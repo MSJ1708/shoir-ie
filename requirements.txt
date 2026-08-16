@@ -3,3 +3,4 @@ simpy
 pulp
 pandas
 plotly
+folium
