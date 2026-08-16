@@ -728,6 +728,12 @@ Enterprise Operations Team
 if not st.session_state.get("user_affiliate"):
     conn = sqlite3.connect("enterprise_full_workspace.db")
     cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS enterprise_users (
+            username TEXT PRIMARY KEY,
+            affiliate_code TEXT
+        )
+    """)
     cursor.execute("SELECT affiliate_code FROM enterprise_users WHERE username = ?", (st.session_state.current_user,))
     row = cursor.fetchone()
     if row and row[0]:
