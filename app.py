@@ -740,7 +740,10 @@ if not st.session_state.get("user_affiliate"):
         st.session_state.user_affiliate = row[0]
     else:
         new_aff = f"AFF-{st.session_state.current_user.upper()}-15"
-        cursor.execute("UPDATE enterprise_users SET affiliate_code = ? WHERE username = ?", (new_aff, st.session_state.current_user))
+        cursor.execute("""
+            INSERT OR REPLACE INTO enterprise_users (username, affiliate_code)
+            VALUES (?, ?)
+        """, (st.session_state.current_user, new_aff))
         conn.commit()
         st.session_state.user_affiliate = new_aff
     conn.close()
