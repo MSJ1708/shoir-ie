@@ -3007,50 +3007,48 @@ with col_m2:
 
 st.markdown("---")
         
-        # --- MANUAL TICKET & FREE TRIAL CODE GENERATOR WITH DURATION ---
-        st.subheader("🎟️ Manual Ticket / Free Trial Code Generator")
-        st.markdown("Create custom subscription or free trial codes manually, set their validity duration in days, and share them with friends.")
-        
-        with st.form("manual_code_form"):
-            col_g1, col_g2, col_g3 = st.columns(3)
-            with col_g1:
-                gen_tier = st.selectbox("Select Tier for Code", ["Free Trial", "Starter Tier ($29)", "Mid-Tier Pro ($79)", "Enterprise Tier ($199)"], key="gen_tier_box")
-            with col_g2:
-                default_code = "TRIAL-" + "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
-                custom_code_input = st.text_input("Ticket / Promo Code", value=default_code, key="custom_code_box")
-            with col_g3:
-                duration_days = st.number_input("Validity (Days)", min_value=1, max_value=365, value=7, step=1, key="gen_duration_box")
-            
-            submit_gen_code = st.form_submit_button("✨ Create and Save Code", type="primary")
-            
-            if submit_gen_code:
-                if custom_code_input.strip():
-                    try:
-                        conn = sqlite3.connect("enterprise_full_workspace.db")
-                        cursor = conn.cursor()
-                        cursor.execute("""
-                            INSERT OR REPLACE INTO license_codes (code, tier, duration_days, is_used, created_at) 
-                            VALUES (?, ?, ?, 0, datetime('now'))
-                        """, (custom_code_input.strip().upper(), gen_tier, duration_days))
-                        
-                        cursor.execute("INSERT INTO audit_trail (timestamp, user, action) VALUES (datetime('now'), ?, ?)", 
-                                       ("sho", f"Manually created code {custom_code_input.strip().upper()} for tier {gen_tier} ({duration_days} days)"))
-                        conn.commit()
-                        conn.close()
-                        
-                        st.success(f"Successfully generated code: **{custom_code_input.strip().upper()}** for **{gen_tier}** valid for **{duration_days} days**!")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Error creating code: {e}")
-                else:
-                    st.warning("Please enter a valid code.")
-        
-        # Display existing active/unused codes table including duration
-        st.markdown("### 📋 Existing Active License / Trial Codes")
-        conn = sqlite3.connect("enterprise_full_workspace.db")
-        codes_df = pd.read_sql("SELECT id, code, tier, duration_days, is_used, created_at FROM license_codes ORDER BY id DESC", conn)
-        conn.close()
-        st.dataframe(codes_df, use_container_width=True)
+# --- MANUAL TICKET & FREE TRIAL CODE GENERATOR WITH DURATION ---
+st.subheader("🎟️ Manual Ticket / Free Trial Code Generator")
+st.markdown("Create custom subscription or free trial codes manually, set their validity duration in days, and share them with friends.")
+
+with st.form("manual_code_form"):
+    col_g1, col_g2, col_g3 = st.columns(3)
+    with col_g1:
+        gen_tier = st.selectbox("Select Tier for Code", ["Free Trial", "Starter Tier ($29)", "Mid-Tier Pro ($79)", "Enterprise Tier ($199)"], key="gen_tier_box")
+    with col_g2:
+        default_code = "TRIAL-" + "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
+        custom_code_input = st.text_input("Ticket / Promo Code", value=default_code, key="custom_code_box")
+    with col_g3:
+        duration_days = st.number_input("Validity (Days)", min_value=1, max_value=365, value=7, step=1, key="gen_duration_box")
+    
+    submit_gen_code = st.form_submit_button("🎟️ Create and Save Code", type="primary")
+
+if submit_gen_code:
+    if custom_code_input.strip():
+        try:
+            conn = sqlite3.connect("enterprise_full_workspace.db")
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT OR REPLACE INTO license_codes (code, tier, duration_days, is_used, created_at)
+                VALUES (?, ?, ?, 0, datetime('now'))
+            """, (custom_code_input.strip().upper(), gen_tier, duration_days))
+            cursor.execute("INSERT INTO audit_trail (timestamp, user, action) VALUES (datetime('now'), ?, ?)",
+                           ("sho", f"Manually created code {custom_code_input.strip().upper()} for tier {gen_tier} ({duration_days} days)"))
+            conn.commit()
+            conn.close()
+            st.success(f"Successfully generated code: **{custom_code_input.strip().upper()}** for **{gen_tier}** valid for **{duration_days} days**!")
+            st.rerun()
+        except Exception as e:
+            st.error(f"Error creating code: {e}")
+    else:
+        st.warning("Please enter a valid code.")
+
+# Display existing active/unused codes table including duration
+st.markdown("### 📋 Existing Active License / Trial Codes")
+conn = sqlite3.connect("enterprise_full_workspace.db")
+codes_df = pd.read_sql("SELECT id, code, tier, duration_days, is_used, created_at FROM license_codes ORDER BY id DESC", conn)
+conn.close()
+st.dataframe(codes_df, use_container_width=True)
 
 # =========================================================
 # UPGRADED COPILOT AI CHAT MODULE
