@@ -722,20 +722,32 @@ Enterprise Operations Team
                         st.rerun()
         else:
             st.success("🎉 No pending payment proofs to review right now.")
+            
 # =====================================================================
 # ENSURE AFFILIATE CODE IS LOADED IN SESSION STATE
 # =====================================================================
 if not st.session_state.get("user_affiliate"):
     conn = sqlite3.connect("enterprise_full_workspace.db")
     cursor = conn.cursor()
+    
+    # 1. Ensure table exists
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS enterprise_users (
-            username TEXT PRIMARY KEY,
-            affiliate_code TEXT
+            username TEXT PRIMARY KEY
         )
     """)
+    
+    # 2. Safely add column if it's missing
+    try:
+        cursor.execute("ALTER TABLE enterprise_users ADD COLUMN affiliate_code TEXT")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+        
+    # 3. Query or insert the affiliate code safely
     cursor.execute("SELECT affiliate_code FROM enterprise_users WHERE username = ?", (st.session_state.current_user,))
     row = cursor.fetchone()
+    
     if row and row[0]:
         st.session_state.user_affiliate = row[0]
     else:
@@ -746,8 +758,9 @@ if not st.session_state.get("user_affiliate"):
         """, (st.session_state.current_user, new_aff))
         conn.commit()
         st.session_state.user_affiliate = new_aff
+        
     conn.close()
-
+    
 # =====================================================================
 # SIDEBAR NAVIGATION & PROFILE DRAWER (Three-line Hamburger Menu)
 # =====================================================================
