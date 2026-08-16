@@ -2945,7 +2945,7 @@ if mod == "Admin Panel":
                                 st.rerun()
 
         st.markdown("---")
-        # --- INITIALIZE DATABASE TABLES ---
+# --- INITIALIZE DATABASE TABLES ---
 def init_workspace_db():
     conn = sqlite3.connect("enterprise_full_workspace.db")
     cursor = conn.cursor()
@@ -2989,22 +2989,23 @@ def init_workspace_db():
 init_workspace_db()
 
 # --- REGISTERED USERS & AUDIT LOGS ---
-        col_m1, col_m2 = st.columns(2)
-        with col_m1:
-            st.subheader("👥 Registered Enterprise Users")
-            conn = sqlite3.connect("enterprise_full_workspace.db")
-            users_df = pd.read_sql("SELECT username, role, tier, email FROM enterprise_users", conn)
-            conn.close()
-            st.dataframe(users_df, use_container_width=True)
-            
-        with col_m2:
-            st.subheader("📊 Security Audit Log")
-            conn = sqlite3.connect("enterprise_full_workspace.db")
-            audit_df = pd.read_sql("SELECT * FROM audit_trail ORDER BY id DESC LIMIT 20", conn)
-            conn.close()
-            st.dataframe(audit_df, use_container_width=True)
+col_m1, col_m2 = st.columns(2)
 
-        st.markdown("---")
+with col_m1:
+    st.subheader("👥 Registered Enterprise Users")
+    conn = sqlite3.connect("enterprise_full_workspace.db")
+    users_df = pd.read_sql("SELECT username, role, tier, email FROM enterprise_users", conn)
+    conn.close()
+    st.dataframe(users_df, use_container_width=True)
+
+with col_m2:
+    st.subheader("📊 Security Audit Log")
+    conn = sqlite3.connect("enterprise_full_workspace.db")
+    audit_df = pd.read_sql("SELECT * FROM audit_trail ORDER BY id DESC LIMIT 20", conn)
+    conn.close()
+    st.dataframe(audit_df, use_container_width=True)
+
+st.markdown("---")
         
         # --- MANUAL TICKET & FREE TRIAL CODE GENERATOR WITH DURATION ---
         st.subheader("🎟️ Manual Ticket / Free Trial Code Generator")
