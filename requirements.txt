@@ -4,3 +4,4 @@ pulp
 pandas
 plotly
 folium
+streamlit-folium
