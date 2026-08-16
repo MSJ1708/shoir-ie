@@ -2987,7 +2987,8 @@ def init_workspace_db():
 
 # Run initialization
 init_workspace_db()
-        # --- REGISTERED USERS & AUDIT LOGS ---
+
+# --- REGISTERED USERS & AUDIT LOGS ---
         col_m1, col_m2 = st.columns(2)
         with col_m1:
             st.subheader("👥 Registered Enterprise Users")
