@@ -2945,7 +2945,48 @@ if mod == "Admin Panel":
                                 st.rerun()
 
         st.markdown("---")
-        
+        # --- INITIALIZE DATABASE TABLES ---
+def init_workspace_db():
+    conn = sqlite3.connect("enterprise_full_workspace.db")
+    cursor = conn.cursor()
+    
+    # 1. Enterprise Users Table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS enterprise_users (
+            username TEXT PRIMARY KEY,
+            role TEXT,
+            tier TEXT,
+            email TEXT
+        )
+    """)
+    
+    # 2. Audit Trail Table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS audit_trail (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT,
+            user TEXT,
+            action TEXT
+        )
+    """)
+    
+    # 3. License Codes Table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS license_codes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            code TEXT UNIQUE,
+            tier TEXT,
+            duration_days INTEGER,
+            is_used INTEGER,
+            created_at TEXT
+        )
+    """)
+    
+    conn.commit()
+    conn.close()
+
+# Run initialization
+init_workspace_db()
         # --- REGISTERED USERS & AUDIT LOGS ---
         col_m1, col_m2 = st.columns(2)
         with col_m1:
