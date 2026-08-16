@@ -360,7 +360,7 @@ if not st.session_state.authenticated:
             st.markdown("---")
             st.markdown("### Scan to Pay via STC Pay")
             
-            qr_path = r"C:\Users\Lenovo\Downloads\Project-AEGIS-Logistics-Twin\stc_pay_qr.png"
+            qr_path = "stc_pay_qr.png"
             try:
                 img = Image.open(qr_path)
                 st.image(img, caption="Scan QR Code to Pay Exact Amount", width=230)
