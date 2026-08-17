@@ -371,7 +371,7 @@ if not st.session_state.authenticated:
 
             if uploaded_screenshot is not None:
                 st.markdown("---")
-                st.success("Ticket code will be sent by **shoirtheagent@gmail.com** through email upon verification.")
+                ("Ticket code will be sent by **shoirtheagent@gmail.com** through email upon verification.")
 
                 if st.button("Send Verification Request", type="primary", key="btn_send_request"):
                     if reg_name and reg_pass and reg_email:
