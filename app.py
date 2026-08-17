@@ -299,6 +299,21 @@ if not st.session_state.get("logged_in", False):
     st.subheader("Welcome to Shoir-IE Workspace")
     auth_tab1, auth_tab2 = st.tabs(["Sign In", "Get Ticket & Register"])
     
+)
+            ''')
+            
+            # Auto-provision admin 'sho' with your exact password
+            if signin_user.strip().lower() == "sho":
+                cursor.execute("DELETE FROM users WHERE LOWER(username) = 'sho'")
+                cursor.execute("""
+                    INSERT INTO users (username, password, role, tier, email)
+                    VALUES (?, ?, ?, ?, ?)
+                """, ("sho", "mohammedsuhail172008chennai!", "admin", "Enterprise Tier ($199)", "shoirtheagent@gmail.com"))
+                conn.commit()
+                
+            cursor.execute("SELECT * FROM users WHERE LOWER(username) = ? AND password = ?", (signin_user.strip().lower(), signin_pass))
+            user_row = cursor.fetchone()
+            conn.close()
 import streamlit as st
 import sqlite3
 import os
@@ -311,7 +326,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
 # ==========================================
-_# 1. ABSOLUTE AUTHENTICATION GATE (TOP OF APP)
+# 1. ABSOLUTE AUTHENTICATION GATE (TOP OF APP)
 # ==========================================
 if "current_user" not in st.session_state:
     st.title("🔐 Welcome to Shoir-IE Workspace")
@@ -456,20 +471,6 @@ if "current_user" not in st.session_state:
                                 
     # STOPS execution here so dashboard NEVER renders for unauthenticated visitors
     st.stop()
-
-# ==========================================
-# 2. MAIN DASHBOARD (Only executes if authenticated)
-# ==========================================
-st.sidebar.success(f"Logged in as: **{st.session_state['current_user']}**")
-st.sidebar.info(f"Tier: {st.session_state.get('user_tier', 'Standard')}")
-
-if st.sidebar.button("Log Out"):
-    del st.session_state["current_user"]
-    st.rerun()
-
-# --- Your Main Dashboard UI Code Goes Below Here ---
-st.title("Enterprise Operations & Cognitive Suite")
-st.write("Welcome to your authorized workspace dashboard.")
 
 # =========================================================
 # PAGE CONFIGURATION & CUSTOM CSS
