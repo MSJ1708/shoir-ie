@@ -2982,6 +2982,22 @@ def init_workspace_db():
         )
     """)
     
+    # Safely add any missing columns to existing tables
+    try:
+        cursor.execute("ALTER TABLE license_codes ADD COLUMN duration_days INTEGER")
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+
+    try:
+        cursor.execute("ALTER TABLE license_codes ADD COLUMN is_used INTEGER")
+    except sqlite3.OperationalError:
+        pass
+
+    try:
+        cursor.execute("ALTER TABLE license_codes ADD COLUMN created_at TEXT")
+    except sqlite3.OperationalError:
+        pass
+    
     conn.commit()
     conn.close()
 
