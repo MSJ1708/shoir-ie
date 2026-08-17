@@ -287,6 +287,11 @@ if "authenticated" not in st.session_state:
 if "show_qr" not in st.session_state:
     st.session_state.show_qr = False
 
+import os
+import sqlite3
+from PIL import Image
+import streamlit as st
+
 # --- AUTHENTICATION & SUBSCRIPTION GATE ---
 if not st.session_state.get("logged_in", False):
     st.subheader("Welcome to Shoir-IE Workspace")
@@ -302,6 +307,20 @@ if not st.session_state.get("logged_in", False):
                 try:
                     conn = sqlite3.connect("enterprise_full_workspace.db")
                     cursor = conn.cursor()
+                    
+                    # Automatically ensure users table exists to prevent 'no such table' errors
+                    cursor.execute('''
+                        CREATE TABLE IF NOT EXISTS users (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            username TEXT UNIQUE,
+                            password TEXT,
+                            role TEXT,
+                            tier TEXT,
+                            email TEXT
+                        )
+                    ''')
+                    conn.commit()
+                    
                     cursor.execute("SELECT username, role, tier, email, password FROM users WHERE username = ? AND password = ?", (signin_user, signin_pass))
                     row = cursor.fetchone()
                     conn.close()
