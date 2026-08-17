@@ -416,8 +416,9 @@ if st.session_state.get("show_qr", False):
                     st.warning("Please fill in your name, password, and email address.")
                 
 # Stops the script from rendering the main dashboard until login/ticket verification occurs
-st.stop()
-
+if not st.session_state.get("logged_in", False):
+    st.stop()
+    
 # =========================================================
 # PAGE CONFIGURATION & CUSTOM CSS
 # =========================================================
