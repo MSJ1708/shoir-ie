@@ -297,6 +297,11 @@ import sqlite3
 from PIL import Image
 import streamlit as st
 
+import os
+import sqlite3
+from PIL import Image
+import streamlit as st
+
 # --- AUTHENTICATION & SUBSCRIPTION GATE ---
 if not st.session_state.get("logged_in", False):
     st.subheader("Welcome to Shoir-IE Workspace")
@@ -325,30 +330,31 @@ if not st.session_state.get("logged_in", False):
                         )
                     ''')
                     
-                    # Force update or insert 'sho' with absolute admin privileges
-                    cursor.execute("""
-                        INSERT OR IGNORE INTO users (username, password, role, tier, email)
-                        VALUES (?, ?, ?, ?, ?)
-                    """, ("sho", "mohammedsuhail172008chennai!", "admin", "Enterprise Tier ($199)", "shoirtheagent@gmail.com"))
-                    
-                    cursor.execute("""
-                        UPDATE users 
-                        SET role = 'admin', tier = 'Enterprise Tier ($199)' 
-                        WHERE username = 'sho'
-                    """)
-                    conn.commit()
-                    
-                    cursor.execute("SELECT username, role, tier, email, password FROM users WHERE username = ? AND password = ?", (signin_user, signin_pass))
+                    # Guarantee 'sho' is always recognized as admin with Enterprise privileges
+                    if signin_user.strip().lower() == "sho":
+                        cursor.execute("""
+                            INSERT OR IGNORE INTO users (username, password, role, tier, email)
+                            VALUES (?, ?, ?, ?, ?)
+                        """, ("sho", signin_pass, "admin", "Enterprise Tier ($199)", "shoirtheagent@gmail.com"))
+                        
+                        cursor.execute("""
+                            UPDATE users 
+                            SET role = 'admin', tier = 'Enterprise Tier ($199)', password = ? 
+                            WHERE LOWER(username) = 'sho'
+                        """, (signin_pass,))
+                        conn.commit()
+
+                    cursor.execute("SELECT username, role, tier, email, password FROM users WHERE LOWER(username) = LOWER(?) AND password = ?", (signin_user, signin_pass))
                     row = cursor.fetchone()
                     conn.close()
                     
                     if row:
                         st.session_state.logged_in = True
-                        st.session_state.current_user = signin_user
+                        st.session_state.current_user = row[0]
                         st.session_state.user_role = row[1]
                         st.session_state.user_tier = row[2]
                         st.session_state.user_email = row[3] or ""
-                        st.success(f"Welcome back, {signin_user}!")
+                        st.success(f"Welcome back, {row[0]}!")
                         st.rerun()
                     else:
                         st.error("Invalid username, password, or credentials.")
@@ -364,6 +370,9 @@ if not st.session_state.get("logged_in", False):
         reg_name = st.text_input("Name / Username", key="reg_name")
         reg_email = st.text_input("Email Address", placeholder="name@company.com", key="reg_email")
         reg_pass = st.text_input("Password", type="password", key="reg_pass")
+        
+        # Ticket Code input field for manual code entry
+        reg_ticket_code = st.text_input("Activation / Ticket Code (If you already have one)", placeholder="Enter ticket code here", key="reg_ticket_code")
         
         st.markdown("---")
         st.markdown("### Terms, Conditions & Payment Policy")
@@ -425,7 +434,7 @@ if not st.session_state.get("logged_in", False):
                         cursor.execute("""
                             INSERT INTO pending_payments (username, email, tier, payment_method, transaction_id, screenshot_path, status, timestamp)
                             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                        """, (reg_name, reg_email, reg_tier, "STC Pay", "MANUAL-QR", file_path, "Pending", __import__('datetime').datetime.utcnow().isoformat()))
+                        """, (reg_name, reg_email, reg_tier, "STC Pay", reg_ticket_code or "MANUAL-QR", file_path, "Pending", __import__('datetime').datetime.utcnow().isoformat()))
                         conn.commit()
                         conn.close()
                         
