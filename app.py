@@ -368,9 +368,10 @@ if not st.session_state.authenticated:
                 st.info(f"Could not load image: {e}")
 
 if st.session_state.get("logged_in", False):
-    # User is logged in — let the rest of the dashboard and tools render below this point
+    # User is logged in successfully — bypass the auth gate and let the main dashboard render below
     pass
 else:
+    # Handle the QR payment upload flow if active
     if st.session_state.get("show_qr", False):
         uploaded_screenshot = st.file_uploader("Upload Payment Screenshot", type=["png", "jpg", "jpeg"], key="payment_screenshot_uploader")
 
@@ -413,15 +414,15 @@ else:
                     
                     st.success("Request sent successfully! Your code will be emailed to you from shoirtheagent@gmail.com")
                     st.session_state.show_qr = False
+                    st.rerun()
                 else:
                     if uploaded_screenshot is None:
                         st.warning("Please upload your payment screenshot.")
                     else:
                         st.warning("Please fill in your name, password, and email address.")
-    else:
-        # Stops the script from rendering the main dashboard until login/ticket verification occurs
-        st.stop()
     
+    # Halt execution here for any unauthenticated user so the dashboard remains locked
+    st.stop()
 # =========================================================
 # PAGE CONFIGURATION & CUSTOM CSS
 # =========================================================
