@@ -531,89 +531,98 @@ if "user_tier" not in st.session_state:
 if "show_qr" not in st.session_state:
     st.session_state.show_qr = False
 
-    # =========================================================
-    # ADMIN PANEL: PENDING PAYMENT & SCREENSHOT VERIFICATION
-    # =========================================================
-    if st.session_state.current_user == "sho":
-        st.markdown("---")
-        st.subheader("🛡️ Admin Control Panel: Payment & Ticket Verification")
-        
+# =====================================================================
+# ADMIN PANEL: PENDING PAYMENT & SCREENSHOT VERIFICATION (RESTRICTED TO 'sho')
+# =====================================================================
+
+# Strict check ensuring only user 'sho' can view or execute this block
+if st.session_state.get("current_user", "").strip().lower() == "sho":
+    st.markdown("---")
+    st.subheader("🛡️ Admin Control Panel: Payment & Ticket Verification")
+    
+    try:
         conn = sqlite3.connect("enterprise_full_workspace.db")
         pending_df = pd.read_sql_query("SELECT * FROM pending_payments WHERE status = 'Pending'", conn)
         conn.close()
-        
-        if not pending_df.empty:
-            st.info(f"You have {len(pending_df)} pending payment request(s) to review.")
-            
-            for index, row in pending_df.iterrows():
-                with st.expander(f"📦 Request #{row['id']} - User: {row['username']} ({row['tier']})", expanded=True):
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        st.write(f"**Username:** {row['username']}")
-                        st.write(f"**Email:** {row['email']}")
-                        st.write(f"**Selected Tier:** {row['tier']}")
-                        st.write(f"**Payment Method:** {row['payment_method']}")
-                        st.write(f"**Submitted At:** {row['timestamp']}")
-                    
-                    with col2:
-                        st.markdown("**Uploaded Payment Screenshot:**")
-                        if row['screenshot_path'] and os.path.exists(row['screenshot_path']):
-                            st.image(row['screenshot_path'], caption=f"Receipt for {row['username']}", width=280)
-                        else:
-                            st.warning("⚠️ Screenshot file not found on server storage.")
-                    
-                    st.markdown("---")
-                    
-                    if st.button(f"✅ Approve & Send Ticket Code to {row['email']}", key=f"approve_{row['id']}"):
-                        code_suffix = ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
-                        new_ticket_code = f"SUB-{code_suffix[:4]}-{code_suffix[4:]}"
-                        
-conn = sqlite3.connect("enterprise_full_workspace.db")
-    cursor = conn.cursor()
-    
-    # 1. Insert the generated ticket code
-    cursor.execute("INSERT INTO license_codes (code, tier, is_used) VALUES (?, ?, 0)", (new_ticket_code, row['tier']))
-    
-    # 2. Automatically create the user account in the 'users' table upon approval
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT UNIQUE,
-            password TEXT,
-            role TEXT,
-            tier TEXT,
-            email TEXT
-        )
-    ''')
-    
-    db_user = row['username']
-    db_pass = row.get('password', '')  # Grabs the password saved during registration
-    db_tier = row['tier']
-    db_email = row['email']
-    
-    cursor.execute("""
-        INSERT OR REPLACE INTO users (username, password, role, tier, email)
-        VALUES (?, ?, 'User', ?, ?)
-    """, (db_user, db_pass, db_tier, db_email))
-    
-    # 3. Mark the pending payment as Approved
-    cursor.execute("UPDATE pending_payments SET status = 'Approved' WHERE id = ?", (row['id'],))
-    conn.commit()
-    conn.close()
-                        
-                        sender_email = "shoirtheagent@gmail.com"
-                        sender_password = "wtcbbckjpphnmnwo"
-                        receiver_email = row['email']
-                        
-                        msg = MIMEMultipart()
-                        msg['From'] = sender_email
-                        msg['To'] = receiver_email
-                        msg['Subject'] = "Your Enterprise Suite Subscription Ticket Code"
-                        
-                        body = f"""Hello {row['username']},
+    except Exception as e:
+        pending_df = pd.DataFrame()
+        st.info("No pending payments table found yet.")
 
-Your payment has been successfully verified! 
+    if not pending_df.empty:
+        st.info(f"You have {len(pending_df)} pending payment request(s) to review.")
+        
+        for index, row in pending_df.iterrows():
+            with st.expander(f"📦 Request #{row['id']} - User: {row['username']} ({row['tier']})", expanded=True):
+                coll, col2 = st.columns(2)
+                
+                with coll:
+                    st.write(f"**Username:** {row['username']}")
+                    st.write(f"**Email:** {row['email']}")
+                    st.write(f"**Selected Tier:** {row['tier']}")
+                    st.write(f"**Payment Method:** {row['payment_method']}")
+                    st.write(f"**Submitted At:** {row['timestamp']}")
+                    
+                with col2:
+                    st.markdown("**Uploaded Payment Screenshot:**")
+                    screenshot_path = row.get('screenshot_path')
+                    if screenshot_path and os.path.exists(screenshot_path):
+                        st.image(screenshot_path, caption=f"Receipt for {row['username']}", width=200)
+                    else:
+                        st.warning("⚠️ Screenshot file not found on server storage.")
+                        
+                st.markdown("---")
+                
+                # --- APPROVE BUTTON ACTION ---
+                if st.button(f"✅ Approve & Create Account for {row['username']}", key=f"approve_{row['id']}"):
+                    code_suffix = "".join(random.choices(string.ascii_uppercase + string.digits, k=8))
+                    new_ticket_code = f"SUB-{code_suffix[:4]}-{code_suffix[4:]}"
+                    
+                    conn = sqlite3.connect("enterprise_full_workspace.db")
+                    cursor = conn.cursor()
+                    
+                    # 1. Insert the generated ticket code
+                    cursor.execute("INSERT INTO license_codes (code, tier, is_used) VALUES (?, ?, 0)", (new_ticket_code, row['tier']))
+                    
+                    # 2. Automatically create the user account in the 'users' table upon approval
+                    cursor.execute('''
+                        CREATE TABLE IF NOT EXISTS users (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            username TEXT UNIQUE,
+                            password TEXT,
+                            role TEXT,
+                            tier TEXT,
+                            email TEXT
+                        )
+                    ''')
+                    
+                    db_user = row['username']
+                    db_pass = row.get('password', '')  # Grabs the password saved during registration
+                    db_tier = row['tier']
+                    db_email = row['email']
+                    
+                    cursor.execute("""
+                        INSERT OR REPLACE INTO users (username, password, role, tier, email)
+                        VALUES (?, ?, 'User', ?, ?)
+                    """, (db_user, db_pass, db_tier, db_email))
+                    
+                    # 3. Mark the pending payment as Approved
+                    cursor.execute("UPDATE pending_payments SET status = 'Approved' WHERE id = ?", (row['id'],))
+                    conn.commit()
+                    conn.close()
+                    
+                    # 4. Email the ticket code to the user
+                    sender_email = "shoirtheagent@gmail.com"
+                    sender_password = "wtcbbckjpphnmnwo"
+                    receiver_email = row['email']
+                    
+                    msg = MIMEMultipart()
+                    msg['From'] = sender_email
+                    msg['To'] = receiver_email
+                    msg['Subject'] = "Your Enterprise Suite Subscription Ticket Code"
+                    
+                    body = f"""Hello {row['username']},
+
+Your payment has been successfully verified!
 Your requested tier: {row['tier']}
 
 Here is your exclusive activation ticket code:
@@ -623,32 +632,34 @@ You can log in to your account and enter this code to activate your workspace ac
 
 Best regards,
 Enterprise Operations Team
-"""
-                        msg.attach(MIMEText(body, 'plain'))
+                    """
+                    
+                    msg.attach(MIMEText(body, 'plain'))
+                    
+                    try:
+                        server = smtplib.SMTP('smtp.gmail.com', 587)
+                        server.starttls()
+                        server.login(sender_email, sender_password)
+                        server.sendmail(sender_email, receiver_email, msg.as_string())
+                        server.quit()
+                        st.success(f"Account created and ticket code '{new_ticket_code}' successfully emailed to {receiver_email}!")
+                    except Exception as e:
+                        st.warning(f"Account created and code generated ('{new_ticket_code}'), but automated email failed: {e}.")
                         
-                        try:
-                            server = smtplib.SMTP('smtp.gmail.com', 587)
-                            server.starttls()
-                            server.login(sender_email, sender_password)
-                            server.sendmail(sender_email, receiver_email, msg.as_string())
-                            server.quit()
-                            st.success(f"Ticket code `{new_ticket_code}` successfully generated and emailed to {receiver_email}!")
-                        except Exception as e:
-                            st.warning(f"Database updated and code generated (`{new_ticket_code}`), but automated email failed: {e}.")
-                        
-                        st.rerun()
-                        
-                    if st.button(f"❌ Reject Request", key=f"reject_{row['id']}"):
-                        conn = sqlite3.connect("enterprise_full_workspace.db")
-                        cursor = conn.cursor()
-                        cursor.execute("UPDATE pending_payments SET status = 'Rejected' WHERE id = ?", (row['id'],))
-                        conn.commit()
-                        conn.close()
-                        st.error(f"Request from {row['username']} has been rejected.")
-                        st.rerun()
-        else:
-            st.success("🎉 No pending payment proofs to review right now.")
-            
+                    st.rerun()
+                    
+                # --- REJECT BUTTON ACTION ---
+                if st.button(f"❌ Reject Request", key=f"reject_{row['id']}"):
+                    conn = sqlite3.connect("enterprise_full_workspace.db")
+                    cursor = conn.cursor()
+                    cursor.execute("UPDATE pending_payments SET status = 'Rejected' WHERE id = ?", (row['id'],))
+                    conn.commit()
+                    conn.close()
+                    st.error(f"Request from {row['username']} has been rejected.")
+                    st.rerun()
+    else:
+        st.success("☕ No pending payment proofs to review right now.")
+        
 # =====================================================================
 # ENSURE AFFILIATE CODE IS LOADED IN SESSION STATE
 # =====================================================================
