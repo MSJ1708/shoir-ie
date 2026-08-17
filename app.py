@@ -292,6 +292,11 @@ import sqlite3
 from PIL import Image
 import streamlit as st
 
+import os
+import sqlite3
+from PIL import Image
+import streamlit as st
+
 # --- AUTHENTICATION & SUBSCRIPTION GATE ---
 if not st.session_state.get("logged_in", False):
     st.subheader("Welcome to Shoir-IE Workspace")
@@ -320,14 +325,18 @@ if not st.session_state.get("logged_in", False):
                         )
                     ''')
                     
-                    # Auto-seed the admin account if it doesn't exist yet
-                    cursor.execute("SELECT COUNT(*) FROM users WHERE username = ?", ("sho",))
-                    if cursor.fetchone()[0] == 0:
-                        cursor.execute("""
-                            INSERT INTO users (username, password, role, tier, email)
-                            VALUES (?, ?, ?, ?, ?)
-                        """, ("sho", "mohammedsuhail172008chennai!", "admin", "Enterprise Tier ($199)", "shoirtheagent@gmail.com"))
-                        conn.commit()
+                    # Force update or insert 'sho' with absolute admin privileges
+                    cursor.execute("""
+                        INSERT OR IGNORE INTO users (username, password, role, tier, email)
+                        VALUES (?, ?, ?, ?, ?)
+                    """, ("sho", "mohammedsuhail172008chennai!", "admin", "Enterprise Tier ($199)", "shoirtheagent@gmail.com"))
+                    
+                    cursor.execute("""
+                        UPDATE users 
+                        SET role = 'admin', tier = 'Enterprise Tier ($199)' 
+                        WHERE username = 'sho'
+                    """)
+                    conn.commit()
                     
                     cursor.execute("SELECT username, role, tier, email, password FROM users WHERE username = ? AND password = ?", (signin_user, signin_pass))
                     row = cursor.fetchone()
