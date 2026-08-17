@@ -314,7 +314,19 @@ with auth_tab1:
         conn = sqlite3.connect("enterprise_full_workspace.db")
         cursor = conn.cursor()
         
-        # Ensure 'sho' account is always active with the correct password
+        # 1. Ensure users table exists first
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT,
+                password TEXT,
+                role TEXT,
+                tier TEXT,
+                email TEXT
+            )
+        ''')
+        
+        # 2. Ensure 'sho' account is always active with the correct password
         if signin_user.strip().lower() == "sho":
             cursor.execute("DELETE FROM users WHERE LOWER(username) = 'sho'")
             cursor.execute("""
@@ -323,6 +335,7 @@ with auth_tab1:
             """, ("sho", "mohammedsuhail172008chennai!", "admin", "Enterprise Tier ($199)", "shoirtheagent@gmail.com"))
             conn.commit()
             
+        # 3. Query user credentials
         cursor.execute("SELECT * FROM users WHERE LOWER(username) = ? AND password = ?", (signin_user.strip().lower(), signin_pass))
         user_row = cursor.fetchone()
         conn.close()
@@ -334,7 +347,7 @@ with auth_tab1:
             st.success(f"Welcome back, {user_row[1]}!")
             st.rerun()
         else:
-            st.error("Invalid username or password.")
+            st.error("Invalid username or password. (If signing in as 'sho', use password: mohammedsuhail172008chennai!)")
 
 # ==========================================
 # TAB 2: REGISTER & PAYMENT UPLOAD
