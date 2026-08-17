@@ -412,8 +412,8 @@ if confirmed_delivery:
             else:
                 st.warning("Please fill in your name, password, and email address.")
                 
-    # Stops the script from rendering the main dashboard until login/ticket verification occurs
-    st.stop()
+# Stops the script from rendering the main dashboard until login/ticket verification occurs
+st.stop()
 
 # =========================================================
 # PAGE CONFIGURATION & CUSTOM CSS
