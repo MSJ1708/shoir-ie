@@ -287,15 +287,7 @@ if "authenticated" not in st.session_state:
 if "show_qr" not in st.session_state:
     st.session_state.show_qr = False
 
-import os
-import sqlite3
-from PIL import Image
-import streamlit as st
 
-import os
-import sqlite3
-from PIL import Image
-import streamlit as st
 
 import os
 import sqlite3
@@ -332,16 +324,11 @@ if not st.session_state.get("logged_in", False):
                     
                     # Guarantee 'sho' is always recognized as admin with Enterprise privileges
                     if signin_user.strip().lower() == "sho":
+                        cursor.execute("DELETE FROM users WHERE LOWER(username) = 'sho'")
                         cursor.execute("""
-                            INSERT OR IGNORE INTO users (username, password, role, tier, email)
+                            INSERT INTO users (username, password, role, tier, email)
                             VALUES (?, ?, ?, ?, ?)
                         """, ("sho", signin_pass, "admin", "Enterprise Tier ($199)", "shoirtheagent@gmail.com"))
-                        
-                        cursor.execute("""
-                            UPDATE users 
-                            SET role = 'admin', tier = 'Enterprise Tier ($199)', password = ? 
-                            WHERE LOWER(username) = 'sho'
-                        """, (signin_pass,))
                         conn.commit()
 
                     cursor.execute("SELECT username, role, tier, email, password FROM users WHERE LOWER(username) = LOWER(?) AND password = ?", (signin_user, signin_pass))
@@ -351,8 +338,12 @@ if not st.session_state.get("logged_in", False):
                     if row:
                         st.session_state.logged_in = True
                         st.session_state.current_user = row[0]
-                        st.session_state.user_role = row[1]
-                        st.session_state.user_tier = row[2]
+                        if row[0].strip().lower() == "sho":
+                            st.session_state.user_role = "admin"
+                            st.session_state.user_tier = "Enterprise Tier ($199)"
+                        else:
+                            st.session_state.user_role = row[1]
+                            st.session_state.user_tier = row[2]
                         st.session_state.user_email = row[3] or ""
                         st.success(f"Welcome back, {row[0]}!")
                         st.rerun()
@@ -370,8 +361,6 @@ if not st.session_state.get("logged_in", False):
         reg_name = st.text_input("Name / Username", key="reg_name")
         reg_email = st.text_input("Email Address", placeholder="name@company.com", key="reg_email")
         reg_pass = st.text_input("Password", type="password", key="reg_pass")
-        
-        # Ticket Code input field for manual code entry
         reg_ticket_code = st.text_input("Activation / Ticket Code (If you already have one)", placeholder="Enter ticket code here", key="reg_ticket_code")
         
         st.markdown("---")
@@ -418,11 +407,13 @@ if not st.session_state.get("logged_in", False):
                         
                         conn = sqlite3.connect("enterprise_full_workspace.db")
                         cursor = conn.cursor()
+                        # Updated pending_payments table to store the user's password
                         cursor.execute('''
                             CREATE TABLE IF NOT EXISTS pending_payments (
                                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                                 username TEXT,
                                 email TEXT,
+                                password TEXT,
                                 tier TEXT,
                                 payment_method TEXT,
                                 transaction_id TEXT,
@@ -432,9 +423,9 @@ if not st.session_state.get("logged_in", False):
                             )
                         ''')
                         cursor.execute("""
-                            INSERT INTO pending_payments (username, email, tier, payment_method, transaction_id, screenshot_path, status, timestamp)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                        """, (reg_name, reg_email, reg_tier, "STC Pay", reg_ticket_code or "MANUAL-QR", file_path, "Pending", __import__('datetime').datetime.utcnow().isoformat()))
+                            INSERT INTO pending_payments (username, email, password, tier, payment_method, transaction_id, screenshot_path, status, timestamp)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """, (reg_name, reg_email, reg_pass, reg_tier, "STC Pay", reg_ticket_code or "MANUAL-QR", file_path, "Pending", __import__('datetime').datetime.utcnow().isoformat()))
                         conn.commit()
                         conn.close()
                         
@@ -447,7 +438,6 @@ if not st.session_state.get("logged_in", False):
                         else:
                             st.warning("Please fill in your name, password, and email address.")
 
-    # Halt execution so unauthenticated users never see the dashboard tools
     st.stop()
     
 # =========================================================
@@ -541,136 +531,6 @@ if "user_tier" not in st.session_state:
 if "show_qr" not in st.session_state:
     st.session_state.show_qr = False
 
-# =========================================================
-# AUTHENTICATION GATE & SUBSCRIPTION FLOW
-# =========================================================
-if not st.session_state.authenticated:
-    st.title("⚡ Enterprise Operations & Cognitive Logistics Suite")
-    st.markdown("Secure Portal. Please sign in or create an account.")
-
-auth_tab1, auth_tab2 = st.tabs([
-    "🔐 Sign In", 
-    "📝 Create Account"
-])
-
-# ---------------------------------------------------------
-# TAB 1: SIGN IN
-# ---------------------------------------------------------
-with auth_tab1:
-    st.subheader("Existing User Sign In")
-    signin_user = st.text_input("Username", key="unique_si_username")
-    signin_pass = st.text_input("Password", type="password", key="unique_si_password")
-    signin_email = st.text_input("Email Address", key="unique_si_email")
-    signin_ticket = st.text_input("Ticket / License Code", placeholder="SUB-XXXX-YYYY", key="unique_si_ticket")
-    
-    if st.button("Log In to Workspace", type="primary", key="unique_si_btn"):
-        if signin_user == "sho" and signin_pass == "mohammedsuhail172008chennai!":
-            st.session_state.authenticated = True
-            st.session_state.current_user = "sho"
-            st.session_state.user_role = "Enterprise Admin"
-            st.session_state.user_tier = "Enterprise Tier"
-            st.session_state.user_email = signin_email or "mohsuhailji@gmail.com"
-            st.success("Welcome back, Administrator!")
-            st.rerun()
-        else:
-            conn = sqlite3.connect("enterprise_full_workspace.db")
-            cursor = conn.cursor()
-            pass_hash = hashlib.sha256(signin_pass.encode()).hexdigest()
-            cursor.execute("SELECT role, tier, email FROM enterprise_users WHERE username = ? AND password_hash = ?", (signin_user, pass_hash))
-            row = cursor.fetchone()
-            
-            if signin_ticket:
-                cursor.execute("SELECT tier, is_used FROM license_codes WHERE code = ?", (signin_ticket,))
-                t_row = cursor.fetchone()
-                if t_row and t_row[1] == 0:
-                    cursor.execute("UPDATE license_codes SET is_used = 1 WHERE code = ?", (signin_ticket,))
-                    conn.commit()
-            
-            if row:
-                st.session_state.authenticated = True
-                st.session_state.current_user = signin_user
-                st.session_state.user_role = row[0]
-                st.session_state.user_tier = row[1]
-                st.session_state.user_email = row[2] or signin_email
-                conn.close()
-                st.success(f"Welcome back, {signin_user}!")
-                st.rerun()
-            else:
-                conn.close()
-                st.error("Invalid username, password, or credentials.")
-
-# ---------------------------------------------------------
-# TAB 2: CREATE ACCOUNT & PAYMENT FLOW
-# ---------------------------------------------------------
-with auth_tab2:
-    st.subheader("Create New Account & Subscription")
-    
-    reg_name = st.text_input("Name / Username", key="unique_reg_name")
-    reg_pass = st.text_input("Password", type="password", key="unique_reg_pass")
-    reg_email = st.text_input("Email Address", placeholder="name@company.com", key="unique_reg_email")
-    
-    reg_tier = st.selectbox("Choose Subscription Tier", ["Starter Tier ($29)", "Mid-Tier Pro ($79)", "Enterprise Tier ($199)"], key="unique_reg_tier")
-    
-    st.markdown("---")
-    st.markdown("### Terms, Conditions & Payment Policy")
-    st.markdown("""
-    - **Refunds:** Refund isn't available for any subscription purchases. All sales are final.
-    - **Exact Price:** You must pay the exact price corresponding to your selected tier.
-    - **Ticket Delivery:** Your ticket code will be sent via email after payment verification.
-    """)
-    
-    accepted_terms = st.checkbox("✅ I accept the terms & conditions, refund policy, and pricing instructions.", key="unique_reg_checkbox")
-    
-    if accepted_terms:
-        if st.button("Confirm & Pay", type="primary", key="unique_btn_confirm_pay"):
-            if reg_name and reg_pass and reg_email:
-                st.session_state.show_qr = True
-                conn = sqlite3.connect("enterprise_full_workspace.db")
-                cursor = conn.cursor()
-                pass_hash = hashlib.sha256(reg_pass.encode()).hexdigest()
-                try:
-                    cursor.execute("INSERT INTO enterprise_users (username, password_hash, role, tier, email) VALUES (?, ?, ?, ?, ?)",
-                                   (reg_name, pass_hash, "User", reg_tier, reg_email))
-                    conn.commit()
-                except Exception:
-                    pass
-                conn.close()
-            else:
-                st.warning("Please fill out your name, password, and email before confirming.")
-    
-    if st.session_state.get("show_qr", False):
-        st.markdown("---")
-        st.markdown("### STC Pay Payment")
-        
-        if os.path.exists("stc_pay_qr.png"):
-            st.image("stc_pay_qr.png", caption="Scan QR Code to Pay Exact Amount", width=230)
-        else:
-            st.info("📱 Transfer the exact amount via STC Pay to our merchant number: **+966 5X XXX XXXX** (QR code coming soon!)")
-            
-        st.markdown("After you scan and pay, upload your payment screenshot below:")
-        uploaded_screenshot = st.file_uploader("Upload Payment Screenshot", type=["png", "jpg", "jpeg"], key="unique_reg_screenshot")
-        
-        if uploaded_screenshot and accepted_terms:
-            st.markdown("---")
-            st.success("✉️ Ticket code will be sent by **shoirtheagent@gmail.com** through email upon verification.")
-            
-            if st.button("Send Request", type="primary", key="unique_btn_send_request"):
-                file_path = os.path.join("payment_proofs", f"{reg_name}_{uploaded_screenshot.name}")
-                with open(file_path, "wb") as f:
-                    f.write(uploaded_screenshot.getbuffer())
-                    
-                conn = sqlite3.connect("enterprise_full_workspace.db")
-                cursor = conn.cursor()
-                cursor.execute(
-                    "INSERT INTO pending_payments (username, email, tier, payment_method, transaction_id, screenshot_path, status, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                    (reg_name, reg_email, reg_tier, "STC Pay", "MANUAL-QR", file_path, "Pending", datetime.utcnow().isoformat())
-                )
-                conn.commit()
-                conn.close()
-                
-                st.success("Request sent successfully! Your code will be emailed to you from shoirtheagent@gmail.com once reviewed.")
-                st.session_state.show_qr = False
-
     # =========================================================
     # ADMIN PANEL: PENDING PAYMENT & SCREENSHOT VERIFICATION
     # =========================================================
@@ -709,12 +569,38 @@ with auth_tab2:
                         code_suffix = ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
                         new_ticket_code = f"SUB-{code_suffix[:4]}-{code_suffix[4:]}"
                         
-                        conn = sqlite3.connect("enterprise_full_workspace.db")
-                        cursor = conn.cursor()
-                        cursor.execute("INSERT INTO license_codes (code, tier, is_used) VALUES (?, ?, 0)", (new_ticket_code, row['tier']))
-                        cursor.execute("UPDATE pending_payments SET status = 'Approved' WHERE id = ?", (row['id'],))
-                        conn.commit()
-                        conn.close()
+conn = sqlite3.connect("enterprise_full_workspace.db")
+    cursor = conn.cursor()
+    
+    # 1. Insert the generated ticket code
+    cursor.execute("INSERT INTO license_codes (code, tier, is_used) VALUES (?, ?, 0)", (new_ticket_code, row['tier']))
+    
+    # 2. Automatically create the user account in the 'users' table upon approval
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE,
+            password TEXT,
+            role TEXT,
+            tier TEXT,
+            email TEXT
+        )
+    ''')
+    
+    db_user = row['username']
+    db_pass = row.get('password', '')  # Grabs the password saved during registration
+    db_tier = row['tier']
+    db_email = row['email']
+    
+    cursor.execute("""
+        INSERT OR REPLACE INTO users (username, password, role, tier, email)
+        VALUES (?, ?, 'User', ?, ?)
+    """, (db_user, db_pass, db_tier, db_email))
+    
+    # 3. Mark the pending payment as Approved
+    cursor.execute("UPDATE pending_payments SET status = 'Approved' WHERE id = ?", (row['id'],))
+    conn.commit()
+    conn.close()
                         
                         sender_email = "shoirtheagent@gmail.com"
                         sender_password = "wtcbbckjpphnmnwo"
