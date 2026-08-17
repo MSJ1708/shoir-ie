@@ -297,7 +297,7 @@ if not st.session_state.get("logged_in", False):
     st.subheader("Welcome to Shoir-IE Workspace")
     auth_tab1, auth_tab2 = st.tabs(["Sign In", "Get Ticket & Register"])
     
-with auth_tab1:
+    with auth_tab1:
         st.subheader("Sign In to Your Account")
         signin_user = st.text_input("Username", key="signin_user")
         signin_pass = st.text_input("Password", type="password", key="signin_pass")
@@ -347,7 +347,7 @@ with auth_tab1:
                     st.error(f"Database error during sign in: {e}")
             else:
                 st.warning("Please enter both username and password.")
-                
+
     with auth_tab2:
         st.subheader("Get Subscription Ticket & Register")
         
@@ -431,6 +431,7 @@ with auth_tab1:
 
     # Halt execution so unauthenticated users never see the dashboard tools
     st.stop()
+    
 # =========================================================
 # PAGE CONFIGURATION & CUSTOM CSS
 # =========================================================
