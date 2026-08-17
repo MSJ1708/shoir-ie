@@ -377,7 +377,7 @@ if uploaded_screenshot is not None:
         key="reg_confirm_delivery"
     )
     
-if confirmed_delivery:
+    if confirmed_delivery:
         if st.button("Send Verification Request", type="primary", key="btn_send_request"):
             if reg_name and reg_pass and reg_email:
                 os.makedirs("payment_proofs", exist_ok=True)
