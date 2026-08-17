@@ -287,75 +287,62 @@ if "authenticated" not in st.session_state:
 if "show_qr" not in st.session_state:
     st.session_state.show_qr = False
 
-# ==========================================================
-# AUTHENTICATION & TICKET / SUBSCRIPTION FLOW GATE
-# ==========================================================
-if not st.session_state.authenticated:
-    st.title("Enterprise Operations & Cognitive Logistics Suite")
-    st.markdown("Secure Portal. Please sign in or get a subscription ticket.")
-
-    auth_tab1, auth_tab2 = st.tabs(["Sign In", "Get Ticket"])
-
-    # --- TAB 1: SIGN IN (INSTANT ACCESS FOR EXISTING ACCOUNTS) ---
+# --- AUTHENTICATION & SUBSCRIPTION GATE ---
+if not st.session_state.get("logged_in", False):
+    st.subheader("Welcome to Shoir-IE Workspace")
+    auth_tab1, auth_tab2 = st.tabs(["Sign In", "Get Ticket & Register"])
+    
     with auth_tab1:
-        st.subheader("Existing User Sign In")
-        signin_user = st.text_input("Username", key="si_username")
-        signin_pass = st.text_input("Password", type="password", key="si_password")
-        signin_email = st.text_input("Email Address", key="si_email")
-        signin_ticket = st.text_input("Ticket Code", placeholder="SUB-XXXX-YYYY", key="si_ticket")
-
-        if st.button("Log In to Workspace", type="primary", key="si_btn"):
-            if signin_user == "sho" and signin_pass == "mohammedsuhail172008chennai!":
-                st.session_state.authenticated = True
-                st.session_state.current_user = "sho"
-                st.session_state.user_role = "Enterprise Admin"
-                st.session_state.user_tier = "Enterprise Tier"
-                st.session_state.user_email = signin_email or "mohsuhailji@gmail.com"
-                st.success("Welcome back, Administrator!")
-                st.rerun()
+        st.subheader("Sign In to Your Account")
+        signin_user = st.text_input("Username", key="signin_user")
+        signin_pass = st.text_input("Password", type="password", key="signin_pass")
+        
+        if st.button("Sign In", type="primary", key="btn_signin"):
+            if signin_user and signin_pass:
+                try:
+                    conn = sqlite3.connect("enterprise_full_workspace.db")
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT username, role, tier, email, password FROM users WHERE username = ? AND password = ?", (signin_user, signin_pass))
+                    row = cursor.fetchone()
+                    conn.close()
+                    
+                    if row:
+                        st.session_state.logged_in = True
+                        st.session_state.current_user = signin_user
+                        st.session_state.user_role = row[1]
+                        st.session_state.user_tier = row[2]
+                        st.session_state.user_email = row[3] or ""
+                        st.success(f"Welcome back, {signin_user}!")
+                        st.rerun()
+                    else:
+                        st.error("Invalid username, password, or credentials.")
+                except Exception as e:
+                    st.error(f"Database error during sign in: {e}")
             else:
-                conn = sqlite3.connect("enterprise_full_workspace.db")
-                cursor = conn.cursor()
-                pass_hash = hashlib.sha256(signin_pass.encode()).hexdigest()
-                cursor.execute("SELECT role, tier, email FROM enterprise_users WHERE username = ? AND password_hash = ?", (signin_user, pass_hash))
-                row = cursor.fetchone()
-                
-                if row:
-                    st.session_state.authenticated = True
-                    st.session_state.current_user = signin_user
-                    st.session_state.user_role = row[0]
-                    st.session_state.user_tier = row[1]
-                    st.session_state.user_email = row[2] or signin_email
-                    conn.close()
-                    st.success(f"Welcome back, {signin_user}!")
-                    st.rerun()
-                else:
-                    conn.close()
-                    st.error("Invalid username, password, or credentials.")
+                st.warning("Please enter both username and password.")
 
-    # --- TAB 2: GET TICKET & SUBSCRIPTION FLOW ---
     with auth_tab2:
         st.subheader("Get Subscription Ticket & Register")
-
+        
         reg_tier = st.selectbox("Choose Subscription Tier", ["Starter Tier ($29)", "Mid-Tier Pro ($79)", "Enterprise Tier ($199)"], key="reg_tier")
         reg_name = st.text_input("Name / Username", key="reg_name")
         reg_email = st.text_input("Email Address", placeholder="name@company.com", key="reg_email")
         reg_pass = st.text_input("Password", type="password", key="reg_pass")
-
+        
         st.markdown("---")
         st.markdown("### Terms, Conditions & Payment Policy")
-        st.markdown("""
-        - **No Refunds:** Refund isn't available for any subscription purchases. All sales are final.
-        - **Exact Price:** You must pay the exact price corresponding to your selected tier.
-        - **Ticket Delivery:** Your ticket code will be sent via email after payment verification.
-        """)
-
+        st.markdown(
+            "- **No Refunds:** Refund isn't available for any subscription purchases. All sales are final.\n"
+            "- **Exact Price:** You must pay the exact price corresponding to your selected tier.\n"
+            "- **Ticket Delivery:** Your ticket code will be sent via email after payment verification."
+        )
+        
         accepted_terms = st.checkbox("I accept the terms & conditions, no-refund policy, and pricing instructions.", key="reg_chk")
-
+        
         if accepted_terms:
             if st.button("Proceed to Pay & Show QR", type="primary", key="btn_confirm_pay"):
                 st.session_state.show_qr = True
-
+        
         if st.session_state.get("show_qr", False):
             st.markdown("---")
             st.markdown("### Scan to Pay via STC Pay")
@@ -366,62 +353,56 @@ if not st.session_state.authenticated:
                 st.image(img, caption="Scan QR Code to Pay Exact Amount", width=230)
             except Exception as e:
                 st.info(f"Could not load image: {e}")
+            
+            uploaded_screenshot = st.file_uploader("Upload Payment Screenshot", type=["png", "jpg", "jpeg"], key="payment_screenshot_uploader")
 
-if st.session_state.get("logged_in", False):
-    # User is logged in successfully — bypass the auth gate and let the main dashboard render below
-    pass
-else:
-    # Handle the QR payment upload flow if active
-    if st.session_state.get("show_qr", False):
-        uploaded_screenshot = st.file_uploader("Upload Payment Screenshot", type=["png", "jpg", "jpeg"], key="payment_screenshot_uploader")
+            st.markdown("---")
 
-        st.markdown("---")
+            confirmed_delivery = st.checkbox(
+                "Ticket code will be sent by shoirtheagent@gmail.com through email upon verification.",
+                key="reg_confirm_delivery"
+            )
 
-        confirmed_delivery = st.checkbox(
-            "Ticket code will be sent by shoirtheagent@gmail.com through email upon verification.",
-            key="reg_confirm_delivery"
-        )
-
-        if confirmed_delivery:
-            if st.button("Send Verification Request", type="primary", key="btn_send_request"):
-                if reg_name and reg_pass and reg_email and uploaded_screenshot is not None:
-                    os.makedirs("payment_proofs", exist_ok=True)
-                    file_path = os.path.join("payment_proofs", f"{reg_name}_{uploaded_screenshot.name}")
-                    with open(file_path, "wb") as f:
-                        f.write(uploaded_screenshot.getbuffer())
-                    
-                    conn = sqlite3.connect("enterprise_full_workspace.db")
-                    cursor = conn.cursor()
-                    cursor.execute('''
-                        CREATE TABLE IF NOT EXISTS pending_payments (
-                            id INTEGER PRIMARY KEY AUTOINCREMENT,
-                            username TEXT,
-                            email TEXT,
-                            tier TEXT,
-                            payment_method TEXT,
-                            transaction_id TEXT,
-                            screenshot_path TEXT,
-                            status TEXT,
-                            timestamp TEXT
-                        )
-                    ''')
-                    cursor.execute("""
-                        INSERT INTO pending_payments (username, email, tier, payment_method, transaction_id, screenshot_path, status, timestamp)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    """, (reg_name, reg_email, reg_tier, "STC Pay", "MANUAL-QR", file_path, "Pending", __import__('datetime').datetime.utcnow().isoformat()))
-                    conn.commit()
-                    conn.close()
-                    
-                    st.success("Request sent successfully! Your code will be emailed to you from shoirtheagent@gmail.com")
-                    st.session_state.show_qr = False
-                    st.rerun()
-                else:
-                    if uploaded_screenshot is None:
-                        st.warning("Please upload your payment screenshot.")
+            if confirmed_delivery:
+                if st.button("Send Verification Request", type="primary", key="btn_send_request"):
+                    if reg_name and reg_pass and reg_email and uploaded_screenshot is not None:
+                        os.makedirs("payment_proofs", exist_ok=True)
+                        file_path = os.path.join("payment_proofs", f"{reg_name}_{uploaded_screenshot.name}")
+                        with open(file_path, "wb") as f:
+                            f.write(uploaded_screenshot.getbuffer())
+                        
+                        conn = sqlite3.connect("enterprise_full_workspace.db")
+                        cursor = conn.cursor()
+                        cursor.execute('''
+                            CREATE TABLE IF NOT EXISTS pending_payments (
+                                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                username TEXT,
+                                email TEXT,
+                                tier TEXT,
+                                payment_method TEXT,
+                                transaction_id TEXT,
+                                screenshot_path TEXT,
+                                status TEXT,
+                                timestamp TEXT
+                            )
+                        ''')
+                        cursor.execute("""
+                            INSERT INTO pending_payments (username, email, tier, payment_method, transaction_id, screenshot_path, status, timestamp)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        """, (reg_name, reg_email, reg_tier, "STC Pay", "MANUAL-QR", file_path, "Pending", __import__('datetime').datetime.utcnow().isoformat()))
+                        conn.commit()
+                        conn.close()
+                        
+                        st.success("Request sent successfully! Your code will be emailed to you from shoirtheagent@gmail.com")
+                        st.session_state.show_qr = False
+                        st.rerun()
                     else:
-                        st.warning("Please fill in your name, password, and email address.")
-    
-    # Halt execution here for any unauthenticated user so the dashboard remains locked
+                        if uploaded_screenshot is None:
+                            st.warning("Please upload your payment screenshot.")
+                        else:
+                            st.warning("Please fill in your name, password, and email address.")
+
+    # Halt execution so unauthenticated users never see the dashboard tools
     st.stop()
 # =========================================================
 # PAGE CONFIGURATION & CUSTOM CSS
