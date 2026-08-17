@@ -299,11 +299,23 @@ if not st.session_state.get("logged_in", False):
     st.subheader("Welcome to Shoir-IE Workspace")
     auth_tab1, auth_tab2 = st.tabs(["Sign In", "Get Ticket & Register"])
     
+import streamlit as st
+import sqlite3
+import os
+import random
+import string
+import pandas as pd
+from PIL import Image
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+
 # ==========================================
-# AUTHENTICATION GATE & TABS
+_# 1. ABSOLUTE AUTHENTICATION GATE (TOP OF APP)
 # ==========================================
 if "current_user" not in st.session_state:
-    st.title("🔐 Enterprise Workspace Access")
+    st.title("🔐 Welcome to Shoir-IE Workspace")
+    st.markdown("Please sign in with your approved account or register for a subscription ticket.")
     
     auth_tab1, auth_tab2 = st.tabs(["🔑 Sign In", "📝 Register & Get Ticket"])
     
@@ -349,7 +361,7 @@ if "current_user" not in st.session_state:
                 st.success(f"Welcome back, {user_row[1]}!")
                 st.rerun()
             else:
-                st.error("Invalid username or password.")
+                st.error("Invalid username or password. Note: New users must wait for admin approval and ticket delivery.")
 
     # --- TAB 2: REGISTER & PAYMENT ---
     with auth_tab2:
@@ -433,7 +445,7 @@ if "current_user" not in st.session_state:
                             conn.commit()
                             conn.close()
                             
-                            st.success("Request sent successfully! Your code will be emailed to you from shoirtheagent@gmail.com")
+                            st.success("Request sent successfully! Your code will be emailed to you from shoirtheagent@gmail.com once approved.")
                             st.session_state.show_qr = False
                             st.rerun()
                         else:
@@ -442,8 +454,22 @@ if "current_user" not in st.session_state:
                             else:
                                 st.warning("Please fill in your name, password, and email address.")
                                 
-    # Stops execution here so the dashboard won't render until logged in
+    # STOPS execution here so dashboard NEVER renders for unauthenticated visitors
     st.stop()
+
+# ==========================================
+# 2. MAIN DASHBOARD (Only executes if authenticated)
+# ==========================================
+st.sidebar.success(f"Logged in as: **{st.session_state['current_user']}**")
+st.sidebar.info(f"Tier: {st.session_state.get('user_tier', 'Standard')}")
+
+if st.sidebar.button("Log Out"):
+    del st.session_state["current_user"]
+    st.rerun()
+
+# --- Your Main Dashboard UI Code Goes Below Here ---
+st.title("Enterprise Operations & Cognitive Suite")
+st.write("Welcome to your authorized workspace dashboard.")
 
 # =========================================================
 # PAGE CONFIGURATION & CUSTOM CSS
