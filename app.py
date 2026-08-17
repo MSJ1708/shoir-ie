@@ -369,46 +369,48 @@ if not st.session_state.authenticated:
 
 uploaded_screenshot = st.file_uploader("Upload Payment Screenshot", type=["png", "jpg", "jpeg"], key="payment_screenshot_uploader")
 
-if uploaded_screenshot is not None:
-    st.markdown("---")
-    
-    confirmed_delivery = st.checkbox(
-        "Ticket code will be sent by shoirtheagent@gmail.com through email upon verification.",
-        key="reg_confirm_delivery"
-    )
-    
-    if confirmed_delivery:
-        if st.button("Send Verification Request", type="primary", key="btn_send_request"):
-            if reg_name and reg_pass and reg_email:
-                os.makedirs("payment_proofs", exist_ok=True)
-                file_path = os.path.join("payment_proofs", f"{reg_name}_{uploaded_screenshot.name}")
-                with open(file_path, "wb") as f:
-                    f.write(uploaded_screenshot.getbuffer())
-                
-                conn = sqlite3.connect("enterprise_full_workspace.db")
-                cursor = conn.cursor()
-                cursor.execute('''
-                    CREATE TABLE IF NOT EXISTS pending_payments (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        username TEXT,
-                        email TEXT,
-                        tier TEXT,
-                        payment_method TEXT,
-                        transaction_id TEXT,
-                        screenshot_path TEXT,
-                        status TEXT,
-                        timestamp TEXT
-                    )
-                ''')
-                cursor.execute("""
-                    INSERT INTO pending_payments (username, email, tier, payment_method, transaction_id, screenshot_path, status, timestamp)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """, (reg_name, reg_email, reg_tier, "STC Pay", "MANUAL-QR", file_path, "Pending", __import__('datetime').datetime.utcnow().isoformat()))
-                conn.commit()
-                conn.close()
-                
-                st.success("Request sent successfully! Your code will be emailed to you from shoirtheagent@gmail.com")
-                st.session_state.show_qr = False
+st.markdown("---")
+
+confirmed_delivery = st.checkbox(
+    "Ticket code will be sent by shoirtheagent@gmail.com through email upon verification.",
+    key="reg_confirm_delivery"
+)
+
+if confirmed_delivery:
+    if st.button("Send Verification Request", type="primary", key="btn_send_request"):
+        if reg_name and reg_pass and reg_email and uploaded_screenshot is not None:
+            os.makedirs("payment_proofs", exist_ok=True)
+            file_path = os.path.join("payment_proofs", f"{reg_name}_{uploaded_screenshot.name}")
+            with open(file_path, "wb") as f:
+                f.write(uploaded_screenshot.getbuffer())
+            
+            conn = sqlite3.connect("enterprise_full_workspace.db")
+            cursor = conn.cursor()
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS pending_payments (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    username TEXT,
+                    email TEXT,
+                    tier TEXT,
+                    payment_method TEXT,
+                    transaction_id TEXT,
+                    screenshot_path TEXT,
+                    status TEXT,
+                    timestamp TEXT
+                )
+            ''')
+            cursor.execute("""
+                INSERT INTO pending_payments (username, email, tier, payment_method, transaction_id, screenshot_path, status, timestamp)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (reg_name, reg_email, reg_tier, "STC Pay", "MANUAL-QR", file_path, "Pending", __import__('datetime').datetime.utcnow().isoformat()))
+            conn.commit()
+            conn.close()
+            
+            st.success("Request sent successfully! Your code will be emailed to you from shoirtheagent@gmail.com")
+            st.session_state.show_qr = False
+        else:
+            if uploaded_screenshot is None:
+                st.warning("Please upload your payment screenshot.")
             else:
                 st.warning("Please fill in your name, password, and email address.")
                 
