@@ -353,6 +353,9 @@ if not st.session_state.get("logged_in", False):
                     st.error(f"Database error during sign in: {e}")
             else:
                 st.warning("Please enter both username and password.")
+# Initialize the authentication tabs first so auth_tab2 is defined
+auth_tab1, auth_tab2 = st.tabs(["🔑 Sign In", "📝 Register & Get Ticket"])
+
 with auth_tab2:
     st.subheader("Get Subscription Ticket & Register")
     
@@ -406,7 +409,6 @@ with auth_tab2:
                         conn = sqlite3.connect("enterprise_full_workspace.db")
                         cursor = conn.cursor()
                         
-                        # 1. Ensure table exists with all required columns
                         cursor.execute('''
                             CREATE TABLE IF NOT EXISTS pending_payments (
                                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -422,13 +424,11 @@ with auth_tab2:
                             )
                         ''')
                         
-                        # 2. Safely add password column if it was missing in an older table version
                         try:
                             cursor.execute("ALTER TABLE pending_payments ADD COLUMN password TEXT;")
                         except sqlite3.OperationalError:
-                            pass  # Column already exists, safe to ignore
+                            pass
                         
-                        # 3. Insert record
                         cursor.execute("""
                             INSERT INTO pending_payments (username, email, password, tier, payment_method, transaction_id, screenshot_path, status, timestamp)
                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -445,7 +445,6 @@ with auth_tab2:
                             st.warning("Please upload your payment screenshot.")
                         else:
                             st.warning("Please fill in your name, password, and email address.")
-
     st.stop()
     
 # =========================================================
