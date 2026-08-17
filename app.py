@@ -371,10 +371,15 @@ if not st.session_state.authenticated:
 
             if uploaded_screenshot is not None:
                 st.markdown("---")
-                ("Ticket code will be sent by **shoirtheagent@gmail.com** through email upon verification.")
-
-                if st.button("Send Verification Request", type="primary", key="btn_send_request"):
-                    if reg_name and reg_pass and reg_email:
+    
+                confirmed_delivery = st.checkbox(
+                    "Ticket code will be sent by shoirtheagent@gmail.com through email upon verification.", 
+                     key="reg_confirm_delivery"
+                )
+    
+                if confirmed_delivery:
+                    if st.button("Send Verification Request", type="primary", key="btn_send_request"):
+                        if reg_name and reg_pass and reg_email:
                         os.makedirs("payment_proofs", exist_ok=True)
                         file_path = os.path.join("payment_proofs", f"{reg_name}_{uploaded_screenshot.name}")
                         with open(file_path, "wb") as f:
