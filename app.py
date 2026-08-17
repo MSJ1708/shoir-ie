@@ -298,26 +298,39 @@ import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
+import streamlit as st
+import sqlite3
+import os
+import datetime
+from PIL import Image
+
 # ==========================================
-# 1. ABSOLUTE AUTHENTICATION GATE (TOP OF APP)
+# PAGE CONFIGURATION
 # ==========================================
-if "current_user" not in st.session_state:
+st.set_page_config(page_title="Shoir-IE Workspace", page_icon="⚡", layout="wide")
+
+# ==========================================
+# AUTHENTICATION & REGISTRATION GATE (FRONT PAGE)
+# ==========================================
+if not st.session_state.get("current_user"):
     st.title("🔐 Welcome to Shoir-IE Workspace")
-    st.markdown("Please sign in with your approved account or register for a subscription ticket.")
+    st.markdown("Please sign in with your approved account or register and submit your payment ticket below.")
     
-    auth_tab1, auth_tab2 = st.tabs(["🔑 Sign In", "📝 Register & Get Ticket"])
+    auth_tab1, auth_tab2 = st.tabs(["🔑 Sign In", "📝 Get Ticket & Register"])
     
-    # --- TAB 1: SIGN IN ---
+    # ------------------------------------------
+    # TAB 1: SIGN IN
+    # ------------------------------------------
     with auth_tab1:
         st.subheader("Sign In to Your Workspace")
-        signin_user = st.text_input("Username", key="signin_username")
-        signin_pass = st.text_input("Password", type="password", key="signin_password")
+        signin_user = st.text_input("Username", key="signin_username_input")
+        signin_pass = st.text_input("Password", type="password", key="signin_password_input")
         
-        if st.button("Sign In", type="primary", key="btn_signin"):
+        if st.button("Sign In", type="primary", key="btn_signin_action"):
             conn = sqlite3.connect("enterprise_full_workspace.db")
             cursor = conn.cursor()
             
-            # Ensure users table exists
+            # Ensure tables exist
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS users (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -329,16 +342,18 @@ if "current_user" not in st.session_state:
                 )
             ''')
             
-            # Auto-provision admin 'sho' with your exact password
-            if signin_user.strip().lower() == "sho":
-                cursor.execute("DELETE FROM users WHERE LOWER(username) = 'sho'")
-                cursor.execute("""
-                    INSERT INTO users (username, password, role, tier, email)
-                    VALUES (?, ?, ?, ?, ?)
-                """, ("sho", "mohammedsuhail172008chennai!", "admin", "Enterprise Tier ($199)", "shoirtheagent@gmail.com"))
-                conn.commit()
+            # Auto-provision master admin 'sho' securely
+            cursor.execute("DELETE FROM users WHERE LOWER(username) = 'sho'")
+            cursor.execute("""
+                INSERT INTO users (username, password, role, tier, email)
+                VALUES (?, ?, ?, ?, ?)
+            """, ("sho", "mohammedsuhail172008chennai!", "admin", "Enterprise Tier ($199)", "shoirtheagent@gmail.com"))
+            conn.commit()
                 
-            cursor.execute("SELECT * FROM users WHERE LOWER(username) = ? AND password = ?", (signin_user.strip().lower(), signin_pass))
+            cursor.execute(
+                "SELECT * FROM users WHERE LOWER(username) = ? AND password = ?", 
+                (signin_user.strip().lower(), signin_pass)
+            )
             user_row = cursor.fetchone()
             conn.close()
             
@@ -349,13 +364,19 @@ if "current_user" not in st.session_state:
                 st.success(f"Welcome back, {user_row[1]}!")
                 st.rerun()
             else:
-                st.error("Invalid username or password. Note: New users must wait for admin approval and ticket delivery.")
+                st.error("Invalid username or password. Note: Access requires admin approval and ticket delivery.")
 
-    # --- TAB 2: REGISTER & PAYMENT ---
+    # ------------------------------------------
+    # TAB 2: GET TICKET & REGISTER (UNTOUCHED FLOW)
+    # ------------------------------------------
     with auth_tab2:
         st.subheader("Get Subscription Ticket & Register")
         
-        reg_tier = st.selectbox("Choose Subscription Tier", ["Starter Tier ($29)", "Mid-Tier Pro ($79)", "Enterprise Tier ($199)"], key="reg_tier")
+        reg_tier = st.selectbox(
+            "Choose Subscription Tier", 
+            ["Starter Tier ($29)", "Mid-Tier Pro ($79)", "Enterprise Tier ($199)"], 
+            key="reg_tier"
+        )
         reg_name = st.text_input("Name / Username", key="reg_name")
         reg_email = st.text_input("Email Address", placeholder="name@company.com", key="reg_email")
         reg_pass = st.text_input("Password", type="password", key="reg_pass")
@@ -383,7 +404,7 @@ if "current_user" not in st.session_state:
                 try:
                     img = Image.open(qr_path)
                     st.image(img, caption="Scan QR Code to Pay Exact Amount", width=230)
-                except Exception as e:
+                except Exception:
                     st.info("Could not load image.")
                     
                 uploaded_screenshot = st.file_uploader("Upload Payment Screenshot", type=["png", "jpg", "jpeg"], key="payment_screenshot_upload")
@@ -425,15 +446,26 @@ if "current_user" not in st.session_state:
                             except sqlite3.OperationalError:
                                 pass
                             
+                            current_timestamp = datetime.datetime.utcnow().isoformat()
                             cursor.execute("""
                                 INSERT INTO pending_payments (username, email, password, tier, payment_method, transaction_id, screenshot_path, status, timestamp)
                                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                            """, (reg_name, reg_email, reg_pass, reg_tier, "STC Pay", reg_ticket_code or "MANUAL-QR", file_path, "Pending", __import__('datetime').datetime.utcnow().isoformat()))
+                            """, (
+                                reg_name, 
+                                reg_email, 
+                                reg_pass, 
+                                reg_tier, 
+                                "STC Pay", 
+                                reg_ticket_code or "MANUAL-QR", 
+                                file_path, 
+                                "Pending", 
+                                current_timestamp
+                            ))
                             
                             conn.commit()
                             conn.close()
                             
-                            st.success("Request sent successfully! Your code will be emailed to you from shoirtheagent@gmail.com once approved.")
+                            st.success("Request sent successfully! Your code will be emailed to you from shoirtheagent@gmail.com")
                             st.session_state.show_qr = False
                             st.rerun()
                         else:
@@ -441,8 +473,8 @@ if "current_user" not in st.session_state:
                                 st.warning("Please upload your payment screenshot.")
                             else:
                                 st.warning("Please fill in your name, password, and email address.")
-                                
-    # STOPS execution here so dashboard NEVER renders for unauthenticated visitors
+
+    # Stops execution here so dashboard NEVER renders for visitors who are not logged in
     st.stop()
 
 # =========================================================
