@@ -367,7 +367,7 @@ if not st.session_state.authenticated:
             except Exception as e:
                 st.info(f"Could not load image: {e}")
 
-if not st.session_state.get("logged_in", False):
+if st.session_state.get("show_qr", False):
     uploaded_screenshot = st.file_uploader("Upload Payment Screenshot", type=["png", "jpg", "jpeg"], key="payment_screenshot_uploader")
 
     st.markdown("---")
