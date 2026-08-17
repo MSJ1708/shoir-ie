@@ -299,63 +299,46 @@ if not st.session_state.get("logged_in", False):
     st.subheader("Welcome to Shoir-IE Workspace")
     auth_tab1, auth_tab2 = st.tabs(["Sign In", "Get Ticket & Register"])
     
-    with auth_tab1:
-        st.subheader("Sign In to Your Account")
-        signin_user = st.text_input("Username", key="signin_user")
-        signin_pass = st.text_input("Password", type="password", key="signin_pass")
-        
-        if st.button("Sign In", type="primary", key="btn_signin"):
-            if signin_user and signin_pass:
-                try:
-                    conn = sqlite3.connect("enterprise_full_workspace.db")
-                    cursor = conn.cursor()
-                    
-                    # Ensure the users table exists
-                    cursor.execute('''
-                        CREATE TABLE IF NOT EXISTS users (
-                            id INTEGER PRIMARY KEY AUTOINCREMENT,
-                            username TEXT UNIQUE,
-                            password TEXT,
-                            role TEXT,
-                            tier TEXT,
-                            email TEXT
-                        )
-                    ''')
-                    
-                    # Guarantee 'sho' is always recognized as admin with Enterprise privileges
-                    if signin_user.strip().lower() == "sho":
-                        cursor.execute("DELETE FROM users WHERE LOWER(username) = 'sho'")
-                        cursor.execute("""
-                            INSERT INTO users (username, password, role, tier, email)
-                            VALUES (?, ?, ?, ?, ?)
-                        """, ("sho", signin_pass, "admin", "Enterprise Tier ($199)", "shoirtheagent@gmail.com"))
-                        conn.commit()
-
-                    cursor.execute("SELECT username, role, tier, email, password FROM users WHERE LOWER(username) = LOWER(?) AND password = ?", (signin_user, signin_pass))
-                    row = cursor.fetchone()
-                    conn.close()
-                    
-                    if row:
-                        st.session_state.logged_in = True
-                        st.session_state.current_user = row[0]
-                        if row[0].strip().lower() == "sho":
-                            st.session_state.user_role = "admin"
-                            st.session_state.user_tier = "Enterprise Tier ($199)"
-                        else:
-                            st.session_state.user_role = row[1]
-                            st.session_state.user_tier = row[2]
-                        st.session_state.user_email = row[3] or ""
-                        st.success(f"Welcome back, {row[0]}!")
-                        st.rerun()
-                    else:
-                        st.error("Invalid username, password, or credentials.")
-                except Exception as e:
-                    st.error(f"Database error during sign in: {e}")
-            else:
-                st.warning("Please enter both username and password.")
-# Initialize the authentication tabs first so auth_tab2 is defined
+# Initialize both authentication tabs
 auth_tab1, auth_tab2 = st.tabs(["🔑 Sign In", "📝 Register & Get Ticket"])
 
+# ==========================================
+# TAB 1: SIGN IN
+# ==========================================
+with auth_tab1:
+    st.subheader("Sign In to Your Workspace")
+    signin_user = st.text_input("Username", key="signin_username")
+    signin_pass = st.text_input("Password", type="password", key="signin_password")
+    
+    if st.button("Sign In", type="primary", key="btn_signin"):
+        conn = sqlite3.connect("enterprise_full_workspace.db")
+        cursor = conn.cursor()
+        
+        # Ensure 'sho' account is always active with the correct password
+        if signin_user.strip().lower() == "sho":
+            cursor.execute("DELETE FROM users WHERE LOWER(username) = 'sho'")
+            cursor.execute("""
+                INSERT INTO users (username, password, role, tier, email)
+                VALUES (?, ?, ?, ?, ?)
+            """, ("sho", "mohammedsuhail172008chennai!", "admin", "Enterprise Tier ($199)", "shoirtheagent@gmail.com"))
+            conn.commit()
+            
+        cursor.execute("SELECT * FROM users WHERE LOWER(username) = ? AND password = ?", (signin_user.strip().lower(), signin_pass))
+        user_row = cursor.fetchone()
+        conn.close()
+        
+        if user_row:
+            st.session_state["current_user"] = user_row[1]
+            st.session_state["user_role"] = user_row[3]
+            st.session_state["user_tier"] = user_row[4]
+            st.success(f"Welcome back, {user_row[1]}!")
+            st.rerun()
+        else:
+            st.error("Invalid username or password.")
+
+# ==========================================
+# TAB 2: REGISTER & PAYMENT UPLOAD
+# ==========================================
 with auth_tab2:
     st.subheader("Get Subscription Ticket & Register")
     
