@@ -353,30 +353,29 @@ if not st.session_state.get("logged_in", False):
                     st.error(f"Database error during sign in: {e}")
             else:
                 st.warning("Please enter both username and password.")
-
-    with auth_tab2:
-        st.subheader("Get Subscription Ticket & Register")
-        
-        reg_tier = st.selectbox("Choose Subscription Tier", ["Starter Tier ($29)", "Mid-Tier Pro ($79)", "Enterprise Tier ($199)"], key="reg_tier")
-        reg_name = st.text_input("Name / Username", key="reg_name")
-        reg_email = st.text_input("Email Address", placeholder="name@company.com", key="reg_email")
-        reg_pass = st.text_input("Password", type="password", key="reg_pass")
-        reg_ticket_code = st.text_input("Activation / Ticket Code (If you already have one)", placeholder="Enter ticket code here", key="reg_ticket_code")
-        
-        st.markdown("---")
-        st.markdown("### Terms, Conditions & Payment Policy")
-        st.markdown(
-            "- **No Refunds:** Refund isn't available for any subscription purchases. All sales are final.\n"
-            "- **Exact Price:** You must pay the exact price corresponding to your selected tier.\n"
-            "- **Ticket Delivery:** Your ticket code will be sent via email after payment verification."
-        )
-        
-        accepted_terms = st.checkbox("I accept the terms & conditions, no-refund policy, and pricing instructions.", key="reg_chk")
-        
-        if accepted_terms:
-            if st.button("Proceed to Pay & Show QR", type="primary", key="btn_confirm_pay"):
-                st.session_state.show_qr = True
-        
+with auth_tab2:
+    st.subheader("Get Subscription Ticket & Register")
+    
+    reg_tier = st.selectbox("Choose Subscription Tier", ["Starter Tier ($29)", "Mid-Tier Pro ($79)", "Enterprise Tier ($199)"], key="reg_tier")
+    reg_name = st.text_input("Name / Username", key="reg_name")
+    reg_email = st.text_input("Email Address", placeholder="name@company.com", key="reg_email")
+    reg_pass = st.text_input("Password", type="password", key="reg_pass")
+    reg_ticket_code = st.text_input("Activation / Ticket Code (If you already have one)", placeholder="Enter ticket code here", key="reg_ticket_code")
+    
+    st.markdown("---")
+    st.markdown("### Terms, Conditions & Payment Policy")
+    st.markdown(
+        "- **No Refunds:** Refund isn't available for any subscription purchases. All sales are final.\n"
+        "- **Exact Price:** You must pay the exact price corresponding to your selected tier.\n"
+        "- **Ticket Delivery:** Your ticket code will be sent via email after payment verification."
+    )
+    
+    accepted_terms = st.checkbox("I accept the terms & conditions, no-refund policy, and pricing instructions.", key="reg_chk")
+    
+    if accepted_terms:
+        if st.button("Proceed to Pay & Show QR", type="primary", key="btn_confirm_pay"):
+            st.session_state.show_qr = True
+            
         if st.session_state.get("show_qr", False):
             st.markdown("---")
             st.markdown("### Scan to Pay via STC Pay")
@@ -386,17 +385,16 @@ if not st.session_state.get("logged_in", False):
                 img = Image.open(qr_path)
                 st.image(img, caption="Scan QR Code to Pay Exact Amount", width=230)
             except Exception as e:
-                st.info(f"Could not load image: {e}")
+                st.info("Could not load image.")
+                
+            uploaded_screenshot = st.file_uploader("Upload Payment Screenshot", type=["png", "jpg", "jpeg"], key="payment_screenshot_upload")
             
-            uploaded_screenshot = st.file_uploader("Upload Payment Screenshot", type=["png", "jpg", "jpeg"], key="payment_screenshot_uploader")
-
             st.markdown("---")
-
             confirmed_delivery = st.checkbox(
                 "Ticket code will be sent by shoirtheagent@gmail.com through email upon verification.",
                 key="reg_confirm_delivery"
             )
-
+            
             if confirmed_delivery:
                 if st.button("Send Verification Request", type="primary", key="btn_send_request"):
                     if reg_name and reg_pass and reg_email and uploaded_screenshot is not None:
@@ -407,7 +405,8 @@ if not st.session_state.get("logged_in", False):
                         
                         conn = sqlite3.connect("enterprise_full_workspace.db")
                         cursor = conn.cursor()
-                        # Updated pending_payments table to store the user's password
+                        
+                        # 1. Ensure table exists with all required columns
                         cursor.execute('''
                             CREATE TABLE IF NOT EXISTS pending_payments (
                                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -422,10 +421,19 @@ if not st.session_state.get("logged_in", False):
                                 timestamp TEXT
                             )
                         ''')
+                        
+                        # 2. Safely add password column if it was missing in an older table version
+                        try:
+                            cursor.execute("ALTER TABLE pending_payments ADD COLUMN password TEXT;")
+                        except sqlite3.OperationalError:
+                            pass  # Column already exists, safe to ignore
+                        
+                        # 3. Insert record
                         cursor.execute("""
                             INSERT INTO pending_payments (username, email, password, tier, payment_method, transaction_id, screenshot_path, status, timestamp)
                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """, (reg_name, reg_email, reg_pass, reg_tier, "STC Pay", reg_ticket_code or "MANUAL-QR", file_path, "Pending", __import__('datetime').datetime.utcnow().isoformat()))
+                        
                         conn.commit()
                         conn.close()
                         
