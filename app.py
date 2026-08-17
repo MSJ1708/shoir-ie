@@ -287,33 +287,6 @@ if "authenticated" not in st.session_state:
 if "show_qr" not in st.session_state:
     st.session_state.show_qr = False
 
-
-
-import os
-import sqlite3
-from PIL import Image
-import streamlit as st
-
-# --- AUTHENTICATION & SUBSCRIPTION GATE ---
-if not st.session_state.get("logged_in", False):
-    st.subheader("Welcome to Shoir-IE Workspace")
-    auth_tab1, auth_tab2 = st.tabs(["Sign In", "Get Ticket & Register"])
-    
-)
-            ''')
-            
-            # Auto-provision admin 'sho' with your exact password
-            if signin_user.strip().lower() == "sho":
-                cursor.execute("DELETE FROM users WHERE LOWER(username) = 'sho'")
-                cursor.execute("""
-                    INSERT INTO users (username, password, role, tier, email)
-                    VALUES (?, ?, ?, ?, ?)
-                """, ("sho", "mohammedsuhail172008chennai!", "admin", "Enterprise Tier ($199)", "shoirtheagent@gmail.com"))
-                conn.commit()
-                
-            cursor.execute("SELECT * FROM users WHERE LOWER(username) = ? AND password = ?", (signin_user.strip().lower(), signin_pass))
-            user_row = cursor.fetchone()
-            conn.close()
 import streamlit as st
 import sqlite3
 import os
