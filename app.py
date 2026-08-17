@@ -367,23 +367,23 @@ if not st.session_state.authenticated:
             except Exception as e:
                 st.info(f"Could not load image: {e}")
 
-            uploaded_screenshot = st.file_uploader("Upload Payment Screenshot", type=["png", "jpg", "jpeg"], key="reg_screenshot")
+uploaded_screenshot = st.file_uploader("Upload Payment Screenshot", type=["png", "jpg", "jpeg"], key="payment_screenshot_uploader")
 
-            if uploaded_screenshot is not None:
-                st.markdown("---")
+if uploaded_screenshot is not None:
+    st.markdown("---")
     
-                confirmed_delivery = st.checkbox(
-                    "Ticket code will be sent by shoirtheagent@gmail.com through email upon verification.", 
-                     key="reg_confirm_delivery"
-                )
+    confirmed_delivery = st.checkbox(
+        "Ticket code will be sent by shoirtheagent@gmail.com through email upon verification.",
+        key="reg_confirm_delivery"
+    )
     
-                if confirmed_delivery:
-                    if st.button("Send Verification Request", type="primary", key="btn_send_request"):
-                        if reg_name and reg_pass and reg_email:
-                        os.makedirs("payment_proofs", exist_ok=True)
-                        file_path = os.path.join("payment_proofs", f"{reg_name}_{uploaded_screenshot.name}")
-                        with open(file_path, "wb") as f:
-                            f.write(uploaded_screenshot.getbuffer())
+    if confirmed_delivery:
+        if st.button("Send Verification Request", type="primary", key="btn_send_request"):
+            if reg_name and reg_pass and reg_email:
+                os.makedirs("payment_proofs", exist_ok=True)
+                file_path = os.path.join("payment_proofs", f"{reg_name}_{uploaded_screenshot.name}")
+                with open(file_path, "wb") as f:
+                    f.write(uploaded_screenshot.getbuffer())
                         
                         conn = sqlite3.connect("enterprise_full_workspace.db")
                         cursor = conn.cursor()
