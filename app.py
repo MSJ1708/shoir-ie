@@ -297,7 +297,7 @@ if not st.session_state.get("logged_in", False):
     st.subheader("Welcome to Shoir-IE Workspace")
     auth_tab1, auth_tab2 = st.tabs(["Sign In", "Get Ticket & Register"])
     
-    with auth_tab1:
+with auth_tab1:
         st.subheader("Sign In to Your Account")
         signin_user = st.text_input("Username", key="signin_user")
         signin_pass = st.text_input("Password", type="password", key="signin_pass")
@@ -308,7 +308,7 @@ if not st.session_state.get("logged_in", False):
                     conn = sqlite3.connect("enterprise_full_workspace.db")
                     cursor = conn.cursor()
                     
-                    # Automatically ensure users table exists to prevent 'no such table' errors
+                    # Ensure the users table exists
                     cursor.execute('''
                         CREATE TABLE IF NOT EXISTS users (
                             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -319,7 +319,15 @@ if not st.session_state.get("logged_in", False):
                             email TEXT
                         )
                     ''')
-                    conn.commit()
+                    
+                    # Auto-seed the admin account if it doesn't exist yet
+                    cursor.execute("SELECT COUNT(*) FROM users WHERE username = ?", ("sho",))
+                    if cursor.fetchone()[0] == 0:
+                        cursor.execute("""
+                            INSERT INTO users (username, password, role, tier, email)
+                            VALUES (?, ?, ?, ?, ?)
+                        """, ("sho", "mohammedsuhail172008chennai!", "admin", "Enterprise Tier ($199)", "shoirtheagent@gmail.com"))
+                        conn.commit()
                     
                     cursor.execute("SELECT username, role, tier, email, password FROM users WHERE username = ? AND password = ?", (signin_user, signin_pass))
                     row = cursor.fetchone()
@@ -339,7 +347,7 @@ if not st.session_state.get("logged_in", False):
                     st.error(f"Database error during sign in: {e}")
             else:
                 st.warning("Please enter both username and password.")
-
+                
     with auth_tab2:
         st.subheader("Get Subscription Ticket & Register")
         
