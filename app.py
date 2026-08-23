@@ -796,7 +796,124 @@ if st.sidebar.button("Lock / Logout Workspace"):
     log_audit(st.session_state.get("current_user", "Unknown"), "User Logged Out")
     st.session_state.authenticated = False
     st.rerun()
+# ==============================================================================
+# REAL-TIME AGV/AMR FLEET DISPATCHER CONTROL TOWER
+# ==============================================================================
+if mod == "AGV Fleet Dispatcher":
+    
+    # Gorgeous custom CSS/HTML header banner
+    st.markdown("""
+    <div style="background: linear-gradient(135deg, #0f2027 0%, #203a43 50%, #2c5364 100%); padding: 28px; border-radius: 14px; color: white; margin-bottom: 24px; box-shadow: 0 6px 16px rgba(0,0,0,0.2);">
+        <div style="display: flex; align-items: center; justify-content: space-between;">
+            <div>
+                <h1 style="margin:0; color: #ffffff; font-size: 26px; font-weight: 700;">🤖 Real-Time AGV/AMR Fleet Dispatcher</h1>
+                <p style="margin:6px 0 0 0; color: #a0aec0; font-size: 14px;">Autonomous Material Handling & Multi-Agent Fleet Routing Control Tower</p>
+            </div>
+            <div style="background: rgba(0, 204, 150, 0.15); border: 1px solid #00CC96; padding: 6px 14px; border-radius: 20px; color: #00CC96; font-weight: 600; font-size: 13px;">
+                🟢 System Online
+            </div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
+    # Initialize Session State for Fleet if missing
+    if "agv_fleet" not in st.session_state:
+        st.session_state.agv_fleet = [
+            {"id": "AGV-01", "x": 1, "y": 2, "status": "NAVIGATING", "battery": 96, "payload": "SKU-A101", "destination": "Aisle 3"},
+            {"id": "AGV-02", "x": 6, "y": 4, "status": "PICKING", "battery": 84, "payload": "Pallet-B2", "destination": "Conveyor 1"},
+            {"id": "AGV-03", "x": 9, "y": 8, "status": "IDLE", "battery": 78, "payload": "None", "destination": "Home Dock"},
+            {"id": "AGV-04", "x": 2, "y": 7, "status": "CHARGING", "battery": 24, "payload": "None", "destination": "Bay 2"}
+        ]
+
+    # Executive KPI Row
+    col1, col2, col3, col4 = st.columns(4)
+    fleet = st.session_state.agv_fleet
+    active_units = sum(1 for r in fleet if r['status'] != 'CHARGING')
+    avg_batt = sum(r['battery'] for r in fleet) // len(fleet)
+
+    col1.metric("Active AMR Units", f"{active_units} / {len(fleet)}", "100% Collision-Free")
+    col2.metric("Fleet Avg Battery", f"{avg_batt}%", "Stable")
+    col3.metric("Active Deadlocks", "0", "Optimized Dijkstra")
+    col4.metric("Hourly Throughput", "48 Units/hr", "+12.4% vs Baseline")
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # Tabbed Command Tower Views
+    tab_map, tab_dispatch, tab_telemetry = st.tabs([
+        "🗺️ Digital Twin Live Map", 
+        "⚡ Dynamic Task Dispatcher", 
+        "📊 Full Fleet Telemetry"
+    ])
+
+    import pandas as pd
+    import plotly.express as px
+
+    df_fleet = pd.DataFrame(fleet)
+
+    with tab_map:
+        st.markdown("#### Live Facility Floor Plan & Robot Tracking")
+        
+        c_ctrl1, c_ctrl2 = st.columns([1, 3])
+        with c_ctrl1:
+            if st.button("🔄 Step Simulation Tick", use_container_width=True):
+                for r in st.session_state.agv_fleet:
+                    if r["status"] == "NAVIGATING":
+                        r["x"] = (r["x"] + 1) % 10
+                        r["y"] = (r["y"] + 2) % 10
+                st.rerun()
+        
+        fig = px.scatter(
+            df_fleet, x="x", y="y", text="id", color="status",
+            size=[32]*len(df_fleet), hover_data=["battery", "payload", "destination"],
+            range_x=[-0.5, 10.5], range_y=[-0.5, 10.5],
+            color_discrete_map={
+                "NAVIGATING": "#00CC96", 
+                "IDLE": "#636EFA", 
+                "PICKING": "#EF553B", 
+                "CHARGING": "#FFA15A"
+            }
+        )
+        fig.update_traces(textposition='top center', marker=dict(line=dict(width=2, color='white')))
+        fig.update_layout(
+            height=450,
+            margin=dict(l=10, r=10, t=10, b=10),
+            plot_bgcolor="#0e1117",
+            paper_bgcolor="#0e1117",
+            font=dict(color="white"),
+            xaxis=dict(showgrid=True, gridcolor="#262730", title="Facility X-Coordinate (m)"),
+            yaxis=dict(showgrid=True, gridcolor="#262730", title="Facility Y-Coordinate (m)")
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+    with tab_dispatch:
+        st.markdown("#### Manual Dispatch & Task Queue Manager")
+        
+        with st.form("agv_dispatch_form"):
+            col_d1, col_d2 = st.columns(2)
+            with col_d1:
+                new_task_id = st.text_input("Task Reference ID", value=f"TSK-9{len(fleet)+10}")
+                pickup_loc = st.selectbox("Pickup Station", ["Warehouse Rack Alpha", "Receiving Dock 2", "Buffer Zone B", "AS/RS Staging"])
+            with col_d2:
+                target_agv = st.selectbox("Assign AMR Unit", [r["id"] for r in fleet])
+                dropoff_loc = st.selectbox("Dropoff Destination", ["Assembly Line Alpha", "Packaging Station 3", "Outbound Dock 1", "QC Inspection Zone"])
+            
+            dispatch_btn = st.form_submit_button("⚡ Transmit Dispatch Order", use_container_width=True)
+            if dispatch_btn:
+                st.success(f"Successfully routed task **{new_task_id}** to **{target_agv}** via optimized A* pathfinding matrix!")
+
+    with tab_telemetry:
+        st.markdown("#### Real-Time Fleet Diagnostics & Status Matrix")
+        st.dataframe(df_fleet, use_container_width=True, hide_index=True)
+        
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("🚨 Emergency Fleet Halt (E-STOP)", type="primary", use_container_width=True):
+            for r in st.session_state.agv_fleet:
+                r["status"] = "IDLE"
+            st.error("⚠️ EMERGENCY STOP ACTIVATED: All autonomous mobile units safely halted in place.")
+
+    # Instantly stop execution so the rest of the main dashboard doesn't render underneath
+    st.stop()
+    
 def render_data_editor(df, key_name):
     if hasattr(st, "data_editor"):
         return st.data_editor(df, num_rows="dynamic", use_container_width=True, key=key_name)
@@ -3236,122 +3353,3 @@ if mod == "Cryptographic Ledger":
         if st.button("Unlock Enterprise Tier", type="primary", use_container_width=True):
             st.info("Redirecting to secure subscription portal...")
 
-# ==============================================================================
-# REAL-TIME AGV/AMR FLEET DISPATCHER MODULE (Master Command Tower Edition)
-# ==============================================================================
-active_module = st.session_state.get("selected_module", "")
-
-if active_module == "AGV Fleet Dispatcher":
-    
-    # Gorgeous custom CSS/HTML header banner
-    st.markdown("""
-    <div style="background: linear-gradient(135deg, #0f2027 0%, #203a43 50%, #2c5364 100%); padding: 28px; border-radius: 14px; color: white; margin-bottom: 24px; box-shadow: 0 6px 16px rgba(0,0,0,0.2);">
-        <div style="display: flex; align-items: center; justify-content: space-between;">
-            <div>
-                <h1 style="margin:0; color: #ffffff; font-size: 26px; font-weight: 700;"> Real-Time AGV/AMR Fleet Dispatcher</h1>
-                <p style="margin:6px 0 0 0; color: #a0aec0; font-size: 14px;">Autonomous Material Handling & Multi-Agent Fleet Routing Control Tower</p>
-            </div>
-            <div style="background: rgba(0, 204, 150, 0.15); border: 1px solid #00CC96; padding: 6px 14px; border-radius: 20px; color: #00CC96; font-weight: 600; font-size: 13px;">
-                🟢 System Online
-            </div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    # Initialize Session State for Fleet if missing
-    if "agv_fleet" not in st.session_state:
-        st.session_state.agv_fleet = [
-            {"id": "AGV-01", "x": 1, "y": 2, "status": "NAVIGATING", "battery": 96, "payload": "SKU-A101", "destination": "Aisle 3"},
-            {"id": "AGV-02", "x": 6, "y": 4, "status": "PICKING", "battery": 84, "payload": "Pallet-B2", "destination": "Conveyor 1"},
-            {"id": "AGV-03", "x": 9, "y": 8, "status": "IDLE", "battery": 78, "payload": "None", "destination": "Home Dock"},
-            {"id": "AGV-04", "x": 2, "y": 7, "status": "CHARGING", "battery": 24, "payload": "None", "destination": "Bay 2"}
-        ]
-
-    # Executive KPI Row
-    col1, col2, col3, col4 = st.columns(4)
-    fleet = st.session_state.agv_fleet
-    active_units = sum(1 for r in fleet if r['status'] != 'CHARGING')
-    avg_batt = sum(r['battery'] for r in fleet) // len(fleet)
-
-    col1.metric("Active AMR Units", f"{active_units} / {len(fleet)}", "100% Collision-Free")
-    col2.metric("Fleet Avg Battery", f"{avg_batt}%", "Stable")
-    col3.metric("Active Deadlocks", "0", "Optimized Dijkstra")
-    col4.metric("Hourly Throughput", "48 Units/hr", "+12.4% vs Baseline")
-
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    # Tabbed Command Tower Views
-    tab_map, tab_dispatch, tab_telemetry = st.tabs([
-        "🗺️ Digital Twin Live Map", 
-        "⚡ Dynamic Task Dispatcher", 
-        "📊 Full Fleet Telemetry"
-    ])
-
-    import pandas as pd
-    import plotly.express as px
-
-    df_fleet = pd.DataFrame(fleet)
-
-    with tab_map:
-        st.markdown("#### Live Facility Floor Plan & Robot Tracking")
-        
-        c_ctrl1, c_ctrl2 = st.columns([1, 3])
-        with c_ctrl1:
-            if st.button("🔄 Step Simulation Tick", use_container_width=True):
-                for r in st.session_state.agv_fleet:
-                    if r["status"] == "NAVIGATING":
-                        r["x"] = (r["x"] + 1) % 10
-                        r["y"] = (r["y"] + 2) % 10
-                st.rerun()
-        
-        fig = px.scatter(
-            df_fleet, x="x", y="y", text="id", color="status",
-            size=[32]*len(df_fleet), hover_data=["battery", "payload", "destination"],
-            range_x=[-0.5, 10.5], range_y=[-0.5, 10.5],
-            color_discrete_map={
-                "NAVIGATING": "#00CC96", 
-                "IDLE": "#636EFA", 
-                "PICKING": "#EF553B", 
-                "CHARGING": "#FFA15A"
-            }
-        )
-        fig.update_traces(textposition='top center', marker=dict(line=dict(width=2, color='white')))
-        fig.update_layout(
-            height=450,
-            margin=dict(l=10, r=10, t=10, b=10),
-            plot_bgcolor="#0e1117",
-            paper_bgcolor="#0e1117",
-            font=dict(color="white"),
-            xaxis=dict(showgrid=True, gridcolor="#262730", title="Facility X-Coordinate (m)"),
-            yaxis=dict(showgrid=True, gridcolor="#262730", title="Facility Y-Coordinate (m)")
-        )
-        st.plotly_chart(fig, use_container_width=True)
-
-    with tab_dispatch:
-        st.markdown("#### Manual Dispatch & Task Queue Manager")
-        
-        with st.form("agv_dispatch_form"):
-            col_d1, col_d2 = st.columns(2)
-            with col_d1:
-                new_task_id = st.text_input("Task Reference ID", value=f"TSK-9{len(fleet)+10}")
-                pickup_loc = st.selectbox("Pickup Station", ["Warehouse Rack Alpha", "Receiving Dock 2", "Buffer Zone B", "AS/RS Staging"])
-            with col_d2:
-                target_agv = st.selectbox("Assign AMR Unit", [r["id"] for r in fleet])
-                dropoff_loc = st.selectbox("Dropoff Destination", ["Assembly Line Alpha", "Packaging Station 3", "Outbound Dock 1", "QC Inspection Zone"])
-            
-            dispatch_btn = st.form_submit_button("⚡ Transmit Dispatch Order", use_container_width=True)
-            if dispatch_btn:
-                st.success(f"Successfully routed task **{new_task_id}** to **{target_agv}** via optimized A* pathfinding matrix!")
-
-    with tab_telemetry:
-        st.markdown("#### Real-Time Fleet Diagnostics & Status Matrix")
-        st.dataframe(df_fleet, use_container_width=True, hide_index=True)
-        
-        st.markdown("<br>", unsafe_allow_html=True)
-        if st.button("🚨 Emergency Fleet Halt (E-STOP)", type="primary", use_container_width=True):
-            for r in st.session_state.agv_fleet:
-                r["status"] = "IDLE"
-            st.error("⚠️ EMERGENCY STOP ACTIVATED: All autonomous mobile units safely halted in place.")
-
-    # Halt execution so the default dashboard doesn't render underneath
-    st.stop()
