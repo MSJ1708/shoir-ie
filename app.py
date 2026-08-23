@@ -1367,10 +1367,9 @@ if mod == "Geospatial Network Designer":
             rate = st.number_input("Freight Rate ($ / Ton-Kilometer)", 0.05, 0.50, st.session_state.freight_rate_per_ton_km, 0.01)
             st.session_state.freight_rate_per_ton_km = rate
             
-           route_data = []
+            route_data = []
             for _, n in df_nodes.iterrows():
                 for _, m in df_markets.iterrows():
-                    # Added **2 to the longitude difference below:
                     dist_approx = math.sqrt((n["lat"] - m["lat"])**2 + (n["lon"] - m["lon"])**2) * 111
                     cost = dist_approx * m["demand_tons_yr"] * rate / 10
                     route_data.append({
