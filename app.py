@@ -1279,7 +1279,7 @@ if mod == "Geospatial Network Designer":
         fig_map.update_layout(
             mapbox=dict(
                 style=map_style,
-                center=dict(lat=24.0, lng=44.0),
+                center=dict(lat=24.0, lon=44.0),  # Changed 'lng' to 'lon' here!
                 zoom=4.8
             ),
             height=500,
@@ -1287,8 +1287,8 @@ if mod == "Geospatial Network Designer":
             paper_bgcolor="#0b0f19",
             font=dict(color="#f3f4f6"),
             legend=dict(orientation="h", yanchor="bottom", y=0.02, xanchor="left", x=0.02, bgcolor="rgba(15,23,42,0.8)")
-        )
-        st.plotly_chart(fig_map, use_container_width=True)
+         )
+         st.plotly_chart(fig_map, use_container_width=True)
 
     # TAB 2: Center of Gravity (CoG) Facility Location Optimizer
     with tab_cog:
