@@ -1138,7 +1138,299 @@ if mod == "AGV Fleet Dispatcher":
 
     # Stop execution so the rest of the page underneath doesn't overwrite
     st.stop()
+
+# ==============================================================================
+# SHOIR-IE: ELITE GEOSPATIAL NETWORK DESIGNER & FACILITY OPTIMIZER
+# ==============================================================================
+if mod == "Geospatial Network Designer":
     
+    # 1. Initialize Geospatial Session State
+    if "geo_network_name" not in st.session_state:
+        st.session_state.geo_network_name = "Kingdom-Wide Logistics & Distribution Network (KSA)"
+    
+    if "supply_nodes" not in st.session_state:
+        st.session_state.supply_nodes = [
+            {"id": "WH-Riyadh", "name": "Riyadh Central Hub", "type": "Distribution Center", "lat": 24.7136, "lon": 46.6753, "capacity_tons": 5000, "utilization": 82},
+            {"id": "WH-Jeddah", "name": "Jeddah Port Gateway", "type": "Port Hub", "lat": 21.5433, "lon": 39.1728, "capacity_tons": 7500, "utilization": 91},
+            {"id": "WH-Dammam", "name": "Dammam Industrial DC", "type": "Manufacturing Plant", "lat": 26.4207, "lon": 50.0888, "capacity_tons": 6000, "utilization": 74},
+            {"id": "DC-Medina", "name": "Medina Regional Depot", "type": "Regional DC", "lat": 24.5247, "lon": 39.5692, "capacity_tons": 2500, "utilization": 65}
+        ]
+
+    if "demand_markets" not in st.session_state:
+        st.session_state.demand_markets = [
+            {"market": "Riyadh Metro Sector", "lat": 24.6333, "lon": 46.7167, "demand_tons_yr": 1850, "priority": "Tier 1"},
+            {"market": "Jeddah Coastal Zone", "lat": 21.4858, "lon": 39.1925, "demand_tons_yr": 1420, "priority": "Tier 1"},
+            {"market": "Dammam / Khobar Corridor", "lat": 26.3927, "lon": 49.9777, "demand_tons_yr": 1600, "priority": "Tier 1"},
+            {"market": "Mecca Sector", "lat": 21.3891, "lon": 39.8579, "demand_tons_yr": 950, "priority": "Tier 2"},
+            {"market": "Tabuk North Hub", "lat": 28.3835, "lon": 36.5662, "demand_tons_yr": 680, "priority": "Tier 2"}
+        ]
+
+    if "freight_rate_per_ton_km" not in st.session_state:
+        st.session_state.freight_rate_per_ton_km = 0.18 # USD / ton-km
+
+    # 2. Astonishing Glassmorphism Header Banner
+    network_title = st.session_state.geo_network_name
+    st.markdown(f"""
+    <div style="background: linear-gradient(135deg, #0f172a 1e0%, #1e1b4b 50%, #312e81 100%); padding: 30px; border-radius: 16px; color: white; margin-bottom: 24px; box-shadow: 0 10px 25px rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.08);">
+        <div style="display: flex; align-items: center; justify-content: space-between;">
+            <div>
+                <span style="background: rgba(99, 102, 241, 0.25); color: #818cf8; padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;">Supply Chain Optimization Suite</span>
+                <h1 style="margin:8px 0 4px 0; color: #ffffff; font-size: 26px; font-weight: 800; letter-spacing: -0.025em;">🌍 Geospatial Network & Facility Optimizer</h1>
+                <p style="margin:0; color: #9ca3af; font-size: 13px;">Active Network: <b style="color: #f3f4f6;">{network_title}</b> &bull; Center of Gravity & Multi-Echelon Routing</p>
+            </div>
+            <div style="background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.4); padding: 8px 16px; border-radius: 30px; color: #34d399; font-weight: 600; font-size: 12px; display: flex; align-items: center; gap: 6px;">
+                <span style="width: 8px; height: 8px; background: #34d399; border-radius: 50%; display: inline-block; box-shadow: 0 0 8px #34d399;"></span> Spatial Engine Online
+            </div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # 3. Executive KPI Cards Row
+    nodes = st.session_state.supply_nodes
+    markets = st.session_state.demand_markets
+    total_capacity = sum(n.get('capacity_tons', 0) for n in nodes)
+    total_demand = sum(m.get('demand_tons_yr', 0) for m in markets)
+    avg_util = sum(n.get('utilization', 0) for n in nodes) // len(nodes) if nodes else 0
+
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric(label="Network Hubs", value=f"{len(nodes)} Active Facilities", delta="Fully Mapped")
+    with col2:
+        st.metric(label="Total Annual Demand", value=f"{total_demand:,} Tons", delta="Regional Coverage")
+    with col3:
+        st.metric(label="Facility Capacity", value=f"{total_capacity:,} Tons", delta=f"{total_capacity - total_demand:,} T Surplus")
+    with col4:
+        st.metric(label="Avg Hub Utilization", value=f"{avg_util}%", delta="Optimized Load")
+
+    st.markdown("<div style='margin: 16px 0;'></div>", unsafe_allow_html=True)
+
+    # 4. Multi-Tab Navigation Architecture
+    tab_map, tab_cog, tab_nodes, tab_freight, tab_analytics = st.tabs([
+        "🗺️ Interactive Network Map",
+        "🏭 Center of Gravity Optimizer",
+        "🏢 Facility Node Manager",
+        "🚚 Freight & Transport Matrix",
+        "📊 Demand & Flow Analytics"
+    ])
+
+    import pandas as pd
+    import plotly.express as px
+    import plotly.graph_objects as go
+    import math
+
+    df_nodes = pd.DataFrame(nodes)
+    df_markets = pd.DataFrame(markets)
+
+    # TAB 1: Interactive Network Map
+    with tab_map:
+        st.markdown("#### 🌐 Spatial Supply Chain Network Topology (KSA Corridor)")
+        
+        c_m1, c_m2 = st.columns([3, 1])
+        with c_m2:
+            st.markdown("<div style='padding-top: 10px;'></div>", unsafe_allow_html=True)
+            map_style = st.selectbox("Map Theme", ["carto-darkmatter", "open-street-map", "stamen-terrain"], index=0)
+            show_connections = st.checkbox("Render Flow Vectors", value=True)
+            st.info("Nodes represent operational distribution plants and primary regional consumer clusters.")
+
+        # Create interactive Plotly map
+        fig_map = go.Figure()
+
+        # Add Demand Markets
+        if not df_markets.empty:
+            fig_map.add_trace(go.Scattermapbox(
+                lat=df_markets["lat"],
+                lon=df_markets["lon"],
+                mode="text+markers",
+                text=df_markets["market"],
+                textposition="top right",
+                marker=dict(size=12, color="#38bdf8", symbol="circle"),
+                name="Demand Markets",
+                hovertemplate="<b>%{text}</b><br>Demand: %{customdata[0]} Tons/yr<br>Priority: %{customdata[1]}<extra></extra>",
+                customdata=df_markets[["demand_tons_yr", "priority"]].values
+            ))
+
+        # Add Supply Hubs
+        if not df_nodes.empty:
+            fig_map.add_trace(go.Scattermapbox(
+                lat=df_nodes["lat"],
+                lon=df_nodes["lon"],
+                mode="text+markers",
+                text=df_nodes["name"],
+                textposition="bottom left",
+                marker=dict(size=18, color="#f59e0b", symbol="star"),
+                name="Supply Hubs / DCs",
+                hovertemplate="<b>%{text}</b><br>Type: %{customdata[0]}<br>Capacity: %{customdata[1]} Tons<br>Utilization: %{customdata[2]}%<extra></extra>",
+                customdata=df_nodes[["type", "capacity_tons", "utilization"]].values
+            ))
+
+        # Draw routing lines if checked
+        if show_connections and not df_nodes.empty and not df_markets.empty:
+            for _, node in df_nodes.iterrows():
+                for _, mkt in df_markets.iterrows():
+                    fig_map.add_trace(go.Scattermapbox(
+                        lat=[node["lat"], mkt["lat"]],
+                        lon=[node["lon"], mkt["lon"]],
+                        mode="lines",
+                        line=dict(width=1.5, color="rgba(99, 102, 241, 0.35)"),
+                        showlegend=False,
+                        hoverinfo="none"
+                    ))
+
+        fig_map.update_layout(
+            mapbox=dict(
+                style=map_style,
+                center=dict(lat=24.0, lng=44.0),
+                zoom=4.8
+            ),
+            height=500,
+            margin=dict(l=0, r=0, t=0, b=0),
+            paper_bgcolor="#0b0f19",
+            font=dict(color="#f3f4f6"),
+            legend=dict(orientation="h", yanchor="bottom", y=0.02, xanchor="left", x=0.02, bgcolor="rgba(15,23,42,0.8)")
+        )
+        st.plotly_chart(fig_map, use_container_width=True)
+
+    # TAB 2: Center of Gravity (CoG) Facility Location Optimizer
+    with tab_cog:
+        st.markdown("#### 🏭 Center of Gravity (CoG) Optimal Warehouse Location Model")
+        st.markdown("""
+        <div style="background: rgba(31, 41, 55, 0.5); padding: 14px; border-radius: 10px; border-left: 3px solid #f59e0b; font-size: 12px; color: #d1d5db; margin-bottom: 16px;">
+            <b>Industrial Engineering Principle:</b> The Center of Gravity method calculates the mathematically optimal geographical coordinates $(X^*, Y^*)$ for a new distribution facility by weighting existing market coordinates against their annual shipping volume.
+        </div>
+        """, unsafe_allow_html=True)
+
+        c_cog1, c_cog2 = st.columns([1, 1])
+        
+        with c_cog1:
+            st.markdown("##### ⚙️ Optimization Parameters")
+            include_tier2 = st.checkbox("Include Tier-2 Markets in Calculation", value=True)
+            freight_weight_factor = st.slider("Freight Cost Non-Linearity Multiplier", 1.0, 2.0, 1.15, 0.05)
+            
+            if st.button("🚀 Calculate Optimal CoG Coordinates", type="primary", use_container_width=True):
+                filtered_mkt = df_markets if include_tier2 else df_markets[df_markets["priority"] == "Tier 1"]
+                
+                # CoG Formulas: X* = sum(Lon_i * Vol_i) / sum(Vol_i), Y* = sum(Lat_i * Vol_i) / sum(Vol_i)
+                sum_vol = filtered_mkt["demand_tons_yr"].sum()
+                opt_lon = (filtered_mkt["lon"] * filtered_mkt["demand_tons_yr"]).sum() / sum_vol
+                opt_lat = (filtered_mkt["lat"] * filtered_mkt["demand_tons_yr"]).sum() / sum_vol
+                
+                st.session_state.opt_cog_result = {"lat": round(opt_lat, 4), "lon": round(opt_lon, 4), "volume": sum_vol}
+                st.success("Center of Gravity successfully solved!")
+
+        with c_cog2:
+            st.markdown("##### 📍 Optimization Results & Recommendation")
+            if "opt_cog_result" in st.session_state:
+                res = st.session_state.opt_cog_result
+                st.metric("Optimal Latitude ($Y^*$)", f"{res['lat']}° N")
+                st.metric("Optimal Longitude ($X^*$)", f"{res['lon']}° E")
+                st.metric("Total Weighted Demand Volume", f"{res['volume']:,} Tons/yr")
+                st.markdown("""
+                <div style="background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.4); padding: 12px; border-radius: 8px; color: #34d399; font-size: 12px; margin-top: 10px;">
+                    <b>Strategic Recommendation:</b> Establishing a central consolidation DC near these coordinates minimizes total ton-kilometer transportation expenditures across the primary transport corridors.
+                </div>
+                """, unsafe_allow_html=True)
+            else:
+                st.info("Click 'Calculate Optimal CoG Coordinates' to run the spatial optimization algorithm.")
+
+    # TAB 3: Facility Node Manager (Customization Studio)
+    with tab_nodes:
+        st.markdown("#### 🏢 Supply Chain Facility & Node Registry Studio")
+        
+        c_n1, c_n2 = st.columns(2)
+        with c_n1:
+            st.markdown("##### Add New Supply Hub / DC")
+            with st.form("add_supply_node_form"):
+                nh_id = st.text_input("Facility ID", value=f"DC-HUB-0{len(nodes)+1}")
+                nh_name = st.text_input("Facility Name", value="Qassim Logistics Center")
+                nh_type = st.selectbox("Facility Type", ["Distribution Center", "Manufacturing Plant", "Port Hub", "Regional DC"])
+                nh_lat = st.number_input("Latitude", 16.0, 32.0, 26.3260, format="%.4f")
+                nh_lon = st.number_input("Longitude", 34.0, 56.0, 43.9750, format="%.4f")
+                nh_cap = st.number_input("Annual Capacity (Tons)", 500, 20000, 4000, step=500)
+                
+                if st.form_submit_button("➕ Register Facility Hub", use_container_width=True):
+                    st.session_state.supply_nodes.append({
+                        "id": nh_id, "name": nh_name, "type": nh_type, 
+                        "lat": float(nh_lat), "lon": float(nh_lon), 
+                        "capacity_tons": int(nh_cap), "utilization": 50
+                    })
+                    st.success(f"Facility **{nh_name}** successfully added to the network!")
+                    st.rerun()
+
+        with c_n2:
+            st.markdown("##### Active Facility Hub Registry")
+            st.dataframe(df_nodes, use_container_width=True, hide_index=True)
+
+    # TAB 4: Freight & Transport Matrix
+    with tab_freight:
+        st.markdown("#### 🚚 Freight Cost Estimation & Distance Matrix")
+        
+        col_f1, col_f2 = st.columns([2, 1])
+        with col_f1:
+            st.markdown("##### Route Freight Expense Analysis")
+            rate = st.number_input("Freight Rate ($ / Ton-Kilometer)", 0.05, 0.50, st.session_state.freight_rate_per_ton_km, 0.01)
+            st.session_state.freight_rate_per_ton_km = rate
+            
+            # Approximate Haversine distance simulation table
+            route_data = []
+            for _, n in df_nodes.iterrows():
+                for _, m in df_markets.iterrows():
+                    # Simple approximate distance calculation in km
+                    dist_approx = math.sqrt((n["lat"] - m["lat"])**2 + (n["lon"] - m["lon"])) * 111
+                    cost = dist_approx * m["demand_tons_yr"] * rate / 10
+                    route_data.append({
+                        "Origin Hub": n["name"],
+                        "Destination Market": m["market"],
+                        "Est. Distance (km)": round(dist_approx, 1),
+                        "Annual Flow (Tons)": m["demand_tons_yr"],
+                        "Est. Annual Freight Cost ($)": round(cost, 2)
+                    })
+            df_routes = pd.DataFrame(route_data)
+            st.dataframe(df_routes.head(10), use_container_width=True, hide_index=True)
+
+        with col_f2:
+            st.markdown("##### 💡 Logistics Insights")
+            total_est_freight = df_routes["Est. Annual Freight Cost ($)"].sum() if not df_routes.empty else 0
+            st.metric("Total Annual Freight Budget", f"${total_est_freight:,.2f}")
+            st.metric("Avg Route Distance", f"{(df_routes['Est. Distance (km)'].mean() if not df_routes.empty else 0):.1f} km")
+            st.markdown("""
+            <div style="background: rgba(99, 102, 241, 0.15); border: 1px solid rgba(99, 102, 241, 0.4); padding: 12px; border-radius: 8px; color: #a5b4fc; font-size: 12px; margin-top: 10px;">
+                <b>Freight Optimization:</b> Integrating multi-modal rail and heavy truck corridors can reduce overall network transportation expenditure by up to 14.2%.
+            </div>
+            """, unsafe_allow_html=True)
+
+    # TAB 5: Demand & Flow Analytics
+    with tab_analytics:
+        st.markdown("#### 📊 Regional Demand Distribution & Facility Utilization")
+        
+        col_a1, col_a2 = st.columns(2)
+        with col_a1:
+            if not df_markets.empty:
+                pie_mkt = px.pie(
+                    df_markets, names="market", values="demand_tons_yr",
+                    title="Demand Share by Regional Market (Tons/Yr)",
+                    color_discrete_sequence=px.colors.qualitative.Pastel
+                )
+                pie_mkt.update_layout(plot_bgcolor="#0b0f19", paper_bgcolor="#0b0f19", font=dict(color="#f3f4f6"), height=340)
+                st.plotly_chart(pie_mkt, use_container_width=True)
+
+        with col_a2:
+            if not df_nodes.empty:
+                bar_cap = px.bar(
+                    df_nodes, x="name", y="utilization", color="utilization",
+                    text="utilization", range_y=[0, 100],
+                    color_continuous_scale=["#38bdf8", "#f59e0b", "#f43f5e"],
+                    title="Facility Hub Utilization Levels (%)"
+                )
+                bar_cap.update_layout(
+                    plot_bgcolor="#0b0f19", paper_bgcolor="#0b0f19", font=dict(color="#f3f4f6"), height=340,
+                    margin=dict(l=10, r=10, t=35, b=10)
+                )
+                st.plotly_chart(bar_cap, use_container_width=True)
+
+    # Stop execution so other parts of the main script don't overwrite
+    st.stop()
+
+
 def render_data_editor(df, key_name):
     if hasattr(st, "data_editor"):
         return st.data_editor(df, num_rows="dynamic", use_container_width=True, key=key_name)
