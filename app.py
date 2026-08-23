@@ -1140,7 +1140,7 @@ if mod == "AGV Fleet Dispatcher":
     st.stop()
 
 # ==============================================================================
-# SHOIR-IE: ELITE GEOSPATIAL NETWORK DESIGNER & FACILITY OPTIMIZER
+# SHOIR-IE: ELITE GEOSPATIAL NETWORK DESIGNER & FACILITY OPTIMIZER (V2.2 FIXED)
 # ==============================================================================
 if mod == "Geospatial Network Designer":
     
@@ -1171,7 +1171,7 @@ if mod == "Geospatial Network Designer":
     # 2. Astonishing Glassmorphism Header Banner
     network_title = st.session_state.geo_network_name
     st.markdown(f"""
-    <div style="background: linear-gradient(135deg, #0f172a 1e0%, #1e1b4b 50%, #312e81 100%); padding: 30px; border-radius: 16px; color: white; margin-bottom: 24px; box-shadow: 0 10px 25px rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.08);">
+    <div style="background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #312e81 100%); padding: 30px; border-radius: 16px; color: white; margin-bottom: 24px; box-shadow: 0 10px 25px rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.08);">
         <div style="display: flex; align-items: center; justify-content: space-between;">
             <div>
                 <span style="background: rgba(99, 102, 241, 0.25); color: #818cf8; padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;">Supply Chain Optimization Suite</span>
@@ -1228,11 +1228,10 @@ if mod == "Geospatial Network Designer":
         c_m1, c_m2 = st.columns([3, 1])
         with c_m2:
             st.markdown("<div style='padding-top: 10px;'></div>", unsafe_allow_html=True)
-            map_style = st.selectbox("Map Theme", ["carto-darkmatter", "open-street-map", "stamen-terrain"], index=0)
+            map_style = st.selectbox("Map Theme", ["carto-darkmatter", "carto-positron", "open-street-map"], index=0)
             show_connections = st.checkbox("Render Flow Vectors", value=True)
             st.info("Nodes represent operational distribution plants and primary regional consumer clusters.")
 
-        # Create interactive Plotly map
         fig_map = go.Figure()
 
         # Add Demand Markets
@@ -1279,7 +1278,7 @@ if mod == "Geospatial Network Designer":
         fig_map.update_layout(
             mapbox=dict(
                 style=map_style,
-                center=dict(lat=24.0, lon=44.0),  # Changed 'lng' to 'lon' here!
+                center=dict(lat=24.0, lon=44.0),
                 zoom=4.8
             ),
             height=500,
@@ -1287,15 +1286,15 @@ if mod == "Geospatial Network Designer":
             paper_bgcolor="#0b0f19",
             font=dict(color="#f3f4f6"),
             legend=dict(orientation="h", yanchor="bottom", y=0.02, xanchor="left", x=0.02, bgcolor="rgba(15,23,42,0.8)")
-         )
-         st.plotly_chart(fig_map, use_container_width=True)
+        )
+        st.plotly_chart(fig_map, use_container_width=True)
 
     # TAB 2: Center of Gravity (CoG) Facility Location Optimizer
     with tab_cog:
         st.markdown("#### 🏭 Center of Gravity (CoG) Optimal Warehouse Location Model")
         st.markdown("""
         <div style="background: rgba(31, 41, 55, 0.5); padding: 14px; border-radius: 10px; border-left: 3px solid #f59e0b; font-size: 12px; color: #d1d5db; margin-bottom: 16px;">
-            <b>Industrial Engineering Principle:</b> The Center of Gravity method calculates the mathematically optimal geographical coordinates $(X^*, Y^*)$ for a new distribution facility by weighting existing market coordinates against their annual shipping volume.
+            <b>Industrial Engineering Principle:</b> The Center of Gravity method calculates the mathematically optimal geographical coordinates for a new distribution facility by weighting existing market coordinates against their annual shipping volume.
         </div>
         """, unsafe_allow_html=True)
 
@@ -1304,12 +1303,10 @@ if mod == "Geospatial Network Designer":
         with c_cog1:
             st.markdown("##### ⚙️ Optimization Parameters")
             include_tier2 = st.checkbox("Include Tier-2 Markets in Calculation", value=True)
-            freight_weight_factor = st.slider("Freight Cost Non-Linearity Multiplier", 1.0, 2.0, 1.15, 0.05)
             
             if st.button("🚀 Calculate Optimal CoG Coordinates", type="primary", use_container_width=True):
                 filtered_mkt = df_markets if include_tier2 else df_markets[df_markets["priority"] == "Tier 1"]
                 
-                # CoG Formulas: X* = sum(Lon_i * Vol_i) / sum(Vol_i), Y* = sum(Lat_i * Vol_i) / sum(Vol_i)
                 sum_vol = filtered_mkt["demand_tons_yr"].sum()
                 opt_lon = (filtered_mkt["lon"] * filtered_mkt["demand_tons_yr"]).sum() / sum_vol
                 opt_lat = (filtered_mkt["lat"] * filtered_mkt["demand_tons_yr"]).sum() / sum_vol
@@ -1321,18 +1318,18 @@ if mod == "Geospatial Network Designer":
             st.markdown("##### 📍 Optimization Results & Recommendation")
             if "opt_cog_result" in st.session_state:
                 res = st.session_state.opt_cog_result
-                st.metric("Optimal Latitude ($Y^*$)", f"{res['lat']}° N")
-                st.metric("Optimal Longitude ($X^*$)", f"{res['lon']}° E")
+                st.metric("Optimal Latitude", f"{res['lat']}° N")
+                st.metric("Optimal Longitude", f"{res['lon']}° E")
                 st.metric("Total Weighted Demand Volume", f"{res['volume']:,} Tons/yr")
                 st.markdown("""
                 <div style="background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.4); padding: 12px; border-radius: 8px; color: #34d399; font-size: 12px; margin-top: 10px;">
-                    <b>Strategic Recommendation:</b> Establishing a central consolidation DC near these coordinates minimizes total ton-kilometer transportation expenditures across the primary transport corridors.
+                    <b>Strategic Recommendation:</b> Establishing a central consolidation DC near these coordinates minimizes total ton-kilometer transportation expenditures across primary corridors.
                 </div>
                 """, unsafe_allow_html=True)
             else:
                 st.info("Click 'Calculate Optimal CoG Coordinates' to run the spatial optimization algorithm.")
 
-    # TAB 3: Facility Node Manager (Customization Studio)
+    # TAB 3: Facility Node Manager
     with tab_nodes:
         st.markdown("#### 🏢 Supply Chain Facility & Node Registry Studio")
         
@@ -1370,11 +1367,9 @@ if mod == "Geospatial Network Designer":
             rate = st.number_input("Freight Rate ($ / Ton-Kilometer)", 0.05, 0.50, st.session_state.freight_rate_per_ton_km, 0.01)
             st.session_state.freight_rate_per_ton_km = rate
             
-            # Approximate Haversine distance simulation table
             route_data = []
             for _, n in df_nodes.iterrows():
                 for _, m in df_markets.iterrows():
-                    # Simple approximate distance calculation in km
                     dist_approx = math.sqrt((n["lat"] - m["lat"])**2 + (n["lon"] - m["lon"])) * 111
                     cost = dist_approx * m["demand_tons_yr"] * rate / 10
                     route_data.append({
@@ -1427,7 +1422,6 @@ if mod == "Geospatial Network Designer":
                 )
                 st.plotly_chart(bar_cap, use_container_width=True)
 
-    # Stop execution so other parts of the main script don't overwrite
     st.stop()
 
 
