@@ -772,7 +772,7 @@ tier_val = st.session_state.user_tier
 is_admin = (st.session_state.current_user == "sho")
 
 tier1_features = ["MILP Solvers", "Inventory Playback", "Core IE Tools", "Subscriptions", "Persistence"]
-tier2_features = tier1_features + ["Carbon Accounting", "IoT Digital Twin", "MEIO Matrix", "Slotting & Gantt", "Fleet Routing", "Warehouse Heatmap", "Supplier Risk Matrix", "Scenarios", "AGV Fleet Dispatcher", "Geospatial Network Designer", "Production Planning & Control (PPC)", "Lean Manufacturing & Shop Floor Operations"]
+tier2_features = tier1_features + ["Carbon Accounting", "IoT Digital Twin", "MEIO Matrix", "Slotting & Gantt", "Fleet Routing", "Warehouse Heatmap", "Supplier Risk Matrix", "Scenarios", "AGV Fleet Dispatcher", "Geospatial Network Designer", "Production Planning & Control (PPC)", "Lean Manufacturing & Shop Floor Operations", "Quality Control, Six Sigma & Reliability"]
 tier3_features = tier2_features + ["AI Copilot", "FastAPI Gateway", "Monte Carlo Sim", "Sensitivity Analysis", "Webhook Alerts", "Agentic Workflows", "Control Tower", "Cryptographic Ledger", "Predictive Maintenance Hub"]
 if is_admin:
     tier3_features.append("Admin Panel")
@@ -2116,6 +2116,236 @@ if mod == "Lean Manufacturing & Shop Floor Operations":
         st.plotly_chart(fig_5s, use_container_width=True)
 
     st.stop()
+# ==============================================================================
+# SHOIR-IE: ELITE QUALITY CONTROL, SIX SIGMA & RELIABILITY SUITE (V2.5)
+# ==============================================================================
+if mod == "Quality Control, Six Sigma & Reliability":
+    
+    import streamlit as st
+    import pandas as pd
+    import plotly.express as px
+    import plotly.graph_objects as go
+    import numpy as np
+
+    # 1. Initialize Session State for Quality & Reliability Modules
+    if "fmea_records" not in st.session_state:
+        st.session_state.fmea_records = [
+            {"process_step": "CNC Spindle Bearing Assembly", "failure_mode": "Bearing Seizure due to misaligned preload", "cause": "Improper torque calibration", "sev": 8, "occ": 4, "det": 3},
+            {"process_step": "Hydraulic Pressure Testing", "failure_mode": "O-Ring Leakage under high load", "cause": "Substandard elastomer material batch", "sev": 7, "occ": 5, "det": 4},
+            {"process_step": "PCB SMT Soldering", "failure_mode": "Cold solder joint / Bridging", "cause": "Reflow oven thermal profile deviation", "sev": 9, "occ": 3, "det": 5},
+        ]
+
+    if "spc_samples" not in st.session_state:
+        # Generate baseline subgroup measurements
+        np.random.seed(42)
+        st.session_state.spc_samples = pd.DataFrame({
+            "Subgroup": [f"SG-{i:02d}" for i in range(1, 16)],
+            "Mean": np.random.normal(50.0, 1.2, 15),
+            "Range": np.random.uniform(2.0, 5.5, 15)
+        })
+
+    # 2. Astonishing Glassmorphism Header Banner
+    st.markdown("""
+    <div style="background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #312e81 100%); padding: 30px; border-radius: 16px; color: white; margin-bottom: 24px; box-shadow: 0 10px 25px rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.08);">
+        <div style="display: flex; align-items: center; justify-content: space-between;">
+            <div>
+                <span style="background: rgba(239, 68, 68, 0.25); color: #f87171; padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;">Tier 2: Quality & Reliability Engineering</span>
+                <h1 style="margin:8px 0 4px 0; color: #ffffff; font-size: 26px; font-weight: 800; letter-spacing: -0.025em;">🛡️ Quality Control, Six Sigma & Reliability SPC Suite</h1>
+                <p style="margin:0; color: #9ca3af; font-size: 13px;">Statistical Process Control &bull; Process Capability ($C_{pk}$) &bull; FMEA RPN Matrix &bull; Reliability MTBF</p>
+            </div>
+            <div style="background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.4); padding: 8px 16px; border-radius: 30px; color: #34d399; font-weight: 600; font-size: 12px; display: flex; align-items: center; gap: 6px;">
+                <span style="width: 8px; height: 8px; background: #34d399; border-radius: 50%; display: inline-block; box-shadow: 0 0 8px #34d399;"></span> Six Sigma Engine Online
+            </div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # 3. Executive KPI Metrics Row
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        st.metric(label="Process Capability Index ($C_{pk}$)", value="1.42", delta="World Class > 1.33")
+    with c2:
+        st.metric(label="Estimated Defect Rate", value="3.4 PPM", delta="Six Sigma Standard")
+    with c3:
+        st.metric(label="Mean Time Between Failures (MTBF)", value="4,850 Hrs", delta="+320 hrs vs target")
+    with c4:
+        st.metric(label="Max Critical RPN Score", value="135 (PCB)", delta="Action Required > 100")
+
+    st.markdown("<div style='margin: 16px 0;'></div>", unsafe_allow_html=True)
+
+    # 4. Multi-Tab Navigation Architecture
+    tab_spc, tab_six, tab_fmea, tab_rel, tab_pareto = st.tabs([
+        "📈 Statistical Process Control (SPC)", 
+        "🎯 Six Sigma & Process Capability", 
+        "🛡️ FMEA & Risk Priority Number (RPN)", 
+        "⏱️ Reliability Engineering & MTBF", 
+        "📊 Pareto Defect Triage Analysis"
+    ])
+
+    # TAB 1: Statistical Process Control (SPC)
+    with tab_spc:
+        st.markdown("#### 📈 X-bar & R Control Charts for Variable Data")
+        st.markdown("""
+        <div style="background: rgba(31, 41, 55, 0.5); padding: 12px; border-radius: 8px; border-left: 3px solid #38bdf8; font-size: 12px; color: #d1d5db; margin-bottom: 16px;">
+            <b>SPC Monitor:</b> Evaluates process stability by plotting subgroup means and ranges against statistical Upper Control Limits (UCL) and Lower Control Limits (LCL).
+        </div>
+        """, unsafe_allow_html=True)
+
+        df_spc = st.session_state.spc_samples
+        grand_mean = df_spc["Mean"].mean()
+        ucl_mean = grand_mean + (3 * df_spc["Mean"].std())
+        lcl_mean = grand_mean - (3 * df_spc["Mean"].std())
+
+        fig_xbar = px.line(
+            df_spc, x="Subgroup", y="Mean", markers=True,
+            title="X-bar Control Chart (Subgroup Means)"
+        )
+        # Add control limit reference lines
+        fig_xbar.add_hline(y=ucl_mean, line_dash="dash", line_color="#ef4444", annotation_text="UCL")
+        fig_xbar.add_hline(y=grand_mean, line_dash="solid", line_color="#34d399", annotation_text="Center Line (Mean)")
+        fig_xbar.add_hline(y=lcl_mean, line_dash="dash", line_color="#ef4444", annotation_text="LCL")
+        fig_xbar.update_layout(plot_bgcolor="#0b0f19", paper_bgcolor="#0b0f19", font=dict(color="#f3f4f6"), height=350)
+        st.plotly_chart(fig_xbar, use_container_width=True)
+
+    # TAB 2: Six Sigma & Process Capability
+    with tab_six:
+        st.markdown("#### 🎯 Process Capability Index ($C_p$ and $C_{pk}$) Calculator")
+        
+        col_s1, col_s2 = st.columns(2)
+        with col_s1:
+            st.markdown("##### Specification Limits & Process Parameters")
+            usl = st.number_input("Upper Specification Limit (USL)", 40.0, 60.0, 53.5, 0.1)
+            lsl = st.number_input("Lower Specification Limit (LSL)", 30.0, 50.0, 46.5, 0.1)
+            process_mean = st.number_input("Estimated Process Mean ($\\mu$)", 40.0, 60.0, 50.1, 0.1)
+            process_std = st.number_input("Process Standard Deviation ($\\sigma$)", 0.1, 5.0, 1.2, 0.1)
+            
+        with col_s2:
+            st.markdown("##### Computed Capability Metrics")
+            cp = (usl - lsl) / (6 * process_std)
+            cpu = (usl - process_mean) / (3 * process_std)
+            cpl = (process_mean - lsl) / (3 * process_std)
+            cpk = min(cpu, cpl)
+            
+            st.metric(label="Process Potential ($C_p$)", value=f"{cp:.2f}", delta="Spread Capability")
+            st.metric(label="Process Capability ($C_{pk}$)", value=f"{cpk:.2f}", delta="Centered Performance")
+            
+            status_color = "#34d399" if cpk >= 1.33 else "#f59e0b"
+            status_text = "Capable Process" if cpk >= 1.33 else "Process Needs Centering / Reduction"
+            st.markdown(f"""
+            <div style="background: rgba(56, 189, 248, 0.15); border: 1px solid rgba(56, 189, 248, 0.4); padding: 14px; border-radius: 8px; color: {status_color}; font-size: 12px; margin-top: 15px;">
+                <b>Six Sigma Assessment:</b> {status_text} ($C_{pk} = {cpk:.2f}$). Target benchmark for world-class manufacturing is $C_{pk} \\ge 1.33$.
+            </div>
+            """, unsafe_allow_html=True)
+
+    # TAB 3: FMEA & RPN Matrix (With Add & Delete Controls)
+    with tab_fmea:
+        st.markdown("#### 🛡️ Failure Mode & Effects Analysis (FMEA) & RPN Management Matrix")
+        st.markdown("""
+        <div style="background: rgba(31, 41, 55, 0.5); padding: 12px; border-radius: 8px; border-left: 3px solid #f43f5e; font-size: 12px; color: #d1d5db; margin-bottom: 16px;">
+            <b>FMEA Risk Engine:</b> Evaluates Risk Priority Numbers ($RPN = Severity \\times Occurrence \\times Detection$). Use the controls on the right to log new failure risks or decommission resolved items.
+        </div>
+        """, unsafe_allow_html=True)
+
+        # Compute RPN for records
+        df_fmea = pd.DataFrame(st.session_state.fmea_records)
+        if not df_fmea.empty:
+            df_fmea["RPN"] = df_fmea["sev"] * df_fmea["occ"] * df_fmea["det"]
+
+        col_f1, col_f2 = st.columns([2, 1])
+        with col_f1:
+            st.markdown("##### Active FMEA Risk Register")
+            if not df_fmea.empty:
+                st.dataframe(df_fmea.rename(columns={
+                    "process_step": "Process Step", "failure_mode": "Potential Failure Mode",
+                    "cause": "Potential Cause", "sev": "Severity (S)", "occ": "Occur (O)", "det": "Detect (D)", "RPN": "Calculated RPN"
+                }), use_container_width=True, hide_index=True)
+            else:
+                st.info("No FMEA records currently registered.")
+                
+        with col_f2:
+            fmea_action_add, fmea_action_del = st.tabs(["➕ Add Risk", "🗑️ Resolve / Delete"])
+            
+            with fmea_action_add:
+                with st.form("add_fmea_form"):
+                    f_step = st.text_input("Process / Operation Step", value="Gearbox Housing Machining")
+                    f_mode = st.text_input("Potential Failure Mode", value="Micro-cracking in casting flange")
+                    f_cause = st.text_input("Potential Cause", value="Excessive cutting feed rate")
+                    f_sev = st.slider("Severity (S, 1-10)", 1, 10, 8)
+                    f_occ = st.slider("Occurrence (O, 1-10)", 1, 10, 3)
+                    f_det = st.slider("Detection (D, 1-10)", 1, 10, 4)
+                    
+                    if st.form_submit_button("🚀 Register FMEA Risk", use_container_width=True):
+                        st.session_state.fmea_records.append({
+                            "process_step": f_step, "failure_mode": f_mode, "cause": f_cause,
+                            "sev": int(f_sev), "occ": int(f_occ), "det": int(f_det)
+                        })
+                        st.success("New FMEA risk registered successfully!")
+                        st.rerun()
+                        
+            with fmea_action_del:
+                with st.form("delete_fmea_form"):
+                    fmea_options = [item["failure_mode"] for item in st.session_state.fmea_records] if st.session_state.fmea_records else []
+                    target_fmea = st.selectbox("Select Failure Mode to Resolve", fmea_options if fmea_options else ["None Available"])
+                    
+                    if st.form_submit_button("🗑️ Remove Resolved Risk", use_container_width=True):
+                        if fmea_options and target_fmea != "None Available":
+                            st.session_state.fmea_records = [
+                                item for item in st.session_state.fmea_records if item["failure_mode"] != target_fmea
+                            ]
+                            st.success(f"Successfully resolved and removed risk!")
+                            st.rerun()
+                        else:
+                            st.warning("No records available to remove.")
+
+    # TAB 4: Reliability Engineering & MTBF
+    with tab_rel:
+        st.markdown("#### ⏱️ Reliability Engineering, MTBF & Exponential Survival Curve")
+        
+        col_r1, col_r2 = st.columns(2)
+        with col_r1:
+            st.markdown("##### Operating Parameters")
+            mtbf_val = st.slider("Mean Time Between Failures (MTBF in Hours)", 500, 10000, 4800, 200)
+            operating_hrs = st.slider("Target Operating Mission Time (Hours)", 100, 2000, 500, 50)
+            
+        with col_r2:
+            failure_rate = 1.0 / mtbf_val
+            survival_prob = np.exp(-failure_rate * operating_hrs) * 100
+            
+            st.metric(label="Calculated Failure Rate ($\\lambda$)", value=f"{failure_rate * 1000:.3f} per 1k Hrs", delta="Exponential Model")
+            st.metric(label="Mission Reliability ($R(t)$)", value=f"{survival_prob:.2f}%", delta="Probability of Zero Failures")
+
+        # Plot survival curve over time
+        time_axis = np.linspace(0, 3000, 50)
+        survival_curve = np.exp(-failure_rate * time_axis) * 100
+        df_survival = pd.DataFrame({"Operating Hours": time_axis, "Reliability (%)": survival_curve})
+
+        fig_surv = px.line(
+            df_survival, x="Operating Hours", y="Reliability (%)",
+            title="System Survival Probability Curve Over Time ($R(t) = e^{-\\lambda t}$)"
+        )
+        fig_surv.update_layout(plot_bgcolor="#0b0f19", paper_bgcolor="#0b0f19", font=dict(color="#f3f4f6"), height=320)
+        st.plotly_chart(fig_surv, use_container_width=True)
+
+    # TAB 5: Pareto Defect Triage Analysis
+    with tab_pareto:
+        st.markdown("#### 📊 Pareto Chart: 80/20 Defect Cause Triage")
+        
+        pareto_data = pd.DataFrame({
+            "Defect Category": ["Dimensional Variance", "Surface Scratching", "Porosity Defect", "Assembly Misalignment", "Electrical Fault"],
+            "Defect Count": [142, 68, 35, 18, 12]
+        }).sort_values(by="Defect Count", ascending=False)
+        
+        pareto_data["Cumulative %"] = (pareto_data["Defect Count"].cumsum() / pareto_data["Defect Count"].sum()) * 100
+
+        fig_pareto = px.bar(
+            pareto_data, x="Defect Category", y="Defect Count",
+            title="Defect Frequency Pareto Analysis (80/20 Rule)"
+        )
+        fig_pareto.update_layout(plot_bgcolor="#0b0f19", paper_bgcolor="#0b0f19", font=dict(color="#f3f4f6"), height=320)
+        st.plotly_chart(fig_pareto, use_container_width=True)
+
+    st.stop()
+
 
 def render_data_editor(df, key_name):
     if hasattr(st, "data_editor"):
