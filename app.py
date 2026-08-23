@@ -797,7 +797,7 @@ if st.sidebar.button("Lock / Logout Workspace"):
     st.session_state.authenticated = False
     st.rerun()
 # ==============================================================================
-# SHOIR-IE: ELITE ENTERPRISE AGV/AMR FLEET COMMAND TOWER (V2.0 STUNNING EDITION)
+# SHOIR-IE: ELITE ENTERPRISE AGV/AMR FLEET COMMAND TOWER (V2.1 BULLETPROOF EDITION)
 # ==============================================================================
 if mod == "AGV Fleet Dispatcher":
     
@@ -852,11 +852,11 @@ if mod == "AGV Fleet Dispatcher":
     </div>
     """, unsafe_allow_html=True)
 
-    # 3. Premium Executive KPI Cards Row
+    # 3. Premium Executive KPI Cards Row (Bulletproof Key Lookups)
     fleet = st.session_state.agv_fleet
-    active_units = sum(1 for r in fleet if r['status'] != 'CHARGING')
-    avg_batt = sum(r['battery'] for r in fleet) // len(fleet) if fleet else 0
-    total_dist = sum(r['dist_traveled'] for r in fleet)
+    active_units = sum(1 for r in fleet if r.get('status', 'IDLE') != 'CHARGING')
+    avg_batt = sum(r.get('battery', 100) for r in fleet) // len(fleet) if fleet else 0
+    total_dist = sum(r.get('dist_traveled', 0.0) for r in fleet)
 
     col1, col2, col3, col4 = st.columns(4)
     with col1:
@@ -898,16 +898,16 @@ if mod == "AGV Fleet Dispatcher":
             st.markdown("<div style='padding-top: 10px;'></div>", unsafe_allow_html=True)
             if st.button("🔄 Step Simulation Tick", use_container_width=True, type="primary"):
                 for r in st.session_state.agv_fleet:
-                    if r["status"] == "NAVIGATING":
-                        r["battery"] = max(5, r["battery"] - 2)
-                        r["dist_traveled"] += 3.5
-                        r["x"] = (r["x"] + 1) % st.session_state.grid_size_x
-                        r["y"] = (r["y"] + 1) % st.session_state.grid_size_y
+                    if r.get("status") == "NAVIGATING":
+                        r["battery"] = max(5, r.get("battery", 100) - 2)
+                        r["dist_traveled"] = r.get("dist_traveled", 0.0) + 3.5
+                        r["x"] = (r.get("x", 0) + 1) % st.session_state.grid_size_x
+                        r["y"] = (r.get("y", 0) + 1) % st.session_state.grid_size_y
                         if r["battery"] <= 20:
                             r["status"] = "CHARGING"
                             r["destination"] = "Charging Bay"
-                    elif r["status"] == "CHARGING":
-                        r["battery"] = min(100, r["battery"] + 15)
+                    elif r.get("status") == "CHARGING":
+                        r["battery"] = min(100, r.get("battery", 0) + 15)
                         if r["battery"] >= 95:
                             r["status"] = "IDLE"
                 st.rerun()
@@ -942,7 +942,7 @@ if mod == "AGV Fleet Dispatcher":
             ))
 
         # AGV Fleet
-        if not df_fleet.empty:
+        if not df_fleet.empty and "x" in df_fleet.columns and "y" in df_fleet.columns:
             fig.add_trace(go.Scatter(
                 x=df_fleet["x"], y=df_fleet["y"],
                 mode="text+markers",
@@ -953,7 +953,7 @@ if mod == "AGV Fleet Dispatcher":
                     "IDLE": "#6366f1", 
                     "PICKING": "#8b5cf6", 
                     "CHARGING": "#f97316"
-                }), symbol="circle", line=dict(width=3, color="white")),
+                }).fillna("#6366f1"), symbol="circle", line=dict(width=3, color="white")),
                 name="AMR Units",
                 hovertemplate="<b>%{text}</b><br>Battery: %{customdata[0]}%<br>Status: %{customdata[1]}<br>Payload: %{customdata[2]}<extra></extra>",
                 customdata=df_fleet[["battery", "status", "payload"]].values
@@ -1121,7 +1121,7 @@ if mod == "AGV Fleet Dispatcher":
         
         col_a1, col_a2 = st.columns(2)
         with col_a1:
-            if not df_fleet.empty:
+            if not df_fleet.empty and "dist_traveled" in df_fleet.columns:
                 dist_fig = px.pie(
                     df_fleet, names="id", values="dist_traveled",
                     title="Shift Distance Traveled Distribution (meters)",
