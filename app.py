@@ -1867,7 +1867,7 @@ if mod == "Production Planning & Control (PPC)":
     st.stop()
 
 # ==============================================================================
-# SHOIR-IE: ELITE LEAN MANUFACTURING & SHOP FLOOR OPERATIONS SUITE (V2.2)
+# SHOIR-IE: ELITE LEAN MANUFACTURING & SHOP FLOOR OPERATIONS SUITE (V2.4)
 # ==============================================================================
 if mod == "Lean Manufacturing & Shop Floor Operations":
     
@@ -1910,8 +1910,8 @@ if mod == "Lean Manufacturing & Shop Floor Operations":
     # 3. Executive KPI Metrics Row
     total_work_content = df_elements["time_sec"].sum() if not df_elements.empty else 0
     max_station_time = df_elements.groupby("station")["time_sec"].sum().max() if not df_elements.empty else 1
-    num_stations = df_elements["station"].nunique()
-    line_efficiency = (total_work_content / (max_station_time * num_stations)) * 100 if num_stations > 0 else 0
+    num_stations = df_elements["station"].nunique() if not df_elements.empty else 1
+    line_efficiency = (total_work_content / (max_station_time * num_stations)) * 100 if num_stations > 0 and max_station_time > 0 else 0
     
     oee_val = (st.session_state.lean_oee["availability"] * st.session_state.lean_oee["performance"] * st.session_state.lean_oee["quality"]) / 10000
 
@@ -1936,43 +1936,81 @@ if mod == "Lean Manufacturing & Shop Floor Operations":
         "🧹 5S Workplace Audit Matrix"
     ])
 
-    # TAB 1: Assembly Line Balancing
+    # TAB 1: Assembly Line Balancing (With Add, Delete Element & Decommission Station Controls)
     with tab_line:
         st.markdown("#### ⚖️ Workstation Assembly Line Balancing & Cycle Optimization")
         st.markdown("""
         <div style="background: rgba(31, 41, 55, 0.5); padding: 12px; border-radius: 8px; border-left: 3px solid #38bdf8; font-size: 12px; color: #d1d5db; margin-bottom: 16px;">
-            <b>Line Balancer:</b> Distributes work elements across workstations to minimize idle time, eliminate bottlenecks, and maximize line balancing efficiency.
+            <b>Line Balancer:</b> Distribute work elements or manage active plant workstations. Use the control panel on the right to add elements, delete specific tasks, or <b>decommission entire workstations</b>.
         </div>
         """, unsafe_allow_html=True)
 
         col_l1, col_l2 = st.columns([2, 1])
         with col_l1:
-            st.dataframe(df_elements.rename(columns={
-                "element": "Work Element", "time_sec": "Time (Seconds)", "station": "Assigned Station"
-            }), use_container_width=True, hide_index=True)
+            st.markdown("##### Current Work Elements Breakdown")
+            if not df_elements.empty:
+                st.dataframe(df_elements.rename(columns={
+                    "element": "Work Element", "time_sec": "Time (Seconds)", "station": "Assigned Station"
+                }), use_container_width=True, hide_index=True)
+            else:
+                st.info("No work elements registered. Line is currently empty.")
             
         with col_l2:
-            st.markdown("##### ➕ Add Work Element")
-            with st.form("add_element_form"):
-                el_name = st.text_input("Element Name / Description", value="F - Panel Riveting")
-                el_time = st.number_input("Element Time (Sec)", 5, 120, 40, 5)
-                el_station = st.selectbox("Assign Workstation", ["Station 1", "Station 2", "Station 3", "Station 4"])
-                
-                if st.form_submit_button("🚀 Add Element to Line", use_container_width=True):
-                    st.session_state.lean_elements.append({
-                        "element": el_name, "time_sec": int(el_time), "station": el_station
-                    })
-                    st.success("Work element added successfully!")
-                    st.rerun()
+            action_tab_add, action_tab_del, action_tab_decom = st.tabs(["➕ Add Task", "🗑️ Del Task", "🚫 Decommission"])
+            
+            with action_tab_add:
+                with st.form("add_element_form"):
+                    el_name = st.text_input("Element Name / Description", value="F - Panel Riveting")
+                    el_time = st.number_input("Element Time (Sec)", 5, 120, 40, 5)
+                    el_station = st.selectbox("Assign Workstation", ["Station 1", "Station 2", "Station 3", "Station 4", "Station 5"])
+                    
+                    if st.form_submit_button("🚀 Add Element", use_container_width=True):
+                        st.session_state.lean_elements.append({
+                            "element": el_name, "time_sec": int(el_time), "station": el_station
+                        })
+                        st.success("Work element added successfully!")
+                        st.rerun()
+                        
+            with action_tab_del:
+                with st.form("delete_element_form"):
+                    element_options = [item["element"] for item in st.session_state.lean_elements] if st.session_state.lean_elements else []
+                    target_to_delete = st.selectbox("Select Element", element_options if element_options else ["None Available"])
+                    
+                    if st.form_submit_button("🗑️ Remove Task", use_container_width=True):
+                        if element_options and target_to_delete != "None Available":
+                            st.session_state.lean_elements = [
+                                item for item in st.session_state.lean_elements if item["element"] != target_to_delete
+                            ]
+                            st.success(f"Successfully removed **{target_to_delete}**!")
+                            st.rerun()
+                        else:
+                            st.warning("No tasks available to delete.")
+                            
+            with action_tab_decom:
+                with st.form("decommission_station_form"):
+                    active_stations = df_elements["station"].unique().tolist() if not df_elements.empty else []
+                    target_station = st.selectbox("Select Station to Decommission", active_stations if active_stations else ["No Active Stations"])
+                    
+                    if st.form_submit_button("🚫 Decommission Station", use_container_width=True):
+                        if active_stations and target_station != "No Active Stations":
+                            # Remove all elements assigned to this station
+                            st.session_state.lean_elements = [
+                                item for item in st.session_state.lean_elements if item["station"] != target_station
+                            ]
+                            st.success(f"Workstation **{target_station}** successfully decommissioned!")
+                            st.rerun()
+                        else:
+                            st.warning("No active stations available to decommission.")
 
         # Station Workload Bar Chart
-        station_loads = df_elements.groupby("station")["time_sec"].sum().reset_index()
-        fig_line = px.bar(
-            station_loads, x="station", y="time_sec", color="station",
-            title="Workstation Total Cycle Time vs Bottleneck Pace"
-        )
-        fig_line.update_layout(plot_bgcolor="#0b0f19", paper_bgcolor="#0b0f19", font=dict(color="#f3f4f6"), height=320)
-        st.plotly_chart(fig_line, use_container_width=True)
+        if not df_elements.empty:
+            station_loads = df_elements.groupby("station")["time_sec"].sum().reset_index()
+            fig_line = px.bar(
+                station_loads, x="station", y="time_sec", color="station",
+                title="Workstation Total Cycle Time vs Bottleneck Pace"
+            )
+            fig_line.update_layout(plot_bgcolor="#0b0f19", paper_bgcolor="#0b0f19", font=dict(color="#f3f4f6"), height=320)
+            st.plotly_chart(fig_line, use_container_width=True)
 
     # TAB 2: Kanban Pull-System Calculator
     with tab_kanban:
@@ -1993,7 +2031,6 @@ if mod == "Lean Manufacturing & Shop Floor Operations":
             
         with col_k2:
             st.markdown("##### Computed Kanban Results")
-            # Kanban formula calculation
             raw_kanban = (daily_demand * lead_time_days * (1 + safety_factor)) / container_capacity
             total_cards = int(np.ceil(raw_kanban))
             total_wip_value = total_cards * container_capacity
@@ -2079,7 +2116,6 @@ if mod == "Lean Manufacturing & Shop Floor Operations":
         st.plotly_chart(fig_5s, use_container_width=True)
 
     st.stop()
-
 
 def render_data_editor(df, key_name):
     if hasattr(st, "data_editor"):
