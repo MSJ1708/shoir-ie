@@ -1637,6 +1637,235 @@ if mod == "Predictive Maintenance Hub":
                 st.rerun()
 
     st.stop()
+# ==============================================================================
+# SHOIR-IE: ELITE PRODUCTION PLANNING, SCHEDULING & CONTROL (PPC) SUITE (V2.2)
+# ==============================================================================
+if mod == "Production Planning & Control (PPC)":
+    
+    import pandas as pd
+    import plotly.express as px
+    import plotly.graph_objects as go
+    import numpy as np
+
+    # 1. Initialize Session State for PPC Data
+    if "mps_data" not in st.session_state:
+        st.session_state.mps_data = [
+            {"period": "W1", "forecast": 120, "orders": 130, "beginning_inv": 50, "mps_production": 100},
+            {"period": "W2", "forecast": 150, "orders": 140, "beginning_inv": 30, "mps_production": 150},
+            {"period": "W3", "forecast": 140, "orders": 110, "beginning_inv": 45, "mps_production": 130},
+            {"period": "W4", "forecast": 180, "orders": 150, "beginning_inv": 35, "mps_production": 170},
+            {"period": "W5", "forecast": 200, "orders": 160, "beginning_inv": 25, "mps_production": 200},
+            {"period": "W6", "forecast": 220, "orders": 190, "beginning_inv": 40, "mps_production": 200}
+        ]
+
+    if "mrp_bom" not in st.session_state:
+        st.session_state.mrp_bom = [
+            {"component_id": "COMP-A01", "description": "Industrial Assembly X", "level": 0, "gross_req": 250, "on_hand": 40, "lead_time_wks": 1},
+            {"component_id": "SUB-B02", "description": "Precision Gearbox Sub-assembly", "level": 1, "gross_req": 250, "on_hand": 15, "lead_time_wks": 2},
+            {"component_id": "RAW-C03", "description": "Alloy Steel Bar Stock", "level": 2, "gross_req": 500, "on_hand": 120, "lead_time_wks": 1},
+            {"component_id": "RAW-D04", "description": "High-Grade Ceramic Bearings", "level": 2, "gross_req": 750, "on_hand": 200, "lead_time_wks": 1}
+        ]
+
+    if "job_shop_tasks" not in st.session_state:
+        st.session_state.job_shop_tasks = [
+            {"task": "CNC Milling (Job #101)", "start": "2026-08-24 08:00", "finish": "2026-08-24 12:00", "machine": "CNC-01"},
+            {"task": "Primary Assembly (Job #101)", "start": "2026-08-24 12:30", "finish": "2026-08-24 16:30", "machine": "Assembly Line A"},
+            {"task": "Lathe Turning (Job #102)", "start": "2026-08-24 13:00", "finish": "2026-08-24 17:00", "machine": "CNC-02"},
+            {"task": "Quality Assurance & Testing", "start": "2026-08-24 17:00", "finish": "2026-08-24 18:30", "machine": "QC Station"},
+        ]
+
+    # 2. Astonishing Glassmorphism Header Banner
+    st.markdown("""
+    <div style="background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #312e81 100%); padding: 30px; border-radius: 16px; color: white; margin-bottom: 24px; box-shadow: 0 10px 25px rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.08);">
+        <div style="display: flex; align-items: center; justify-content: space-between;">
+            <div>
+                <span style="background: rgba(56, 189, 248, 0.25); color: #38bdf8; padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;">Tier 2: Production Systems</span>
+                <h1 style="margin:8px 0 4px 0; color: #ffffff; font-size: 26px; font-weight: 800; letter-spacing: -0.025em;">⚙️ Production Planning, Scheduling & Control (PPC)</h1>
+                <p style="margin:0; color: #9ca3af; font-size: 13px;">Master Production Scheduling &bull; MRP II Net Requirements &bull; Job Shop Gantt &bull; Aggregate Planning</p>
+            </div>
+            <div style="background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.4); padding: 8px 16px; border-radius: 30px; color: #34d399; font-weight: 600; font-size: 12px; display: flex; align-items: center; gap: 6px;">
+                <span style="width: 8px; height: 8px; background: #34d399; border-radius: 50%; display: inline-block; box-shadow: 0 0 8px #34d399;"></span> Engine Online
+            </div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    df_mps = pd.DataFrame(st.session_state.mps_data)
+    df_mrp = pd.DataFrame(st.session_state.mrp_bom)
+    df_gantt = pd.DataFrame(st.session_state.job_shop_tasks)
+
+    # 3. Executive KPI Metrics Row
+    total_planned = df_mps["mps_production"].sum() if not df_mps.empty else 0
+    total_bom_items = len(df_mrp)
+
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        st.metric(label="Total Scheduled Production", value=f"{total_planned:,} Units", delta="6-Week Horizon")
+    with c2:
+        st.metric(label="Plant Capacity Utilization", value="88.2%", delta="+2.4% vs Baseline")
+    with c3:
+        st.metric(label="Active BOM Assemblies", value=f"{total_bom_items} Items", delta="Multi-Level Verified")
+    with c4:
+        st.metric(label="On-Time Delivery Rate", value="98.5%", delta="Nominal Range")
+
+    st.markdown("<div style='margin: 16px 0;'></div>", unsafe_allow_html=True)
+
+    # 4. Multi-Tab Navigation Architecture
+    tab_mps, tab_mrp, tab_shop, tab_agg = st.tabs([
+        "📅 Master Production Schedule (MPS)", 
+        "📦 MRP & Bill of Materials Studio", 
+        "⏳ Job Shop Scheduling & Gantt", 
+        "📊 Aggregate Planning Strategies"
+    ])
+
+    # TAB 1: Master Production Schedule (MPS)
+    with tab_mps:
+        st.markdown("#### 📋 Rolling Horizon Master Production Schedule")
+        st.markdown("""
+        <div style="background: rgba(31, 41, 55, 0.5); padding: 12px; border-radius: 8px; border-left: 3px solid #38bdf8; font-size: 12px; color: #d1d5db; margin-bottom: 16px;">
+            <b>MPS Controller:</b> Balance market demand forecasts with firm customer orders and available plant capacity across multi-period planning horizons.
+        </div>
+        """, unsafe_allow_html=True)
+
+        col_m1, col_m2 = st.columns([2, 1])
+        with col_m1:
+            st.dataframe(df_mps.rename(columns={
+                "period": "Period", "forecast": "Forecast Demand", 
+                "orders": "Customer Orders", "beginning_inv": "Beginning Inv.", 
+                "mps_production": "Scheduled MPS"
+            }), use_container_width=True, hide_index=True)
+            
+        with col_m2:
+            st.markdown("##### ⚙️ Adjust Period Production")
+            with st.form("mps_adjust_form"):
+                target_period = st.selectbox("Select Period", df_mps["period"].tolist())
+                new_mps_val = st.number_input("New Scheduled Production", 50, 500, 150, 10)
+                
+                if st.form_submit_button("💾 Update MPS Allocation", use_container_width=True):
+                    for row in st.session_state.mps_data:
+                        if row["period"] == target_period:
+                            row["mps_production"] = int(new_mps_val)
+                    st.success(f"MPS updated for **{target_period}**!")
+                    st.rerun()
+
+        # Visual Chart for MPS
+        fig_mps = px.bar(
+            df_mps, x="period", y=["forecast", "orders", "mps_production"],
+            barmode="group", title="Demand Forecast vs Customer Orders vs MPS Production"
+        )
+        fig_mps.update_layout(plot_bgcolor="#0b0f19", paper_bgcolor="#0b0f19", font=dict(color="#f3f4f6"), height=320)
+        st.plotly_chart(fig_mps, use_container_width=True)
+
+    # TAB 2: MRP & Bill of Materials Studio
+    with tab_mrp:
+        st.markdown("#### 🧩 Multi-Level Material Requirements Planning (MRP II) Engine")
+        
+        col_r1, col_r2 = st.columns([2, 1])
+        with col_r1:
+            st.markdown("##### Gross-to-Net Component Breakdown")
+            # Calculate net requirement dynamically
+            df_mrp["net_req"] = np.maximum(0, df_mrp["gross_req"] - df_mrp["on_hand"])
+            
+            st.dataframe(df_mrp.rename(columns={
+                "component_id": "Part ID", "description": "Description", "level": "BOM Level",
+                "gross_req": "Gross Req.", "on_hand": "On-Hand Stock", "net_req": "Net Req.", "lead_time_wks": "Lead Time (wks)"
+            }), use_container_width=True, hide_index=True)
+            
+        with col_r2:
+            st.markdown("##### ➕ Register New BOM Component")
+            with st.form("add_bomp_form"):
+                b_id = st.text_input("Component ID", value="SUB-E05")
+                b_desc = st.text_input("Description", value="Hydraulic Actuator Unit")
+                b_lvl = st.slider("BOM Tier Level", 0, 3, 1)
+                b_gross = st.number_input("Gross Requirement", 50, 2000, 300, 50)
+                b_stock = st.number_input("On-Hand Inventory", 0, 500, 50, 10)
+                b_lt = st.number_input("Lead Time (Weeks)", 1, 5, 2)
+                
+                if st.form_submit_button("➕ Add Component to MRP", use_container_width=True):
+                    st.session_state.mrp_bom.append({
+                        "component_id": b_id, "description": b_desc, "level": int(b_lvl),
+                        "gross_req": int(b_gross), "on_hand": int(b_stock), "lead_time_wks": int(b_lt)
+                    })
+                    st.success(f"Component **{b_desc}** successfully added to BOM!")
+                    st.rerun()
+
+        fig_mrp = px.bar(
+            df_mrp, x="component_id", y=["gross_req", "on_hand", "net_req"],
+            barmode="stack", title="BOM Component Gross-to-Net Inventory Stock Analysis"
+        )
+        fig_mrp.update_layout(plot_bgcolor="#0b0f19", paper_bgcolor="#0b0f19", font=dict(color="#f3f4f6"), height=320)
+        st.plotly_chart(fig_mrp, use_container_width=True)
+
+    # TAB 3: Job Shop Scheduling & Gantt
+    with tab_shop:
+        st.markdown("#### ⏳ Job Shop Dispatching & Workstation Gantt Studio")
+        
+        col_s1, col_s2 = st.columns([2, 1])
+        with col_s1:
+            if not df_gantt.empty:
+                fig_gantt = px.timeline(
+                    df_gantt, x_start="start", x_end="finish", y="machine", color="task",
+                    title="Shop Floor Workstation Scheduling Timeline"
+                )
+                fig_gantt.update_layout(plot_bgcolor="#0b0f19", paper_bgcolor="#0b0f19", font=dict(color="#f3f4f6"), height=350)
+                st.plotly_chart(fig_gantt, use_container_width=True)
+                
+        with col_s2:
+            st.markdown("##### ➕ Schedule New Machine Task")
+            with st.form("add_gantt_form"):
+                g_task = st.text_input("Task Name", value="Welding Sub-Assembly #103")
+                g_machine = st.selectbox("Workstation / Machine", ["CNC-01", "CNC-02", "Assembly Line A", "Welding Bay", "QC Station"])
+                g_start = st.text_input("Start Timestamp", value="2026-08-25 08:00")
+                g_finish = st.text_input("Finish Timestamp", value="2026-08-25 14:00")
+                
+                if st.form_submit_button("🚀 Assign Task to Schedule", use_container_width=True):
+                    st.session_state.job_shop_tasks.append({
+                        "task": g_task, "start": g_start, "finish": g_finish, "machine": g_machine
+                    })
+                    st.success("Task scheduled successfully!")
+                    st.rerun()
+
+    # TAB 4: Aggregate Planning Strategies
+    with tab_agg:
+        st.markdown("#### 📈 Aggregate Planning Strategy Comparison (Chase vs. Level)")
+        st.markdown("""
+        <div style="background: rgba(31, 41, 55, 0.5); padding: 12px; border-radius: 8px; border-left: 3px solid #34d399; font-size: 12px; color: #d1d5db; margin-bottom: 16px;">
+            <b>Operations Strategy Simulator:</b> Compare pure Chase production (matching workforce to fluctuating demand) against Level production (maintaining constant output with inventory buffers).
+        </div>
+        """, unsafe_allow_html=True)
+
+        col_a1, col_a2 = st.columns([1, 2])
+        with col_a1:
+            st.markdown("##### Strategy Cost Parameters")
+            holding_cost_rate = st.slider("Inventory Holding Cost ($/unit/mo)", 2, 20, 5)
+            hiring_cost_rate = st.slider("Workforce Hiring Cost ($/worker)", 500, 3000, 1200)
+            
+            st.markdown(f"""
+            <div style="background: rgba(56, 189, 248, 0.15); border: 1px solid rgba(56, 189, 248, 0.4); padding: 12px; border-radius: 8px; color: #38bdf8; font-size: 12px; margin-top: 10px;">
+                <b>Simulated Cost Impact:</b><br>
+                &bull; Chase Strategy Est. Cost: <b>${(sum([1000, 1200, 900, 1500, 1800, 1400]) * holding_cost_rate * 0.4):,.2f}</b><br>
+                &bull; Level Strategy Est. Cost: <b>${(sum([1000, 1200, 900, 1500, 1800, 1400]) * holding_cost_rate * 1.2):,.2f}</b>
+            </div>
+            """, unsafe_allow_html=True)
+
+        with col_a2:
+            months = ["Month 1", "Month 2", "Month 3", "Month 4", "Month 5", "Month 6"]
+            df_agg = pd.DataFrame({
+                "Month": months,
+                "Demand Forecast": [1000, 1200, 900, 1500, 1800, 1400],
+                "Chase Strategy (Hiring/Firing)": [1000, 1200, 900, 1500, 1800, 1400],
+                "Level Strategy (Constant Output)": [1300, 1300, 1300, 1300, 1300, 1300]
+            })
+
+            fig_agg = px.line(
+                df_agg, x="Month", y=["Demand Forecast", "Chase Strategy (Hiring/Firing)", "Level Strategy (Constant Output)"],
+                markers=True, title="Production Strategy Output Trajectory Across 6-Month Horizon"
+            )
+            fig_agg.update_layout(plot_bgcolor="#0b0f19", paper_bgcolor="#0b0f19", font=dict(color="#f3f4f6"), height=340)
+            st.plotly_chart(fig_agg, use_container_width=True)
+
+    st.stop()
+
 
 def render_data_editor(df, key_name):
     if hasattr(st, "data_editor"):
