@@ -797,26 +797,26 @@ if st.sidebar.button("Lock / Logout Workspace"):
     st.session_state.authenticated = False
     st.rerun()
 # ==============================================================================
-# REAL-TIME AGV/AMR FLEET DISPATCHER CONTROL TOWER
+# REAL-TIME AGV/AMR FLEET DISPATCHER CONTROL TOWER (Customizable Edition)
 # ==============================================================================
 if mod == "AGV Fleet Dispatcher":
     
-    # Gorgeous custom CSS/HTML header banner
-    st.markdown("""
-    <div style="background: linear-gradient(135deg, #0f2027 0%, #203a43 50%, #2c5364 100%); padding: 28px; border-radius: 14px; color: white; margin-bottom: 24px; box-shadow: 0 6px 16px rgba(0,0,0,0.2);">
-        <div style="display: flex; align-items: center; justify-content: space-between;">
-            <div>
-                <h1 style="margin:0; color: #ffffff; font-size: 26px; font-weight: 700;">🤖 Real-Time AGV/AMR Fleet Dispatcher</h1>
-                <p style="margin:6px 0 0 0; color: #a0aec0; font-size: 14px;">Autonomous Material Handling & Multi-Agent Fleet Routing Control Tower</p>
-            </div>
-            <div style="background: rgba(0, 204, 150, 0.15); border: 1px solid #00CC96; padding: 6px 14px; border-radius: 20px; color: #00CC96; font-weight: 600; font-size: 13px;">
-                🟢 System Online
-            </div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
+    # Initialize Session State for Facility, Stations, and Fleet
+    if "facility_name" not in st.session_state:
+        st.session_state.facility_name = "Main Manufacturing Plant - Sector A"
+    if "grid_size_x" not in st.session_state:
+        st.session_state.grid_size_x = 10
+    if "grid_size_y" not in st.session_state:
+        st.session_state.grid_size_y = 10
+    
+    if "facility_stations" not in st.session_state:
+        st.session_state.facility_stations = [
+            {"name": "Warehouse Rack Alpha", "x": 1, "y": 2, "type": "Pickup"},
+            {"name": "Assembly Line Alpha", "x": 8, "y": 8, "type": "Dropoff"},
+            {"name": "Conveyor 1", "x": 6, "y": 4, "type": "Dropoff"},
+            {"name": "Receiving Dock 2", "x": 2, "y": 7, "type": "Pickup"}
+        ]
 
-    # Initialize Session State for Fleet if missing
     if "agv_fleet" not in st.session_state:
         st.session_state.agv_fleet = [
             {"id": "AGV-01", "x": 1, "y": 2, "status": "NAVIGATING", "battery": 96, "payload": "SKU-A101", "destination": "Aisle 3"},
@@ -824,6 +824,22 @@ if mod == "AGV Fleet Dispatcher":
             {"id": "AGV-03", "x": 9, "y": 8, "status": "IDLE", "battery": 78, "payload": "None", "destination": "Home Dock"},
             {"id": "AGV-04", "x": 2, "y": 7, "status": "CHARGING", "battery": 24, "payload": "None", "destination": "Bay 2"}
         ]
+
+    # Gorgeous custom CSS/HTML header banner displaying dynamic facility name
+    fac_name = st.session_state.facility_name
+    st.markdown(f"""
+    <div style="background: linear-gradient(135deg, #0f2027 0%, #203a43 50%, #2c5364 100%); padding: 28px; border-radius: 14px; color: white; margin-bottom: 24px; box-shadow: 0 6px 16px rgba(0,0,0,0.2);">
+        <div style="display: flex; align-items: center; justify-content: space-between;">
+            <div>
+                <h1 style="margin:0; color: #ffffff; font-size: 26px; font-weight: 700;">🤖 Real-Time AGV/AMR Fleet Dispatcher</h1>
+                <p style="margin:6px 0 0 0; color: #a0aec0; font-size: 14px;">Facility: <b>{fac_name}</b> | Autonomous Multi-Agent Routing Control Tower</p>
+            </div>
+            <div style="background: rgba(0, 204, 150, 0.15); border: 1px solid #00CC96; padding: 6px 14px; border-radius: 20px; color: #00CC96; font-weight: 600; font-size: 13px;">
+                🟢 System Online
+            </div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
     # Executive KPI Row
     col1, col2, col3, col4 = st.columns(4)
@@ -833,73 +849,143 @@ if mod == "AGV Fleet Dispatcher":
 
     col1.metric("Active AMR Units", f"{active_units} / {len(fleet)}", "100% Collision-Free")
     col2.metric("Fleet Avg Battery", f"{avg_batt}%", "Stable")
-    col3.metric("Active Deadlocks", "0", "Optimized Dijkstra")
+    col3.metric("Active Stations", f"{len(st.session_state.facility_stations)} Nodes", "Mapped")
     col4.metric("Hourly Throughput", "48 Units/hr", "+12.4% vs Baseline")
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # Tabbed Command Tower Views
-    tab_map, tab_dispatch, tab_telemetry = st.tabs([
+    # Tabbed Command Tower Views (Added Floor Plan Configurator)
+    tab_map, tab_setup, tab_dispatch, tab_telemetry = st.tabs([
         "🗺️ Digital Twin Live Map", 
+        "📐 Floor Plan & Layout Configurator",
         "⚡ Dynamic Task Dispatcher", 
         "📊 Full Fleet Telemetry"
     ])
 
     import pandas as pd
     import plotly.express as px
+    import plotly.graph_objects as go
 
     df_fleet = pd.DataFrame(fleet)
+    df_stations = pd.DataFrame(st.session_state.facility_stations)
 
     with tab_map:
-        st.markdown("#### Live Facility Floor Plan & Robot Tracking")
+        st.markdown(f"#### Live Facility Floor Plan: *{fac_name}*")
         
         c_ctrl1, c_ctrl2 = st.columns([1, 3])
         with c_ctrl1:
             if st.button("🔄 Step Simulation Tick", use_container_width=True):
                 for r in st.session_state.agv_fleet:
                     if r["status"] == "NAVIGATING":
-                        r["x"] = (r["x"] + 1) % 10
-                        r["y"] = (r["y"] + 2) % 10
+                        r["x"] = (r["x"] + 1) % st.session_state.grid_size_x
+                        r["y"] = (r["y"] + 2) % st.session_state.grid_size_y
                 st.rerun()
         
-        fig = px.scatter(
-            df_fleet, x="x", y="y", text="id", color="status",
-            size=[32]*len(df_fleet), hover_data=["battery", "payload", "destination"],
-            range_x=[-0.5, 10.5], range_y=[-0.5, 10.5],
-            color_discrete_map={
+        # Build multi-layer Plotly map (Stations + AGVs)
+        fig = go.Figure()
+
+        # Plot Stations / Nodes if available
+        if not df_stations.empty:
+            fig.add_trace(go.Scatter(
+                x=df_stations["x"], y=df_stations["y"],
+                mode="text+markers",
+                text=df_stations["name"],
+                textposition="bottom center",
+                marker=dict(size=14, color="#FFA15A", symbol="square"),
+                name="Workstations"
+            ))
+
+        # Plot AGVs
+        fig.add_trace(go.Scatter(
+            x=df_fleet["x"], y=df_fleet["y"],
+            mode="text+markers",
+            text=df_fleet["id"],
+            textposition="top center",
+            marker=dict(size=26, color=df_fleet["status"].map({
                 "NAVIGATING": "#00CC96", 
                 "IDLE": "#636EFA", 
                 "PICKING": "#EF553B", 
-                "CHARGING": "#FFA15A"
-            }
-        )
-        fig.update_traces(textposition='top center', marker=dict(line=dict(width=2, color='white')))
+                "CHARGING": "#FF7F0E"
+            }), symbol="circle", line=dict(width=2, color="white")),
+            name="AMR Units",
+            hovertemplate="<b>%{text}</b><br>Battery: %{customdata[0]}%<br>Payload: %{customdata[1]}<br>Destination: %{customdata[2]}<extra></extra>",
+            customdata=df_fleet[["battery", "payload", "destination"]].values
+        ))
+
+        max_x = st.session_state.grid_size_x
+        max_y = st.session_state.grid_size_y
         fig.update_layout(
-            height=450,
+            height=480,
             margin=dict(l=10, r=10, t=10, b=10),
             plot_bgcolor="#0e1117",
             paper_bgcolor="#0e1117",
             font=dict(color="white"),
-            xaxis=dict(showgrid=True, gridcolor="#262730", title="Facility X-Coordinate (m)"),
-            yaxis=dict(showgrid=True, gridcolor="#262730", title="Facility Y-Coordinate (m)")
+            xaxis=dict(showgrid=True, gridcolor="#262730", range=[-0.5, max_x + 0.5], title="Facility X-Coordinate (m)"),
+            yaxis=dict(showgrid=True, gridcolor="#262730", range=[-0.5, max_y + 0.5], title="Facility Y-Coordinate (m)"),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
         )
         st.plotly_chart(fig, use_container_width=True)
 
+    with tab_setup:
+        st.markdown("#### 📐 Facility Layout & Station Customizer")
+        
+        with st.form("facility_config_form"):
+            st.markdown("##### 1. Plant Identification & Grid Bounds")
+            new_fac_name = st.text_input("Facility / Plant Name", value=st.session_state.facility_name)
+            
+            col_g1, col_g2 = st.columns(2)
+            with col_g1:
+                new_gx = st.number_input("Grid Max X (meters)", min_value=5, max_value=50, value=st.session_state.grid_size_x)
+            with col_g2:
+                new_gy = st.number_input("Grid Max Y (meters)", min_value=5, max_value=50, value=st.session_state.grid_size_y)
+            
+            save_grid_btn = st.form_submit_button("💾 Update Facility Settings", use_container_width=True)
+            if save_grid_btn:
+                st.session_state.facility_name = new_fac_name
+                st.session_state.grid_size_x = int(new_gx)
+                st.session_state.grid_size_y = int(new_gy)
+                st.success(f"Facility layout updated successfully to **{new_fac_name}** ({new_gx}m x {new_gy}m grid)!")
+                st.rerun()
+
+        st.markdown("---")
+        st.markdown("##### 2. Add New Workstation / Dock Node")
+        with st.form("add_station_form"):
+            col_s1, col_s2, col_s3, col_s4 = st.columns(4)
+            with col_s1:
+                stn_name = st.text_input("Station Name", value="Assembly Bay B")
+            with col_s2:
+                stn_x = st.number_input("X Coord", min_value=0, max_value=50, value=4)
+            with col_s3:
+                stn_y = st.number_input("Y Coord", min_value=0, max_value=50, value=5)
+            with col_s4:
+                stn_type = st.selectbox("Node Type", ["Pickup", "Dropoff", "Charging Dock", "Buffer Zone"])
+            
+            add_stn_btn = st.form_submit_button("➕ Add Station to Floor Plan", use_container_width=True)
+            if add_stn_btn:
+                st.session_state.facility_stations.append({"name": stn_name, "x": int(stn_x), "y": int(stn_y), "type": stn_type})
+                st.success(f"Workstation **{stn_name}** added at ({stn_x}, {stn_y})!")
+                st.rerun()
+
+        st.markdown("##### Current Configured Stations")
+        st.dataframe(df_stations, use_container_width=True, hide_index=True)
+
     with tab_dispatch:
         st.markdown("#### Manual Dispatch & Task Queue Manager")
+        
+        station_names = [s["name"] for s in st.session_state.facility_stations]
         
         with st.form("agv_dispatch_form"):
             col_d1, col_d2 = st.columns(2)
             with col_d1:
                 new_task_id = st.text_input("Task Reference ID", value=f"TSK-9{len(fleet)+10}")
-                pickup_loc = st.selectbox("Pickup Station", ["Warehouse Rack Alpha", "Receiving Dock 2", "Buffer Zone B", "AS/RS Staging"])
+                pickup_loc = st.selectbox("Pickup Station", station_names if station_names else ["Default Dock"])
             with col_d2:
                 target_agv = st.selectbox("Assign AMR Unit", [r["id"] for r in fleet])
-                dropoff_loc = st.selectbox("Dropoff Destination", ["Assembly Line Alpha", "Packaging Station 3", "Outbound Dock 1", "QC Inspection Zone"])
+                dropoff_loc = st.selectbox("Dropoff Destination", station_names if station_names else ["Default Line"])
             
             dispatch_btn = st.form_submit_button("⚡ Transmit Dispatch Order", use_container_width=True)
             if dispatch_btn:
-                st.success(f"Successfully routed task **{new_task_id}** to **{target_agv}** via optimized A* pathfinding matrix!")
+                st.success(f"Successfully routed task **{new_task_id}** from *{pickup_loc}* to *{dropoff_loc}* using **{target_agv}**!")
 
     with tab_telemetry:
         st.markdown("#### Real-Time Fleet Diagnostics & Status Matrix")
