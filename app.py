@@ -2117,7 +2117,7 @@ if mod == "Lean Manufacturing & Shop Floor Operations":
 
     st.stop()
 # ==============================================================================
-# SHOIR-IE: ELITE QUALITY CONTROL, SIX SIGMA & RELIABILITY SUITE (V2.5)
+# SHOIR-IE: ELITE QUALITY CONTROL, SIX SIGMA & RELIABILITY SUITE (V2.6)
 # ==============================================================================
 if mod == "Quality Control, Six Sigma & Reliability":
     
@@ -2136,7 +2136,6 @@ if mod == "Quality Control, Six Sigma & Reliability":
         ]
 
     if "spc_samples" not in st.session_state:
-        # Generate baseline subgroup measurements
         np.random.seed(42)
         st.session_state.spc_samples = pd.DataFrame({
             "Subgroup": [f"SG-{i:02d}" for i in range(1, 16)],
@@ -2163,11 +2162,11 @@ if mod == "Quality Control, Six Sigma & Reliability":
     # 3. Executive KPI Metrics Row
     c1, c2, c3, c4 = st.columns(4)
     with c1:
-        st.metric(label="Process Capability Index ($C_{pk}$)", value="1.42", delta="World Class > 1.33")
+        st.metric(label="Process Capability ($C_{pk}$)", value="1.42", delta="World Class > 1.33")
     with c2:
         st.metric(label="Estimated Defect Rate", value="3.4 PPM", delta="Six Sigma Standard")
     with c3:
-        st.metric(label="Mean Time Between Failures (MTBF)", value="4,850 Hrs", delta="+320 hrs vs target")
+        st.metric(label="MTBF Reliability", value="4,850 Hrs", delta="+320 hrs vs target")
     with c4:
         st.metric(label="Max Critical RPN Score", value="135 (PCB)", delta="Action Required > 100")
 
@@ -2200,7 +2199,6 @@ if mod == "Quality Control, Six Sigma & Reliability":
             df_spc, x="Subgroup", y="Mean", markers=True,
             title="X-bar Control Chart (Subgroup Means)"
         )
-        # Add control limit reference lines
         fig_xbar.add_hline(y=ucl_mean, line_dash="dash", line_color="#ef4444", annotation_text="UCL")
         fig_xbar.add_hline(y=grand_mean, line_dash="solid", line_color="#34d399", annotation_text="Center Line (Mean)")
         fig_xbar.add_hline(y=lcl_mean, line_dash="dash", line_color="#ef4444", annotation_text="LCL")
@@ -2216,26 +2214,29 @@ if mod == "Quality Control, Six Sigma & Reliability":
             st.markdown("##### Specification Limits & Process Parameters")
             usl = st.number_input("Upper Specification Limit (USL)", 40.0, 60.0, 53.5, 0.1)
             lsl = st.number_input("Lower Specification Limit (LSL)", 30.0, 50.0, 46.5, 0.1)
-            process_mean = st.number_input("Estimated Process Mean ($\\mu$)", 40.0, 60.0, 50.1, 0.1)
-            process_std = st.number_input("Process Standard Deviation ($\\sigma$)", 0.1, 5.0, 1.2, 0.1)
+            process_mean = st.number_input("Estimated Process Mean (mu)", 40.0, 60.0, 50.1, 0.1)
+            process_std = st.number_input("Process Standard Deviation (sigma)", 0.1, 5.0, 1.2, 0.1)
             
         with col_s2:
-            st.markdown("##### Computed Capability Metrics")
             cp = (usl - lsl) / (6 * process_std)
             cpu = (usl - process_mean) / (3 * process_std)
             cpl = (process_mean - lsl) / (3 * process_std)
             cpk = min(cpu, cpl)
             
+            st.markdown("##### Computed Capability Metrics")
             st.metric(label="Process Potential ($C_p$)", value=f"{cp:.2f}", delta="Spread Capability")
             st.metric(label="Process Capability ($C_{pk}$)", value=f"{cpk:.2f}", delta="Centered Performance")
             
             status_color = "#34d399" if cpk >= 1.33 else "#f59e0b"
             status_text = "Capable Process" if cpk >= 1.33 else "Process Needs Centering / Reduction"
-            st.markdown(f"""
+            
+            # Safe HTML string rendering without f-string brace conflicts
+            assessment_html = f"""
             <div style="background: rgba(56, 189, 248, 0.15); border: 1px solid rgba(56, 189, 248, 0.4); padding: 14px; border-radius: 8px; color: {status_color}; font-size: 12px; margin-top: 15px;">
-                <b>Six Sigma Assessment:</b> {status_text} ($C_{pk} = {cpk:.2f}$). Target benchmark for world-class manufacturing is $C_{pk} \\ge 1.33$.
+                <b>Six Sigma Assessment:</b> {status_text} ($C_{{pk}} = {cpk:.2f}$). Target benchmark for world-class manufacturing is $C_{{pk}} \\ge 1.33$.
             </div>
-            """, unsafe_allow_html=True)
+            """
+            st.markdown(assessment_html, unsafe_allow_html=True)
 
     # TAB 3: FMEA & RPN Matrix (With Add & Delete Controls)
     with tab_fmea:
@@ -2246,7 +2247,6 @@ if mod == "Quality Control, Six Sigma & Reliability":
         </div>
         """, unsafe_allow_html=True)
 
-        # Compute RPN for records
         df_fmea = pd.DataFrame(st.session_state.fmea_records)
         if not df_fmea.empty:
             df_fmea["RPN"] = df_fmea["sev"] * df_fmea["occ"] * df_fmea["det"]
@@ -2292,7 +2292,7 @@ if mod == "Quality Control, Six Sigma & Reliability":
                             st.session_state.fmea_records = [
                                 item for item in st.session_state.fmea_records if item["failure_mode"] != target_fmea
                             ]
-                            st.success(f"Successfully resolved and removed risk!")
+                            st.success("Successfully resolved and removed risk!")
                             st.rerun()
                         else:
                             st.warning("No records available to remove.")
@@ -2311,17 +2311,16 @@ if mod == "Quality Control, Six Sigma & Reliability":
             failure_rate = 1.0 / mtbf_val
             survival_prob = np.exp(-failure_rate * operating_hrs) * 100
             
-            st.metric(label="Calculated Failure Rate ($\\lambda$)", value=f"{failure_rate * 1000:.3f} per 1k Hrs", delta="Exponential Model")
-            st.metric(label="Mission Reliability ($R(t)$)", value=f"{survival_prob:.2f}%", delta="Probability of Zero Failures")
+            st.metric(label="Calculated Failure Rate (Lambda)", value=f"{failure_rate * 1000:.3f} per 1k Hrs", delta="Exponential Model")
+            st.metric(label="Mission Reliability R(t)", value=f"{survival_prob:.2f}%", delta="Probability of Zero Failures")
 
-        # Plot survival curve over time
         time_axis = np.linspace(0, 3000, 50)
         survival_curve = np.exp(-failure_rate * time_axis) * 100
         df_survival = pd.DataFrame({"Operating Hours": time_axis, "Reliability (%)": survival_curve})
 
         fig_surv = px.line(
             df_survival, x="Operating Hours", y="Reliability (%)",
-            title="System Survival Probability Curve Over Time ($R(t) = e^{-\\lambda t}$)"
+            title="System Survival Probability Curve Over Time"
         )
         fig_surv.update_layout(plot_bgcolor="#0b0f19", paper_bgcolor="#0b0f19", font=dict(color="#f3f4f6"), height=320)
         st.plotly_chart(fig_surv, use_container_width=True)
@@ -2345,7 +2344,6 @@ if mod == "Quality Control, Six Sigma & Reliability":
         st.plotly_chart(fig_pareto, use_container_width=True)
 
     st.stop()
-
 
 def render_data_editor(df, key_name):
     if hasattr(st, "data_editor"):
