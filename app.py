@@ -1424,6 +1424,219 @@ if mod == "Geospatial Network Designer":
 
     st.stop()
 
+# ==============================================================================
+# SHOIR-IE: ELITE PREDICTIVE MAINTENANCE & ASSET HEALTH HUB (V2.2)
+# ==============================================================================
+if mod == "Predictive Maintenance Hub":
+    
+    # 1. Initialize Asset Fleet Session State
+    if "maintenance_assets" not in st.session_state:
+        st.session_state.maintenance_assets = [
+            {"asset_id": "CNC-01", "name": "5-Axis CNC Mill Alpha", "type": "Machining Center", "health": 88, "status": "Healthy", "vibration_mm_s": 2.1, "temp_c": 62.4, "rul_hours": 1450},
+            {"asset_id": "AGV-04", "name": "Heavy Payload AGV Fleet Unit", "type": "Material Handling", "health": 64, "status": "Warning", "vibration_mm_s": 4.8, "temp_c": 78.1, "rul_hours": 320},
+            {"asset_id": "CONV-12", "name": "Main Assembly Line Conveyor", "type": "Conveyor System", "health": 92, "status": "Optimal", "vibration_mm_s": 1.5, "temp_c": 54.0, "rul_hours": 2100},
+            {"asset_id": "PUMP-02", "name": "Hydraulic Press Pump B", "type": "Fluid Power", "health": 41, "status": "Critical", "vibration_mm_s": 7.4, "temp_c": 89.5, "rul_hours": 85}
+        ]
+
+    if "maintenance_work_orders" not in st.session_state:
+        st.session_state.maintenance_work_orders = [
+            {"wo_id": "WO-1001", "asset": "Hydraulic Press Pump B", "type": "Urgent Overhaul", "priority": "Emergency (P1)", "status": "Dispatched"},
+            {"wo_id": "WO-1002", "asset": "Heavy Payload AGV Fleet Unit", "type": "Component Replacement", "priority": "High (P2)", "status": "In Progress"}
+        ]
+
+    # 2. Astonishing Glassmorphism Header Banner
+    st.markdown("""
+    <div style="background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #312e81 100%); padding: 30px; border-radius: 16px; color: white; margin-bottom: 24px; box-shadow: 0 10px 25px rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.08);">
+        <div style="display: flex; align-items: center; justify-content: space-between;">
+            <div>
+                <span style="background: rgba(239, 68, 68, 0.25); color: #fca5a5; padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;">Reliability Engineering Suite</span>
+                <h1 style="margin:8px 0 4px 0; color: #ffffff; font-size: 26px; font-weight: 800; letter-spacing: -0.025em;">🛠️ Predictive Maintenance & Asset Health Hub</h1>
+                <p style="margin:0; color: #9ca3af; font-size: 13px;">Condition-Based Monitoring (CBM) &bull; Remaining Useful Life (RUL) &bull; Automated Dispatch</p>
+            </div>
+            <div style="background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.4); padding: 8px 16px; border-radius: 30px; color: #34d399; font-weight: 600; font-size: 12px; display: flex; align-items: center; gap: 6px;">
+                <span style="width: 8px; height: 8px; background: #34d399; border-radius: 50%; display: inline-block; box-shadow: 0 0 8px #34d399;"></span> Telemetry Active
+            </div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    import pandas as pd
+    import plotly.express as px
+    import plotly.graph_objects as go
+    import numpy as np
+    import datetime
+
+    assets_df = pd.DataFrame(st.session_state.maintenance_assets)
+    wo_df = pd.DataFrame(st.session_state.maintenance_work_orders)
+
+    # 3. Executive KPI Metrics Row
+    total_assets = len(assets_df)
+    critical_count = len(assets_df[assets_df["status"] == "Critical"])
+    warning_count = len(assets_df[assets_df["status"] == "Warning"])
+    avg_health = int(assets_df["health"].mean()) if total_assets > 0 else 0
+
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        st.metric(label="Monitored Assets", value=f"{total_assets} Units", delta="Live Telemetry")
+    with c2:
+        st.metric(label="Fleet Health Index", value=f"{avg_health}%", delta="Nominal Range")
+    with c3:
+        st.metric(label="Warning Alarms", value=f"{warning_count} Units", delta="Monitor Closely", delta_color="inverse")
+    with c4:
+        st.metric(label="Critical Failures", value=f"{critical_count} Units", delta="Action Required", delta_color="inverse")
+
+    st.markdown("<div style='margin: 16px 0;'></div>", unsafe_allow_html=True)
+
+    # 4. Multi-Tab Advanced Navigation Architecture
+    tab_dash, tab_telemetry, tab_rul, tab_scheduler, tab_registry = st.tabs([
+        "📊 Asset Health Dashboard", 
+        "📈 Real-Time Sensor Telemetry", 
+        "⏳ Prognostic RUL Studio", 
+        "📋 Maintenance Work Orders",
+        "⚙️ Asset Registry Studio"
+    ])
+
+    # TAB 1: Asset Health Dashboard
+    with tab_dash:
+        st.markdown("#### 🔍 Industrial Equipment Fleet Condition Overview")
+        
+        col_d1, col_d2 = st.columns([2, 1])
+        with col_d1:
+            st.dataframe(
+                assets_df[["asset_id", "name", "type", "health", "status", "vibration_mm_s", "temp_c", "rul_hours"]], 
+                use_container_width=True, 
+                hide_index=True
+            )
+        with col_d2:
+            fig_health = px.bar(
+                assets_df, x="asset_id", y="health", color="status",
+                color_discrete_map={"Healthy": "#34d399", "Optimal": "#38bdf8", "Warning": "#fbbf24", "Critical": "#f43f5e"},
+                title="Asset Health Index (%)"
+            )
+            fig_health.update_layout(plot_bgcolor="#0b0f19", paper_bgcolor="#0b0f19", font=dict(color="#f3f4f6"), height=290, margin=dict(l=10, r=10, t=30, b=10))
+            st.plotly_chart(fig_health, use_container_width=True)
+
+    # TAB 2: Real-Time Sensor Telemetry & Anomaly Detection
+    with tab_telemetry:
+        st.markdown("#### 📉 High-Frequency Vibration & Thermal Telemetry Stream")
+        
+        c_t1, c_t2 = st.columns([2, 1])
+        with c_t1:
+            selected_asset = st.selectbox("Select Asset for Diagnostic Stream", assets_df["name"].tolist())
+        with c_t2:
+            anomaly_sensitivity = st.slider("Anomaly Alarm Threshold (mm/s)", 2.0, 8.0, 5.0, 0.5)
+
+        # Generate responsive time-series telemetry based on selected asset
+        np.random.seed(hash(selected_asset) % 2026)
+        time_steps = pd.date_range(end=datetime.datetime.now(), periods=60, freq="10min")
+        base_vibe = 2.0 if "CNC" in selected_asset or "Conveyor" in selected_asset else 5.2
+        vib_trend = np.linspace(base_vibe, base_vibe + 2.5, 60) + np.random.normal(0, 0.25, 60)
+        temp_trend = np.linspace(55, 78, 60) + np.random.normal(0, 0.8, 60)
+        
+        df_telemetry = pd.DataFrame({
+            "Timestamp": time_steps, 
+            "Vibration (mm/s)": np.abs(vib_trend), 
+            "Temperature (°C)": temp_trend,
+            "Threshold Limit": anomaly_sensitivity
+        })
+        
+        fig_tele = go.Figure()
+        fig_tele.add_trace(go.Scatter(x=df_telemetry["Timestamp"], y=df_telemetry["Vibration (mm/s)"], mode="lines+markers", name="Vibration (mm/s)", line=dict(color="#38bdf8", width=2)))
+        fig_tele.add_trace(go.Scatter(x=df_telemetry["Timestamp"], y=df_telemetry["Threshold Limit"], mode="lines", name="Alarm Limit", line=dict(color="#f43f5e", dash="dash", width=1.5)))
+        fig_tele.update_layout(
+            title=f"Condition Monitoring Stream — {selected_asset}",
+            plot_bgcolor="#0b0f19", paper_bgcolor="#0b0f19", font=dict(color="#f3f4f6"), height=360,
+            margin=dict(l=20, r=20, t=40, b=20)
+        )
+        st.plotly_chart(fig_tele, use_container_width=True)
+
+    # TAB 3: Prognostic RUL & Degradation Analysis
+    with tab_rul:
+        st.markdown("#### ⏳ Remaining Useful Life (RUL) Prognostic Matrix")
+        st.markdown("""
+        <div style="background: rgba(31, 41, 55, 0.5); padding: 14px; border-radius: 10px; border-left: 3px solid #38bdf8; font-size: 12px; color: #d1d5db; margin-bottom: 16px;">
+            <b>Reliability Engineering Model:</b> RUL estimation maps real-time operating vibration signatures against Weibull failure distributions to project precise component breakdown timelines.
+        </div>
+        """, unsafe_allow_html=True)
+        
+        if not assets_df.empty:
+            fig_rul = px.scatter(
+                assets_df, x="rul_hours", y="health", size="vibration_mm_s", color="status",
+                text="asset_id", color_discrete_map={"Healthy": "#34d399", "Optimal": "#38bdf8", "Warning": "#fbbf24", "Critical": "#f43f5e"},
+                title="Remaining Useful Life (Hours) vs Health Index (%)"
+            )
+            fig_rul.update_layout(plot_bgcolor="#0b0f19", paper_bgcolor="#0b0f19", font=dict(color="#f3f4f6"), height=380)
+            st.plotly_chart(fig_rul, use_container_width=True)
+
+    # TAB 4: Maintenance Work Orders
+    with tab_scheduler:
+        st.markdown("#### 📋 Corrective & Preventive Maintenance Work Order Dispatch")
+        
+        col_w1, col_w2 = st.columns([1, 1])
+        with col_w1:
+            st.markdown("##### Create New Work Order")
+            with st.form("wo_form_elite"):
+                wo_asset = st.selectbox("Target Equipment", assets_df["name"].tolist())
+                wo_type = st.selectbox("Action Required", ["Urgent Overhaul", "Component Replacement", "Lubrication & Alignment", "Vibration Sensor Calibration"])
+                wo_priority = st.selectbox("Priority Ranking", ["Emergency (P1)", "High (P2)", "Medium (P3)", "Routine (P4)"])
+                wo_notes = st.text_area("Technician Instructions", value="Inspect bearing housing for thermal fatigue and verify backlash tolerances.")
+                
+                if st.form_submit_button("🚀 Dispatch Maintenance Order", use_container_width=True):
+                    new_wo = {
+                        "wo_id": f"WO-{np.random.randint(1010, 9999)}",
+                        "asset": wo_asset,
+                        "type": wo_type,
+                        "priority": wo_priority,
+                        "status": "Dispatched"
+                    }
+                    st.session_state.maintenance_work_orders.append(new_wo)
+                    st.success(f"Work order successfully generated for **{wo_asset}**!")
+                    st.rerun()
+
+        with col_w2:
+            st.markdown("##### Active Work Order Dispatch Log")
+            if not wo_df.empty:
+                st.dataframe(wo_df, use_container_width=True, hide_index=True)
+            else:
+                st.info("No active work orders currently logged.")
+
+    # TAB 5: Asset Registry Studio
+    with tab_registry:
+        st.markdown("#### ⚙️ Equipment Asset Registry & Telemetry Configuration")
+        
+        col_r1, col_r2 = st.columns(2)
+        with col_r1:
+            st.markdown("##### Add New Monitored Machine")
+            with st.form("add_asset_form"):
+                new_id = st.text_input("Asset ID Tag", value=f"EQ-{len(assets_df)+10}")
+                new_name = st.text_input("Asset Name", value="Hydraulic Stamping Press C")
+                new_type = st.selectbox("Machine Category", ["Machining Center", "Material Handling", "Conveyor System", "Fluid Power", "Robotic Arm"])
+                new_health = st.slider("Current Health Score (%)", 10, 100, 85)
+                new_vibe = st.number_input("Vibration Baseline (mm/s)", 0.5, 10.0, 2.2, 0.1)
+                new_temp = st.number_input("Operating Temperature (°C)", 30.0, 120.0, 60.0, 0.5)
+                new_rul = st.number_input("Estimated RUL (Hours)", 50, 5000, 1800, 50)
+                
+                status_calc = "Critical" if new_health < 50 else ("Warning" if new_health < 70 else ("Optimal" if new_health > 90 else "Healthy"))
+                
+                if st.form_submit_button("➕ Register Asset to Fleet", use_container_width=True):
+                    st.session_state.maintenance_assets.append({
+                        "asset_id": new_id, "name": new_name, "type": new_type,
+                        "health": int(new_health), "status": status_calc,
+                        "vibration_mm_s": float(new_vibe), "temp_c": float(new_temp),
+                        "rul_hours": int(new_rul)
+                    })
+                    st.success(f"Asset **{new_name}** successfully added to the telemetry network!")
+                    st.rerun()
+
+        with col_r2:
+            st.markdown("##### Manage Existing Fleet Database")
+            selected_to_remove = st.selectbox("Select Asset to Remove / Decommission", [a["name"] for a in st.session_state.maintenance_assets])
+            if st.button("🗑️ Decommission Selected Asset", type="secondary"):
+                st.session_state.maintenance_assets = [a for a in st.session_state.maintenance_assets if a["name"] != selected_to_remove]
+                st.success(f"Asset **{selected_to_remove}** successfully decommissioned.")
+                st.rerun()
+
+    st.stop()
 
 def render_data_editor(df, key_name):
     if hasattr(st, "data_editor"):
