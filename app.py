@@ -3237,9 +3237,11 @@ if mod == "Cryptographic Ledger":
             st.info("Redirecting to secure subscription portal...")
 
 # ==============================================================================
-# REAL-TIME AGV/AMR FLEET DISPATCHER MODULE (Enterprise Command Tower Edition)
+# REAL-TIME AGV/AMR FLEET DISPATCHER MODULE (Master Command Tower Edition)
 # ==============================================================================
-if st.session_state.get("selected_nav", st.session_state.get("selected_module", "")) == "AGV Fleet Dispatcher":
+active_module = st.session_state.get("selected_module", "")
+
+if active_module == "AGV Fleet Dispatcher":
     
     # Gorgeous custom CSS/HTML header banner
     st.markdown("""
@@ -3300,9 +3302,8 @@ if st.session_state.get("selected_nav", st.session_state.get("selected_module", 
                     if r["status"] == "NAVIGATING":
                         r["x"] = (r["x"] + 1) % 10
                         r["y"] = (r["y"] + 2) % 10
-                st.toast("Simulation clock advanced. Grid coordinates updated.", icon="🚀")
+                st.rerun()
         
-        # Interactive Plotly Digital Twin Grid
         fig = px.scatter(
             df_fleet, x="x", y="y", text="id", color="status",
             size=[32]*len(df_fleet), hover_data=["battery", "payload", "destination"],
@@ -3351,3 +3352,6 @@ if st.session_state.get("selected_nav", st.session_state.get("selected_module", 
             for r in st.session_state.agv_fleet:
                 r["status"] = "IDLE"
             st.error("⚠️ EMERGENCY STOP ACTIVATED: All autonomous mobile units safely halted in place.")
+
+    # Halt execution so the default dashboard doesn't render underneath
+    st.stop()
