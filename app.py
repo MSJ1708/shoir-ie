@@ -772,7 +772,7 @@ tier_val = st.session_state.user_tier
 is_admin = (st.session_state.current_user == "sho")
 
 tier1_features = ["MILP Solvers", "Inventory Playback", "Core IE Tools", "Subscriptions", "Persistence", "Facility Layout & Warehousing"]
-tier2_features = tier1_features + ["Carbon Accounting", "IoT Digital Twin", "MEIO Matrix", "Slotting & Gantt", "Fleet Routing", "Warehouse Heatmap", "Supplier Risk Matrix", "Scenarios", "AGV Fleet Dispatcher", "Geospatial Network Designer", "Production Planning & Control (PPC)", "Lean Manufacturing & Shop Floor Operations", "Quality Control, Six Sigma & Reliability"]
+tier2_features = tier1_features + ["Carbon Accounting", "IoT Digital Twin", "MEIO Matrix", "Slotting & Gantt", "Fleet Routing", "Warehouse Heatmap", "Supplier Risk Matrix", "Scenarios", "AGV Fleet Dispatcher", "Geospatial Network Designer", "Production Planning & Control (PPC)", "Lean Manufacturing & Shop Floor Operations", "Quality Control, Six Sigma & Reliability", "Engineering Economics & Finance"]
 tier3_features = tier2_features + ["AI Copilot", "FastAPI Gateway", "Monte Carlo Sim", "Sensitivity Analysis", "Webhook Alerts", "Agentic Workflows", "Control Tower", "Cryptographic Ledger", "Predictive Maintenance Hub", "Human Factors & Ergonomics (NIOSH)"]
 if is_admin:
     tier3_features.append("Admin Panel")
@@ -2853,6 +2853,331 @@ if mod in ["Human Factors & Ergonomics (NIOSH)", "Human Factors, Ergonomics, & S
             rest_mins_per_hour = max(0.0, 60.0 * (energy_exp - 4.0) / (energy_exp - 1.5))
             st.metric("Required Rest Time", f"{rest_mins_per_hour:.1f} mins / hour")
             st.metric("Total Shift Rest", f"{rest_mins_per_hour * shift_hours:.1f} minutes")
+
+    st.stop()
+
+# ==============================================================================
+# SHOIR-IE: ELITE ENGINEERING ECONOMICS & FINANCIAL ANALYSIS SUITE (V3.3)
+# ==============================================================================
+if mod in ["Engineering Economics & Finance", "Engineering Economics & Financial Analysis"]:
+    
+    import streamlit as st
+    import pandas as pd
+    import plotly.express as px
+    import plotly.graph_objects as go
+    import numpy as np
+    import uuid
+
+    # 1. Initialize Dynamic Session States (CRUD & Simulation Settings)
+    if "fin_cash_flows" not in st.session_state:
+        st.session_state.fin_cash_flows = [
+            {"year": 0, "cash_flow": -100000.0},
+            {"year": 1, "cash_flow": 25000.0},
+            {"year": 2, "cash_flow": 35000.0},
+            {"year": 3, "cash_flow": 45000.0},
+            {"year": 4, "cash_flow": 55000.0},
+        ]
+
+    if "cvp_products" not in st.session_state:
+        st.session_state.cvp_products = [
+            {"id": "P1", "name": "Precision CNC Valve", "price": 120.0, "vc": 45.0, "mix_pct": 50.0},
+            {"id": "P2", "name": "Automated Actuator Unit", "price": 250.0, "vc": 110.0, "mix_pct": 30.0},
+            {"id": "P3", "name": "Industrial Sensor Module", "price": 85.0, "vc": 25.0, "mix_pct": 20.0},
+        ]
+
+    def calculate_npv(rate, cash_flows):
+        return sum(cf / ((1 + rate) ** t) for t, cf in cash_flows)
+
+    def calculate_irr(cash_flows):
+        cf_dict = {t: cf for t, cf in cash_flows}
+        max_t = max(cf_dict.keys())
+        full_cfs = [cf_dict.get(t, 0.0) for t in range(max_t + 1)]
+        low, high = -0.99, 10.0
+        for _ in range(1000):
+            mid = (low + high) / 2.0
+            npv_mid = sum(cf / ((1 + mid) ** t) for t, cf in enumerate(full_cfs))
+            if abs(npv_mid) < 1e-6:
+                return mid
+            npv_low = sum(cf / ((1 + low) ** t) for t, cf in enumerate(full_cfs))
+            if npv_low * npv_mid < 0:
+                high = mid
+            else:
+                low = mid
+        return (low + high) / 2.0
+
+    # 2. Glassmorphism Header Banner
+    st.markdown("""
+    <div style="background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #312e81 100%); padding: 30px; border-radius: 16px; color: white; margin-bottom: 24px; box-shadow: 0 10px 25px rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.08);">
+        <div style="display: flex; align-items: center; justify-content: space-between;">
+            <div>
+                <span style="background: rgba(16, 185, 129, 0.25); color: #34d399; padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;">Tier 2: Engineering Economics & Financial Optimization</span>
+                <h1 style="margin:8px 0 4px 0; color: #ffffff; font-size: 26px; font-weight: 800; letter-spacing: -0.025em;">💰 Engineering Economics & Financial Analysis Suite (V3.3)</h1>
+                <p style="margin:0; color: #9ca3af; font-size: 13px;">Capital Budgeting &bull; Machine Replacement EUAW &bull; Tax Depreciation &bull; Multi-Product CVP &bull; Monte Carlo Risk &bull; Loan Amortization</p>
+            </div>
+            <div style="background: rgba(56, 189, 248, 0.15); border: 1px solid rgba(56, 189, 248, 0.4); padding: 8px 16px; border-radius: 30px; color: #38bdf8; font-weight: 600; font-size: 12px; display: flex; align-items: center; gap: 6px;">
+                <span style="width: 8px; height: 8px; background: #38bdf8; border-radius: 50%; display: inline-block; box-shadow: 0 0 8px #38bdf8;"></span> V3.3 Enterprise Active
+            </div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # 3. Multi-Tab Navigation Architecture (6 Elite Tabs)
+    tab_cap, tab_rep, tab_dep, tab_cvp, tab_mc, tab_loan = st.tabs([
+        "📈 Capital Budgeting", 
+        "🔄 Machine Replacement", 
+        "📉 Tax Depreciation", 
+        "📊 Multi-Product CVP",
+        "🎲 Monte Carlo Risk",
+        "💳 Loan Amortization"
+    ])
+
+    # ----------------------------------------------------
+    # TAB 1: CAPITAL BUDGETING ENGINE
+    # ----------------------------------------------------
+    with tab_cap:
+        st.markdown("#### 📈 Capital Budgeting Engine (NPV, IRR, MIRR & Payback)")
+        col_c1, col_c2 = st.columns([1, 2])
+
+        with col_c1:
+            st.markdown("##### ⚙️ Financial Parameters & CF Manager")
+            discount_rate = st.slider("Discount Rate / Cost of Capital (%)", 1.0, 25.0, 10.0, 0.5, key="cap_disc") / 100.0
+
+            st.markdown("##### ➕ Add Cash Flow Year")
+            with st.form("add_cf_form"):
+                new_year = st.number_input("Year Number", min_value=0, max_value=30, value=len(st.session_state.fin_cash_flows))
+                new_cf = st.number_input("Cash Flow Amount ($)", value=15000.0, step=1000.0)
+                if st.form_submit_button("📥 Add / Update Cash Flow", use_container_width=True):
+                    existing = next((item for item in st.session_state.fin_cash_flows if item["year"] == new_year), None)
+                    if existing:
+                        existing["cash_flow"] = new_cf
+                    else:
+                        st.session_state.fin_cash_flows.append({"year": int(new_year), "cash_flow": float(new_cf)})
+                        st.session_state.fin_cash_flows = sorted(st.session_state.fin_cash_flows, key=lambda x: x["year"])
+                    st.rerun()
+
+            st.markdown("##### 🗑️ Remove Cash Flow Year")
+            with st.form("remove_cf_form"):
+                cf_years = [item["year"] for item in st.session_state.fin_cash_flows if item["year"] > 0]
+                rem_year = st.selectbox("Select Year to Remove", cf_years if cf_years else ["No removable years"])
+                if st.form_submit_button("🗑️ Delete Year", use_container_width=True):
+                    if cf_years and rem_year != "No removable years":
+                        st.session_state.fin_cash_flows = [item for item in st.session_state.fin_cash_flows if item["year"] != rem_year]
+                        st.rerun()
+
+        with col_c2:
+            st.markdown("##### 📊 Cash Flow Register & Metrics")
+            df_cf = pd.DataFrame(st.session_state.fin_cash_flows)
+            st.dataframe(df_cf.rename(columns={"year": "Project Year", "cash_flow": "Net Cash Flow ($)"}), use_container_width=True, hide_index=True)
+
+            cfs = [(item["year"], item["cash_flow"]) for item in st.session_state.fin_cash_flows]
+            npv_val = calculate_npv(discount_rate, cfs)
+            irr_val = calculate_irr(cfs)
+
+            cumulative_cf, payback_period, running_sum = 0.0, 0.0, 0.0
+            payback_found = False
+            for t, cf in cfs:
+                if t == 0:
+                    running_sum += cf
+                else:
+                    prev_sum = running_sum
+                    running_sum += cf
+                    if running_sum >= 0 and not payback_found:
+                        fraction = abs(prev_sum) / cf if cf > 0 else 0
+                        payback_period = (t - 1) + fraction
+                        payback_found = True
+
+            mc1, mc2, mc3 = st.columns(3)
+            mc1.metric("Net Present Value (NPV)", f"${npv_val:,.2f}")
+            mc2.metric("Internal Rate of Return", f"{irr_val*100:.2f}%")
+            mc3.metric("Discounted Payback", f"{payback_period:.2f} Yrs" if payback_found else "N/A")
+
+            fig_cf = px.bar(df_cf, x="year", y="cash_flow", title="Project Net Cash Flow Timeline")
+            fig_cf.update_layout(plot_bgcolor="#0b0f19", paper_bgcolor="#0b0f19", font=dict(color="#f3f4f6"), height=260)
+            st.plotly_chart(fig_cf, use_container_width=True)
+
+    # ----------------------------------------------------
+    # TAB 2: MACHINE REPLACEMENT (EUAW)
+    # ----------------------------------------------------
+    with tab_rep:
+        st.markdown("#### 🔄 Machine Replacement Analysis & EUAW")
+        col_r1, col_r2 = st.columns(2)
+        with col_r1:
+            init_cost = st.number_input("Challenger Initial Investment ($)", 10000, 500000, 120000, 5000)
+            interest_r = st.slider("Interest Rate for EUAW (%)", 2.0, 20.0, 10.0, 0.5, key="rep_int") / 100.0
+            salvage_yr1 = st.number_input("Year 1 Salvage Value ($)", 5000, 200000, 80000, 5000)
+            salvage_decline = st.slider("Annual Salvage Value Decline Rate (%)", 5.0, 30.0, 15.0, 1.0) / 100.0
+            base_om = st.number_input("Year 1 O&M Cost ($)", 1000, 50000, 12000, 1000)
+            om_escalation = st.slider("O&M Escalation Rate (%)", 1.0, 25.0, 8.0, 1.0) / 100.0
+
+        with col_r2:
+            years_list = list(range(1, 9))
+            eua_list = []
+            for yr in years_list:
+                crf = (interest_r * ((1 + interest_r)**yr)) / (((1 + interest_r)**yr) - 1)
+                salvage_val = salvage_yr1 * ((1 - salvage_decline)**(yr - 1))
+                capital_recovery = (init_cost - salvage_val * ((1/(1+interest_r))**yr)) * crf
+                total_om_pv = sum((base_om * ((1 + om_escalation)**(t-1))) / ((1 + interest_r)**t) for t in range(1, yr+1))
+                annual_om_equivalent = total_om_pv * crf
+                total_euaW = capital_recovery + annual_om_equivalent
+                eua_list.append({"Year": yr, "Total EUAW": total_euaW})
+
+            df_eua = pd.DataFrame(eua_list)
+            optimal_row = df_eua.loc[df_eua["Total EUAW"].idxmin()]
+            st.metric(label="Optimal Economic Life", value=f"{int(optimal_row['Year'])} Years", delta=f"Min EUAW: ${optimal_row['Total EUAW']:,.2f} / yr")
+            
+            fig_eua = px.line(df_eua, x="Year", y="Total EUAW", markers=True, title="EUAW Economic Life Curve")
+            fig_eua.update_layout(plot_bgcolor="#0b0f19", paper_bgcolor="#0b0f19", font=dict(color="#f3f4f6"), height=260)
+            st.plotly_chart(fig_eua, use_container_width=True)
+
+    # ----------------------------------------------------
+    # TAB 3: TAX DEPRECIATION
+    # ----------------------------------------------------
+    with tab_dep:
+        st.markdown("#### 📉 Tax Depreciation Models (SL, DB, MACRS)")
+        col_d1, col_d2 = st.columns(2)
+        with col_d1:
+            asset_cost = st.number_input("Initial Asset Cost Basis ($)", 10000, 1000000, 150000, 10000)
+            salvage_val_dep = st.number_input("Estimated Salvage Value ($)", 0, 100000, 15000, 1000)
+            useful_life = st.slider("Useful Recovery Life (Years)", 3, 15, 5, 1)
+        with col_d2:
+            dep_rows = []
+            sl_annual = (asset_cost - salvage_val_dep) / useful_life
+            db_rate = 2.0 / useful_life
+            sl_book, db_book = asset_cost, asset_cost
+            macrs_rates_5yr = [0.20, 0.32, 0.192, 0.1152, 0.1152, 0.0576]
+
+            for yr in range(1, useful_life + 1):
+                sl_dep = sl_annual if sl_book - sl_annual >= salvage_val_dep else max(0.0, sl_book - salvage_val_dep)
+                sl_book = max(salvage_val_dep, sl_book - sl_dep)
+                db_dep = db_book * db_rate
+                if db_book - db_dep < salvage_val_dep:
+                    db_dep = max(0.0, db_book - salvage_val_dep)
+                db_book = max(salvage_val_dep, db_book - db_dep)
+                m_rate = macrs_rates_5yr[yr-1] if yr-1 < len(macrs_rates_5yr) else (1.0 / useful_life)
+                macrs_dep = asset_cost * m_rate
+                dep_rows.append({"Year": yr, "Straight-Line": sl_dep, "Declining Balance": db_dep, "MACRS": macrs_dep})
+
+            df_dep = pd.DataFrame(dep_rows)
+            st.dataframe(df_dep.style.format("${:,.2f}"), use_container_width=True, hide_index=True)
+
+    # ----------------------------------------------------
+    # TAB 4: MULTI-PRODUCT CVP
+    # ----------------------------------------------------
+    with tab_cvp:
+        st.markdown("#### 📊 Multi-Product CVP & Break-Even Analysis")
+        col_v1, col_v2 = st.columns([1, 2])
+        with col_v1:
+            total_fixed_costs = st.number_input("Total Monthly Fixed Costs ($)", 10000, 500000, 85000, 5000)
+            with st.form("add_cvp_form"):
+                p_name = st.text_input("Product Name", value="Industrial Robot Arm")
+                p_price = st.number_input("Selling Price ($)", 10.0, 5000.0, 450.0, 10.0)
+                p_vc = st.number_input("Unit Variable Cost ($)", 5.0, 4000.0, 180.0, 10.0)
+                p_mix = st.slider("Sales Mix Share (%)", 5.0, 100.0, 25.0, 5.0)
+                if st.form_submit_button("📥 Add Product", use_container_width=True):
+                    st.session_state.cvp_products.append({"id": f"P-{str(uuid.uuid4())[:4].upper()}", "name": p_name, "price": float(p_price), "vc": float(p_vc), "mix_pct": float(p_mix)})
+                    st.rerun()
+        with col_v2:
+            df_cvp = pd.DataFrame(st.session_state.cvp_products)
+            if not df_cvp.empty:
+                total_mix = df_cvp["mix_pct"].sum()
+                df_cvp["normalized_mix"] = df_cvp["mix_pct"] / total_mix if total_mix > 0 else 1.0 / len(df_cvp)
+                df_cvp["unit_cm"] = df_cvp["price"] - df_cvp["vc"]
+                weighted_cm = (df_cvp["unit_cm"] * df_cvp["normalized_mix"]).sum()
+                break_even_units = total_fixed_costs / weighted_cm if weighted_cm > 0 else 0
+                st.metric("Total Break-Even Sales Volume", f"{break_even_units:,.0f} Units")
+                st.dataframe(df_cvp[["name", "price", "vc", "mix_pct", "unit_cm"]].rename(columns={"name": "Product", "price": "Price", "vc": "VC", "mix_pct": "Mix", "unit_cm": "CM"}), use_container_width=True, hide_index=True)
+
+    # ----------------------------------------------------
+    # TAB 5: MONTE CARLO RISK SIMULATION (NEW IN V3.3)
+    # ----------------------------------------------------
+    with tab_mc:
+        st.markdown("#### 🎲 Monte Carlo NPV Risk & Uncertainty Simulation")
+        st.markdown("""
+        <div style="background: rgba(31, 41, 55, 0.5); padding: 12px; border-radius: 8px; border-left: 3px solid #f43f5e; font-size: 12px; color: #d1d5db; margin-bottom: 16px;">
+            <b>Probabilistic Risk Modeler:</b> Simulates 1,000 randomized project futures by adding Gaussian noise ($\pm 15\%$) to annual cash flows to calculate the probability of a positive NPV.
+        </div>
+        """, unsafe_allow_html=True)
+
+        mc_col1, mc_col2 = st.columns([1, 2])
+        with mc_col1:
+            sim_runs = st.slider("Simulation Iterations", 500, 5000, 1000, 500)
+            volatility = st.slider("Cash Flow Volatility / Uncertainty (%)", 5.0, 40.0, 15.0, 2.5) / 100.0
+            run_sim_btn = st.button("🚀 Run Monte Carlo Simulation", use_container_width=True)
+
+        with mc_col2:
+            if run_sim_btn or "mc_results" in st.session_state:
+                npv_sims = []
+                base_cfs = [(item["year"], item["cash_flow"]) for item in st.session_state.fin_cash_flows]
+                base_rate = discount_rate
+
+                np.random.seed(42)
+                for _ in range(sim_runs):
+                    sim_cfs = []
+                    for t, cf in base_cfs:
+                        if t == 0:
+                            sim_cfs.append((t, cf)) # Initial outlay is fixed
+                        else:
+                            perturbed_cf = cf * np.random.normal(1.0, volatility)
+                            sim_cfs.append((t, perturbed_cf))
+                    npv_sims.append(calculate_npv(base_rate, sim_cfs))
+
+                st.session_state.mc_results = npv_sims
+                df_mc = pd.DataFrame({"NPV": npv_sims})
+                
+                prob_positive = (sum(1 for x in npv_sims if x > 0) / len(npv_sims)) * 100
+                mean_npv = np.mean(npv_sims)
+
+                m1, m2 = st.columns(2)
+                m1.metric("Probability of Positive NPV", f"{prob_positive:.1f}%", delta="Confidence Level")
+                m2.metric("Mean Simulated NPV", f"${mean_npv:,.2f}")
+
+                fig_mc = px.histogram(df_mc, x="NPV", nbins=40, title="Monte Carlo NPV Distribution Curve", color_discrete_sequence=["#f43f5e"])
+                fig_mc.update_layout(plot_bgcolor="#0b0f19", paper_bgcolor="#0b0f19", font=dict(color="#f3f4f6"), height=280)
+                st.plotly_chart(fig_mc, use_container_width=True)
+            else:
+                st.info("Click **Run Monte Carlo Simulation** to generate probabilistic risk profiles.")
+
+    # ----------------------------------------------------
+    # TAB 6: LOAN AMORTIZATION & FINANCING (NEW IN V3.3)
+    # ----------------------------------------------------
+    with tab_loan:
+        st.markdown("#### 💳 Equipment Loan Amortization & Financing Modeler")
+        col_l1, col_l2 = st.columns(2)
+        with col_l1:
+            loan_amount = st.number_input("Equipment Loan Principal ($)", 10000, 1000000, 80000, 10000)
+            loan_rate = st.slider("Annual Loan Interest Rate (%)", 1.0, 18.0, 6.5, 0.5) / 100.0
+            loan_terms = st.slider("Loan Term (Years)", 1, 10, 5, 1)
+            corp_tax_rate = st.slider("Corporate Tax Rate (%)", 0.0, 40.0, 20.0, 5.0) / 100.0
+
+        with col_l2:
+            # Amortization calculation
+            r = loan_rate
+            n = loan_terms
+            annual_payment = loan_amount * (r * (1 + r)**n) / ((1 + r)**n - 1) if r > 0 else loan_amount / n
+
+            balance = loan_amount
+            amort_rows = []
+            for yr in range(1, n + 1):
+                interest_payment = balance * r
+                principal_payment = annual_payment - interest_payment
+                balance -= principal_payment
+                tax_shield = interest_payment * corp_tax_rate
+                
+                amort_rows.append({
+                    "Year": yr,
+                    "Payment": annual_payment,
+                    "Principal": principal_payment,
+                    "Interest": interest_payment,
+                    "Interest Tax Shield": tax_shield,
+                    "Ending Balance": max(0.0, balance)
+                })
+
+            df_amort = pd.DataFrame(amort_rows)
+            st.metric("Annual Debt Service Payment", f"${annual_payment:,.2f} / yr")
+            st.dataframe(df_amort.style.format({
+                "Payment": "${:,.2f}", "Principal": "${:,.2f}", "Interest": "${:,.2f}",
+                "Interest Tax Shield": "${:,.2f}", "Ending Balance": "${:,.2f}"
+            }), use_container_width=True, hide_index=True)
 
     st.stop()
 
