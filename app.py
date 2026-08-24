@@ -2583,8 +2583,8 @@ if mod in ["Facility Layout & Warehousing", "Facility Layout, Material Handling 
 
     st.stop()
     
-    # ==============================================================================
-# SHOIR-IE: ELITE HUMAN FACTORS, ERGONOMICS & SAFETY ENGINEERING (V2.9)
+# ==============================================================================
+# SHOIR-IE: ELITE HUMAN FACTORS, ERGONOMICS & SAFETY ENGINEERING (V3.0)
 # ==============================================================================
 if mod in ["Human Factors & Ergonomics (NIOSH)", "Human Factors, Ergonomics, & Safety Engineering"]:
     
@@ -2594,12 +2594,17 @@ if mod in ["Human Factors & Ergonomics (NIOSH)", "Human Factors, Ergonomics, & S
     import plotly.graph_objects as go
     import numpy as np
 
-    # 1. Initialize Session State for Ergonomic Tasks
+    # 1. Initialize Session States
     if "ergonomic_tasks" not in st.session_state:
         st.session_state.ergonomic_tasks = [
             {"task_id": "T-101", "station": "Palletizing Line A", "load_kg": 18.5, "rwl_kg": 14.2, "li": 1.30, "risk": "Moderate Risk"},
             {"task_id": "T-102", "station": "Raw Material Unloading", "load_kg": 25.0, "rwl_kg": 11.0, "li": 2.27, "risk": "High Risk (Action Req.)"},
-            {"task_id": "T-103", "station": "Sub-Assembly Transfer", "load_kg": 10.0, "rwl_kg": 16.5, "li": 0.61, "risk": "Safe / Low Risk"},
+        ]
+        
+    if "time_studies" not in st.session_state:
+        st.session_state.time_studies = [
+            {"study_id": "TS-01", "element": "Pick and Place Part", "observed_time_s": 12.5, "rating_pct": 110, "allowance_pct": 15, "standard_time_s": 15.8},
+            {"study_id": "TS-02", "element": "CNC Fixture Clamping", "observed_time_s": 8.2, "rating_pct": 100, "allowance_pct": 12, "standard_time_s": 9.18},
         ]
 
     # 2. Astonishing Glassmorphism Header Banner
@@ -2608,63 +2613,59 @@ if mod in ["Human Factors & Ergonomics (NIOSH)", "Human Factors, Ergonomics, & S
         <div style="display: flex; align-items: center; justify-content: space-between;">
             <div>
                 <span style="background: rgba(244, 63, 94, 0.25); color: #f43f5e; padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;">Tier 3: Safety, Ergonomics & Human Factors</span>
-                <h1 style="margin:8px 0 4px 0; color: #ffffff; font-size: 26px; font-weight: 800; letter-spacing: -0.025em;">🛡️ Human Factors, Ergonomics & NIOSH Lifting Suite</h1>
-                <p style="margin:0; color: #9ca3af; font-size: 13px;">NIOSH Lifting Equation (RWL & LI) &bull; Ergonomic Task Risk Register &bull; Biomechanical Posture Evaluation</p>
+                <h1 style="margin:8px 0 4px 0; color: #ffffff; font-size: 26px; font-weight: 800; letter-spacing: -0.025em;">🛡️ Human Factors, Ergonomics & Safety Engineering Suite</h1>
+                <p style="margin:0; color: #9ca3af; font-size: 13px;">NIOSH RWL & LI &bull; RULA/REBA Posture Scorer &bull; Work Measurement & Time Study &bull; MTM/PMTS &bull; Fatigue-Recovery Modeler</p>
             </div>
             <div style="background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.4); padding: 8px 16px; border-radius: 30px; color: #34d399; font-weight: 600; font-size: 12px; display: flex; align-items: center; gap: 6px;">
-                <span style="width: 8px; height: 8px; background: #34d399; border-radius: 50%; display: inline-block; box-shadow: 0 0 8px #34d399;"></span> Safety Engine Active
+                <span style="width: 8px; height: 8px; background: #34d399; border-radius: 50%; display: inline-block; box-shadow: 0 0 8px #34d399;"></span> V3.0 Engine Active
             </div>
         </div>
     </div>
     """, unsafe_allow_html=True)
 
     # 3. Multi-Tab Navigation Architecture
-    tab_niosh, tab_register, tab_reba, tab_guidelines = st.tabs([
-        "⚖️ NIOSH Lifting Calculator (RWL & LI)", 
-        "📋 Ergonomic Risk Task Register (CRUD)", 
-        "🦴 REBA / RULA Posture Analysis", 
-        "📚 Ergonomic Design Guidelines"
+    tab_niosh, tab_rula, tab_timestudy, tab_pmts, tab_fatigue, tab_register = st.tabs([
+        "⚖️ NIOSH Lifting Calculator", 
+        "🦴 RULA & REBA Posture Scorer", 
+        "⏱️ Work Measurement & Time Study", 
+        "⚙️ PMTS / MTM Micro-Motion", 
+        "🔋 Fatigue-Recovery Modeler",
+        "📋 Risk Task Register"
     ])
 
-    # TAB 1: NIOSH Lifting Equation Calculator
+    # ----------------------------------------------------
+    # TAB 1: NIOSH LIFTING CALCULATOR
+    # ----------------------------------------------------
     with tab_niosh:
         st.markdown("#### ⚖️ NIOSH Recommended Weight Limit (RWL) & Lifting Index (LI) Calculator")
         st.markdown("""
         <div style="background: rgba(31, 41, 55, 0.5); padding: 12px; border-radius: 8px; border-left: 3px solid #f43f5e; font-size: 12px; color: #d1d5db; margin-bottom: 16px;">
-            <b>NIOSH Equation:</b> $RWL = LC \\times HM \\times VM \\times DM \\times AM \\times FM \\times CM$. The Lifting Index ($LI = \\text{Load} / \\text{RWL}$) evaluates lower back injury risk. $LI > 1.0$ indicates increased stress; $LI > 3.0$ requires immediate redesign.
+            <b>Manual Handling Evaluation:</b> Computes the Recommended Weight Limit (RWL) using multipliers for horizontal distance, vertical height, travel distance, asymmetry, frequency, and coupling.
         </div>
         """, unsafe_allow_html=True)
 
         col_n1, col_n2 = st.columns(2)
-
         with col_n1:
-            st.markdown("##### Input Lifting Parameters (Metric)")
-            load_weight = st.number_input("Actual Object Weight Lifted ($L$ in kg)", 1.0, 50.0, 16.5, 0.5)
-            h_dist = st.slider("Horizontal Distance ($H$ in cm from ankles to hands)", 20, 80, 35, 1)
-            v_height = st.slider("Vertical Height ($V$ in cm from floor to hands)", 0, 175, 75, 5)
+            load_weight = st.number_input("Actual Object Weight Lifted (kg)", 1.0, 50.0, 18.5, 0.5)
+            h_dist = st.slider("Horizontal Distance ($H$ in cm)", 20, 80, 35, 1)
+            v_height = st.slider("Vertical Height ($V$ in cm)", 0, 175, 75, 5)
             d_travel = st.slider("Vertical Travel Distance ($D$ in cm)", 20, 150, 50, 5)
             a_angle = st.slider("Asymmetric Angle ($A$ in degrees)", 0, 135, 15, 5)
-            lifts_per_min = st.slider("Lifting Frequency (lifts/minute)", 0.2, 15.0, 2.0, 0.2)
-            duration_hrs = st.selectbox("Lifting Duration", ["Short (< 1 hour)", "Moderate (1 - 2 hours)", "Long (2 - 8 hours)"])
-            coupling_quality = st.selectbox("Container / Hand Coupling Quality", ["Good (Optimal handles)", "Fair (Adequate grips/fingers)", "Poor (Awkward / no handles)"])
+            lifts_per_min = st.slider("Lifting Frequency (lifts/min)", 0.2, 15.0, 2.0, 0.2)
+            coupling_quality = st.selectbox("Hand Coupling Quality", ["Good (Optimal handles)", "Fair (Adequate)", "Poor (Awkward)"])
 
         with col_n2:
-            # NIOSH Multipliers Calculation logic
-            lc = 23.0  # Load Constant in kg
+            lc = 23.0
             hm = max(0.0, min(1.0, 25.0 / h_dist))
             vm = max(0.0, min(1.0, 1.0 - (0.003 * abs(v_height - 75.0))))
             dm = max(0.71, min(1.0, 0.82 + (4.5 / max(d_travel, 1))))
             am = max(0.0, min(1.0, 1.0 - (0.0032 * a_angle)))
-            
-            # Simplified FM approximation based on frequency & height
             fm = 0.85 if lifts_per_min <= 1 else (0.60 if lifts_per_min <= 5 else 0.30)
-            
             cm = 1.0 if "Good" in coupling_quality else (0.95 if "Fair" in coupling_quality else 0.90)
 
             rwl = lc * hm * vm * dm * am * fm * cm
             li = load_weight / rwl if rwl > 0 else 99.0
 
-            # Determine Risk Status
             if li <= 1.0:
                 risk_badge, badge_color = "Safe Operation (Low Risk)", "#34d399"
             elif li <= 2.0:
@@ -2672,107 +2673,186 @@ if mod in ["Human Factors & Ergonomics (NIOSH)", "Human Factors, Ergonomics, & S
             else:
                 risk_badge, badge_color = "High Risk (Immediate Redesign Required)", "#ef4444"
 
-            st.markdown("##### Biomechanical Output & Multipliers")
+            st.markdown("##### Calculated NIOSH Outputs")
             st.metric(label="Recommended Weight Limit (RWL)", value=f"{rwl:.2f} kg", delta="NIOSH Standard")
-            st.metric(label="Lifting Index (LI)", value=f"{li:.2f}", delta="Risk Metric")
+            st.metric(label="Lifting Index (LI)", value=f"{li:.2f}", delta="Risk Indicator")
 
-            assessment_html = f"""
+            st.markdown(f"""
             <div style="background: rgba(31, 41, 55, 0.6); border: 1px solid {badge_color}; padding: 14px; border-radius: 8px; color: {badge_color}; font-size: 13px; font-weight: 600; margin-top: 15px;">
-                Safety Assessment: {risk_badge}<br>
-                <span style="font-weight: 400; color: #9ca3af; font-size: 11px;">
-                HM={hm:.2f} | VM={vm:.2f} | DM={dm:.2f} | AM={am:.2f} | FM={fm:.2f} | CM={cm:.2f}
-                </span>
+                Status: {risk_badge}<br>
+                <span style="font-weight: 400; color: #9ca3af; font-size: 11px;">Multipliers: HM={hm:.2f}, VM={vm:.2f}, DM={dm:.2f}, AM={am:.2f}, FM={fm:.2f}, CM={cm:.2f}</span>
             </div>
-            """
-            st.markdown(assessment_html, unsafe_allow_html=True)
+            """, unsafe_allow_html=True)
 
-            # Quick save button to push to register
-            if st.button("📌 Log This Task to Risk Register", use_container_width=True):
-                new_task_id = f"T-{len(st.session_state.ergonomic_tasks)+101}"
-                st.session_state.ergonomic_tasks.append({
-                    "task_id": new_task_id,
-                    "station": f"Manual Station ({h_dist}cm H)",
-                    "load_kg": float(load_weight),
-                    "rwl_kg": round(rwl, 2),
-                    "li": round(li, 2),
-                    "risk": risk_badge
-                })
-                st.success(f"Task **{new_task_id}** successfully added to the Ergonomic Risk Register!")
-
-    # TAB 2: Ergonomic Risk Task Register (CRUD)
-    with tab_register:
-        st.markdown("#### 📋 Ergonomic Risk Register & Task Management")
+    # ----------------------------------------------------
+    # TAB 2: RULA & REBA POSTURAL RISK ASSESSORS
+    # ----------------------------------------------------
+    with tab_rula:
+        st.markdown("#### 🦴 RULA & REBA Postural Risk Assessors")
         st.markdown("""
         <div style="background: rgba(31, 41, 55, 0.5); padding: 12px; border-radius: 8px; border-left: 3px solid #38bdf8; font-size: 12px; color: #d1d5db; margin-bottom: 16px;">
-            <b>Task Register:</b> Tracks active facility lifting operations, actual loads vs. calculated RWL, and associated Lifting Index scores. Use the control panel to add or decommission tasks.
+            <b>Joint Angle Scoring:</b> Evaluates upper limb (RULA) and full-body posture (REBA) based on joint angles for the upper arm, lower arm, wrist, neck, trunk, and legs.
         </div>
         """, unsafe_allow_html=True)
 
-        df_erg = pd.DataFrame(st.session_state.ergonomic_tasks)
+        col_r1, col_r2 = st.columns(2)
+        with col_r1:
+            st.markdown("##### Postural Joint Angle Inputs")
+            posture_type = st.radio("Assessment Framework", ["RULA (Upper Limb Focus)", "REBA (Full Body Focus)"])
+            upper_arm = st.slider("Upper Arm Position / Angle", 1, 4, 2, help="1: -20° to 20° | 4: >90° flexion/extension")
+            lower_arm = st.slider("Lower Arm Position / Angle", 1, 3, 2, help="1: 60° to 100° flexion | 3: <60° or >100°")
+            wrist_score = st.slider("Wrist Flexion / Deviation", 1, 4, 2, help="1: Neutral | 4: Extreme deviation")
+            neck_score = st.slider("Neck Position", 1, 3, 2, help="1: 0°-10° flexion | 3: >20° extension/flexion")
+            trunk_score = st.slider("Trunk / Torso Posture", 1, 4, 2, help="1: Upright | 4: >60° flexion")
+            load_force = st.selectbox("Load / Force Factor", ["< 5 kg (Low)", "5 to 10 kg (Medium)", "> 10 kg or Shock Load (High)"])
 
-        col_e1, col_e2 = st.columns([2, 1])
-        with col_e1:
-            st.markdown("##### Registered Ergonomic Tasks")
-            if not df_erg.empty:
-                st.dataframe(df_erg.rename(columns={
-                    "task_id": "Task ID", "station": "Workstation", "load_kg": "Actual Load (kg)",
-                    "rwl_kg": "RWL (kg)", "li": "Lifting Index (LI)", "risk": "Risk Assessment"
-                }), use_container_width=True, hide_index=True)
+        with col_r2:
+            # Composite scoring simulation for RULA/REBA
+            base_score = upper_arm + lower_arm + wrist_score + neck_score + trunk_score
+            force_add = 0 if "< 5" in load_force else (1 if "5 to" in load_force else 2)
+            final_score = min(7, max(1, int(round((base_score / 3.5) + force_add))))
+
+            if final_score <= 2:
+                r_text, r_col = "Negligible Risk (Action not necessary)", "#34d399"
+            elif final_score <= 4:
+                r_text, r_col = "Low Risk (Further investigation may be needed)", "#38bdf8"
+            elif final_score <= 6:
+                r_text, r_col = "Medium Risk (Changes soon)", "#f59e0b"
             else:
-                st.info("No ergonomic tasks registered.")
+                r_text, r_col = "Very High Risk (Implement change immediately)", "#ef4444"
 
-        with col_e2:
-            st.markdown("##### 🗑️ Task Decommissioning")
-            with st.form("delete_erg_form"):
-                task_ids = [t["task_id"] for t in st.session_state.ergonomic_tasks] if st.session_state.ergonomic_tasks else []
-                target_task = st.selectbox("Select Task ID to Remove", task_ids if task_ids else ["None"])
+            st.markdown("##### Postural Assessment Result")
+            st.metric(label=f"Calculated {posture_type.split()[0]} Score", value=f"Level {final_score} / 7", delta="Ergonomic Index")
+            
+            st.markdown(f"""
+            <div style="background: rgba(31, 41, 55, 0.6); border: 1px solid {r_col}; padding: 14px; border-radius: 8px; color: {r_col}; font-size: 13px; font-weight: 600; margin-top: 20px;">
+                Risk Assessment: {r_text}<br>
+                <span style="font-weight: 400; color: #9ca3af; font-size: 11px;">Evaluated via multi-joint kinematic angle breakdown.</span>
+            </div>
+            """, unsafe_allow_html=True)
 
-                if st.form_submit_button("🗑️ Remove Task Record", use_container_width=True):
-                    if task_ids and target_task != "None":
-                        st.session_state.ergonomic_tasks = [
-                            t for t in st.session_state.ergonomic_tasks if t["task_id"] != target_task
-                        ]
-                        st.success(f"Task **{target_task}** removed successfully!")
-                        st.rerun()
-                    else:
-                        st.warning("No tasks available to remove.")
-
-    # TAB 3: REBA / RULA Posture Analysis
-    with tab_reba:
-        st.markdown("#### 🦴 REBA & RULA Postural Ergonomics Framework")
+    # ----------------------------------------------------
+    # TAB 3: WORK MEASUREMENT & TIME STUDY MODULE
+    # ----------------------------------------------------
+    with tab_timestudy:
+        st.markdown("#### ⏱️ Work Measurement & Time Study Module")
         st.markdown("""
         <div style="background: rgba(31, 41, 55, 0.5); padding: 12px; border-radius: 8px; border-left: 3px solid #34d399; font-size: 12px; color: #d1d5db; margin-bottom: 16px;">
-            <b>Postural Scoring:</b> Rapid Entire Body Assessment (REBA) and Rapid Upper Limb Assessment (RULA) score body part angles (neck, trunk, arms, wrists, legs) to identify musculoskeletal disorder (MSD) hazards.
+            <b>Time Study Analysis:</b> Computes Normal Time ($NT = OT \\times \\text{Rating}$) and Standard Time ($ST = NT \\times (1 + \\text{Allowance})$) using operator performance ratings and fatigue allowances.
         </div>
         """, unsafe_allow_html=True)
 
-        reba_matrix = pd.DataFrame({
-            "Action Level": ["Level 1 (Score 1)", "Level 2 (Score 2-3)", "Level 3 (Score 4-7)", "Level 4 (Score 8-10)", "Level 5 (Score 11+)"],
-            "Risk Level": ["Negligible Risk", "Low Risk", "Medium Risk", "High Risk", "Very High Risk"],
-            "Required Action": ["None required", "Further investigation may be needed", "Investigation & changes soon", "Investigate and implement change soon", "Implement change immediately"]
-        })
-        st.dataframe(reba_matrix, use_container_width=True, hide_index=True)
+        col_t1, col_t2 = st.columns([1, 1])
+        with col_t1:
+            st.markdown("##### New Time Study Calculation")
+            with st.form("time_study_form"):
+                element_name = st.text_input("Work Element Name", value="Assembly Insertion")
+                observed_time = st.number_input("Observed Time (OT in seconds)", 1.0, 300.0, 14.5, 0.1)
+                rating_factor = st.slider("Performance Rating Factor (%)", 70, 150, 110, 5, help="100% = Standard pace")
+                allowance_pct = st.slider("Allowance Factor (Personal, Fatigue, Delay %)", 5, 30, 15, 1)
 
-        fig_reba = px.bar(
-            pd.DataFrame({"Risk Category": ["Negligible", "Low Risk", "Medium Risk", "High Risk"], "Station Count": [2, 5, 3, 1]}),
-            x="Risk Category", y="Station Count",
-            title="Plant-Wide Postural Ergonomics Risk Distribution"
-        )
-        fig_reba.update_layout(plot_bgcolor="#0b0f19", paper_bgcolor="#0b0f19", font=dict(color="#f3f4f6"), height=300)
-        st.plotly_chart(fig_reba, use_container_width=True)
+                if st.form_submit_button("📐 Compute & Log Standard Time", use_container_width=True):
+                    normal_time = observed_time * (rating_factor / 100.0)
+                    standard_time = normal_time * (1.0 + (allowance_pct / 100.0))
+                    
+                    new_id = f"TS-{len(st.session_state.time_studies)+1:02d}"
+                    st.session_state.time_studies.append({
+                        "study_id": new_id, "element": element_name,
+                        "observed_time_s": float(observed_time), "rating_pct": int(rating_factor),
+                        "allowance_pct": int(allowance_pct), "standard_time_s": round(standard_time, 2)
+                    })
+                    st.success(f"Added **{element_name}**! Standard Time: **{standard_time:.2f}s**")
+                    st.rerun()
 
-    # TAB 4: Ergonomic Design Guidelines
-    with tab_guidelines:
-        st.markdown("#### 📚 Ergonomic Workstation & Material Handling Guidelines")
+        with col_t2:
+            st.markdown("##### Recorded Time Studies")
+            df_ts = pd.DataFrame(st.session_state.time_studies)
+            if not df_ts.empty:
+                st.dataframe(df_ts.rename(columns={
+                    "study_id": "ID", "element": "Work Element", "observed_time_s": "OT (s)",
+                    "rating_pct": "Rating (%)", "allowance_pct": "Allow (%)", "standard_time_s": "Std Time (s)"
+                }), use_container_width=True, hide_index=True)
+
+    # ----------------------------------------------------
+    # TAB 4: PMTS / MTM MICRO-MOTION DATABASE
+    # ----------------------------------------------------
+    with tab_pmts:
+        st.markdown("#### ⚙️ Predetermined Motion Time Systems (PMTS / MTM)")
         st.markdown("""
-        * **Golden Zone Lifting:** Keep lifts between knuckle and chest height ($75\\text{cm}$ to $110\\text{cm}$ from the floor) to minimize spinal torque.
-        * **Minimize Reaching:** Keep horizontal distance ($H$) under $35\\text{cm}$ to reduce lower back moment arms.
-        * **Eliminate Twisting:** Avoid combined lifting and twisting motions; reorient workstations to allow foot pivoting instead of spine rotation.
-        * **Mechanical Assist Integration:** Deploy articulated jib cranes, lift tables, or autonomous conveyor transfers for any task where the Lifting Index ($LI$) exceeds $1.5$.
+        <div style="background: rgba(31, 41, 55, 0.5); padding: 12px; border-radius: 8px; border-left: 3px solid #38bdf8; font-size: 12px; color: #d1d5db; margin-bottom: 16px;">
+            <b>Micro-Motion Database:</b> Uses Time Measurement Units (TMU where 1 TMU = 0.036 seconds) for elemental motions: Reach, Grasp, Move, Position, and Release.
+        </div>
         """, unsafe_allow_html=True)
 
-    st.stop()
+        mtm_library = pd.DataFrame({
+            "Motion Element": ["Reach (R30cm)", "Grasp (G2 - Simple)", "Move (M30cm)", "Position (P1NS - Precision)", "Release (RL1)"],
+            "Description": ["Reach hand 30cm to object", "Simple grip / grasp", "Move weighted object 30cm", "Align and engage part", "Normal release"],
+            "TMU Value": [16.5, 5.6, 18.2, 22.0, 2.0],
+            "Time (Seconds)": [0.59, 0.20, 0.66, 0.79, 0.07]
+        })
+        st.dataframe(mtm_library, use_container_width=True, hide_index=True)
 
+        st.markdown("##### Custom MTM Sequence Builder")
+        col_m1, col_m2, col_m3 = st.columns(3)
+        with col_m1:
+            reaches = st.number_input("Number of Reaches", 0, 20, 4)
+        with col_m2:
+            grasps = st.number_input("Number of Grasps", 0, 20, 4)
+        with col_m3:
+            moves = st.number_input("Number of Moves", 0, 20, 4)
+
+        total_tmus = (reaches * 16.5) + (grasps * 5.6) + (moves * 18.2)
+        total_sec = total_tmus * 0.036
+        st.metric(label="Total Sequence MTM Time", value=f"{total_tmus:.1f} TMU ({total_sec:.2f} Seconds)", delta="Predetermined Benchmark")
+
+    # ----------------------------------------------------
+    # TAB 5: FATIGUE-RECOVERY SHIFT MODELER
+    # ----------------------------------------------------
+    with tab_fatigue:
+        st.markdown("#### 🔋 Fatigue-Recovery Shift Modeler")
+        st.markdown("""
+        <div style="background: rgba(31, 41, 55, 0.5); padding: 12px; border-radius: 8px; border-left: 3px solid #f59e0b; font-size: 12px; color: #d1d5db; margin-bottom: 16px;">
+            <b>Work-Rest Optimization:</b> Computes required rest breaks per hour based on metabolic energy expenditure to prevent physical fatigue and musculoskeletal disorders. Formula: $R = 60 \\times (E - S) / (E - 1.5)$.
+        </div>
+        """, unsafe_allow_html=True)
+
+        col_f1, col_f2 = st.columns(2)
+        with col_f1:
+            energy_exp = st.slider("Task Energy Expenditure ($E$ in kcal/min)", 2.5, 12.0, 6.5, 0.5, help="Light work: ~3 kcal/min | Heavy labor: ~8+ kcal/min")
+            standard_energy = 4.0  # Acceptable continuous energy expenditure rate (kcal/min)
+            shift_hours = st.slider("Shift Duration (Hours)", 4, 12, 8)
+
+        with col_f2:
+            if energy_exp > standard_energy:
+                rest_mins_per_hour = 60.0 * (energy_exp - standard_energy) / (energy_exp - 1.5)
+            else:
+                rest_mins_per_hour = 0.0
+
+            total_rest_shift = rest_mins_per_hour * shift_hours
+
+            st.markdown("##### Fatigue & Rest Recommendations")
+            st.metric(label="Required Rest Time", value=f"{rest_mins_per_hour:.1f} mins / hour", delta="Mandatory Recovery")
+            st.metric(label=f"Total Rest Across {shift_hours}-Hr Shift", value=f"{total_rest_shift:.1f} minutes", delta="Ergonomic Buffer")
+
+            st.markdown(f"""
+            <div style="background: rgba(245, 158, 11, 0.15); border: 1px solid rgba(245, 158, 11, 0.4); padding: 14px; border-radius: 8px; color: #f59e0b; font-size: 12px; margin-top: 15px;">
+                <b>Shift Protocol:</b> For a task expending <b>{energy_exp} kcal/min</b>, operators require <b>{rest_mins_per_hour:.1f} minutes</b> of physical recovery per hour to prevent lactic acid buildup and muscular fatigue.
+            </div>
+            """, unsafe_allow_html=True)
+
+    # ----------------------------------------------------
+    # TAB 6: TASK RISK REGISTER
+    # ----------------------------------------------------
+    with tab_register:
+        st.markdown("#### 📋 Ergonomic Risk Register & Task Management")
+        df_erg = pd.DataFrame(st.session_state.ergonomic_tasks)
+        if not df_erg.empty:
+            st.dataframe(df_erg.rename(columns={
+                "task_id": "Task ID", "station": "Workstation", "load_kg": "Load (kg)",
+                "rwl_kg": "RWL (kg)", "li": "Lifting Index", "risk": "Risk Status"
+            }), use_container_width=True, hide_index=True)
+
+    st.stop()
 
 def render_data_editor(df, key_name):
     if hasattr(st, "data_editor"):
