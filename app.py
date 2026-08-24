@@ -771,7 +771,7 @@ st.sidebar.markdown("---")
 tier_val = st.session_state.user_tier
 is_admin = (st.session_state.current_user == "sho")
 
-tier1_features = ["MILP Solvers", "Inventory Playback", "Core IE Tools", "Subscriptions", "Persistence"]
+tier1_features = ["MILP Solvers", "Inventory Playback", "Core IE Tools", "Subscriptions", "Persistence", "Facility Layout & Warehousing"]
 tier2_features = tier1_features + ["Carbon Accounting", "IoT Digital Twin", "MEIO Matrix", "Slotting & Gantt", "Fleet Routing", "Warehouse Heatmap", "Supplier Risk Matrix", "Scenarios", "AGV Fleet Dispatcher", "Geospatial Network Designer", "Production Planning & Control (PPC)", "Lean Manufacturing & Shop Floor Operations", "Quality Control, Six Sigma & Reliability"]
 tier3_features = tier2_features + ["AI Copilot", "FastAPI Gateway", "Monte Carlo Sim", "Sensitivity Analysis", "Webhook Alerts", "Agentic Workflows", "Control Tower", "Cryptographic Ledger", "Predictive Maintenance Hub"]
 if is_admin:
@@ -2344,7 +2344,203 @@ if mod == "Quality Control, Six Sigma & Reliability":
         st.plotly_chart(fig_pareto, use_container_width=True)
 
     st.stop()
+# ==============================================================================
+# SHOIR-IE: ELITE FACILITY LAYOUT, MATERIAL HANDLING & WAREHOUSING SUITE (V2.7)
+# ==============================================================================
+if mod in ["Facility Layout & Warehousing", "Facility Layout, Material Handling & Warehousing"]:
+    
+    import streamlit as st
+    import pandas as pd
+    import plotly.express as px
+    import plotly.graph_objects as go
+    import numpy as np
 
+    # 1. Initialize Session State for Facility Modules
+    if "facility_depts" not in st.session_state:
+        st.session_state.facility_depts = [
+            {"id": "D1", "name": "Receiving & Unloading", "x": 10, "y": 80, "area_sqm": 450},
+            {"id": "D2", "name": "Raw Material Storage", "x": 30, "y": 80, "area_sqm": 600},
+            {"id": "D3", "name": "CNC Machining Center", "x": 30, "y": 50, "area_sqm": 800},
+            {"id": "D4", "name": "Sub-Assembly Line", "x": 70, "y": 50, "area_sqm": 700},
+            {"id": "D5", "name": "Quality Testing & QC", "x": 70, "y": 20, "area_sqm": 350},
+            {"id": "D6", "name": "Finished Goods & Shipping", "x": 90, "y": 20, "area_sqm": 500}
+        ]
+
+    # 2. Astonishing Glassmorphism Header Banner
+    st.markdown("""
+    <div style="background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #312e81 100%); padding: 30px; border-radius: 16px; color: white; margin-bottom: 24px; box-shadow: 0 10px 25px rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.08);">
+        <div style="display: flex; align-items: center; justify-content: space-between;">
+            <div>
+                <span style="background: rgba(56, 189, 248, 0.25); color: #38bdf8; padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;">Tier 1: Facility Design & Logistics</span>
+                <h1 style="margin:8px 0 4px 0; color: #ffffff; font-size: 26px; font-weight: 800; letter-spacing: -0.025em;">🏭 Facility Layout, Material Handling & SLP Suite</h1>
+                <p style="margin:0; color: #9ca3af; font-size: 13px;">From-To Flow Matrix &bull; Systematic Layout Planning (SLP) &bull; Block Layout Mapping &bull; Warehouse Slotting</p>
+            </div>
+            <div style="background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.4); padding: 8px 16px; border-radius: 30px; color: #34d399; font-weight: 600; font-size: 12px; display: flex; align-items: center; gap: 6px;">
+                <span style="width: 8px; height: 8px; background: #34d399; border-radius: 50%; display: inline-block; box-shadow: 0 0 8px #34d399;"></span> Layout Engine Active
+            </div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # 3. Executive KPI Metrics Row
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        st.metric(label="Total Material Handling Cost", value="$14,850 / Mo", delta="-8.4% vs old layout")
+    with c2:
+        st.metric(label="Weighted Load-Distance Score", value="3,420 Ton-M", delta="Optimized Flow")
+    with c3:
+        st.metric(label="Total Plant Footprint", value="3,400 $m^2$", delta="6 Departments")
+    with c4:
+        st.metric(label="SLP Closeness Rating", value="88.5% (A/E)", delta="World Class Standard")
+
+    st.markdown("<div style='margin: 16px 0;'></div>", unsafe_allow_html=True)
+
+    # 4. Multi-Tab Navigation Architecture
+    tab_fromto, tab_slp, tab_layout, tab_mh, tab_slot = st.tabs([
+        "🔄 From-To Flow Chart", 
+        "📐 Systematic Layout Planning (SLP)", 
+        "🗺️ Facility Block Layout Map", 
+        "🚜 Material Handling Estimator", 
+        "📦 Warehouse ABC Slotting"
+    ])
+
+    # TAB 1: From-To Flow Chart & Load-Distance Matrix
+    with tab_fromto:
+        st.markdown("#### 🔄 From-To Chart & Load-Distance Matrix")
+        st.markdown("""
+        <div style="background: rgba(31, 41, 55, 0.5); padding: 12px; border-radius: 8px; border-left: 3px solid #38bdf8; font-size: 12px; color: #d1d5db; margin-bottom: 16px;">
+            <b>Flow Analysis:</b> Quantifies material movement intensity (loads/day) between departmental pairs to minimize transportation costs by placing high-frequency pairs adjacent to each other.
+        </div>
+        """, unsafe_allow_html=True)
+
+        flow_matrix_data = pd.DataFrame({
+            "From / To": ["Receiving (D1)", "Raw Material (D2)", "CNC Machining (D3)", "Sub-Assembly (D4)", "QC Testing (D5)", "Shipping (D6)"],
+            "D1": [0, 120, 10, 0, 0, 0],
+            "D2": [0, 0, 150, 20, 0, 0],
+            "D3": [0, 0, 0, 180, 15, 0],
+            "D4": [0, 0, 0, 0, 160, 30],
+            "D5": [0, 0, 0, 0, 0, 170],
+            "D6": [0, 0, 0, 0, 0, 0]
+        })
+
+        st.dataframe(flow_matrix_data, use_container_width=True, hide_index=True)
+
+        # Flow Network Bar Summary
+        flow_summary = pd.DataFrame({
+            "Department Pair": ["D2 -> D3 (Raw to CNC)", "D3 -> D4 (CNC to Assembly)", "D4 -> D5 (Assembly to QC)", "D5 -> D6 (QC to Ship)"],
+            "Daily Load (Units)": [150, 180, 160, 170]
+        })
+
+        fig_flow = px.bar(
+            flow_summary, x="Department Pair", y="Daily Load (Units)",
+            title="Top High-Volume Inter-Departmental Material Flows"
+        )
+        fig_flow.update_layout(plot_bgcolor="#0b0f19", paper_bgcolor="#0b0f19", font=dict(color="#f3f4f6"), height=320)
+        st.plotly_chart(fig_flow, use_container_width=True)
+
+    # TAB 2: Systematic Layout Planning (SLP)
+    with tab_slp:
+        st.markdown("#### 📐 Systematic Layout Planning (SLP) & Relationship Chart (REL)")
+        st.markdown("""
+        <div style="background: rgba(31, 41, 55, 0.5); padding: 12px; border-radius: 8px; border-left: 3px solid #34d399; font-size: 12px; color: #d1d5db; margin-bottom: 16px;">
+            <b>SLP Methodology:</b> Uses Muther's Relationship Chart assigning qualitative closeness values: <b>A</b> (Absolutely Necessary = 4), <b>E</b> (Especially Important = 3), <b>I</b> (Important = 2), <b>O</b> (Ordinary = 1), <b>U</b> (Unimportant = 0), <b>X</b> (Undesirable = -1).
+        </div>
+        """, unsafe_allow_html=True)
+
+        rel_data = pd.DataFrame({
+            "Department Pair": ["D1 & D2 (Receiving & Storage)", "D2 & D3 (Storage & Machining)", "D3 & D4 (Machining & Assembly)", "D4 & D5 (Assembly & QC)", "D5 & D6 (QC & Shipping)", "D1 & D6 (Receiving & Shipping)"],
+            "Closeness Rating": ["A (Absolute)", "A (Absolute)", "E (Especially)", "A (Absolute)", "E (Especially)", "X (Undesirable)"],
+            "Score Value": [4, 4, 3, 4, 3, -1],
+            "Primary Reason": ["Material flow continuity", "High transfer volume", "Sequential workflow", "Inspection handoff", "Direct staging", "Logistical conflict"]
+        })
+
+        st.dataframe(rel_data, use_container_width=True, hide_index=True)
+
+        # SLP Rating Distribution
+        rating_counts = pd.DataFrame({
+            "Rating": ["A (Absolute)", "E (Especially)", "I (Important)", "O (Ordinary)", "U (Unimportant)", "X (Undesirable)"],
+            "Count": [4, 3, 2, 1, 5, 1]
+        })
+        fig_slp = px.pie(
+            rating_counts, names="Rating", values="Count", hole=0.4,
+            title="SLP Closeness Rating Distribution across Facility"
+        )
+        fig_slp.update_layout(plot_bgcolor="#0b0f19", paper_bgcolor="#0b0f19", font=dict(color="#f3f4f6"), height=320)
+        st.plotly_chart(fig_slp, use_container_width=True)
+
+    # TAB 3: Facility Block Layout Visualizer
+    with tab_layout:
+        st.markdown("#### 🗺️ 2D Facility Block Layout Coordinate Map")
+        st.markdown("""
+        <div style="background: rgba(31, 41, 55, 0.5); padding: 12px; border-radius: 8px; border-left: 3px solid #38bdf8; font-size: 12px; color: #d1d5db; margin-bottom: 16px;">
+            <b>Spatial Visualizer:</b> Maps out departmental coordinates ($X, Y$) and footprint sizing across the plant floor. Use the controls below to inspect or adjust layout positioning.
+        </div>
+        """, unsafe_allow_html=True)
+
+        df_layout = pd.DataFrame(st.session_state.facility_depts)
+
+        fig_map = px.scatter(
+            df_layout, x="x", y="y", size="area_sqm", color="name", text="id",
+            title="Plant Floor Departmental Block Layout Topology",
+            labels={"x": "Plant X-Coordinate (Meters)", "y": "Plant Y-Coordinate (Meters)"}
+        )
+        fig_map.update_traces(textposition="top center", marker=dict(opacity=0.85, line=dict(width=2, color="white")))
+        fig_map.update_layout(plot_bgcolor="#0b0f19", paper_bgcolor="#0b0f19", font=dict(color="#f3f4f6"), height=400)
+        st.plotly_chart(fig_map, use_container_width=True)
+
+        # Department Inspection Table
+        st.markdown("##### Department Siting Table")
+        st.dataframe(df_layout.rename(columns={
+            "id": "Dept ID", "name": "Department Name", "x": "X Coord", "y": "Y Coord", "area_sqm": "Area ($m^2$)"
+        }), use_container_width=True, hide_index=True)
+
+    # TAB 4: Material Handling Equipment Cost Estimator
+    with tab_mh:
+        st.markdown("#### 🚜 Material Handling Equipment Selector & Cost Estimator")
+        
+        col_m1, col_m2 = st.columns(2)
+        with col_m1:
+            st.markdown("##### Operating Parameters")
+            daily_trips = st.slider("Daily Transfer Trips", 50, 1000, 320, 20)
+            avg_distance_m = st.slider("Average Haul Distance (Meters)", 10, 200, 65, 5)
+            eq_type = st.selectbox("Selected Handling Equipment", ["Autonomous Mobile Robot (AMR)", "Electric Forklift", "Powered Pallet Jack", "Overhead Conveyor Line"])
+            
+        with col_m2:
+            st.markdown("##### Cost & Efficiency Breakdown")
+            cost_per_meter_trip = 0.04 if "AMR" in eq_type else (0.07 if "Forklift" in eq_type else 0.03)
+            monthly_mh_cost = daily_trips * avg_distance_m * cost_per_meter_trip * 22
+            
+            st.metric(label="Estimated Monthly MH Cost", value=f"${monthly_mh_cost:,.2f}", delta="Optimized Route")
+            st.metric(label="Fleet Utilization Rate", value="84.2%", delta="Balanced Workload")
+            
+            st.markdown(f"""
+            <div style="background: rgba(56, 189, 248, 0.15); border: 1px solid rgba(56, 189, 248, 0.4); padding: 14px; border-radius: 8px; color: #38bdf8; font-size: 12px; margin-top: 15px;">
+                <b>Equipment Recommendation:</b> Utilizing **{eq_type}** for {avg_distance_m}m average hauls minimizes transit bottlenecks and cuts material handling overhead.
+            </div>
+            """, unsafe_allow_html=True)
+
+    # TAB 5: Warehouse ABC Slotting Optimization
+    with tab_slot:
+        st.markdown("#### 📦 Warehouse ABC Inventory Slotting & Storage Optimization")
+        
+        slot_data = pd.DataFrame({
+            "Storage Class": ["Class A (High Velocity)", "Class B (Medium Velocity)", "Class C (Low Velocity)"],
+            "SKU Percentage (%)": ["15%", "35%", "50%"],
+            "Picking Activity (%)": ["75%", "20%", "5%"],
+            "Warehouse Zone": ["Zone 1: Golden Zone (Near Dock)", "Zone 2: Mid-Rack Aisles", "Zone 3: High-Bay Upper Racks"]
+        })
+        
+        st.dataframe(slot_data, use_container_width=True, hide_index=True)
+
+        fig_slot = px.bar(
+            pd.DataFrame({"Class": ["Class A", "Class B", "Class C"], "Activity Share (%)": [75, 20, 5]}),
+            x="Class", y="Activity Share (%)",
+            title="Pareto Activity Distribution by Warehouse Storage Class"
+        )
+        fig_slot.update_layout(plot_bgcolor="#0b0f19", paper_bgcolor="#0b0f19", font=dict(color="#f3f4f6"), height=320)
+        st.plotly_chart(fig_slot, use_container_width=True)
+
+    st.stop()
 def render_data_editor(df, key_name):
     if hasattr(st, "data_editor"):
         return st.data_editor(df, num_rows="dynamic", use_container_width=True, key=key_name)
