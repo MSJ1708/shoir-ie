@@ -3182,7 +3182,7 @@ if mod in ["Engineering Economics & Finance", "Engineering Economics & Financial
     st.stop()
 
 # ==============================================================================
-# SHOIR-IE: ELITE DIGITAL TWIN, DES & MES CONTROL TOWER (V3.6)
+# SHOIR-IE: ELITE DIGITAL TWIN, DES & MES CONTROL TOWER (V3.8 - FULL CRUD)
 # ==============================================================================
 if mod in ["Digital Twin & Discrete-Event Simulation", "Digital Twin & DES"]:
     
@@ -3248,8 +3248,8 @@ if mod in ["Digital Twin & Discrete-Event Simulation", "Digital Twin & DES"]:
         <div style="display: flex; align-items: center; justify-content: space-between;">
             <div>
                 <span style="background: rgba(56, 189, 248, 0.25); color: #38bdf8; padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;">Tier 3: Advanced Digital Twin & MES Operations</span>
-                <h1 style="margin:8px 0 4px 0; color: #ffffff; font-size: 26px; font-weight: 800; letter-spacing: -0.025em;">🌐 Digital Twin, DES & MES Control Tower (V3.6)</h1>
-                <p style="margin:0; color: #9ca3af; font-size: 13px;">Factory Floor &bull; AGV Fleet &bull; DES Queues &bull; IoT Hub &bull; Kanban WIP Buffers &bull; MTBF Reliability &bull; Audit Log</p>
+                <h1 style="margin:8px 0 4px 0; color: #ffffff; font-size: 26px; font-weight: 800; letter-spacing: -0.025em;">🌐 Digital Twin, DES & MES Control Tower (V3.8)</h1>
+                <p style="margin:0; color: #9ca3af; font-size: 13px;">Factory Floor &bull; AGV Fleet &bull; DES Queues &bull; IoT Hub &bull; Kanban Buffers &bull; MTBF Reliability &bull; Full CRUD ID Management</p>
             </div>
             <div style="background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.4); padding: 8px 16px; border-radius: 30px; color: #34d399; font-weight: 600; font-size: 12px; display: flex; align-items: center; gap: 6px;">
                 <span style="width: 8px; height: 8px; background: #34d399; border-radius: 50%; display: inline-block; box-shadow: 0 0 8px #34d399;"></span> MES Synchronized
@@ -3292,6 +3292,14 @@ if mod in ["Digital Twin & Discrete-Event Simulation", "Digital Twin & DES"]:
                     st.session_state.event_logs.insert(0, {"timestamp": datetime.datetime.now().strftime("%H:%M:%S"), "category": "Factory Floor", "message": f"Deployed new workstation {new_id} ({ws_name})."})
                     st.rerun()
 
+            if st.session_state.dt_workstations:
+                with st.form("del_ws_form"):
+                    ws_to_del = st.selectbox("🗑️ Remove Workstation by ID", [w["id"] for w in st.session_state.dt_workstations])
+                    if st.form_submit_button("Delete Workstation", use_container_width=True):
+                        st.session_state.dt_workstations = [w for w in st.session_state.dt_workstations if w["id"] != ws_to_del]
+                        st.session_state.event_logs.insert(0, {"timestamp": datetime.datetime.now().strftime("%H:%M:%S"), "category": "Factory Floor", "message": f"Removed workstation {ws_to_del}."})
+                        st.rerun()
+
             st.markdown("##### 🤖 Register New AGV Unit")
             with st.form("add_agv_form"):
                 agv_name = st.text_input("AGV Identifier", value="AGV-03")
@@ -3301,6 +3309,14 @@ if mod in ["Digital Twin & Discrete-Event Simulation", "Digital Twin & DES"]:
                     st.session_state.agv_fleet.append({"agv_id": agv_name, "task": agv_task, "battery": float(agv_batt), "status": "Active", "x": 50, "y": 45})
                     st.session_state.event_logs.insert(0, {"timestamp": datetime.datetime.now().strftime("%H:%M:%S"), "category": "AGV Fleet", "message": f"Dispatched {agv_name} for mission: {agv_task}."})
                     st.rerun()
+
+            if st.session_state.agv_fleet:
+                with st.form("del_agv_form"):
+                    agv_to_del = st.selectbox("🗑️ Remove AGV by ID", [a["agv_id"] for a in st.session_state.agv_fleet])
+                    if st.form_submit_button("Delete AGV Unit", use_container_width=True):
+                        st.session_state.agv_fleet = [a for a in st.session_state.agv_fleet if a["agv_id"] != agv_to_del]
+                        st.session_state.event_logs.insert(0, {"timestamp": datetime.datetime.now().strftime("%H:%M:%S"), "category": "AGV Fleet", "message": f"Removed AGV {agv_to_del}."})
+                        st.rerun()
 
         with col_f2:
             st.markdown("##### 🖥️ Live Plant Floor & AGV Visual Canvas")
@@ -3358,6 +3374,14 @@ if mod in ["Digital Twin & Discrete-Event Simulation", "Digital Twin & DES"]:
                         "service_rate": float(srv_rate), "capacity": int(q_cap)
                     })
                     st.rerun()
+
+            if st.session_state.des_queues:
+                with st.form("del_queue_form"):
+                    q_to_del = st.selectbox("🗑️ Remove Queue by ID", [q["queue_id"] for q in st.session_state.des_queues])
+                    if st.form_submit_button("Delete Queue Slot", use_container_width=True):
+                        st.session_state.des_queues = [q for q in st.session_state.des_queues if q["queue_id"] != q_to_del]
+                        st.rerun()
+
         with col_d2:
             df_q = pd.DataFrame(st.session_state.des_queues)
             if not df_q.empty:
@@ -3385,6 +3409,14 @@ if mod in ["Digital Twin & Discrete-Event Simulation", "Digital Twin & DES"]:
                     status_lbl = "Normal" if s_val < s_thresh else "Warning"
                     st.session_state.iot_sensors.append({"sensor_id": new_sid, "name": s_name, "type": s_type, "reading": float(s_val), "threshold": float(s_thresh), "status": status_lbl})
                     st.rerun()
+
+            if st.session_state.iot_sensors:
+                with st.form("del_sensor_form"):
+                    sns_to_del = st.selectbox("🗑️ Remove Sensor by ID", [s["sensor_id"] for s in st.session_state.iot_sensors])
+                    if st.form_submit_button("Delete IoT Sensor", use_container_width=True):
+                        st.session_state.iot_sensors = [s for s in st.session_state.iot_sensors if s["sensor_id"] != sns_to_del]
+                        st.rerun()
+
         with col_i2:
             df_iot = pd.DataFrame(st.session_state.iot_sensors)
             if not df_iot.empty:
@@ -3394,7 +3426,7 @@ if mod in ["Digital Twin & Discrete-Event Simulation", "Digital Twin & DES"]:
                 st.plotly_chart(fig_iot, use_container_width=True)
 
     # ----------------------------------------------------
-    # TAB 4: KANBAN WIP & BUFFERS (NEW IN V3.6)
+    # TAB 4: KANBAN WIP & BUFFERS
     # ----------------------------------------------------
     with tab_kanban:
         st.markdown("#### 📦 Kanban WIP Buffer & Starvation / Blocking Engine")
@@ -3422,6 +3454,13 @@ if mod in ["Digital Twin & Discrete-Event Simulation", "Digital Twin & DES"]:
                     })
                     st.rerun()
 
+            if st.session_state.kanban_buffers:
+                with st.form("del_kanban_form"):
+                    buf_to_del = st.selectbox("🗑️ Remove Buffer by ID", [b["buffer_id"] for b in st.session_state.kanban_buffers])
+                    if st.form_submit_button("Delete Kanban Buffer", use_container_width=True):
+                        st.session_state.kanban_buffers = [b for b in st.session_state.kanban_buffers if b["buffer_id"] != buf_to_del]
+                        st.rerun()
+
         with k_col2:
             df_kb = pd.DataFrame(st.session_state.kanban_buffers)
             if not df_kb.empty:
@@ -3432,13 +3471,13 @@ if mod in ["Digital Twin & Discrete-Event Simulation", "Digital Twin & DES"]:
                 st.plotly_chart(fig_kb, use_container_width=True)
 
     # ----------------------------------------------------
-    # TAB 5: RELIABILITY & MTBF ENGINE (NEW IN V3.6)
+    # TAB 5: RELIABILITY & MTBF ENGINE
     # ----------------------------------------------------
     with tab_rel:
         st.markdown("#### 🛠️ Machine Reliability, MTBF & Availability Modeler")
         st.markdown("""
         <div style="background: rgba(31, 41, 55, 0.5); padding: 12px; border-radius: 8px; border-left: 3px solid #f59e0b; font-size: 12px; color: #d1d5db; margin-bottom: 16px;">
-            <b>Reliability Engineering:</b> Calculates system availability based on Mean Time Between Failures (MTBF) and Mean Time To Repair (MTTR): $\text{Availability} = \frac{\text{MTBF}}{\text{MTBF} + \text{MTTR}}$.
+            <b>Reliability Engineering:</b> Calculates system availability based on Mean Time Between Failures (MTBF) and Mean Time To Repair (MTTR).
         </div>
         """, unsafe_allow_html=True)
 
@@ -3458,6 +3497,13 @@ if mod in ["Digital Twin & Discrete-Event Simulation", "Digital Twin & DES"]:
                     })
                     st.rerun()
 
+            if st.session_state.reliability_data:
+                with st.form("del_rel_form"):
+                    rel_to_del = st.selectbox("🗑️ Remove Asset by ID", [r["machine_id"] for r in st.session_state.reliability_data])
+                    if st.form_submit_button("Delete Reliability Record", use_container_width=True):
+                        st.session_state.reliability_data = [r for r in st.session_state.reliability_data if r["machine_id"] != rel_to_del]
+                        st.rerun()
+
         with r_col2:
             df_rel = pd.DataFrame(st.session_state.reliability_data)
             if not df_rel.empty:
@@ -3472,19 +3518,14 @@ if mod in ["Digital Twin & Discrete-Event Simulation", "Digital Twin & DES"]:
     with tab_logs:
         st.markdown("#### 📜 Live Plant Floor Event Stream & Audit Log")
         df_logs = pd.DataFrame(st.session_state.event_logs)
-        
-        # CORRECTED: use_context=True removed
-        st.dataframe(
-            df_logs.rename(columns={"timestamp": "Time", "category": "Module", "message": "Event Description"}), 
-            use_container_width=True, 
-            hide_index=True
-        )
+        st.dataframe(df_logs.rename(columns={"timestamp": "Time", "category": "Module", "message": "Event Description"}), use_container_width=True, hide_index=True)
 
         if st.button("🗑️ Clear Event Log"):
             st.session_state.event_logs = []
             st.rerun()
 
     st.stop()
+    
 def render_data_editor(df, key_name):
     if hasattr(st, "data_editor"):
         return st.data_editor(df, num_rows="dynamic", use_container_width=True, key=key_name)
