@@ -773,7 +773,7 @@ is_admin = (st.session_state.current_user == "sho")
 
 tier1_features = ["MILP Solvers", "Inventory Playback", "Core IE Tools", "Subscriptions", "Persistence", "Facility Layout & Warehousing"]
 tier2_features = tier1_features + ["Carbon Accounting", "IoT Digital Twin", "MEIO Matrix", "Slotting & Gantt", "Fleet Routing", "Warehouse Heatmap", "Supplier Risk Matrix", "Scenarios", "AGV Fleet Dispatcher", "Geospatial Network Designer", "Production Planning & Control (PPC)", "Lean Manufacturing & Shop Floor Operations", "Quality Control, Six Sigma & Reliability", "Engineering Economics & Finance"]
-tier3_features = tier2_features + ["AI Copilot", "FastAPI Gateway", "Monte Carlo Sim", "Sensitivity Analysis", "Webhook Alerts", "Agentic Workflows", "Control Tower", "Cryptographic Ledger", "Predictive Maintenance Hub", "Human Factors & Ergonomics (NIOSH)", "Digital Twin & Discrete-Event Simulation"]
+tier3_features = tier2_features + ["AI Copilot", "FastAPI Gateway", "Monte Carlo Sim", "Sensitivity Analysis", "Webhook Alerts", "Agentic Workflows", "Control Tower", "Cryptographic Ledger", "Predictive Maintenance Hub", "Human Factors & Ergonomics (NIOSH)", "Digital Twin & Discrete-Event Simulation", "Green IE & Sustainability"]
 if is_admin:
     tier3_features.append("Admin Panel")
 
@@ -3523,6 +3523,201 @@ if mod in ["Digital Twin & Discrete-Event Simulation", "Digital Twin & DES"]:
         if st.button("🗑️ Clear Event Log"):
             st.session_state.event_logs = []
             st.rerun()
+
+    st.stop()
+
+# ==============================================================================
+# SHOIR-IE: GREEN IE, SUSTAINABILITY & CIRCULAR ECONOMY SUITE (V3.9)
+# ==============================================================================
+if mod in ["Green IE & Sustainability", "Sustainability & Circular Economy", "Green IE"]:
+    
+    import streamlit as st
+    import pandas as pd
+    import plotly.express as px
+    import plotly.graph_objects as go
+    import uuid
+    import datetime
+
+    # 1. Initialize Sustainability Session States
+    if "carbon_sources" not in st.session_state:
+        st.session_state.carbon_sources = [
+            {"source_id": "CARB-01", "facility": "Main Assembly Plant A", "scope_1_tco2": 145.2, "scope_2_tco2": 310.5, "scope_3_tco2": 89.0},
+            {"source_id": "CARB-02", "facility": "CNC Machining Center B", "scope_1_tco2": 62.8, "scope_2_tco2": 184.0, "scope_3_tco2": 45.5},
+            {"source_id": "CARB-03", "facility": "Stamping & Press Facility", "scope_1_tco2": 98.4, "scope_2_tco2": 215.2, "scope_3_tco2": 72.1},
+        ]
+
+    if "energy_units" not in st.session_state:
+        st.session_state.energy_units = [
+            {"unit_id": "ENG-101", "machine": "CNC Mill Matrix 01", "kwh_per_hr": 42.5, "iso_50001_compliant": "Compliant", "daily_load_factor": 0.82},
+            {"unit_id": "ENG-102", "machine": "Hydraulic Stamping Press", "kwh_per_hr": 78.0, "iso_50001_compliant": "Review Required", "daily_load_factor": 0.91},
+            {"unit_id": "ENG-103", "machine": "Laser Cutting Cell C", "kwh_per_hr": 55.2, "iso_50001_compliant": "Compliant", "daily_load_factor": 0.76},
+        ]
+
+    if "lca_materials" not in st.session_state:
+        st.session_state.lca_materials = [
+            {"mat_id": "LCA-501", "component": "Aluminum Chassis 6061", "circularity_score": 85.0, "recycling_rate": 92.0, "eol_impact": "Low"},
+            {"mat_id": "LCA-502", "component": "Injection Molded Polymer ABS", "circularity_score": 52.0, "recycling_rate": 40.0, "eol_impact": "Moderate"},
+            {"mat_id": "LCA-503", "component": "Structural Steel Beam Q235", "circularity_score": 91.0, "recycling_rate": 95.0, "eol_impact": "Negligible"},
+        ]
+
+    if "event_logs" not in st.session_state:
+        st.session_state.event_logs = []
+
+    # 2. Glassmorphism Header Banner
+    st.markdown("""
+    <div style="background: linear-gradient(135deg, #064e3b 0%, #065f46 50%, #022c22 100%); padding: 30px; border-radius: 16px; color: white; margin-bottom: 24px; box-shadow: 0 10px 25px rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.08);">
+        <div style="display: flex; align-items: center; justify-content: space-between;">
+            <div>
+                <span style="background: rgba(52, 211, 153, 0.25); color: #34d399; padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;">Tier 4: Green Industrial Engineering & ESG</span>
+                <h1 style="margin:8px 0 4px 0; color: #ffffff; font-size: 26px; font-weight: 800; letter-spacing: -0.025em;">🌱 Sustainability, Carbon Auditing & Circular Economy Suite (V3.9)</h1>
+                <p style="margin:0; color: #a7f3d0; font-size: 13px;">Scope 1-3 Carbon Footprint &bull; ISO 50001 Energy Profiling &bull; Life Cycle Assessment (LCA) &bull; Full CRUD Customization</p>
+            </div>
+            <div style="background: rgba(16, 185, 129, 0.2); border: 1px solid rgba(52, 211, 153, 0.4); padding: 8px 16px; border-radius: 30px; color: #6ee7b7; font-weight: 600; font-size: 12px; display: flex; align-items: center; gap: 6px;">
+                <span style="width: 8px; height: 8px; background: #34d399; border-radius: 50%; display: inline-block; box-shadow: 0 0 8px #34d399;"></span> ESG Verified
+            </div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # 3. Multi-Tab Navigation Architecture
+    tab_carbon, tab_energy, tab_lca = st.tabs([
+        "🌍 Carbon Footprint (Scope 1-3)", 
+        "⚡ Energy & ISO 50001 Tracker", 
+        "♻️ Life Cycle Assessment (LCA)"
+    ])
+
+    # ----------------------------------------------------
+    # TAB 1: CARBON FOOTPRINT CALCULATOR (SCOPE 1, 2, 3)
+    # ----------------------------------------------------
+    with tab_carbon:
+        st.markdown("#### 🌍 Greenhouse Gas (GHG) Emissions & Carbon Footprint Auditing")
+        col_c1, col_c2 = st.columns([1, 2])
+
+        with col_c1:
+            st.markdown("##### ➕ Register / Add Emission Source")
+            with st.form("add_carbon_form"):
+                fac_name = st.text_input("Facility / Production Line", value="Assembly Line C")
+                s1 = st.number_input("Scope 1 Direct (tCO2e)", 0.0, 1000.0, 75.0, 5.0)
+                s2 = st.number_input("Scope 2 Indirect Energy (tCO2e)", 0.0, 2000.0, 160.0, 5.0)
+                s3 = st.number_input("Scope 3 Value Chain (tCO2e)", 0.0, 2000.0, 50.0, 5.0)
+
+                if st.form_submit_button("📥 Add Carbon Audit Record", use_container_width=True):
+                    new_cid = f"CARB-{str(uuid.uuid4())[:4].upper()}"
+                    st.session_state.carbon_sources.append({
+                        "source_id": new_cid, "facility": fac_name, "scope_1_tco2": float(s1), "scope_2_tco2": float(s2), "scope_3_tco2": float(s3)
+                    })
+                    st.session_state.event_logs.insert(0, {"timestamp": datetime.datetime.now().strftime("%H:%M:%S"), "category": "Green IE", "message": f"Added carbon emission record for {fac_name} ({new_cid})."})
+                    st.rerun()
+
+            if st.session_state.carbon_sources:
+                with st.form("del_carbon_form"):
+                    carb_to_del = st.selectbox("🗑️ Remove Record by ID", [c["source_id"] for c in st.session_state.carbon_sources])
+                    if st.form_submit_button("Delete Emission Source", use_container_width=True):
+                        st.session_state.carbon_sources = [c for c in st.session_state.carbon_sources if c["source_id"] != carb_to_del]
+                        st.session_state.event_logs.insert(0, {"timestamp": datetime.datetime.now().strftime("%H:%M:%S"), "category": "Green IE", "message": f"Removed carbon record {carb_to_del}."})
+                        st.rerun()
+
+        with col_c2:
+            df_carb = pd.DataFrame(st.session_state.carbon_sources)
+            if not df_carb.empty:
+                df_carb["Total tCO2e"] = df_carb["scope_1_tco2"] + df_carb["scope_2_tco2"] + df_carb["scope_3_tco2"]
+                st.dataframe(df_carb.rename(columns={"source_id": "ID", "facility": "Facility / Line", "scope_1_tco2": "Scope 1", "scope_2_tco2": "Scope 2", "scope_3_tco2": "Scope 3"}), use_container_width=True, hide_index=True)
+                
+                # Plotly stacked bar chart
+                fig_carb = px.bar(df_carb, x="facility", y=["scope_1_tco2", "scope_2_tco2", "scope_3_tco2"], 
+                                  title="Carbon Emissions Breakdown by Scope (tCO2e)",
+                                  color_discrete_map={"scope_1_tco2": "#f43f5e", "scope_2_tco2": "#f59e0b", "scope_3_tco2": "#38bdf8"})
+                fig_carb.update_layout(plot_bgcolor="#0b0f19", paper_bgcolor="#0b0f19", font=dict(color="#f3f4f6"), height=290, legend_title="GHG Scopes")
+                st.plotly_chart(fig_carb, use_container_width=True)
+
+    # ----------------------------------------------------
+    # TAB 2: ENERGY MANAGEMENT & ISO 50001 TRACKER
+    # ----------------------------------------------------
+    with tab_energy:
+        st.markdown("#### ⚡ Energy Management, kWh Profiling & ISO 50001 Compliance")
+        col_e1, col_e2 = st.columns([1, 2])
+
+        with col_e1:
+            st.markdown("##### ➕ Add Machine Energy Unit")
+            with st.form("add_energy_form"):
+                mach_name = st.text_input("Machine / Asset Unit", value="Hydraulic Extruder B")
+                kwh_rate = st.number_input("Power Consumption (kWh / hr)", 1.0, 500.0, 64.5, 1.0)
+                iso_status = st.selectbox("ISO 50001 Status", ["Compliant", "Review Required", "Non-Compliant"])
+                load_factor = st.slider("Daily Load Factor", 0.1, 1.0, 0.85, 0.05)
+
+                if st.form_submit_button("📥 Register Energy Profile", use_container_width=True):
+                    new_eid = f"ENG-{str(uuid.uuid4())[:4].upper()}"
+                    st.session_state.energy_units.append({
+                        "unit_id": new_eid, "machine": mach_name, "kwh_per_hr": float(kwh_rate),
+                        "iso_50001_compliant": iso_status, "daily_load_factor": float(load_factor)
+                    })
+                    st.session_state.event_logs.insert(0, {"timestamp": datetime.datetime.now().strftime("%H:%M:%S"), "category": "Energy Management", "message": f"Added energy profile for {mach_name} ({new_eid})."})
+                    st.rerun()
+
+            if st.session_state.energy_units:
+                with st.form("del_energy_form"):
+                    eng_to_del = st.selectbox("🗑️ Remove Unit by ID", [e["unit_id"] for e in st.session_state.energy_units])
+                    if st.form_submit_button("Delete Energy Unit", use_container_width=True):
+                        st.session_state.energy_units = [e for e in st.session_state.energy_units if e["unit_id"] != eng_to_del]
+                        st.session_state.event_logs.insert(0, {"timestamp": datetime.datetime.now().strftime("%H:%M:%S"), "category": "Energy Management", "message": f"Removed energy unit {eng_to_del}."})
+                        st.rerun()
+
+        with col_e2:
+            df_eng = pd.DataFrame(st.session_state.energy_units)
+            if not df_eng.empty:
+                df_eng["Daily kWh (24h)"] = df_eng["kwh_per_hr"] * 24 * df_eng["daily_load_factor"]
+                st.dataframe(df_eng.rename(columns={"unit_id": "ID", "machine": "Machine Unit", "kwh_per_hr": "kWh/hr", "iso_50001_compliant": "ISO 50001", "daily_load_factor": "Load Factor"}), use_container_width=True, hide_index=True)
+                
+                fig_eng = px.bar(df_eng, x="machine", y="Daily kWh (24h)", color="iso_50001_compliant",
+                                 color_discrete_map={"Compliant": "#34d399", "Review Required": "#f59e0b", "Non-Compliant": "#f43f5e"},
+                                 title="Projected Daily Power Consumption (kWh) & ISO Compliance")
+                fig_eng.update_layout(plot_bgcolor="#0b0f19", paper_bgcolor="#0b0f19", font=dict(color="#f3f4f6"), height=290)
+                st.plotly_chart(fig_eng, use_container_width=True)
+
+    # ----------------------------------------------------
+    # TAB 3: LIFE CYCLE ASSESSMENT (LCA) TOOL
+    # ----------------------------------------------------
+    with tab_lca:
+        st.markdown("#### ♻️ Life Cycle Assessment (LCA) & Circular Economy Modeling")
+        col_l1, col_l2 = st.columns([1, 2])
+
+        with col_l1:
+            st.markdown("##### ➕ Add Material / Component LCA")
+            with st.form("add_lca_form"):
+                comp_name = st.text_input("Material / Component Name", value="Recycled Polymer Blend")
+                circ_score = st.slider("Material Circularity Score (%)", 0.0, 100.0, 78.0, 1.0)
+                rec_rate = st.slider("Recycling Rate (%)", 0.0, 100.0, 88.0, 1.0)
+                eol_impact = st.selectbox("End-of-Life Environmental Impact", ["Negligible", "Low", "Moderate", "High"])
+
+                if st.form_submit_button("📥 Register LCA Component", use_container_width=True):
+                    new_lid = f"LCA-{str(uuid.uuid4())[:4].upper()}"
+                    st.session_state.lca_materials.append({
+                        "mat_id": new_lid, "component": comp_name, "circularity_score": float(circ_score),
+                        "recycling_rate": float(rec_rate), "eol_impact": eol_impact
+                    })
+                    st.session_state.event_logs.insert(0, {"timestamp": datetime.datetime.now().strftime("%H:%M:%S"), "category": "LCA Tool", "message": f"Added LCA profile for {comp_name} ({new_lid})."})
+                    st.rerun()
+
+            if st.session_state.lca_materials:
+                with st.form("del_lca_form"):
+                    lca_to_del = st.selectbox("🗑️ Remove Component by ID", [l["mat_id"] for l in st.session_state.lca_materials])
+                    if st.form_submit_button("Delete LCA Record", use_container_width=True):
+                        st.session_state.lca_materials = [l for l in st.session_state.lca_materials if l["mat_id"] != lca_to_del]
+                        st.session_state.event_logs.insert(0, {"timestamp": datetime.datetime.now().strftime("%H:%M:%S"), "category": "LCA Tool", "message": f"Removed LCA record {lca_to_del}."})
+                        st.rerun()
+
+        with col_l2:
+            df_lca = pd.DataFrame(st.session_state.lca_materials)
+            if not df_lca.empty:
+                st.dataframe(df_lca.rename(columns={"mat_id": "ID", "component": "Component", "circularity_score": "Circularity (%)", "recycling_rate": "Recycling (%)", "eol_impact": "EoL Impact"}), use_container_width=True, hide_index=True)
+                
+                fig_lca = px.scatter(df_lca, x="circularity_score", y="recycling_rate", size="circularity_score", color="eol_impact",
+                                     hover_name="component", text="component",
+                                     color_discrete_map={"Negligible": "#34d399", "Low": "#38bdf8", "Moderate": "#f59e0b", "High": "#f43f5e"},
+                                     title="Circularity Score vs Recycling Rate (%) Matrix")
+                fig_lca.update_traces(textposition='top center')
+                fig_lca.update_layout(plot_bgcolor="#0b0f19", paper_bgcolor="#0b0f19", font=dict(color="#f3f4f6"), height=290)
+                st.plotly_chart(fig_lca, use_container_width=True)
 
     st.stop()
     
