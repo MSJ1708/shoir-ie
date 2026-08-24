@@ -3472,14 +3472,19 @@ if mod in ["Digital Twin & Discrete-Event Simulation", "Digital Twin & DES"]:
     with tab_logs:
         st.markdown("#### 📜 Live Plant Floor Event Stream & Audit Log")
         df_logs = pd.DataFrame(st.session_state.event_logs)
-        st.dataframe(df_logs.rename(columns={"timestamp": "Time", "category": "Module", "message": "Event Description"}), use_context=True, use_container_width=True, hide_index=True)
+        
+        # CORRECTED: use_context=True removed
+        st.dataframe(
+            df_logs.rename(columns={"timestamp": "Time", "category": "Module", "message": "Event Description"}), 
+            use_container_width=True, 
+            hide_index=True
+        )
 
         if st.button("🗑️ Clear Event Log"):
             st.session_state.event_logs = []
             st.rerun()
 
     st.stop()
-
 def render_data_editor(df, key_name):
     if hasattr(st, "data_editor"):
         return st.data_editor(df, num_rows="dynamic", use_container_width=True, key=key_name)
