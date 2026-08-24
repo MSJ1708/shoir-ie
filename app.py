@@ -773,7 +773,7 @@ is_admin = (st.session_state.current_user == "sho")
 
 tier1_features = ["MILP Solvers", "Inventory Playback", "Core IE Tools", "Subscriptions", "Persistence", "Facility Layout & Warehousing"]
 tier2_features = tier1_features + ["Carbon Accounting", "IoT Digital Twin", "MEIO Matrix", "Slotting & Gantt", "Fleet Routing", "Warehouse Heatmap", "Supplier Risk Matrix", "Scenarios", "AGV Fleet Dispatcher", "Geospatial Network Designer", "Production Planning & Control (PPC)", "Lean Manufacturing & Shop Floor Operations", "Quality Control, Six Sigma & Reliability"]
-tier3_features = tier2_features + ["AI Copilot", "FastAPI Gateway", "Monte Carlo Sim", "Sensitivity Analysis", "Webhook Alerts", "Agentic Workflows", "Control Tower", "Cryptographic Ledger", "Predictive Maintenance Hub"]
+tier3_features = tier2_features + ["AI Copilot", "FastAPI Gateway", "Monte Carlo Sim", "Sensitivity Analysis", "Webhook Alerts", "Agentic Workflows", "Control Tower", "Cryptographic Ledger", "Predictive Maintenance Hub", "Human Factors & Ergonomics (NIOSH)"]
 if is_admin:
     tier3_features.append("Admin Panel")
 
@@ -2580,6 +2580,196 @@ if mod in ["Facility Layout & Warehousing", "Facility Layout, Material Handling 
             "Warehouse Zone": ["Zone 1: Golden Zone (Near Dock)", "Zone 2: Mid-Rack Aisles", "Zone 3: High-Bay Upper Racks"]
         })
         st.dataframe(slot_data, use_container_width=True, hide_index=True)
+
+    st.stop()
+    
+    # ==============================================================================
+# SHOIR-IE: ELITE HUMAN FACTORS, ERGONOMICS & SAFETY ENGINEERING (V2.9)
+# ==============================================================================
+if mod in ["Human Factors & Ergonomics (NIOSH)", "Human Factors, Ergonomics, & Safety Engineering"]:
+    
+    import streamlit as st
+    import pandas as pd
+    import plotly.express as px
+    import plotly.graph_objects as go
+    import numpy as np
+
+    # 1. Initialize Session State for Ergonomic Tasks
+    if "ergonomic_tasks" not in st.session_state:
+        st.session_state.ergonomic_tasks = [
+            {"task_id": "T-101", "station": "Palletizing Line A", "load_kg": 18.5, "rwl_kg": 14.2, "li": 1.30, "risk": "Moderate Risk"},
+            {"task_id": "T-102", "station": "Raw Material Unloading", "load_kg": 25.0, "rwl_kg": 11.0, "li": 2.27, "risk": "High Risk (Action Req.)"},
+            {"task_id": "T-103", "station": "Sub-Assembly Transfer", "load_kg": 10.0, "rwl_kg": 16.5, "li": 0.61, "risk": "Safe / Low Risk"},
+        ]
+
+    # 2. Astonishing Glassmorphism Header Banner
+    st.markdown("""
+    <div style="background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #312e81 100%); padding: 30px; border-radius: 16px; color: white; margin-bottom: 24px; box-shadow: 0 10px 25px rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.08);">
+        <div style="display: flex; align-items: center; justify-content: space-between;">
+            <div>
+                <span style="background: rgba(244, 63, 94, 0.25); color: #f43f5e; padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;">Tier 3: Safety, Ergonomics & Human Factors</span>
+                <h1 style="margin:8px 0 4px 0; color: #ffffff; font-size: 26px; font-weight: 800; letter-spacing: -0.025em;">🛡️ Human Factors, Ergonomics & NIOSH Lifting Suite</h1>
+                <p style="margin:0; color: #9ca3af; font-size: 13px;">NIOSH Lifting Equation (RWL & LI) &bull; Ergonomic Task Risk Register &bull; Biomechanical Posture Evaluation</p>
+            </div>
+            <div style="background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.4); padding: 8px 16px; border-radius: 30px; color: #34d399; font-weight: 600; font-size: 12px; display: flex; align-items: center; gap: 6px;">
+                <span style="width: 8px; height: 8px; background: #34d399; border-radius: 50%; display: inline-block; box-shadow: 0 0 8px #34d399;"></span> Safety Engine Active
+            </div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # 3. Multi-Tab Navigation Architecture
+    tab_niosh, tab_register, tab_reba, tab_guidelines = st.tabs([
+        "⚖️ NIOSH Lifting Calculator (RWL & LI)", 
+        "📋 Ergonomic Risk Task Register (CRUD)", 
+        "🦴 REBA / RULA Posture Analysis", 
+        "📚 Ergonomic Design Guidelines"
+    ])
+
+    # TAB 1: NIOSH Lifting Equation Calculator
+    with tab_niosh:
+        st.markdown("#### ⚖️ NIOSH Recommended Weight Limit (RWL) & Lifting Index (LI) Calculator")
+        st.markdown("""
+        <div style="background: rgba(31, 41, 55, 0.5); padding: 12px; border-radius: 8px; border-left: 3px solid #f43f5e; font-size: 12px; color: #d1d5db; margin-bottom: 16px;">
+            <b>NIOSH Equation:</b> $RWL = LC \\times HM \\times VM \\times DM \\times AM \\times FM \\times CM$. The Lifting Index ($LI = \\text{Load} / \\text{RWL}$) evaluates lower back injury risk. $LI > 1.0$ indicates increased stress; $LI > 3.0$ requires immediate redesign.
+        </div>
+        """, unsafe_allow_html=True)
+
+        col_n1, col_n2 = st.columns(2)
+
+        with col_n1:
+            st.markdown("##### Input Lifting Parameters (Metric)")
+            load_weight = st.number_input("Actual Object Weight Lifted ($L$ in kg)", 1.0, 50.0, 16.5, 0.5)
+            h_dist = st.slider("Horizontal Distance ($H$ in cm from ankles to hands)", 20, 80, 35, 1)
+            v_height = st.slider("Vertical Height ($V$ in cm from floor to hands)", 0, 175, 75, 5)
+            d_travel = st.slider("Vertical Travel Distance ($D$ in cm)", 20, 150, 50, 5)
+            a_angle = st.slider("Asymmetric Angle ($A$ in degrees)", 0, 135, 15, 5)
+            lifts_per_min = st.slider("Lifting Frequency (lifts/minute)", 0.2, 15.0, 2.0, 0.2)
+            duration_hrs = st.selectbox("Lifting Duration", ["Short (< 1 hour)", "Moderate (1 - 2 hours)", "Long (2 - 8 hours)"])
+            coupling_quality = st.selectbox("Container / Hand Coupling Quality", ["Good (Optimal handles)", "Fair (Adequate grips/fingers)", "Poor (Awkward / no handles)"])
+
+        with col_n2:
+            # NIOSH Multipliers Calculation logic
+            lc = 23.0  # Load Constant in kg
+            hm = max(0.0, min(1.0, 25.0 / h_dist))
+            vm = max(0.0, min(1.0, 1.0 - (0.003 * abs(v_height - 75.0))))
+            dm = max(0.71, min(1.0, 0.82 + (4.5 / max(d_travel, 1))))
+            am = max(0.0, min(1.0, 1.0 - (0.0032 * a_angle)))
+            
+            # Simplified FM approximation based on frequency & height
+            fm = 0.85 if lifts_per_min <= 1 else (0.60 if lifts_per_min <= 5 else 0.30)
+            
+            cm = 1.0 if "Good" in coupling_quality else (0.95 if "Fair" in coupling_quality else 0.90)
+
+            rwl = lc * hm * vm * dm * am * fm * cm
+            li = load_weight / rwl if rwl > 0 else 99.0
+
+            # Determine Risk Status
+            if li <= 1.0:
+                risk_badge, badge_color = "Safe Operation (Low Risk)", "#34d399"
+            elif li <= 2.0:
+                risk_badge, badge_color = "Moderate Risk (Intervention Suggested)", "#f59e0b"
+            else:
+                risk_badge, badge_color = "High Risk (Immediate Redesign Required)", "#ef4444"
+
+            st.markdown("##### Biomechanical Output & Multipliers")
+            st.metric(label="Recommended Weight Limit (RWL)", value=f"{rwl:.2f} kg", delta="NIOSH Standard")
+            st.metric(label="Lifting Index (LI)", value=f"{li:.2f}", delta="Risk Metric")
+
+            assessment_html = f"""
+            <div style="background: rgba(31, 41, 55, 0.6); border: 1px solid {badge_color}; padding: 14px; border-radius: 8px; color: {badge_color}; font-size: 13px; font-weight: 600; margin-top: 15px;">
+                Safety Assessment: {risk_badge}<br>
+                <span style="font-weight: 400; color: #9ca3af; font-size: 11px;">
+                HM={hm:.2f} | VM={vm:.2f} | DM={dm:.2f} | AM={am:.2f} | FM={fm:.2f} | CM={cm:.2f}
+                </span>
+            </div>
+            """
+            st.markdown(assessment_html, unsafe_allow_html=True)
+
+            # Quick save button to push to register
+            if st.button("📌 Log This Task to Risk Register", use_container_width=True):
+                new_task_id = f"T-{len(st.session_state.ergonomic_tasks)+101}"
+                st.session_state.ergonomic_tasks.append({
+                    "task_id": new_task_id,
+                    "station": f"Manual Station ({h_dist}cm H)",
+                    "load_kg": float(load_weight),
+                    "rwl_kg": round(rwl, 2),
+                    "li": round(li, 2),
+                    "risk": risk_badge
+                })
+                st.success(f"Task **{new_task_id}** successfully added to the Ergonomic Risk Register!")
+
+    # TAB 2: Ergonomic Risk Task Register (CRUD)
+    with tab_register:
+        st.markdown("#### 📋 Ergonomic Risk Register & Task Management")
+        st.markdown("""
+        <div style="background: rgba(31, 41, 55, 0.5); padding: 12px; border-radius: 8px; border-left: 3px solid #38bdf8; font-size: 12px; color: #d1d5db; margin-bottom: 16px;">
+            <b>Task Register:</b> Tracks active facility lifting operations, actual loads vs. calculated RWL, and associated Lifting Index scores. Use the control panel to add or decommission tasks.
+        </div>
+        """, unsafe_allow_html=True)
+
+        df_erg = pd.DataFrame(st.session_state.ergonomic_tasks)
+
+        col_e1, col_e2 = st.columns([2, 1])
+        with col_e1:
+            st.markdown("##### Registered Ergonomic Tasks")
+            if not df_erg.empty:
+                st.dataframe(df_erg.rename(columns={
+                    "task_id": "Task ID", "station": "Workstation", "load_kg": "Actual Load (kg)",
+                    "rwl_kg": "RWL (kg)", "li": "Lifting Index (LI)", "risk": "Risk Assessment"
+                }), use_container_width=True, hide_index=True)
+            else:
+                st.info("No ergonomic tasks registered.")
+
+        with col_e2:
+            st.markdown("##### 🗑️ Task Decommissioning")
+            with st.form("delete_erg_form"):
+                task_ids = [t["task_id"] for t in st.session_state.ergonomic_tasks] if st.session_state.ergonomic_tasks else []
+                target_task = st.selectbox("Select Task ID to Remove", task_ids if task_ids else ["None"])
+
+                if st.form_submit_button("🗑️ Remove Task Record", use_container_width=True):
+                    if task_ids and target_task != "None":
+                        st.session_state.ergonomic_tasks = [
+                            t for t in st.session_state.ergonomic_tasks if t["task_id"] != target_task
+                        ]
+                        st.success(f"Task **{target_task}** removed successfully!")
+                        st.rerun()
+                    else:
+                        st.warning("No tasks available to remove.")
+
+    # TAB 3: REBA / RULA Posture Analysis
+    with tab_reba:
+        st.markdown("#### 🦴 REBA & RULA Postural Ergonomics Framework")
+        st.markdown("""
+        <div style="background: rgba(31, 41, 55, 0.5); padding: 12px; border-radius: 8px; border-left: 3px solid #34d399; font-size: 12px; color: #d1d5db; margin-bottom: 16px;">
+            <b>Postural Scoring:</b> Rapid Entire Body Assessment (REBA) and Rapid Upper Limb Assessment (RULA) score body part angles (neck, trunk, arms, wrists, legs) to identify musculoskeletal disorder (MSD) hazards.
+        </div>
+        """, unsafe_allow_html=True)
+
+        reba_matrix = pd.DataFrame({
+            "Action Level": ["Level 1 (Score 1)", "Level 2 (Score 2-3)", "Level 3 (Score 4-7)", "Level 4 (Score 8-10)", "Level 5 (Score 11+)"],
+            "Risk Level": ["Negligible Risk", "Low Risk", "Medium Risk", "High Risk", "Very High Risk"],
+            "Required Action": ["None required", "Further investigation may be needed", "Investigation & changes soon", "Investigate and implement change soon", "Implement change immediately"]
+        })
+        st.dataframe(reba_matrix, use_container_width=True, hide_index=True)
+
+        fig_reba = px.bar(
+            pd.DataFrame({"Risk Category": ["Negligible", "Low Risk", "Medium Risk", "High Risk"], "Station Count": [2, 5, 3, 1]}),
+            x="Risk Category", y="Station Count",
+            title="Plant-Wide Postural Ergonomics Risk Distribution"
+        )
+        fig_reba.update_layout(plot_bgcolor="#0b0f19", paper_bgcolor="#0b0f19", font=dict(color="#f3f4f6"), height=300)
+        st.plotly_chart(fig_reba, use_container_width=True)
+
+    # TAB 4: Ergonomic Design Guidelines
+    with tab_guidelines:
+        st.markdown("#### 📚 Ergonomic Workstation & Material Handling Guidelines")
+        st.markdown("""
+        * **Golden Zone Lifting:** Keep lifts between knuckle and chest height ($75\\text{cm}$ to $110\\text{cm}$ from the floor) to minimize spinal torque.
+        * **Minimize Reaching:** Keep horizontal distance ($H$) under $35\\text{cm}$ to reduce lower back moment arms.
+        * **Eliminate Twisting:** Avoid combined lifting and twisting motions; reorient workstations to allow foot pivoting instead of spine rotation.
+        * **Mechanical Assist Integration:** Deploy articulated jib cranes, lift tables, or autonomous conveyor transfers for any task where the Lifting Index ($LI$) exceeds $1.5$.
+        """, unsafe_allow_html=True)
 
     st.stop()
 
