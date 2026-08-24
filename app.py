@@ -3722,7 +3722,7 @@ if mod in ["Green IE & Sustainability", "Sustainability & Circular Economy", "Gr
     st.stop()
 
 # ==============================================================================
-# SHOIR-IE: ENTERPRISE INTEGRATION, REPORTING & RBAC SUITE (V4.0)
+# SHOIR-IE: ENTERPRISE INTEGRATION, REPORTING & RBAC SUITE (V4.3 - FINAL)
 # ==============================================================================
 if mod in ["Enterprise Integration & Collaboration", "Enterprise Integration", "Collaboration Suite"]:
     
@@ -3761,8 +3761,8 @@ if mod in ["Enterprise Integration & Collaboration", "Enterprise Integration", "
         <div style="display: flex; align-items: center; justify-content: space-between;">
             <div>
                 <span style="background: rgba(129, 140, 248, 0.25); color: #818cf8; padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;">Tier 5: Enterprise Governance & Integration</span>
-                <h1 style="margin:8px 0 4px 0; color: #ffffff; font-size: 26px; font-weight: 800; letter-spacing: -0.025em;">🏢 Enterprise Integration & Collaboration Suite (V4.0)</h1>
-                <p style="margin:0; color: #c7d2fe; font-size: 13px;">Automated Executive Reporting &bull; ERP/MES API Connectors &bull; CSV Bulk Ingestion &bull; RBAC Workspace</p>
+                <h1 style="margin:8px 0 4px 0; color: #ffffff; font-size: 26px; font-weight: 800; letter-spacing: -0.025em;">🏢 Enterprise Integration & Collaboration Suite (V4.3)</h1>
+                <p style="margin:0; color: #c7d2fe; font-size: 13px;">Modular Export Wizard &bull; ERP/MES API Connectors &bull; CSV Bulk Ingestion &bull; RBAC Workspace Manager</p>
             </div>
             <div style="background: rgba(59, 130, 246, 0.2); border: 1px solid rgba(96, 165, 250, 0.4); padding: 8px 16px; border-radius: 30px; color: #93c5fd; font-weight: 600; font-size: 12px; display: flex; align-items: center; gap: 6px;">
                 <span style="width: 8px; height: 8px; background: #60a5fa; border-radius: 50%; display: inline-block; box-shadow: 0 0 8px #60a5fa;"></span> Active Role: {st.session_state.current_role}
@@ -3773,73 +3773,111 @@ if mod in ["Enterprise Integration & Collaboration", "Enterprise Integration", "
 
     # 3. Multi-Tab Navigation Architecture
     tab_reports, tab_erp, tab_rbac = st.tabs([
-        "📊 Executive Audit & Reporting Engine", 
+        "📊 Modular Export & Reporting Wizard", 
         "🔌 ERP/MES Connectors & Data Ingestion", 
         "👤 Workspace & RBAC Security"
     ])
 
     # ----------------------------------------------------
-    # TAB 1: AUTOMATED EXECUTIVE REPORTING ENGINE
+    # TAB 1: MODULAR EXPORT WIZARD & EXECUTIVE REPORTING
     # ----------------------------------------------------
     with tab_reports:
-        st.markdown("#### 📊 One-Click Executive Audit & Operations Report Generator")
+        st.markdown("#### 📊 Modular Export Wizard: Convert Modules to Enterprise Files")
         st.markdown("""
-        <div style="background: rgba(31, 41, 55, 0.5); padding: 12px; border-radius: 8px; border-left: 3px solid #818cf8; font-size: 12px; color: #d1d5db; margin-bottom: 16px;">
-            <b>Automated Compliance & Performance Audit:</b> Compiles active production metrics, sustainability scores, and throughput logs into a downloadable Excel/CSV executive package.
+        <div style="background: rgba(31, 41, 55, 0.5); padding: 14px; border-radius: 8px; border-left: 3px solid #38bdf8; font-size: 13px; color: #d1d5db; margin-bottom: 20px;">
+            <b>Interactive Export Engine:</b> Select any combination of operational modules below. Click <b>"Convert it to File"</b> to bundle all raw data, metrics, and audit logs into a clean, multi-sheet Excel workbook ready for executive presentation.
         </div>
         """, unsafe_allow_html=True)
 
-        col_rep1, col_rep2 = st.columns([1, 2])
+        col_exp1, col_exp2 = st.columns([1, 1.5])
 
-        with col_rep1:
-            st.markdown("##### ⚙️ Report Generation Parameters")
-            with st.form("generate_audit_form"):
-                report_title = st.text_input("Executive Audit Title", value="Q3 Industrial Operations & ESG Audit")
-                include_stations = st.checkbox("Include Factory Floor Workstations", value=True)
-                include_sustainability = st.checkbox("Include Carbon & ESG Metrics", value=True)
-                include_erp = st.checkbox("Include ERP Sync Logs", value=True)
-
-                if st.form_submit_button("📥 Compile Executive Report Package", use_container_width=True):
-                    rep_id = f"REP-{str(uuid.uuid4())[:4].upper()}"
-                    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    st.session_state.audit_report_history.insert(0, {
-                        "report_id": rep_id, "title": report_title, "generated_at": timestamp, "status": "Ready for Export"
-                    })
-                    st.success(f"Successfully compiled report {rep_id}!")
-                    st.rerun()
-
-            if st.session_state.audit_report_history:
-                with st.form("del_report_form"):
-                    rep_to_del = st.selectbox("🗑️ Remove Compiled Report by ID", [r["report_id"] for r in st.session_state.audit_report_history])
-                    if st.form_submit_button("Delete Report Record", use_container_width=True):
-                        st.session_state.audit_report_history = [r for r in st.session_state.audit_report_history if r["report_id"] != rep_to_del]
-                        st.rerun()
-
-        with col_rep2:
-            st.markdown("##### 📁 Compiled Audit Reports & Downloads")
-            df_reports = pd.DataFrame(st.session_state.audit_report_history)
-            if not df_reports.empty:
-                st.dataframe(df_reports.rename(columns={"report_id": "Report ID", "title": "Audit Title", "generated_at": "Timestamp", "status": "Status"}), use_container_width=True, hide_index=True)
+        with col_exp1:
+            st.markdown("##### ⚙️ Step 1: Select Modules to Export")
+            
+            with st.form("modular_export_form"):
+                report_name = st.text_input("Export Package Title", value="Shoir-IE_Operations_Export")
                 
-                # Excel Export Generator using BytesIO
-                output = io.BytesIO()
-                with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                    df_reports.to_excel(writer, index=False, sheet_name='Audit_Reports')
-                    if "dt_workstations" in st.session_state:
-                        pd.DataFrame(st.session_state.dt_workstations).to_excel(writer, index=False, sheet_name='Workstations')
-                    if "carbon_sources" in st.session_state:
-                        pd.DataFrame(st.session_state.carbon_sources).to_excel(writer, index=False, sheet_name='Carbon_Footprint')
-                excel_data = output.getvalue()
+                st.markdown("###### Include Modules:")
+                inc_carbon = st.checkbox("🌍 Carbon Footprint (Scope 1-3)", value=True)
+                inc_energy = st.checkbox("⚡ Energy & ISO 50001 Units", value=True)
+                inc_lca = st.checkbox("♻️ Life Cycle Assessment (LCA)", value=True)
+                inc_workstations = st.checkbox("🏭 Factory Floor Workstations", value=True)
+                inc_erp = st.checkbox("🔌 ERP / MES Connectors", value=True)
+                inc_users = st.checkbox("👤 Workspace & RBAC Roster", value=True)
+                inc_logs = st.checkbox("📋 System Event Logs", value=True)
 
-                st.download_button(
-                    label="📥 Download Complete Enterprise Audit Package (Excel)",
-                    data=excel_data,
-                    file_name=f"Shoir_IE_Executive_Audit_{datetime.date.today()}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    use_container_width=True
-                )
+                convert_clicked = st.form_submit_button("🔄 Convert it to File", use_container_width=True)
+
+            if convert_clicked:
+                st.session_state.conversion_ready = True
+                st.session_state.export_params = {
+                    "title": report_name,
+                    "carbon": inc_carbon,
+                    "energy": inc_energy,
+                    "lca": inc_lca,
+                    "workstations": inc_workstations,
+                    "erp": inc_erp,
+                    "users": inc_users,
+                    "logs": inc_logs,
+                    "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                }
+                st.success("Successfully converted selected modules into export package!")
+
+        with col_exp2:
+            st.markdown("##### 📁 Step 2: Download Converted Package")
+            
+            if st.session_state.get("conversion_ready", False):
+                params = st.session_state.export_params
+                st.markdown(f"""
+                <div style="background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); padding: 16px; border-radius: 12px; margin-bottom: 16px;">
+                    <div style="color: #34d399; font-weight: 700; font-size: 14px; margin-bottom: 6px;">✅ Package Converted & Ready</div>
+                    <div style="color: #d1d5db; font-size: 12px; line-height: 1.5;">
+                        <b>Title:</b> {params['title']}<br>
+                        <b>Converted At:</b> {params['timestamp']}<br>
+                        <b>Included Sheets:</b> {[k.capitalize() for k, v in params.items() if v is True and k not in ['title', 'timestamp']]}
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+
+                try:
+                    import openpyxl
+                    output = io.BytesIO()
+                    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                        summary_df = pd.DataFrame([{
+                            "Report Title": params['title'],
+                            "Generated Timestamp": params['timestamp'],
+                            "Platform": "Shoir-IE Enterprise Operations Suite"
+                        }])
+                        summary_df.to_excel(writer, index=False, sheet_name='Summary')
+
+                        if params['carbon'] and "carbon_sources" in st.session_state:
+                            pd.DataFrame(st.session_state.carbon_sources).to_excel(writer, index=False, sheet_name='Carbon_Footprint')
+                        if params['energy'] and "energy_units" in st.session_state:
+                            pd.DataFrame(st.session_state.energy_units).to_excel(writer, index=False, sheet_name='Energy_ISO50001')
+                        if params['lca'] and "lca_materials" in st.session_state:
+                            pd.DataFrame(st.session_state.lca_materials).to_excel(writer, index=False, sheet_name='LCA_Circular_Economy')
+                        if params['workstations'] and "dt_workstations" in st.session_state:
+                            pd.DataFrame(st.session_state.dt_workstations).to_excel(writer, index=False, sheet_name='Workstations')
+                        if params['erp'] and "erp_connectors" in st.session_state:
+                            pd.DataFrame(st.session_state.erp_connectors).to_excel(writer, index=False, sheet_name='ERP_Connectors')
+                        if params['users'] and "workspace_users" in st.session_state:
+                            pd.DataFrame(st.session_state.workspace_users).to_excel(writer, index=False, sheet_name='Workspace_Users')
+                        if params['logs'] and "event_logs" in st.session_state:
+                            pd.DataFrame(st.session_state.event_logs).to_excel(writer, index=False, sheet_name='Event_Logs')
+
+                    excel_data = output.getvalue()
+
+                    st.download_button(
+                        label="📥 Download Converted Enterprise Package (.xlsx)",
+                        data=excel_data,
+                        file_name=f"{params['title']}_{datetime.date.today()}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        use_container_width=True
+                    )
+                except ImportError:
+                    st.warning("⚠️ Please add `openpyxl` to your `requirements.txt` to enable multi-sheet Excel exports.")
             else:
-                st.info("No audit reports compiled yet. Use the control panel on the left to generate your first audit package.")
+                st.info("👈 Select your desired modules on the left and click **'Convert it to File'** to generate your download package.")
 
     # ----------------------------------------------------
     # TAB 2: ERP / MES DATA CONNECTORS & BULK UPLOAD
@@ -3888,7 +3926,7 @@ if mod in ["Enterprise Integration & Collaboration", "Enterprise Integration", "
             if not df_erp.empty:
                 st.dataframe(df_erp.rename(columns={"connector_id": "ID", "system_name": "Enterprise System", "protocol": "Protocol", "status": "Status", "last_sync": "Last Sync"}), use_container_width=True, hide_index=True)
                 
-                fig_erp = px.bar(df_erp, x="system_name", y=[100, 100, 100], color="status",
+                fig_erp = px.bar(df_erp, x="system_name", y=[100]*len(df_erp), color="status",
                                  color_discrete_map={"Connected": "#34d399", "Active": "#38bdf8", "Standby": "#f59e0b", "Maintenance": "#f43f5e"},
                                  title="Enterprise Connector Health & Status Overview")
                 fig_erp.update_layout(plot_bgcolor="#0b0f19", paper_bgcolor="#0b0f19", font=dict(color="#f3f4f6"), height=260, yaxis_title="Health Index (%)")
@@ -3900,7 +3938,6 @@ if mod in ["Enterprise Integration & Collaboration", "Enterprise Integration", "
     with tab_rbac:
         st.markdown("#### 👤 Workspace Management & Role-Based Access Control (RBAC)")
         
-        # Role Switcher Widget
         col_r_sel1, col_r_sel2 = st.columns([2, 1])
         with col_r_sel1:
             st.markdown("""
@@ -3943,7 +3980,6 @@ if mod in ["Enterprise Integration & Collaboration", "Enterprise Integration", "
             if not df_users.empty:
                 st.dataframe(df_users.rename(columns={"user_id": "User ID", "name": "Name", "role": "Role", "department": "Department", "access_level": "Clearance"}), use_container_width=True, hide_index=True)
                 
-                # Permission Badge View
                 st.markdown(f"""
                 <div style="background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); padding: 12px; border-radius: 8px; margin-top: 12px; color: #34d399; font-size: 13px;">
                     <b>Current Security Context:</b> Active user role is <b>{st.session_state.current_role}</b>. All module configuration edits and API deployments are fully authorized.
