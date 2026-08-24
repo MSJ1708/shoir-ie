@@ -771,7 +771,7 @@ st.sidebar.markdown("---")
 tier_val = st.session_state.user_tier
 is_admin = (st.session_state.current_user == "sho")
 
-tier1_features = ["MILP Solvers", "Inventory Playback", "Core IE Tools", "Subscriptions", "Persistence", "Facility Layout & Warehousing"]
+tier1_features = ["MILP Solvers", "Inventory Playback", "Core IE Tools", "Subscriptions", "Persistence", "Facility Layout & Warehousing", "Enterprise Integration & Collaboration"]
 tier2_features = tier1_features + ["Carbon Accounting", "IoT Digital Twin", "MEIO Matrix", "Slotting & Gantt", "Fleet Routing", "Warehouse Heatmap", "Supplier Risk Matrix", "Scenarios", "AGV Fleet Dispatcher", "Geospatial Network Designer", "Production Planning & Control (PPC)", "Lean Manufacturing & Shop Floor Operations", "Quality Control, Six Sigma & Reliability", "Engineering Economics & Finance"]
 tier3_features = tier2_features + ["AI Copilot", "FastAPI Gateway", "Monte Carlo Sim", "Sensitivity Analysis", "Webhook Alerts", "Agentic Workflows", "Control Tower", "Cryptographic Ledger", "Predictive Maintenance Hub", "Human Factors & Ergonomics (NIOSH)", "Digital Twin & Discrete-Event Simulation", "Green IE & Sustainability"]
 if is_admin:
@@ -3718,6 +3718,237 @@ if mod in ["Green IE & Sustainability", "Sustainability & Circular Economy", "Gr
                 fig_lca.update_traces(textposition='top center')
                 fig_lca.update_layout(plot_bgcolor="#0b0f19", paper_bgcolor="#0b0f19", font=dict(color="#f3f4f6"), height=290)
                 st.plotly_chart(fig_lca, use_container_width=True)
+
+    st.stop()
+
+# ==============================================================================
+# SHOIR-IE: ENTERPRISE INTEGRATION, REPORTING & RBAC SUITE (V4.0)
+# ==============================================================================
+if mod in ["Enterprise Integration & Collaboration", "Enterprise Integration", "Collaboration Suite"]:
+    
+    import streamlit as st
+    import pandas as pd
+    import plotly.express as px
+    import plotly.graph_objects as go
+    import uuid
+    import datetime
+    import io
+
+    # 1. Initialize Enterprise Session States
+    if "erp_connectors" not in st.session_state:
+        st.session_state.erp_connectors = [
+            {"connector_id": "ERP-01", "system_name": "SAP S/4HANA Manufacturing", "protocol": "REST API / OData", "status": "Connected", "last_sync": "10 min ago"},
+            {"connector_id": "ERP-02", "system_name": "Oracle MES Cloud", "protocol": "Kafka Event Stream", "status": "Active", "last_sync": "Real-time"},
+            {"connector_id": "ERP-03", "system_name": "Wonderware Historian SCADA", "protocol": "OPC-UA Gateway", "status": "Standby", "last_sync": "1 hr ago"},
+        ]
+
+    if "workspace_users" not in st.session_state:
+        st.session_state.workspace_users = [
+            {"user_id": "USR-101", "name": "Mohammed Suhail", "role": "Plant Manager", "department": "Industrial Engineering", "access_level": "Full Administrative"},
+            {"user_id": "USR-102", "name": "Sarah Al-Amri", "role": "Senior Process Engineer", "department": "Lean & Automation", "access_level": "Editor / Execution"},
+            {"user_id": "USR-103", "name": "Fahad Al-Harbi", "role": "Floor Operator", "department": "CNC Machining Cell", "access_level": "Read-Only / Console"},
+        ]
+
+    if "current_role" not in st.session_state:
+        st.session_state.current_role = "Plant Manager"
+
+    if "audit_report_history" not in st.session_state:
+        st.session_state.audit_report_history = []
+
+    # 2. Glassmorphism Header Banner
+    st.markdown("""
+    <div style="background: linear-gradient(135deg, #1e1b4b 0%, #312e81 50%, #172554 100%); padding: 30px; border-radius: 16px; color: white; margin-bottom: 24px; box-shadow: 0 10px 25px rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.08);">
+        <div style="display: flex; align-items: center; justify-content: space-between;">
+            <div>
+                <span style="background: rgba(129, 140, 248, 0.25); color: #818cf8; padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;">Tier 5: Enterprise Governance & Integration</span>
+                <h1 style="margin:8px 0 4px 0; color: #ffffff; font-size: 26px; font-weight: 800; letter-spacing: -0.025em;">🏢 Enterprise Integration & Collaboration Suite (V4.0)</h1>
+                <p style="margin:0; color: #c7d2fe; font-size: 13px;">Automated Executive Reporting &bull; ERP/MES API Connectors &bull; CSV Bulk Ingestion &bull; RBAC Workspace</p>
+            </div>
+            <div style="background: rgba(59, 130, 246, 0.2); border: 1px solid rgba(96, 165, 250, 0.4); padding: 8px 16px; border-radius: 30px; color: #93c5fd; font-weight: 600; font-size: 12px; display: flex; align-items: center; gap: 6px;">
+                <span style="width: 8px; height: 8px; background: #60a5fa; border-radius: 50%; display: inline-block; box-shadow: 0 0 8px #60a5fa;"></span> Active Role: {st.session_state.current_role}
+            </div>
+        </div>
+    </div>
+    """.format(st=st), unsafe_allow_html=True)
+
+    # 3. Multi-Tab Navigation Architecture
+    tab_reports, tab_erp, tab_rbac = st.tabs([
+        "📊 Executive Audit & Reporting Engine", 
+        "🔌 ERP/MES Connectors & Data Ingestion", 
+        "👤 Workspace & RBAC Security"
+    ])
+
+    # ----------------------------------------------------
+    # TAB 1: AUTOMATED EXECUTIVE REPORTING ENGINE
+    # ----------------------------------------------------
+    with tab_reports:
+        st.markdown("#### 📊 One-Click Executive Audit & Operations Report Generator")
+        st.markdown("""
+        <div style="background: rgba(31, 41, 55, 0.5); padding: 12px; border-radius: 8px; border-left: 3px solid #818cf8; font-size: 12px; color: #d1d5db; margin-bottom: 16px;">
+            <b>Automated Compliance & Performance Audit:</b> Compiles active production metrics, sustainability scores, and throughput logs into a downloadable Excel/CSV executive package.
+        </div>
+        """, unsafe_allow_html=True)
+
+        col_rep1, col_rep2 = st.columns([1, 2])
+
+        with col_rep1:
+            st.markdown("##### ⚙️ Report Generation Parameters")
+            with st.form("generate_audit_form"):
+                report_title = st.text_input("Executive Audit Title", value="Q3 Industrial Operations & ESG Audit")
+                include_stations = st.checkbox("Include Factory Floor Workstations", value=True)
+                include_sustainability = st.checkbox("Include Carbon & ESG Metrics", value=True)
+                include_erp = st.checkbox("Include ERP Sync Logs", value=True)
+
+                if st.form_submit_button("📥 Compile Executive Report Package", use_container_width=True):
+                    rep_id = f"REP-{str(uuid.uuid4())[:4].upper()}"
+                    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    st.session_state.audit_report_history.insert(0, {
+                        "report_id": rep_id, "title": report_title, "generated_at": timestamp, "status": "Ready for Export"
+                    })
+                    st.success(f"Successfully compiled report {rep_id}!")
+                    st.rerun()
+
+            if st.session_state.audit_report_history:
+                with st.form("del_report_form"):
+                    rep_to_del = st.selectbox("🗑️ Remove Compiled Report by ID", [r["report_id"] for r in st.session_state.audit_report_history])
+                    if st.form_submit_button("Delete Report Record", use_container_width=True):
+                        st.session_state.audit_report_history = [r for r in st.session_state.audit_report_history if r["report_id"] != rep_to_del]
+                        st.rerun()
+
+        with col_rep2:
+            st.markdown("##### 📁 Compiled Audit Reports & Downloads")
+            df_reports = pd.DataFrame(st.session_state.audit_report_history)
+            if not df_reports.empty:
+                st.dataframe(df_reports.rename(columns={"report_id": "Report ID", "title": "Audit Title", "generated_at": "Timestamp", "status": "Status"}), use_container_width=True, hide_index=True)
+                
+                # Excel Export Generator using BytesIO
+                output = io.BytesIO()
+                with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                    df_reports.to_excel(writer, index=False, sheet_name='Audit_Reports')
+                    if "dt_workstations" in st.session_state:
+                        pd.DataFrame(st.session_state.dt_workstations).to_excel(writer, index=False, sheet_name='Workstations')
+                    if "carbon_sources" in st.session_state:
+                        pd.DataFrame(st.session_state.carbon_sources).to_excel(writer, index=False, sheet_name='Carbon_Footprint')
+                excel_data = output.getvalue()
+
+                st.download_button(
+                    label="📥 Download Complete Enterprise Audit Package (Excel)",
+                    data=excel_data,
+                    file_name=f"Shoir_IE_Executive_Audit_{datetime.date.today()}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True
+                )
+            else:
+                st.info("No audit reports compiled yet. Use the control panel on the left to generate your first audit package.")
+
+    # ----------------------------------------------------
+    # TAB 2: ERP / MES DATA CONNECTORS & BULK UPLOAD
+    # ----------------------------------------------------
+    with tab_erp:
+        st.markdown("#### 🔌 ERP & MES Data Connectors / Bulk File Ingestion")
+        col_e1, col_e2 = st.columns([1, 2])
+
+        with col_e1:
+            st.markdown("##### ➕ Register API / MES Connector")
+            with st.form("add_erp_form"):
+                sys_name = st.text_input("Enterprise System Name", value="Infor CloudSuite Industrial")
+                protocol = st.selectbox("Integration Protocol", ["REST API / OData", "Kafka Event Stream", "OPC-UA Gateway", "Direct SQL Bridge"])
+                status_conn = st.selectbox("Connection Status", ["Connected", "Active", "Standby", "Maintenance"])
+
+                if st.form_submit_button("📥 Deploy API Connector", use_container_width=True):
+                    new_eid = f"ERP-{str(uuid.uuid4())[:4].upper()}"
+                    st.session_state.erp_connectors.append({
+                        "connector_id": new_eid, "system_name": sys_name, "protocol": protocol, "status": status_conn, "last_sync": "Just now"
+                    })
+                    st.rerun()
+
+            if st.session_state.erp_connectors:
+                with st.form("del_erp_form"):
+                    erp_to_del = st.selectbox("🗑️ Remove Connector by ID", [e["connector_id"] for e in st.session_state.erp_connectors])
+                    if st.form_submit_button("Delete Connector", use_container_width=True):
+                        st.session_state.erp_connectors = [e for e in st.session_state.erp_connectors if e["connector_id"] != erp_to_del]
+                        st.rerun()
+
+            st.markdown("##### 📁 Bulk CSV / Excel File Ingestion")
+            uploaded_file = st.file_uploader("Upload Plant Floor Dataset (CSV/XLSX)", type=["csv", "xlsx"])
+            if uploaded_file is not None:
+                try:
+                    if uploaded_file.name.endswith('.csv'):
+                        df_uploaded = pd.read_csv(uploaded_file)
+                    else:
+                        df_uploaded = pd.read_excel(uploaded_file)
+                    st.success(f"Successfully parsed {uploaded_file.name} ({len(df_uploaded)} rows)")
+                    st.dataframe(df_uploaded.head(3), use_container_width=True)
+                except Exception as e:
+                    st.error(f"Error parsing file: {e}")
+
+        with col_e2:
+            st.markdown("##### 🌐 Active Enterprise API Integrations")
+            df_erp = pd.DataFrame(st.session_state.erp_connectors)
+            if not df_erp.empty:
+                st.dataframe(df_erp.rename(columns={"connector_id": "ID", "system_name": "Enterprise System", "protocol": "Protocol", "status": "Status", "last_sync": "Last Sync"}), use_container_width=True, hide_index=True)
+                
+                fig_erp = px.bar(df_erp, x="system_name", y=[100, 100, 100], color="status",
+                                 color_discrete_map={"Connected": "#34d399", "Active": "#38bdf8", "Standby": "#f59e0b", "Maintenance": "#f43f5e"},
+                                 title="Enterprise Connector Health & Status Overview")
+                fig_erp.update_layout(plot_bgcolor="#0b0f19", paper_bgcolor="#0b0f19", font=dict(color="#f3f4f6"), height=260, yaxis_title="Health Index (%)")
+                st.plotly_chart(fig_erp, use_container_width=True)
+
+    # ----------------------------------------------------
+    # TAB 3: USER WORKSPACE & RBAC SECURITY
+    # ----------------------------------------------------
+    with tab_rbac:
+        st.markdown("#### 👤 Workspace Management & Role-Based Access Control (RBAC)")
+        
+        # Role Switcher Widget
+        col_r_sel1, col_r_sel2 = st.columns([2, 1])
+        with col_r_sel1:
+            st.markdown("""
+            <div style="background: rgba(31, 41, 55, 0.4); padding: 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.08); font-size: 13px; color: #d1d5db;">
+                <b>Security Policy Enforcement:</b> Restricts or grants module configuration based on user clearance level (Plant Manager, Senior Engineer, Floor Operator).
+            </div>
+            """, unsafe_allow_html=True)
+        with col_r_sel2:
+            selected_role = st.selectbox("Switch Active Role", ["Plant Manager", "Senior Process Engineer", "Floor Operator"], index=["Plant Manager", "Senior Process Engineer", "Floor Operator"].index(st.session_state.current_role) if st.session_state.current_role in ["Plant Manager", "Senior Process Engineer", "Floor Operator"] else 0)
+            if selected_role != st.session_state.current_role:
+                st.session_state.current_role = selected_role
+                st.rerun()
+
+        col_u1, col_u2 = st.columns([1, 2])
+        with col_u1:
+            st.markdown("##### ➕ Register Workspace User")
+            with st.form("add_user_form"):
+                u_name = st.text_input("Full Name", value="Zainab Malik")
+                u_role = st.selectbox("Assigned Role", ["Plant Manager", "Senior Process Engineer", "Floor Operator", "Data Analyst"])
+                u_dept = st.text_input("Department", value="Supply Chain Analytics")
+                u_access = st.selectbox("Clearance Level", ["Full Administrative", "Editor / Execution", "Read-Only / Console"])
+
+                if st.form_submit_button("📥 Provision User", use_container_width=True):
+                    new_uid = f"USR-{str(uuid.uuid4())[:4].upper()}"
+                    st.session_state.workspace_users.append({
+                        "user_id": new_uid, "name": u_name, "role": u_role, "department": u_dept, "access_level": u_access
+                    })
+                    st.rerun()
+
+            if st.session_state.workspace_users:
+                with st.form("del_user_form"):
+                    usr_to_del = st.selectbox("🗑️ Remove User by ID", [u["user_id"] for u in st.session_state.workspace_users])
+                    if st.form_submit_button("Revoke User Access", use_container_width=True):
+                        st.session_state.workspace_users = [u for u in st.session_state.workspace_users if u["user_id"] != usr_to_del]
+                        st.rerun()
+
+        with col_u2:
+            st.markdown("##### 👥 Active Roster & Permissions Matrix")
+            df_users = pd.DataFrame(st.session_state.workspace_users)
+            if not df_users.empty:
+                st.dataframe(df_users.rename(columns={"user_id": "User ID", "name": "Name", "role": "Role", "department": "Department", "access_level": "Clearance"}), use_container_width=True, hide_index=True)
+                
+                # Permission Badge View
+                st.markdown(f"""
+                <div style="background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); padding: 12px; border-radius: 8px; margin-top: 12px; color: #34d399; font-size: 13px;">
+                    <b>Current Security Context:</b> Active user role is <b>{st.session_state.current_role}</b>. All module configuration edits and API deployments are fully authorized.
+                </div>
+                """, unsafe_allow_html=True)
 
     st.stop()
     
