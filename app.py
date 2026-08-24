@@ -773,7 +773,7 @@ is_admin = (st.session_state.current_user == "sho")
 
 tier1_features = ["MILP Solvers", "Inventory Playback", "Core IE Tools", "Subscriptions", "Persistence", "Facility Layout & Warehousing"]
 tier2_features = tier1_features + ["Carbon Accounting", "IoT Digital Twin", "MEIO Matrix", "Slotting & Gantt", "Fleet Routing", "Warehouse Heatmap", "Supplier Risk Matrix", "Scenarios", "AGV Fleet Dispatcher", "Geospatial Network Designer", "Production Planning & Control (PPC)", "Lean Manufacturing & Shop Floor Operations", "Quality Control, Six Sigma & Reliability", "Engineering Economics & Finance"]
-tier3_features = tier2_features + ["AI Copilot", "FastAPI Gateway", "Monte Carlo Sim", "Sensitivity Analysis", "Webhook Alerts", "Agentic Workflows", "Control Tower", "Cryptographic Ledger", "Predictive Maintenance Hub", "Human Factors & Ergonomics (NIOSH)"]
+tier3_features = tier2_features + ["AI Copilot", "FastAPI Gateway", "Monte Carlo Sim", "Sensitivity Analysis", "Webhook Alerts", "Agentic Workflows", "Control Tower", "Cryptographic Ledger", "Predictive Maintenance Hub", "Human Factors & Ergonomics (NIOSH)", "Digital Twin & Discrete-Event Simulation"]
 if is_admin:
     tier3_features.append("Admin Panel")
 
@@ -3181,6 +3181,304 @@ if mod in ["Engineering Economics & Finance", "Engineering Economics & Financial
 
     st.stop()
 
+# ==============================================================================
+# SHOIR-IE: ELITE DIGITAL TWIN, DES & MES CONTROL TOWER (V3.6)
+# ==============================================================================
+if mod in ["Digital Twin & Discrete-Event Simulation", "Digital Twin & DES"]:
+    
+    import streamlit as st
+    import pandas as pd
+    import plotly.express as px
+    import plotly.graph_objects as go
+    import numpy as np
+    import uuid
+    import datetime
+
+    # 1. Initialize Dynamic Session States
+    if "dt_workstations" not in st.session_state:
+        st.session_state.dt_workstations = [
+            {"id": "WS-01", "name": "CNC Milling Center A", "type": "Machining", "status": "Running", "x": 15, "y": 20},
+            {"id": "WS-02", "name": "Automated Stamping Press", "type": "Fabrication", "status": "Idle", "x": 45, "y": 20},
+            {"id": "WS-03", "name": "Robotic Welding Cell", "type": "Assembly", "status": "Running", "x": 75, "y": 20},
+            {"id": "WS-04", "name": "Quality Vision Inspection", "type": "Inspection", "status": "Maintenance", "x": 45, "y": 70},
+        ]
+
+    if "agv_fleet" not in st.session_state:
+        st.session_state.agv_fleet = [
+            {"agv_id": "AGV-01", "task": "Transporting Part #104", "battery": 88.0, "status": "Moving", "x": 30, "y": 20},
+            {"agv_id": "AGV-02", "task": "Returning to Charging Dock", "battery": 24.5, "status": "Charging", "x": 60, "y": 70},
+        ]
+
+    if "des_queues" not in st.session_state:
+        st.session_state.des_queues = [
+            {"queue_id": "Q-101", "station": "CNC Milling Center A", "arrival_rate": 12.0, "service_rate": 15.0, "capacity": 25},
+            {"queue_id": "Q-102", "station": "Robotic Welding Cell", "arrival_rate": 10.0, "service_rate": 11.5, "capacity": 20},
+        ]
+
+    if "iot_sensors" not in st.session_state:
+        st.session_state.iot_sensors = [
+            {"sensor_id": "SNS-901", "name": "Spindle Vibration (CNC A)", "type": "Vibration (mm/s)", "reading": 2.45, "threshold": 4.5, "status": "Normal"},
+            {"sensor_id": "SNS-902", "name": "Hydraulic Pressure (Press)", "type": "Pressure (Bar)", "reading": 182.1, "threshold": 210.0, "status": "Normal"},
+            {"sensor_id": "SNS-903", "name": "Thermal Core (Welding Cell)", "type": "Temperature (°C)", "reading": 78.4, "threshold": 85.0, "status": "Warning"},
+        ]
+
+    if "kanban_buffers" not in st.session_state:
+        st.session_state.kanban_buffers = [
+            {"buffer_id": "BUF-01", "from_ws": "CNC Milling Center A", "to_ws": "Automated Stamping Press", "current_wip": 18, "max_capacity": 20, "state": "Near Capacity"},
+            {"buffer_id": "BUF-02", "from_ws": "Automated Stamping Press", "to_ws": "Robotic Welding Cell", "current_wip": 4, "max_capacity": 25, "state": "Starved"},
+        ]
+
+    if "reliability_data" not in st.session_state:
+        st.session_state.reliability_data = [
+            {"machine_id": "WS-01", "mtbf_hrs": 350.0, "mttr_hrs": 2.5, "availability_pct": 99.2, "failure_risk": "Low"},
+            {"machine_id": "WS-02", "mtbf_hrs": 120.0, "mttr_hrs": 4.0, "availability_pct": 96.8, "failure_risk": "Moderate"},
+            {"machine_id": "WS-03", "mtbf_hrs": 85.0, "mttr_hrs": 6.0, "availability_pct": 93.4, "failure_risk": "High"},
+        ]
+
+    if "event_logs" not in st.session_state:
+        st.session_state.event_logs = [
+            {"timestamp": "08:02:14", "category": "Kanban Buffer", "message": "Buffer BUF-01 reached 90% capacity (Starvation risk downstream)."},
+            {"timestamp": "08:01:45", "category": "Reliability", "message": "Machine WS-03 flagged for high breakdown probability (MTBF: 85 hrs)."},
+            {"timestamp": "07:59:12", "category": "AGV Fleet", "message": "AGV-01 completed delivery to WS-03."},
+        ]
+
+    # 2. Glassmorphism Header Banner
+    st.markdown("""
+    <div style="background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #312e81 100%); padding: 30px; border-radius: 16px; color: white; margin-bottom: 24px; box-shadow: 0 10px 25px rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.08);">
+        <div style="display: flex; align-items: center; justify-content: space-between;">
+            <div>
+                <span style="background: rgba(56, 189, 248, 0.25); color: #38bdf8; padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;">Tier 3: Advanced Digital Twin & MES Operations</span>
+                <h1 style="margin:8px 0 4px 0; color: #ffffff; font-size: 26px; font-weight: 800; letter-spacing: -0.025em;">🌐 Digital Twin, DES & MES Control Tower (V3.6)</h1>
+                <p style="margin:0; color: #9ca3af; font-size: 13px;">Factory Floor &bull; AGV Fleet &bull; DES Queues &bull; IoT Hub &bull; Kanban WIP Buffers &bull; MTBF Reliability &bull; Audit Log</p>
+            </div>
+            <div style="background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.4); padding: 8px 16px; border-radius: 30px; color: #34d399; font-weight: 600; font-size: 12px; display: flex; align-items: center; gap: 6px;">
+                <span style="width: 8px; height: 8px; background: #34d399; border-radius: 50%; display: inline-block; box-shadow: 0 0 8px #34d399;"></span> MES Synchronized
+            </div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # 3. Multi-Tab Navigation Architecture (6 Elite Tabs)
+    tab_floor, tab_des, tab_iot, tab_kanban, tab_rel, tab_logs = st.tabs([
+        "🏭 Factory Floor & AGVs", 
+        "⚙️ DES Queues", 
+        "📡 IoT Telemetry",
+        "📦 Kanban WIP & Buffers",
+        "🛠️ Reliability & MTBF",
+        "📜 Audit Event Stream"
+    ])
+
+    # ----------------------------------------------------
+    # TAB 1: INTERACTIVE FACTORY FLOOR & AGV TRACKER
+    # ----------------------------------------------------
+    with tab_floor:
+        st.markdown("#### 🏭 Interactive SVG Factory Floor & AGV Fleet Canvas")
+        col_f1, col_f2 = st.columns([1, 2])
+
+        with col_f1:
+            st.markdown("##### ➕ Add Workstation Slot")
+            with st.form("add_ws_form"):
+                ws_name = st.text_input("Workstation Name", value="Laser Cutter B")
+                ws_type = st.selectbox("Operation Category", ["Machining", "Fabrication", "Assembly", "Inspection", "Packaging"])
+                ws_status = st.selectbox("Operational Status", ["Running", "Idle", "Maintenance"])
+                pos_x = st.slider("X Position (%)", 5, 90, 30)
+                pos_y = st.slider("Y Position (%)", 5, 90, 50)
+
+                if st.form_submit_button("📥 Deploy Workstation", use_container_width=True):
+                    new_id = f"WS-{str(uuid.uuid4())[:4].upper()}"
+                    st.session_state.dt_workstations.append({
+                        "id": new_id, "name": ws_name, "type": ws_type, "status": ws_status, "x": pos_x, "y": pos_y
+                    })
+                    st.session_state.event_logs.insert(0, {"timestamp": datetime.datetime.now().strftime("%H:%M:%S"), "category": "Factory Floor", "message": f"Deployed new workstation {new_id} ({ws_name})."})
+                    st.rerun()
+
+            st.markdown("##### 🤖 Register New AGV Unit")
+            with st.form("add_agv_form"):
+                agv_name = st.text_input("AGV Identifier", value="AGV-03")
+                agv_task = st.text_input("Current Mission", value="Staging Raw Materials")
+                agv_batt = st.slider("Battery Level (%)", 10.0, 100.0, 95.0, 5.0)
+                if st.form_submit_button("📥 Dispatch AGV", use_container_width=True):
+                    st.session_state.agv_fleet.append({"agv_id": agv_name, "task": agv_task, "battery": float(agv_batt), "status": "Active", "x": 50, "y": 45})
+                    st.session_state.event_logs.insert(0, {"timestamp": datetime.datetime.now().strftime("%H:%M:%S"), "category": "AGV Fleet", "message": f"Dispatched {agv_name} for mission: {agv_task}."})
+                    st.rerun()
+
+        with col_f2:
+            st.markdown("##### 🖥️ Live Plant Floor & AGV Visual Canvas")
+            svg_content = f"""
+            <svg width="100%" height="340" style="background: #090d16; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1);">
+                <defs>
+                    <pattern id="grid" width="30" height="30" patternUnits="userSpaceOnUse">
+                        <path d="M 30 0 L 0 0 0 30" fill="none" stroke="rgba(255,255,255,0.03)" stroke-width="1"/>
+                    </pattern>
+                </defs>
+                <rect width="100%" height="100%" fill="url(#grid)" />
+            """
+            for ws in st.session_state.dt_workstations:
+                color = "#34d399" if ws["status"] == "Running" else ("#f59e0b" if ws["status"] == "Idle" else "#f43f5e")
+                svg_content += f"""
+                <g transform="translate({ws['x']*6.5}, {ws['y']*2.8})">
+                    <rect x="0" y="0" width="125" height="50" rx="6" fill="#1e293b" stroke="{color}" stroke-width="2"/>
+                    <circle cx="12" cy="12" r="5" fill="{color}"/>
+                    <text x="24" y="15" fill="#ffffff" font-family="sans-serif" font-size="10" font-weight="bold">{ws['id']}</text>
+                    <text x="10" y="32" fill="#94a3b8" font-family="sans-serif" font-size="8">{ws['name'][:16]}</text>
+                    <text x="10" y="42" fill="{color}" font-family="sans-serif" font-size="7" font-weight="600">{ws['status'].upper()}</text>
+                </g>
+                """
+            for agv in st.session_state.agv_fleet:
+                svg_content += f"""
+                <g transform="translate({agv['x']*6.5}, {agv['y']*2.8})">
+                    <rect x="0" y="0" width="95" height="36" rx="18" fill="#38bdf8" stroke="#ffffff" stroke-width="1.5"/>
+                    <circle cx="12" cy="18" r="4" fill="#0f172a"/>
+                    <text x="22" y="16" fill="#0f172a" font-family="sans-serif" font-size="9" font-weight="bold">{agv['agv_id']}</text>
+                    <text x="22" y="27" fill="#0f172a" font-family="sans-serif" font-size="7">{int(agv['battery'])}% Batt</text>
+                </g>
+                """
+            svg_content += "</svg>"
+            st.markdown(svg_content, unsafe_allow_html=True)
+            df_agv = pd.DataFrame(st.session_state.agv_fleet)
+            st.dataframe(df_agv.rename(columns={"agv_id": "AGV Unit", "task": "Current Mission", "battery": "Battery (%)", "status": "Status"}), use_container_width=True, hide_index=True)
+
+    # ----------------------------------------------------
+    # TAB 2: DISCRETE-EVENT SIMULATION (DES) ENGINE
+    # ----------------------------------------------------
+    with tab_des:
+        st.markdown("#### ⚙️ Discrete-Event Simulation (DES) Queue Engine")
+        col_d1, col_d2 = st.columns([1, 2])
+        with col_d1:
+            with st.form("add_queue_form"):
+                q_id = f"Q-{str(uuid.uuid4())[:4].upper()}"
+                q_station = st.text_input("Queue / Station Name", value="Assembly Line Staging")
+                arr_rate = st.number_input("Arrival Rate ($\lambda$ parts/hr)", 1.0, 50.0, 14.0, 0.5)
+                srv_rate = st.number_input("Service Rate ($\mu$ parts/hr)", 1.0, 60.0, 18.0, 0.5)
+                q_cap = st.number_input("Max Queue Buffer Capacity", 5, 100, 30)
+
+                if st.form_submit_button("📥 Add Queue Slot", use_container_width=True):
+                    st.session_state.des_queues.append({
+                        "queue_id": q_id, "station": q_station, "arrival_rate": float(arr_rate),
+                        "service_rate": float(srv_rate), "capacity": int(q_cap)
+                    })
+                    st.rerun()
+        with col_d2:
+            df_q = pd.DataFrame(st.session_state.des_queues)
+            if not df_q.empty:
+                df_q["Utilization (%)"] = (df_q["arrival_rate"] / df_q["service_rate"]) * 100
+                st.dataframe(df_q.rename(columns={"queue_id": "ID", "station": "Workstation", "arrival_rate": "Arrival", "service_rate": "Service", "Utilization (%)": "Util (%)"}), use_container_width=True, hide_index=True)
+                fig_des = px.bar(df_q, x="station", y=["Utilization (%)"], title="Workstation Server Utilization (%)")
+                fig_des.update_layout(plot_bgcolor="#0b0f19", paper_bgcolor="#0b0f19", font=dict(color="#f3f4f6"), height=260)
+                st.plotly_chart(fig_des, use_container_width=True)
+
+    # ----------------------------------------------------
+    # TAB 3: IOT TELEMETRY WEBHOOK HUB
+    # ----------------------------------------------------
+    with tab_iot:
+        st.markdown("#### 📡 IoT & Telemetry Webhook Ingestion Hub")
+        col_i1, col_i2 = st.columns([1, 2])
+        with col_i1:
+            with st.form("add_sensor_form"):
+                s_name = st.text_input("Sensor Asset Name", value="Conveyor Motor RPM")
+                s_type = st.selectbox("Telemetry Metric", ["Vibration (mm/s)", "Pressure (Bar)", "Temperature (°C)", "Speed (RPM)"])
+                s_val = st.number_input("Initial Live Reading", 0.0, 5000.0, 1450.0, 10.0)
+                s_thresh = st.number_input("Critical Alarm Threshold", 0.0, 5000.0, 1800.0, 10.0)
+
+                if st.form_submit_button("📥 Register IoT Sensor", use_container_width=True):
+                    new_sid = f"SNS-{str(uuid.uuid4())[:4].upper()}"
+                    status_lbl = "Normal" if s_val < s_thresh else "Warning"
+                    st.session_state.iot_sensors.append({"sensor_id": new_sid, "name": s_name, "type": s_type, "reading": float(s_val), "threshold": float(s_thresh), "status": status_lbl})
+                    st.rerun()
+        with col_i2:
+            df_iot = pd.DataFrame(st.session_state.iot_sensors)
+            if not df_iot.empty:
+                st.dataframe(df_iot.rename(columns={"sensor_id": "ID", "name": "Sensor", "type": "Metric", "reading": "Reading", "status": "Status"}), use_container_width=True, hide_index=True)
+                fig_iot = px.bar(df_iot, x="name", y="reading", color="status", color_discrete_map={"Normal": "#34d399", "Warning": "#f59e0b"}, title="Live Sensor Telemetry vs Thresholds")
+                fig_iot.update_layout(plot_bgcolor="#0b0f19", paper_bgcolor="#0b0f19", font=dict(color="#f3f4f6"), height=280)
+                st.plotly_chart(fig_iot, use_container_width=True)
+
+    # ----------------------------------------------------
+    # TAB 4: KANBAN WIP & BUFFERS (NEW IN V3.6)
+    # ----------------------------------------------------
+    with tab_kanban:
+        st.markdown("#### 📦 Kanban WIP Buffer & Starvation / Blocking Engine")
+        st.markdown("""
+        <div style="background: rgba(31, 41, 55, 0.5); padding: 12px; border-radius: 8px; border-left: 3px solid #38bdf8; font-size: 12px; color: #d1d5db; margin-bottom: 16px;">
+            <b>Lean Production Buffers:</b> Tracks WIP inventory between successive workstations to monitor line balancing, upstream blockages, and downstream starvation risks.
+        </div>
+        """, unsafe_allow_html=True)
+
+        k_col1, k_col2 = st.columns([1, 2])
+        with k_col1:
+            with st.form("add_kanban_form"):
+                buf_name = st.text_input("Buffer Identifier", value="BUF-03")
+                from_w = st.text_input("Upstream Station", value="Robotic Welding")
+                to_w = st.text_input("Downstream Station", value="Inspection Cell")
+                wip_qty = st.number_input("Current WIP Units", 0, 100, 12)
+                max_cap = st.number_input("Max Buffer Capacity", 5, 150, 30)
+
+                if st.form_submit_button("📥 Add Kanban Buffer", use_container_width=True):
+                    util_ratio = wip_qty / max_cap
+                    state_lbl = "Balanced" if 0.3 <= util_ratio <= 0.8 else ("Starved" if util_ratio < 0.3 else "Near Capacity")
+                    st.session_state.kanban_buffers.append({
+                        "buffer_id": buf_name, "from_ws": from_w, "to_ws": to_w,
+                        "current_wip": int(wip_qty), "max_capacity": int(max_cap), "state": state_lbl
+                    })
+                    st.rerun()
+
+        with k_col2:
+            df_kb = pd.DataFrame(st.session_state.kanban_buffers)
+            if not df_kb.empty:
+                df_kb["Fill Rate (%)"] = (df_kb["current_wip"] / df_kb["max_capacity"]) * 100
+                st.dataframe(df_kb.rename(columns={"buffer_id": "Buffer ID", "from_ws": "From", "to_ws": "To", "current_wip": "WIP", "max_capacity": "Capacity", "state": "Status"}), use_container_width=True, hide_index=True)
+                fig_kb = px.bar(df_kb, x="buffer_id", y="Fill Rate (%)", color="state", color_discrete_map={"Balanced": "#34d399", "Starved": "#f43f5e", "Near Capacity": "#f59e0b"}, title="Kanban Buffer Fill Rates (%)")
+                fig_kb.update_layout(plot_bgcolor="#0b0f19", paper_bgcolor="#0b0f19", font=dict(color="#f3f4f6"), height=280)
+                st.plotly_chart(fig_kb, use_container_width=True)
+
+    # ----------------------------------------------------
+    # TAB 5: RELIABILITY & MTBF ENGINE (NEW IN V3.6)
+    # ----------------------------------------------------
+    with tab_rel:
+        st.markdown("#### 🛠️ Machine Reliability, MTBF & Availability Modeler")
+        st.markdown("""
+        <div style="background: rgba(31, 41, 55, 0.5); padding: 12px; border-radius: 8px; border-left: 3px solid #f59e0b; font-size: 12px; color: #d1d5db; margin-bottom: 16px;">
+            <b>Reliability Engineering:</b> Calculates system availability based on Mean Time Between Failures (MTBF) and Mean Time To Repair (MTTR): $\text{Availability} = \frac{\text{MTBF}}{\text{MTBF} + \text{MTTR}}$.
+        </div>
+        """, unsafe_allow_html=True)
+
+        r_col1, r_col2 = st.columns([1, 2])
+        with r_col1:
+            with st.form("add_rel_form"):
+                m_id = st.text_input("Machine ID", value="WS-04")
+                mtbf_val = st.number_input("MTBF (Hours)", 10.0, 2000.0, 200.0, 10.0)
+                mttr_val = st.number_input("MTTR (Hours)", 0.5, 48.0, 3.0, 0.5)
+
+                if st.form_submit_button("📥 Calculate & Add Asset", use_container_width=True):
+                    avail = (mtbf_val / (mtbf_val + mttr_val)) * 100.0
+                    risk = "Low" if avail >= 98.0 else ("Moderate" if avail >= 95.0 else "High")
+                    st.session_state.reliability_data.append({
+                        "machine_id": m_id, "mtbf_hrs": float(mtbf_val), "mttr_hrs": float(mttr_val),
+                        "availability_pct": round(avail, 2), "failure_risk": risk
+                    })
+                    st.rerun()
+
+        with r_col2:
+            df_rel = pd.DataFrame(st.session_state.reliability_data)
+            if not df_rel.empty:
+                st.dataframe(df_rel.rename(columns={"machine_id": "Asset ID", "mtbf_hrs": "MTBF (hrs)", "mttr_hrs": "MTTR (hrs)", "availability_pct": "Availability (%)", "failure_risk": "Risk Level"}), use_container_width=True, hide_index=True)
+                fig_rel = px.bar(df_rel, x="machine_id", y="availability_pct", color="failure_risk", color_discrete_map={"Low": "#34d399", "Moderate": "#f59e0b", "High": "#f43f5e"}, title="Asset Availability (%) vs Failure Risk")
+                fig_rel.update_layout(plot_bgcolor="#0b0f19", paper_bgcolor="#0b0f19", font=dict(color="#f3f4f6"), height=280)
+                st.plotly_chart(fig_rel, use_container_width=True)
+
+    # ----------------------------------------------------
+    # TAB 6: LIVE EVENT STREAM & AUDIT LOG
+    # ----------------------------------------------------
+    with tab_logs:
+        st.markdown("#### 📜 Live Plant Floor Event Stream & Audit Log")
+        df_logs = pd.DataFrame(st.session_state.event_logs)
+        st.dataframe(df_logs.rename(columns={"timestamp": "Time", "category": "Module", "message": "Event Description"}), use_context=True, use_container_width=True, hide_index=True)
+
+        if st.button("🗑️ Clear Event Log"):
+            st.session_state.event_logs = []
+            st.rerun()
+
+    st.stop()
 
 def render_data_editor(df, key_name):
     if hasattr(st, "data_editor"):
