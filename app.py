@@ -699,83 +699,83 @@ if st.session_state.get("current_user", "").strip().lower() == "sho":
             st.rerun()
 
     st.markdown("---")
-
-if st.button(f"✅ Approve & Create Account for {row['username']}", key=f"approve_{row['id']}"):
-        code_suffix = "".join(random.choices(string.ascii_uppercase + string.digits, k=8))
-        new_ticket_code = f"SUB-{code_suffix[:4]}-{code_suffix[4:]}"
-
-        conn = sqlite3.connect("enterprise_full_workspace.db")
-        cursor = conn.cursor()
-
-        # 1. Insert license code
-        cursor.execute("INSERT INTO license_codes (code, tier, is_used) VALUES (?, ?, 0)", (new_ticket_code, row['tier']))
-
-        # 2. Automatically create the user account in the 'users' table upon approval
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                username TEXT UNIQUE,
-                password TEXT,
-                role TEXT,
-                tier TEXT,
-                email TEXT,
-                created_at TEXT
-            )
-        ''')
-        
-        db_user = row['username']
-        db_pass = row.get('password', '')
-        db_tier = row['tier']
-        db_email = row['email']
-        created_at_str = datetime.datetime.now().isoformat()
-
-        cursor.execute("""
-            INSERT OR REPLACE INTO users (username, password, role, tier, email, created_at)
-            VALUES (?, ?, 'User', ?, ?, ?)
-        """, (db_user, db_pass, db_tier, db_email, created_at_str))
-
-        # 3. Mark the pending payment as approved
-        cursor.execute("UPDATE pending_payments SET status = 'Approved' WHERE id = ?", (row['id'],))
-        conn.commit()
-        conn.close()
-
-        sender_email = "shoirtheagent@gmail.com"
-        sender_password = "wtcbbckjpphnmnwo"
-        receiver_email = row['email']
-
-        msg = MIMEMultipart()
-        msg['From'] = sender_email
-        msg['To'] = receiver_email
-        msg['Subject'] = "Your Enterprise Suite Subscription Ticket Code"
-
-        body = f"""Hello {row['username']},
-
-Your payment has been successfully verified!
-Your requested tier: {row['tier']}
-
-Here is your exclusive activation ticket code:
-{new_ticket_code}
-
-You can log in to your account and enter this code to activate your workspace access.
-
-Best regards,
-Enterprise Operations Team
-"""
-
-        msg.attach(MIMEText(body, 'plain'))
-
-        try:
-            server = smtplib.SMTP('smtp.gmail.com', 587)
-            server.starttls()
-            server.login(sender_email, sender_password)
-            server.sendmail(sender_email, receiver_email, msg.as_string())
-            server.quit()
-            st.success(f"Account created and ticket code '{new_ticket_code}' successfully emailed to {receiver_email}!")
-        except Exception as e:
-            st.warning(f"Account created and code generated ('{new_ticket_code}'), but automated email failed: {e}.")
-
-        st.rerun()
-# --- REJECT BUTTON ACTION ---
+    for index, row in pending_df.iterrows():
+    if st.button(f"✅ Approve & Create Account for {row['username']}", key=f"approve_{row['id']}"):
+            code_suffix = "".join(random.choices(string.ascii_uppercase + string.digits, k=8))
+            new_ticket_code = f"SUB-{code_suffix[:4]}-{code_suffix[4:]}"
+    
+            conn = sqlite3.connect("enterprise_full_workspace.db")
+            cursor = conn.cursor()
+    
+            # 1. Insert license code
+            cursor.execute("INSERT INTO license_codes (code, tier, is_used) VALUES (?, ?, 0)", (new_ticket_code, row['tier']))
+    
+            # 2. Automatically create the user account in the 'users' table upon approval
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS users (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    username TEXT UNIQUE,
+                    password TEXT,
+                    role TEXT,
+                    tier TEXT,
+                    email TEXT,
+                    created_at TEXT
+                )
+            ''')
+            
+            db_user = row['username']
+            db_pass = row.get('password', '')
+            db_tier = row['tier']
+            db_email = row['email']
+            created_at_str = datetime.datetime.now().isoformat()
+    
+            cursor.execute("""
+                INSERT OR REPLACE INTO users (username, password, role, tier, email, created_at)
+                VALUES (?, ?, 'User', ?, ?, ?)
+            """, (db_user, db_pass, db_tier, db_email, created_at_str))
+    
+            # 3. Mark the pending payment as approved
+            cursor.execute("UPDATE pending_payments SET status = 'Approved' WHERE id = ?", (row['id'],))
+            conn.commit()
+            conn.close()
+    
+            sender_email = "shoirtheagent@gmail.com"
+            sender_password = "wtcbbckjpphnmnwo"
+            receiver_email = row['email']
+    
+            msg = MIMEMultipart()
+            msg['From'] = sender_email
+            msg['To'] = receiver_email
+            msg['Subject'] = "Your Enterprise Suite Subscription Ticket Code"
+    
+            body = f"""Hello {row['username']},
+    
+    Your payment has been successfully verified!
+    Your requested tier: {row['tier']}
+    
+    Here is your exclusive activation ticket code:
+    {new_ticket_code}
+    
+    You can log in to your account and enter this code to activate your workspace access.
+    
+    Best regards,
+    Enterprise Operations Team
+    """
+    
+            msg.attach(MIMEText(body, 'plain'))
+    
+            try:
+                server = smtplib.SMTP('smtp.gmail.com', 587)
+                server.starttls()
+                server.login(sender_email, sender_password)
+                server.sendmail(sender_email, receiver_email, msg.as_string())
+                server.quit()
+                st.success(f"Account created and ticket code '{new_ticket_code}' successfully emailed to {receiver_email}!")
+            except Exception as e:
+                st.warning(f"Account created and code generated ('{new_ticket_code}'), but automated email failed: {e}.")
+    
+            st.rerun()
+    # --- REJECT BUTTON ACTION ---
 if st.button(f"❌ Reject Request", key=f"reject_{row['id']}"):
     conn = sqlite3.connect("enterprise_full_workspace.db")
     cursor = conn.cursor()
