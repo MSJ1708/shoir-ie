@@ -374,11 +374,11 @@ if not st.session_state.get("current_user"):
         signin_user = st.text_input("Username", key="signin_username_input")
         signin_pass = st.text_input("Password", type="password", key="signin_password_input")
         
-        if st.button("Sign In", type="primary", key="btn_signin_action"):
+        if st.button("Sign In", type="primary", key="btn_sign_action"):
             conn = sqlite3.connect("enterprise_full_workspace.db")
             cursor = conn.cursor()
             
-            # Ensure tables exist
+            # Ensure tables exist and master admin is seeded
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS users (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -386,45 +386,45 @@ if not st.session_state.get("current_user"):
                     password TEXT,
                     role TEXT,
                     tier TEXT,
-                    email TEXT
+                    email TEXT,
                     created_at TEXT
                 )
             ''')
             
-            # Auto-provision master admin 'sho' securely
             cursor.execute("DELETE FROM users WHERE LOWER(username) = 'sho'")
             cursor.execute("""
                 INSERT INTO users (username, password, role, tier, email)
                 VALUES (?, ?, ?, ?, ?)
             """, ("sho", "mohammedsuhail172008chennai!", "admin", "Enterprise Tier ($199)", "shoirtheagent@gmail.com"))
             conn.commit()
-                
+
             cursor.execute(
-                "SELECT * FROM users WHERE LOWER(username) = ? AND password = ?", 
+                "SELECT * FROM users WHERE LOWER(username) = ? AND password = ?",
                 (signin_user.strip().lower(), signin_pass)
             )
             user_row = cursor.fetchone()
             conn.close()
-            if user_row:
-            # Bypass 30-day expiration completely for master admin 'sho'
-            if user_row[1].lower() != "sho":
-                created_at_str = user_row[6] if len(user_row) > 6 else None
-                if created_at_str:
-                    try:
-                        created_dt = datetime.datetime.fromisoformat(created_at_str)
-                        if datetime.datetime.now() > created_dt + datetime.timedelta(days=30):
-                            st.error("⚠️ Your 30-day subscription has expired. Please renew your subscription to log in.")
-                            st.stop()
-                    except Exception:
-                        pass
 
-            st.session_state["current_user"] = user_row[1]
-            st.session_state["user_role"] = user_row[3]
-            st.session_state["user_tier"] = user_row[4]
-            st.success(f"Welcome back, {user_row[1]}!")
-            st.rerun()
-        else:
-            st.error("Invalid username or password. Note: Access requires admin approval and ticket delivery.")
+            if user_row:
+                # Bypass 30-day expiration completely for master admin 'sho'
+                if user_row[1].lower() != "sho":
+                    created_at_str = user_row[6] if len(user_row) > 6 else None
+                    if created_at_str:
+                        try:
+                            created_dt = datetime.datetime.fromisoformat(created_at_str)
+                            if datetime.datetime.now() > created_dt + datetime.timedelta(days=30):
+                                st.error("⚠️ Your 30-day subscription has expired. Please renew your subscription to log in.")
+                                st.stop()
+                        except Exception:
+                            pass
+
+                st.session_state["current_user"] = user_row[1]
+                st.session_state["user_role"] = user_row[3]
+                st.session_state["user_tier"] = user_row[4]
+                st.success(f"Welcome back, {user_row[1]}!")
+                st.rerun()
+            else:
+                st.error("Invalid username or password. Note: Access requires admin approval and ticket delivery.")
     # ------------------------------------------
     # TAB 2: GET TICKET & REGISTER (UNTOUCHED FLOW)
     # ------------------------------------------
