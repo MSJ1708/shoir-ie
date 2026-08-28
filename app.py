@@ -669,8 +669,17 @@ if st.session_state.get("current_user", "").strip().lower() == "sho":
                 st.markdown("---")
                 
 # --- GLOBAL FREE MODE TOGGLE ---
-    conn = sqlite3.connect("enterprise_full_workspace.db")
+conn = sqlite3.connect("enterprise_full_workspace.db")
     cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS system_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT
+        )
+    ''')
+    cursor.execute("INSERT OR IGNORE INTO system_settings (key, value) VALUES ('free_mode', 'off')")
+    conn.commit()
+
     cursor.execute("SELECT value FROM system_settings WHERE key = 'free_mode'")
     row_setting = cursor.fetchone()
     current_free_mode = row_setting[0] if row_setting else 'off'
