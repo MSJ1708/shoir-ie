@@ -766,7 +766,6 @@ Enterprise Operations Team
             st.warning(f"Account created and code generated ('{new_ticket_code}'), but automated email failed: {e}.")
 
         st.rerun()
-                    
             # --- REJECT BUTTON ACTION ---
             if st.button(f"❌ Reject Request", key=f"reject_{row['id']}"):
                 conn = sqlite3.connect("enterprise_full_workspace.db")
@@ -777,9 +776,6 @@ Enterprise Operations Team
                 st.error(f"Request from {row['username']} has been rejected.")
                 st.rerun()
 
-    if not pending_tickets:
-        st.success("🟢 No pending payment proofs to review right now.")
-        
 # =====================================================================
 # ENSURE AFFILIATE CODE IS LOADED IN SESSION STATE
 # =====================================================================
