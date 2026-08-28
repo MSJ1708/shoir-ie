@@ -406,7 +406,7 @@ if not st.session_state.get("current_user"):
             user_row = cursor.fetchone()
             conn.close()
             
-            if user_row:
+if user_row:
         # Bypass 30-day expiration completely for master admin 'sho'
         if user_row[1].lower() != "sho":
             created_at_str = user_row[6] if len(user_row) > 6 else None
