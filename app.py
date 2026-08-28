@@ -691,8 +691,7 @@ if st.session_state.get("current_user", "").strip().lower() == "sho":
 
     st.markdown("---")
 
-    # --- APPROVE BUTTON ACTION ---
-    if st.button(f"✅ Approve & Create Account for {row['username']}", key=f"approve_{row['id']}"):
+if st.button(f"✅ Approve & Create Account for {row['username']}", key=f"approve_{row['id']}"):
         code_suffix = "".join(random.choices(string.ascii_uppercase + string.digits, k=8))
         new_ticket_code = f"SUB-{code_suffix[:4]}-{code_suffix[4:]}"
 
@@ -731,16 +730,16 @@ if st.session_state.get("current_user", "").strip().lower() == "sho":
         conn.commit()
         conn.close()
 
-            sender_email = "shoirtheagent@gmail.com"
-            sender_password = "wtcbbckjpphnmnwo"
-            receiver_email = row['email']
+        sender_email = "shoirtheagent@gmail.com"
+        sender_password = "wtcbbckjpphnmnwo"
+        receiver_email = row['email']
 
-            msg = MIMEMultipart()
-            msg['From'] = sender_email
-            msg['To'] = receiver_email
-            msg['Subject'] = "Your Enterprise Suite Subscription Ticket Code"
+        msg = MIMEMultipart()
+        msg['From'] = sender_email
+        msg['To'] = receiver_email
+        msg['Subject'] = "Your Enterprise Suite Subscription Ticket Code"
 
-            body = f"""Hello {row['username']},
+        body = f"""Hello {row['username']},
 
 Your payment has been successfully verified!
 Your requested tier: {row['tier']}
@@ -754,20 +753,19 @@ Best regards,
 Enterprise Operations Team
 """
 
-            msg.attach(MIMEText(body, 'plain'))
+        msg.attach(MIMEText(body, 'plain'))
 
-            try:
-                server = smtplib.SMTP('smtp.gmail.com', 587)
-                server.starttls()
-                server.login(sender_email, sender_password)
-                server.sendmail(sender_email, receiver_email, msg.as_string())
-                server.quit()
-                st.success(f"Account created and ticket code '{new_ticket_code}' successfully emailed to {receiver_email}!")
-            except Exception as e:
-                st.warning(f"Account created and code generated ('{new_ticket_code}'), but automated email failed: {e}.")
+        try:
+            server = smtplib.SMTP('smtp.gmail.com', 587)
+            server.starttls()
+            server.login(sender_email, sender_password)
+            server.sendmail(sender_email, receiver_email, msg.as_string())
+            server.quit()
+            st.success(f"Account created and ticket code '{new_ticket_code}' successfully emailed to {receiver_email}!")
+        except Exception as e:
+            st.warning(f"Account created and code generated ('{new_ticket_code}'), but automated email failed: {e}.")
 
-            st.rerun()
-
+        st.rerun()
                     
                 # --- REJECT BUTTON ACTION ---
                 if st.button(f"❌ Reject Request", key=f"reject_{row['id']}"):
