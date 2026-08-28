@@ -768,7 +768,6 @@ Enterprise Operations Team
 
             st.rerun()
 
-
                     
                 # --- REJECT BUTTON ACTION ---
                 if st.button(f"❌ Reject Request", key=f"reject_{row['id']}"):
