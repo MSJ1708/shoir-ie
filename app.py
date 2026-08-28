@@ -776,14 +776,14 @@ if st.session_state.get("current_user", "").strip().lower() == "sho":
     
             st.rerun()
     # --- REJECT BUTTON ACTION ---
-if st.button(f"❌ Reject Request", key=f"reject_{row['id']}"):
-    conn = sqlite3.connect("enterprise_full_workspace.db")
-    cursor = conn.cursor()
-    cursor.execute("UPDATE pending_payments SET status = 'Rejected' WHERE id = ?", (row['id'],))
-    conn.commit()
-    conn.close()
-    st.error(f"Request from {row['username']} has been rejected.")
-    st.rerun()
+            if st.button(f"❌ Reject Request", key=f"reject_{row['id']}"):
+                conn = sqlite3.connect("enterprise_full_workspace.db")
+                cursor = conn.cursor()
+                cursor.execute("UPDATE pending_payments SET status = 'Rejected' WHERE id = ?", (row['id'],))
+                conn.commit()
+                conn.close()
+                st.error(f"Request from {row['username']} has been rejected.")
+                st.rerun()
 # =====================================================================
 # ENSURE AFFILIATE CODE IS LOADED IN SESSION STATE
 # =====================================================================
