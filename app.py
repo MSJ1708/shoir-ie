@@ -699,7 +699,7 @@ if st.session_state.get("current_user", "").strip().lower() == "sho":
             st.rerun()
 
     st.markdown("---")
-                    for index, row in pending_df.iterrows():
+    for index, row in pending_df.iterrows():
             if st.button(f"✅ Approve & Create Account for {row['username']}", key=f"approve_{row['id']}"):
                 code_suffix = "".join(random.choices(string.ascii_uppercase + string.digits, k=8))
                 new_ticket_code = f"SUB-{code_suffix[:4]}-{code_suffix[4:]}"
