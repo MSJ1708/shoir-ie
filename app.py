@@ -731,16 +731,16 @@ if st.session_state.get("current_user", "").strip().lower() == "sho":
         conn.commit()
         conn.close()
 
-        sender_email = "shoirtheagent@gmail.com"
-        sender_password = "wtcbbckjpphnmnwo"
-        receiver_email = row['email']
-                    
-                    msg = MIMEMultipart()
-                    msg['From'] = sender_email
-                    msg['To'] = receiver_email
-                    msg['Subject'] = "Your Enterprise Suite Subscription Ticket Code"
-                    
-                    body = f"""Hello {row['username']},
+sender_email = "shoirtheagent@gmail.com"
+            sender_password = "wtcbbckjpphnmnwo"
+            receiver_email = row['email']
+
+            msg = MIMEMultipart()
+            msg['From'] = sender_email
+            msg['To'] = receiver_email
+            msg['Subject'] = "Your Enterprise Suite Subscription Ticket Code"
+
+            body = f"""Hello {row['username']},
 
 Your payment has been successfully verified!
 Your requested tier: {row['tier']}
@@ -752,9 +752,9 @@ You can log in to your account and enter this code to activate your workspace ac
 
 Best regards,
 Enterprise Operations Team
-                    """
-                    
-                    msg.attach(MIMEText(body, 'plain'))
+"""
+
+            msg.attach(MIMEText(body, 'plain'))
                     
                     try:
                         server = smtplib.SMTP('smtp.gmail.com', 587)
