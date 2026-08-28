@@ -424,9 +424,8 @@ if user_row:
         st.session_state["user_tier"] = user_row[4]
         st.success(f"Welcome back, {user_row[1]}!")
         st.rerun()
-            else:
-                st.error("Invalid username or password. Note: Access requires admin approval and ticket delivery.")
-
+    else:
+        st.error("Invalid username or password. Note: Access requires admin approval and ticket delivery.")
     # ------------------------------------------
     # TAB 2: GET TICKET & REGISTER (UNTOUCHED FLOW)
     # ------------------------------------------
