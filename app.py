@@ -731,7 +731,7 @@ if st.session_state.get("current_user", "").strip().lower() == "sho":
         conn.commit()
         conn.close()
 
-sender_email = "shoirtheagent@gmail.com"
+            sender_email = "shoirtheagent@gmail.com"
             sender_password = "wtcbbckjpphnmnwo"
             receiver_email = row['email']
 
@@ -755,18 +755,20 @@ Enterprise Operations Team
 """
 
             msg.attach(MIMEText(body, 'plain'))
-                    
-                    try:
-                        server = smtplib.SMTP('smtp.gmail.com', 587)
-                        server.starttls()
-                        server.login(sender_email, sender_password)
-                        server.sendmail(sender_email, receiver_email, msg.as_string())
-                        server.quit()
-                        st.success(f"Account created and ticket code '{new_ticket_code}' successfully emailed to {receiver_email}!")
-                    except Exception as e:
-                        st.warning(f"Account created and code generated ('{new_ticket_code}'), but automated email failed: {e}.")
-                        
-                    st.rerun()
+
+            try:
+                server = smtplib.SMTP('smtp.gmail.com', 587)
+                server.starttls()
+                server.login(sender_email, sender_password)
+                server.sendmail(sender_email, receiver_email, msg.as_string())
+                server.quit()
+                st.success(f"Account created and ticket code '{new_ticket_code}' successfully emailed to {receiver_email}!")
+            except Exception as e:
+                st.warning(f"Account created and code generated ('{new_ticket_code}'), but automated email failed: {e}.")
+
+            st.rerun()
+
+
                     
                 # --- REJECT BUTTON ACTION ---
                 if st.button(f"❌ Reject Request", key=f"reject_{row['id']}"):
