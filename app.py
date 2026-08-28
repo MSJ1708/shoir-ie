@@ -669,34 +669,34 @@ if st.session_state.get("current_user", "").strip().lower() == "sho":
                 st.markdown("---")
                 
 # --- GLOBAL FREE MODE TOGGLE ---
-conn = sqlite3.connect("enterprise_full_workspace.db")
-    cursor = conn.cursor()
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS system_settings (
-            key TEXT PRIMARY KEY,
-            value TEXT
-        )
-    ''')
-    cursor.execute("INSERT OR IGNORE INTO system_settings (key, value) VALUES ('free_mode', 'off')")
-    conn.commit()
-
-    cursor.execute("SELECT value FROM system_settings WHERE key = 'free_mode'")
-    row_setting = cursor.fetchone()
-    current_free_mode = row_setting[0] if row_setting else 'off'
-    conn.close()
-
-    is_free_active = (current_free_mode == 'on')
-    toggle_label = "🔴 Turn Off 'Make it Free' (Back to Normal)" if is_free_active else "🟢 Make it Free for Everyone"
-
-    if st.button(toggle_label, type="primary" if not is_free_active else "secondary", key="btn_toggle_free_mode"):
-        new_val = 'off' if is_free_active else 'on'
         conn = sqlite3.connect("enterprise_full_workspace.db")
         cursor = conn.cursor()
-        cursor.execute("UPDATE system_settings SET value = ? WHERE key = 'free_mode'", (new_val,))
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS system_settings (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            )
+        ''')
+        cursor.execute("INSERT OR IGNORE INTO system_settings (key, value) VALUES ('free_mode', 'off')")
         conn.commit()
+
+        cursor.execute("SELECT value FROM system_settings WHERE key = 'free_mode'")
+        row_setting = cursor.fetchone()
+        current_free_mode = row_setting[0] if row_setting else 'off'
         conn.close()
-        st.success(f"Global Free Mode is now: {new_val.upper()}")
-        st.rerun()
+
+        is_free_active = (current_free_mode == 'on')
+        toggle_label = "🔴 Turn Off 'Make it Free' (Back to Normal)" if is_free_active else "🟢 Make it Free for Everyone"
+
+        if st.button(toggle_label, type="primary" if not is_free_active else "secondary", key="btn_toggle_free_mode"):
+            new_val = 'off' if is_free_active else 'on'
+            conn = sqlite3.connect("enterprise_full_workspace.db")
+            cursor = conn.cursor()
+            cursor.execute("UPDATE system_settings SET value = ? WHERE key = 'free_mode'", (new_val,))
+            conn.commit()
+            conn.close()
+            st.success(f"Global Free Mode is now: {new_val.upper()}")
+            st.rerun()
 
     st.markdown("---")
 
