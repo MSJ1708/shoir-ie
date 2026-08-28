@@ -181,7 +181,16 @@ def init_db():
         ))
         
         conn.commit()
- 
+        # 8. System Settings Table (Stores global free mode toggle)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS system_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT
+        )
+    """)
+    cursor.execute("INSERT OR IGNORE INTO system_settings (key, value) VALUES ('free_mode', 'off')")
+
+    cursor.execute("INSERT OR IGNORE INTO system_settings (key, value) VALUES ('free_mode', 'off')")
 def send_tier_email(receiver_email, username, tier_code, tier_name):
     """Sends the approved subscription tier code to the user's email."""
     try:
@@ -312,6 +321,45 @@ st.set_page_config(page_title="Shoir-IE Workspace", page_icon="⚡", layout="wid
 # ==========================================
 # AUTHENTICATION & REGISTRATION GATE (FRONT PAGE)
 # ==========================================
+# Check if global free mode is enabled by admin
+try:
+    conn = sqlite3.connect("enterprise_full_workspace.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT value FROM system_settings WHERE key = 'free_mode'")
+    f_row = cursor.fetchone()
+    is_free_mode = (f_row and f_row[0] == 'on')
+    conn.close()
+except Exception:
+    is_free_mode = False
+
+if is_free_mode and not st.session_state.get("current_user"):
+    st.session_state["current_user"] = "Guest Visitor"
+    st.session_state["user_role"] = "Enterprise User"
+    st.session_state["user_tier"] = "Enterprise Tier"
+    st.session_state["authenticated"] = True
+
+import datetime
+
+# Enforce 30-day subscription expiry check for active sessions
+if st.session_state.get("authenticated") and st.session_state.get("current_user") != "Guest Visitor":
+    try:
+        conn = sqlite3.connect("enterprise_full_workspace.db")
+        cursor = conn.cursor()
+        cursor.execute("SELECT created_at FROM users WHERE LOWER(username) = ?", (st.session_state.get("current_user").lower(),))
+        row = cursor.fetchone()
+        conn.close()
+        
+        if row and row[0]:
+            created_dt = datetime.datetime.fromisoformat(row[0])
+            # Check if 30 days have passed (excluding master admin 'sho')
+            if datetime.datetime.now() > created_dt + datetime.timedelta(days=30) and st.session_state.get("current_user").lower() != "sho":
+                for key in list(st.session_state.keys()):
+                    del st.session_state[key]
+                st.error("🚨 Your 30-day subscription has expired. Your session has ended. Please renew your subscription to continue.")
+                st.stop()
+    except Exception:
+        pass
+
 if not st.session_state.get("current_user"):
     st.title("🔐 Welcome to Shoir-IE Workspace")
     st.markdown("Please sign in with your approved account or register and submit your payment ticket below.")
@@ -339,6 +387,7 @@ if not st.session_state.get("current_user"):
                     role TEXT,
                     tier TEXT,
                     email TEXT
+                    created_at TEXT
                 )
             ''')
             
@@ -358,11 +407,23 @@ if not st.session_state.get("current_user"):
             conn.close()
             
             if user_row:
-                st.session_state["current_user"] = user_row[1]
-                st.session_state["user_role"] = user_row[3]
-                st.session_state["user_tier"] = user_row[4]
-                st.success(f"Welcome back, {user_row[1]}!")
-                st.rerun()
+        # Bypass 30-day expiration completely for master admin 'sho'
+        if user_row[1].lower() != "sho":
+            created_at_str = user_row[6] if len(user_row) > 6 else None
+            if created_at_str:
+                try:
+                    created_dt = datetime.datetime.fromisoformat(created_at_str)
+                    if datetime.datetime.now() > created_dt + datetime.timedelta(days=30):
+                        st.error("⚠️ Your 30-day subscription has expired. Please renew your subscription to log in.")
+                        st.stop()
+                except Exception:
+                    pass
+
+        st.session_state["current_user"] = user_row[1]
+        st.session_state["user_role"] = user_row[3]
+        st.session_state["user_tier"] = user_row[4]
+        st.success(f"Welcome back, {user_row[1]}!")
+        st.rerun()
             else:
                 st.error("Invalid username or password. Note: Access requires admin approval and ticket delivery.")
 
@@ -609,6 +670,28 @@ if st.session_state.get("current_user", "").strip().lower() == "sho":
                         
                 st.markdown("---")
                 
+                # --- GLOBAL FREE MODE TOGGLE ---
+    conn = sqlite3.connect("enterprise_full_workspace.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT value FROM system_settings WHERE key = 'free_mode'")
+    row_setting = cursor.fetchone()
+    current_free_mode = row_setting[0] if row_setting else 'off'
+    conn.close()
+
+    is_free_active = (current_free_mode == 'on')
+    toggle_label = "🔴 Turn Off 'Make it free' (Back to Normal)" if is_free_active else "🟢 Make it Free for Everyone"
+
+    if st.button(toggle_label, type="primary" if not is_free_active else "secondary", key="btn_toggle_free_mode"):
+        new_val = 'off' if is_free_active else 'on'
+        conn = sqlite3.connect("enterprise_full_workspace.db")
+        cursor = conn.cursor()
+        cursor.execute("UPDATE system_settings SET value = ? WHERE key = 'free_mode'", (new_val,))
+        conn.commit()
+        conn.close()
+        st.success(f"Global Free Mode is now: {new_val.upper()}")
+        st.rerun()
+    st.markdown("---")
+    
                 # --- APPROVE BUTTON ACTION ---
                 if st.button(f"✅ Approve & Create Account for {row['username']}", key=f"approve_{row['id']}"):
                     code_suffix = "".join(random.choices(string.ascii_uppercase + string.digits, k=8))
