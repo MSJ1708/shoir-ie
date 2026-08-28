@@ -766,7 +766,7 @@ Enterprise Operations Team
             st.warning(f"Account created and code generated ('{new_ticket_code}'), but automated email failed: {e}.")
 
         st.rerun()
-            # --- REJECT BUTTON ACTION ---
+# --- REJECT BUTTON ACTION ---
             if st.button(f"❌ Reject Request", key=f"reject_{row['id']}"):
                 conn = sqlite3.connect("enterprise_full_workspace.db")
                 cursor = conn.cursor()
