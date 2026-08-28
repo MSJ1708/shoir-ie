@@ -702,26 +702,28 @@ if st.session_state.get("current_user", "").strip().lower() == "sho":
                     cursor.execute("INSERT INTO license_codes (code, tier, is_used) VALUES (?, ?, 0)", (new_ticket_code, row['tier']))
                     
                     # 2. Automatically create the user account in the 'users' table upon approval
-                    cursor.execute('''
-                        CREATE TABLE IF NOT EXISTS users (
-                            id INTEGER PRIMARY KEY AUTOINCREMENT,
-                            username TEXT UNIQUE,
-                            password TEXT,
-                            role TEXT,
-                            tier TEXT,
-                            email TEXT
-                        )
-                    ''')
-                    
-                    db_user = row['username']
-                    db_pass = row.get('password', '')  # Grabs the password saved during registration
-                    db_tier = row['tier']
-                    db_email = row['email']
-                    
-                    cursor.execute("""
-                        INSERT OR REPLACE INTO users (username, password, role, tier, email)
-                        VALUES (?, ?, 'User', ?, ?)
-                    """, (db_user, db_pass, db_tier, db_email))
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT UNIQUE,
+                password TEXT,
+                role TEXT,
+                tier TEXT,
+                email TEXT,
+                created_at TEXT
+            )
+        ''')
+        
+        db_user = row['username']
+        db_pass = row.get('password', '')
+        db_tier = row['tier']
+        db_email = row['email']
+        created_at_str = datetime.datetime.now().isoformat()
+
+        cursor.execute("""
+            INSERT OR REPLACE INTO users (username, password, role, tier, email, created_at)
+            VALUES (?, ?, 'User', ?, ?, ?)
+        """, (db_user, db_pass, db_tier, db_email, created_at_str))
                     
                     # 3. Mark the pending payment as Approved
                     cursor.execute("UPDATE pending_payments SET status = 'Approved' WHERE id = ?", (row['id'],))
