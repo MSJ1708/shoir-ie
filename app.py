@@ -668,7 +668,7 @@ if st.session_state.get("current_user", "").strip().lower() == "sho":
                         
                 st.markdown("---")
                 
-                # --- GLOBAL FREE MODE TOGGLE ---
+# --- GLOBAL FREE MODE TOGGLE ---
     conn = sqlite3.connect("enterprise_full_workspace.db")
     cursor = conn.cursor()
     cursor.execute("SELECT value FROM system_settings WHERE key = 'free_mode'")
@@ -677,7 +677,7 @@ if st.session_state.get("current_user", "").strip().lower() == "sho":
     conn.close()
 
     is_free_active = (current_free_mode == 'on')
-    toggle_label = "🔴 Turn Off 'Make it free' (Back to Normal)" if is_free_active else "🟢 Make it Free for Everyone"
+    toggle_label = "🔴 Turn Off 'Make it Free' (Back to Normal)" if is_free_active else "🟢 Make it Free for Everyone"
 
     if st.button(toggle_label, type="primary" if not is_free_active else "secondary", key="btn_toggle_free_mode"):
         new_val = 'off' if is_free_active else 'on'
@@ -688,20 +688,21 @@ if st.session_state.get("current_user", "").strip().lower() == "sho":
         conn.close()
         st.success(f"Global Free Mode is now: {new_val.upper()}")
         st.rerun()
+
     st.markdown("---")
-    
-                # --- APPROVE BUTTON ACTION ---
-                if st.button(f"✅ Approve & Create Account for {row['username']}", key=f"approve_{row['id']}"):
-                    code_suffix = "".join(random.choices(string.ascii_uppercase + string.digits, k=8))
-                    new_ticket_code = f"SUB-{code_suffix[:4]}-{code_suffix[4:]}"
-                    
-                    conn = sqlite3.connect("enterprise_full_workspace.db")
-                    cursor = conn.cursor()
-                    
-                    # 1. Insert the generated ticket code
-                    cursor.execute("INSERT INTO license_codes (code, tier, is_used) VALUES (?, ?, 0)", (new_ticket_code, row['tier']))
-                    
-                    # 2. Automatically create the user account in the 'users' table upon approval
+
+    # --- APPROVE BUTTON ACTION ---
+    if st.button(f"✅ Approve & Create Account for {row['username']}", key=f"approve_{row['id']}"):
+        code_suffix = "".join(random.choices(string.ascii_uppercase + string.digits, k=8))
+        new_ticket_code = f"SUB-{code_suffix[:4]}-{code_suffix[4:]}"
+
+        conn = sqlite3.connect("enterprise_full_workspace.db")
+        cursor = conn.cursor()
+
+        # 1. Insert license code
+        cursor.execute("INSERT INTO license_codes (code, tier, is_used) VALUES (?, ?, 0)", (new_ticket_code, row['tier']))
+
+        # 2. Automatically create the user account in the 'users' table upon approval
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -724,16 +725,15 @@ if st.session_state.get("current_user", "").strip().lower() == "sho":
             INSERT OR REPLACE INTO users (username, password, role, tier, email, created_at)
             VALUES (?, ?, 'User', ?, ?, ?)
         """, (db_user, db_pass, db_tier, db_email, created_at_str))
-                    
-                    # 3. Mark the pending payment as Approved
-                    cursor.execute("UPDATE pending_payments SET status = 'Approved' WHERE id = ?", (row['id'],))
-                    conn.commit()
-                    conn.close()
-                    
-                    # 4. Email the ticket code to the user
-                    sender_email = "shoirtheagent@gmail.com"
-                    sender_password = "wtcbbckjpphnmnwo"
-                    receiver_email = row['email']
+
+        # 3. Mark the pending payment as approved
+        cursor.execute("UPDATE pending_payments SET status = 'Approved' WHERE id = ?", (row['id'],))
+        conn.commit()
+        conn.close()
+
+        sender_email = "shoirtheagent@gmail.com"
+        sender_password = "wtcbbckjpphnmnwo"
+        receiver_email = row['email']
                     
                     msg = MIMEMultipart()
                     msg['From'] = sender_email
