@@ -729,10 +729,13 @@ if st.session_state.get("current_user", "").strip().lower() == "sho":
             db_email = row['email']
             created_at_str = datetime.datetime.now().isoformat()
     
-            cursor.execute("""
-                INSERT OR REPLACE INTO users (username, password, role, tier, email, created_at)
-                VALUES (?, ?, 'User', ?, ?, ?)
-            """, (db_user, db_pass, db_tier, db_email, created_at_str))
+            cursor.execute(
+    """
+    INSERT OR REPLACE INTO users (username, password, role, tier, email, created_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+""",
+    (db_user, db_pass, "User", db_tier, db_email, created_at_str),
+)
     
             # 3. Mark the pending payment as approved
             cursor.execute("UPDATE pending_payments SET status = 'Approved' WHERE id = ?", (row['id'],))
