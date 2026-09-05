@@ -2281,7 +2281,7 @@ if selected_module == "Geospatial Network Designer":
 # ==============================================================================
 # SHOIR-IE: ELITE PREDICTIVE MAINTENANCE & ASSET HEALTH HUB (V2.2)
 # ==============================================================================
-if mod == "Predictive Maintenance Hub":
+if selected_module == "Predictive Maintenance Hub":
     
     # 1. Initialize Asset Fleet Session State
     if "maintenance_assets" not in st.session_state:
