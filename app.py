@@ -436,15 +436,16 @@ with auth_tab2:
     reg_email = st.text_input("Email Address", placeholder="name@company.com", key="reg_email")
     reg_pass = st.text_input("Password", type="password", key="reg_pass")
     reg_ticket_code = st.text_input("Activation / Ticket Code (If you already have one)", placeholder="Enter ticket code here", key="reg_ticket")
-        st.markdown("### Terms, Conditions & Payment Policy")
-        st.markdown(
-            "- **No Refunds:** Refund isn't available for any subscription purchases. All sales are final.\n"
-            "- **Exact Price:** You must pay the exact price corresponding to your selected tier.\n"
-            "- **Ticket Delivery:** Your ticket code will be sent via email after payment verification."
-        )
-        
-        accepted_terms = st.checkbox("I accept the terms & conditions, no-refund policy, and pricing instructions.", key="reg_chk")
-        
+
+    st.markdown("---")
+    st.markdown("### Terms, Conditions & Payment Policy")
+    st.markdown(
+        "- **No Refunds:** Refund isn't available for any subscription purchases. All sales are final.\n"
+        "- **Exact Price:** You must pay the exact price corresponding to your selected tier.\n"
+        "- **Ticket Delivery:** Your ticket code will be sent via email after payment verification."
+    )
+    accepted_terms = st.checkbox("I accept the terms & conditions, no-refund policy, and pricing instructions.", key="reg_chk")
+
         if accepted_terms:
             if st.button("Proceed to Pay & Show QR", type="primary", key="btn_confirm_pay"):
                 st.session_state.show_qr = True
