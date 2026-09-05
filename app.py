@@ -1654,8 +1654,7 @@ if df is not None and not df.empty:
 # ==============================================================================
 # SHOIR-IE: ELITE ENTERPRISE AGV/AMR FLEET COMMAND TOWER (V2.1 BULLETPROOF EDITION)
 # ==============================================================================
-    if selected_module == "AGV Fleet Dispatcher":
-    
+if selected_module == "AGV Fleet Dispatcher":
     # 1. Initialize Comprehensive Enterprise Session State
     if "facility_name" not in st.session_state:
         st.session_state.facility_name = "Shoir-IE Smart Plant - Riyadh Sector A"
