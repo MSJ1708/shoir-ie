@@ -497,40 +497,40 @@ with auth_tab2:
                             
                             try:
                                 cursor.execute("ALTER TABLE pending_payments ADD COLUMN password TEXT;")
-                            except sqlite3.OperationalError:
-                                pass
-                            
-                            current_timestamp = datetime.datetime.utcnow().isoformat()
-                            cursor.execute("""
-                                INSERT INTO pending_payments (username, email, password, tier, payment_method, transaction_id, screenshot_path, status, timestamp)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                            """, (
-                                reg_name, 
-                                reg_email, 
-                                reg_pass, 
-                                reg_tier, 
-                                "STC Pay", 
-                                reg_ticket_code or "MANUAL-QR", 
-                                file_path, 
-                                "Pending", 
-                                current_timestamp
-                            ))
-                            
-                            conn.commit()
-                            conn.close()
-                            
-                            st.success("Request sent successfully! Your code will be emailed to you from shoirtheagent@gmail.com")
-                            st.session_state.show_qr = False
-                            st.rerun()
-                        else:
-                            if uploaded_screenshot is None:
-                                st.warning("Please upload your payment screenshot.")
-                            else:
-                                st.warning("Please fill in your name, password, and email address.")
+if confirmed_delivery:
+            if st.button("Send Verification Request", type="primary", key="btn_send_request"):
+                if reg_name and reg_pass and reg_email and uploaded_screenshot is not None:
+                    os.makedirs("payment_proofs", exist_ok=True)
+                    file_path = os.path.join("payment_proofs", f"{reg_name}_{uploaded_screenshot.name}")
+                    with open(file_path, "wb") as f:
+                        f.write(uploaded_screenshot.getbuffer())
 
-    # Stops execution here so dashboard NEVER renders for visitors who are not logged in
-    st.stop()
+                    # Database insert / handling
+                    conn = sqlite3.connect("users.db")
+                    cursor = conn.cursor()
+                    cursor.execute("""
+                        INSERT INTO pending_registrations (username, password, email, tier, payment_proof, status, timestamp)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        reg_name,
+                        reg_pass,
+                        reg_email,
+                        reg_tier,
+                        file_path,
+                        "Pending",
+                        str(datetime.now())
+                    ))
+                    conn.commit()
+                    conn.close()
 
+                    st.success("Request sent successfully! Your code will be emailed to you from shoirtheagent@gmail.com")
+                    st.session_state.show_qr = False
+                    st.rerun()
+                else:
+                    if uploaded_screenshot is None:
+                        st.warning("Please upload your payment screenshot.")
+                    else:
+                        st.warning("Please fill in your name, password, and email address.")
 # =========================================================
 # PAGE CONFIGURATION & CUSTOM CSS
 # =========================================================
