@@ -2494,7 +2494,7 @@ if selected_module == "Predictive Maintenance Hub":
 # ==============================================================================
 # SHOIR-IE: ELITE PRODUCTION PLANNING, SCHEDULING & CONTROL (PPC) SUITE (V2.2)
 # ==============================================================================
-if mod == "Production Planning & Control (PPC)":
+if selected_module == "Production Planning & Control (PPC)":
     
     import pandas as pd
     import plotly.express as px
@@ -2723,7 +2723,7 @@ if mod == "Production Planning & Control (PPC)":
 # ==============================================================================
 # SHOIR-IE: ELITE LEAN MANUFACTURING & SHOP FLOOR OPERATIONS SUITE (V2.4)
 # ==============================================================================
-if mod == "Lean Manufacturing & Shop Floor Operations":
+if selected_module == "Lean Manufacturing & Shop Floor Operations":
     
     import pandas as pd
     import plotly.express as px
@@ -2973,7 +2973,7 @@ if mod == "Lean Manufacturing & Shop Floor Operations":
 # ==============================================================================
 # SHOIR-IE: ELITE QUALITY CONTROL, SIX SIGMA & RELIABILITY SUITE (V2.6)
 # ==============================================================================
-if mod == "Quality Control, Six Sigma & Reliability":
+if selected_module == "Quality Control, Six Sigma & Reliability":
     
     import streamlit as st
     import pandas as pd
@@ -3201,7 +3201,7 @@ if mod == "Quality Control, Six Sigma & Reliability":
 # ==============================================================================
 # SHOIR-IE: ELITE FACILITY LAYOUT, MATERIAL HANDLING & WAREHOUSING SUITE (V2.8)
 # ==============================================================================
-if mod in ["Facility Layout & Warehousing", "Facility Layout, Material Handling & Warehousing"]:
+if selected_module in ["Facility Layout & Warehousing", "Facility Layout, Material Handling & Warehousing"]:
     
     import streamlit as st
     import pandas as pd
