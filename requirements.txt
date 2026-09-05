@@ -6,3 +6,6 @@ plotly
 folium
 streamlit-folium
 openpyxl
+scipy
+statsmodels
+scikit-learn
