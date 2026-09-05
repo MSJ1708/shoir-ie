@@ -429,9 +429,10 @@ if not st.session_state.get("current_user"):
     # ------------------------------------------
     # TAB 2: GET TICKET & REGISTER (UNTOUCHED FLOW)
     # ------------------------------------------
+auth_tab1, auth_tab2 = st.tabs(["Login", "Get Ticket & Register"])
+
 with auth_tab2:
     st.subheader("Get Subscription Ticket & Register")
-
     reg_tier = st.selectbox("Choose Subscription Tier", ["Starter Tier ($29)", "Research Pack ($30)", "Mid-Tier Pro ($79)", "Enterprise Tier ($120)"])
     reg_name = st.text_input("Name / Username", key="reg_name")
     reg_email = st.text_input("Email Address", placeholder="name@company.com", key="reg_email")
