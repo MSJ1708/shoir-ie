@@ -4384,7 +4384,7 @@ if selected_module in ["Digital Twin & Discrete-Event Simulation", "Digital Twin
 # ==============================================================================
 # SHOIR-IE: GREEN IE, SUSTAINABILITY & CIRCULAR ECONOMY SUITE (V3.9)
 # ==============================================================================
-if mod in ["Green IE & Sustainability", "Sustainability & Circular Economy", "Green IE"]:
+if selected_module in ["Green IE & Sustainability", "Sustainability & Circular Economy", "Green IE"]:
     
     import streamlit as st
     import pandas as pd
