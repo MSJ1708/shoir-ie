@@ -607,14 +607,17 @@ if st.session_state.get("current_user", "").strip().lower() == "sho":
     st.markdown("---")
     st.subheader("🛡️ Admin Control Panel: Payment & Ticket Verification")
     
-    try:
+try:
+        import os
         conn = sqlite3.connect("users.db")
+        debug_df = pd.read_sql_query("SELECT * FROM pending_registrations", conn)
+        st.write(f"DEBUG - Total rows in database: {len(debug_df)}")
+        
         pending_df = pd.read_sql_query("SELECT * FROM pending_registrations WHERE LOWER(status) = 'pending'", conn)
         conn.close()
     except Exception as e:
         pending_df = pd.DataFrame()
-        st.info("No pending registrations table found yet.")
-
+        st.warning(f"Database error or table missing: {e}")
     if not pending_df.empty:
         st.info(f"You have {len(pending_df)} pending payment request(s) to review.")
         
