@@ -1481,7 +1481,7 @@ elif selected_module == "LaTeX Document Formatter":
                 file_name="research_bundle.txt",
                 mime="text/plain"
             )
-elif selected_module == "Statistical Hypothesis Testing":
+if selected_module == "Statistical Hypothesis Testing":
 import streamlit as st
 import pandas as pd
 import numpy as np
