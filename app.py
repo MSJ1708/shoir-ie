@@ -446,20 +446,20 @@ with auth_tab2:
     )
     accepted_terms = st.checkbox("I accept the terms & conditions, no-refund policy, and pricing instructions.", key="reg_chk")
 
-        if accepted_terms:
-            if st.button("Proceed to Pay & Show QR", type="primary", key="btn_confirm_pay"):
-                st.session_state.show_qr = True
-                
-            if st.session_state.get("show_qr", False):
-                st.markdown("---")
-                st.markdown("### Scan to Pay via STC Pay")
-                
-                qr_path = "stc_pay_qr.png"
-                try:
-                    img = Image.open(qr_path)
-                    st.image(img, caption="Scan QR Code to Pay Exact Amount", width=230)
-                except Exception:
-                    st.info("Could not load image.")
+    if accepted_terms:
+        if st.button("Proceed to Pay & Show QR", type="primary", key="btn_confirm_pay"):
+            st.session_state.show_qr = True
+
+    if st.session_state.get("show_qr", False):
+        st.markdown("---")
+        st.markdown("### Scan to Pay via STC Pay")
+
+        qr_path = "stc_pay_qr.png"
+        try:
+            img = Image.open(qr_path)
+            st.image(img, caption="Scan QR Code to Pay Exact Amount", width=230)
+        except Exception:
+            st.info("Could not load image.")
                     
                 uploaded_screenshot = st.file_uploader("Upload Payment Screenshot", type=["png", "jpg", "jpeg"], key="payment_screenshot_upload")
                 
