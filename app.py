@@ -609,7 +609,7 @@ if st.session_state.get("current_user", "").strip().lower() == "sho":
     
     try:
         conn = sqlite3.connect("users.db")
-        pending_df = pd.read_sql_query("SELECT * FROM pending_registrations WHERE status = 'Pending'", conn)
+        pending_df = pd.read_sql_query("SELECT * FROM pending_registrations WHERE LOWER(status) = 'pending'", conn)
         conn.close()
     except Exception as e:
         pending_df = pd.DataFrame()
