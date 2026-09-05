@@ -429,14 +429,13 @@ if not st.session_state.get("current_user"):
     # TAB 2: GET TICKET & REGISTER (UNTOUCHED FLOW)
     # ------------------------------------------
     with auth_tab2:
-        st.subheader("Get Subscription Ticket & Register")
-        
-        reg_tier = st.selectbox("Choose Subscription Tier", ["Starter Tier ($29)", "Research Pack ($30)", "Mid-Tier Pro ($79)", "Enterprise Tier ($199)"], key="reg_tier")
-        )
-        reg_name = st.text_input("Name / Username", key="reg_name")
-        reg_email = st.text_input("Email Address", placeholder="name@company.com", key="reg_email")
-        reg_pass = st.text_input("Password", type="password", key="reg_pass")
-        reg_ticket_code = st.text_input("Activation / Ticket Code (If you already have one)", placeholder="Enter ticket code here", key="reg_ticket_code")
+    st.subheader("Get Subscription Ticket & Register")
+
+    reg_tier = st.selectbox("Choose Subscription Tier", ["Starter Tier ($29)", "Research Pack ($30)", "Mid-Tier Pro ($79)", "Enterprise Tier ($120)"])
+    reg_name = st.text_input("Name / Username", key="reg_name")
+    reg_email = st.text_input("Email Address", placeholder="name@company.com", key="reg_email")
+    reg_pass = st.text_input("Password", type="password", key="reg_pass")
+    reg_ticket_code = st.text_input("Activation / Ticket Code (If you already have one)", placeholder="Enter ticket code here", key="reg_ticket")
         
         st.markdown("---")
         st.markdown("### Terms, Conditions & Payment Policy")
