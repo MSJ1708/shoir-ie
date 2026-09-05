@@ -491,7 +491,7 @@ with auth_tab2:
                         reg_tier,
                         file_path,
                         "Pending",
-                        str(datetime.now())
+                        str(datetime.datetime.now())
                     ))
                     conn.commit()
                     conn.close()
