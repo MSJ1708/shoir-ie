@@ -481,18 +481,20 @@ with auth_tab2:
 
                     conn = sqlite3.connect("users.db")
                     cursor = conn.cursor()
+                    
+                    # Ensure the table exists before inserting records
                     cursor.execute("""
-                        INSERT INTO pending_registrations (username, password, email, tier, payment_proof, status, timestamp)
-                        VALUES (?, ?, ?, ?, ?, ?, ?)
-                    """, (
-                        reg_name,
-                        reg_pass,
-                        reg_email,
-                        reg_tier,
-                        file_path,
-                        "Pending",
-                        str(datetime.datetime.now())
-                    ))
+                        CREATE TABLE IF NOT EXISTS pending_registrations (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            username TEXT,
+                            password TEXT,
+                            email TEXT,
+                            tier TEXT,
+                            payment_proof TEXT,
+                            status TEXT,
+                            timestamp TEXT
+                        )
+                    """)
                     conn.commit()
                     conn.close()
 
