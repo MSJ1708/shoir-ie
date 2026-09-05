@@ -3441,7 +3441,7 @@ if selected_module in ["Facility Layout & Warehousing", "Facility Layout, Materi
 # ==============================================================================
 # SHOIR-IE: ELITE HUMAN FACTORS, ERGONOMICS & SAFETY ENGINEERING (V3.1)
 # ==============================================================================
-if mod in ["Human Factors & Ergonomics (NIOSH)", "Human Factors, Ergonomics, & Safety Engineering"]:
+if selected_module in ["Human Factors & Ergonomics (NIOSH)", "Human Factors, Ergonomics, & Safety Engineering"]:
     
     import streamlit as st
     import pandas as pd
@@ -3714,7 +3714,7 @@ if mod in ["Human Factors & Ergonomics (NIOSH)", "Human Factors, Ergonomics, & S
 # ==============================================================================
 # SHOIR-IE: ELITE ENGINEERING ECONOMICS & FINANCIAL ANALYSIS SUITE (V3.3)
 # ==============================================================================
-if mod in ["Engineering Economics & Finance", "Engineering Economics & Financial Analysis"]:
+if selected_module in ["Engineering Economics & Finance", "Engineering Economics & Financial Analysis"]:
     
     import streamlit as st
     import pandas as pd
@@ -4039,7 +4039,7 @@ if mod in ["Engineering Economics & Finance", "Engineering Economics & Financial
 # ==============================================================================
 # SHOIR-IE: ELITE DIGITAL TWIN, DES & MES CONTROL TOWER (V3.8 - FULL CRUD)
 # ==============================================================================
-if mod in ["Digital Twin & Discrete-Event Simulation", "Digital Twin & DES"]:
+if selected_module in ["Digital Twin & Discrete-Event Simulation", "Digital Twin & DES"]:
     
     import streamlit as st
     import pandas as pd
@@ -4579,7 +4579,7 @@ if mod in ["Green IE & Sustainability", "Sustainability & Circular Economy", "Gr
 # ==============================================================================
 # SHOIR-IE: ENTERPRISE INTEGRATION, REPORTING & RBAC SUITE (V4.7 - MASTER)
 # ==============================================================================
-if mod in ["Enterprise Integration & Collaboration", "Enterprise Integration", "Collaboration Suite"]:
+if selected_module in ["Enterprise Integration & Collaboration", "Enterprise Integration", "Collaboration Suite"]:
     
     import streamlit as st
     import pandas as pd
