@@ -1482,15 +1482,8 @@ elif selected_module == "LaTeX Document Formatter":
                 mime="text/plain"
             )
 if selected_module == "Statistical Hypothesis Testing":
-import streamlit as st
-import pandas as pd
-import numpy as np
-from scipy import stats
-import plotly.express as px
-import plotly.figure_factory as ff
-
-st.title("🔬 Advanced Statistical Hypothesis Testing Suite")
-st.markdown("A research-grade interactive suite featuring live data editing, automated diagnostics, parametric/non-parametric tests, and dynamic visual analytics.")
+    st.title("📊 Advanced Statistical Hypothesis Testing Suite")
+    st.markdown("A research-grade interactive suite featuring live data editing, automated diagnostics, parametric/non-parametric tests, and visualizations.")
 
 # --- 1. FLEXIBLE DATA INGESTION & LIVE EDITOR ---
 ingestion_mode = st.radio("Data Ingestion Mode", ["Interactive Data Editor (Add/Delete/Modify)", "Upload CSV/Excel", "Benchmark Dataset"], horizontal=True)
