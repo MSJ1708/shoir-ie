@@ -451,31 +451,31 @@ with auth_tab2:
             st.session_state.show_qr = True
 
     if st.session_state.get("show_qr", False):
-        st.markdown("---")
-        st.markdown("### Scan to Pay via STC Pay")
-
-        qr_path = "stc_pay_qr.png"
-        try:
-            img = Image.open(qr_path)
-            st.image(img, caption="Scan QR Code to Pay Exact Amount", width=230)
-        except Exception:
-            st.info("Could not load image.")
-                    
-                uploaded_screenshot = st.file_uploader("Upload Payment Screenshot", type=["png", "jpg", "jpeg"], key="payment_screenshot_upload")
-                
-                st.markdown("---")
-                confirmed_delivery = st.checkbox(
-                    "Ticket code will be sent by shoirtheagent@gmail.com through email upon verification.",
-                    key="reg_confirm_delivery"
-                )
-                
-                if confirmed_delivery:
-                    if st.button("Send Verification Request", type="primary", key="btn_send_request"):
-                        if reg_name and reg_pass and reg_email and uploaded_screenshot is not None:
-                            os.makedirs("payment_proofs", exist_ok=True)
-                            file_path = os.path.join("payment_proofs", f"{reg_name}_{uploaded_screenshot.name}")
-                            with open(file_path, "wb") as f:
-                                f.write(uploaded_screenshot.getbuffer())
+            st.markdown("---")
+            st.markdown("### Scan to Pay via STC Pay")
+    
+            qr_path = "stc_pay_qr.png"
+            try:
+                img = Image.open(qr_path)
+                st.image(img, caption="Scan QR Code to Pay Exact Amount", width=230)
+            except Exception:
+                st.info("Could not load image.")
+    
+            uploaded_screenshot = st.file_uploader("Upload Payment Screenshot", type=["png", "jpg", "jpeg"], key="payment_screenshot_upload")
+    
+            st.markdown("---")
+            confirmed_delivery = st.checkbox(
+                "Ticket code will be sent by shoirtheagent@gmail.com through email upon verification.",
+                key="reg_confirm_delivery"
+            )
+    
+            if confirmed_delivery:
+                if st.button("Send Verification Request", type="primary", key="btn_send_request"):
+                    if reg_name and reg_pass and reg_email and uploaded_screenshot is not None:
+                        os.makedirs("payment_proofs", exist_ok=True)
+                        file_path = os.path.join("payment_proofs", f"{reg_name}_{uploaded_screenshot.name}")
+                        with open(file_path, "wb") as f:
+                            f.write(uploaded_screenshot.getbuffer())
                             
                             conn = sqlite3.connect("enterprise_full_workspace.db")
                             cursor = conn.cursor()
