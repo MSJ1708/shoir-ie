@@ -1996,7 +1996,7 @@ if selected_module == "AGV Fleet Dispatcher":
 # ==============================================================================
 # SHOIR-IE: ELITE GEOSPATIAL NETWORK DESIGNER & FACILITY OPTIMIZER (V2.2 FIXED)
 # ==============================================================================
-if mod == "Geospatial Network Designer":
+if selected_module == "Geospatial Network Designer":
     
     # 1. Initialize Geospatial Session State
     if "geo_network_name" not in st.session_state:
