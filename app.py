@@ -19,6 +19,7 @@ import os
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from PIL import Image
+from scipy import stats
 
 # =====================================================================
 # PAGE CONFIGURATION & CUSTOM CSS (Professional Styling & Hover Zoom)
@@ -1653,7 +1654,7 @@ if df is not None and not df.empty:
 # ==============================================================================
 # SHOIR-IE: ELITE ENTERPRISE AGV/AMR FLEET COMMAND TOWER (V2.1 BULLETPROOF EDITION)
 # ==============================================================================
-if mod == "AGV Fleet Dispatcher":
+    if selected_module == "AGV Fleet Dispatcher":
     
     # 1. Initialize Comprehensive Enterprise Session State
     if "facility_name" not in st.session_state:
