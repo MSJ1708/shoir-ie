@@ -487,6 +487,7 @@ with auth_tab2:
                         CREATE TABLE IF NOT EXISTS pending_payments (
                             id INTEGER PRIMARY KEY AUTOINCREMENT,
                             username TEXT,
+                            password TEXT,
                             email TEXT,
                             tier TEXT,
                             payment_method TEXT,
@@ -496,14 +497,21 @@ with auth_tab2:
                             timestamp TEXT
                         )
                     """)
+
+                    # Auto-migrate: add password column if this table pre-dates it
+                    try:
+                        cursor.execute("ALTER TABLE pending_payments ADD COLUMN password TEXT")
+                    except sqlite3.OperationalError:
+                        pass
                     
                     # THIS WAS MISSING: actually save the request so the Admin Panel can see it
                     cursor.execute("""
                         INSERT INTO pending_payments
-                            (username, email, tier, payment_method, transaction_id, screenshot_path, status, timestamp)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                            (username, password, email, tier, payment_method, transaction_id, screenshot_path, status, timestamp)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, (
                         reg_name,
+                        reg_pass,
                         reg_email,
                         reg_tier,
                         "STC Pay (QR)",
@@ -6865,6 +6873,7 @@ if mod == "Admin Panel":
             CREATE TABLE IF NOT EXISTS pending_payments (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 username TEXT,
+                password TEXT,
                 email TEXT,
                 tier TEXT,
                 payment_method TEXT,
@@ -6874,6 +6883,12 @@ if mod == "Admin Panel":
                 timestamp TEXT
             )
         ''')
+
+        # Auto-migrate: add password column if this table pre-dates it
+        try:
+            cursor.execute("ALTER TABLE pending_payments ADD COLUMN password TEXT")
+        except sqlite3.OperationalError:
+            pass
         
         # Robust migration check for license_codes: Drop and recreate cleanly if 'id' column is missing
         cursor.execute("PRAGMA table_info(license_codes);")
@@ -6928,6 +6943,13 @@ if mod == "Admin Panel":
                                 INSERT OR REPLACE INTO enterprise_users (username, role, tier, email)
                                 VALUES (?, 'User', ?, ?)
                             """, (row['username'], row['tier'], row['email']))
+                            
+                            # Create/refresh the actual login account (this is what Sign In checks)
+                            login_password = row['password'] if 'password' in row.index and row['password'] else ''
+                            cursor.execute("""
+                                INSERT OR REPLACE INTO users (username, password, role, tier, email, created_at)
+                                VALUES (?, ?, ?, ?, ?, ?)
+                            """, (row['username'], login_password, "User", row['tier'], row['email'], datetime.datetime.now().isoformat()))
                             cursor.execute("UPDATE pending_payments SET status = 'Approved' WHERE id = ?", (row['id'],))
                             cursor.execute("INSERT INTO audit_trail (timestamp, user, action) VALUES (datetime('now'), ?, ?)", 
                                            ("sho", f"Approved payment & issued ticket code {t_code} for user {row['username']}"))
