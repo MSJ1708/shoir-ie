@@ -479,22 +479,40 @@ with auth_tab2:
                     with open(file_path, "wb") as f:
                         f.write(uploaded_screenshot.getbuffer())
 
-                    conn = sqlite3.connect("users.db")
+                    conn = sqlite3.connect("enterprise_full_workspace.db")
                     cursor = conn.cursor()
                     
-                    # Ensure the table exists before inserting records
+                    # Make sure the table the Admin Panel reads from actually exists
                     cursor.execute("""
-                        CREATE TABLE IF NOT EXISTS pending_registrations (
+                        CREATE TABLE IF NOT EXISTS pending_payments (
                             id INTEGER PRIMARY KEY AUTOINCREMENT,
                             username TEXT,
-                            password TEXT,
                             email TEXT,
                             tier TEXT,
-                            payment_proof TEXT,
+                            payment_method TEXT,
+                            transaction_id TEXT,
+                            screenshot_path TEXT,
                             status TEXT,
                             timestamp TEXT
                         )
                     """)
+                    
+                    # THIS WAS MISSING: actually save the request so the Admin Panel can see it
+                    cursor.execute("""
+                        INSERT INTO pending_payments
+                            (username, email, tier, payment_method, transaction_id, screenshot_path, status, timestamp)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        reg_name,
+                        reg_email,
+                        reg_tier,
+                        "STC Pay (QR)",
+                        reg_ticket_code if reg_ticket_code else None,
+                        file_path,
+                        "Pending",
+                        datetime.datetime.now().isoformat()
+                    ))
+                    
                     conn.commit()
                     conn.close()
 
@@ -599,168 +617,16 @@ if "show_qr" not in st.session_state:
     st.session_state.show_qr = False
 
 # =====================================================================
-# ADMIN PANEL: PENDING PAYMENT & SCREENSHOT VERIFICATION (RESTRICTED TO 'sho')
+# (Removed: a duplicate, broken "admin verification" block used to sit
+# here. It was unreachable in normal operation (its display/approve
+# logic lived inside an `except:` clause), it read from a different
+# table (pending_registrations/users.db) than anything ever wrote to,
+# it leaked a raw DEBUG row-count to every visitor regardless of login,
+# and it emailed using a Gmail app password hardcoded in plain text.
+# The working version of this feature is the "Admin Panel" module
+# further down (mod == "Admin Panel"), which now receives the requests
+# saved by the registration form above.)
 # =====================================================================
-
-# Strict check ensuring only user 'sho' can view or execute this block
-if st.session_state.get("current_user", "").strip().lower() == "sho":
-    st.markdown("---")
-    st.subheader("🛡️ Admin Control Panel: Payment & Ticket Verification")
-    
-try:
-    import os
-    conn = sqlite3.connect("users.db")
-    debug_df = pd.read_sql_query("SELECT * FROM pending_registrations", conn)
-    st.write(f"DEBUG - Total rows in database: {len(debug_df)}")
-    
-    pending_df = pd.read_sql_query("SELECT * FROM pending_registrations WHERE LOWER(status) = 'pending'", conn)
-    conn.close()
-except Exception as e:
-    pending_df = pd.DataFrame()
-    st.warning(f"Database error or table missing: {e}")
-    if not pending_df.empty:
-        st.info(f"You have {len(pending_df)} pending payment request(s) to review.")
-        
-        for index, row in pending_df.iterrows():
-            with st.expander(f"📦 Request #{row['id']} - User: {row['username']} ({row['tier']})", expanded=True):
-                coll, col2 = st.columns(2)
-                
-                with coll:
-                    st.write(f"**Username:** {row['username']}")
-                    st.write(f"**Email:** {row['email']}")
-                    st.write(f"**Selected Tier:** {row['tier']}")
-                    st.write(f"**Payment Method:** {row['payment_method']}")
-                    st.write(f"**Submitted At:** {row['timestamp']}")
-                    
-                with col2:
-                    st.markdown("**Uploaded Payment Screenshot:**")
-                    screenshot_path = row.get('screenshot_path')
-                    if screenshot_path and os.path.exists(screenshot_path):
-                        st.image(screenshot_path, caption=f"Receipt for {row['username']}", width=200)
-                    else:
-                        st.warning("⚠️ Screenshot file not found on server storage.")
-                        
-                st.markdown("---")
-                
-# --- GLOBAL FREE MODE TOGGLE ---
-        conn = sqlite3.connect("enterprise_full_workspace.db")
-        cursor = conn.cursor()
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS system_settings (
-                key TEXT PRIMARY KEY,
-                value TEXT
-            )
-        ''')
-        cursor.execute("INSERT OR IGNORE INTO system_settings (key, value) VALUES ('free_mode', 'off')")
-        conn.commit()
-
-        cursor.execute("SELECT value FROM system_settings WHERE key = 'free_mode'")
-        row_setting = cursor.fetchone()
-        current_free_mode = row_setting[0] if row_setting else 'off'
-        conn.close()
-
-        is_free_active = (current_free_mode == 'on')
-        toggle_label = "🔴 Turn Off 'Make it Free' (Back to Normal)" if is_free_active else "🟢 Make it Free for Everyone"
-
-        if st.button(toggle_label, type="primary" if not is_free_active else "secondary", key="btn_toggle_free_mode"):
-            new_val = 'off' if is_free_active else 'on'
-            conn = sqlite3.connect("enterprise_full_workspace.db")
-            cursor = conn.cursor()
-            cursor.execute("UPDATE system_settings SET value = ? WHERE key = 'free_mode'", (new_val,))
-            conn.commit()
-            conn.close()
-            st.success(f"Global Free Mode is now: {new_val.upper()}")
-            st.rerun()
-
-    st.markdown("---")
-    for index, row in pending_df.iterrows():
-            if st.button(f"✅ Approve & Create Account for {row['username']}", key=f"approve_{row['id']}"):
-                code_suffix = "".join(random.choices(string.ascii_uppercase + string.digits, k=8))
-                new_ticket_code = f"SUB-{code_suffix[:4]}-{code_suffix[4:]}"
-    
-            conn = sqlite3.connect("enterprise_full_workspace.db")
-            cursor = conn.cursor()
-    
-            # 1. Insert license code
-            cursor.execute("INSERT INTO license_codes (code, tier, is_used) VALUES (?, ?, 0)", (new_ticket_code, row['tier']))
-    
-            # 2. Automatically create the user account in the 'users' table upon approval
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS users (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    username TEXT UNIQUE,
-                    password TEXT,
-                    role TEXT,
-                    tier TEXT,
-                    email TEXT,
-                    created_at TEXT
-                )
-            ''')
-            
-            db_user = row['username']
-            db_pass = row.get('password', '')
-            db_tier = row['tier']
-            db_email = row['email']
-            created_at_str = datetime.datetime.now().isoformat()
-    
-            cursor.execute(
-    """
-    INSERT OR REPLACE INTO users (username, password, role, tier, email, created_at)
-    VALUES (?, ?, ?, ?, ?, ?)
-""",
-    (db_user, db_pass, "User", db_tier, db_email, created_at_str),
-)
-    
-            # 3. Mark the pending payment as approved
-            cursor.execute("UPDATE pending_payments SET status = 'Approved' WHERE id = ?", (row['id'],))
-            conn.commit()
-            conn.close()
-    
-            sender_email = "shoirtheagent@gmail.com"
-            sender_password = "wtcbbckjpphnmnwo"
-            receiver_email = row['email']
-    
-            msg = MIMEMultipart()
-            msg['From'] = sender_email
-            msg['To'] = receiver_email
-            msg['Subject'] = "Your Enterprise Suite Subscription Ticket Code"
-    
-            body = f"""Hello {row['username']},
-    
-    Your payment has been successfully verified!
-    Your requested tier: {row['tier']}
-    
-    Here is your exclusive activation ticket code:
-    {new_ticket_code}
-    
-    You can log in to your account and enter this code to activate your workspace access.
-    
-    Best regards,
-    Enterprise Operations Team
-    """
-    
-            msg.attach(MIMEText(body, 'plain'))
-    
-            try:
-                server = smtplib.SMTP('smtp.gmail.com', 587)
-                server.starttls()
-                server.login(sender_email, sender_password)
-                server.sendmail(sender_email, receiver_email, msg.as_string())
-                server.quit()
-                st.success(f"Account created and ticket code '{new_ticket_code}' successfully emailed to {receiver_email}!")
-            except Exception as e:
-                st.warning(f"Account created and code generated ('{new_ticket_code}'), but automated email failed: {e}.")
-    
-            st.rerun()
-    # --- REJECT BUTTON ACTION ---
-            if st.button(f"❌ Reject Request", key=f"reject_{row['id']}"):
-                conn = sqlite3.connect("enterprise_full_workspace.db")
-                cursor = conn.cursor()
-                cursor.execute("UPDATE pending_payments SET status = 'Rejected' WHERE id = ?", (row['id'],))
-                conn.commit()
-                conn.close()
-                st.error(f"Request from {row['username']} has been rejected.")
-                st.rerun()
 # =====================================================================
 # ENSURE AFFILIATE CODE IS LOADED IN SESSION STATE
 # =====================================================================
@@ -7391,4 +7257,3 @@ if mod == "Cryptographic Ledger":
         st.write("")
         if st.button("Unlock Enterprise Tier", type="primary", use_container_width=True):
             st.info("Redirecting to secure subscription portal...")
-
