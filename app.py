@@ -5,7 +5,7 @@ import folium
 from streamlit_folium import st_folium
 import sqlite3
 import json
-from datetime import datetime, timedelta
+import datetime
 import random
 import string
 import pandas as pd
@@ -32,6 +32,7 @@ st.set_page_config(
 
 st.markdown("""
 <style>
+    .main { background-color: #0e1117; }
     .blue-metric {
         color: #0066cc !important;
         font-weight: 700;
@@ -61,22 +62,37 @@ st.markdown("""
         box-shadow: 0 8px 20px rgba(0, 102, 204, 0.2);
     }
     .trust-banner {
-        background-color: #f0f2f6; 
-        padding: 12px; 
-        border-radius: 6px; 
-        text-align: center; 
+        background-color: #f0f2f6;
+        padding: 12px;
+        border-radius: 6px;
+        text-align: center;
         margin-bottom: 20px;
     }
 </style>
 """, unsafe_allow_html=True)
 
+os.makedirs("payment_proofs", exist_ok=True)
+
 # =====================================================================
 # SQLITE ENTERPRISE DATABASE SETUP & AUTO-MIGRATION
+# ---------------------------------------------------------------------
+# NOTE: this file previously had THREE separate copies of the page-config
+# / database-setup / login-and-register section stacked on top of each
+# other (leftover from earlier edits that were never cleaned up). That
+# caused several concrete bugs:
+#   - st.set_page_config() was called 3 times (Streamlit only allows 1).
+#   - init_db() was defined twice; the second, much simpler definition
+#     silently overrode the first, so the admin account, audit_trail
+#     table, and several enterprise_users columns the rest of the app
+#     relies on were never actually created.
+#   - The register tab was rendered twice (once via a leftover, unused
+#     tab object), which is why the register/login tabs looked broken.
+# This is now a single, consolidated version. No feature was removed.
 # =====================================================================
 def init_db():
     with sqlite3.connect("enterprise_full_workspace.db") as conn:
         cursor = conn.cursor()
-        
+
         # 1. Saved Projects Table (Stores workspace / simulation states)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS saved_projects (
@@ -85,7 +101,7 @@ def init_db():
                 updated_at TEXT
             )
         """)
-        
+
         # 2. Enterprise Users Table (Stores user profiles, roles, and tier levels)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS enterprise_users (
@@ -102,7 +118,7 @@ def init_db():
                 ticket_expiry TEXT
             )
         """)
-        
+
         # Auto-migrate missing columns safely if updating an existing database
         migrations = [
             ("tier", "TEXT DEFAULT 'Starter Tier'"),
@@ -120,17 +136,37 @@ def init_db():
             except sqlite3.OperationalError:
                 pass
 
-        # 3. License Codes Table (Stores generated tier subscription keys)
+        # 3. Login Credentials Table (this is what "Sign In" actually checks)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT,
+                password TEXT,
+                role TEXT,
+                tier TEXT,
+                email TEXT,
+                created_at TEXT
+            )
+        """)
+
+        # 4. License Codes Table (Stores generated tier subscription keys)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS license_codes (
-                code TEXT PRIMARY KEY,
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                code TEXT UNIQUE,
                 tier TEXT,
+                duration_days INTEGER DEFAULT 30,
                 is_used INTEGER DEFAULT 0,
                 created_at TEXT
             )
         """)
-        
-        # 4. Affiliate Referrals Table (Tracks user referral links and discounts)
+        for col, defn in [("duration_days", "INTEGER DEFAULT 30"), ("is_used", "INTEGER DEFAULT 0"), ("created_at", "TEXT")]:
+            try:
+                cursor.execute(f"ALTER TABLE license_codes ADD COLUMN {col} {defn}")
+            except sqlite3.OperationalError:
+                pass
+
+        # 5. Affiliate Referrals Table (Tracks user referral links and discounts)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS affiliate_referrals (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -140,8 +176,8 @@ def init_db():
                 timestamp TEXT
             )
         """)
-        
-        # 5. Audit Trail Table (Tracks administrative actions and security events)
+
+        # 6. Audit Trail Table (Tracks administrative actions and security events)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS audit_trail (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -151,47 +187,59 @@ def init_db():
             )
         """)
 
-        # 6. Pending Verifications Table (Tracks users waiting for manual QR payment approval)
+        # 7. Pending Payment / Ticket Requests Table
+        #    (this is what "Send Verification Request" on the register tab
+        #    writes to, and what the Admin Panel's "Pending Payment & Ticket
+        #    Requests" section reads from)
         cursor.execute("""
-            CREATE TABLE IF NOT EXISTS pending_verifications (
+            CREATE TABLE IF NOT EXISTS pending_payments (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 username TEXT,
+                password TEXT,
                 email TEXT,
-                password_hash TEXT,
                 tier TEXT,
-                payment_proof TEXT,
-                status TEXT DEFAULT 'Pending',
-                created_at TEXT
+                payment_method TEXT,
+                transaction_id TEXT,
+                screenshot_path TEXT,
+                status TEXT,
+                timestamp TEXT
             )
         """)
-        
-        # 7. Seed Admin User 'sho' securely
+
+        # 8. System Settings Table (Stores global free-mode toggle)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS system_settings (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            )
+        """)
+        cursor.execute("INSERT OR IGNORE INTO system_settings (key, value) VALUES ('free_mode', 'off')")
+
+        # 9. Seed Admin User 'sho' profile row
         admin_pass_hash = hashlib.sha256("mohammedsuhail172008chennai!".encode()).hexdigest()
         cursor.execute("""
-            INSERT OR REPLACE INTO enterprise_users 
+            INSERT OR REPLACE INTO enterprise_users
             (username, password_hash, role, tier, email, trial_expires, affiliate_code, ticket_expiry)
             VALUES (?, ?, ?, ?, ?, ?, COALESCE((SELECT affiliate_code FROM enterprise_users WHERE username = 'sho'), 'AFF-SHO-15'), ?)
         """, (
-            "sho", 
-            admin_pass_hash, 
-            "Enterprise Admin", 
-            "Enterprise Tier", 
-            "mohsuhailji@gmail.com", 
-            "2030-01-01T00:00:00", 
+            "sho",
+            admin_pass_hash,
+            "Enterprise Admin",
+            "Enterprise Tier",
+            "mohsuhailji@gmail.com",
+            "2030-01-01T00:00:00",
             "2030-01-01T00:00:00"
         ))
-        
-        conn.commit()
-        # 8. System Settings Table (Stores global free mode toggle)
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS system_settings (
-            key TEXT PRIMARY KEY,
-            value TEXT
-        )
-    """)
-    cursor.execute("INSERT OR IGNORE INTO system_settings (key, value) VALUES ('free_mode', 'off')")
 
-    cursor.execute("INSERT OR IGNORE INTO system_settings (key, value) VALUES ('free_mode', 'off')")
+        # 10. Seed Admin User 'sho' login credentials (this is what Sign In checks)
+        cursor.execute("DELETE FROM users WHERE LOWER(username) = 'sho'")
+        cursor.execute("""
+            INSERT INTO users (username, password, role, tier, email, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, ("sho", "mohammedsuhail172008chennai!", "admin", "Enterprise Tier ($199)", "shoirtheagent@gmail.com", "2020-01-01T00:00:00"))
+
+        conn.commit()
+
 def send_tier_email(receiver_email, username, tier_code, tier_name):
     """Sends the approved subscription tier code to the user's email."""
     try:
@@ -216,6 +264,36 @@ def send_tier_email(receiver_email, username, tier_code, tier_name):
     except Exception as e:
         st.error(f"Error sending tier code email: {e}")
         return False
+
+def log_audit(user, action):
+    """Records an entry in the security audit trail.
+
+    This was called from many places throughout the app (logout, profile
+    save, feedback submit, and most module actions) but was never actually
+    defined anywhere in the file, which crashed the app with a NameError
+    every time one of those actions ran. It's defined here now.
+    """
+    try:
+        conn = sqlite3.connect("enterprise_full_workspace.db")
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS audit_trail (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT,
+                user TEXT,
+                action TEXT
+            )
+        """)
+        cursor.execute(
+            "INSERT INTO audit_trail (timestamp, user, action) VALUES (datetime('now'), ?, ?)",
+            (user, action)
+        )
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+init_db()
 
 # =====================================================================
 # SESSION STATE INITIALIZATION
@@ -291,33 +369,8 @@ if "sample_data_loaded" not in st.session_state:
     st.session_state.sample_data_loaded = False
 if "onboarded" not in st.session_state:
     st.session_state.onboarded = False
-# Initialize session state flags
-if "authenticated" not in st.session_state:
-    st.session_state.authenticated = False
 if "show_qr" not in st.session_state:
     st.session_state.show_qr = False
-
-import streamlit as st
-import sqlite3
-import os
-import random
-import string
-import pandas as pd
-from PIL import Image
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
-
-import streamlit as st
-import sqlite3
-import os
-import datetime
-from PIL import Image
-
-# ==========================================
-# PAGE CONFIGURATION
-# ==========================================
-st.set_page_config(page_title="Shoir-IE Workspace", page_icon="⚡", layout="wide")
 
 # ==========================================
 # AUTHENTICATION & REGISTRATION GATE (FRONT PAGE)
@@ -339,8 +392,6 @@ if is_free_mode and not st.session_state.get("current_user"):
     st.session_state["user_tier"] = "Enterprise Tier"
     st.session_state["authenticated"] = True
 
-import datetime
-
 # Enforce 30-day subscription expiry check for active sessions
 if st.session_state.get("authenticated") and st.session_state.get("current_user") != "Guest Visitor":
     try:
@@ -349,7 +400,7 @@ if st.session_state.get("authenticated") and st.session_state.get("current_user"
         cursor.execute("SELECT created_at FROM users WHERE LOWER(username) = ?", (st.session_state.get("current_user").lower(),))
         row = cursor.fetchone()
         conn.close()
-        
+
         if row and row[0]:
             created_dt = datetime.datetime.fromisoformat(row[0])
             # Check if 30 days have passed (excluding master admin 'sho')
@@ -364,9 +415,9 @@ if st.session_state.get("authenticated") and st.session_state.get("current_user"
 if not st.session_state.get("current_user"):
     st.title("🔐 Welcome to Shoir-IE Workspace")
     st.markdown("Please sign in with your approved account or register and submit your payment ticket below.")
-    
+
     auth_tab1, auth_tab2 = st.tabs(["🔑 Sign In", "📝 Get Ticket & Register"])
-    
+
     # ------------------------------------------
     # TAB 1: SIGN IN
     # ------------------------------------------
@@ -374,30 +425,10 @@ if not st.session_state.get("current_user"):
         st.subheader("Sign In to Your Workspace")
         signin_user = st.text_input("Username", key="signin_username_input")
         signin_pass = st.text_input("Password", type="password", key="signin_password_input")
-        
+
         if st.button("Sign In", type="primary", key="btn_sign_action"):
             conn = sqlite3.connect("enterprise_full_workspace.db")
             cursor = conn.cursor()
-            
-            # Ensure tables exist and master admin is seeded
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS users (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    username TEXT,
-                    password TEXT,
-                    role TEXT,
-                    tier TEXT,
-                    email TEXT,
-                    created_at TEXT
-                )
-            ''')
-            
-            cursor.execute("DELETE FROM users WHERE LOWER(username) = 'sho'")
-            cursor.execute("""
-                INSERT INTO users (username, password, role, tier, email)
-                VALUES (?, ?, ?, ?, ?)
-            """, ("sho", "mohammedsuhail172008chennai!", "admin", "Enterprise Tier ($199)", "shoirtheagent@gmail.com"))
-            conn.commit()
 
             cursor.execute(
                 "SELECT * FROM users WHERE LOWER(username) = ? AND password = ?",
@@ -422,257 +453,136 @@ if not st.session_state.get("current_user"):
                 st.session_state["current_user"] = user_row[1]
                 st.session_state["user_role"] = user_row[3]
                 st.session_state["user_tier"] = user_row[4]
+                # FIX: this flag was never being set on sign-in anywhere in the
+                # file, even though the Admin Panel (and the 30-day-expiry
+                # check above) both require it to be True. That alone was
+                # enough to make "sho" permanently see "Access Denied" on the
+                # Admin Panel even after a correct, successful login.
+                st.session_state["authenticated"] = True
                 st.success(f"Welcome back, {user_row[1]}!")
                 st.rerun()
             else:
                 st.error("Invalid username or password. Note: Access requires admin approval and ticket delivery.")
+
     # ------------------------------------------
-    # TAB 2: GET TICKET & REGISTER (UNTOUCHED FLOW)
+    # TAB 2: GET TICKET & REGISTER
     # ------------------------------------------
-auth_tab1, auth_tab2 = st.tabs(["Login", "Get Ticket & Register"])
-
-with auth_tab2:
-    st.subheader("Get Subscription Ticket & Register")
-    reg_tier = st.selectbox("Choose Subscription Tier", ["Starter Tier ($29)", "Research Pack ($30)", "Mid-Tier Pro ($79)", "Enterprise Tier ($120)"])
-    reg_name = st.text_input("Name / Username", key="reg_name")
-    reg_email = st.text_input("Email Address", placeholder="name@company.com", key="reg_email")
-    reg_pass = st.text_input("Password", type="password", key="reg_pass")
-    reg_ticket_code = st.text_input("Activation / Ticket Code (If you already have one)", placeholder="Enter ticket code here", key="reg_ticket")
-
-    st.markdown("---")
-    st.markdown("### Terms, Conditions & Payment Policy")
-    st.markdown(
-        "- **No Refunds:** Refund isn't available for any subscription purchases. All sales are final.\n"
-        "- **Exact Price:** You must pay the exact price corresponding to your selected tier.\n"
-        "- **Ticket Delivery:** Your ticket code will be sent via email after payment verification."
-    )
-    accepted_terms = st.checkbox("I accept the terms & conditions, no-refund policy, and pricing instructions.", key="reg_chk")
-
-    if accepted_terms:
-        if st.button("Proceed to Pay & Show QR", type="primary", key="btn_confirm_pay"):
-            st.session_state.show_qr = True
-
-    if st.session_state.get("show_qr", False):
-        st.markdown("---")
-        st.markdown("### Scan to Pay via STC Pay")
-
-        qr_path = "stc_pay_qr.png"
-        try:
-            img = Image.open(qr_path)
-            st.image(img, caption="Scan QR Code to Pay Exact Amount", width=230)
-        except Exception:
-            st.info("Could not load image.")
-
-        uploaded_screenshot = st.file_uploader("Upload Payment Screenshot", type=["png", "jpg", "jpeg"], key="payment_screenshot_upload")
+    with auth_tab2:
+        st.subheader("Get Subscription Ticket & Register")
+        reg_tier = st.selectbox("Choose Subscription Tier", ["Starter Tier ($29)", "Research Pack ($30)", "Mid-Tier Pro ($79)", "Enterprise Tier ($120)"])
+        reg_name = st.text_input("Name / Username", key="reg_name")
+        reg_email = st.text_input("Email Address", placeholder="name@company.com", key="reg_email")
+        reg_pass = st.text_input("Password", type="password", key="reg_pass")
+        reg_ticket_code = st.text_input("Activation / Ticket Code (If you already have one)", placeholder="Enter ticket code here", key="reg_ticket")
 
         st.markdown("---")
-        confirmed_delivery = st.checkbox(
-            "Ticket code will be sent by shoirtheagent@gmail.com through email upon verification.",
-            key="reg_confirm_delivery"
+        st.markdown("### Terms, Conditions & Payment Policy")
+        st.markdown(
+            "- **No Refunds:** Refund isn't available for any subscription purchases. All sales are final.\n"
+            "- **Exact Price:** You must pay the exact price corresponding to your selected tier.\n"
+            "- **Ticket Delivery:** Your ticket code will be sent via email after payment verification."
         )
+        accepted_terms = st.checkbox("I accept the terms & conditions, no-refund policy, and pricing instructions.", key="reg_chk")
 
-        if confirmed_delivery:
-            if st.button("Send Verification Request", type="primary", key="btn_send_request"):
-                if reg_name and reg_pass and reg_email and uploaded_screenshot is not None:
-                    os.makedirs("payment_proofs", exist_ok=True)
-                    file_path = os.path.join("payment_proofs", f"{reg_name}_{uploaded_screenshot.name}")
-                    with open(file_path, "wb") as f:
-                        f.write(uploaded_screenshot.getbuffer())
+        if accepted_terms:
+            if st.button("Proceed to Pay & Show QR", type="primary", key="btn_confirm_pay"):
+                st.session_state.show_qr = True
 
-                    conn = sqlite3.connect("enterprise_full_workspace.db")
-                    cursor = conn.cursor()
-                    
-                    # Make sure the table the Admin Panel reads from actually exists
-                    cursor.execute("""
-                        CREATE TABLE IF NOT EXISTS pending_payments (
-                            id INTEGER PRIMARY KEY AUTOINCREMENT,
-                            username TEXT,
-                            password TEXT,
-                            email TEXT,
-                            tier TEXT,
-                            payment_method TEXT,
-                            transaction_id TEXT,
-                            screenshot_path TEXT,
-                            status TEXT,
-                            timestamp TEXT
-                        )
-                    """)
+        if st.session_state.get("show_qr", False):
+            st.markdown("---")
+            st.markdown("### Scan to Pay via STC Pay")
 
-                    # Auto-migrate: add password column if this table pre-dates it
-                    try:
-                        cursor.execute("ALTER TABLE pending_payments ADD COLUMN password TEXT")
-                    except sqlite3.OperationalError:
-                        pass
-                    
-                    # THIS WAS MISSING: actually save the request so the Admin Panel can see it
-                    cursor.execute("""
-                        INSERT INTO pending_payments
-                            (username, password, email, tier, payment_method, transaction_id, screenshot_path, status, timestamp)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """, (
-                        reg_name,
-                        reg_pass,
-                        reg_email,
-                        reg_tier,
-                        "STC Pay (QR)",
-                        reg_ticket_code if reg_ticket_code else None,
-                        file_path,
-                        "Pending",
-                        datetime.datetime.now().isoformat()
-                    ))
-                    
-                    conn.commit()
-                    conn.close()
+            qr_path = "stc_pay_qr.png"
+            try:
+                img = Image.open(qr_path)
+                st.image(img, caption="Scan QR Code to Pay Exact Amount", width=230)
+            except Exception:
+                st.info("Could not load image.")
 
-                    st.success("Request sent successfully! Your code will be emailed to you from shoirtheagent@gmail.com")
-                    st.session_state.show_qr = False
-                    st.rerun()
-                else:
-                    if uploaded_screenshot is None:
-                        st.warning("Please upload your payment screenshot.")
+            uploaded_screenshot = st.file_uploader("Upload Payment Screenshot", type=["png", "jpg", "jpeg"], key="payment_screenshot_upload")
+
+            st.markdown("---")
+            confirmed_delivery = st.checkbox(
+                "Ticket code will be sent by shoirtheagent@gmail.com through email upon verification.",
+                key="reg_confirm_delivery"
+            )
+
+            if confirmed_delivery:
+                if st.button("Send Verification Request", type="primary", key="btn_send_request"):
+                    if reg_name and reg_pass and reg_email and uploaded_screenshot is not None:
+                        os.makedirs("payment_proofs", exist_ok=True)
+                        file_path = os.path.join("payment_proofs", f"{reg_name}_{uploaded_screenshot.name}")
+                        with open(file_path, "wb") as f:
+                            f.write(uploaded_screenshot.getbuffer())
+
+                        conn = sqlite3.connect("enterprise_full_workspace.db")
+                        cursor = conn.cursor()
+                        cursor.execute("""
+                            INSERT INTO pending_payments
+                                (username, password, email, tier, payment_method, transaction_id, screenshot_path, status, timestamp)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """, (
+                            reg_name,
+                            reg_pass,
+                            reg_email,
+                            reg_tier,
+                            "STC Pay (QR)",
+                            reg_ticket_code if reg_ticket_code else None,
+                            file_path,
+                            "Pending",
+                            datetime.datetime.now().isoformat()
+                        ))
+
+                        conn.commit()
+                        conn.close()
+
+                        st.success("Request sent successfully! Your code will be emailed to you from shoirtheagent@gmail.com")
+                        st.session_state.show_qr = False
+                        st.rerun()
                     else:
-                        st.warning("Please fill in your name, password, and email address.")
-                  
-# =========================================================
-# PAGE CONFIGURATION & CUSTOM CSS
-# =========================================================
-st.set_page_config(
-    page_title="Enterprise Operations & Cognitive Logistics Suite - SaaS Edition",
-    page_icon="⚡",
-    layout="wide"
-)
+                        if uploaded_screenshot is None:
+                            st.warning("Please upload your payment screenshot.")
+                        else:
+                            st.warning("Please fill in your name, password, and email address.")
 
-st.markdown("""
-<style>
-    /* Custom UI Styling */
-    .main { background-color: #0e1117; }
-</style>
-""", unsafe_allow_html=True)
+    # FIX: nothing below this point stopped script execution for a visitor
+    # who isn't signed in, so the entire dashboard (sidebar, all modules,
+    # including the module list that reveals "Admin Panel") was rendering
+    # underneath the login form for anyone, logged in or not.
+    st.stop()
 
-# =========================================================
-# DATABASE SETUP & AUTO-MIGRATION
-# =========================================================
-os.makedirs("payment_proofs", exist_ok=True)
-
-def init_db():
-    conn = sqlite3.connect("enterprise_full_workspace.db")
-    cursor = conn.cursor()
-    
-    # Saved projects table
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS saved_projects (
-        name TEXT PRIMARY KEY,
-        data TEXT,
-        updated_at TEXT
-    )
-    """)
-    
-    # Enterprise users table
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS enterprise_users (
-        username TEXT PRIMARY KEY,
-        password_hash TEXT,
-        role TEXT,
-        tier TEXT DEFAULT 'Starter Tier',
-        email TEXT,
-        trial_expires TEXT,
-        linkedin TEXT
-    )
-    """)
-    
-    # Pending payments table
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS pending_payments (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        username TEXT,
-        email TEXT,
-        tier TEXT,
-        payment_method TEXT,
-        transaction_id TEXT,
-        screenshot_path TEXT,
-        status TEXT,
-        timestamp TEXT
-    )
-    """)
-    
-    # License codes table
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS license_codes (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        code TEXT UNIQUE,
-        tier TEXT,
-        is_used INTEGER DEFAULT 0
-    )
-    """)
-    
-    conn.commit()
-    conn.close()
-
-init_db()
-
-# =========================================================
-# SESSION STATE INITIALIZATION
-# =========================================================
-if "authenticated" not in st.session_state:
-    st.session_state.authenticated = False
-if "current_user" not in st.session_state:
-    st.session_state.current_user = None
-if "user_role" not in st.session_state:
-    st.session_state.user_role = None
-if "user_tier" not in st.session_state:
-    st.session_state.user_tier = None
-if "show_qr" not in st.session_state:
-    st.session_state.show_qr = False
-
-# =====================================================================
-# (Removed: a duplicate, broken "admin verification" block used to sit
-# here. It was unreachable in normal operation (its display/approve
-# logic lived inside an `except:` clause), it read from a different
-# table (pending_registrations/users.db) than anything ever wrote to,
-# it leaked a raw DEBUG row-count to every visitor regardless of login,
-# and it emailed using a Gmail app password hardcoded in plain text.
-# The working version of this feature is the "Admin Panel" module
-# further down (mod == "Admin Panel"), which now receives the requests
-# saved by the registration form above.)
-# =====================================================================
 # =====================================================================
 # ENSURE AFFILIATE CODE IS LOADED IN SESSION STATE
 # =====================================================================
 if not st.session_state.get("user_affiliate"):
     conn = sqlite3.connect("enterprise_full_workspace.db")
     cursor = conn.cursor()
-    
-    # 1. Ensure table exists
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS enterprise_users (
-            username TEXT PRIMARY KEY
-        )
-    """)
-    
-    # 2. Safely add column if it's missing
-    try:
-        cursor.execute("ALTER TABLE enterprise_users ADD COLUMN affiliate_code TEXT")
-        conn.commit()
-    except sqlite3.OperationalError:
-        pass  # Column already exists
-        
-    # 3. Query or insert the affiliate code safely
+
+    # Make sure a row exists for this user WITHOUT touching any of their
+    # other columns.
+    # FIX: this used to be "INSERT OR REPLACE INTO enterprise_users
+    # (username, affiliate_code) VALUES (?, ?)". INSERT OR REPLACE deletes
+    # the whole existing row and reinserts only the columns given, so every
+    # time a user without a cached affiliate code loaded a page, their role,
+    # tier, and email were silently wiped back to blank/defaults. This is
+    # very likely why the "Registered Enterprise Users" table showed blank
+    # role/email for a user who should have had a tier assigned.
+    cursor.execute("INSERT OR IGNORE INTO enterprise_users (username) VALUES (?)", (st.session_state.current_user,))
+
     cursor.execute("SELECT affiliate_code FROM enterprise_users WHERE username = ?", (st.session_state.current_user,))
     row = cursor.fetchone()
-    
+
     if row and row[0]:
         st.session_state.user_affiliate = row[0]
     else:
         new_aff = f"AFF-{st.session_state.current_user.upper()}-15"
-        cursor.execute("""
-            INSERT OR REPLACE INTO enterprise_users (username, affiliate_code)
-            VALUES (?, ?)
-        """, (st.session_state.current_user, new_aff))
+        cursor.execute("UPDATE enterprise_users SET affiliate_code = ? WHERE username = ?", (new_aff, st.session_state.current_user))
         conn.commit()
         st.session_state.user_affiliate = new_aff
-        
+
     conn.close()
-    
+
+
 # =====================================================================
 # SIDEBAR NAVIGATION & PROFILE DRAWER (Three-line Hamburger Menu)
 # =====================================================================
@@ -9411,15 +9321,27 @@ if mod == "Admin Panel":
                             conn = sqlite3.connect("enterprise_full_workspace.db")
                             cursor = conn.cursor()
                             cursor.execute("INSERT OR IGNORE INTO license_codes (code, tier, duration_days, is_used, created_at) VALUES (?, ?, 30, 0, datetime('now'))", (t_code, row['tier']))
+                            # FIX: this used to be "INSERT OR REPLACE INTO enterprise_users
+                            # (username, role, tier, email)". INSERT OR REPLACE deletes the
+                            # whole existing row first, so re-approving (or approving a user
+                            # who already had a profile row) silently wiped out their
+                            # linkedin/github/about_me/affiliate_code columns. Upsert instead.
+                            cursor.execute("INSERT OR IGNORE INTO enterprise_users (username) VALUES (?)", (row['username'],))
                             cursor.execute("""
-                                INSERT OR REPLACE INTO enterprise_users (username, role, tier, email)
-                                VALUES (?, 'User', ?, ?)
-                            """, (row['username'], row['tier'], row['email']))
+                                UPDATE enterprise_users SET role = 'User', tier = ?, email = ?
+                                WHERE username = ?
+                            """, (row['tier'], row['email'], row['username']))
                             
                             # Create/refresh the actual login account (this is what Sign In checks)
+                            # FIX: this used to be "INSERT OR REPLACE INTO users (...)", but
+                            # username isn't the primary key on this table (id is), so REPLACE
+                            # never actually matched anything - it just kept adding a brand new
+                            # duplicate row every time the same person was approved. Delete any
+                            # existing row for this username first instead.
                             login_password = row['password'] if 'password' in row.index and row['password'] else ''
+                            cursor.execute("DELETE FROM users WHERE LOWER(username) = ?", (row['username'].strip().lower(),))
                             cursor.execute("""
-                                INSERT OR REPLACE INTO users (username, password, role, tier, email, created_at)
+                                INSERT INTO users (username, password, role, tier, email, created_at)
                                 VALUES (?, ?, ?, ?, ?, ?)
                             """, (row['username'], login_password, "User", row['tier'], row['email'], datetime.datetime.now().isoformat()))
                             cursor.execute("UPDATE pending_payments SET status = 'Approved' WHERE id = ?", (row['id'],))
@@ -9434,127 +9356,152 @@ if mod == "Admin Panel":
                                 st.balloons()
                                 st.rerun()
 
+                        # ADDED: there was no way to decline a request at all before -
+                        # only "Approve" existed anywhere in the file, even though you
+                        # described needing to accept OR decline. This marks the request
+                        # as Declined (so it drops out of the Pending list below) and logs
+                        # who declined it, without creating any account or emailing anyone.
+                        if st.button("❌ Decline Request", key=f"decline_{row['id']}_{idx}"):
+                            conn = sqlite3.connect("enterprise_full_workspace.db")
+                            cursor = conn.cursor()
+                            cursor.execute("UPDATE pending_payments SET status = 'Declined' WHERE id = ?", (row['id'],))
+                            cursor.execute(
+                                "INSERT INTO audit_trail (timestamp, user, action) VALUES (datetime('now'), ?, ?)",
+                                ("sho", f"Declined payment request from user {row['username']} ({row['tier']})")
+                            )
+                            conn.commit()
+                            conn.close()
+                            st.warning(f"Request from **{row['username']}** has been declined.")
+                            st.rerun()
+
         st.markdown("---")
-# --- INITIALIZE DATABASE TABLES ---
-def init_workspace_db():
-    conn = sqlite3.connect("enterprise_full_workspace.db")
-    cursor = conn.cursor()
-    
-    # 1. Enterprise Users Table
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS enterprise_users (
-            username TEXT PRIMARY KEY,
-            role TEXT,
-            tier TEXT,
-            email TEXT
-        )
-    """)
-    
-    # 2. Audit Trail Table
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS audit_trail (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            timestamp TEXT,
-            user TEXT,
-            action TEXT
-        )
-    """)
-    
-    # 3. License Codes Table
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS license_codes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            code TEXT UNIQUE,
-            tier TEXT,
-            duration_days INTEGER,
-            is_used INTEGER,
-            created_at TEXT
-        )
-    """)
-    
-    # Safely add any missing columns to existing tables
-    try:
-        cursor.execute("ALTER TABLE license_codes ADD COLUMN duration_days INTEGER")
-    except sqlite3.OperationalError:
-        pass  # Column already exists
-
-    try:
-        cursor.execute("ALTER TABLE license_codes ADD COLUMN is_used INTEGER")
-    except sqlite3.OperationalError:
-        pass
-
-    try:
-        cursor.execute("ALTER TABLE license_codes ADD COLUMN created_at TEXT")
-    except sqlite3.OperationalError:
-        pass
-    
-    conn.commit()
-    conn.close()
-
-# Run initialization
-init_workspace_db()
-
-# --- REGISTERED USERS & AUDIT LOGS ---
-col_m1, col_m2 = st.columns(2)
-
-with col_m1:
-    st.subheader("👥 Registered Enterprise Users")
-    conn = sqlite3.connect("enterprise_full_workspace.db")
-    users_df = pd.read_sql("SELECT username, role, tier, email FROM enterprise_users", conn)
-    conn.close()
-    st.dataframe(users_df, use_container_width=True)
-
-with col_m2:
-    st.subheader("📊 Security Audit Log")
-    conn = sqlite3.connect("enterprise_full_workspace.db")
-    audit_df = pd.read_sql("SELECT * FROM audit_trail ORDER BY id DESC LIMIT 20", conn)
-    conn.close()
-    st.dataframe(audit_df, use_container_width=True)
-
-st.markdown("---")
-        
-# --- MANUAL TICKET & FREE TRIAL CODE GENERATOR WITH DURATION ---
-st.subheader("🎟️ Manual Ticket / Free Trial Code Generator")
-st.markdown("Create custom subscription or free trial codes manually, set their validity duration in days, and share them with friends.")
-
-with st.form("manual_code_form"):
-    col_g1, col_g2, col_g3 = st.columns(3)
-    with col_g1:
-        gen_tier = st.selectbox("Select Tier for Code", ["Free Trial", "Starter Tier ($29)", "Mid-Tier Pro ($79)", "Enterprise Tier ($199)"], key="gen_tier_box")
-    with col_g2:
-        default_code = "TRIAL-" + "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
-        custom_code_input = st.text_input("Ticket / Promo Code", value=default_code, key="custom_code_box")
-    with col_g3:
-        duration_days = st.number_input("Validity (Days)", min_value=1, max_value=365, value=7, step=1, key="gen_duration_box")
-    
-    submit_gen_code = st.form_submit_button("🎟️ Create and Save Code", type="primary")
-
-if submit_gen_code:
-    if custom_code_input.strip():
-        try:
+        # FIX: everything from here down through the license-codes table
+        # below used to sit at the top level of the file (outside this
+        # if/else), so it rendered on every page for every signed-in user -
+        # not just admin 'sho' on the Admin Panel. That's the leak that let
+        # any user see the full user list/audit log, and even mint their own
+        # license codes via the 'Manual Ticket / Free Trial Code Generator'
+        # form. It's now indented so it's only reachable here.
+        # --- INITIALIZE DATABASE TABLES ---
+        def init_workspace_db():
             conn = sqlite3.connect("enterprise_full_workspace.db")
             cursor = conn.cursor()
+
+            # 1. Enterprise Users Table
             cursor.execute("""
-                INSERT OR REPLACE INTO license_codes (code, tier, duration_days, is_used, created_at)
-                VALUES (?, ?, ?, 0, datetime('now'))
-            """, (custom_code_input.strip().upper(), gen_tier, duration_days))
-            cursor.execute("INSERT INTO audit_trail (timestamp, user, action) VALUES (datetime('now'), ?, ?)",
-                           ("sho", f"Manually created code {custom_code_input.strip().upper()} for tier {gen_tier} ({duration_days} days)"))
+                CREATE TABLE IF NOT EXISTS enterprise_users (
+                    username TEXT PRIMARY KEY,
+                    role TEXT,
+                    tier TEXT,
+                    email TEXT
+                )
+            """)
+
+            # 2. Audit Trail Table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS audit_trail (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TEXT,
+                    user TEXT,
+                    action TEXT
+                )
+            """)
+
+            # 3. License Codes Table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS license_codes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    code TEXT UNIQUE,
+                    tier TEXT,
+                    duration_days INTEGER,
+                    is_used INTEGER,
+                    created_at TEXT
+                )
+            """)
+
+            # Safely add any missing columns to existing tables
+            try:
+                cursor.execute("ALTER TABLE license_codes ADD COLUMN duration_days INTEGER")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+
+            try:
+                cursor.execute("ALTER TABLE license_codes ADD COLUMN is_used INTEGER")
+            except sqlite3.OperationalError:
+                pass
+
+            try:
+                cursor.execute("ALTER TABLE license_codes ADD COLUMN created_at TEXT")
+            except sqlite3.OperationalError:
+                pass
+
             conn.commit()
             conn.close()
-            st.success(f"Successfully generated code: **{custom_code_input.strip().upper()}** for **{gen_tier}** valid for **{duration_days} days**!")
-            st.rerun()
-        except Exception as e:
-            st.error(f"Error creating code: {e}")
-    else:
-        st.warning("Please enter a valid code.")
 
-# Display existing active/unused codes table including duration
-st.markdown("### 📋 Existing Active License / Trial Codes")
-conn = sqlite3.connect("enterprise_full_workspace.db")
-codes_df = pd.read_sql("SELECT id, code, tier, duration_days, is_used, created_at FROM license_codes ORDER BY id DESC", conn)
-conn.close()
-st.dataframe(codes_df, use_container_width=True)
+        # Run initialization
+        init_workspace_db()
+
+        # --- REGISTERED USERS & AUDIT LOGS ---
+        col_m1, col_m2 = st.columns(2)
+
+        with col_m1:
+            st.subheader("👥 Registered Enterprise Users")
+            conn = sqlite3.connect("enterprise_full_workspace.db")
+            users_df = pd.read_sql("SELECT username, role, tier, email FROM enterprise_users", conn)
+            conn.close()
+            st.dataframe(users_df, use_container_width=True)
+
+        with col_m2:
+            st.subheader("📊 Security Audit Log")
+            conn = sqlite3.connect("enterprise_full_workspace.db")
+            audit_df = pd.read_sql("SELECT * FROM audit_trail ORDER BY id DESC LIMIT 20", conn)
+            conn.close()
+            st.dataframe(audit_df, use_container_width=True)
+
+        st.markdown("---")
+
+        # --- MANUAL TICKET & FREE TRIAL CODE GENERATOR WITH DURATION ---
+        st.subheader("🎟️ Manual Ticket / Free Trial Code Generator")
+        st.markdown("Create custom subscription or free trial codes manually, set their validity duration in days, and share them with friends.")
+
+        with st.form("manual_code_form"):
+            col_g1, col_g2, col_g3 = st.columns(3)
+            with col_g1:
+                gen_tier = st.selectbox("Select Tier for Code", ["Free Trial", "Starter Tier ($29)", "Mid-Tier Pro ($79)", "Enterprise Tier ($199)"], key="gen_tier_box")
+            with col_g2:
+                default_code = "TRIAL-" + "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
+                custom_code_input = st.text_input("Ticket / Promo Code", value=default_code, key="custom_code_box")
+            with col_g3:
+                duration_days = st.number_input("Validity (Days)", min_value=1, max_value=365, value=7, step=1, key="gen_duration_box")
+
+            submit_gen_code = st.form_submit_button("🎟️ Create and Save Code", type="primary")
+
+        if submit_gen_code:
+            if custom_code_input.strip():
+                try:
+                    conn = sqlite3.connect("enterprise_full_workspace.db")
+                    cursor = conn.cursor()
+                    cursor.execute("""
+                        INSERT OR REPLACE INTO license_codes (code, tier, duration_days, is_used, created_at)
+                        VALUES (?, ?, ?, 0, datetime('now'))
+                    """, (custom_code_input.strip().upper(), gen_tier, duration_days))
+                    cursor.execute("INSERT INTO audit_trail (timestamp, user, action) VALUES (datetime('now'), ?, ?)",
+                                   ("sho", f"Manually created code {custom_code_input.strip().upper()} for tier {gen_tier} ({duration_days} days)"))
+                    conn.commit()
+                    conn.close()
+                    st.success(f"Successfully generated code: **{custom_code_input.strip().upper()}** for **{gen_tier}** valid for **{duration_days} days**!")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error creating code: {e}")
+            else:
+                st.warning("Please enter a valid code.")
+
+        # Display existing active/unused codes table including duration
+        st.markdown("### 📋 Existing Active License / Trial Codes")
+        conn = sqlite3.connect("enterprise_full_workspace.db")
+        codes_df = pd.read_sql("SELECT id, code, tier, duration_days, is_used, created_at FROM license_codes ORDER BY id DESC", conn)
+        conn.close()
+        st.dataframe(codes_df, use_container_width=True)
 
 # =========================================================
 # UPGRADED COPILOT AI CHAT MODULE
