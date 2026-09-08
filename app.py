@@ -13,6 +13,9 @@ import numpy as np
 import plotly.graph_objects as go
 import plotly.express as px
 import hashlib
+import re
+import html
+import time
 import smtplib
 from email.message import EmailMessage
 import os
@@ -215,8 +218,38 @@ def init_db():
         """)
         cursor.execute("INSERT OR IGNORE INTO system_settings (key, value) VALUES ('free_mode', 'off')")
 
-        # 9. Seed Admin User 'sho' profile row
-        admin_pass_hash = hashlib.sha256("mohammedsuhail172008chennai!".encode()).hexdigest()
+        # 9. SECURITY: Login Attempts Table - backs the rate limiter below.
+        # Stored in the database (not st.session_state) so a lockout can't
+        # be bypassed just by opening a new tab / incognito window.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS login_attempts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT,
+                success INTEGER,
+                attempted_at TEXT
+            )
+        """)
+
+        # 10. Seed Admin User 'sho' profile row
+        # SECURITY FIX: the admin password used to be hardcoded directly in
+        # this file as plain text (and hashed here with a bare, unsalted
+        # SHA-256 - fast to brute-force by design, not meant for passwords).
+        # It now reads from Streamlit secrets first. Add this to your
+        # .streamlit/secrets.toml (same file your email credentials already
+        # live in):
+        #   [admin]
+        #   password = "your-password-here"
+        # Until you do, it falls back to the exact same password that was
+        # already hardcoded here, so sho's login does not change today.
+        # IMPORTANT: since that password has been sitting in plain text in
+        # this file, if this project has ever been pushed to git (even a
+        # private repo) or shared anywhere, treat it as compromised and
+        # change it via secrets.toml.
+        try:
+            admin_password = st.secrets["admin"]["password"]
+        except Exception:
+            admin_password = "mohammedsuhail172008chennai!"
+        admin_pass_hash = hash_password(admin_password)
         cursor.execute("""
             INSERT OR REPLACE INTO enterprise_users
             (username, password_hash, role, tier, email, trial_expires, affiliate_code, ticket_expiry)
@@ -231,14 +264,183 @@ def init_db():
             "2030-01-01T00:00:00"
         ))
 
-        # 10. Seed Admin User 'sho' login credentials (this is what Sign In checks)
+        # 11. Seed Admin User 'sho' login credentials (this is what Sign In checks)
+        # SECURITY FIX: password is now stored hashed (salted PBKDF2), not
+        # plain text. sho still logs in with the exact same password as
+        # before - only the stored value's format changed.
         cursor.execute("DELETE FROM users WHERE LOWER(username) = 'sho'")
         cursor.execute("""
             INSERT INTO users (username, password, role, tier, email, created_at)
             VALUES (?, ?, ?, ?, ?, ?)
-        """, ("sho", "mohammedsuhail172008chennai!", "admin", "Enterprise Tier ($199)", "shoirtheagent@gmail.com", "2020-01-01T00:00:00"))
+        """, ("sho", admin_pass_hash, "admin", "Enterprise Tier ($199)", "shoirtheagent@gmail.com", "2020-01-01T00:00:00"))
 
         conn.commit()
+
+# =====================================================================
+# SECURITY HELPERS
+# =====================================================================
+def hash_password(password, salt=None):
+    """Salted PBKDF2-HMAC-SHA256 password hashing. Returns 'salt$hash'
+    (both hex-encoded). 200,000 iterations, matching current OWASP
+    guidance for PBKDF2-SHA256."""
+    if salt is None:
+        salt = os.urandom(16).hex()
+    pwd_hash = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), bytes.fromhex(salt), 200_000).hex()
+    return f"{salt}${pwd_hash}"
+
+def verify_password(stored, provided):
+    """Checks a password against a stored value. Understands the new
+    salted-hash format ('salt$hash') and also accepts the old plain-text
+    format so any account created before this update - including sho's -
+    keeps working without anyone needing to reset a password. Returns
+    (is_valid, needs_upgrade) - needs_upgrade is True for a legacy
+    plaintext row that just matched, so the caller can transparently
+    re-hash it."""
+    if not stored or not provided:
+        return False, False
+    if "$" in stored:
+        salt, _ = stored.split("$", 1)
+        return (hash_password(provided, salt) == stored), False
+    # Legacy plaintext row from before hashing was added
+    return (stored == provided), (stored == provided)
+
+def is_login_rate_limited(username, max_attempts=5, window_minutes=10):
+    """SECURITY: basic brute-force throttle. Blocks further sign-in
+    attempts for a username after too many failures in a short window.
+    Backed by the login_attempts table (survives across tabs/sessions)."""
+    try:
+        conn = sqlite3.connect("enterprise_full_workspace.db")
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT COUNT(*) FROM login_attempts WHERE LOWER(username) = ? AND success = 0 AND attempted_at > datetime('now', ?)",
+            (username.strip().lower(), f"-{window_minutes} minutes")
+        )
+        count = cursor.fetchone()[0]
+        conn.close()
+        return count >= max_attempts
+    except Exception:
+        return False
+
+def record_login_attempt(username, success):
+    try:
+        conn = sqlite3.connect("enterprise_full_workspace.db")
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO login_attempts (username, success, attempted_at) VALUES (?, ?, datetime('now'))",
+            (username.strip().lower(), 1 if success else 0)
+        )
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+_USERNAME_RE = re.compile(r"^[A-Za-z0-9_.\-]{3,32}$")
+
+def is_valid_username(username):
+    """SECURITY: usernames get echoed back on-screen with raw HTML
+    rendering allowed elsewhere in the app (e.g. the dashboard header).
+    Restricting the character set at the point of registration is what
+    actually closes that gap, rather than trying to catch it at every
+    place the name is later displayed."""
+    return bool(username) and bool(_USERNAME_RE.match(username.strip()))
+
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+def is_valid_email(email):
+    return bool(email) and bool(_EMAIL_RE.match(email.strip()))
+
+# =====================================================================
+# LEGAL CONTENT
+# ---------------------------------------------------------------------
+# Drafted from what this app actually does and actually collects (I
+# read the registration, admin-approval, and audit-log code to write
+# these - they're not generic boilerplate). Two things you need to do
+# before this counts as real compliance, not just a placeholder:
+#   1. Replace [LEGAL BUSINESS NAME] and [BUSINESS ADDRESS] below with
+#      your actual registered details - I can't invent these for you,
+#      and "add business details" that aren't real would itself be a
+#      false/misleading claim to users.
+#   2. Have an actual lawyer familiar with Saudi law review this. STC
+#      Pay as your payment method and your general location both point
+#      to Saudi Arabia, which means Saudi PDPL (Personal Data
+#      Protection Law) and the Ministry of Commerce's E-Commerce Law
+#      are what actually govern this, not GDPR - this text draws on
+#      general good practice but is not a substitute for that review.
+# =====================================================================
+PRIVACY_POLICY_TEXT = """
+**Last updated:** _(fill in the date you publish this)_
+
+**Who we are:** [LEGAL BUSINESS NAME], operating the Shoir-IE platform ("we", "us"). Contact: shoirtheagent@gmail.com.
+
+**What we collect, and why:**
+| Data | Why we collect it |
+|---|---|
+| Username, email address | To create and identify your account, and to contact you about it |
+| Password | To secure your account (stored as a salted hash - we never see or store your actual password) |
+| Selected subscription tier, payment method, transaction ID | To verify your payment and activate the correct tier |
+| Payment screenshot you upload | To manually verify that payment was made before activating your account |
+| Account activity (logins, admin actions) | Security audit log, so we can investigate misuse if it happens |
+
+We only collect what's needed to run this registration-and-approval process. We don't collect analytics, advertising, or behavioral tracking data - there is none of that on this platform.
+
+**Who sees it:** Only the platform administrator, for the purpose of verifying your payment and managing your account. We do not sell, rent, or share your data with third parties, advertisers, or analytics providers.
+
+**How it's stored:** In a private database on our servers. Passwords are hashed (PBKDF2, salted) - not stored in plain text.
+
+**How long we keep it:** For as long as your account is active. Payment screenshots are kept only as long as needed to resolve any payment dispute, then deleted.
+
+**Your rights:** You can request a copy of your data, a correction, or deletion, by emailing shoirtheagent@gmail.com. If you're in Saudi Arabia, this is also your right under the Personal Data Protection Law (PDPL); if you're elsewhere, your local data protection law may give you similar rights.
+
+**Changes:** If this policy changes, we'll update the date above.
+"""
+
+TERMS_AND_CONDITIONS_TEXT = """
+**Last updated:** _(fill in the date you publish this)_
+
+**1. The service.** Shoir-IE ("the platform") provides access to a set of operations-research, simulation, and engineering tools, organized into subscription tiers (Starter, Mid-Tier Pro, Enterprise, Research Pack).
+
+**2. Accounts & registration.** You must provide accurate registration information. Accounts are activated manually after payment verification by an administrator - this may take time, and we don't guarantee a specific activation window. You're responsible for keeping your password confidential and for all activity on your account.
+
+**3. Payment.** You agree to pay the exact price listed for your selected tier. See the separate Refund Policy for cancellation terms.
+
+**4. Acceptable use.** You may not: share your account with others, attempt to access another user's data or the administrator area, attempt to reverse-engineer, scrape, or resell access to the platform, or use it for any unlawful purpose.
+
+**5. Outputs are not professional advice.** Simulation results, optimizations, and analyses produced by the platform are decision-support tools, not certified engineering, financial, or legal advice. You're responsible for independently verifying anything you rely on for real-world decisions.
+
+**6. Availability.** The service is provided "as is." We don't guarantee uninterrupted or error-free operation.
+
+**7. Termination.** We may suspend or terminate accounts that violate these terms or that were activated based on fraudulent payment proof.
+
+**8. Intellectual property.** The platform, its modules, and its content are owned by [LEGAL BUSINESS NAME]. Nothing here transfers ownership of that to you.
+
+**9. Limitation of liability.** To the extent permitted by applicable law, [LEGAL BUSINESS NAME] is not liable for indirect or consequential damages arising from use of the platform.
+
+**10. Governing law.** _(state the jurisdiction whose law governs this agreement, e.g. Kingdom of Saudi Arabia)_.
+
+**11. Changes.** We may update these terms; continued use after a change means you accept the update.
+"""
+
+REFUND_POLICY_TEXT = """
+**Last updated:** _(fill in the date you publish this)_
+
+Subscription purchases are **final and non-refundable**, except in the following cases:
+
+- You were charged but your account was never activated and the issue isn't resolved within a reasonable time after you contact us.
+- You were charged more than once for the same registration (duplicate/double charge).
+- You were charged the wrong amount for the tier you selected due to a platform error.
+
+To request a refund under one of these cases, email shoirtheagent@gmail.com with your username and payment proof.
+
+**Note for the site owner:** a blanket "no refunds, ever" policy is risky to state as absolute - many consumer-protection frameworks (and Saudi Arabia's E-Commerce Law is one of them) restrict how far a no-refund clause can go, particularly around non-delivery or billing errors. The carve-outs above exist specifically to reduce that exposure; a local lawyer should confirm the wording is sufficient for how you actually operate.
+"""
+
+COOKIE_POLICY_TEXT = """
+**Last updated:** _(fill in the date you publish this)_
+
+We use one strictly-necessary session identifier so the platform can keep you signed in while you use it. This is a core function of the underlying web framework (Streamlit) - it's not used to track you, build a profile, or follow you across other sites.
+
+**We do not use any analytics, advertising, or third-party tracking cookies.** (Checked directly against this app's code - there are none at present.) If that changes in the future - for example, if analytics are added later - this policy and the consent flow will need to be updated at that time, since a consent banner would then become necessary.
+"""
 
 def send_tier_email(receiver_email, username, tier_code, tier_name):
     """Sends the approved subscription tier code to the user's email."""
@@ -427,17 +629,44 @@ if not st.session_state.get("current_user"):
         signin_pass = st.text_input("Password", type="password", key="signin_password_input")
 
         if st.button("Sign In", type="primary", key="btn_sign_action"):
+            # SECURITY: brute-force throttle. Checked before touching the
+            # database at all - this is what "rate limiting" on the login
+            # form actually means for an app with no separate API layer.
+            if signin_user and is_login_rate_limited(signin_user):
+                st.error("Too many failed sign-in attempts. Please wait 10 minutes and try again.")
+                st.stop()
+
             conn = sqlite3.connect("enterprise_full_workspace.db")
             cursor = conn.cursor()
 
+            # SECURITY FIX: this used to be "... AND password = ?", comparing
+            # the typed password directly against a plain-text column in
+            # SQL. Passwords are now hashed, so the row is fetched by
+            # username only and the password is checked in Python via
+            # verify_password() below (which also transparently upgrades
+            # any old plain-text row - including sho's - to a proper hash
+            # the first time it's used, with zero change to the password
+            # itself).
             cursor.execute(
-                "SELECT * FROM users WHERE LOWER(username) = ? AND password = ?",
-                (signin_user.strip().lower(), signin_pass)
+                "SELECT * FROM users WHERE LOWER(username) = ?",
+                (signin_user.strip().lower(),)
             )
             user_row = cursor.fetchone()
+
+            is_valid = False
+            if user_row:
+                is_valid, needs_upgrade = verify_password(user_row[2], signin_pass)
+                if is_valid and needs_upgrade:
+                    cursor.execute(
+                        "UPDATE users SET password = ? WHERE id = ?",
+                        (hash_password(signin_pass), user_row[0])
+                    )
+                    conn.commit()
+
+            record_login_attempt(signin_user, is_valid)
             conn.close()
 
-            if user_row:
+            if is_valid:
                 # Bypass 30-day expiration completely for master admin 'sho'
                 if user_row[1].lower() != "sho":
                     created_at_str = user_row[6] if len(user_row) > 6 else None
@@ -476,13 +705,22 @@ if not st.session_state.get("current_user"):
         reg_ticket_code = st.text_input("Activation / Ticket Code (If you already have one)", placeholder="Enter ticket code here", key="reg_ticket")
 
         st.markdown("---")
-        st.markdown("### Terms, Conditions & Payment Policy")
-        st.markdown(
-            "- **No Refunds:** Refund isn't available for any subscription purchases. All sales are final.\n"
-            "- **Exact Price:** You must pay the exact price corresponding to your selected tier.\n"
-            "- **Ticket Delivery:** Your ticket code will be sent via email after payment verification."
+        st.markdown("### Legal & Privacy")
+        st.caption("Please read before registering. Collecting this data without disclosing it here is what creates legal exposure - showing it isn't optional.")
+
+        with st.expander("📄 Privacy Policy"):
+            st.markdown(PRIVACY_POLICY_TEXT)
+        with st.expander("📄 Terms & Conditions"):
+            st.markdown(TERMS_AND_CONDITIONS_TEXT)
+        with st.expander("📄 Refund Policy"):
+            st.markdown(REFUND_POLICY_TEXT)
+        with st.expander("📄 Cookie Policy"):
+            st.markdown(COOKIE_POLICY_TEXT)
+
+        accepted_terms = st.checkbox(
+            "I have read and accept the Privacy Policy, Terms & Conditions, Refund Policy, and Cookie Policy above.",
+            key="reg_chk"
         )
-        accepted_terms = st.checkbox("I accept the terms & conditions, no-refund policy, and pricing instructions.", key="reg_chk")
 
         if accepted_terms:
             if st.button("Proceed to Pay & Show QR", type="primary", key="btn_confirm_pay"):
@@ -509,7 +747,16 @@ if not st.session_state.get("current_user"):
 
             if confirmed_delivery:
                 if st.button("Send Verification Request", type="primary", key="btn_send_request"):
-                    if reg_name and reg_pass and reg_email and uploaded_screenshot is not None:
+                    # SECURITY: usernames get displayed elsewhere in the app
+                    # with raw HTML rendering allowed. Restricting the
+                    # character set here (letters, numbers, . _ -, 3-32
+                    # chars) is what actually prevents a malicious username
+                    # from being usable as a stored XSS payload later.
+                    if reg_name and not is_valid_username(reg_name):
+                        st.warning("Username can only contain letters, numbers, periods, underscores, and hyphens (3-32 characters).")
+                    elif reg_email and not is_valid_email(reg_email):
+                        st.warning("Please enter a valid email address.")
+                    elif reg_name and reg_pass and reg_email and uploaded_screenshot is not None:
                         os.makedirs("payment_proofs", exist_ok=True)
                         file_path = os.path.join("payment_proofs", f"{reg_name}_{uploaded_screenshot.name}")
                         with open(file_path, "wb") as f:
@@ -523,7 +770,7 @@ if not st.session_state.get("current_user"):
                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """, (
                             reg_name,
-                            reg_pass,
+                            hash_password(reg_pass),
                             reg_email,
                             reg_tier,
                             "STC Pay (QR)",
@@ -622,25 +869,28 @@ is_admin = (st.session_state.current_user == "sho")
 tier1_features = ["MILP Solvers", "Inventory Playback", "Core IE Tools", "Subscriptions", "Persistence", "Facility Layout & Warehousing", "Enterprise Integration & Collaboration"]
 tier2_features = tier1_features + ["Carbon Accounting", "IoT Digital Twin", "MEIO Matrix", "Slotting & Gantt", "Fleet Routing", "Warehouse Heatmap", "Supplier Risk Matrix", "Scenarios", "AGV Fleet Dispatcher", "Geospatial Network Designer", "Production Planning & Control (PPC)", "Lean Manufacturing & Shop Floor Operations", "Quality Control, Six Sigma & Reliability", "Engineering Economics & Finance"]
 tier3_features = tier2_features + ["AI Copilot", "FastAPI Gateway", "Monte Carlo Sim", "Sensitivity Analysis", "Webhook Alerts", "Agentic Workflows", "Control Tower", "Cryptographic Ledger", "Predictive Maintenance Hub", "Human Factors & Ergonomics (NIOSH)", "Digital Twin & Discrete-Event Simulation", "Green IE & Sustainability"]
+# FIX (recurring from an earlier upload of this file - reapplied): this list
+# was missing commas between most entries, which in Python silently
+# concatenates adjacent string literals into one garbled string instead of
+# separate list items, and duplicated several Starter-tier names by accident.
 research_pack_features = tier3_features + [
-    "Statistical Hypothesis Testing", 
-    "LaTeX Document Formatter", 
-    "Literature & Citation Matrix", 
-    "Advanced Regression Analysis"
-    "Paper-to-Simulation Auto-Engine", "MILP Solvers", "Inventory Playback", "Core IE Tools", "Subscriptions", "Persistence", "Facility Layout & Warehousing", "Enterprise Integration & Collaboration"
-    "Adversarial AI Peer-Review Swarm"
-    "Live Reproducible Paper Canvas"
-    "Adversarial Chaos & Shock Injector"
-    "Adversarially Stressed Synthetic Industrial Twins"
-    "Automated Theory-to-Code Formalizer"
-    "Real-Time Quantum-Classical Hybrid Optimization Router"
-    "Automated Code-to-Formal-Proof Verifier"
-    "Decentralized Cryptographic Reproducibility Vault"
-    "Autonomous Parametric Surrogate Swarm"
+    "Statistical Hypothesis Testing",
+    "LaTeX Document Formatter",
+    "Literature & Citation Matrix",
+    "Advanced Regression Analysis",
+    "Paper-to-Simulation Auto-Engine",
+    "Adversarial AI Peer-Review Swarm",
+    "Live Reproducible Paper Canvas",
+    "Adversarial Chaos & Shock Injector",
+    "Adversarially Stressed Synthetic Industrial Twins",
+    "Automated Theory-to-Code Formalizer",
+    "Real-Time Quantum-Classical Hybrid Optimization Router",
+    "Automated Code-to-Formal-Proof Verifier",
+    "Decentralized Cryptographic Reproducibility Vault",
     "Autonomous Parametric Surrogate Swarm",
-    "🔌 Edge-Connected IoT Digital Twin Bridge"
-    "🔌 Universal Cross-Domain Mathematical Isomorphism Engine (UCMIE)"
-    "🔄 Autonomous Epistemic Cross-Disciplinary Falsification Matrix (AE-FRESM)"
+    "🔌 Edge-Connected IoT Digital Twin Bridge",
+    "🔌 Universal Cross-Domain Mathematical Isomorphism Engine (UCMIE)",
+    "🔄 Autonomous Epistemic Cross-Disciplinary Falsification Matrix (AE-FRESM)",
     "Autonomous Cognitive Operations & Zero-Knowledge Mesh (ACO-ZKMS)",
     "⚡ ACO-ZKMS Master Engine"
 ]
@@ -7376,7 +7626,13 @@ else:
     )
     
     st.title("Enterprise Operations & Cognitive Logistics Suite")
-    st.markdown(f"Active User: **{st.session_state.current_user}** | Tier: <span class='blue-metric'>{st.session_state.user_tier}</span>", unsafe_allow_html=True)
+    # SECURITY FIX: this line renders with unsafe_allow_html=True while
+    # interpolating the username directly. Since registration now restricts
+    # usernames to a safe character set (see is_valid_username), this is
+    # closed at the source for every account created from here on - but
+    # html.escape() is added here too as defense-in-depth for any account
+    # that predates that restriction.
+    st.markdown(f"Active User: **{html.escape(st.session_state.current_user)}** | Tier: <span class='blue-metric'>{html.escape(st.session_state.user_tier)}</span>", unsafe_allow_html=True)
     
     # =====================================================================
     # VALUE BOOSTER 3: ACCELERATED "AHA!" MOMENTS (GUIDED ONBOARDING)
@@ -9338,6 +9594,12 @@ if mod == "Admin Panel":
                             # never actually matched anything - it just kept adding a brand new
                             # duplicate row every time the same person was approved. Delete any
                             # existing row for this username first instead.
+                            # SECURITY FIX: the password is now hashed at the moment
+                            # someone submits the registration form (see the register
+                            # tab above), so it's never stored in plain text anywhere,
+                            # not even temporarily in the pending-requests queue while
+                            # it's waiting on your review. This just carries that hash
+                            # straight through into the real login table.
                             login_password = row['password'] if 'password' in row.index and row['password'] else ''
                             cursor.execute("DELETE FROM users WHERE LOWER(username) = ?", (row['username'].strip().lower(),))
                             cursor.execute("""
