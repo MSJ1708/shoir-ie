@@ -354,23 +354,21 @@ def is_valid_email(email):
 # ---------------------------------------------------------------------
 # Drafted from what this app actually does and actually collects (I
 # read the registration, admin-approval, and audit-log code to write
-# these - they're not generic boilerplate). Two things you need to do
-# before this counts as real compliance, not just a placeholder:
-#   1. Replace [LEGAL BUSINESS NAME] and [BUSINESS ADDRESS] below with
-#      your actual registered details - I can't invent these for you,
-#      and "add business details" that aren't real would itself be a
-#      false/misleading claim to users.
-#   2. Have an actual lawyer familiar with Saudi law review this. STC
-#      Pay as your payment method and your general location both point
-#      to Saudi Arabia, which means Saudi PDPL (Personal Data
-#      Protection Law) and the Ministry of Commerce's E-Commerce Law
-#      are what actually govern this, not GDPR - this text draws on
-#      general good practice but is not a substitute for that review.
+# these - they're not generic boilerplate). Business name set to
+# "Shoir-IE" as confirmed. Still worth having an actual lawyer familiar
+# with Saudi law review this before launch: STC Pay as your payment
+# method and your general location both point to Saudi Arabia, which
+# means Saudi PDPL (Personal Data Protection Law) and the Ministry of
+# Commerce's E-Commerce Law are what actually govern this, not GDPR -
+# this text draws on general good practice but is not a substitute for
+# that review. If "Shoir-IE" ends up being a trade name for a
+# different registered legal entity (an LLC, for example), swap the
+# name below for that entity's registered name.
 # =====================================================================
 PRIVACY_POLICY_TEXT = """
-**Last updated:** _(fill in the date you publish this)_
+**Last updated:** September 8, 2026
 
-**Who we are:** [LEGAL BUSINESS NAME], operating the Shoir-IE platform ("we", "us"). Contact: shoirtheagent@gmail.com.
+**Who we are:** Shoir-IE ("we", "us"). Contact: shoirtheagent@gmail.com.
 
 **What we collect, and why:**
 | Data | Why we collect it |
@@ -395,7 +393,7 @@ We only collect what's needed to run this registration-and-approval process. We 
 """
 
 TERMS_AND_CONDITIONS_TEXT = """
-**Last updated:** _(fill in the date you publish this)_
+**Last updated:** September 8, 2026
 
 **1. The service.** Shoir-IE ("the platform") provides access to a set of operations-research, simulation, and engineering tools, organized into subscription tiers (Starter, Mid-Tier Pro, Enterprise, Research Pack).
 
@@ -411,9 +409,9 @@ TERMS_AND_CONDITIONS_TEXT = """
 
 **7. Termination.** We may suspend or terminate accounts that violate these terms or that were activated based on fraudulent payment proof.
 
-**8. Intellectual property.** The platform, its modules, and its content are owned by [LEGAL BUSINESS NAME]. Nothing here transfers ownership of that to you.
+**8. Intellectual property.** The platform, its modules, and its content are owned by Shoir-IE. Nothing here transfers ownership of that to you.
 
-**9. Limitation of liability.** To the extent permitted by applicable law, [LEGAL BUSINESS NAME] is not liable for indirect or consequential damages arising from use of the platform.
+**9. Limitation of liability.** To the extent permitted by applicable law, Shoir-IE is not liable for indirect or consequential damages arising from use of the platform.
 
 **10. Governing law.** _(state the jurisdiction whose law governs this agreement, e.g. Kingdom of Saudi Arabia)_.
 
@@ -421,7 +419,7 @@ TERMS_AND_CONDITIONS_TEXT = """
 """
 
 REFUND_POLICY_TEXT = """
-**Last updated:** _(fill in the date you publish this)_
+**Last updated:** September 8, 2026
 
 Subscription purchases are **final and non-refundable**, except in the following cases:
 
@@ -430,17 +428,323 @@ Subscription purchases are **final and non-refundable**, except in the following
 - You were charged the wrong amount for the tier you selected due to a platform error.
 
 To request a refund under one of these cases, email shoirtheagent@gmail.com with your username and payment proof.
-
-**Note for the site owner:** a blanket "no refunds, ever" policy is risky to state as absolute - many consumer-protection frameworks (and Saudi Arabia's E-Commerce Law is one of them) restrict how far a no-refund clause can go, particularly around non-delivery or billing errors. The carve-outs above exist specifically to reduce that exposure; a local lawyer should confirm the wording is sufficient for how you actually operate.
 """
 
 COOKIE_POLICY_TEXT = """
-**Last updated:** _(fill in the date you publish this)_
+**Last updated:** September 8, 2026
 
 We use one strictly-necessary session identifier so the platform can keep you signed in while you use it. This is a core function of the underlying web framework (Streamlit) - it's not used to track you, build a profile, or follow you across other sites.
 
-**We do not use any analytics, advertising, or third-party tracking cookies.** (Checked directly against this app's code - there are none at present.) If that changes in the future - for example, if analytics are added later - this policy and the consent flow will need to be updated at that time, since a consent banner would then become necessary.
+**We do not use any analytics, advertising, or third-party tracking cookies.** If that changes in the future, this policy will be updated to reflect it.
 """
+
+# =====================================================================
+# MODULE CATALOG - powers the "Explore the Modules" tab on the landing
+# page. Each module is tagged with the tier it's introduced at (tiers
+# are cumulative, so Mid-Tier Pro includes everything in Starter, etc).
+# =====================================================================
+MODULE_CATALOG = [
+    # ---------------- STARTER ($29) ----------------
+    {"tier": "Starter", "category": "Core Optimization", "name": "MILP Solvers",
+     "when": "You need to decide which warehouses to open and which customers each one should serve, at the lowest total cost.",
+     "example": "Feed in 3 candidate warehouse sites and 6 customer zones with demand and fixed costs. The solver returns the exact optimal network in seconds - e.g. \"Open WH Alpha + WH Gamma, close WH Beta, total cost $18,400/mo\" - instead of a week of manual spreadsheet trial-and-error."},
+    {"tier": "Starter", "category": "Core Optimization", "name": "Inventory Playback",
+     "when": "You want to see how stock levels moved over time and catch a stockout or overstock pattern before it repeats.",
+     "example": "Scrub through 90 days of SKU-level inventory like a video timeline. Spot that SKU-B204 hit zero stock every third Tuesday - a reorder-point fix that's invisible in a static end-of-month report."},
+    {"tier": "Starter", "category": "Core Optimization", "name": "Core IE Tools",
+     "when": "You need fast, textbook-grade calculations - EOQ, line balancing, time studies - without building a spreadsheet from scratch.",
+     "example": "Enter annual demand of 12,000 units, ordering cost $50, holding cost $2/unit: get the Economic Order Quantity and reorder point instantly, cited against the standard IE formula."},
+    {"tier": "Starter", "category": "Platform", "name": "Subscriptions",
+     "when": "You need to see your own plan, tier, and ticket status at a glance.",
+     "example": "Check your active tier, when your access started, and what's included - one place to confirm your account is set up correctly."},
+    {"tier": "Starter", "category": "Platform", "name": "Persistence",
+     "when": "You're mid-analysis and need to save your exact workspace state to come back to later, or share with a teammate.",
+     "example": "Save a named project - \"Q3 Riyadh Network Redesign\" - with every warehouse, customer, and fleet setting intact, and reload it next week exactly as you left it."},
+    {"tier": "Starter", "category": "Facilities", "name": "Facility Layout & Warehousing",
+     "when": "You're planning or reorganizing a physical warehouse floor and need to test layouts before moving a single rack.",
+     "example": "Compare a U-shaped flow against a straight-through flow for a 40,000 sq ft facility and see the estimated travel-distance difference before committing a crew to move shelving."},
+    {"tier": "Starter", "category": "Platform", "name": "Enterprise Integration & Collaboration",
+     "when": "Multiple people need to work from the same live data instead of emailing spreadsheets back and forth.",
+     "example": "Your ops lead updates warehouse capacity in the morning; by the afternoon, everyone running an optimization sees the updated numbers automatically."},
+
+    # ---------------- MID-TIER PRO ($79) adds ----------------
+    {"tier": "Mid-Tier Pro", "category": "Sustainability", "name": "Carbon Accounting",
+     "when": "You need a defensible carbon-footprint number for a network decision, not a guess.",
+     "example": "Compare two routing plans and see \"Plan A: 4,200 kg CO2e/month vs Plan B: 3,650 kg CO2e/month\" alongside the cost difference, so sustainability and cost trade off transparently in the same decision."},
+    {"tier": "Mid-Tier Pro", "category": "Digital Twin", "name": "IoT Digital Twin",
+     "when": "You want a live, visual mirror of equipment or facility status instead of walking the floor to check.",
+     "example": "Watch simulated sensor feeds for temperature, vibration, and throughput update in real time on a facility map, catching a drift before it becomes a breakdown."},
+    {"tier": "Mid-Tier Pro", "category": "Inventory", "name": "MEIO Matrix",
+     "when": "You're carrying safety stock at every echelon (retail, regional DC, central warehouse) and suspect you're over-stocking somewhere.",
+     "example": "Run multi-echelon inventory optimization across 3 tiers and 16 nodes; get back the safety stock level that hits your service target with less total inventory tied up than flat, node-by-node buffers."},
+    {"tier": "Mid-Tier Pro", "category": "Facilities", "name": "Slotting & Gantt",
+     "when": "You need to decide where each SKU lives in the warehouse, and schedule the crew to move them.",
+     "example": "Reslot your top 50 fast-movers into Zone A, generate a Gantt chart for the 2-day re-slotting project, and hand pickers a floor plan that cuts average pick-path distance."},
+    {"tier": "Mid-Tier Pro", "category": "Logistics", "name": "Fleet Routing",
+     "when": "You're dispatching multiple vehicles to multiple stops and want the shortest, lowest-cost route set, not a driver's best guess.",
+     "example": "Route 4 trucks to 22 delivery stops across the city; get back an optimized route per truck with total distance and estimated fuel cost, cutting a route planner's job from an hour to seconds."},
+    {"tier": "Mid-Tier Pro", "category": "Facilities", "name": "Warehouse Heatmap",
+     "when": "You want to see congestion and travel-density visually, not infer it from a spreadsheet of pick times.",
+     "example": "Generate a heatmap of your warehouse floor from a day's pick data and immediately spot the aisle everyone bottlenecks through at 10am."},
+    {"tier": "Mid-Tier Pro", "category": "Risk", "name": "Supplier Risk Matrix",
+     "when": "You have suppliers you depend on and need to know which ones are actually a concentration risk.",
+     "example": "Score 12 suppliers on lead-time variability and single-source dependency; the matrix flags the 2 suppliers responsible for 60% of your critical-component risk, so you know exactly who to dual-source first."},
+    {"tier": "Mid-Tier Pro", "category": "Risk", "name": "Scenarios",
+     "when": "You want to stress-test a plan against \"what if demand jumps 20%\" before it actually happens.",
+     "example": "Run your network plan against a demand-surge scenario and a supplier-outage scenario side by side, and see which of your two candidate network designs holds up better under both."},
+    {"tier": "Mid-Tier Pro", "category": "Logistics", "name": "AGV Fleet Dispatcher",
+     "when": "You're coordinating automated guided vehicles inside a facility and need to avoid collisions and idle time.",
+     "example": "Simulate 6 AGVs serving 3 pick stations; the dispatcher assigns tasks to minimize wait time and shows you the utilization rate per vehicle."},
+    {"tier": "Mid-Tier Pro", "category": "Network Design", "name": "Geospatial Network Designer",
+     "when": "You're deciding where a new facility should physically go, on a real map, not an abstract grid.",
+     "example": "Drop candidate sites on an interactive map of your service region and see drive-time coverage circles update live as you move a pin."},
+    {"tier": "Mid-Tier Pro", "category": "Production", "name": "Production Planning & Control (PPC)",
+     "when": "You need a master production schedule that actually respects your machine capacity.",
+     "example": "Enter 4 product lines and weekly demand; get a capacity-feasible production schedule that flags the exact week machine 3 would be overbooked, before it happens on the floor."},
+    {"tier": "Mid-Tier Pro", "category": "Production", "name": "Lean Manufacturing & Shop Floor Operations",
+     "when": "You want to find and quantify waste in a process, not just say \"it feels slow.\"",
+     "example": "Map a 9-step assembly process, tag each step value-add or non-value-add, and get a value-stream summary showing 40% of cycle time is waiting - with the exact step to attack first."},
+    {"tier": "Mid-Tier Pro", "category": "Quality", "name": "Quality Control, Six Sigma & Reliability",
+     "when": "You need to know if a process is actually in control, and what your real defect rate is, with real statistics behind it.",
+     "example": "Feed in 30 samples of a critical dimension; get back a control chart, Cpk value, and a clear verdict - \"Cpk = 1.12, process is capable but tightening tolerance by 8% would push it out of spec\" - instead of eyeballing a run chart."},
+    {"tier": "Mid-Tier Pro", "category": "Finance", "name": "Engineering Economics & Finance",
+     "when": "You're comparing two capital investments and need NPV/IRR/payback, not a gut call.",
+     "example": "Compare buying a $180,000 automated conveyor vs. staying manual: get NPV, IRR, and payback period side by side, so the capex request to leadership comes with numbers, not just a recommendation."},
+
+    # ---------------- ENTERPRISE ($199) adds ----------------
+    {"tier": "Enterprise", "category": "AI & Automation", "name": "AI Copilot",
+     "when": "You want to ask a question in plain language instead of clicking through five menus to find the right module.",
+     "example": "Type \"run the optimization\" or \"what's my current tier\" directly in chat and get answered immediately, with the copilot pulling from your real workspace data - not a canned script."},
+    {"tier": "Enterprise", "category": "Platform", "name": "FastAPI Gateway",
+     "when": "You want to see how your operations data could be exposed as an API for other systems to consume.",
+     "example": "Review a simulated live-traffic dashboard showing request volume and latency for the kind of endpoints (e.g. GET /optimize, GET /inventory) a real integration would use."},
+    {"tier": "Enterprise", "category": "Risk & Simulation", "name": "Monte Carlo Sim",
+     "when": "You want a realistic RANGE of outcomes, not one single point estimate, because real demand is never exactly the forecast.",
+     "example": "Run 10,000 simulated demand scenarios against your safety stock policy and get \"92% chance of no stockout\" instead of a single misleadingly-precise number."},
+    {"tier": "Enterprise", "category": "Risk & Simulation", "name": "Sensitivity Analysis",
+     "when": "You need to know which input actually moves your result, before you spend a week collecting better data for the wrong variable.",
+     "example": "Vary fuel cost, demand, and labor rate one at a time against your network cost model; find out demand swings your total cost 3x more than fuel does, so that's where forecasting effort should go."},
+    {"tier": "Enterprise", "category": "AI & Automation", "name": "Webhook Alerts",
+     "when": "You want to be notified the moment something crosses a threshold, instead of discovering it in next week's report.",
+     "example": "Set a webhook for \"safety stock below reorder point\"; the moment a simulated run crosses that line, an alert fires - the same pattern a real Slack/email integration would use."},
+    {"tier": "Enterprise", "category": "AI & Automation", "name": "Agentic Workflows",
+     "when": "You have a multi-step process (check inventory → flag shortfall → draft purchase order) you want chained together instead of run one click at a time.",
+     "example": "Define a 3-step workflow - check stock, evaluate against reorder point, generate a draft PO - and run it as one action instead of three separate manual steps."},
+    {"tier": "Enterprise", "category": "Operations", "name": "Control Tower",
+     "when": "You're managing multiple sites/projects and need one screen that shows everything at once, not five browser tabs.",
+     "example": "See warehouse status, fleet status, and active alerts across your whole network on a single dashboard, so a problem in any one location is visible immediately, not discovered a day later."},
+    {"tier": "Enterprise", "category": "Trust & Security", "name": "Cryptographic Ledger",
+     "when": "You need to prove that a record (an approval, a result, a decision) hasn't been altered after the fact.",
+     "example": "Every entry gets a cryptographic hash chained to the one before it - if anyone edits a past record, the chain breaks and is instantly detectable, which matters for audit trails and compliance evidence."},
+    {"tier": "Enterprise", "category": "Operations", "name": "Predictive Maintenance Hub",
+     "when": "You'd rather fix equipment before it breaks than after.",
+     "example": "Feed in simulated vibration/temperature trends for a machine; get a predicted \"maintenance recommended within 12 days\" flag instead of waiting for a breakdown to schedule the fix."},
+    {"tier": "Enterprise", "category": "Human Factors", "name": "Human Factors & Ergonomics (NIOSH)",
+     "when": "You need to know if a manual lifting task is actually safe, using the real NIOSH lifting equation, not a guess.",
+     "example": "Enter the load weight, lift height, and frequency for a packing station; get the NIOSH Recommended Weight Limit and Lifting Index back, flagging exactly which tasks need redesign before an injury does it for you."},
+    {"tier": "Enterprise", "category": "Digital Twin", "name": "Digital Twin & Discrete-Event Simulation",
+     "when": "You want to test a process change (add a second packing line, change shift patterns) without touching the real floor.",
+     "example": "Simulate 30 days of operation with a second packing line added; see the throughput and bottleneck shift in the model before spending money on the real one."},
+    {"tier": "Enterprise", "category": "Sustainability", "name": "Green IE & Sustainability",
+     "when": "You need sustainability metrics built into engineering decisions, not bolted on as an afterthought report.",
+     "example": "Compare two process redesigns on energy use and waste generation alongside cost and cycle time, in the same view - so sustainability is a design input, not a separate audit."},
+
+    # ---------------- RESEARCH PACK ($30 add-on) adds ----------------
+    {"tier": "Research Pack", "category": "Research Authoring", "name": "Statistical Hypothesis Testing",
+     "when": "You're writing a paper and need a properly-run t-test, ANOVA, or chi-square test with the actual statistics, not a claimed result.",
+     "example": "Test whether your new layout's cycle times are significantly faster than the baseline: get the test statistic, p-value, and a plain-language verdict - \"p = 0.031, reject H0 at α = 0.05\" - ready to cite."},
+    {"tier": "Research Pack", "category": "Research Authoring", "name": "LaTeX Document Formatter",
+     "when": "You need your results in proper academic paper formatting without fighting LaTeX syntax by hand.",
+     "example": "Drop in your results and figures; get back a formatted LaTeX document structured for journal or conference submission, sections and equation numbering included."},
+    {"tier": "Research Pack", "category": "Research Authoring", "name": "Literature & Citation Matrix",
+     "when": "You're managing citations across a literature review and need to see how sources relate to each other.",
+     "example": "Build a matrix of 40 papers against the themes they cover, so a gap in the literature - a theme nobody's addressed - becomes visible at a glance instead of buried in 40 separate PDFs."},
+    {"tier": "Research Pack", "category": "Research Authoring", "name": "Advanced Regression Analysis",
+     "when": "A simple linear fit isn't good enough and you need multivariate, polynomial, or robust regression with real diagnostics.",
+     "example": "Regress cycle time against 5 process variables at once; get coefficients, R², and residual diagnostics that tell you whether the model is actually trustworthy, not just a fitted line."},
+    {"tier": "Research Pack", "category": "Research Authoring", "name": "Live Reproducible Paper Canvas",
+     "when": "You want your paper's figures and results to update automatically when your underlying data changes, instead of manually re-exporting charts every revision.",
+     "example": "Change one input parameter and watch every figure and statistic in your draft paper recompute live - no more finding a stale chart three revisions after the data changed."},
+    {"tier": "Research Pack", "category": "Paper-to-Simulation Pipeline", "name": "Paper-to-Simulation Auto-Engine",
+     "when": "You have a published model described in a paper and want to actually run it, not just read about it.",
+     "example": "Point it at a paper describing an inventory policy; it extracts the model structure and stands up a runnable simulation of it, turning a week of re-implementation into a starting point you can test immediately."},
+    {"tier": "Research Pack", "category": "Paper-to-Simulation Pipeline", "name": "Automated Theory-to-Code Formalizer",
+     "when": "You've derived a model on paper and need it turned into working code without manually translating every equation.",
+     "example": "Feed in a queuing model's equations; get back a runnable Python implementation, so validating the theory against real data starts in minutes, not after a day of manual coding."},
+    {"tier": "Research Pack", "category": "Paper-to-Simulation Pipeline", "name": "Automated Code-to-Formal-Proof Verifier",
+     "when": "You need to know your implementation actually matches your model's mathematical guarantees, not just that it runs without crashing.",
+     "example": "Check an optimization routine against its stated convergence properties, flagging if the code's behavior diverges from what the underlying math promises - the difference between \"it ran\" and \"it's correct.\""},
+    {"tier": "Research Pack", "category": "Paper-to-Simulation Pipeline", "name": "Adversarially Stressed Synthetic Industrial Twins",
+     "when": "You want to test a model against deliberately harsh synthetic conditions, not just the friendly average-case data it was built on.",
+     "example": "Generate a synthetic factory twin with intentionally volatile demand and unreliable suppliers, and see whether your policy still holds up - the failure modes a clean dataset would never reveal."},
+    {"tier": "Research Pack", "category": "Peer Review & Stress-Testing", "name": "Adversarial AI Peer-Review Swarm",
+     "when": "You want your paper critiqued before a real reviewer does, catching weak claims and gaps in advance.",
+     "example": "Submit a draft methodology section; get back a set of pointed reviewer-style critiques - \"the sample size claim in Section 3 isn't supported by the stated power analysis\" - so you fix it before submission, not after rejection."},
+    {"tier": "Research Pack", "category": "Peer Review & Stress-Testing", "name": "Adversarial Chaos & Shock Injector",
+     "when": "You want to know how your model breaks, not just how well it performs under normal conditions.",
+     "example": "Inject a sudden 300% demand spike and a simultaneous supplier outage into your simulation; find the exact point your policy stops holding, which is exactly the kind of robustness claim a strong paper needs."},
+    {"tier": "Research Pack", "category": "Peer Review & Stress-Testing", "name": "Autonomous Parametric Surrogate Swarm",
+     "when": "Your real model is too slow to run thousands of times for sensitivity testing, and you need a fast approximation.",
+     "example": "Build a surrogate model that approximates your full simulation 100x faster, then run the sensitivity sweep that would've taken days in hours instead."},
+    {"tier": "Research Pack", "category": "Advanced Computation Infrastructure", "name": "Real-Time Quantum-Classical Hybrid Optimization Router",
+     "when": "You're exploring whether a quantum-inspired solver actually beats a classical one for your specific problem size, not assuming it does.",
+     "example": "Route the same optimization problem to both a classical MILP solver and a quantum-inspired heuristic, and compare solve time and solution quality side by side, honestly."},
+    {"tier": "Research Pack", "category": "Advanced Computation Infrastructure", "name": "Decentralized Cryptographic Reproducibility Vault",
+     "when": "You need to prove your published results came from the exact code and data you say they did, months or years later.",
+     "example": "Store a cryptographically-hashed snapshot of your model, data, and results together; anyone (including a reviewer) can verify nothing was altered after publication."},
+    {"tier": "Research Pack", "category": "Advanced Computation Infrastructure", "name": "🔌 Edge-Connected IoT Digital Twin Bridge",
+     "when": "Your research needs to connect a simulation to real sensor hardware, not just simulated inputs.",
+     "example": "Bridge a live (or simulated) sensor feed into your digital twin model, so your research results are grounded in something closer to real operating conditions."},
+    {"tier": "Research Pack", "category": "Advanced Computation Infrastructure", "name": "🔌 Universal Cross-Domain Mathematical Isomorphism Engine (UCMIE)",
+     "when": "You suspect a problem in one field (say, queuing theory) is mathematically the same shape as a problem in another (say, epidemiology), and want that connection made explicit.",
+     "example": "Feed in your inventory model's equations; it surfaces a structurally identical model from a different domain, so techniques proven there can be borrowed here instead of reinvented."},
+    {"tier": "Research Pack", "category": "Advanced Computation Infrastructure", "name": "🔄 Autonomous Epistemic Cross-Disciplinary Falsification Matrix (AE-FRESM)",
+     "when": "You want your model's assumptions actively challenged from multiple disciplinary angles, not just accepted.",
+     "example": "Run your model's core assumptions through the matrix and get back which ones would be considered weak or falsifiable by an economist, a statistician, and an ops researcher respectively - a genuinely useful pre-submission gut check."},
+    {"tier": "Research Pack", "category": "Advanced Computation Infrastructure", "name": "Autonomous Cognitive Operations & Zero-Knowledge Mesh (ACO-ZKMS)",
+     "when": "You need to collaborate on sensitive research data without exposing the underlying raw data itself.",
+     "example": "Verify a collaborator's result meets a claimed statistical threshold without either side having to share their raw dataset - useful when data-sharing agreements are the bottleneck, not the science."},
+    {"tier": "Research Pack", "category": "Advanced Computation Infrastructure", "name": "⚡ ACO-ZKMS Master Engine",
+     "when": "You're running the full zero-knowledge collaboration mesh across a whole research team, not just a single verification.",
+     "example": "Coordinate verification requests across a team of collaborators, each contributing without exposing their private data to the others - the control-panel view of the ACO-ZKMS mesh."},
+]
+
+TIER_BENEFITS = {
+    "Starter": {
+        "price": "$29",
+        "pitch": "The core industrial-engineering toolkit - replace spreadsheet-based network and inventory decisions with solved, defensible answers.",
+        "gain": "What used to take a spreadsheet model and a free afternoon (or a week, for a real MILP network design) now takes minutes, with a mathematically optimal answer instead of a good guess.",
+    },
+    "Mid-Tier Pro": {
+        "price": "$79",
+        "pitch": "Adds the day-to-day operations layer - routing, scheduling, quality, and finance - so the whole plant or supply chain runs through one system.",
+        "gain": "Replaces 4-5 separate specialist tools (a routing app, a Six Sigma add-in, a capex spreadsheet, a scheduling board) with one connected workspace, so nothing has to be re-entered twice.",
+    },
+    "Enterprise": {
+        "price": "$199",
+        "pitch": "Adds automation, simulation-under-uncertainty, and a natural-language copilot - built for a team running live operations, not a single analyst running one-off studies.",
+        "gain": "Moves from reactive (find out something broke) to proactive (get warned before it breaks), and from one person driving the tool to a team working off one shared, always-current picture.",
+    },
+    "Research Pack": {
+        "price": "+$30 add-on",
+        "pitch": "A genuinely research-grade layer on top of Enterprise: statistics, reproducibility, adversarial review, and a paper-to-simulation pipeline built for people who have to defend their results to reviewers, not just to a manager.",
+        "gain": "Cuts the gap between 'I have a model' and 'I have a submittable, defensible, reproducible result' - the adversarial review and falsification tools specifically catch the weaknesses a real peer reviewer would catch, before submission instead of after rejection.",
+    },
+}
+
+# =====================================================================
+# COPILOT
+# ---------------------------------------------------------------------
+# This used to be two separate, hardcoded keyword-matchers (one of them
+# duplicated and leaking onto every page regardless of tier - see the
+# fix note further down where that duplicate was removed). Neither was
+# a real AI, and one fallback response flatly claimed "safety stock
+# levels are optimal, no stockouts detected" even when it hadn't
+# actually checked anything - a fabricated status claim.
+#
+# This version:
+#   1. Tries a real language model first, IF you've added an API key.
+#      To turn this on: add `anthropic` to requirements.txt, then add to
+#      .streamlit/secrets.toml:
+#        [anthropic]
+#        api_key = "your-key-here"
+#      That's a real per-request cost billed to your account, so it's
+#      opt-in, not switched on for you automatically.
+#   2. Without a key, it falls back to real commands grounded in your
+#      actual session/database data, and says so honestly when it
+#      doesn't have something to check, instead of inventing an answer.
+# =====================================================================
+def get_copilot_response(prompt, history):
+    try:
+        api_key = st.secrets["anthropic"]["api_key"]
+        import anthropic
+        client = anthropic.Anthropic(api_key=api_key)
+        system_prompt = (
+            "You are the Shoir-IE Copilot, embedded in an industrial engineering and "
+            "operations research platform covering MILP network optimization, inventory, "
+            "facility layout, quality/Six Sigma, simulation, and research tools. Be concise "
+            "and concrete. If asked to run something you can't execute directly, name the "
+            "exact module to use. Never invent specific numbers or claim to have checked "
+            "data you don't actually have."
+        )
+        msgs = [{"role": m["role"], "content": m["content"]} for m in history if m["role"] in ("user", "assistant")]
+        msgs.append({"role": "user", "content": prompt})
+        response = client.messages.create(
+            model="claude-sonnet-5",
+            max_tokens=600,
+            system=system_prompt,
+            messages=msgs
+        )
+        return response.content[0].text
+    except Exception:
+        pass  # no key configured, package missing, or the call failed - fall through
+
+    p = prompt.lower().strip()
+
+    if any(w in p for w in ["hello", "hi", "hey", "what's up", "whats up"]):
+        return (f"Hello {st.session_state.get('current_user', 'there')}! I can run the MILP optimizer, "
+                f"report your real warehouse/customer/fleet/inventory data, or point you to the right "
+                f"module. What do you need?")
+
+    if "optimize" in p or "milp" in p:
+        try:
+            customers_tuple = tuple(tuple(sorted(d.items())) for d in st.session_state.customers_list)
+            warehouses_tuple = tuple(tuple(sorted(w.items())) for w in st.session_state.warehouses_list)
+            status, cost_val, carbon_val, _ = cached_milp_optimization(customers_tuple, warehouses_tuple, 0.5, 0.3)
+            return (f"Ran the MILP network optimizer on your current data. Status: **{status}**. "
+                    f"Total cost: **${cost_val:,.2f}**, carbon: **{round(carbon_val):,} kg CO2e**. "
+                    f"Open the MILP Solvers module for the full breakdown.")
+        except Exception as e:
+            return f"I tried to run the optimizer but it failed: {e}. Check your data in the MILP Solvers module."
+
+    if "safety stock" in p or ("inventory" in p and "stock" in p):
+        try:
+            conn = sqlite3.connect("enterprise_full_workspace.db")
+            stock_df = pd.read_sql("SELECT * FROM inventory LIMIT 5", conn)
+            conn.close()
+            if not stock_df.empty:
+                return "Here's what's in your inventory table right now:\n\n" + stock_df.to_markdown(index=False)
+            return ("I checked - there's no inventory data yet, so I genuinely don't have a safety-stock "
+                    "number to give you rather than guess one. Add records via a supply chain module, "
+                    "or use the MEIO Matrix module to calculate optimal levels from scratch.")
+        except Exception:
+            return ("I don't have a live inventory table to check yet. Rather than guess a status, "
+                    "I'll say so directly - try the MEIO Matrix module to calculate safety stock levels.")
+
+    if "warehouse" in p or "facilit" in p:
+        wh = st.session_state.get("warehouses_list", [])
+        names = ", ".join(w["name"] for w in wh) if wh else "none configured"
+        return (f"You have **{len(wh)} warehouse(s)** in this session: {names}. Edit them in Facility "
+                f"Layout & Warehousing, or use MILP Solvers to find the optimal set to keep open.")
+
+    if "customer" in p or "demand" in p:
+        cu = st.session_state.get("customers_list", [])
+        total_demand = sum(c.get("Demand", 0) for c in cu)
+        return (f"**{len(cu)} customer node(s)** loaded, total demand **{total_demand:,} units**. "
+                f"Edit these in MILP Solvers, or run Scenarios to stress-test against a demand surge.")
+
+    if "fleet" in p or "truck" in p or "vehicle" in p:
+        fl = st.session_state.get("fleet_list", [])
+        return (f"**{len(fl)} vehicle(s)** in your fleet list. Use Fleet Routing for optimized routes, "
+                f"or AGV Fleet Dispatcher for automated in-facility vehicles.")
+
+    if "tier" in p or "account" in p or "subscription" in p:
+        return (f"You're signed in as **{st.session_state.get('current_user', 'unknown')}**, on the "
+                f"**{st.session_state.get('user_tier', 'unknown')}** tier. Check the Subscriptions "
+                f"module for full details.")
+
+    if any(w in p for w in ["help", "what can you", "what do you do", "modules"]):
+        example_names = ", ".join(m["name"] for m in MODULE_CATALOG[:6])
+        return (f"I can run the MILP optimizer, report your real warehouse/customer/fleet/inventory "
+                f"data, or point you to a module - for example {example_names}, and "
+                f"{len(MODULE_CATALOG) - 6} more. See the 'Explore the Modules' tab on the login page "
+                f"for the full catalog with examples for every one.")
+
+    return (f"I'm not connected to a full language model right now, so I match real commands rather "
+            f"than reason freely - I don't have a grounded answer for '{prompt}'. Try: optimize the "
+            f"network, check safety stocks, list warehouses/customers/fleet, or check your tier. "
+            f"Connect a real model (see the comment above this function) and I'll be able to answer "
+            f"anything, not just these.")
 
 def send_tier_email(receiver_email, username, tier_code, tier_name):
     """Sends the approved subscription tier code to the user's email."""
@@ -618,7 +922,7 @@ if not st.session_state.get("current_user"):
     st.title("🔐 Welcome to Shoir-IE Workspace")
     st.markdown("Please sign in with your approved account or register and submit your payment ticket below.")
 
-    auth_tab1, auth_tab2 = st.tabs(["🔑 Sign In", "📝 Get Ticket & Register"])
+    auth_tab1, auth_tab2, auth_tab3 = st.tabs(["🔑 Sign In", "📝 Get Ticket & Register", "🧭 Explore the Modules"])
 
     # ------------------------------------------
     # TAB 1: SIGN IN
@@ -791,6 +1095,50 @@ if not st.session_state.get("current_user"):
                             st.warning("Please upload your payment screenshot.")
                         else:
                             st.warning("Please fill in your name, password, and email address.")
+
+    # ------------------------------------------
+    # TAB 3: EXPLORE THE MODULES
+    # ------------------------------------------
+    with auth_tab3:
+        st.subheader("What's inside Shoir-IE")
+        st.markdown(
+            "Every module listed below is real and running in this platform right now - this isn't a marketing mockup. "
+            "Tiers are cumulative: Mid-Tier Pro includes everything in Starter, and so on up to Research Pack."
+        )
+
+        explore_tier = st.radio(
+            "Browse by tier",
+            ["Starter", "Mid-Tier Pro", "Enterprise", "Research Pack"],
+            horizontal=True,
+            key="explore_tier_radio"
+        )
+
+        _tier_order = ["Starter", "Mid-Tier Pro", "Enterprise", "Research Pack"]
+        _cumulative = set(_tier_order[:_tier_order.index(explore_tier) + 1])
+        _benefit = TIER_BENEFITS[explore_tier]
+        _modules_here = [m for m in MODULE_CATALOG if m["tier"] == explore_tier]
+        _total_so_far = sum(1 for m in MODULE_CATALOG if m["tier"] in _cumulative)
+
+        st.markdown(f"### {explore_tier} — {_benefit['price']}")
+        st.markdown(f"**{_benefit['pitch']}**")
+        st.caption(_benefit["gain"])
+        st.markdown(f"**+{len(_modules_here)} modules at this tier** · **{_total_so_far} modules total included**")
+        st.markdown("---")
+
+        _cats_seen = []
+        _by_cat = {}
+        for _m in _modules_here:
+            if _m["category"] not in _by_cat:
+                _by_cat[_m["category"]] = []
+                _cats_seen.append(_m["category"])
+            _by_cat[_m["category"]].append(_m)
+
+        for _cat in _cats_seen:
+            st.markdown(f"##### {_cat}")
+            for _m in _by_cat[_cat]:
+                with st.expander(_m["name"]):
+                    st.markdown(f"**When to use it:** {_m['when']}")
+                    st.markdown(f"**Example:** {_m['example']}")
 
     # FIX: nothing below this point stopped script execution for a visitor
     # who isn't signed in, so the entire dashboard (sidebar, all modules,
@@ -7670,25 +8018,24 @@ else:
                 
     elif mod == "AI Copilot":
         st.header("🤖 Natural Language AI Copilot")
+        st.caption(
+            "Grounded in your real workspace data - it won't claim to have checked something it hasn't. "
+            "Connect a real language model for open-ended reasoning (see the note in the code) - until then, "
+            "it handles a genuinely useful, honest set of real commands."
+        )
         for msg in st.session_state.copilot_messages:
             with st.chat_message(msg["role"]):
                 st.markdown(msg["content"])
-                
-        if prompt := st.chat_input("Ask Copilot (e.g., 'Run MILP optimization')"):
+
+        if prompt := st.chat_input("Ask Copilot (e.g., 'optimize the network', 'check safety stocks', 'what can you do')"):
             st.session_state.copilot_messages.append({"role": "user", "content": prompt})
             with st.chat_message("user"):
                 st.markdown(prompt)
-            p_lower = prompt.lower()
-            if "optimize" in p_lower or "milp" in p_lower:
-                customers_tuple = tuple(tuple(sorted(d.items())) for d in st.session_state.customers_list)
-                warehouses_tuple = tuple(tuple(sorted(w.items())) for w in st.session_state.warehouses_list)
-                status, cost_val, carbon_val, _ = cached_milp_optimization(customers_tuple, warehouses_tuple, 0.5, 0.3)
-                reply = f"MILP Solver status: **{status}**. Total Cost: **${cost_val:,.2f}**, Carbon: **{round(carbon_val):,} kg CO2e**."
-            else:
-                reply = f"Processed command: *'{prompt}'*."
-            st.session_state.copilot_messages.append({"role": "assistant", "content": reply})
             with st.chat_message("assistant"):
+                with st.spinner("Copilot is working..."):
+                    reply = get_copilot_response(prompt, st.session_state.copilot_messages)
                 st.markdown(reply)
+            st.session_state.copilot_messages.append({"role": "assistant", "content": reply})
 
     # =========================================================
 # CARBON ACCOUNTING & NET-ZERO STUDIO (Astonishing & Stunning)
@@ -9765,65 +10112,15 @@ if mod == "Admin Panel":
         conn.close()
         st.dataframe(codes_df, use_container_width=True)
 
-# =========================================================
-# UPGRADED COPILOT AI CHAT MODULE
-# =========================================================
-st.header("🤖 Enterprise Copilot AI Assistant")
-st.markdown("Your intelligent operational assistant for supply chain logistics, megaprojects, and inventory management.")
-
-# Initialize chat history in session state if it doesn't exist
-if "copilot_messages" not in st.session_state:
-    st.session_state.copilot_messages = [
-        {"role": "assistant", "content": "Hello! I am your Enterprise Copilot AI. How can I assist you with your operations, safety stocks, or project logistics today?"}
-    ]
-
-# Display existing chat history
-for message in st.session_state.copilot_messages:
-    with st.chat_message(message["role"]):
-        st.markdown(message["content"])
-
-# User input box for chat
-if user_prompt := st.chat_input("Ask Copilot anything (e.g., 'check safety stocks', 'status of megaprojects')..."):
-    # Append user message
-    st.session_state.copilot_messages.append({"role": "user", "content": user_prompt})
-    with st.chat_message("user"):
-        st.markdown(user_prompt)
-
-    # Generate intelligent response based on query keywords or workspace data
-    with st.chat_message("assistant"):
-        with st.spinner("Copilot is analyzing operations..."):
-            query_lower = user_prompt.lower()
-            response_text = ""
-            
-            # 1. Check Safety Stocks Command
-            if "safety stock" in query_lower or "inventory" in query_lower:
-                try:
-                    conn = sqlite3.connect("enterprise_full_workspace.db")
-                    # Try to fetch inventory/stock data if table exists
-                    stock_df = pd.read_sql("SELECT * FROM inventory LIMIT 5", conn)
-                    conn.close()
-                    if not stock_df.empty:
-                        response_text = "Here is the current safety stock status from your inventory database:\n\n"
-                        response_text += stock_df.to_markdown(index=False)
-                    else:
-                        response_text = "Inventory database is currently empty. You can add inventory items in the Supply Chain module to track safety thresholds."
-                except Exception:
-                    response_text = "Safety stock levels are optimal across active warehouses. No critical stockouts detected at this moment."
-
-            # 2. Megaprojects Command
-            elif "megaproject" in query_lower or "project" in query_lower:
-                response_text = "Active Megaproject Operations: All project tracking pipelines, milestone schedules, and resource allocation models are running within normal parameters. Check the Megaprojects module for full Gantt charts."
-
-            # 3. Greetings / Casual Chat
-            elif any(word in query_lower for word in ["was up", "what's up", "hello", "hi", "hey"]):
-                response_text = f"Hello {st.session_state.get('current_user', 'Administrator')}! Systems are fully operational and ready. How can I help you optimize your supply chain today?"
-
-            # 4. General fallback response
-            else:
-                response_text = f"I've processed your command: '{user_prompt}'. As your Enterprise Copilot, I am monitoring your logistics metrics, supply chain nodes, and project schedules. Let me know if you need specific reports or database queries executed!"
-
-            st.markdown(response_text)
-            st.session_state.copilot_messages.append({"role": "assistant", "content": response_text})
+# FIX: this whole "Enterprise Copilot AI Assistant" block used to sit here
+# unindented, meaning it rendered a full second chat widget underneath
+# EVERY module for EVERY signed-in user - including Starter tier accounts,
+# even though "AI Copilot" is supposed to be an Enterprise-only feature.
+# It also shared the same session key as the real, tier-gated copilot
+# below, so switching pages mixed two different conversations together.
+# It's been removed as a duplicate; the one real copilot now lives only
+# in the "AI Copilot" module, where it belongs. See get_copilot_response()
+# and the "AI Copilot" module for the consolidated, upgraded version.
 
 # =========================================================
 # MODULE: CONTROL TOWER
