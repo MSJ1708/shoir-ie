@@ -10,7 +10,7 @@ The module functions are deterministic where possible, persist important metadat
 and return explicit diagnostics rather than inventing data.
 """
 from __future__ import annotations
-import io, json, math, os, re, sqlite3, hashlib, heapq, time
+import io, json, math, os, re, sqlite3, hashlib, heapq, time, html
 from datetime import datetime, timedelta
 from itertools import product
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
@@ -619,8 +619,14 @@ def render_module(module: str, tier: str, username: str):
     if required and not tier_allows(tier,required):
         st.warning(f"🔒 {module} requires {required}. Your current tier is {tier}. Open Subscriptions to review upgrade options.")
         return
-    st.markdown(f"## {module}")
-    st.caption(next((x["when"] for x in PLATFORM_CATALOG if x["name"]==module),"Industrial engineering workspace"))
+    _meta = next((x for x in PLATFORM_CATALOG if x["name"]==module), {"category":"Industrial Engineering","tier":required or "Starter","when":"Industrial engineering workspace"})
+    st.markdown(
+        f"""<div style="background:linear-gradient(135deg,#0b1220 0%,#172554 55%,#0f3b66 100%);border:1px solid rgba(148,163,184,.20);border-radius:18px;padding:22px 24px;margin:4px 0 18px;box-shadow:0 18px 40px rgba(15,23,42,.13);">
+        <div style="display:inline-block;padding:5px 10px;border-radius:999px;background:rgba(56,189,248,.13);border:1px solid rgba(56,189,248,.25);color:#7dd3fc;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;">{html.escape(str(_meta.get("category","Industrial Engineering")))} · {html.escape(str(_meta.get("tier","Starter")))} capability</div>
+        <h1 style="margin:10px 0 5px;color:#fff;font-size:28px;font-weight:800;">{html.escape(str(module))}</h1>
+        <p style="margin:0;color:#cbd5e1;font-size:13px;">{html.escape(str(_meta.get("when","Industrial engineering workspace")))}</p>
+        </div>""", unsafe_allow_html=True)
+    st.caption("Workflow: Prepare → Validate → Run → Inspect → Explain → Export")
     if module=="Engineering Validation Center":
         df=st.session_state.setdefault("validation_df",pd.DataFrame({"Metric":["Cost","Service Level","Capacity"],"Value":[100000,95,12000],"Unit":["USD","%","units"]}))
         edited=st.data_editor(df,num_rows="dynamic",use_container_width=True,key="validation_editor")
@@ -693,8 +699,20 @@ def render_module(module: str, tier: str, username: str):
         with tabs[0]:
             qc=st.data_editor(st.session_state.setdefault("quality_df",pd.DataFrame({"Sample":range(1,21),"Measurement":np.random.default_rng(1).normal(10,0.2,20)})),num_rows="dynamic",use_container_width=True,key="quality_editor")
             lsl=st.number_input("LSL",value=9.0,key="quality_lsl"); usl=st.number_input("USL",value=11.0,key="quality_usl")
-            if st.button("📈 Analyze SPC & Capability",type="primary",use_container_width=True,key="quality_spc"): st.session_state["quality_spc"]=capability(qc["Measurement"],lsl,usl); st.session_state["quality_limits"]=spc_limits(qc["Measurement"])
-            if "quality_spc" in st.session_state: st.json({**st.session_state["quality_spc"],**st.session_state["quality_limits"]})
+            if st.button("📈 Analyze SPC & Capability",type="primary",use_container_width=True,key="quality_spc_run"):
+                try:
+                    st.session_state["quality_spc_result"] = capability(qc["Measurement"], lsl, usl)
+                    st.session_state["quality_limits_result"] = spc_limits(qc["Measurement"])
+                except Exception as exc:
+                    st.error(f"Quality analysis failed safely: {exc}")
+            if "quality_spc_result" in st.session_state:
+                _qr = {**dict(st.session_state.get("quality_spc_result", {})), **dict(st.session_state.get("quality_limits_result", {}))}
+                q1,q2,q3,q4=st.columns(4)
+                q1.metric("Cpk", f"{_qr.get('Cpk', float('nan')):.3f}")
+                q2.metric("Cp", f"{_qr.get('Cp', float('nan')):.3f}")
+                q3.metric("Mean", f"{_qr.get('mean', float('nan')):.3f}")
+                q4.metric("σ", f"{_qr.get('sigma', float('nan')):.3f}")
+                st.json(_qr)
         with tabs[1]:
             msa=st.data_editor(st.session_state.setdefault("msa_df",pd.DataFrame({"Part":[1,1,2,2,3,3],"Operator":["A","B"]*3,"Measurement":[10.1,10.2,11.0,10.9,9.9,10.0]})),num_rows="dynamic",use_container_width=True,key="msa_editor")
             if st.button("🔬 Calculate Gage R&R",use_container_width=True,key="msa_run"): st.json(gage_rr(msa))
@@ -715,31 +733,45 @@ def render_module(module: str, tier: str, username: str):
         tabs=st.tabs(["Discrete Event","Agent Based","System Dynamics"])
         with tabs[0]:
             c1,c2,c3=st.columns(3); ar=c1.number_input("Arrival rate / hr",1.0,1000.0,20.0,key="sim_ar"); sr=c2.number_input("Service rate / hr / server",1.0,1000.0,25.0,key="sim_sr"); servers=c3.number_input("Servers",1,20,2,key="sim_servers")
-            if st.button("▶ Run DES Replications",type="primary",use_container_width=True,key="sim_des"): st.session_state["sim_des"]=queue_simulation(ar,sr,servers)
-            if "sim_des" in st.session_state: st.dataframe(st.session_state["sim_des"],use_container_width=True)
+            if st.button("▶ Run DES Replications",type="primary",use_container_width=True,key="sim_des_run"):
+                try:
+                    st.session_state["sim_des_result"] = queue_simulation(ar,sr,servers)
+                except Exception as exc:
+                    st.error(f"DES simulation failed safely: {exc}")
+            if "sim_des_result" in st.session_state:
+                st.dataframe(st.session_state["sim_des_result"],use_container_width=True)
         with tabs[1]:
             agents=st.slider("Agents",5,200,30,key="sim_agents"); steps=st.slider("Steps",20,500,100,key="sim_steps")
-            if st.button("🤖 Run Agent Simulation",use_container_width=True,key="sim_agent"): st.session_state["sim_agent"]=agent_simulation(agents,steps)
-            if "sim_agent" in st.session_state: st.dataframe(st.session_state["sim_agent"],use_container_width=True)
+            if st.button("🤖 Run Agent Simulation",use_container_width=True,key="sim_agent_run"):
+                try:
+                    st.session_state["sim_agent_result"] = agent_simulation(agents,steps)
+                except Exception as exc:
+                    st.error(f"Agent simulation failed safely: {exc}")
+            if "sim_agent_result" in st.session_state:
+                st.dataframe(st.session_state["sim_agent_result"],use_container_width=True)
         with tabs[2]:
             inv=st.number_input("Initial inventory",0.0,100000.0,5000.0,key="sd_inv"); demand=st.number_input("Demand/day",0.1,10000.0,500.0,key="sd_dem"); repl=st.number_input("Replenishment/day",0.0,10000.0,550.0,key="sd_repl")
             if st.button("📈 Run System Dynamics",use_container_width=True,key="sd_run"): st.session_state["sd"]=system_dynamics_inventory(inv,demand,repl)
             if "sd" in st.session_state: st.dataframe(st.session_state["sd"],use_container_width=True); st.line_chart(st.session_state["sd"].set_index("Day")[["Inventory","Demand","Replenishment"]])
         figs=[]; tables=[]
-        if "sim_des" in st.session_state: tables.append(("DES Replications",st.session_state["sim_des"]))
-        if "sim_agent" in st.session_state: tables.append(("Agent Summary",st.session_state["sim_agent"]))
+        if "sim_des_result" in st.session_state: tables.append(("DES Replications",st.session_state["sim_des_result"]))
+        if "sim_agent_result" in st.session_state: tables.append(("Agent Summary",st.session_state["sim_agent_result"]))
         if "sd" in st.session_state: tables.append(("System Dynamics",st.session_state["sd"]))
         render_export_bar(module,tables,[],tier,username)
     elif module=="3D Factory Designer":
         df=st.data_editor(st.session_state.setdefault("factory3d_df",pd.DataFrame({"Asset":["CNC-01","Assembly","Packing","WIP Buffer"],"Type":["Machine","Station","Station","Storage"],"X":[0,6,12,3],"Y":[0,2,2,5],"Z":[0,0,0,0],"Length":[2,4,4,3],"Width":[2,2,2,3],"Height":[2,3,3,2]})),num_rows="dynamic",use_container_width=True,key="factory3d_editor")
         fig=px.scatter_3d(df,x="X",y="Y",z="Z",color="Type",text="Asset",size="Height",title="3D Factory Model"); st.plotly_chart(fig,use_container_width=True)
-        if st.button("📏 Analyze Travel Distances",use_container_width=True,key="factory3d_dist"):
-            pts=pd.to_numeric(df[["X","Y","Z"]].stack(),errors="coerce").unstack().fillna(0).to_numpy(); pairs=[] 
-            for i in range(len(pts)):
-                for j in range(i+1,len(pts)): pairs.append({"From":df.iloc[i]["Asset"],"To":df.iloc[j]["Asset"],"Distance":float(np.linalg.norm(pts[i]-pts[j]))})
-            st.session_state["factory3d_dist"]=pd.DataFrame(pairs).sort_values("Distance")
-        if "factory3d_dist" in st.session_state: st.dataframe(st.session_state["factory3d_dist"].head(50),use_container_width=True)
-        render_export_bar(module,[("3D Layout",df),("Travel Matrix",st.session_state.get("factory3d_dist",pd.DataFrame()))],[("3D Factory",fig)],tier,username)
+        if st.button("📏 Analyze Travel Distances",use_container_width=True,key="factory3d_dist_run"):
+            try:
+                pts=pd.to_numeric(df[["X","Y","Z"]].stack(),errors="coerce").unstack().fillna(0).to_numpy(); pairs=[]
+                for i in range(len(pts)):
+                    for j in range(i+1,len(pts)):
+                        pairs.append({"From":df.iloc[i]["Asset"],"To":df.iloc[j]["Asset"],"Distance":float(np.linalg.norm(pts[i]-pts[j]))})
+                st.session_state["factory3d_dist_result"]=pd.DataFrame(pairs).sort_values("Distance")
+            except Exception as exc:
+                st.error(f"Travel analysis failed safely: {exc}")
+        if "factory3d_dist_result" in st.session_state: st.dataframe(st.session_state["factory3d_dist_result"].head(50),use_container_width=True)
+        render_export_bar(module,[("3D Layout",df),("Travel Matrix",st.session_state.get("factory3d_dist_result",pd.DataFrame()))],[("3D Factory",fig)],tier,username)
     elif module=="Industrial Connectivity Hub":
         tabs=st.tabs(["REST / SAP / Oracle / WMS","SQL","MQTT / OPC-UA"])
         with tabs[0]:
