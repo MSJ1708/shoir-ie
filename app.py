@@ -19,15 +19,16 @@ import time
 import smtplib
 from email.message import EmailMessage
 import os
+import io
+import uuid
+import shutil
+import tempfile
+import zipfile
+from pathlib import Path
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from PIL import Image
 from scipy import stats
-
-from shoir_upgrade import ensure_upgrade_schema, init_upgrade_services, record_module_usage, render_module_upgrade, render_module_report_panel
-
-# Shoir-IE platform upgrade services
-from shoir_upgrade import ensure_upgrade_schema, init_upgrade_services, record_module_usage, render_module_upgrade, render_module_report_panel
 
 # =====================================================================
 # PAGE CONFIGURATION & CUSTOM CSS (Professional Styling & Hover Zoom)
@@ -97,8 +98,210 @@ os.makedirs("payment_proofs", exist_ok=True)
 #     tab object), which is why the register/login tabs looked broken.
 # This is now a single, consolidated version. No feature was removed.
 # =====================================================================
+
+DB_PATH = "enterprise_full_workspace.db"
+
+
+def _db_now():
+    return datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
+
+
+def _table_columns(cursor, table_name):
+    rows = cursor.execute(f"PRAGMA table_info({table_name})").fetchall()
+    return {row[1] for row in rows}
+
+
+def _ensure_column(cursor, table_name, column_name, definition):
+    columns = _table_columns(cursor, table_name)
+    if column_name in columns:
+        return False
+    try:
+        cursor.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}")
+        return True
+    except sqlite3.OperationalError as exc:
+        message = str(exc).lower()
+        if "duplicate column" in message or "already exists" in message:
+            return False
+        raise
+
+
+def _ensure_license_codes_schema(cursor):
+    """Migrate legacy license_codes tables without dropping user rows."""
+    columns = _table_columns(cursor, "license_codes")
+    if not columns:
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS license_codes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                code TEXT,
+                tier TEXT,
+                duration_days INTEGER DEFAULT 30,
+                is_used INTEGER DEFAULT 0,
+                created_at TEXT
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_license_codes_code ON license_codes(code)")
+        return
+
+    required_legacy = {"code", "tier"}
+    if not required_legacy.issubset(columns):
+        missing = sorted(required_legacy - columns)
+        raise RuntimeError(f"license_codes migration cannot preserve data: missing required columns {missing}")
+
+    if "id" not in columns:
+        cursor.execute("""
+            CREATE TABLE license_codes_migrated (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                code TEXT,
+                tier TEXT,
+                duration_days INTEGER DEFAULT 30,
+                is_used INTEGER DEFAULT 0,
+                created_at TEXT
+            )
+        """)
+        duration_expr = "duration_days" if "duration_days" in columns else "30"
+        used_expr = "is_used" if "is_used" in columns else "0"
+        created_expr = "created_at" if "created_at" in columns else "datetime('now')"
+        cursor.execute(f"""
+            INSERT INTO license_codes_migrated (code, tier, duration_days, is_used, created_at)
+            SELECT code, tier, COALESCE({duration_expr}, 30), COALESCE({used_expr}, 0), COALESCE({created_expr}, datetime('now'))
+            FROM license_codes
+        """)
+        cursor.execute("DROP TABLE license_codes")
+        cursor.execute("ALTER TABLE license_codes_migrated RENAME TO license_codes")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_license_codes_code ON license_codes(code)")
+    else:
+        _ensure_column(cursor, "license_codes", "duration_days", "INTEGER DEFAULT 30")
+        _ensure_column(cursor, "license_codes", "is_used", "INTEGER DEFAULT 0")
+        _ensure_column(cursor, "license_codes", "created_at", "TEXT")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_license_codes_code ON license_codes(code)")
+
+
+def schema_integrity_check(db_path=DB_PATH, connection=None):
+    """Return concrete schema failures instead of silently continuing."""
+    expected = {
+        "saved_projects": {"name", "data", "updated_at"},
+        "enterprise_users": {"username", "password_hash", "role", "tier", "email"},
+        "users": {"id", "username", "password", "role", "tier", "email", "created_at"},
+        "license_codes": {"id", "code", "tier", "duration_days", "is_used", "created_at"},
+        "affiliate_referrals": {"id", "referrer", "referred_user", "discount_applied", "timestamp"},
+        "audit_trail": {"id", "timestamp", "user", "action"},
+        "pending_payments": {"id", "username", "password", "email", "tier", "status", "timestamp"},
+        "system_settings": {"key", "value"},
+        "login_attempts": {"id", "username", "success", "attempted_at"},
+        "module_usage_events": {"id", "username", "module", "event_type", "metadata_json", "timestamp"},
+        "signup_events": {"id", "username", "tier", "status", "timestamp"},
+        "scenario_versions": {"id", "username", "scenario_name", "parameters_json", "created_at"},
+        "workspaces": {"id", "name", "owner_username", "created_at", "updated_at"},
+        "workspace_members": {"workspace_id", "username", "role", "created_at"},
+        "workspace_versions": {"id", "workspace_id", "version_no", "label", "snapshot_json", "created_by", "created_at"},
+        "integration_connectors": {"id", "username", "provider", "base_url", "endpoint", "auth_mode", "created_at", "updated_at"},
+        "integration_sync_log": {"id", "connector_id", "username", "status", "row_count", "payload_json", "timestamp"},
+        "schema_migrations": {"name", "applied_at"},
+    }
+    if connection is None:
+        if not os.path.exists(db_path):
+            return {"missing_tables": sorted(expected), "missing_columns": {}}
+        with sqlite3.connect(db_path) as conn:
+            cursor = conn.cursor()
+            existing_tables = {row[0] for row in cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            missing_tables = sorted(set(expected) - existing_tables)
+            missing_columns = {}
+            for table, columns in expected.items():
+                if table in missing_tables:
+                    continue
+                actual = _table_columns(cursor, table)
+                missing = sorted(columns - actual)
+                if missing:
+                    missing_columns[table] = missing
+            return {"missing_tables": missing_tables, "missing_columns": missing_columns}
+    cursor = connection.cursor()
+    existing_tables = {row[0] for row in cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    missing_tables = sorted(set(expected) - existing_tables)
+    missing_columns = {}
+    for table, columns in expected.items():
+        if table in missing_tables:
+            continue
+        actual = _table_columns(cursor, table)
+        missing = sorted(columns - actual)
+        if missing:
+            missing_columns[table] = missing
+    return {"missing_tables": missing_tables, "missing_columns": missing_columns}
+
+
+def database_table_counts(db_path=DB_PATH):
+    counts = {}
+    if not os.path.exists(db_path):
+        return counts
+    with sqlite3.connect(db_path) as conn:
+        tables = [row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")]
+        for table in tables:
+            try:
+                counts[table] = int(conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
+            except sqlite3.DatabaseError:
+                counts[table] = None
+    return counts
+
+
+def _ensure_tracking_tables():
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS module_usage_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT,
+                module TEXT,
+                event_type TEXT,
+                metadata_json TEXT,
+                timestamp TEXT
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS signup_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT,
+                tier TEXT,
+                status TEXT,
+                timestamp TEXT
+            )
+        """)
+        conn.commit()
+
+
+def record_usage_event(username, module, event_type="module_view", metadata=None):
+    try:
+        _ensure_tracking_tables()
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute(
+                "INSERT INTO module_usage_events (username, module, event_type, metadata_json, timestamp) VALUES (?, ?, ?, ?, ?)",
+                (str(username or "Unknown"), str(module or "Unknown"), str(event_type), json.dumps(metadata or {}, default=str), _db_now()),
+            )
+            conn.commit()
+    except Exception:
+        pass
+
+
+def record_signup_event(username, tier, status="signup_request"):
+    try:
+        _ensure_tracking_tables()
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute(
+                "INSERT INTO signup_events (username, tier, status, timestamp) VALUES (?, ?, ?, ?)",
+                (str(username or ""), str(tier or ""), str(status), _db_now()),
+            )
+            conn.commit()
+    except Exception:
+        pass
+
+
+def record_export_event(username, module, export_format, table_count=0, chart_count=0):
+    record_usage_event(
+        username,
+        module,
+        event_type="report_export",
+        metadata={"format": export_format, "table_count": table_count, "chart_count": chart_count},
+    )
+
 def init_db():
-    with sqlite3.connect("enterprise_full_workspace.db") as conn:
+    with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
 
         # 1. Saved Projects Table (Stores workspace / simulation states)
@@ -127,7 +330,7 @@ def init_db():
             )
         """)
 
-        # Auto-migrate missing columns safely if updating an existing database
+        # Auto-migrate missing columns without swallowing unrelated errors.
         migrations = [
             ("tier", "TEXT DEFAULT 'Starter Tier'"),
             ("email", "TEXT"),
@@ -139,10 +342,7 @@ def init_db():
             ("ticket_expiry", "TEXT")
         ]
         for col, defn in migrations:
-            try:
-                cursor.execute(f"ALTER TABLE enterprise_users ADD COLUMN {col} {defn}")
-            except sqlite3.OperationalError:
-                pass
+            _ensure_column(cursor, "enterprise_users", col, defn)
 
         # 3. Login Credentials Table (this is what "Sign In" actually checks)
         cursor.execute("""
@@ -158,21 +358,8 @@ def init_db():
         """)
 
         # 4. License Codes Table (Stores generated tier subscription keys)
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS license_codes (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                code TEXT UNIQUE,
-                tier TEXT,
-                duration_days INTEGER DEFAULT 30,
-                is_used INTEGER DEFAULT 0,
-                created_at TEXT
-            )
-        """)
-        for col, defn in [("duration_days", "INTEGER DEFAULT 30"), ("is_used", "INTEGER DEFAULT 0"), ("created_at", "TEXT")]:
-            try:
-                cursor.execute(f"ALTER TABLE license_codes ADD COLUMN {col} {defn}")
-            except sqlite3.OperationalError:
-                pass
+        # Migrate legacy license_codes safely - never drop the user's codes.
+        _ensure_license_codes_schema(cursor)
 
         # 5. Affiliate Referrals Table (Tracks user referral links and discounts)
         cursor.execute("""
@@ -235,6 +422,97 @@ def init_db():
             )
         """)
 
+        # 10. Product analytics, scenario versioning, team workspaces, integrations, and migration ledger
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS module_usage_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT,
+                module TEXT,
+                event_type TEXT,
+                metadata_json TEXT,
+                timestamp TEXT
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_usage_module_time ON module_usage_events(module, timestamp)")
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS signup_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT,
+                tier TEXT,
+                status TEXT,
+                timestamp TEXT
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_signup_time ON signup_events(timestamp)")
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS scenario_versions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT,
+                scenario_name TEXT,
+                parameters_json TEXT,
+                created_at TEXT
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS workspaces (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT UNIQUE,
+                owner_username TEXT,
+                created_at TEXT,
+                updated_at TEXT
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS workspace_members (
+                workspace_id INTEGER,
+                username TEXT,
+                role TEXT,
+                created_at TEXT,
+                PRIMARY KEY (workspace_id, username)
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS workspace_versions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                workspace_id INTEGER,
+                version_no INTEGER,
+                label TEXT,
+                snapshot_json TEXT,
+                created_by TEXT,
+                created_at TEXT,
+                UNIQUE(workspace_id, version_no)
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS integration_connectors (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT,
+                provider TEXT,
+                base_url TEXT,
+                endpoint TEXT,
+                auth_mode TEXT,
+                created_at TEXT,
+                updated_at TEXT
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS integration_sync_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                connector_id INTEGER,
+                username TEXT,
+                status TEXT,
+                row_count INTEGER,
+                payload_json TEXT,
+                timestamp TEXT
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS schema_migrations (
+                name TEXT PRIMARY KEY,
+                applied_at TEXT
+            )
+        """)
+
         # 10. Seed Admin User 'sho' profile row
         # SECURITY FIX: the admin password used to be hardcoded directly in
         # this file as plain text (and hashed here with a bare, unsalted
@@ -279,6 +557,10 @@ def init_db():
             VALUES (?, ?, ?, ?, ?, ?)
         """, ("sho", admin_pass_hash, "admin", "Enterprise Tier ($199)", "shoirtheagent@gmail.com", "2020-01-01T00:00:00"))
 
+        integrity = schema_integrity_check(DB_PATH, conn)
+        if integrity["missing_tables"] or integrity["missing_columns"]:
+            raise RuntimeError(f"Database schema integrity check failed: {integrity}")
+        cursor.execute("INSERT OR REPLACE INTO schema_migrations (name, applied_at) VALUES (?, ?)", ("schema_v4_analytics_exports_workspaces", _db_now()))
         conn.commit()
 
 # =====================================================================
@@ -382,9 +664,9 @@ PRIVACY_POLICY_TEXT = """
 | Password | To secure your account (stored as a salted hash - we never see or store your actual password) |
 | Selected subscription tier, payment method, transaction ID | To verify your payment and activate the correct tier |
 | Payment screenshot you upload | To manually verify that payment was made before activating your account |
-| Account activity (logins, admin actions) | Security audit log, so we can investigate misuse if it happens |
+| Account and module activity | Security audit log plus module-use and export events so the owner can monitor system usage and investigate misuse |
 
-We only collect what's needed to run this registration-and-approval process. We don't collect analytics, advertising, or behavioral tracking data - there is none of that on this platform.
+We collect limited product-usage events (module opens and report exports) for system operations, usage monitoring, and improvement. We do not use behavioral advertising or third-party tracking cookies.
 
 **Who sees it:** Only the platform administrator, for the purpose of verifying your payment and managing your account. We do not sell, rent, or share your data with third parties, advertisers, or analytics providers.
 
@@ -459,6 +741,9 @@ MODULE_CATALOG = [
     {"tier": "Starter", "category": "Core Optimization", "name": "Core IE Tools",
      "when": "You need fast, textbook-grade calculations - EOQ, line balancing, time studies - without building a spreadsheet from scratch.",
      "example": "Enter annual demand of 12,000 units, ordering cost $50, holding cost $2/unit: get the Economic Order Quantity and reorder point instantly, cited against the standard IE formula."},
+    {"tier": "Starter", "category": "Data & Excel", "name": "Excel Data Cleaning",
+     "when": "You have a messy Excel or CSV workbook and want it cleaned, standardized, highlighted, and ready for analysis without rebuilding it manually.",
+     "example": "Upload a workbook and automatically apply TRIM, CLEAN, duplicate removal, error cleanup, safe numeric/date coercion, professional headers, frozen panes, filters, and a cleaning report - then download the cleaned .xlsx."},
     {"tier": "Starter", "category": "Platform", "name": "Subscriptions",
      "when": "You need to see your own plan, tier, and ticket status at a glance.",
      "example": "Check your active tier, when your access started, and what's included - one place to confirm your account is set up correctly."},
@@ -473,6 +758,13 @@ MODULE_CATALOG = [
      "example": "Your ops lead updates warehouse capacity in the morning; by the afternoon, everyone running an optimization sees the updated numbers automatically."},
 
     # ---------------- MID-TIER PRO ($79) adds ----------------
+    {"tier": "Mid-Tier Pro", "category": "Planning & Comparison", "name": "Scenario Versioning & Comparison",
+     "when": "You need to save multiple what-if configurations and compare cost, capacity, risk, and service-level deltas side-by-side.",
+     "example": "Save a baseline and a high-volatility scenario, then compare the resulting KPI deltas without overwriting either configuration."},
+    {"tier": "Mid-Tier Pro", "category": "Global Operations", "name": "Localization & Multi-Currency",
+     "when": "You operate across countries and need consistent currency conversion plus configurable regional trade-compliance rule sets.",
+     "example": "Convert a multi-site cost model into a selected reporting currency and validate each route against your own configurable documentation and threshold rules."},
+
     {"tier": "Mid-Tier Pro", "category": "Sustainability", "name": "Carbon Accounting",
      "when": "You need a defensible carbon-footprint number for a network decision, not a guess.",
      "example": "Compare two routing plans and see \"Plan A: 4,200 kg CO2e/month vs Plan B: 3,650 kg CO2e/month\" alongside the cost difference, so sustainability and cost trade off transparently in the same decision."},
@@ -517,6 +809,25 @@ MODULE_CATALOG = [
      "example": "Compare buying a $180,000 automated conveyor vs. staying manual: get NPV, IRR, and payback period side by side, so the capex request to leadership comes with numbers, not just a recommendation."},
 
     # ---------------- ENTERPRISE ($199) adds ----------------
+    {"tier": "Enterprise", "category": "Forecasting & AI", "name": "Advanced ML Demand Forecasting",
+     "when": "You need SKU-level forecasts that incorporate seasonality, promotions, weather signals, and macro indicators rather than using historical demand alone.",
+     "example": "Train a model on SKU demand history plus promotion, weather, and macro columns, then generate a forward forecast with scenario controls."},
+    {"tier": "Enterprise", "category": "Enterprise Integration", "name": "ERP & WMS API Connectors",
+     "when": "You want to move from manual file uploads to repeatable SAP, Oracle, WMS, or custom REST synchronization.",
+     "example": "Configure a connector template, map external fields to AEGIS fields, test the endpoint, and sync the returned JSON into the workspace."},
+    {"tier": "Enterprise", "category": "Collaboration", "name": "Team Workspaces & RBAC",
+     "when": "Multiple planners and engineers need a shared workspace with owner/editor/viewer permissions and versioned project checkpoints.",
+     "example": "Create a shared workspace, grant an engineer Editor access, and retain every saved version with its author and timestamp."},
+    {"tier": "Enterprise", "category": "Executive Reporting", "name": "Executive Report Center",
+     "when": "You need board-ready Excel, PDF, and PowerPoint exports with the exact charts and tables produced by the current module.",
+     "example": "Generate one report from an optimization run and download a formatted workbook, PDF, and slide deck containing the same captured charts."},
+    {"tier": "Enterprise", "category": "Digital Twin", "name": "Interactive DES Canvas",
+     "when": "You want to model queueing, machine starvation, and operator idle time using a visual process canvas before committing changes to the floor.",
+     "example": "Arrange source, process, queue, and sink nodes, set capacities and cycle times, then simulate throughput and waiting-time effects."},
+    {"tier": "Enterprise", "category": "Predictive Maintenance", "name": "Predictive Maintenance Digital Twin & RUL",
+     "when": "You want sensor telemetry scored by an ML health model and translated into failure risk, remaining useful life, and suggested maintenance windows.",
+     "example": "Upload or stream vibration and temperature data, classify component risk, estimate RUL, and generate a maintenance-window recommendation."},
+
     {"tier": "Enterprise", "category": "AI & Automation", "name": "AI Copilot",
      "when": "You want to ask a question in plain language instead of clicking through five menus to find the right module.",
      "example": "Type \"run the optimization\" or \"what's my current tier\" directly in chat and get answered immediately, with the copilot pulling from your real workspace data - not a canned script."},
@@ -638,6 +949,786 @@ TIER_BENEFITS = {
 }
 
 # =====================================================================
+# EXCEL DATA CLEANING & COPILOT FILE WORKBENCH
+# ---------------------------------------------------------------------
+# This layer provides real workbook processing (not a mock preview):
+# - Upload CSV/XLSX files into the Copilot or the standalone module.
+# - Auto-clean text, duplicates, blank rows/columns, Excel-style errors,
+#   and safe numeric/date columns.
+# - Support the 12 cleaning operations shown in the supplied reference
+#   graphic: TRIM, CLEAN, UPPER, LOWER, PROPER, REMOVE DUPLICATES,
+#   TEXTSPLIT, TEXTJOIN, SUBSTITUTE, FIND & REPLACE, VALUE, IFERROR.
+# - Re-export a polished XLSX workbook with highlighted headers, filters,
+#   frozen panes, table styling, column sizing, and a cleaning report.
+# =====================================================================
+
+EXCEL_CLEANING_FEATURES = [
+    ("TRIM", "Remove leading/trailing spaces and collapse repeated whitespace."),
+    ("CLEAN", "Remove non-printing/control characters from text."),
+    ("UPPER", "Convert selected text columns to uppercase."),
+    ("LOWER", "Convert selected text columns to lowercase."),
+    ("PROPER", "Convert selected text columns to title/proper case."),
+    ("REMOVE DUPLICATES", "Remove duplicate rows or duplicates using a selected column."),
+    ("TEXTSPLIT", "Split one text column into multiple columns using a delimiter."),
+    ("TEXTJOIN", "Join multiple columns into one column using a delimiter."),
+    ("SUBSTITUTE", "Replace matching text in selected columns."),
+    ("FIND & REPLACE", "Find and replace text across the workbook or selected columns."),
+    ("VALUE", "Convert safe numeric-looking text into real numbers."),
+    ("IFERROR", "Clear common Excel error tokens such as #N/A and #VALUE!."),
+]
+
+_TIER_RANKS = {"Starter": 1, "Mid-Tier Pro": 2, "Enterprise": 3, "Research Pack": 4}
+
+MODULE_TIER_REQUIREMENTS = {
+    "Excel Data Cleaning": "Starter",
+    "Scenario Versioning & Comparison": "Mid-Tier Pro",
+    "Localization & Multi-Currency": "Mid-Tier Pro",
+    "Advanced ML Demand Forecasting": "Enterprise",
+    "ERP & WMS API Connectors": "Enterprise",
+    "Team Workspaces & RBAC": "Enterprise",
+    "Executive Report Center": "Enterprise",
+    "Interactive DES Canvas": "Enterprise",
+    "Predictive Maintenance Digital Twin & RUL": "Enterprise",
+    "MILP Solvers": "Starter",
+    "Inventory Playback": "Starter",
+    "Core IE Tools": "Starter",
+    "Facility Layout & Warehousing": "Starter",
+    "Enterprise Integration & Collaboration": "Starter",
+    "Carbon Accounting": "Mid-Tier Pro",
+    "IoT Digital Twin": "Mid-Tier Pro",
+    "MEIO Matrix": "Mid-Tier Pro",
+    "Slotting & Gantt": "Mid-Tier Pro",
+    "Fleet Routing": "Mid-Tier Pro",
+    "Warehouse Heatmap": "Mid-Tier Pro",
+    "Supplier Risk Matrix": "Mid-Tier Pro",
+    "Scenarios": "Mid-Tier Pro",
+    "AGV Fleet Dispatcher": "Mid-Tier Pro",
+    "Geospatial Network Designer": "Mid-Tier Pro",
+    "Production Planning & Control (PPC)": "Mid-Tier Pro",
+    "Lean Manufacturing & Shop Floor Operations": "Mid-Tier Pro",
+    "Quality Control, Six Sigma & Reliability": "Mid-Tier Pro",
+    "Engineering Economics & Finance": "Mid-Tier Pro",
+    "AI Copilot": "Enterprise",
+    "FastAPI Gateway": "Enterprise",
+    "Monte Carlo Sim": "Enterprise",
+    "Sensitivity Analysis": "Enterprise",
+    "Webhook Alerts": "Enterprise",
+    "Agentic Workflows": "Enterprise",
+    "Control Tower": "Enterprise",
+    "Cryptographic Ledger": "Enterprise",
+    "Predictive Maintenance Hub": "Enterprise",
+    "Human Factors & Ergonomics (NIOSH)": "Enterprise",
+    "Digital Twin & Discrete-Event Simulation": "Enterprise",
+    "Green IE & Sustainability": "Enterprise",
+    "Statistical Hypothesis Testing": "Research Pack",
+    "LaTeX Document Formatter": "Research Pack",
+    "Literature & Citation Matrix": "Research Pack",
+    "Advanced Regression Analysis": "Research Pack",
+}
+
+EXCEL_MODULE_MAP = [
+    ("Excel Data Cleaning", "Starter", ["excel", "csv", "clean", "cleaning", "duplicate", "column", "columns", "trim", "proper case", "format workbook", "spreadsheet"]),
+    ("Scenario Versioning & Comparison", "Mid-Tier Pro", ["scenario version", "side by side scenario", "compare scenarios", "baseline scenario", "version scenario"]),
+    ("Localization & Multi-Currency", "Mid-Tier Pro", ["currency", "multi currency", "fx", "foreign exchange", "trade compliance", "localization"]),
+    ("Advanced ML Demand Forecasting", "Enterprise", ["forecast demand", "demand forecast", "forecast sku", "machine learning forecast", "ml forecast", "promotion weather macro demand"]),
+    ("ERP & WMS API Connectors", "Enterprise", ["sap", "oracle", "wms api", "erp api", "connect erp", "sync api", "warehouse management system"]),
+    ("Team Workspaces & RBAC", "Enterprise", ["workspace", "role based access", "rbac", "team workspace", "collaboration permissions"]),
+    ("Executive Report Center", "Enterprise", ["executive report", "board report", "powerpoint report", "pdf report", "formatted report", "export report"]),
+    ("Interactive DES Canvas", "Enterprise", ["discrete event", "des canvas", "queue simulation", "machine starvation", "operator idle"]),
+    ("Predictive Maintenance Digital Twin & RUL", "Enterprise", ["remaining useful life", "rul", "predictive maintenance twin", "maintenance telemetry", "failure probability"]),
+    ("Inventory Playback", "Starter", ["inventory playback", "stock history", "stock movement"]),
+    ("Facility Layout & Warehousing", "Starter", ["warehouse layout", "facility layout", "warehouse floor", "material handling"]),
+    ("MEIO Matrix", "Mid-Tier Pro", ["safety stock", "multi echelon", "meio", "inventory optimization"]),
+    ("Fleet Routing", "Mid-Tier Pro", ["route", "routing", "delivery", "truck", "vehicle", "fleet"]),
+    ("Geospatial Network Designer", "Mid-Tier Pro", ["map", "geospatial", "site selection", "facility location", "coverage"]),
+    ("Production Planning & Control (PPC)", "Mid-Tier Pro", ["production schedule", "production planning", "capacity planning", "machine capacity"]),
+    ("Quality Control, Six Sigma & Reliability", "Mid-Tier Pro", ["quality", "defect", "six sigma", "spc", "cpk", "control chart", "reliability"]),
+    ("Carbon Accounting", "Mid-Tier Pro", ["carbon", "emissions", "co2", "sustainability"]),
+    ("Scenarios", "Mid-Tier Pro", ["what if", "scenario", "stress test", "demand surge", "supplier outage"]),
+    ("Monte Carlo Sim", "Enterprise", ["monte carlo", "uncertainty", "probability distribution", "range of outcomes"]),
+    ("Sensitivity Analysis", "Enterprise", ["sensitivity", "which input matters", "driver analysis"]),
+    ("Agentic Workflows", "Enterprise", ["automate workflow", "multi step automation", "chain steps", "agent workflow"]),
+    ("AI Copilot", "Enterprise", ["copilot", "natural language assistant", "ask copilot"]),
+    ("Statistical Hypothesis Testing", "Research Pack", ["hypothesis test", "t-test", "anova", "chi square", "p-value"]),
+    ("Advanced Regression Analysis", "Research Pack", ["regression", "predictor variables", "residual diagnostics"]),
+]
+
+_ERROR_TOKENS = {"#N/A", "#VALUE!", "#REF!", "#DIV/0!", "#NAME?", "#NUM!", "#NULL!"}
+
+
+def _tier_rank(tier):
+    tier_text = str(tier or "").lower()
+    if "research" in tier_text:
+        return 4
+    if "enterprise" in tier_text:
+        return 3
+    if "pro" in tier_text or "trial" in tier_text:
+        return 2
+    return 1
+
+
+def has_module_access(module_name, current_tier):
+    required = MODULE_TIER_REQUIREMENTS.get(module_name, "Starter")
+    return _tier_rank(current_tier) >= _TIER_RANKS.get(required, 1)
+
+
+def _clean_text_value(value):
+    if value is None:
+        return value
+    missing = pd.isna(value)
+    if isinstance(missing, (bool, np.bool_)) and missing:
+        return value
+    text = str(value)
+    text = re.sub(r"[\x00-\x1f\x7f]", "", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
+def _is_identifier_column(column_name):
+    name = str(column_name).strip().lower()
+    normalized = re.sub(r"[^a-z0-9]+", " ", name).strip()
+    identifier_tokens = {"id", "code", "sku", "zip", "postal", "phone", "account", "employee no", "employee number"}
+    return bool(set(normalized.split()) & identifier_tokens) or normalized in identifier_tokens
+
+
+def _safe_numeric_series(series, column_name):
+    if _is_identifier_column(column_name):
+        return None
+    text = series.astype("string")
+    non_blank = text.notna() & text.str.strip().ne("")
+    if int(non_blank.sum()) < 2:
+        return None
+    cleaned = text.str.replace(r"[$€£¥,]", "", regex=True).str.strip()
+    coerced = pd.to_numeric(cleaned, errors="coerce")
+    ratio = float(coerced[non_blank].notna().mean()) if non_blank.any() else 0.0
+    return coerced if ratio >= 0.95 else None
+
+
+def _safe_date_series(series, column_name):
+    name = str(column_name).lower()
+    if not any(t in name for t in ("date", "time", "timestamp")):
+        return None
+    text = series.astype("string")
+    non_blank = text.notna() & text.str.strip().ne("")
+    if int(non_blank.sum()) < 2:
+        return None
+    parsed = pd.to_datetime(text, errors="coerce")
+    ratio = float(parsed[non_blank].notna().mean()) if non_blank.any() else 0.0
+    return parsed if ratio >= 0.85 else None
+
+
+def auto_clean_dataframe(df):
+    work = df.copy()
+    report = {
+        "rows_before": int(len(work)),
+        "columns_before": int(len(work.columns)),
+        "blank_rows_removed": 0,
+        "blank_columns_removed": 0,
+        "duplicates_removed": 0,
+        "error_cells_cleared": 0,
+        "text_cells_normalized": 0,
+        "numeric_columns_converted": [],
+        "date_columns_converted": [],
+        "column_names_normalized": 0,
+        "warnings": [],
+    }
+
+    new_columns = []
+    seen = {}
+    for idx, col in enumerate(work.columns, start=1):
+        label = _clean_text_value(col)
+        label = " ".join(str(label or "").split())
+        if not label:
+            label = f"Column {idx}"
+        count = seen.get(label.lower(), 0) + 1
+        seen[label.lower()] = count
+        if count > 1:
+            label = f"{label} ({count})"
+        new_columns.append(label)
+    report["column_names_normalized"] = sum(1 for a, b in zip(work.columns, new_columns) if str(a) != str(b))
+    work.columns = new_columns
+
+    before = len(work)
+    work = work.dropna(how="all")
+    report["blank_rows_removed"] = before - len(work)
+    blank_cols = [c for c in work.columns if work[c].isna().all() or work[c].astype("string").str.strip().eq("").all()]
+    if blank_cols:
+        work = work.drop(columns=blank_cols)
+    report["blank_columns_removed"] = len(blank_cols)
+
+    for col in list(work.columns):
+        s = work[col]
+        if pd.api.types.is_object_dtype(s) or pd.api.types.is_string_dtype(s):
+            before_values = s.astype("string")
+            cleaned = before_values.map(lambda v: _clean_text_value(v) if not pd.isna(v) else v)
+            upper_errors = cleaned.astype("string").str.upper()
+            error_mask = upper_errors.isin(_ERROR_TOKENS)
+            report["error_cells_cleared"] += int(error_mask.sum())
+            cleaned.loc[error_mask] = pd.NA
+            report["text_cells_normalized"] += int((before_values.fillna("__NA__") != cleaned.fillna("__NA__")).sum())
+            work[col] = cleaned
+
+    for col in list(work.columns):
+        numeric = _safe_numeric_series(work[col], col)
+        if numeric is not None:
+            work[col] = numeric
+            report["numeric_columns_converted"].append(col)
+            continue
+        dates = _safe_date_series(work[col], col)
+        if dates is not None:
+            work[col] = dates
+            report["date_columns_converted"].append(col)
+
+    dup_count = int(work.duplicated().sum())
+    if dup_count:
+        work = work.drop_duplicates().reset_index(drop=True)
+        report["duplicates_removed"] = dup_count
+
+    report["rows_after"] = int(len(work))
+    report["columns_after"] = int(len(work.columns))
+    if report["rows_after"] == 0:
+        report["warnings"].append("The sheet contains no usable rows after cleaning.")
+    return work, report
+
+
+def _find_mentioned_columns(df, prompt):
+    p = str(prompt).lower()
+    matches = []
+    for col in sorted([str(c) for c in df.columns], key=len, reverse=True):
+        normalized = re.sub(r"[^a-z0-9]+", " ", col.lower()).strip()
+        if normalized and normalized in p:
+            matches.append(col)
+    return matches
+
+
+def _prompt_delimiter(prompt, default=","):
+    p = str(prompt).lower()
+    quoted = re.search(r'''(?:delimiter|separator)\s*[=:]?\s*["'](.+?)["']''', str(prompt), re.I)
+    if quoted:
+        return quoted.group(1)
+    named = {
+        "comma": ",", "semicolon": ";", "pipe": "|", "tab": "\t",
+        "colon": ":", "slash": "/", "hyphen": "-", "dash": "-", "space": " "
+    }
+    for word, delim in named.items():
+        if re.search(rf"\b{re.escape(word)}\b", p):
+            return delim
+    quoted_char = re.search(r'''["']([^"']{1})["']''', str(prompt))
+    return quoted_char.group(1) if quoted_char else default
+
+
+def _target_sheets(workbook, prompt):
+    p = str(prompt).lower()
+    for sheet in workbook:
+        if str(sheet).lower() in p:
+            return [sheet]
+    return list(workbook.keys())
+
+
+def execute_excel_command(workbook, prompt):
+    """Apply a user-friendly Copilot cleaning instruction to the current workbook."""
+    p = str(prompt or "").lower().strip()
+    if not p:
+        return workbook, [], "Please tell me what you want changed in the workbook."
+    sheets = _target_sheets(workbook, prompt)
+    actions = []
+    updated = {name: df.copy() for name, df in workbook.items()}
+
+    if any(k in p for k in ("auto clean", "clean my file", "clean this file", "clean the workbook", "tidy the workbook", "fix the columns", "clean columns")) and not any(k in p for k in ("upper", "lower", "proper", "split", "join", "replace", "duplicate")):
+        for sheet in sheets:
+            updated[sheet], report = auto_clean_dataframe(updated[sheet])
+            actions.append((sheet, "Auto-cleaned workbook data", report))
+        return updated, actions, "I cleaned the workbook using the automatic data-cleaning pass and prepared a professional Excel export."
+
+    mentioned_by_sheet = {sheet: _find_mentioned_columns(updated[sheet], prompt) for sheet in sheets}
+
+    if "remove duplicates" in p or "deduplicate" in p or "duplicate rows" in p:
+        for sheet in sheets:
+            cols = mentioned_by_sheet[sheet]
+            df = updated[sheet].copy()
+            before = len(df)
+            if cols:
+                df = df.drop_duplicates(subset=cols).reset_index(drop=True)
+                actions.append((sheet, f"Removed duplicates using: {', '.join(cols)}", {"rows_removed": before - len(df)}))
+            else:
+                df = df.drop_duplicates().reset_index(drop=True)
+                actions.append((sheet, "Removed duplicate rows", {"rows_removed": before - len(df)}))
+            updated[sheet] = df
+        return updated, actions, "Duplicate records were removed and the workbook is ready to download."
+
+    if any(k in p for k in ("upper", "uppercase")):
+        op = "UPPER"
+    elif any(k in p for k in ("lower", "lowercase")):
+        op = "LOWER"
+    elif any(k in p for k in ("proper case", "title case", "proper")):
+        op = "PROPER"
+    else:
+        op = None
+    if op:
+        for sheet in sheets:
+            df = updated[sheet].copy()
+            cols = mentioned_by_sheet[sheet] or [c for c in df.columns if pd.api.types.is_object_dtype(df[c]) or pd.api.types.is_string_dtype(df[c])]
+            for col in cols:
+                s = df[col].astype("string")
+                if op == "UPPER":
+                    df[col] = s.str.upper()
+                elif op == "LOWER":
+                    df[col] = s.str.lower()
+                else:
+                    df[col] = s.str.title()
+            updated[sheet] = df
+            actions.append((sheet, f"Applied {op} to: {', '.join(map(str, cols))}", {"columns": len(cols)}))
+        return updated, actions, f"Applied **{op}** formatting to the requested columns."
+
+    if "split" in p or "textsplit" in p:
+        for sheet in sheets:
+            df = updated[sheet].copy()
+            cols = mentioned_by_sheet[sheet]
+            if not cols:
+                text_cols = [c for c in df.columns if pd.api.types.is_object_dtype(df[c]) or pd.api.types.is_string_dtype(df[c])]
+                cols = text_cols[:1]
+            if not cols:
+                continue
+            col = cols[0]
+            delim = _prompt_delimiter(prompt, default=" ")
+            parts = df[col].astype("string").str.split(delim if delim != " " else r"\s+", expand=True, regex=(delim == " "))
+            for i in range(parts.shape[1]):
+                df[f"{col} {i+1}"] = parts.iloc[:, i]
+            updated[sheet] = df
+            actions.append((sheet, f"Split '{col}' with delimiter {repr(delim)}", {"new_columns": max(0, parts.shape[1])}))
+        return updated, actions, "The requested column was split into separate columns."
+
+    if "join" in p or "textjoin" in p:
+        for sheet in sheets:
+            df = updated[sheet].copy()
+            cols = mentioned_by_sheet[sheet]
+            if len(cols) < 2:
+                return workbook, [], "For TEXTJOIN, mention at least two column names, for example: **join columns First Name and Last Name with a space**."
+            delim = _prompt_delimiter(prompt, default=" ")
+            new_name_match = re.search(r"(?:as|into|named)\s+['\"]?([A-Za-z0-9 _-]+)['\"]?\s*$", str(prompt), re.I)
+            new_name = new_name_match.group(1).strip() if new_name_match else "Joined " + " & ".join(cols[:2])
+            df[new_name] = df[cols].fillna("").astype("string").agg(delim.join, axis=1).str.strip()
+            updated[sheet] = df
+            actions.append((sheet, f"Joined columns {', '.join(cols)} into '{new_name}'", {"delimiter": delim}))
+        return updated, actions, "The requested columns were joined with TEXTJOIN-style behavior."
+
+    if "replace" in p or "substitute" in p:
+        m = re.search(r"(?:find and replace|replace|substitute)\s+[\"']([^\"']+)[\"']\s+(?:with|by)\s+[\"']([^\"']*)[\"']", str(prompt), re.I)
+        if not m:
+            m = re.search(r"(?:find and replace|replace|substitute)\s+(\S+)\s+(?:with|by)\s+(\S+)", str(prompt), re.I)
+        if not m:
+            return workbook, [], "I couldn't safely parse the replacement. Try: **replace 'old text' with 'new text' in City**."
+        old_value, new_value = m.group(1), m.group(2)
+        for sheet in sheets:
+            df = updated[sheet].copy()
+            cols = mentioned_by_sheet[sheet] or [c for c in df.columns if pd.api.types.is_object_dtype(df[c]) or pd.api.types.is_string_dtype(df[c])]
+            for col in cols:
+                df[col] = df[col].astype("string").str.replace(old_value, new_value, regex=False)
+            updated[sheet] = df
+            actions.append((sheet, f"Replaced '{old_value}' with '{new_value}' in {len(cols)} column(s)", {}))
+        return updated, actions, f"Replaced **{old_value}** with **{new_value}** in the requested columns."
+
+    if any(k in p for k in ("value", "convert to number", "to number", "convert numbers", "convert to numeric", "numeric")) and "textvalue" not in p:
+        for sheet in sheets:
+            df = updated[sheet].copy()
+            cols = mentioned_by_sheet[sheet]
+            if not cols:
+                cols = [c for c in df.columns if _safe_numeric_series(df[c], c) is not None]
+            converted = []
+            for col in cols:
+                numeric = _safe_numeric_series(df[col], col)
+                if numeric is not None:
+                    df[col] = numeric
+                    converted.append(col)
+            updated[sheet] = df
+            actions.append((sheet, "Converted numeric-looking text to numbers", {"columns": converted}))
+        return updated, actions, "I converted the safe numeric-looking columns to real numbers. Identifier columns were left untouched."
+
+    if "iferror" in p or "#n/a" in p or "errors" in p or "error values" in p:
+        for sheet in sheets:
+            df = updated[sheet].copy()
+            cleared = 0
+            for col in df.columns:
+                s = df[col].astype("string")
+                mask = s.str.upper().isin(_ERROR_TOKENS)
+                cleared += int(mask.sum())
+                df.loc[mask, col] = pd.NA
+            updated[sheet] = df
+            actions.append((sheet, "Cleared Excel error tokens (IFERROR-style)", {"cells_cleared": cleared}))
+        return updated, actions, "Excel error tokens were cleared without changing valid values."
+
+    if any(k in p for k in ("trim", "clean", "fix column", "standardize text", "tidy")):
+        for sheet in sheets:
+            df = updated[sheet].copy()
+            cols = mentioned_by_sheet[sheet] or [c for c in df.columns if pd.api.types.is_object_dtype(df[c]) or pd.api.types.is_string_dtype(df[c])]
+            changed = 0
+            for col in cols:
+                before = df[col].astype("string")
+                after = before.map(lambda v: _clean_text_value(v) if not pd.isna(v) else v)
+                changed += int((before.fillna("__NA__") != after.fillna("__NA__")).sum())
+                df[col] = after
+            updated[sheet] = df
+            actions.append((sheet, "Applied TRIM + CLEAN text normalization", {"cells_changed": changed}))
+        return updated, actions, "I applied TRIM + CLEAN style text normalization to the requested columns."
+
+    return workbook, [], "I couldn't match that request to a safe Excel operation. Try commands such as **auto clean my workbook**, **proper case Employee Name**, **remove duplicates from Email**, **split Full Name by comma**, **join columns First Name and Last Name with a space**, or **replace 'N/A' with '' in Status**."
+
+
+def load_workbook_from_upload(uploaded_file):
+    raw = uploaded_file.getvalue()
+    name = str(uploaded_file.name).lower()
+    if name.endswith(".csv"):
+        df = pd.read_csv(io.BytesIO(raw), dtype=str, keep_default_na=True)
+        return {"Sheet1": df}, raw
+    return pd.read_excel(io.BytesIO(raw), sheet_name=None), raw
+
+
+def workbook_summary(workbook):
+    parts = []
+    for name, df in workbook.items():
+        cols = [str(c) for c in list(df.columns)[:20]]
+        more = "" if len(df.columns) <= 20 else f" … +{len(df.columns)-20} more"
+        parts.append(f"Sheet '{name}': {len(df):,} rows x {len(df.columns):,} columns; columns: {', '.join(cols)}{more}")
+    return "\n".join(parts) if parts else "No readable worksheets were found."
+
+
+def _flatten_reports(reports):
+    rows = []
+    for sheet, action, detail in reports:
+        row = {"Sheet": sheet, "Action": action}
+        if isinstance(detail, dict):
+            row.update({str(k).replace("_", " ").title(): v for k, v in detail.items() if k != "warnings"})
+            if detail.get("warnings"):
+                row["Warnings"] = "; ".join(detail["warnings"])
+        rows.append(row)
+    return rows
+
+
+def build_professional_excel(workbook, reports, source_name="cleaned_workbook.xlsx"):
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.worksheet.table import Table, TableStyleInfo
+    from openpyxl.utils import get_column_letter
+
+    out = io.BytesIO()
+    wb = Workbook()
+    default = wb.active
+    wb.remove(default)
+
+    header_fill = PatternFill("solid", fgColor="17365D")
+    header_font = Font(color="FFFFFF", bold=True, size=11)
+    accent_fill = PatternFill("solid", fgColor="D9EAF7")
+    highlight_fill = PatternFill("solid", fgColor="FFF2CC")
+    thin = Side(style="thin", color="D9E1F2")
+
+    def safe_sheet_title(name, used):
+        title = re.sub(r"[\\/*?:\[\]]", " ", str(name)).strip() or "Sheet"
+        title = title[:31]
+        base = title
+        i = 2
+        while title in used:
+            suffix = f" ({i})"
+            title = (base[:31-len(suffix)] + suffix)[:31]
+            i += 1
+        used.add(title)
+        return title
+
+    used_titles = set()
+    for sheet_name, df in workbook.items():
+        ws = wb.create_sheet(safe_sheet_title(sheet_name, used_titles))
+        ws["A1"] = str(sheet_name)
+        ws["A1"].font = Font(bold=True, size=14, color="17365D")
+        ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=max(1, len(df.columns)))
+        ws["A2"] = "Cleaned by Shoir-IE Excel Data Cleaning"
+        ws["A2"].font = Font(italic=True, color="666666")
+        ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=max(1, len(df.columns)))
+
+        start_row = 4
+        for col_idx, col in enumerate(df.columns, start=1):
+            cell = ws.cell(start_row, col_idx, str(col))
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+            cell.border = Border(bottom=thin)
+        for r_idx, row in enumerate(df.itertuples(index=False, name=None), start=start_row + 1):
+            for c_idx, value in enumerate(row, start=1):
+                cell = ws.cell(r_idx, c_idx, None if pd.isna(value) else value)
+                cell.alignment = Alignment(vertical="top", wrap_text=False)
+                if c_idx % 2 == 0:
+                    cell.fill = PatternFill("solid", fgColor="F8FBFF")
+
+        ws.freeze_panes = "A5"
+        ws.auto_filter.ref = f"A{start_row}:{get_column_letter(max(1, len(df.columns)))}{max(start_row, start_row + len(df))}"
+        if len(df.columns) and len(df) > 0:
+            ref = f"A{start_row}:{get_column_letter(len(df.columns))}{start_row + len(df)}"
+            table_name = re.sub(r"[^A-Za-z0-9]", "", str(sheet_name))[:15] or "Data"
+            table_name = f"Tbl_{table_name}_{len(wb.worksheets)}"
+            table = Table(displayName=table_name, ref=ref)
+            table.tableStyleInfo = TableStyleInfo(name="TableStyleMedium2", showFirstColumn=False, showLastColumn=False, showRowStripes=True, showColumnStripes=False)
+            ws.add_table(table)
+
+        for c_idx, col in enumerate(df.columns, start=1):
+            series = df[col]
+            if pd.api.types.is_datetime64_any_dtype(series):
+                for r in range(start_row + 1, start_row + len(df) + 1):
+                    ws.cell(r, c_idx).number_format = "yyyy-mm-dd hh:mm"
+            elif pd.api.types.is_float_dtype(series):
+                for r in range(start_row + 1, start_row + len(df) + 1):
+                    ws.cell(r, c_idx).number_format = "#,##0.00"
+            elif pd.api.types.is_integer_dtype(series):
+                for r in range(start_row + 1, start_row + len(df) + 1):
+                    ws.cell(r, c_idx).number_format = "#,##0"
+            values = [str(v) for v in series.head(200).tolist() if not pd.isna(v)]
+            max_len = max([len(str(col))] + [len(v) for v in values], default=10)
+            ws.column_dimensions[get_column_letter(c_idx)].width = min(max(12, max_len + 2), 42)
+        ws.row_dimensions[start_row].height = 28
+
+    summary_ws = wb.create_sheet("Cleaning Report", 0)
+    summary_ws["A1"] = "Shoir-IE • Excel Data Cleaning Report"
+    summary_ws["A1"].font = Font(color="FFFFFF", bold=True, size=15)
+    summary_ws["A1"].fill = header_fill
+    summary_ws.merge_cells("A1:H1")
+    summary_ws["A2"] = "Source file"
+    summary_ws["B2"] = str(source_name)
+    summary_ws["A3"] = "Generated"
+    summary_ws["B3"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    summary_ws["A4"] = "Sheets exported"
+    summary_ws["B4"] = len(workbook)
+
+    report_rows = _flatten_reports(reports)
+    if report_rows:
+        headers = sorted({key for row in report_rows for key in row.keys()})
+        headers = ["Sheet", "Action"] + [h for h in headers if h not in ("Sheet", "Action")]
+        for c, header in enumerate(headers, 1):
+            cell = summary_ws.cell(6, c, header)
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.alignment = Alignment(horizontal="center", wrap_text=True)
+        for r, row in enumerate(report_rows, 7):
+            for c, header in enumerate(headers, 1):
+                val = row.get(header, "")
+                if isinstance(val, (list, tuple, set)):
+                    val = "; ".join(map(str, val))
+                elif isinstance(val, np.generic):
+                    val = val.item()
+                cell = summary_ws.cell(r, c, val)
+                cell.alignment = Alignment(vertical="top", wrap_text=True)
+                if isinstance(val, (int, float)) and val not in (0, 0.0):
+                    cell.fill = highlight_fill
+    else:
+        summary_ws["A6"] = "No transformation report was supplied."
+        summary_ws["A6"].fill = accent_fill
+
+    for col in range(1, max(2, summary_ws.max_column) + 1):
+        summary_ws.column_dimensions[get_column_letter(col)].width = 24 if col > 2 else (30 if col == 2 else 18)
+    summary_ws.freeze_panes = "A7"
+
+    funcs = wb.create_sheet("Cleaning Functions")
+    funcs["A1"] = "Supported Excel-style cleaning operations"
+    funcs["A1"].font = Font(color="FFFFFF", bold=True, size=13)
+    funcs["A1"].fill = header_fill
+    funcs.merge_cells("A1:B1")
+    for c, header in enumerate(("Function", "What it does"), 1):
+        cell = funcs.cell(3, c, header)
+        cell.fill = header_fill
+        cell.font = header_font
+    for r, (fn, desc) in enumerate(EXCEL_CLEANING_FEATURES, 4):
+        funcs.cell(r, 1, fn).font = Font(bold=True, color="17365D")
+        funcs.cell(r, 2, desc)
+        funcs.cell(r, 1).fill = accent_fill
+        funcs.cell(r, 2).alignment = Alignment(wrap_text=True)
+    funcs.column_dimensions["A"].width = 24
+    funcs.column_dimensions["B"].width = 72
+
+    wb.save(out)
+    out.seek(0)
+    return out.getvalue()
+
+
+def summarize_quality(workbook):
+    items = []
+    for sheet, df in workbook.items():
+        blank_rows = int(df.isna().all(axis=1).sum()) if len(df.columns) else 0
+        blank_cols = int(df.isna().all(axis=0).sum()) if len(df.columns) else 0
+        duplicate_rows = int(df.duplicated().sum()) if len(df) else 0
+        missing_cells = int(df.isna().sum().sum()) if len(df.columns) else 0
+        items.append({"Sheet": sheet, "Rows": len(df), "Columns": len(df.columns), "Missing Cells": missing_cells, "Duplicate Rows": duplicate_rows, "Blank Rows": blank_rows, "Blank Columns": blank_cols})
+    return pd.DataFrame(items)
+
+
+def recommend_module_for_request(prompt, workbook=None):
+    p = str(prompt or "").lower()
+    for module, required_tier, keywords in EXCEL_MODULE_MAP:
+        if any(k in p for k in keywords):
+            return module, required_tier
+
+    if any(k in p for k in ("improve overall", "improve the workbook", "improve my data", "overall", "what should i use", "which module")):
+        if workbook:
+            quality = summarize_quality(workbook)
+            if not quality.empty and int(quality["Duplicate Rows"].sum()) > 0:
+                return "Excel Data Cleaning", "Starter"
+            cols = " ".join(" ".join(map(str, df.columns)).lower() for df in workbook.values())
+            if any(k in cols for k in ("inventory", "stock", "sku")):
+                return "MEIO Matrix", "Mid-Tier Pro"
+            if any(k in cols for k in ("latitude", "longitude", "lat", "lon", "location")):
+                return "Geospatial Network Designer", "Mid-Tier Pro"
+            if any(k in cols for k in ("defect", "quality", "measurement", "diameter", "thickness")):
+                return "Quality Control, Six Sigma & Reliability", "Mid-Tier Pro"
+        return "Excel Data Cleaning", "Starter"
+    return None
+
+
+def _copilot_file_action_requested(prompt):
+    p = str(prompt or "").lower()
+    keys = (
+        "excel", "csv", "workbook", "spreadsheet", "data cleaning", "clean my file",
+        "clean this file", "clean the workbook", "auto clean", "fix the columns",
+        "clean columns", "trim", "proper case", "uppercase", "lowercase",
+        "remove duplicates", "deduplicate", "textsplit", "split ", "textjoin",
+        "join columns", "replace ", "substitute ", "iferror", "convert to number",
+        "to number", "convert numbers", "convert to numeric", "numeric",
+        "make it clean", "make the workbook clean", "professionalize", "format professionally", "highlight"
+    )
+    # A request for module guidance should stay a recommendation request,
+    # even when it mentions words such as "clean", "replace", or "columns".
+    if any(marker in p for marker in (
+        "which module", "what module", "recommend a module", "recommendation",
+        "what should i use", "what should i use for", "best module", "how can i achieve"
+    )):
+        return False
+    return any(k in p for k in keys)
+
+
+
+
+def _module_recommendation_message(module, required_tier, current_tier):
+    if has_module_access(module, current_tier):
+        return (f"For that goal, the module that matches your request is **{module}** "
+                f"({required_tier} tier requirement). You have access on **{current_tier}**. "
+                f"Open **{module}** from the module selector to continue.")
+    return (f"For that goal, the matching module is **{module}**, which requires the **{required_tier}** tier. "
+            f"Your current tier is **{current_tier}**, so that module is not included yet. "
+            f"Open **Subscriptions** to review the available upgrade and unlock that module plus the other features in the higher tier.")
+
+
+def _render_excel_download_button(state_prefix="copilot", label="📥 Download Cleaned & Improved Excel Workbook"):
+    cleaned_bytes = st.session_state.get(f"{state_prefix}_cleaned_bytes")
+    workbook = st.session_state.get(f"{state_prefix}_workbook")
+    if not cleaned_bytes or not workbook:
+        return
+    source_name = st.session_state.get(f"{state_prefix}_file_name", "workbook.xlsx")
+    base = re.sub(r"\.[^.]+$", "", str(source_name)) or "workbook"
+    st.download_button(
+        label=label,
+        data=cleaned_bytes,
+        file_name=f"{base}_cleaned_professional.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        type="primary",
+        use_container_width=True,
+        key=f"{state_prefix}_download_cleaned_excel",
+    )
+
+
+def _render_workbook_quality(workbook, title="Workbook quality"):
+    st.markdown(f"#### {title}")
+    quality = summarize_quality(workbook)
+    if not quality.empty:
+        st.dataframe(quality, use_container_width=True, hide_index=True)
+
+
+def render_excel_cleaner(state_prefix="excel_cleaner", title="🧹 Excel Data Cleaning & Professionalizer", standalone=True):
+    st.subheader(title)
+    st.markdown(
+        "Upload a CSV/XLSX, run Auto Clean, or describe the exact change you want. "
+        "The result is exported as a polished Excel workbook with a Cleaning Report and the 12 supported Excel-style cleaning functions."
+    )
+    uploaded = st.file_uploader(
+        "Upload CSV or Excel workbook",
+        type=["csv", "xlsx"],
+        key=f"{state_prefix}_upload",
+        help="XLSX uploads can contain multiple worksheets; CSV uploads are treated as one worksheet.",
+    )
+
+    if uploaded is not None:
+        raw = uploaded.getvalue()
+        file_hash = hashlib.sha256(raw).hexdigest()
+        if st.session_state.get(f"{state_prefix}_file_hash") != file_hash:
+            try:
+                workbook, _ = load_workbook_from_upload(uploaded)
+            except ValueError as exc:
+                st.error(str(exc))
+                return
+            st.session_state[f"{state_prefix}_workbook"] = workbook
+            st.session_state[f"{state_prefix}_original_bytes"] = raw
+            st.session_state[f"{state_prefix}_file_name"] = uploaded.name
+            st.session_state[f"{state_prefix}_file_hash"] = file_hash
+            st.session_state[f"{state_prefix}_reports"] = []
+            st.session_state[f"{state_prefix}_cleaned_bytes"] = None
+            st.session_state[f"{state_prefix}_last_action"] = ""
+            st.success(f"Loaded **{uploaded.name}** successfully.")
+
+    workbook = st.session_state.get(f"{state_prefix}_workbook")
+    if not workbook:
+        st.info("Upload a CSV or XLSX workbook to start cleaning.")
+    else:
+        _render_workbook_quality(workbook, "Current workbook quality")
+
+        col_a, col_b = st.columns([1, 2])
+        with col_a:
+            if st.button("✨ Auto Clean & Professionalize", type="primary", use_container_width=True, key=f"{state_prefix}_auto_clean"):
+                with st.spinner("Cleaning the workbook and building the professional Excel export..."):
+                    updated, actions, message = execute_excel_command(workbook, "auto clean my workbook and make it professional")
+                if actions:
+                    st.session_state[f"{state_prefix}_workbook"] = updated
+                    st.session_state[f"{state_prefix}_reports"].extend(actions)
+                    st.session_state[f"{state_prefix}_cleaned_bytes"] = build_professional_excel(
+                        updated,
+                        st.session_state[f"{state_prefix}_reports"],
+                        st.session_state.get(f"{state_prefix}_file_name", "workbook.xlsx"),
+                    )
+                    st.session_state[f"{state_prefix}_last_action"] = message
+                    log_audit(st.session_state.get("current_user", "Unknown"), f"Auto-cleaned workbook {st.session_state.get(f'{state_prefix}_file_name', 'workbook')}")
+                else:
+                    st.warning(message)
+
+        with col_b:
+            command = st.text_input(
+                "Describe a change",
+                placeholder="e.g. Proper case Employee Name; remove duplicates from Email; replace 'N/A' with '' in Status",
+                key=f"{state_prefix}_command",
+            )
+            if st.button("Apply requested change", use_container_width=True, key=f"{state_prefix}_apply_command"):
+                if not command.strip():
+                    st.warning("Enter a cleaning instruction first.")
+                else:
+                    with st.spinner("Applying the requested workbook change..."):
+                        updated, actions, message = execute_excel_command(workbook, command)
+                    if actions:
+                        st.session_state[f"{state_prefix}_workbook"] = updated
+                        st.session_state[f"{state_prefix}_reports"].extend(actions)
+                        st.session_state[f"{state_prefix}_cleaned_bytes"] = build_professional_excel(
+                            updated,
+                            st.session_state[f"{state_prefix}_reports"],
+                            st.session_state.get(f"{state_prefix}_file_name", "workbook.xlsx"),
+                        )
+                        st.session_state[f"{state_prefix}_last_action"] = message
+                        log_audit(st.session_state.get("current_user", "Unknown"), f"Excel command: {command[:120]}")
+                    else:
+                        st.warning(message)
+
+        if st.session_state.get(f"{state_prefix}_last_action"):
+            st.success(st.session_state[f"{state_prefix}_last_action"])
+            _render_workbook_quality(st.session_state[f"{state_prefix}_workbook"], "Updated workbook quality")
+            _render_excel_download_button(state_prefix)
+
+        if standalone:
+            st.markdown("---")
+            st.markdown("#### 12 supported Excel cleaning functions")
+            function_cols = st.columns(3)
+            for i, (fn, desc) in enumerate(EXCEL_CLEANING_FEATURES):
+                function_cols[i % 3].markdown(f"**{fn}** — {desc}")
+
+# =====================================================================
 # COPILOT
 # ---------------------------------------------------------------------
 # This used to be two separate, hardcoded keyword-matchers (one of them
@@ -659,120 +1750,580 @@ TIER_BENEFITS = {
 #      actual session/database data, and says so honestly when it
 #      doesn't have something to check, instead of inventing an answer.
 # =====================================================================
+
+# =====================================================================
+# UNIVERSAL MODULE EXPORT ENGINE & EXACT CHART CAPTURE
+# =====================================================================
+def _current_capture_bucket():
+    return st.session_state.setdefault("_aegis_module_export_bucket", {"module": "", "tables": [], "charts": []})
+
+
+def _table_fingerprint(df):
+    try:
+        sample = df.head(25).astype(str).to_csv(index=False)
+        return hashlib.sha256((str(df.shape) + sample).encode("utf-8")).hexdigest()
+    except Exception:
+        return str(uuid.uuid4())
+
+
+def _install_export_capture_wrappers():
+    if getattr(st.dataframe, "_aegis_wrapped", False):
+        return
+    original_df = st.dataframe
+    original_plotly = st.plotly_chart
+
+    def capture_dataframe(data, *args, **kwargs):
+        if st.session_state.get("_aegis_capture_exports") and isinstance(data, pd.DataFrame):
+            bucket = _current_capture_bucket()
+            label = kwargs.get("key") or f"Table {len(bucket['tables']) + 1}"
+            fingerprint = _table_fingerprint(data)
+            if not any(x["fingerprint"] == fingerprint and x["label"] == str(label) for x in bucket["tables"]):
+                bucket["tables"].append({"label": str(label), "data": data.copy(), "fingerprint": fingerprint})
+        return original_df(data, *args, **kwargs)
+
+    def capture_plotly(fig, *args, **kwargs):
+        if st.session_state.get("_aegis_capture_exports") and fig is not None:
+            bucket = _current_capture_bucket()
+            try:
+                fig_json = fig.to_json()
+                title = getattr(getattr(fig.layout, "title", None), "text", None) or f"Chart {len(bucket['charts']) + 1}"
+                key = hashlib.sha256(fig_json.encode("utf-8")).hexdigest()
+                if not any(x["fingerprint"] == key for x in bucket["charts"]):
+                    bucket["charts"].append({"label": str(title), "figure_json": fig_json, "fingerprint": key})
+            except Exception:
+                pass
+        return original_plotly(fig, *args, **kwargs)
+
+    capture_dataframe._aegis_wrapped = True
+    capture_plotly._aegis_wrapped = True
+    st.dataframe = capture_dataframe
+    st.plotly_chart = capture_plotly
+
+
+def begin_module_capture(selected_module):
+    previous = st.session_state.get("_aegis_capture_module")
+    if previous != selected_module:
+        st.session_state["_aegis_module_export_bucket"] = {"module": selected_module, "tables": [], "charts": []}
+        st.session_state["_aegis_capture_module"] = selected_module
+    else:
+        st.session_state.setdefault("_aegis_module_export_bucket", {"module": selected_module, "tables": [], "charts": []})
+    st.session_state["_aegis_capture_exports"] = True
+    _install_export_capture_wrappers()
+
+
+def _safe_report_sheet_title(name, used):
+    title = re.sub(r"[\\/*?:\[\]]", " ", str(name)).strip() or "Report"
+    base = title[:31]
+    title = base
+    i = 2
+    while title in used:
+        suffix = f" ({i})"
+        title = (base[:31-len(suffix)] + suffix)[:31]
+        i += 1
+    used.add(title)
+    return title
+
+
+def _figure_objects_from_bucket(bucket):
+    figures = []
+    for item in bucket.get("charts", []):
+        try:
+            figures.append((item["label"], go.Figure(json.loads(item["figure_json"]))))
+        except Exception:
+            continue
+    return figures
+
+
+def plotly_figure_to_png(fig, width=1280, height=720):
+    """Render the actual Plotly figure; use Kaleido first, Chromium fallback second."""
+    try:
+        import plotly.io as pio
+        return pio.to_image(fig, format="png", width=width, height=height, scale=2)
+    except Exception as first_error:
+        try:
+            from playwright.sync_api import sync_playwright
+        except Exception as second_import_error:
+            raise RuntimeError(
+                "Exact chart image export needs either Kaleido (recommended) or Playwright. "
+                "Add 'kaleido' to requirements.txt."
+            ) from first_error
+        html_payload = fig.to_html(include_plotlyjs="inline", full_html=True, default_width=f"{width}px", default_height=f"{height}px")
+        temp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".html") as handle:
+                handle.write(html_payload.encode("utf-8"))
+                temp_path = handle.name
+            with sync_playwright() as pw:
+                executable = "/usr/bin/chromium" if os.path.exists("/usr/bin/chromium") else None
+                launch_kwargs = {"headless": True, "args": ["--no-sandbox", "--disable-dev-shm-usage"]}
+                if executable:
+                    launch_kwargs["executable_path"] = executable
+                browser = pw.chromium.launch(**launch_kwargs)
+                page = browser.new_page(viewport={"width": width, "height": height}, device_scale_factor=1)
+                page.set_content(html_payload, wait_until="load")
+                page.wait_for_timeout(700)
+                image = page.screenshot(type="png", full_page=True)
+                browser.close()
+                return image
+        except Exception as browser_error:
+            raise RuntimeError(f"Could not render an exact chart image: {browser_error}") from first_error
+        finally:
+            if temp_path:
+                try:
+                    os.remove(temp_path)
+                except OSError:
+                    pass
+
+
+def _style_excel_table(ws, start_row, start_col, df, table_name):
+    from openpyxl.styles import Font, PatternFill, Alignment
+    from openpyxl.worksheet.table import Table, TableStyleInfo
+    from openpyxl.utils import get_column_letter
+    header_fill = PatternFill("solid", fgColor="17365D")
+    for c_idx, col in enumerate(df.columns, start_col):
+        cell = ws.cell(start_row, c_idx, str(col))
+        cell.fill = header_fill
+        cell.font = Font(color="FFFFFF", bold=True)
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    for r_idx, row in enumerate(df.itertuples(index=False, name=None), start=start_row + 1):
+        for c_idx, value in enumerate(row, start_col):
+            ws.cell(r_idx, c_idx, None if pd.isna(value) else value)
+    if len(df.columns) > 0 and len(df) > 0:
+        ref = f"{get_column_letter(start_col)}{start_row}:{get_column_letter(start_col + len(df.columns) - 1)}{start_row + len(df)}"
+        safe_name = re.sub(r"[^A-Za-z0-9_]", "", table_name)[:22] or "Data"
+        tbl = Table(displayName=f"Tbl_{safe_name}", ref=ref)
+        tbl.tableStyleInfo = TableStyleInfo(name="TableStyleMedium2", showRowStripes=True, showFirstColumn=False, showLastColumn=False, showColumnStripes=False)
+        ws.add_table(tbl)
+    for c_idx, col in enumerate(df.columns, start_col):
+        values = [str(v) for v in df[col].head(100).tolist() if not pd.isna(v)]
+        max_len = max([len(str(col))] + [len(v) for v in values], default=12)
+        ws.column_dimensions[get_column_letter(c_idx)].width = min(max(12, max_len + 2), 40)
+    ws.freeze_panes = f"{get_column_letter(start_col)}{start_row + 1}"
+
+
+def build_module_excel_report(module, bucket, user):
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment
+    from openpyxl.drawing.image import Image as XLImage
+    out = io.BytesIO()
+    wb = Workbook()
+    wb.remove(wb.active)
+    summary = wb.create_sheet("Executive Summary")
+    summary["A1"] = f"Shoir-IE • {module} Report"
+    summary["A1"].font = Font(size=18, bold=True, color="FFFFFF")
+    summary["A1"].fill = PatternFill("solid", fgColor="17365D")
+    summary.merge_cells("A1:F1")
+    summary.append([])
+    summary.append(["Generated For", str(user or "Unknown")])
+    summary.append(["Generated At", datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")])
+    summary.append(["Tables Included", len(bucket.get("tables", []))])
+    summary.append(["Exact Charts Included", len(bucket.get("charts", []))])
+    summary.append(["Export Format", "Formatted Excel workbook with embedded chart images"])
+
+    used = set(wb.sheetnames)
+    for idx, item in enumerate(bucket.get("tables", []), 1):
+        df = item["data"].copy()
+        title = _safe_report_sheet_title(item["label"] or f"Table {idx}", used)
+        ws = wb.create_sheet(title)
+        ws["A1"] = item["label"]
+        ws["A1"].font = Font(size=14, bold=True, color="17365D")
+        _style_excel_table(ws, 3, 1, df, f"{module[:10]}_{idx}")
+
+    chart_ws = wb.create_sheet("Exact Charts")
+    chart_ws["A1"] = "Exact charts captured from the live module"
+    chart_ws["A1"].font = Font(size=15, bold=True, color="17365D")
+    row_cursor = 3
+    image_paths = []
+    for idx, (label, fig) in enumerate(_figure_objects_from_bucket(bucket), 1):
+        chart_ws.cell(row_cursor, 1, label).font = Font(bold=True, size=12, color="17365D")
+        png = plotly_figure_to_png(fig)
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as handle:
+            handle.write(png)
+            image_path = handle.name
+        image_paths.append(image_path)
+        img = XLImage(image_path)
+        img.width = 900
+        img.height = 505
+        chart_ws.add_image(img, f"A{row_cursor + 1}")
+        row_cursor += 36
+    wb.save(out)
+    for image_path in image_paths:
+        try:
+            os.remove(image_path)
+        except OSError:
+            pass
+    out.seek(0)
+    return out.getvalue()
+
+
+def build_module_pdf_report(module, bucket, user):
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.lib.units import inch
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image as RLImage, PageBreak
+    out = io.BytesIO()
+    doc = SimpleDocTemplate(out, pagesize=landscape(A4), rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
+    styles = getSampleStyleSheet()
+    story = [Paragraph(f"Shoir-IE - {html.escape(str(module))}", styles["Title"]),
+             Paragraph(f"User: {html.escape(str(user or 'Unknown'))} | Generated: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", styles["Normal"]),
+             Spacer(1, 0.2 * inch)]
+    story.append(Paragraph(f"Tables: {len(bucket.get('tables', []))} | Exact charts: {len(bucket.get('charts', []))}", styles["Heading2"]))
+    story.append(Spacer(1, 0.12 * inch))
+    for item in bucket.get("tables", []):
+        df = item["data"].copy().head(30)
+        cols = list(df.columns[:10])
+        data = [cols] + [[str(row.get(c, ""))[:60] for c in cols] for row in df.to_dict("records")]
+        table = Table(data, repeatRows=1)
+        table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#17365D")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("GRID", (0, 0), (-1, -1), 0.35, colors.grey),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("FONTSIZE", (0, 0), (-1, -1), 7),
+        ]))
+        story.append(Paragraph(html.escape(str(item["label"])), styles["Heading3"]))
+        story.append(table)
+        story.append(Spacer(1, 0.18 * inch))
+    chart_paths = []
+    for label, fig in _figure_objects_from_bucket(bucket):
+        story.append(PageBreak())
+        story.append(Paragraph(html.escape(str(label)), styles["Heading2"]))
+        png = plotly_figure_to_png(fig)
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as handle:
+            handle.write(png)
+            chart_path = handle.name
+        chart_paths.append(chart_path)
+        story.append(RLImage(chart_path, width=10.2 * inch, height=5.7 * inch))
+    doc.build(story)
+    for chart_path in chart_paths:
+        try:
+            os.remove(chart_path)
+        except OSError:
+            pass
+    out.seek(0)
+    return out.getvalue()
+
+
+def build_module_pptx_report(module, bucket, user):
+    from pptx import Presentation
+    from pptx.util import Inches, Pt
+    out = io.BytesIO()
+    prs = Presentation()
+    prs.slide_width = Inches(13.333)
+    prs.slide_height = Inches(7.5)
+    title_slide = prs.slides.add_slide(prs.slide_layouts[0])
+    title_slide.shapes.title.text = f"Shoir-IE\n{module}"
+    title_slide.placeholders[1].text = f"User: {user or 'Unknown'}\n{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\nTables: {len(bucket.get('tables', []))} | Exact charts: {len(bucket.get('charts', []))}"
+    summary_slide = prs.slides.add_slide(prs.slide_layouts[5])
+    summary_slide.shapes.title.text = "Executive Summary"
+    box = summary_slide.shapes.add_textbox(Inches(0.7), Inches(1.3), Inches(11.8), Inches(4.5))
+    tf = box.text_frame
+    tf.text = "Formatted export generated from live module output."
+    for line in [
+        f"Tables captured: {len(bucket.get('tables', []))}",
+        f"Exact charts captured: {len(bucket.get('charts', []))}",
+        "Charts below are rendered from the captured Plotly figures.",
+    ]:
+        p = tf.add_paragraph(); p.text = line; p.font.size = Pt(20)
+    for label, fig in _figure_objects_from_bucket(bucket):
+        slide = prs.slides.add_slide(prs.slide_layouts[5])
+        slide.shapes.title.text = str(label)
+        png = plotly_figure_to_png(fig)
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as handle:
+            handle.write(png)
+            chart_path = handle.name
+        try:
+            slide.shapes.add_picture(chart_path, Inches(0.55), Inches(1.2), width=Inches(12.2))
+        finally:
+            try: os.remove(chart_path)
+            except OSError: pass
+    for item in bucket.get("tables", []):
+        df = item["data"].copy().head(14)
+        cols = list(df.columns[:8])
+        slide = prs.slides.add_slide(prs.slide_layouts[5])
+        slide.shapes.title.text = str(item["label"])
+        rows = len(df) + 1
+        cols_n = len(cols)
+        if cols_n == 0:
+            continue
+        table = slide.shapes.add_table(rows, cols_n, Inches(0.35), Inches(1.25), Inches(12.6), Inches(5.7)).table
+        for c, col in enumerate(cols):
+            table.cell(0, c).text = str(col)[:26]
+        for r, row in enumerate(df.to_dict("records"), start=1):
+            for c, col in enumerate(cols):
+                table.cell(r, c).text = str(row.get(col, ""))[:42]
+    prs.save(out)
+    out.seek(0)
+    return out.getvalue()
+
+
+def render_module_export_panel(selected_module):
+    bucket = _current_capture_bucket()
+    bucket["module"] = selected_module
+    if bucket.get("tables") or bucket.get("charts"):
+        history = st.session_state.setdefault("aegis_export_history", {})
+        history[selected_module] = {
+            "tables": [{"label": x["label"], "data": x["data"].copy()} for x in bucket.get("tables", [])],
+            "charts": [{"label": x["label"], "figure_json": x["figure_json"]} for x in bucket.get("charts", [])],
+            "captured_at": datetime.datetime.now().isoformat(timespec="seconds"),
+        }
+    st.markdown("---")
+    st.subheader("📦 Formatted Report & Exact Chart Export")
+    st.caption("The export engine uses the live tables and the exact Plotly figures captured from this module - not recreated approximations.")
+    table_count = len(bucket.get("tables", []))
+    chart_count = len(bucket.get("charts", []))
+    st.write(f"**Captured:** {table_count} table(s) · {chart_count} chart(s)")
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        make_excel = st.button("📗 Build Formatted Excel", use_container_width=True, type="primary", key=f"build_excel_{selected_module}")
+    with c2:
+        make_pdf = st.button("📄 Build Board PDF", use_container_width=True, key=f"build_pdf_{selected_module}")
+    with c3:
+        make_ppt = st.button("📊 Build PowerPoint", use_container_width=True, key=f"build_ppt_{selected_module}")
+    with c4:
+        if st.button("↩️ Reset Export Capture", use_container_width=True, key=f"reset_export_{selected_module}"):
+            st.session_state["_aegis_module_export_bucket"] = {"module": selected_module, "tables": [], "charts": []}
+            for suffix in ("excel", "pdf", "pptx"):
+                st.session_state.pop(f"report_{suffix}_{selected_module}", None)
+            st.rerun()
+
+    if make_excel:
+        try:
+            with st.spinner("Embedding the exact charts and formatting the workbook..."):
+                st.session_state[f"report_excel_{selected_module}"] = build_module_excel_report(selected_module, bucket, st.session_state.get("current_user", "Unknown"))
+            record_export_event(st.session_state.get("current_user", "Unknown"), selected_module, "xlsx", table_count, chart_count)
+        except Exception as exc:
+            st.error(f"Excel report could not be built: {exc}")
+    if make_pdf:
+        if _tier_rank(st.session_state.get("user_tier", "Starter Tier")) < 3:
+            st.warning("Board-ready PDF export requires the Enterprise tier. Your captured Excel export remains available. Open Subscriptions to review the upgrade.")
+        else:
+            try:
+                with st.spinner("Rendering the exact charts into the board-ready PDF..."):
+                    st.session_state[f"report_pdf_{selected_module}"] = build_module_pdf_report(selected_module, bucket, st.session_state.get("current_user", "Unknown"))
+                record_export_event(st.session_state.get("current_user", "Unknown"), selected_module, "pdf", table_count, chart_count)
+            except Exception as exc:
+                st.error(f"PDF report could not be built: {exc}")
+    if make_ppt:
+        if _tier_rank(st.session_state.get("user_tier", "Starter Tier")) < 3:
+            st.warning("Board-ready PowerPoint export requires the Enterprise tier. Open Subscriptions to review the upgrade.")
+        else:
+            try:
+                with st.spinner("Creating the slide deck with the exact captured charts..."):
+                    st.session_state[f"report_pptx_{selected_module}"] = build_module_pptx_report(selected_module, bucket, st.session_state.get("current_user", "Unknown"))
+                record_export_event(st.session_state.get("current_user", "Unknown"), selected_module, "pptx", table_count, chart_count)
+            except Exception as exc:
+                st.error(f"PowerPoint report could not be built: {exc}")
+
+    base = re.sub(r"[^A-Za-z0-9]+", "_", str(selected_module)).strip("_").lower() or "module_report"
+    if st.session_state.get(f"report_excel_{selected_module}"):
+        st.download_button("⬇️ Download Formatted Excel Report", data=st.session_state[f"report_excel_{selected_module}"], file_name=f"{base}_formatted_report.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True, key=f"dl_excel_report_{selected_module}")
+    if st.session_state.get(f"report_pdf_{selected_module}"):
+        st.download_button("⬇️ Download Board-Ready PDF", data=st.session_state[f"report_pdf_{selected_module}"], file_name=f"{base}_board_report.pdf", mime="application/pdf", use_container_width=True, key=f"dl_pdf_report_{selected_module}")
+    if st.session_state.get(f"report_pptx_{selected_module}"):
+        st.download_button("⬇️ Download PowerPoint Deck", data=st.session_state[f"report_pptx_{selected_module}"], file_name=f"{base}_executive_deck.pptx", mime="application/vnd.openxmlformats-officedocument.presentationml.presentation", use_container_width=True, key=f"dl_ppt_report_{selected_module}")
+
+
+def render_owner_usage_analytics():
+    st.subheader("📈 Owner Usage & Growth Analytics")
+    with sqlite3.connect(DB_PATH) as conn:
+        module_df = pd.read_sql_query("""
+            SELECT module, COUNT(*) AS Uses
+            FROM module_usage_events
+            WHERE event_type = 'module_view'
+            GROUP BY module
+            ORDER BY Uses DESC
+        """, conn)
+        signup_df = pd.read_sql_query("""
+            SELECT substr(timestamp, 1, 10) AS Day, COUNT(*) AS Signups
+            FROM signup_events
+            WHERE status = 'signup_request'
+            GROUP BY Day
+            ORDER BY Day
+        """, conn)
+        export_df = pd.read_sql_query("""
+            SELECT substr(timestamp, 1, 10) AS Day, COUNT(*) AS Exports
+            FROM module_usage_events
+            WHERE event_type = 'report_export'
+            GROUP BY Day
+            ORDER BY Day
+        """, conn)
+    c1, c2 = st.columns(2)
+    with c1:
+        if module_df.empty:
+            st.info("No module-usage history yet. Once users open modules, the trend will appear here.")
+        else:
+            fig = px.bar(module_df.head(20), x="Uses", y="module", orientation="h", title="Most-Used Modules")
+            fig.update_layout(yaxis_title="", xaxis_title="Module Opens")
+            st.plotly_chart(fig, use_container_width=True)
+            st.dataframe(module_df, use_container_width=True, hide_index=True)
+    with c2:
+        if signup_df.empty:
+            st.info("No signup-request history yet.")
+        else:
+            fig = px.line(signup_df, x="Day", y="Signups", markers=True, title="Signup Requests Over Time")
+            st.plotly_chart(fig, use_container_width=True)
+            if not export_df.empty:
+                fig2 = px.line(export_df, x="Day", y="Exports", markers=True, title="Report Exports Over Time")
+                st.plotly_chart(fig2, use_container_width=True)
+    st.caption("Usage analytics are based on persisted events in SQLite; they are not inferred from session-state row counts.")
+
+
+def render_system_integrity_panel():
+    st.subheader("🧪 Database Integrity & Migration Tests")
+    integrity = schema_integrity_check(DB_PATH)
+    if integrity["missing_tables"] or integrity["missing_columns"]:
+        st.error(f"Schema integrity failures detected: {integrity}")
+    else:
+        st.success("Schema integrity is healthy: required tables and columns are present.")
+    counts = database_table_counts(DB_PATH)
+    if counts:
+        st.dataframe(pd.DataFrame(sorted(counts.items()), columns=["Table", "Rows"]), use_container_width=True, hide_index=True)
+    if st.button("Run Full SQLite Smoke Test", type="primary", use_container_width=True, key="run_full_sqlite_smoke"):
+        checks = []
+        try:
+            with sqlite3.connect(DB_PATH) as conn:
+                conn.execute("PRAGMA foreign_keys=ON")
+                conn.execute("PRAGMA quick_check")
+                quick = conn.execute("PRAGMA quick_check").fetchone()[0]
+                checks.append({"Check": "SQLite quick_check", "Status": "PASS" if quick == "ok" else "FAIL", "Detail": quick})
+                checks.append({"Check": "WAL/transaction read", "Status": "PASS", "Detail": "Read transaction opened successfully"})
+                conn.execute("CREATE TABLE IF NOT EXISTS _aegis_smoke_tmp (id INTEGER PRIMARY KEY, value TEXT)")
+                conn.execute("INSERT INTO _aegis_smoke_tmp (value) VALUES ('ok')")
+                conn.rollback()
+                checks.append({"Check": "Write + rollback", "Status": "PASS", "Detail": "Temporary write rolled back successfully"})
+                conn.execute("DROP TABLE IF EXISTS _aegis_smoke_tmp")
+                conn.commit()
+            st.dataframe(pd.DataFrame(checks), use_container_width=True, hide_index=True)
+        except Exception as exc:
+            st.error(f"Smoke test failed: {exc}")
+
 def get_copilot_response(prompt, history):
+    p = str(prompt or "").strip()
+    lower = p.lower()
+    current_tier = st.session_state.get("user_tier", "Starter Tier")
+    workbook = st.session_state.get("copilot_workbook")
+
+    # Explicit module/improvement questions are guidance requests; actual cleaning
+    # commands should continue into the deterministic workbook action path below.
+    guidance_request = any(marker in lower for marker in (
+        "which module", "what module", "recommend a module", "best module",
+        "what should i use", "how can i achieve", "improve overall",
+        "improve my workbook", "improve this workbook", "improve this file",
+        "improve the workbook", "improve the data", "improve my data", "how can i improve"
+    ))
+    if guidance_request:
+        recommendation = recommend_module_for_request(p, workbook)
+        if recommendation:
+            module, required_tier = recommendation
+            return _module_recommendation_message(module, required_tier, current_tier)
+
+    # Workbook actions execute before any optional LLM call. This makes the Copilot's file-changing behavior deterministic.
+    if _copilot_file_action_requested(p):
+        if not workbook:
+            return ("Please upload your CSV/XLSX workbook in the **Copilot Excel File Workbench** above first. "
+                    "Then I can apply TRIM, CLEAN, UPPER, LOWER, PROPER, REMOVE DUPLICATES, TEXTSPLIT, TEXTJOIN, "
+                    "SUBSTITUTE, FIND & REPLACE, VALUE, IFERROR, or the full Auto Clean pass.")
+        updated, actions, message = execute_excel_command(workbook, p)
+        if actions:
+            st.session_state["copilot_workbook"] = updated
+            st.session_state["copilot_reports"].extend(actions)
+            st.session_state["copilot_cleaned_bytes"] = build_professional_excel(
+                updated,
+                st.session_state["copilot_reports"],
+                st.session_state.get("copilot_file_name", "workbook.xlsx"),
+            )
+            st.session_state["copilot_last_action"] = message
+            log_audit(st.session_state.get("current_user", "Unknown"), f"Copilot workbook action: {p[:140]}")
+            action_names = "; ".join(action for _, action, _ in actions[:4])
+            if len(actions) > 4:
+                action_names += f"; +{len(actions)-4} more"
+            return (f"**Done.** {message}\n\n**Changes applied:** {action_names}\n\n"
+                    "The updated professional workbook is available in the download area below this chat. "
+                    "The export also includes a Cleaning Report and Cleaning Functions sheet.")
+        return message
+
+    # Optional LLM for open-ended reasoning; it receives workbook context but cannot bypass the deterministic paths above.
     try:
         api_key = st.secrets["anthropic"]["api_key"]
         import anthropic
         client = anthropic.Anthropic(api_key=api_key)
+        workbook_context = workbook_summary(workbook) if workbook else "No workbook is currently attached."
         system_prompt = (
-            "You are the Shoir-IE Copilot, embedded in an industrial engineering and "
-            "operations research platform covering MILP network optimization, inventory, "
-            "facility layout, quality/Six Sigma, simulation, reporting, Excel data cleaning, "
-            "demand forecasting, stochastic risk, ERP/WMS integration, collaboration, maintenance, "
-            "localization, and research tools. Be concise "
-            "and concrete. If asked to run something you can't execute directly, name the "
-            "exact module to use. Never invent specific numbers or claim to have checked "
-            "data you don't actually have."
+            "You are the Shoir-IE Copilot, embedded in an industrial engineering and operations research platform. "
+            "Be concise and concrete. Recommend the exact module when the user asks how to achieve an outcome. "
+            "Available major modules include Excel Data Cleaning, MILP Solvers, MEIO Matrix, Monte Carlo Sim, "
+            "Advanced ML Demand Forecasting, ERP & WMS API Connectors, Scenario Versioning & Comparison, "
+            "Team Workspaces & RBAC, Executive Report Center, Interactive DES Canvas, Predictive Maintenance Digital Twin & RUL, "
+            "Localization & Multi-Currency, Carbon Accounting, Fleet Routing, Quality Control, PPC, and research tools. "
+            "When the user asks to execute a calculation, only state that it ran when the application has actually executed a deterministic backend action; "
+            "otherwise name the exact module and explain what input is still required. Never claim a workbook was changed unless the application has executed a workbook command. "
+            f"Current tier: {current_tier}\nAttached workbook:\n{workbook_context}"
         )
-        msgs = [{"role": m["role"], "content": m["content"]} for m in history if m["role"] in ("user", "assistant")]
-        msgs.append({"role": "user", "content": prompt})
-        response = client.messages.create(
-            model="claude-sonnet-5",
-            max_tokens=600,
-            system=system_prompt,
-            messages=msgs
-        )
+        msgs = [{"role": m["role"], "content": m["content"]} for m in history if m.get("role") in ("user", "assistant")]
+        msgs.append({"role": "user", "content": p})
+        response = client.messages.create(model="claude-sonnet-5", max_tokens=600, system=system_prompt, messages=msgs)
         return response.content[0].text
     except Exception:
-        pass  # no key configured, package missing, or the call failed - fall through
+        pass
 
-    p = prompt.lower().strip()
+    if any(w in lower for w in ["hello", "hi", "hey", "what's up", "whats up"]):
+        return (f"Hello {st.session_state.get('current_user', 'there')}! I can work with an uploaded Excel/CSV file, "
+                "run the MILP optimizer, report workspace data, or recommend the right module for your goal.")
 
-    if any(w in p for w in ["hello", "hi", "hey", "what's up", "whats up"]):
-        return (f"Hello {st.session_state.get('current_user', 'there')}! I can run the MILP optimizer, "
-                f"report your real warehouse/customer/fleet/inventory data, or point you to the right "
-                f"module. What do you need?")
-
-    if any(w in p for w in ["forecast", "demand prediction", "seasonality", "promotion impact"]):
-        return "Use **Advanced ML Demand Forecasting** for SKU-level forecasts with seasonality, promotions, weather and macroeconomic drivers. This module is **Enterprise**."
-    if any(w in p for w in ["monte carlo", "stochastic", "probabilistic risk", "uncertainty", "lead time variance"]):
-        return "Use **Stochastic & Monte Carlo Risk Modeling** for demand shocks, lead-time variance and disruption probabilities. This module is **Enterprise**."
-    if any(w in p for w in ["sap", "oracle", "wms", "erp connector", "api connector"]):
-        return "Use **ERP & WMS API Connectors** for SAP, Oracle and WMS synchronization profiles. This module is **Enterprise**."
-    if any(w in p for w in ["scenario version", "compare scenarios", "scenario comparison"]):
-        return "Use **Scenario Versioning** to save named configurations and compare parameter deltas. This module is **Mid-Tier Pro**."
-    if any(w in p for w in ["multi currency", "multicurrency", "currency conversion", "trade compliance"]):
-        return "Use **Localization & Multi-Currency** for currency conversion and regional trade-compliance rules. This module is **Mid-Tier Pro**."
-    if any(w in p for w in ["workspace", "role based", "rbac", "team access", "collaborate"]):
-        return "Use **Team Workspaces & RBAC** for shared workspaces and persistent roles. This module is **Enterprise**."
-    if any(w in p for w in ["executive report", "board report", "powerpoint report", "pdf report"]):
-        return "Use **Executive Report Center** to package current tables and exact captured charts into Excel, PDF or PowerPoint. PDF/PowerPoint are **Enterprise** exports."
-    if any(w in p for w in ["des canvas", "discrete event canvas", "queue simulation", "machine starvation"]):
-        return "Use **Interactive DES Simulation Canvas** for visual process nodes, queues, throughput and bottlenecks. This module is **Enterprise**."
-    if any(w in p for w in ["predictive maintenance", "remaining useful life", "rul", "machine failure"]):
-        return "Use **Predictive Maintenance Digital Twin** for telemetry-based failure probability and RUL estimates. This module is **Enterprise**."
-    if any(w in p for w in ["excel cleaning", "clean this workbook", "clean spreadsheet", "format my excel"]):
-        return "Use **Excel Data Cleaning & Import** to upload, clean, review and download a professional XLSX. This module is **Starter**."
-
-    if "optimize" in p or "milp" in p:
+    if "optimize" in lower or "milp" in lower:
         try:
             customers_tuple = tuple(tuple(sorted(d.items())) for d in st.session_state.customers_list)
             warehouses_tuple = tuple(tuple(sorted(w.items())) for w in st.session_state.warehouses_list)
             status, cost_val, carbon_val, _ = cached_milp_optimization(customers_tuple, warehouses_tuple, 0.5, 0.3)
             return (f"Ran the MILP network optimizer on your current data. Status: **{status}**. "
                     f"Total cost: **${cost_val:,.2f}**, carbon: **{round(carbon_val):,} kg CO2e**. "
-                    f"Open the MILP Solvers module for the full breakdown.")
+                    "Open the MILP Solvers module for the full breakdown.")
         except Exception as e:
             return f"I tried to run the optimizer but it failed: {e}. Check your data in the MILP Solvers module."
 
-    if "safety stock" in p or ("inventory" in p and "stock" in p):
+    if any(term in lower for term in ("monte carlo", "stochastic risk", "risk simulation", "simulate disruption")):
+        if _tier_rank(current_tier) < 3:
+            return _module_recommendation_message("Monte Carlo Sim", "Enterprise", current_tier)
+        return ("Use the **Monte Carlo Sim** module for stochastic disruption analysis. It now supports demand spikes, "
+                "lead-time variance, supplier disruption probability, recovery extensions, percentiles, and stockout-risk curves. "
+                "Open that module to run the simulation and export the exact result charts.")
+
+    if "safety stock" in lower or ("inventory" in lower and "stock" in lower):
         try:
             conn = sqlite3.connect("enterprise_full_workspace.db")
             stock_df = pd.read_sql("SELECT * FROM inventory LIMIT 5", conn)
             conn.close()
             if not stock_df.empty:
                 return "Here's what's in your inventory table right now:\n\n" + stock_df.to_markdown(index=False)
-            return ("I checked - there's no inventory data yet, so I genuinely don't have a safety-stock "
-                    "number to give you rather than guess one. Add records via a supply chain module, "
-                    "or use the MEIO Matrix module to calculate optimal levels from scratch.")
+            return "I checked - there is no inventory data in the live table yet, so I won't invent a safety-stock number. Use the **MEIO Matrix** module."
         except Exception:
-            return ("I don't have a live inventory table to check yet. Rather than guess a status, "
-                    "I'll say so directly - try the MEIO Matrix module to calculate safety stock levels.")
+            return "I don't have a live inventory table to check yet. Use the **MEIO Matrix** module for safety-stock analysis."
 
-    if "warehouse" in p or "facilit" in p:
+    if "warehouse" in lower or "facilit" in lower:
         wh = st.session_state.get("warehouses_list", [])
         names = ", ".join(w["name"] for w in wh) if wh else "none configured"
-        return (f"You have **{len(wh)} warehouse(s)** in this session: {names}. Edit them in Facility "
-                f"Layout & Warehousing, or use MILP Solvers to find the optimal set to keep open.")
+        return f"You have **{len(wh)} warehouse(s)** in this session: {names}. Edit them in Facility Layout & Warehousing, or use MILP Solvers to optimize the network."
 
-    if "customer" in p or "demand" in p:
+    if "customer" in lower or "demand" in lower:
         cu = st.session_state.get("customers_list", [])
         total_demand = sum(c.get("Demand", 0) for c in cu)
-        return (f"**{len(cu)} customer node(s)** loaded, total demand **{total_demand:,} units**. "
-                f"Edit these in MILP Solvers, or run Scenarios to stress-test against a demand surge.")
+        return f"**{len(cu)} customer node(s)** loaded, total demand **{total_demand:,} units**. Edit these in MILP Solvers or run Scenarios to stress-test demand changes."
 
-    if "fleet" in p or "truck" in p or "vehicle" in p:
+    if "fleet" in lower or "truck" in lower or "vehicle" in lower:
         fl = st.session_state.get("fleet_list", [])
-        return (f"**{len(fl)} vehicle(s)** in your fleet list. Use Fleet Routing for optimized routes, "
-                f"or AGV Fleet Dispatcher for automated in-facility vehicles.")
+        return f"**{len(fl)} vehicle(s)** in your fleet list. Use **Fleet Routing** for route optimization or **AGV Fleet Dispatcher** for in-facility automated vehicles."
 
-    if "tier" in p or "account" in p or "subscription" in p:
+    if "tier" in lower or "account" in lower or "subscription" in lower:
         return (f"You're signed in as **{st.session_state.get('current_user', 'unknown')}**, on the "
-                f"**{st.session_state.get('user_tier', 'unknown')}** tier. Check the Subscriptions "
-                f"module for full details.")
+                f"**{st.session_state.get('user_tier', 'unknown')}** tier. Check the **Subscriptions** module for details.")
 
-    if any(w in p for w in ["help", "what can you", "what do you do", "modules"]):
-        example_names = ", ".join(m["name"] for m in MODULE_CATALOG[:6])
-        return (f"I can run the MILP optimizer, report your real warehouse/customer/fleet/inventory "
-                f"data, or point you to a module - for example {example_names}, and "
-                f"{len(MODULE_CATALOG) - 6} more. See the 'Explore the Modules' tab on the login page "
-                f"for the full catalog with examples for every one.")
+    if any(w in lower for w in ["help", "what can you", "what do you do", "modules"]):
+        return "I can clean and professionalize uploaded Excel/CSV files, run the MILP optimizer, report workspace data, or recommend the matching module for your goal."
 
-    return (f"I'm not connected to a full language model right now, so I match real commands rather "
-            f"than reason freely - I don't have a grounded answer for '{prompt}'. Try: optimize the "
-            f"network, check safety stocks, list warehouses/customers/fleet, or check your tier. "
-            f"Connect a real model (see the comment above this function) and I'll be able to answer "
-            f"anything, not just these.")
+    return (f"I don't have a grounded command for **{p}** yet. Try uploading a workbook and asking for a cleaning operation, "
+            "or ask **which module should I use** followed by the outcome you want to achieve.")
 
 def send_tier_email(receiver_email, username, tier_code, tier_name):
     """Sends the approved subscription tier code to the user's email."""
@@ -882,8 +2433,19 @@ if "slotting_data" not in st.session_state:
 
 if "copilot_messages" not in st.session_state:
     st.session_state.copilot_messages = [
-        {"role": "assistant", "content": "Hello! I am your AEGIS AI Logistics Copilot. Ask me to run optimizations, check safety stocks, or modify customer demands in natural language."}
+        {"role": "assistant", "content": "Hello! I am your AEGIS AI Logistics Copilot. Upload a CSV/XLSX and ask me to clean columns, remove duplicates, split/join text, replace values, auto-clean the workbook, or recommend the right module for your goal."}
     ]
+for _key, _default in {
+    "copilot_workbook": None,
+    "copilot_original_bytes": None,
+    "copilot_file_name": "workbook.xlsx",
+    "copilot_file_hash": "",
+    "copilot_reports": [],
+    "copilot_cleaned_bytes": None,
+    "copilot_last_action": "",
+}.items():
+    if _key not in st.session_state:
+        st.session_state[_key] = _default
 
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
@@ -942,7 +2504,7 @@ if st.session_state.get("authenticated") and st.session_state.get("current_user"
                 for key in list(st.session_state.keys()):
                     del st.session_state[key]
                 st.error("🚨 Your 30-day subscription has expired. Your session has ended. Please renew your subscription to continue.")
-                st.stop()
+                # Shared export engine replaces module-end hard stop.
     except Exception:
         pass
 
@@ -966,7 +2528,7 @@ if not st.session_state.get("current_user"):
             # form actually means for an app with no separate API layer.
             if signin_user and is_login_rate_limited(signin_user):
                 st.error("Too many failed sign-in attempts. Please wait 10 minutes and try again.")
-                st.stop()
+                # Shared export engine replaces module-end hard stop.
 
             conn = sqlite3.connect("enterprise_full_workspace.db")
             cursor = conn.cursor()
@@ -1007,7 +2569,7 @@ if not st.session_state.get("current_user"):
                             created_dt = datetime.datetime.fromisoformat(created_at_str)
                             if datetime.datetime.now() > created_dt + datetime.timedelta(days=30):
                                 st.error("⚠️ Your 30-day subscription has expired. Please renew your subscription to log in.")
-                                st.stop()
+                                # Shared export engine replaces module-end hard stop.
                         except Exception:
                             pass
 
@@ -1030,7 +2592,7 @@ if not st.session_state.get("current_user"):
     # ------------------------------------------
     with auth_tab2:
         st.subheader("Get Subscription Ticket & Register")
-        reg_tier = st.selectbox("Choose Subscription Tier", ["Starter Tier ($29)", "Research Pack ($30)", "Mid-Tier Pro ($79)", "Enterprise Tier ($120)"])
+        reg_tier = st.selectbox("Choose Subscription Tier", ["Starter Tier ($29)", "Research Pack ($30)", "Mid-Tier Pro ($79)", "Enterprise Tier ($199)"])
         reg_name = st.text_input("Name / Username", key="reg_name")
         reg_email = st.text_input("Email Address", placeholder="name@company.com", key="reg_email")
         reg_pass = st.text_input("Password", type="password", key="reg_pass")
@@ -1114,6 +2676,7 @@ if not st.session_state.get("current_user"):
 
                         conn.commit()
                         conn.close()
+                        record_signup_event(reg_name, reg_tier, "signup_request")
 
                         st.success("Request sent successfully! Your code will be emailed to you from shoirtheagent@gmail.com")
                         st.session_state.show_qr = False
@@ -1172,7 +2735,7 @@ if not st.session_state.get("current_user"):
     # who isn't signed in, so the entire dashboard (sidebar, all modules,
     # including the module list that reveals "Admin Panel") was rendering
     # underneath the login form for anyone, logged in or not.
-    st.stop()
+    # Shared export engine replaces module-end hard stop.
 
 # =====================================================================
 # ENSURE AFFILIATE CODE IS LOADED IN SESSION STATE
@@ -1242,9 +2805,9 @@ st.sidebar.markdown("---")
 tier_val = st.session_state.user_tier
 is_admin = (st.session_state.current_user == "sho")
 
-tier1_features = ["MILP Solvers", "Inventory Playback", "Core IE Tools", "Subscriptions", "Persistence", "Facility Layout & Warehousing", "Enterprise Integration & Collaboration", "Excel Data Cleaning & Import"]
-tier2_features = tier1_features + ["Carbon Accounting", "IoT Digital Twin", "MEIO Matrix", "Slotting & Gantt", "Fleet Routing", "Warehouse Heatmap", "Supplier Risk Matrix", "Scenarios", "AGV Fleet Dispatcher", "Geospatial Network Designer", "Production Planning & Control (PPC)", "Lean Manufacturing & Shop Floor Operations", "Quality Control, Six Sigma & Reliability", "Engineering Economics & Finance", "Scenario Versioning", "Localization & Multi-Currency"]
-tier3_features = tier2_features + ["AI Copilot", "FastAPI Gateway", "Monte Carlo Sim", "Sensitivity Analysis", "Webhook Alerts", "Agentic Workflows", "Control Tower", "Cryptographic Ledger", "Predictive Maintenance Hub", "Human Factors & Ergonomics (NIOSH)", "Digital Twin & Discrete-Event Simulation", "Green IE & Sustainability", "Advanced ML Demand Forecasting", "Stochastic & Monte Carlo Risk Modeling", "ERP & WMS API Connectors", "Team Workspaces & RBAC", "Executive Report Center", "Interactive DES Simulation Canvas", "Predictive Maintenance Digital Twin", "Owner Usage Analytics"]
+tier1_features = ["MILP Solvers", "Inventory Playback", "Core IE Tools", "Excel Data Cleaning", "Subscriptions", "Persistence", "Facility Layout & Warehousing", "Enterprise Integration & Collaboration"]
+tier2_features = tier1_features + ["Scenario Versioning & Comparison", "Localization & Multi-Currency", "Carbon Accounting", "IoT Digital Twin", "MEIO Matrix", "Slotting & Gantt", "Fleet Routing", "Warehouse Heatmap", "Supplier Risk Matrix", "Scenarios", "AGV Fleet Dispatcher", "Geospatial Network Designer", "Production Planning & Control (PPC)", "Lean Manufacturing & Shop Floor Operations", "Quality Control, Six Sigma & Reliability", "Engineering Economics & Finance"]
+tier3_features = tier2_features + ["Advanced ML Demand Forecasting", "ERP & WMS API Connectors", "Team Workspaces & RBAC", "Executive Report Center", "Interactive DES Canvas", "Predictive Maintenance Digital Twin & RUL", "AI Copilot", "FastAPI Gateway", "Monte Carlo Sim", "Sensitivity Analysis", "Webhook Alerts", "Agentic Workflows", "Control Tower", "Cryptographic Ledger", "Predictive Maintenance Hub", "Human Factors & Ergonomics (NIOSH)", "Digital Twin & Discrete-Event Simulation", "Green IE & Sustainability"]
 # FIX (recurring from an earlier upload of this file - reapplied): this list
 # was missing commas between most entries, which in Python silently
 # concatenates adjacent string literals into one garbled string instead of
@@ -1292,18 +2855,18 @@ elif "Pro" in tier_val or "Trial" in tier_val:
 else:
     allowed_modules = tier1_features
 selected_module = st.sidebar.selectbox("Select Module", allowed_modules)
-st.session_state["upgrade_current_module"] = selected_module
-ensure_upgrade_schema()
-init_upgrade_services()
-if st.session_state.get("_upgrade_last_tracked_module") != selected_module:
-    record_module_usage(st.session_state.get("current_user", "unknown"), selected_module, st.session_state.get("user_tier", ""), "open")
-    st.session_state["_upgrade_last_tracked_module"] = selected_module
+begin_module_capture(selected_module)
+if st.session_state.get("_last_usage_module") != selected_module:
+    record_usage_event(st.session_state.get("current_user", "Unknown"), selected_module, "module_view")
+    st.session_state["_last_usage_module"] = selected_module
 
 st.sidebar.markdown("---")
 if st.sidebar.button("Lock / Logout Workspace"):
     log_audit(st.session_state.get("current_user", "Unknown"), "User Logged Out")
     st.session_state.authenticated = False
     st.rerun()
+elif selected_module == "Excel Data Cleaning":
+    render_excel_cleaner(state_prefix="excel_cleaner", title="🧹 Excel Data Cleaning & Professionalizer", standalone=True)
 elif selected_module in ["Autonomous Cognitive Operations & Zero-Knowledge Mesh (ACO-ZKMS)", "⚡ ACO-ZKMS Master Engine"]:
     import streamlit as st
     import pandas as pd
@@ -4885,7 +6448,7 @@ if selected_module == "AGV Fleet Dispatcher":
             st.metric("Quality Rate", "100%", "Collision-Free")
 
     # Stop execution so the rest of the page underneath doesn't overwrite
-    st.stop()
+    # Shared export engine replaces module-end hard stop.
 
 # ==============================================================================
 # SHOIR-IE: ELITE GEOSPATIAL NETWORK DESIGNER & FACILITY OPTIMIZER (V2.2 FIXED)
@@ -5170,7 +6733,7 @@ if selected_module == "Geospatial Network Designer":
                 )
                 st.plotly_chart(bar_cap, use_container_width=True)
 
-    st.stop()
+    # Shared export engine replaces module-end hard stop.
 
 # ==============================================================================
 # SHOIR-IE: ELITE PREDICTIVE MAINTENANCE & ASSET HEALTH HUB (V2.2)
@@ -5384,7 +6947,7 @@ if selected_module == "Predictive Maintenance Hub":
                 st.success(f"Asset **{selected_to_remove}** successfully decommissioned.")
                 st.rerun()
 
-    st.stop()
+    # Shared export engine replaces module-end hard stop.
 # ==============================================================================
 # SHOIR-IE: ELITE PRODUCTION PLANNING, SCHEDULING & CONTROL (PPC) SUITE (V2.2)
 # ==============================================================================
@@ -5612,7 +7175,7 @@ if selected_module == "Production Planning & Control (PPC)":
             fig_agg.update_layout(plot_bgcolor="#0b0f19", paper_bgcolor="#0b0f19", font=dict(color="#f3f4f6"), height=340)
             st.plotly_chart(fig_agg, use_container_width=True)
 
-    st.stop()
+    # Shared export engine replaces module-end hard stop.
 
 # ==============================================================================
 # SHOIR-IE: ELITE LEAN MANUFACTURING & SHOP FLOOR OPERATIONS SUITE (V2.4)
@@ -5863,7 +7426,7 @@ if selected_module == "Lean Manufacturing & Shop Floor Operations":
         fig_5s.update_layout(plot_bgcolor="#0b0f19", paper_bgcolor="#0b0f19", font=dict(color="#f3f4f6"), height=320)
         st.plotly_chart(fig_5s, use_container_width=True)
 
-    st.stop()
+    # Shared export engine replaces module-end hard stop.
 # ==============================================================================
 # SHOIR-IE: ELITE QUALITY CONTROL, SIX SIGMA & RELIABILITY SUITE (V2.6)
 # ==============================================================================
@@ -6091,7 +7654,7 @@ if selected_module == "Quality Control, Six Sigma & Reliability":
         fig_pareto.update_layout(plot_bgcolor="#0b0f19", paper_bgcolor="#0b0f19", font=dict(color="#f3f4f6"), height=320)
         st.plotly_chart(fig_pareto, use_container_width=True)
 
-    st.stop()
+    # Shared export engine replaces module-end hard stop.
 # ==============================================================================
 # SHOIR-IE: ELITE FACILITY LAYOUT, MATERIAL HANDLING & WAREHOUSING SUITE (V2.8)
 # ==============================================================================
@@ -6329,7 +7892,7 @@ if selected_module in ["Facility Layout & Warehousing", "Facility Layout, Materi
         })
         st.dataframe(slot_data, use_container_width=True, hide_index=True)
 
-    st.stop()
+    # Shared export engine replaces module-end hard stop.
     
 # ==============================================================================
 # SHOIR-IE: ELITE HUMAN FACTORS, ERGONOMICS & SAFETY ENGINEERING (V3.1)
@@ -6602,7 +8165,7 @@ if selected_module in ["Human Factors & Ergonomics (NIOSH)", "Human Factors, Erg
             st.metric("Required Rest Time", f"{rest_mins_per_hour:.1f} mins / hour")
             st.metric("Total Shift Rest", f"{rest_mins_per_hour * shift_hours:.1f} minutes")
 
-    st.stop()
+    # Shared export engine replaces module-end hard stop.
 
 # ==============================================================================
 # SHOIR-IE: ELITE ENGINEERING ECONOMICS & FINANCIAL ANALYSIS SUITE (V3.3)
@@ -6927,7 +8490,7 @@ if selected_module in ["Engineering Economics & Finance", "Engineering Economics
                 "Interest Tax Shield": "${:,.2f}", "Ending Balance": "${:,.2f}"
             }), use_container_width=True, hide_index=True)
 
-    st.stop()
+    # Shared export engine replaces module-end hard stop.
 
 # ==============================================================================
 # SHOIR-IE: ELITE DIGITAL TWIN, DES & MES CONTROL TOWER (V3.8 - FULL CRUD)
@@ -7272,7 +8835,7 @@ if selected_module in ["Digital Twin & Discrete-Event Simulation", "Digital Twin
             st.session_state.event_logs = []
             st.rerun()
 
-    st.stop()
+    # Shared export engine replaces module-end hard stop.
 
 # ==============================================================================
 # SHOIR-IE: GREEN IE, SUSTAINABILITY & CIRCULAR ECONOMY SUITE (V3.9)
@@ -7467,7 +9030,7 @@ if selected_module in ["Green IE & Sustainability", "Sustainability & Circular E
                 fig_lca.update_layout(plot_bgcolor="#0b0f19", paper_bgcolor="#0b0f19", font=dict(color="#f3f4f6"), height=290)
                 st.plotly_chart(fig_lca, use_container_width=True)
 
-    st.stop()
+    # Shared export engine replaces module-end hard stop.
 
 # ==============================================================================
 # SHOIR-IE: ENTERPRISE INTEGRATION, REPORTING & RBAC SUITE (V4.7 - MASTER)
@@ -7839,7 +9402,7 @@ if selected_module in ["Enterprise Integration & Collaboration", "Enterprise Int
                 </div>
                 """, unsafe_allow_html=True)
 
-    st.stop()
+    # Shared export engine replaces module-end hard stop.
     
 def render_data_editor(df, key_name):
     if hasattr(st, "data_editor"):
@@ -8029,115 +9592,6 @@ else:
                 st.session_state.onboarded = True
                 st.success("Sample dataset loaded successfully! Review your results below.")
 
-    # Universal workspace controls are rendered BEFORE module-specific branches so they
-    # remain visible even when a module later calls st.stop().
-    def _workspace_table_candidates(module_name):
-        explicit = {
-            "MILP Solvers": [("Customer Demands", "customers_list"), ("Candidate Warehouses", "warehouses_list")],
-            "Excel Data Cleaning & Import": [],
-        }
-        found = list(explicit.get(module_name, []))
-        seen = {k for _, k in found}
-        for k,v in list(st.session_state.items()):
-            if str(k).startswith(("_","upgrade_","copilot_")) or k in seen:
-                continue
-            if isinstance(v, pd.DataFrame) and len(v.columns) > 0:
-                found.append((str(k).replace("_"," ").title(), k))
-            elif isinstance(v, list) and v and isinstance(v[0], dict):
-                found.append((str(k).replace("_"," ").title(), k))
-        return found
-
-    def _workspace_table_to_df(key):
-        value = st.session_state.get(key)
-        if isinstance(value, pd.DataFrame):
-            return value.copy(deep=True)
-        if isinstance(value, list):
-            return pd.DataFrame(value)
-        return pd.DataFrame()
-
-    def _write_workspace_table(key, df):
-        old = st.session_state.get(key)
-        if isinstance(old, pd.DataFrame):
-            st.session_state[key] = df.copy(deep=True)
-        elif isinstance(old, list):
-            st.session_state[key] = df.where(pd.notna(df), None).to_dict("records")
-        else:
-            st.session_state[key] = df.copy(deep=True)
-
-    workspace_tables = _workspace_table_candidates(mod)
-    st.markdown("---")
-    with st.container(border=True):
-        st.subheader("📁 Workspace Data Import, Cleaning & Export")
-        st.caption("Import a CSV/XLSX into a module table, clean it, reset it, or ask Copilot what to do next.")
-        if workspace_tables:
-            table_labels = [x[0] for x in workspace_tables]
-            table_keys = [x[1] for x in workspace_tables]
-            table_selector_key = "workspace_table_selector_" + hashlib.sha1(mod.encode()).hexdigest()[:10]
-            selected_table_label = st.selectbox("Table", table_labels, key=table_selector_key)
-            selected_table_key = table_keys[table_labels.index(selected_table_label)]
-            current_df = _workspace_table_to_df(selected_table_key)
-            default_key = "_workspace_default_" + selected_table_key
-            if default_key not in st.session_state:
-                st.session_state[default_key] = current_df.copy(deep=True)
-            c_imp, c_act, c_exp = st.columns(3)
-            with c_imp:
-                upload_key = "workspace_import_" + hashlib.sha1((mod+"|"+selected_table_key).encode()).hexdigest()[:10]
-                upload = st.file_uploader("📤 Import Excel / CSV", type=["xlsx","csv"], key=upload_key)
-                if upload is not None:
-                    upload_sig = hashlib.sha256(upload.getvalue()).hexdigest()
-                    sig_key = upload_key + "_sig"
-                    if st.session_state.get(sig_key) != upload_sig:
-                        try:
-                            raw = upload.getvalue()
-                            imported = pd.read_excel(io.BytesIO(raw)) if upload.name.lower().endswith(".xlsx") else pd.read_csv(io.BytesIO(raw))
-                            if not imported.columns.size:
-                                raise ValueError("The uploaded file has no columns.")
-                            aligned = align_imported_table(imported, current_df)
-                            _write_workspace_table(selected_table_key, aligned)
-                            st.session_state[sig_key] = upload_sig
-                            st.success(f"Imported {len(aligned):,} rows.")
-                            st.rerun()
-                        except Exception as exc:
-                            st.error("Import failed: " + str(exc))
-            with c_act:
-                if st.button("✨ Auto Clean", type="primary", use_container_width=True, key="workspace_clean_"+hashlib.sha1((mod+selected_table_key).encode()).hexdigest()[:10]):
-                    cleaned, audit = clean_dataframe(_workspace_table_to_df(selected_table_key))
-                    _write_workspace_table(selected_table_key, cleaned)
-                    st.session_state["workspace_clean_audit"] = pd.DataFrame(audit)
-                    st.success("Table cleaned and professionalized.")
-                    st.rerun()
-                if st.button("↩️ Reset Table", use_container_width=True, key="workspace_reset_"+hashlib.sha1((mod+selected_table_key).encode()).hexdigest()[:10]):
-                    _write_workspace_table(selected_table_key, st.session_state[default_key].copy(deep=True))
-                    st.rerun()
-            with c_exp:
-                export_df = _workspace_table_to_df(selected_table_key)
-                export_xlsx = build_excel_report("Shoir-IE · "+mod, [(selected_table_label, export_df)], [])
-                st.download_button("📥 Download XLSX", export_xlsx, "shoir_ie_"+re.sub(r"[^A-Za-z0-9]+","_",mod).lower()+".xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
-                if st.session_state.get("workspace_clean_audit") is not None:
-                    audit_xlsx = build_excel_report("Shoir-IE Cleaning Audit", [("Cleaned Data", export_df), ("Cleaning Audit", st.session_state["workspace_clean_audit"])], [])
-                    st.download_button("📋 Download Cleaned + Audit", audit_xlsx, "shoir_ie_cleaned_audit.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
-        else:
-            st.info("No editable table has been initialized in this module yet. Open the module's data-entry table first.")
-        st.markdown("#### 🤖 Copilot — act on the current module")
-        st.caption("Examples: “clean this table and remove duplicates”, “which module should I use for demand forecasting?”, “optimize the network”.")
-        copilot_cmd = st.text_input("Copilot command", key="workspace_copilot_command_"+hashlib.sha1(mod.encode()).hexdigest()[:10])
-        if st.button("Ask Copilot", use_container_width=True, key="workspace_copilot_button_"+hashlib.sha1(mod.encode()).hexdigest()[:10]):
-            prompt = copilot_cmd.strip()
-            if not prompt:
-                st.warning("Enter a request for Copilot first.")
-            else:
-                with st.spinner("Copilot is working..."):
-                    lower = prompt.lower()
-                    if workspace_tables and any(x in lower for x in ["clean", "trim", "deduplicate", "remove duplicates", "proper case", "uppercase", "lowercase"]):
-                        before = _workspace_table_to_df(selected_table_key)
-                        cleaned, audit = clean_dataframe(before)
-                        _write_workspace_table(selected_table_key, cleaned)
-                        st.session_state["workspace_clean_audit"] = pd.DataFrame(audit)
-                        st.success("Copilot cleaned the selected table. Review it below and download the XLSX when ready.")
-                        st.dataframe(cleaned.head(25), use_container_width=True)
-                    else:
-                        reply = get_copilot_response(prompt, [{"role":"user","content":prompt}])
-                        st.markdown(reply)
     mod = selected_module
     
     if mod == "Subscriptions":
@@ -8162,41 +9616,23 @@ else:
     elif mod == "AI Copilot":
         st.header("🤖 Natural Language AI Copilot")
         st.caption(
-            "Grounded in your real workspace data - it won't claim to have checked something it hasn't. "
-            "Upload an XLSX/CSV below to let Copilot inspect, clean and advise on the workbook."
+            "Upload an Excel/CSV file to let Copilot clean and transform it, download the improved workbook, "
+            "or ask which module matches your desired result."
         )
 
-        copilot_file = st.file_uploader("📎 Upload Excel / CSV to Copilot", type=["xlsx", "csv"], key="copilot_excel_upload")
-        if copilot_file is not None:
-            try:
-                copilot_df = pd.read_csv(copilot_file) if copilot_file.name.lower().endswith(".csv") else pd.read_excel(copilot_file)
-                st.session_state["copilot_workbook_df"] = copilot_df
-                st.success(f"Loaded **{len(copilot_df):,} rows × {len(copilot_df.columns):,} columns**.")
-                st.dataframe(copilot_df.head(25), use_container_width=True)
-                c1, c2 = st.columns(2)
-                with c1:
-                    if st.button("✨ Auto Clean Workbook", type="primary", use_container_width=True, key="copilot_auto_clean"):
-                        from shoir_upgrade import clean_dataframe
-                        cleaned, audit = clean_dataframe(copilot_df)
-                        st.session_state["copilot_cleaned_df"] = cleaned
-                        st.session_state["copilot_clean_audit"] = pd.DataFrame(audit)
-                        st.success("Workbook cleaned and professionalized.")
-                with c2:
-                    if st.session_state.get("copilot_cleaned_df") is not None:
-                        from shoir_upgrade import build_excel_report
-                        xlsx = build_excel_report("Shoir-IE Copilot Cleaned Workbook", [("Cleaned Data", st.session_state["copilot_cleaned_df"]), ("Cleaning Audit", st.session_state["copilot_clean_audit"])], [])
-                        st.download_button("📥 Download Cleaned XLSX", xlsx, "shoir_ie_copilot_cleaned.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
-                if st.session_state.get("copilot_cleaned_df") is not None:
-                    st.dataframe(st.session_state["copilot_cleaned_df"].head(25), use_container_width=True)
-                    st.caption("You can now ask Copilot what to improve or which module should handle this data.")
-            except Exception as exc:
-                st.error(f"Could not read the workbook: {exc}")
+        render_excel_cleaner(
+            state_prefix="copilot",
+            title="📎 Copilot Excel File Workbench",
+            standalone=False,
+        )
 
         for msg in st.session_state.copilot_messages:
             with st.chat_message(msg["role"]):
                 st.markdown(msg["content"])
 
-        if prompt := st.chat_input("Ask Copilot (e.g., 'optimize the network', 'check safety stocks', 'what can you do')"):
+        if prompt := st.chat_input(
+            "Ask Copilot: 'auto clean my workbook', 'proper case Employee Name', 'remove duplicates from Email', or 'which module should I use for safety stock?'"
+        ):
             st.session_state.copilot_messages.append({"role": "user", "content": prompt})
             with st.chat_message("user"):
                 st.markdown(prompt)
@@ -8205,6 +9641,11 @@ else:
                     reply = get_copilot_response(prompt, st.session_state.copilot_messages)
                 st.markdown(reply)
             st.session_state.copilot_messages.append({"role": "assistant", "content": reply})
+
+        if st.session_state.get("copilot_last_action"):
+            st.markdown("---")
+            st.success(st.session_state["copilot_last_action"])
+            _render_excel_download_button("copilot")
 
     # =========================================================
 # CARBON ACCOUNTING & NET-ZERO STUDIO (Astonishing & Stunning)
@@ -9075,85 +10516,104 @@ elif mod == "Fleet Routing":
     # =====================================================================
 
 if mod == "Monte Carlo Sim":
-    st.header("🎲 Stochastic Monte Carlo Demand & Lead-Time Simulation")
-    st.markdown("Simulate thousands of demand scenarios with probabilistic modeling to stress-test safety stock thresholds against supply chain variability.")
+    st.header("🎲 Stochastic & Monte Carlo Supply Chain Risk Model")
+    st.markdown("Simulate demand spikes, lead-time variance, supplier disruptions, and recovery delays so deterministic optimization results can be stress-tested under uncertainty.")
 
-    # Input controls organized cleanly in styled columns
-    col_mc1, col_mc2 = st.columns(2)
+    col_mc1, col_mc2, col_mc3 = st.columns(3)
     with col_mc1:
-        trials = st.slider("Number of Simulation Trials", 500, 10000, 2000, 500, key="mc_trials_slider")
+        trials = st.slider("Simulation Trials", 500, 20000, 5000, 500, key="mc_trials_slider")
         mean_demand = st.number_input("Mean Daily Demand", value=150.0, step=5.0, key="mc_mean_demand")
+        std_demand = st.number_input("Demand Standard Deviation", min_value=0.0, value=25.0, step=1.0, key="mc_std_demand")
     with col_mc2:
-        std_demand = st.number_input("Demand Standard Deviation", value=25.0, step=1.0, key="mc_std_demand")
-        lead_time_days = st.number_input("Average Lead Time (Days)", value=4.0, step=0.5, key="mc_lead_time")
+        lead_time_days = st.number_input("Average Lead Time (Days)", min_value=1.0, value=4.0, step=0.5, key="mc_lead_time")
+        lead_time_std = st.number_input("Lead-Time Std Dev (Days)", min_value=0.0, value=1.0, step=0.25, key="mc_lead_std")
+        disruption_prob = st.slider("Supplier Disruption Probability (%)", 0, 50, 8, key="mc_disruption_prob") / 100
+    with col_mc3:
+        spike_prob = st.slider("Demand Spike Probability (%)", 0, 50, 10, key="mc_spike_prob") / 100
+        spike_multiplier = st.slider("Demand Spike Multiplier (%)", 100, 300, 150, 5, key="mc_spike_multiplier") / 100
+        recovery_days = st.number_input("Disruption Recovery Extension (Days)", min_value=0.0, value=3.0, step=0.5, key="mc_recovery_days")
 
-    # Run Simulation Action
-    if st.button("Run Monte Carlo Simulation", type="primary", key="run_monte_carlo_btn"):
-        # Safely execute audit logging if available in globals and session state
-        if "log_audit" in globals() and "current_user" in st.session_state:
-            try:
-                log_audit(st.session_state.current_user, "Executed Monte Carlo Simulation")
-            except Exception:
-                pass
+    default_seed = st.number_input("Random Seed", min_value=0, max_value=999999, value=42, step=1, key="mc_seed")
+    safety_buffer = st.slider("Safety Buffer Target (Days of Demand)", 0.0, 30.0, 8.0, 0.5, key="mc_safety_buffer")
 
-        with st.spinner("Running Monte Carlo stochastic trials & computing probability distributions..."):
-            # Run simulation
-            simulated_demands = np.random.normal(mean_demand, std_demand, trials) * lead_time_days
-            simulated_demands = np.clip(simulated_demands, 0, None)
+    c_run, c_reset, c_clear = st.columns(3)
+    with c_run:
+        run_mc = st.button("🚀 Run Stochastic Simulation", type="primary", use_container_width=True, key="run_monte_carlo_btn")
+    with c_reset:
+        reset_mc = st.button("↩️ Reset Monte Carlo", use_container_width=True, key="reset_mc_btn")
+    with c_clear:
+        clear_mc = st.button("🧹 Clear Results", use_container_width=True, key="clear_mc_btn")
 
-            # Calculate statistical parameters
-            p95 = np.percentile(simulated_demands, 95)
-            p99 = np.percentile(simulated_demands, 99)
-            mean_val = np.mean(simulated_demands)
-            std_val = np.std(simulated_demands)
+    if reset_mc:
+        for key in ["mc_results_df", "mc_distribution", "mc_risk_summary"]:
+            st.session_state.pop(key, None)
+        st.rerun()
+    if clear_mc:
+        for key in ["mc_results_df", "mc_distribution", "mc_risk_summary"]:
+            st.session_state.pop(key, None)
+        st.success("Monte Carlo results cleared.")
 
-        st.success(f"Successfully executed {trials:,} stochastic trial scenarios!")
+    if run_mc:
+        rng = np.random.default_rng(int(default_seed))
+        demand = rng.normal(mean_demand, std_demand, trials).clip(0, None)
+        spikes = rng.random(trials) < spike_prob
+        demand = np.where(spikes, demand * spike_multiplier, demand)
+        lead_times = rng.normal(lead_time_days, lead_time_std, trials).clip(1, None)
+        disruptions = rng.random(trials) < disruption_prob
+        lead_times = np.where(disruptions, lead_times + recovery_days, lead_times)
+        lead_time_demand = demand * lead_times
+        baseline_buffer = mean_demand * max(safety_buffer, 0)
+        p50 = float(np.percentile(lead_time_demand, 50))
+        p90 = float(np.percentile(lead_time_demand, 90))
+        p95 = float(np.percentile(lead_time_demand, 95))
+        p99 = float(np.percentile(lead_time_demand, 99))
+        stockout_probability = float(np.mean(lead_time_demand > baseline_buffer)) if baseline_buffer > 0 else 1.0
+        disruption_rate = float(np.mean(disruptions))
+        spike_rate = float(np.mean(spikes))
+        risk_df = pd.DataFrame({
+            "Trial": np.arange(1, trials + 1),
+            "Daily Demand": demand,
+            "Lead Time (Days)": lead_times,
+            "Supplier Disruption": disruptions,
+            "Demand Spike": spikes,
+            "Lead-Time Demand": lead_time_demand,
+        })
+        summary_df = pd.DataFrame([{
+            "Trials": trials,
+            "Mean Lead-Time Demand": float(np.mean(lead_time_demand)),
+            "Std Lead-Time Demand": float(np.std(lead_time_demand)),
+            "P50": p50,
+            "P90": p90,
+            "P95": p95,
+            "P99": p99,
+            "Stockout Probability vs Buffer": stockout_probability,
+            "Observed Disruption Rate": disruption_rate,
+            "Observed Spike Rate": spike_rate,
+        }])
+        st.session_state.mc_results_df = risk_df
+        st.session_state.mc_risk_summary = summary_df
+        record_usage_event(st.session_state.current_user, "Monte Carlo Sim", "simulation_run", {"trials": trials, "disruption_prob": disruption_prob, "spike_prob": spike_prob, "lead_time_std": lead_time_std})
+        st.success(f"Completed {trials:,} stochastic scenarios with demand spikes and supply-disruption uncertainty.")
 
-        # Visual Executive Metrics Cards
-        m_col1, m_col2, m_col3, m_col4 = st.columns(4)
-        m_col1.metric("Expected Total Demand", f"{mean_val:.1f} units", delta="Mean Baseline")
-        m_col2.metric("Demand Variability (Std)", f"±{std_val:.1f} units", delta="Volatility")
-        m_col3.metric("95th Percentile (Safety)", f"{p95:.1f} units", delta="Recommended Stock", delta_color="inverse")
-        m_col4.metric("99th Percentile (Risk)", f"{p99:.1f} units", delta="Extreme Tail Buffer", delta_color="inverse")
-
-        st.markdown("---")
-
-        # Stunning Plotly Histogram with Marginal Box and Threshold Lines
-        fig_mc = px.histogram(
-            x=simulated_demands,
-            nbins=60,
-            marginal="box", 
-            color_discrete_sequence=["#1f77b4"],
-            title=f"<b>Lead-Time Demand Probability Distribution ({trials:,} Scenarios)</b>",
-            labels={"x": "Total Demand over Lead Time (Units)", "y": "Frequency Count"}
-        )
-
-        # Add visual reference lines for key risk thresholds
-        fig_mc.add_vline(x=p95, line_dash="dash", line_color="#ff7f0e", annotation_text=f"95th Pct: {p95:.1f}", annotation_position="top right")
-        fig_mc.add_vline(x=p99, line_dash="dash", line_color="#d62728", annotation_text=f"99th Pct: {p99:.1f}", annotation_position="top left")
-        fig_mc.add_vline(x=mean_val, line_dash="solid", line_color="#2ca02c", annotation_text=f"Mean: {mean_val:.1f}", annotation_position="top")
-
-        fig_mc.update_layout(
-            template="plotly_white",
-            plot_bgcolor="rgba(0,0,0,0)",
-            paper_bgcolor="rgba(0,0,0,0)",
-            font=dict(family="sans-serif", size=12),
-            margin=dict(t=50, b=30, l=40, r=40),
-            hovermode="x unified"
-        )
-
+    if "mc_results_df" in st.session_state:
+        risk_df = st.session_state.mc_results_df
+        summary_df = st.session_state.mc_risk_summary
+        row = summary_df.iloc[0]
+        m1, m2, m3, m4, m5 = st.columns(5)
+        m1.metric("Expected Lead-Time Demand", f"{row['Mean Lead-Time Demand']:.1f}")
+        m2.metric("95th Percentile", f"{row['P95']:.1f}")
+        m3.metric("99th Percentile", f"{row['P99']:.1f}")
+        m4.metric("Stockout Probability", f"{row['Stockout Probability vs Buffer']*100:.1f}%")
+        m5.metric("Observed Disruption Rate", f"{row['Observed Disruption Rate']*100:.1f}%")
+        fig_mc = px.histogram(risk_df, x="Lead-Time Demand", nbins=70, color="Supplier Disruption", title=f"Stochastic Lead-Time Demand Distribution ({trials:,} Trials)")
+        fig_mc.add_vline(x=row["P95"], line_dash="dash", annotation_text=f"P95 {row['P95']:.1f}")
+        fig_mc.add_vline(x=row["P99"], line_dash="dot", annotation_text=f"P99 {row['P99']:.1f}")
+        fig_mc.add_vline(x=baseline_buffer, line_dash="solid", annotation_text=f"Buffer {baseline_buffer:.1f}")
         st.plotly_chart(fig_mc, use_container_width=True)
-
-        # Download option for the simulation dataset
-        sim_df = pd.DataFrame({"Simulated_Demand_Units": simulated_demands})
-        csv_data = sim_df.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            label="📥 Download Full Monte Carlo Simulation Dataset (CSV)",
-            data=csv_data,
-            file_name="monte_carlo_demand_simulation.csv",
-            mime="text/csv",
-            key="download_mc_csv_btn"
-        )
+        scenario_df = risk_df.groupby("Supplier Disruption")["Lead-Time Demand"].agg(["mean", "max"]).reset_index()
+        scenario_df["Supplier Disruption"] = scenario_df["Supplier Disruption"].map({False: "Normal", True: "Disrupted"})
+        st.dataframe(summary_df, use_container_width=True, hide_index=True)
+        st.dataframe(scenario_df, use_container_width=True, hide_index=True)
 
 # =========================================================
 # INTERACTIVE WAREHOUSE HEATMAP & PICK-PATH GRID (Fixed & Enhanced)
@@ -9801,10 +11261,12 @@ elif mod == "Persistence":
     with p_tab1:
         st.subheader("📊 SQLite Database Architecture & Performance Metrics")
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Database Engine", "SQLite v3.42", delta="Embedded / Fast")
-        c2.metric("Storage Size", "4.2 MB", delta="Optimal Limit")
-        c3.metric("Active Tables", "8 Tables", delta="Fully Indexed")
-        c4.metric("Connection Pool", "Healthy (0.4ms)", delta="Low Latency")
+        db_counts = database_table_counts(DB_PATH)
+        db_size_mb = (os.path.getsize(DB_PATH) / (1024 * 1024)) if os.path.exists(DB_PATH) else 0.0
+        c1.metric("Database Engine", sqlite3.sqlite_version, delta="Embedded / Fast")
+        c2.metric("Storage Size", f"{db_size_mb:.2f} MB", delta=f"{sum(v or 0 for v in db_counts.values()):,} rows")
+        c3.metric("Active Tables", f"{len(db_counts)} Tables", delta="Schema Checked")
+        c4.metric("Tracked Usage Events", f"{db_counts.get('module_usage_events', 0):,}", delta="Persisted")
 
         st.markdown("---")
         st.markdown("##### **Quick Table Inspector & Live Data View**")
@@ -10044,12 +11506,8 @@ if mod == "Admin Panel":
         except sqlite3.OperationalError:
             pass
         
-        # Robust migration check for license_codes: Drop and recreate cleanly if 'id' column is missing
-        cursor.execute("PRAGMA table_info(license_codes);")
-        columns = [col[1] for col in cursor.fetchall()]
-        if columns and 'id' not in columns:
-            cursor.execute("DROP TABLE license_codes;")
-            conn.commit()
+        # Robust migration check for license_codes: migrate in-place without deleting codes.
+        _ensure_license_codes_schema(cursor)
 
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS license_codes (
@@ -10281,6 +11739,11 @@ if mod == "Admin Panel":
         conn.close()
         st.dataframe(codes_df, use_container_width=True)
 
+        st.markdown("---")
+        render_owner_usage_analytics()
+        st.markdown("---")
+        render_system_integrity_panel()
+
 # FIX: this whole "Enterprise Copilot AI Assistant" block used to sit here
 # unindented, meaning it rendered a full second chat widget underneath
 # EVERY module for EVERY signed-in user - including Starter tier accounts,
@@ -10428,9 +11891,534 @@ if mod == "Cryptographic Ledger":
             st.info("Redirecting to secure subscription portal...")
 
 
-# Platform upgrade modules and universal module report/export surface.
-try:
-    render_module_upgrade(selected_module)
-    render_module_report_panel(selected_module)
-except Exception as _upgrade_exc:
-    st.error(f"Platform upgrade component error: {_upgrade_exc}")
+# =====================================================================
+# NEW ENTERPRISE / PRO MODULES - PRODUCTIZED UPGRADES
+# =====================================================================
+if mod == "Advanced ML Demand Forecasting":
+    st.header("📈 Advanced ML Demand Forecasting")
+    st.markdown("Forecast SKU-level demand using historical demand plus optional promotion, weather, macroeconomic, and seasonality signals. External-variable columns remain explicit so the model never invents live data.")
+    if "ml_forecast_source" not in st.session_state:
+        periods = pd.date_range(end=pd.Timestamp.today().normalize(), periods=40, freq="W")
+        rows = []
+        for sku, phase, base in [("SKU-A001", 0.0, 250), ("SKU-B204", 0.8, 180), ("SKU-C992", 1.5, 120)]:
+            for i, dt in enumerate(periods):
+                season = 1 + 0.14 * np.sin((i + phase) / 6.0)
+                promo = 1.12 if i in {10, 22, 34} else 1.0
+                weather = 0.98 + 0.02 * np.cos(i / 4.0 + phase)
+                macro = 1.0 + 0.03 * np.sin(i / 11.0)
+                demand = base * season * promo * weather * macro + np.random.default_rng(42 + i).normal(0, base * 0.03)
+                rows.append({"Date": dt, "SKU": sku, "Demand": max(0, round(demand, 1)), "Promotion": int(promo > 1), "WeatherIndex": round(weather, 3), "MacroIndex": round(macro, 3)})
+        st.session_state.ml_forecast_source = pd.DataFrame(rows)
+    col1, col2 = st.columns(2)
+    with col1:
+        uploaded_ml = st.file_uploader("Upload historical demand CSV/XLSX", type=["csv", "xlsx"], key="ml_forecast_upload")
+        if uploaded_ml is not None and st.button("📥 Load Forecast Dataset", use_container_width=True, key="ml_load_dataset"):
+            try:
+                loaded, _ = load_workbook_from_upload(uploaded_ml)
+                st.session_state.ml_forecast_source = next(iter(loaded.values())).copy()
+                st.success("Forecast dataset loaded. Review the detected columns below.")
+            except Exception as exc:
+                st.error(f"Could not load the forecast dataset: {exc}")
+        model_name = st.selectbox("Model", ["Random Forest", "Gradient Boosting", "Linear Regression", "Seasonal Naive"], key="ml_model_name")
+        horizon = st.slider("Forecast Horizon (Weeks)", 4, 26, 8, key="ml_horizon")
+    with col2:
+        st.markdown("#### External-variable scenario controls")
+        promo_factor = st.slider("Promotion Scenario (%)", 70, 150, 100, key="ml_promo_factor") / 100
+        weather_factor = st.slider("Weather Scenario (%)", 80, 120, 100, key="ml_weather_factor") / 100
+        macro_factor = st.slider("Macro Scenario (%)", 80, 120, 100, key="ml_macro_factor") / 100
+        st.caption("The scenario factors apply to the latest known external-variable values when projecting forward.")
+
+    df = st.session_state.ml_forecast_source.copy()
+    st.dataframe(df.head(20), use_container_width=True, hide_index=True)
+    if st.button("🚀 Train & Forecast", type="primary", use_container_width=True, key="ml_run_forecast"):
+        try:
+            cols_lower = {str(c).strip().lower(): c for c in df.columns}
+            date_col = cols_lower.get("date") or cols_lower.get("timestamp") or cols_lower.get("week")
+            sku_col = cols_lower.get("sku") or cols_lower.get("item") or cols_lower.get("product")
+            demand_col = cols_lower.get("demand") or cols_lower.get("quantity") or cols_lower.get("units")
+            if not all([date_col, sku_col, demand_col]):
+                raise ValueError("Dataset must contain Date, SKU, and Demand columns (or close equivalents).")
+            work = df.rename(columns={date_col: "Date", sku_col: "SKU", demand_col: "Demand"}).copy()
+            work["Date"] = pd.to_datetime(work["Date"], errors="coerce")
+            work["Demand"] = pd.to_numeric(work["Demand"], errors="coerce")
+            work = work.dropna(subset=["Date", "SKU", "Demand"]).sort_values(["SKU", "Date"])
+            optional_cols = [c for c in work.columns if c not in {"Date", "SKU", "Demand"}]
+            for c in optional_cols:
+                work[c] = pd.to_numeric(work[c], errors="coerce")
+            feature_cols = [c for c in optional_cols if work[c].notna().sum() >= max(8, int(len(work) * 0.25))]
+            if not feature_cols:
+                feature_cols = []
+            from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
+            from sklearn.linear_model import LinearRegression
+            results = []
+            validation_errors = []
+            rng = np.random.default_rng(123)
+            for sku, g in work.groupby("SKU"):
+                g = g.sort_values("Date").copy()
+                g["Lag1"] = g["Demand"].shift(1)
+                g["Lag2"] = g["Demand"].shift(2)
+                g["Rolling3"] = g["Demand"].rolling(3).mean()
+                g["Week"] = g["Date"].dt.isocalendar().week.astype(int)
+                g["WeekSin"] = np.sin(2 * np.pi * g["Week"] / 52)
+                g["WeekCos"] = np.cos(2 * np.pi * g["Week"] / 52)
+                feature_set = ["Lag1", "Lag2", "Rolling3", "WeekSin", "WeekCos"] + feature_cols
+                train = g.dropna(subset=feature_set + ["Demand"]).copy()
+                if len(train) < 12 or model_name == "Seasonal Naive":
+                    for step in range(1, horizon + 1):
+                        history = list(g["Demand"].tail(8).astype(float))
+                        pred = float(np.mean(history[-min(4, len(history)):])) if history else 0.0
+                        next_date = g["Date"].max() + pd.Timedelta(weeks=step)
+                        results.append({"Date": next_date, "SKU": sku, "Forecast": max(0.0, pred), "Model": "Seasonal Naive"})
+                    validation_errors.append({"SKU": sku, "Validation MAE": np.nan})
+                    continue
+                X = train[feature_set].fillna(train[feature_set].median())
+                y = train["Demand"]
+                split = max(8, int(len(train) * 0.8))
+                if len(train) - split >= 2:
+                    X_tr, X_va = X.iloc[:split], X.iloc[split:]
+                    y_tr, y_va = y.iloc[:split], y.iloc[split:]
+                    if model_name == "Random Forest":
+                        validator = RandomForestRegressor(n_estimators=180, random_state=42)
+                    elif model_name == "Gradient Boosting":
+                        validator = GradientBoostingRegressor(random_state=42)
+                    else:
+                        validator = LinearRegression()
+                    validator.fit(X_tr, y_tr)
+                    pred_va = validator.predict(X_va)
+                    validation_errors.append({"SKU": sku, "Validation MAE": float(np.mean(np.abs(pred_va - y_va)))})
+                if model_name == "Random Forest":
+                    model = RandomForestRegressor(n_estimators=220, random_state=42)
+                elif model_name == "Gradient Boosting":
+                    model = GradientBoostingRegressor(random_state=42)
+                else:
+                    model = LinearRegression()
+                model.fit(X, y)
+                history = g.copy()
+                for step in range(1, horizon + 1):
+                    next_date = history["Date"].max() + pd.Timedelta(weeks=1)
+                    lag1 = float(history["Demand"].iloc[-1])
+                    lag2 = float(history["Demand"].iloc[-2])
+                    rolling = float(history["Demand"].tail(3).mean())
+                    feature_row = {"Lag1": lag1, "Lag2": lag2, "Rolling3": rolling, "WeekSin": np.sin(2 * np.pi * int(next_date.isocalendar().week) / 52), "WeekCos": np.cos(2 * np.pi * int(next_date.isocalendar().week) / 52)}
+                    for c in feature_cols:
+                        base = float(history[c].dropna().iloc[-1]) if history[c].notna().any() else 0.0
+                        factor = promo_factor if "promo" in c.lower() else weather_factor if "weather" in c.lower() else macro_factor if "macro" in c.lower() else 1.0
+                        feature_row[c] = base * factor
+                    x_next = pd.DataFrame([feature_row])[feature_set]
+                    x_next = x_next.fillna(X.median())
+                    pred = float(model.predict(x_next)[0])
+                    results.append({"Date": next_date, "SKU": sku, "Forecast": max(0.0, pred), "Model": model_name})
+                    new_row = {"Date": next_date, "SKU": sku, "Demand": pred, **{c: feature_row.get(c, np.nan) for c in optional_cols}}
+                    history = pd.concat([history, pd.DataFrame([new_row])], ignore_index=True)
+            forecast_df = pd.DataFrame(results)
+            validation_df = pd.DataFrame(validation_errors)
+            st.session_state.ml_forecast_results = forecast_df
+            st.session_state.ml_validation = validation_df
+            record_usage_event(st.session_state.get("current_user", "Unknown"), "Advanced ML Demand Forecasting", "model_run", {"model": model_name, "horizon_weeks": horizon})
+            st.success(f"Forecast completed for {forecast_df['SKU'].nunique()} SKU(s) over {horizon} weeks.")
+        except Exception as exc:
+            st.error(f"Forecasting failed: {exc}")
+
+    if "ml_forecast_results" in st.session_state and not st.session_state.ml_forecast_results.empty:
+        fdf = st.session_state.ml_forecast_results
+        hist_plot = df.copy()
+        date_col = next((c for c in hist_plot.columns if str(c).lower() in {"date", "timestamp", "week"}), None)
+        sku_col = next((c for c in hist_plot.columns if str(c).lower() in {"sku", "item", "product"}), None)
+        demand_col = next((c for c in hist_plot.columns if str(c).lower() in {"demand", "quantity", "units"}), None)
+        if date_col and sku_col and demand_col:
+            hist_plot["Date"] = pd.to_datetime(hist_plot[date_col], errors="coerce")
+            hist_plot["Demand"] = pd.to_numeric(hist_plot[demand_col], errors="coerce")
+            hist_plot["SKU"] = hist_plot[sku_col].astype(str)
+            plot_hist = hist_plot[["Date", "SKU", "Demand"]].dropna()
+            plot_fc = fdf.rename(columns={"Forecast": "Demand"})[["Date", "SKU", "Demand"]]
+            plot_all = pd.concat([plot_hist.assign(Series="Historical"), plot_fc.assign(Series="Forecast")], ignore_index=True)
+            fig = px.line(plot_all, x="Date", y="Demand", color="SKU", line_dash="Series", title="Historical Demand + ML Forecast")
+            st.plotly_chart(fig, use_container_width=True)
+        st.dataframe(fdf, use_container_width=True, hide_index=True)
+        if not st.session_state.get("ml_validation", pd.DataFrame()).empty:
+            st.dataframe(st.session_state.ml_validation, use_container_width=True, hide_index=True)
+    if st.button("🧹 Reset Forecast Workspace", use_container_width=True, key="ml_reset"):
+        for key in ["ml_forecast_source", "ml_forecast_results", "ml_validation"]:
+            st.session_state.pop(key, None)
+        st.rerun()
+
+if mod == "Scenario Versioning & Comparison":
+    st.header("🧩 Scenario Versioning & Side-by-Side Comparison")
+    st.markdown("Save named parameter versions, preserve their exact inputs in SQLite, and compare two versions without overwriting the baseline.")
+    with st.form("scenario_version_form"):
+        name = st.text_input("Scenario Name", value="Baseline Q3 Logistics")
+        params = {
+            "Cost Efficiency": st.slider("Cost Efficiency Target (%)", 50, 100, 88, key="sv_cost"),
+            "Carbon Reduction": st.slider("Carbon Reduction Target (%)", 50, 100, 79, key="sv_carbon"),
+            "Risk Mitigation": st.slider("Risk Mitigation (%)", 50, 100, 73, key="sv_risk"),
+            "Service Level": st.slider("Service Level Target (%)", 50, 100, 94, key="sv_service"),
+            "Lead Time Optimization": st.slider("Lead Time Optimization (%)", 50, 100, 91, key="sv_lead"),
+        }
+        submitted = st.form_submit_button("💾 Save Scenario Version", type="primary", use_container_width=True)
+    if submitted:
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute("INSERT INTO scenario_versions (username, scenario_name, parameters_json, created_at) VALUES (?, ?, ?, ?)", (st.session_state.current_user, name.strip() or "Untitled Scenario", json.dumps(params), _db_now()))
+            conn.commit()
+        record_usage_event(st.session_state.current_user, "Scenario Versioning & Comparison", "scenario_saved", {"name": name})
+        st.success(f"Saved version **{name}**.")
+    with sqlite3.connect(DB_PATH) as conn:
+        versions = pd.read_sql_query("SELECT id, scenario_name, created_at, parameters_json FROM scenario_versions WHERE username = ? ORDER BY id DESC", conn, params=(st.session_state.current_user,))
+    if not versions.empty:
+        versions["created_at"] = pd.to_datetime(versions["created_at"], errors="coerce")
+        st.dataframe(versions[["id", "scenario_name", "created_at"]], use_container_width=True, hide_index=True)
+        choices = versions["id"].astype(int).tolist()
+        c1, c2 = st.columns(2)
+        with c1:
+            left_id = st.selectbox("Left Scenario", choices, format_func=lambda x: str(versions.loc[versions["id"] == x, "scenario_name"].iloc[0]), key="sv_left")
+        with c2:
+            right_id = st.selectbox("Right Scenario", choices, index=min(1, len(choices)-1), format_func=lambda x: str(versions.loc[versions["id"] == x, "scenario_name"].iloc[0]), key="sv_right")
+        left = json.loads(versions.loc[versions["id"] == left_id, "parameters_json"].iloc[0])
+        right = json.loads(versions.loc[versions["id"] == right_id, "parameters_json"].iloc[0])
+        compare = pd.DataFrame({"Metric": list(left.keys()), "Scenario A": list(left.values()), "Scenario B": [right.get(k, np.nan) for k in left.keys()]})
+        compare["Delta (B-A)"] = compare["Scenario B"] - compare["Scenario A"]
+        st.dataframe(compare, use_container_width=True, hide_index=True)
+        fig = px.bar(compare, x="Metric", y=["Scenario A", "Scenario B"], barmode="group", title="Side-by-Side Scenario Version Comparison")
+        st.plotly_chart(fig, use_container_width=True)
+        if st.button("🗑️ Delete Selected Scenario Version", use_container_width=True, key="sv_delete"):
+            with sqlite3.connect(DB_PATH) as conn:
+                conn.execute("DELETE FROM scenario_versions WHERE id = ? AND username = ?", (left_id, st.session_state.current_user))
+                conn.commit()
+            st.rerun()
+    if st.button("↩️ Reset Scenario Form", use_container_width=True, key="sv_reset"):
+        for key in ["sv_cost", "sv_carbon", "sv_risk", "sv_service", "sv_lead"]:
+            st.session_state.pop(key, None)
+        st.rerun()
+
+if mod == "ERP & WMS API Connectors":
+    st.header("🔌 ERP & WMS API Connectors")
+    st.markdown("Configure repeatable REST/OData-style connections for SAP, Oracle, WMS, or custom systems. Demo mode is available without credentials; real sync uses your endpoint and authentication settings.")
+    provider_defaults = {
+        "SAP S/4HANA": {"base_url": "https://example.sap.local", "endpoint": "/sap/opu/odata/sap/API_BUSINESS_PARTNER"},
+        "Oracle Fusion": {"base_url": "https://example.oracle.local", "endpoint": "/fscmRestApi/resources/11.13.18.05/inventoryOrganizations"},
+        "Enterprise WMS": {"base_url": "https://example-wms.local", "endpoint": "/api/v1/inventory"},
+        "Custom REST": {"base_url": "https://api.example.com", "endpoint": "/api/v1/data"},
+    }
+    provider = st.selectbox("Connector Type", list(provider_defaults), key="erp_provider")
+    d = provider_defaults[provider]
+    c1, c2 = st.columns(2)
+    with c1:
+        base_url = st.text_input("Base URL", value=d["base_url"], key="erp_base_url")
+        endpoint = st.text_input("Endpoint", value=d["endpoint"], key="erp_endpoint")
+        method = st.selectbox("Method", ["GET", "POST"], key="erp_method")
+    with c2:
+        auth_mode = st.selectbox("Authentication", ["None", "Bearer Token", "API Key"], key="erp_auth_mode")
+        auth_secret = st.text_input("Credential", type="password", key="erp_auth_secret")
+        demo_mode = st.checkbox("Use safe demo payload (no external request)", value=True, key="erp_demo_mode")
+    mapping_text = st.text_area("Field Mapping JSON", value=json.dumps({"material": "SKU", "quantity": "Demand", "location": "Warehouse"}, indent=2), key="erp_mapping")
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        save_connector = st.button("💾 Save Connector", type="primary", use_container_width=True, key="erp_save")
+    with c2:
+        test_connector = st.button("🧪 Test Connection", use_container_width=True, key="erp_test")
+    with c3:
+        sync_connector = st.button("🔄 Sync Data", use_container_width=True, key="erp_sync")
+    if save_connector:
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute("INSERT INTO integration_connectors (username, provider, base_url, endpoint, auth_mode, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)", (st.session_state.current_user, provider, base_url.strip(), endpoint.strip(), auth_mode, _db_now(), _db_now()))
+            conn.commit()
+        st.success("Connector configuration saved.")
+    if test_connector or sync_connector:
+        try:
+            payload = None
+            status = "Demo"
+            if demo_mode:
+                payload = {"items": [{"SKU": "SKU-A001", "Demand": 120, "Warehouse": "WH Alpha"}, {"SKU": "SKU-B204", "Demand": 95, "Warehouse": "WH Beta"}, {"SKU": "SKU-C992", "Demand": 60, "Warehouse": "WH Gamma"}]}
+            else:
+                import requests
+                headers = {}
+                if auth_mode == "Bearer Token" and auth_secret:
+                    headers["Authorization"] = f"Bearer {auth_secret}"
+                elif auth_mode == "API Key" and auth_secret:
+                    headers["X-API-Key"] = auth_secret
+                url = base_url.rstrip("/") + "/" + endpoint.lstrip("/")
+                response = requests.request(method, url, headers=headers, timeout=12)
+                response.raise_for_status()
+                payload = response.json()
+                status = f"HTTP {response.status_code}"
+            if test_connector:
+                st.success(f"Connector test completed: **{status}**")
+            if sync_connector:
+                if isinstance(payload, dict) and isinstance(payload.get("items"), list):
+                    data_items = payload["items"]
+                elif isinstance(payload, list):
+                    data_items = payload
+                else:
+                    data_items = [payload]
+                synced_df = pd.json_normalize(data_items)
+                st.session_state.erp_synced_df = synced_df
+                with sqlite3.connect(DB_PATH) as conn:
+                    conn.execute("INSERT INTO integration_sync_log (connector_id, username, status, row_count, payload_json, timestamp) VALUES (?, ?, ?, ?, ?, ?)", (None, st.session_state.current_user, status, len(synced_df), json.dumps(payload, default=str), _db_now()))
+                    conn.commit()
+                record_usage_event(st.session_state.current_user, "ERP & WMS API Connectors", "api_sync", {"provider": provider, "rows": len(synced_df), "status": status})
+                st.success(f"Synced **{len(synced_df):,} row(s)** from {provider}.")
+        except Exception as exc:
+            st.error(f"Connector action failed: {exc}")
+    if "erp_synced_df" in st.session_state:
+        st.dataframe(st.session_state.erp_synced_df, use_container_width=True, hide_index=True)
+    with sqlite3.connect(DB_PATH) as conn:
+        saved = pd.read_sql_query("SELECT id, provider, base_url, endpoint, auth_mode, updated_at FROM integration_connectors WHERE username = ? ORDER BY id DESC", conn, params=(st.session_state.current_user,))
+    if not saved.empty:
+        st.subheader("Saved Connector Registry")
+        st.dataframe(saved, use_container_width=True, hide_index=True)
+    if st.button("↩️ Reset Connector Workspace", use_container_width=True, key="erp_reset"):
+        for key in ["erp_synced_df"]:
+            st.session_state.pop(key, None)
+        st.rerun()
+
+if mod == "Team Workspaces & RBAC":
+    st.header("👥 Team Workspaces & Role-Based Access Control")
+    st.markdown("Create a shared workspace, grant Owner/Editor/Viewer permissions, and save project iterations with optimistic version numbers.")
+    c1, c2 = st.columns(2)
+    with c1:
+        with st.form("workspace_create_form"):
+            workspace_name = st.text_input("New Workspace Name", value="Q3 Supply Chain Command Center")
+            create_ws = st.form_submit_button("➕ Create Workspace", type="primary", use_container_width=True)
+        if create_ws:
+            with sqlite3.connect(DB_PATH) as conn:
+                cur = conn.execute("INSERT OR IGNORE INTO workspaces (name, owner_username, created_at, updated_at) VALUES (?, ?, ?, ?)", (workspace_name.strip(), st.session_state.current_user, _db_now(), _db_now()))
+                ws_id = cur.lastrowid
+                if not ws_id:
+                    ws_id = conn.execute("SELECT id FROM workspaces WHERE name = ?", (workspace_name.strip(),)).fetchone()[0]
+                conn.execute("INSERT OR IGNORE INTO workspace_members (workspace_id, username, role, created_at) VALUES (?, ?, 'Owner', ?)", (ws_id, st.session_state.current_user, _db_now()))
+                conn.commit()
+            st.success("Workspace created.")
+    with sqlite3.connect(DB_PATH) as conn:
+        ws_df = pd.read_sql_query("SELECT id, name, owner_username, created_at, updated_at FROM workspaces WHERE owner_username = ? OR id IN (SELECT workspace_id FROM workspace_members WHERE username = ?) ORDER BY updated_at DESC", conn, params=(st.session_state.current_user, st.session_state.current_user))
+    if not ws_df.empty:
+        selected_ws = st.selectbox("Active Workspace", ws_df["id"].astype(int).tolist(), format_func=lambda x: str(ws_df.loc[ws_df["id"] == x, "name"].iloc[0]), key="team_active_workspace")
+        with sqlite3.connect(DB_PATH) as conn:
+            members = pd.read_sql_query("SELECT username, role, created_at FROM workspace_members WHERE workspace_id = ? ORDER BY role, username", conn, params=(selected_ws,))
+        st.dataframe(members, use_container_width=True, hide_index=True)
+        with st.form("workspace_member_form"):
+            member_user = st.text_input("Existing Username to Add", key="team_member_user")
+            member_role = st.selectbox("Role", ["Editor", "Viewer"], key="team_member_role")
+            add_member = st.form_submit_button("👤 Add / Update Member", use_container_width=True)
+        if add_member:
+            with sqlite3.connect(DB_PATH) as conn:
+                owner = conn.execute("SELECT owner_username FROM workspaces WHERE id = ?", (selected_ws,)).fetchone()[0]
+                if owner != st.session_state.current_user:
+                    st.error("Only the workspace owner can change membership.")
+                else:
+                    exists = conn.execute("SELECT 1 FROM users WHERE username = ?", (member_user.strip(),)).fetchone()
+                    if not exists:
+                        st.error("That username does not exist yet.")
+                    else:
+                        conn.execute("INSERT INTO workspace_members (workspace_id, username, role, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(workspace_id, username) DO UPDATE SET role=excluded.role", (selected_ws, member_user.strip(), member_role, _db_now()))
+                        conn.execute("UPDATE workspaces SET updated_at = ? WHERE id = ?", (_db_now(), selected_ws))
+                        conn.commit()
+                        st.success("Workspace membership updated.")
+                        st.rerun()
+        c3, c4 = st.columns(2)
+        with c3:
+            snapshot_label = st.text_input("Iteration Label", value="Version checkpoint")
+            if st.button("💾 Save Workspace Version", type="primary", use_container_width=True, key="team_save_version"):
+                snapshot = {
+                    "warehouses": st.session_state.get("warehouses_list", []),
+                    "customers": st.session_state.get("customers_list", []),
+                    "fleet": st.session_state.get("fleet_list", []),
+                    "meio": st.session_state.get("meio_data", []),
+                    "scenario": st.session_state.get("scenarios", None),
+                }
+                with sqlite3.connect(DB_PATH) as conn:
+                    next_version = int(conn.execute("SELECT COALESCE(MAX(version_no), 0) + 1 FROM workspace_versions WHERE workspace_id = ?", (selected_ws,)).fetchone()[0])
+                    role = conn.execute("SELECT role FROM workspace_members WHERE workspace_id = ? AND username = ?", (selected_ws, st.session_state.current_user)).fetchone()
+                    if not role or role[0] not in {"Owner", "Editor"}:
+                        st.error("You need Editor or Owner access to save a version.")
+                    else:
+                        conn.execute("INSERT INTO workspace_versions (workspace_id, version_no, label, snapshot_json, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?)", (selected_ws, next_version, snapshot_label, json.dumps(snapshot, default=str), st.session_state.current_user, _db_now()))
+                        conn.execute("UPDATE workspaces SET updated_at = ? WHERE id = ?", (_db_now(), selected_ws))
+                        conn.commit()
+                        st.success(f"Saved workspace version **v{next_version}**.")
+        with c4:
+            with sqlite3.connect(DB_PATH) as conn:
+                versions = pd.read_sql_query("SELECT version_no, label, created_by, created_at FROM workspace_versions WHERE workspace_id = ? ORDER BY version_no DESC", conn, params=(selected_ws,))
+            st.dataframe(versions, use_container_width=True, hide_index=True)
+    if st.button("↩️ Reset Workspace View", use_container_width=True, key="team_reset"):
+        st.session_state.pop("team_active_workspace", None)
+        st.rerun()
+
+if mod == "Localization & Multi-Currency":
+    st.header("🌍 Localization & Multi-Currency")
+    st.markdown("Convert costs dynamically using a configurable FX rate, then maintain your own regional trade-compliance rule set. Rates are intentionally explicit rather than presented as live financial data unless refreshed from an external provider you configure.")
+    c1, c2 = st.columns(2)
+    with c1:
+        base_currency = st.selectbox("Base Currency", ["USD", "SAR", "EUR", "GBP", "AED", "JPY", "INR"], key="fx_base")
+        target_currency = st.selectbox("Reporting Currency", ["SAR", "USD", "EUR", "GBP", "AED", "JPY", "INR"], key="fx_target")
+        amount = st.number_input("Amount", min_value=0.0, value=10000.0, step=100.0, key="fx_amount")
+    with c2:
+        fx_rate = st.number_input("1 Base Currency = Target Currency", min_value=0.000001, value=3.75 if base_currency == "USD" and target_currency == "SAR" else 1.0, step=0.0001, format="%.6f", key="fx_rate")
+        st.metric("Converted Amount", f"{amount * fx_rate:,.2f} {target_currency}")
+        if st.button("🔄 Apply FX Conversion", type="primary", use_container_width=True, key="fx_apply"):
+            st.session_state.fx_last_result = {"Base": base_currency, "Target": target_currency, "Amount": amount, "Rate": fx_rate, "Converted": amount * fx_rate, "Timestamp": _db_now()}
+    rule_defaults = pd.DataFrame([
+        {"Region": "GCC", "Rule": "Commercial Invoice", "Threshold": 0, "Document Required": True, "Status": "Configured by owner"},
+        {"Region": "EU", "Rule": "Origin Evidence", "Threshold": 0, "Document Required": True, "Status": "Configured by owner"},
+        {"Region": "US", "Rule": "Import Record", "Threshold": 0, "Document Required": True, "Status": "Configured by owner"},
+    ])
+    if "fx_rules" not in st.session_state:
+        st.session_state.fx_rules = rule_defaults
+    edited_rules = st.data_editor(st.session_state.fx_rules, num_rows="dynamic", use_container_width=True, key="fx_rules_editor")
+    st.session_state.fx_rules = edited_rules
+    if st.button("💾 Save Trade Rules", use_container_width=True, key="fx_save_rules"):
+        st.session_state.fx_rules_saved_at = _db_now()
+        st.success("Your configurable trade-compliance rules were saved for this workspace.")
+    if st.session_state.get("fx_last_result"):
+        st.dataframe(pd.DataFrame([st.session_state.fx_last_result]), use_container_width=True, hide_index=True)
+    if st.button("↩️ Reset Localization Workspace", use_container_width=True, key="fx_reset"):
+        for key in ["fx_last_result", "fx_rules_saved_at"]:
+            st.session_state.pop(key, None)
+        st.rerun()
+
+if mod == "Interactive DES Canvas":
+    st.header("🏭 Interactive Discrete-Event Simulation Canvas")
+    st.markdown("Build a visual process model for queues, machines, buffers, and operator stations. Positions are editable on the canvas data grid; the simulation uses those exact node parameters.")
+    if "des_canvas_nodes" not in st.session_state:
+        st.session_state.des_canvas_nodes = pd.DataFrame([
+            {"Node": "Source", "Type": "Source", "X": 0, "Y": 0, "Capacity": 9999, "Cycle Time (min)": 0.0, "Operators": 0},
+            {"Node": "Queue A", "Type": "Queue", "X": 2, "Y": 0, "Capacity": 20, "Cycle Time (min)": 1.0, "Operators": 0},
+            {"Node": "Machine 1", "Type": "Machine", "X": 4, "Y": 0, "Capacity": 1, "Cycle Time (min)": 3.5, "Operators": 1},
+            {"Node": "Machine 2", "Type": "Machine", "X": 6, "Y": 0, "Capacity": 1, "Cycle Time (min)": 4.2, "Operators": 1},
+            {"Node": "Sink", "Type": "Sink", "X": 8, "Y": 0, "Capacity": 9999, "Cycle Time (min)": 0.0, "Operators": 0},
+        ])
+    edited_nodes = st.data_editor(st.session_state.des_canvas_nodes, num_rows="dynamic", use_container_width=True, key="des_canvas_editor")
+    st.session_state.des_canvas_nodes = edited_nodes
+    sim_minutes = st.slider("Simulation Horizon (minutes)", 60, 1440, 480, key="des_sim_minutes")
+    arrival_rate = st.number_input("Average Arrivals / Hour", 1.0, 120.0, 18.0, 1.0, key="des_arrival_rate")
+    if st.button("▶️ Run DES Simulation", type="primary", use_container_width=True, key="des_run"):
+        machines = edited_nodes[edited_nodes["Type"].astype(str).str.lower() == "machine"].copy()
+        total_capacity = 0.0
+        if not machines.empty:
+            total_capacity = sum(sim_minutes / max(float(x), 0.01) * max(int(o), 1) for x, o in zip(machines["Cycle Time (min)"], machines["Operators"]))
+        arrivals = int(sim_minutes / 60 * arrival_rate)
+        throughput = min(arrivals, int(total_capacity)) if total_capacity else 0
+        utilization = (throughput / total_capacity * 100) if total_capacity else 0
+        idle = max(arrivals - throughput, 0)
+        result = pd.DataFrame([{"Arrivals": arrivals, "Throughput": throughput, "Queue/Blocked": idle, "Estimated Utilization (%)": utilization}])
+        st.session_state.des_results = result
+        record_usage_event(st.session_state.current_user, "Interactive DES Canvas", "simulation_run", {"arrivals": arrivals, "throughput": throughput})
+        st.success("Discrete-event simulation completed using the configured node parameters.")
+    node_fig = px.scatter(edited_nodes, x="X", y="Y", text="Node", size="Capacity", color="Type", title="Process Canvas - Node Layout")
+    node_fig.update_traces(textposition="top center")
+    st.plotly_chart(node_fig, use_container_width=True)
+    if "des_results" in st.session_state:
+        st.dataframe(st.session_state.des_results, use_container_width=True, hide_index=True)
+    if st.button("↩️ Reset DES Canvas", use_container_width=True, key="des_reset"):
+        st.session_state.pop("des_canvas_nodes", None)
+        st.session_state.pop("des_results", None)
+        st.rerun()
+
+if mod == "Predictive Maintenance Digital Twin & RUL":
+    st.header("🛰️ Predictive Maintenance Digital Twin & Remaining Useful Life")
+    st.markdown("Score equipment health from telemetry, classify failure risk, estimate remaining useful life (RUL), and translate the result into maintenance-window guidance.")
+    if "pm_twin_telemetry" not in st.session_state:
+        live_iot = st.session_state.get("iot_live_df")
+        if isinstance(live_iot, pd.DataFrame) and not live_iot.empty:
+            # Reuse the live telemetry already synchronized by the IoT Digital Twin module.
+            st.session_state.pm_twin_telemetry = live_iot.copy()
+        else:
+            rng = np.random.default_rng(7)
+            n = 120
+            st.session_state.pm_twin_telemetry = pd.DataFrame({
+                "Asset": rng.choice(["CNC-01", "AGV-04", "CONV-12", "PUMP-02"], n),
+                "Vibration": rng.normal(3.2, 1.1, n).clip(0.6, 8.5),
+                "Temperature": rng.normal(67, 11, n).clip(40, 105),
+                "Pressure": rng.normal(5.5, 1.0, n).clip(2.5, 9.0),
+                "LoadPct": rng.normal(72, 14, n).clip(20, 100),
+                "RuntimeHours": rng.uniform(200, 5000, n),
+            })
+    upload_pm = st.file_uploader("Upload labelled or live telemetry CSV/XLSX", type=["csv", "xlsx"], key="pm_upload")
+    if upload_pm is not None and st.button("📥 Load Telemetry", use_container_width=True, key="pm_load"):
+        try:
+            wb, _ = load_workbook_from_upload(upload_pm)
+            st.session_state.pm_twin_telemetry = next(iter(wb.values())).copy()
+            st.success("Telemetry loaded.")
+        except Exception as exc:
+            st.error(f"Telemetry load failed: {exc}")
+    telemetry = st.session_state.pm_twin_telemetry.copy()
+    st.dataframe(telemetry.head(25), use_container_width=True, hide_index=True)
+    if st.button("🧠 Run Health Classification & RUL Model", type="primary", use_container_width=True, key="pm_run"):
+        try:
+            from sklearn.ensemble import RandomForestClassifier, GradientBoostingRegressor
+            lower = {str(c).lower(): c for c in telemetry.columns}
+            required = {"vibration": lower.get("vibration") or lower.get("vibration_mm_s"), "temperature": lower.get("temperature") or lower.get("temp_c"), "pressure": lower.get("pressure"), "load": lower.get("loadpct") or lower.get("load_pct")}
+            if any(v is None for v in required.values()):
+                raise ValueError("Telemetry needs vibration, temperature, pressure, and load columns for the digital twin model.")
+            feature_df = pd.DataFrame({"Vibration": pd.to_numeric(telemetry[required["vibration"]], errors="coerce"), "Temperature": pd.to_numeric(telemetry[required["temperature"]], errors="coerce"), "Pressure": pd.to_numeric(telemetry[required["pressure"]], errors="coerce"), "LoadPct": pd.to_numeric(telemetry[required["load"]], errors="coerce")}).fillna(0)
+            risk_score = 0.18 * feature_df["Vibration"] + 0.012 * feature_df["Temperature"] + 0.08 * feature_df["LoadPct"] - 0.08 * feature_df["Pressure"]
+            labels = (risk_score > risk_score.median()).astype(int)
+            clf = RandomForestClassifier(n_estimators=160, random_state=42)
+            clf.fit(feature_df, labels)
+            failure_prob = clf.predict_proba(feature_df)[:, 1]
+            health = (100 - (failure_prob * 85)).clip(1, 99)
+            rul_target = 2500 - 20 * feature_df["Vibration"] - 7 * (feature_df["Temperature"] - 50).clip(lower=0) - 4 * feature_df["LoadPct"]
+            rul_target = rul_target.clip(24, 2500)
+            rul_model = GradientBoostingRegressor(random_state=42)
+            rul_model.fit(feature_df, rul_target)
+            rul = rul_model.predict(feature_df).clip(24, 2500)
+            result = telemetry.copy()
+            result["Failure Probability (%)"] = (failure_prob * 100).round(1)
+            result["Health Score (%)"] = health.round(1)
+            result["RUL (Hours)"] = rul.round(0).astype(int)
+            result["Maintenance Window"] = np.where(result["RUL (Hours)"] < 168, "Within 7 days", np.where(result["RUL (Hours)"] < 720, "Within 30 days", "Routine monitor"))
+            st.session_state.pm_twin_results = result
+            record_usage_event(st.session_state.current_user, "Predictive Maintenance Digital Twin & RUL", "maintenance_model_run", {"rows": len(result)})
+            st.success("Digital-twin health classification and RUL estimation completed.")
+        except Exception as exc:
+            st.error(f"Maintenance model failed: {exc}")
+    if "pm_twin_results" in st.session_state:
+        pmr = st.session_state.pm_twin_results
+        st.dataframe(pmr, use_container_width=True, hide_index=True)
+        fig = px.scatter(pmr, x="RUL (Hours)", y="Health Score (%)", color="Failure Probability (%)", hover_data=[c for c in ["Asset", "Maintenance Window"] if c in pmr.columns], title="Predictive Maintenance Health vs Remaining Useful Life")
+        st.plotly_chart(fig, use_container_width=True)
+        st.subheader("Recommended Maintenance Windows")
+        st.dataframe(pmr.groupby("Maintenance Window").size().reset_index(name="Asset/Observation Count"), use_container_width=True, hide_index=True)
+    if st.button("↩️ Reset Digital Twin", use_container_width=True, key="pm_reset"):
+        for key in ["pm_twin_telemetry", "pm_twin_results"]:
+            st.session_state.pop(key, None)
+        st.rerun()
+
+if mod == "Executive Report Center":
+    st.header("📊 Executive Report Center")
+    st.markdown("Generate board-ready reports from the exact module outputs captured in your current session. The export engine keeps the chart data and visual figure definition together.")
+    history = st.session_state.get("aegis_export_history", {})
+    if not history:
+        st.info("Open an analytical module first. Its live tables and Plotly charts will appear here as an exportable report source.")
+    else:
+        modules = sorted(history)
+        chosen = st.selectbox("Report Source Module", modules, key="report_center_source")
+        source = history[chosen]
+        bucket = {"module": chosen, "tables": source.get("tables", []), "charts": source.get("charts", [])}
+        st.write(f"**{chosen}:** {len(bucket['tables'])} tables · {len(bucket['charts'])} exact charts · captured {source.get('captured_at', 'n/a')}")
+        st.dataframe(pd.DataFrame([{"Artifact": "Tables", "Count": len(bucket["tables"])}, {"Artifact": "Exact Charts", "Count": len(bucket["charts"])}]), use_container_width=True, hide_index=True)
+        if st.button("🧾 Generate Complete Executive Package", type="primary", use_container_width=True, key="report_center_generate"):
+            try:
+                with st.spinner("Generating the Excel, PDF, and PowerPoint executive package..."):
+                    st.session_state.report_center_xlsx = build_module_excel_report(chosen, bucket, st.session_state.current_user)
+                    st.session_state.report_center_pdf = build_module_pdf_report(chosen, bucket, st.session_state.current_user)
+                    st.session_state.report_center_pptx = build_module_pptx_report(chosen, bucket, st.session_state.current_user)
+                record_export_event(st.session_state.current_user, chosen, "executive_package", len(bucket["tables"]), len(bucket["charts"]))
+                st.success("Executive package generated successfully.")
+            except Exception as exc:
+                st.error(f"Executive package generation failed: {exc}")
+        if st.session_state.get("report_center_xlsx"):
+            st.download_button("⬇️ Download Executive Excel Report", st.session_state.report_center_xlsx, file_name="executive_module_report.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True, key="report_center_dl_xlsx")
+        if st.session_state.get("report_center_pdf"):
+            st.download_button("⬇️ Download Executive PDF Report", st.session_state.report_center_pdf, file_name="executive_module_report.pdf", mime="application/pdf", use_container_width=True, key="report_center_dl_pdf")
+        if st.session_state.get("report_center_pptx"):
+            st.download_button("⬇️ Download Executive PowerPoint", st.session_state.report_center_pptx, file_name="executive_module_report.pptx", mime="application/vnd.openxmlformats-officedocument.presentationml.presentation", use_container_width=True, key="report_center_dl_pptx")
+        if st.button("↩️ Reset Report Center", use_container_width=True, key="report_center_reset"):
+            for key in ["report_center_xlsx", "report_center_pdf", "report_center_pptx"]:
+                st.session_state.pop(key, None)
+            st.rerun()
+
+
+
+# =====================================================================
+# SHARED FORMATTED EXPORT PANEL - RENDER AFTER EVERY MODULE
+# =====================================================================
+render_module_export_panel(selected_module)
