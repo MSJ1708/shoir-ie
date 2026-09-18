@@ -174,28 +174,28 @@ def finite_schedule(jobs: pd.DataFrame, machines: pd.DataFrame, horizon_hours: f
     clocks = {m: pd.Timestamp("2000-01-01") for m in m_caps}
     rows = []
     late = 0
-    for r in work.itertuples(index=False):
-        machine = str(getattr(r, "Machine"))
+    for _, r in work.iterrows():
+        machine = str(r["Machine"])
         if machine not in m_caps:
             continue
-        dur = float(getattr(r, "Duration"))
+        dur = float(r["Duration"])
         used = sum(x["duration"] for x in rows if x["Machine"] == machine)
         if used + dur > m_caps[machine] or used + dur > horizon_hours:
             rows.append({
-                "Job": getattr(r, "Job"), "Machine": machine, "Duration": dur,
-                "Start": pd.NaT, "Finish": pd.NaT, "Due Date": getattr(r, "Due_Date"),
+                "Job": r["Job"], "Machine": machine, "Duration": dur,
+                "Start": pd.NaT, "Finish": pd.NaT, "Due Date": r["Due Date"],
                 "Status": "Capacity exceeded"
             })
             late += 1
             continue
         start = clocks[machine]
         finish = start + pd.Timedelta(hours=dur)
-        due = getattr(r, "Due_Date")
+        due = r["Due Date"]
         status = "On time" if finish <= due else "Late"
         if status == "Late":
             late += 1
         rows.append({
-            "Job": getattr(r, "Job"), "Machine": machine, "Duration": dur,
+            "Job": r["Job"], "Machine": machine, "Duration": dur,
             "Start": start, "Finish": finish, "Due Date": due, "Status": status
         })
         clocks[machine] = finish
