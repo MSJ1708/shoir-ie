@@ -24,6 +24,7 @@ from email.mime.multipart import MIMEMultipart
 from PIL import Image
 from scipy import stats
 from shoir_upgrade import (align_imported_table, clean_dataframe, build_excel_report, build_workbook_bundle, read_uploaded_workbook, apply_excel_function, EXCEL_FUNCTIONS, copilot_module_recommendation)
+from industrial_platform import PLATFORM_CATALOG, render_module as render_industrial_module, ml_demand_forecast, tier_allows as platform_tier_allows
 
 # =====================================================================
 # PAGE CONFIGURATION & CUSTOM CSS (Professional Styling & Hover Zoom)
@@ -633,6 +634,10 @@ TIER_BENEFITS = {
     },
 }
 
+for _platform_module in PLATFORM_CATALOG:
+    if not any(x.get("name") == _platform_module["name"] for x in MODULE_CATALOG):
+        MODULE_CATALOG.append(_platform_module)
+
 # =====================================================================
 # COPILOT
 # ---------------------------------------------------------------------
@@ -698,6 +703,24 @@ def get_copilot_response(prompt, history):
         except Exception as e:
             return f"I tried to run the optimizer but it failed: {e}. Check your data in the MILP Solvers module."
 
+    if "forecast" in p or "predict demand" in p:
+        wb=st.session_state.get("copilot_workbook",{})
+        if wb:
+            try:
+                sheet=next(iter(wb)); df=wb[sheet]
+                date_col=next((x for x in df.columns if "date" in str(x).lower()),None)
+                target_col=next((x for x in df.columns if any(k in str(x).lower() for k in ["demand","sales","qty","quantity"])),None)
+                if date_col and target_col:
+                    ext=[x for x in df.columns if x not in [date_col,target_col] and pd.api.types.is_numeric_dtype(df[x])]
+                    forecast,metrics=ml_demand_forecast(df,date_col,target_col,ext[:5],12)
+                    return ("I ran the demand-forecast engine on the first uploaded workbook sheet. "
+                            f"Model R²: **{metrics['R2']:.3f}**, MAE: **{metrics['MAE']:.2f}**. "
+                            "Open Advanced ML Demand Forecasting for the full forecast, uncertainty band and exports.")
+                return "I found the workbook, but could not safely identify both a date column and demand/sales quantity column. Map them explicitly in Advanced ML Demand Forecasting."
+            except Exception as e:
+                return f"I found the workbook but the forecast could not be completed safely: {e}."
+        return "Upload the demand workbook first. Then I can run the grounded forecasting workflow."
+    
     if "safety stock" in p or ("inventory" in p and "stock" in p):
         try:
             conn = sqlite3.connect("enterprise_full_workspace.db")
@@ -1003,7 +1026,7 @@ if not st.session_state.get("current_user"):
     # ------------------------------------------
     with auth_tab2:
         st.subheader("Get Subscription Ticket & Register")
-        reg_tier = st.selectbox("Choose Subscription Tier", ["Starter Tier ($29)", "Research Pack ($30)", "Mid-Tier Pro ($79)", "Enterprise Tier ($120)"])
+        reg_tier = st.selectbox("Choose Subscription Tier", ["Starter Tier ($29)", "Mid-Tier Pro ($79)", "Professional Tier ($129)", "Enterprise Tier ($199)", "Enterprise Plus Tier ($399)", "Research Pack ($30 add-on)"])
         reg_name = st.text_input("Name / Username", key="reg_name")
         reg_email = st.text_input("Email Address", placeholder="name@company.com", key="reg_email")
         reg_pass = st.text_input("Password", type="password", key="reg_pass")
@@ -1215,9 +1238,11 @@ st.sidebar.markdown("---")
 tier_val = st.session_state.user_tier
 is_admin = (st.session_state.current_user == "sho")
 
-tier1_features = ["MILP Solvers", "Inventory Playback", "Core IE Tools", "Subscriptions", "Persistence", "Facility Layout & Warehousing", "Enterprise Integration & Collaboration"]
-tier2_features = tier1_features + ["Carbon Accounting", "IoT Digital Twin", "MEIO Matrix", "Slotting & Gantt", "Fleet Routing", "Warehouse Heatmap", "Supplier Risk Matrix", "Scenarios", "AGV Fleet Dispatcher", "Geospatial Network Designer", "Production Planning & Control (PPC)", "Lean Manufacturing & Shop Floor Operations", "Quality Control, Six Sigma & Reliability", "Engineering Economics & Finance"]
-tier3_features = tier2_features + ["AI Copilot", "FastAPI Gateway", "Monte Carlo Sim", "Sensitivity Analysis", "Webhook Alerts", "Agentic Workflows", "Control Tower", "Cryptographic Ledger", "Predictive Maintenance Hub", "Human Factors & Ergonomics (NIOSH)", "Digital Twin & Discrete-Event Simulation", "Green IE & Sustainability"]
+tier1_features = ["MILP Solvers", "Inventory Playback", "Core IE Tools", "Subscriptions", "Persistence", "Facility Layout & Warehousing", "Enterprise Integration & Collaboration", "Engineering Validation Center", "Excel Data Cleaning & Import"]
+tier2_features = tier1_features + ["Carbon Accounting", "IoT Digital Twin", "MEIO Matrix", "Slotting & Gantt", "Fleet Routing", "Warehouse Heatmap", "Supplier Risk Matrix", "Scenarios", "AGV Fleet Dispatcher", "Geospatial Network Designer", "Production Planning & Control (PPC)", "Lean Manufacturing & Shop Floor Operations", "Quality Control, Six Sigma & Reliability", "Engineering Economics & Finance", "Industrial Data Model & Digital Thread"]
+professional_features = tier2_features + ["Advanced Planning & Scheduling", "Quality Engineering & Reliability", "Capital Investment & Engineering Economics", "Workforce Engineering", "Industrial Sustainability & LCA", "Benchmarking & Engineering Standards", "Scenario Versioning & Comparison", "Localization & Multi-Currency"]
+tier3_features = professional_features + ["AI Copilot", "FastAPI Gateway", "Monte Carlo Sim", "Sensitivity Analysis", "Webhook Alerts", "Agentic Workflows", "Control Tower", "Cryptographic Ledger", "Predictive Maintenance Hub", "Human Factors & Ergonomics (NIOSH)", "Digital Twin & Discrete-Event Simulation", "Green IE & Sustainability", "Manufacturing Execution System", "Industrial Simulation Lab", "3D Factory Designer", "Industrial Connectivity Hub", "Multi-Objective Optimization", "Robust & Resilient Optimization", "Engineering Model Registry", "Experiment Lab", "Industrial Control Center", "Engineering Decision Center", "Advanced ML Demand Forecasting", "Team Workspaces & RBAC", "Executive Report Center"]
+tier4_features = tier3_features + ["Industrial Data Platform", "Advanced Engineering Copilot", "Live Industrial Digital Twin", "Enterprise Security & Governance", "Predictive Maintenance Digital Twin"]
 # FIX (recurring from an earlier upload of this file - reapplied): this list
 # was missing commas between most entries, which in Python silently
 # concatenates adjacent string literals into one garbled string instead of
@@ -1258,8 +1283,12 @@ st.sidebar.markdown("### 🛠️ Enterprise Modules")
 
 if "Research" in tier_val:
     allowed_modules = research_pack_features
+elif "Enterprise Plus" in tier_val or "Industrial Enterprise" in tier_val:
+    allowed_modules = tier4_features
 elif "Enterprise" in tier_val or is_admin:
     allowed_modules = tier3_features
+elif "Professional" in tier_val:
+    allowed_modules = professional_features
 elif "Pro" in tier_val or "Trial" in tier_val:
     allowed_modules = tier2_features
 else:
@@ -8179,8 +8208,10 @@ else:
                 recommendation=copilot_module_recommendation(recommendation_prompt)
                 st.info(recommendation)
                 current_tier=str(st.session_state.get("user_tier","Starter Tier"))
-                if "Required tier:" in recommendation and current_tier.lower().replace(" tier","") not in recommendation.lower():
-                    st.warning("This module may require a higher tier. Open Subscriptions to review available features.")
+                if "Required tier:" in recommendation:
+                    required_tier=recommendation.split("Required tier:",1)[1].strip().rstrip(".")
+                    if not platform_tier_allows(current_tier, required_tier):
+                        st.warning(f"🔒 This module requires **{required_tier}**. Your current tier is **{current_tier}**. Upgrade in Subscriptions to unlock it.")
             st.markdown("### 💬 Copilot")
             for msg in st.session_state.copilot_messages:
                 with st.chat_message(msg["role"]):
@@ -8194,6 +8225,10 @@ else:
                         reply=get_copilot_response(prompt,st.session_state.copilot_messages)
                     st.markdown(reply)
                 st.session_state.copilot_messages.append({"role":"assistant","content":reply})
+
+    # New unified industrial platform modules render through a dedicated, testable service layer.
+    if mod in {x["name"] for x in PLATFORM_CATALOG}:
+        render_industrial_module(mod, tier_val, st.session_state.get("current_user", "unknown"))
 
     # =========================================================
 # CARBON ACCOUNTING & NET-ZERO STUDIO (Astonishing & Stunning)
@@ -10142,6 +10177,22 @@ if mod == "Admin Panel":
                             st.rerun()
 
         st.markdown("---")
+        st.subheader("📈 Owner Usage & Module Trends")
+        conn = sqlite3.connect("enterprise_full_workspace.db")
+        usage_df = pd.read_sql("SELECT date(timestamp) AS Day, action AS Action, COUNT(*) AS Events FROM audit_trail GROUP BY date(timestamp), action ORDER BY Day", conn)
+        conn.close()
+        if usage_df.empty:
+            st.info("Usage trends will appear after real user actions are recorded.")
+        else:
+            u1,u2=st.columns(2)
+            with u1:
+                st.plotly_chart(px.line(usage_df.groupby("Day",as_index=False)["Events"].sum(),x="Day",y="Events",title="Activity Over Time"),use_container_width=True)
+            with u2:
+                top_actions=usage_df.groupby("Action",as_index=False)["Events"].sum().sort_values("Events",ascending=False).head(15)
+                st.plotly_chart(px.bar(top_actions,x="Action",y="Events",title="Most Used Actions"),use_container_width=True)
+            st.dataframe(usage_df,use_container_width=True,hide_index=True)
+
+        st.markdown("---")
         # FIX: everything from here down through the license-codes table
         # below used to sit at the top level of the file (outside this
         # if/else), so it rendered on every page for every signed-in user -
@@ -10234,7 +10285,7 @@ if mod == "Admin Panel":
         with st.form("manual_code_form"):
             col_g1, col_g2, col_g3 = st.columns(3)
             with col_g1:
-                gen_tier = st.selectbox("Select Tier for Code", ["Free Trial", "Starter Tier ($29)", "Mid-Tier Pro ($79)", "Enterprise Tier ($199)"], key="gen_tier_box")
+                gen_tier = st.selectbox("Select Tier for Code", ["Free Trial", "Starter Tier ($29)", "Mid-Tier Pro ($79)", "Professional Tier ($129)", "Enterprise Tier ($199)", "Enterprise Plus Tier ($399)", "Research Pack ($30 add-on)"], key="gen_tier_box")
             with col_g2:
                 default_code = "TRIAL-" + "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
                 custom_code_input = st.text_input("Ticket / Promo Code", value=default_code, key="custom_code_box")

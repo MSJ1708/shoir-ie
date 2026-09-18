@@ -254,8 +254,13 @@ def build_workbook_bundle(title: str, tables: Iterable[Tuple[str,pd.DataFrame]],
         z.writestr("shoir_ie_formatted_workbook.xlsx",xlsx)
         if figures:
             for idx,(label,fig) in enumerate(figures,1):
+                safe_label=re.sub(r'[^A-Za-z0-9]+','_',str(label)).lower()
                 try:
-                    z.writestr(f"charts/chart_{idx}_{re.sub(r'[^A-Za-z0-9]+','_',str(label)).lower()}.html",fig.to_html(include_plotlyjs="cdn",full_html=True))
+                    z.writestr(f"charts/chart_{idx}_{safe_label}.html",fig.to_html(include_plotlyjs="cdn",full_html=True))
+                except Exception:
+                    pass
+                try:
+                    z.writestr(f"charts/chart_{idx}_{safe_label}.png",fig.to_image(format="png",width=1600,height=900,scale=2))
                 except Exception:
                     pass
         readme=(
