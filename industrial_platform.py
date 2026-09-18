@@ -629,7 +629,7 @@ def render_module(module: str, tier: str, username: str):
         if st.session_state.get("validation_result"):
             res=st.session_state.validation_result; st.metric("Data Quality",f'{res["quality"]["score"]:.1f}%'); st.write(res)
         st.dataframe(edited,use_container_width=True)
-        render_export_bar(module,[("Validation Table",edited)],tier,username=username)
+        render_export_bar(module,[("Validation Table",edited)],tier=tier,username=username)
     elif module=="Industrial Data Model & Digital Thread":
         tabs=st.tabs(["Entities","Relationships","Data Quality"])
         with tabs[0]:
@@ -646,7 +646,7 @@ def render_module(module: str, tier: str, username: str):
             st.info("Relationships are intentionally explicit: use entity IDs and relationship names; no hidden inference.")
         with tabs[2]:
             st.write(data_quality_report(df))
-        render_export_bar(module,[("Entities",df),("Relationships",rel)],tier,username=username)
+        render_export_bar(module,[("Entities",df),("Relationships",rel)],tier=tier,username=username)
     elif module=="Advanced Planning & Scheduling":
         tabs=st.tabs(["Demand / MRP","Finite Schedule","Dispatch"])
         with tabs[0]:
@@ -664,7 +664,7 @@ def render_module(module: str, tier: str, username: str):
             st.dataframe(st.session_state.get("aps_schedule_result",pd.DataFrame()),use_container_width=True)
         tables=[("Demand",demand),("BOM",bom),("Finite Schedule",st.session_state.get("aps_schedule_result",pd.DataFrame()))]
         figs=[("Finite Schedule",fig)] if "fig" in locals() else []
-        render_export_bar(module,tables,figs,tier,username)
+        render_export_bar(module,tables,figs,tier=tier,username=username)
     elif module=="Manufacturing Execution System":
         tabs=st.tabs(["Work Orders","Execution Events","OEE & WIP"])
         with tabs[0]:
@@ -729,7 +729,7 @@ def render_module(module: str, tier: str, username: str):
         if "sim_des" in st.session_state: tables.append(("DES Replications",st.session_state["sim_des"]))
         if "sim_agent" in st.session_state: tables.append(("Agent Summary",st.session_state["sim_agent"]))
         if "sd" in st.session_state: tables.append(("System Dynamics",st.session_state["sd"]))
-        render_export_bar(module,tables,[],tier,username)
+        render_export_bar(module,tables,[],tier=tier,username=username)
     elif module=="3D Factory Designer":
         df=st.data_editor(st.session_state.setdefault("factory3d_df",pd.DataFrame({"Asset":["CNC-01","Assembly","Packing","WIP Buffer"],"Type":["Machine","Station","Station","Storage"],"X":[0,6,12,3],"Y":[0,2,2,5],"Z":[0,0,0,0],"Length":[2,4,4,3],"Width":[2,2,2,3],"Height":[2,3,3,2]})),num_rows="dynamic",use_container_width=True,key="factory3d_editor")
         fig=px.scatter_3d(df,x="X",y="Y",z="Z",color="Type",text="Asset",size="Height",title="3D Factory Model"); st.plotly_chart(fig,use_container_width=True)
