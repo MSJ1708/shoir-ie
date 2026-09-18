@@ -24,6 +24,8 @@ from email.mime.multipart import MIMEMultipart
 from PIL import Image
 from scipy import stats
 
+from shoir_upgrade import ensure_upgrade_schema, init_upgrade_services, record_module_usage, render_module_upgrade, render_module_report_panel
+
 # Shoir-IE platform upgrade services
 from shoir_upgrade import ensure_upgrade_schema, init_upgrade_services, record_module_usage, render_module_upgrade, render_module_report_panel
 
@@ -665,7 +667,9 @@ def get_copilot_response(prompt, history):
         system_prompt = (
             "You are the Shoir-IE Copilot, embedded in an industrial engineering and "
             "operations research platform covering MILP network optimization, inventory, "
-            "facility layout, quality/Six Sigma, simulation, and research tools. Be concise "
+            "facility layout, quality/Six Sigma, simulation, reporting, Excel data cleaning, "
+            "demand forecasting, stochastic risk, ERP/WMS integration, collaboration, maintenance, "
+            "localization, and research tools. Be concise "
             "and concrete. If asked to run something you can't execute directly, name the "
             "exact module to use. Never invent specific numbers or claim to have checked "
             "data you don't actually have."
@@ -688,6 +692,27 @@ def get_copilot_response(prompt, history):
         return (f"Hello {st.session_state.get('current_user', 'there')}! I can run the MILP optimizer, "
                 f"report your real warehouse/customer/fleet/inventory data, or point you to the right "
                 f"module. What do you need?")
+
+    if any(w in p for w in ["forecast", "demand prediction", "seasonality", "promotion impact"]):
+        return "Use **Advanced ML Demand Forecasting** for SKU-level forecasts with seasonality, promotions, weather and macroeconomic drivers. This module is **Enterprise**."
+    if any(w in p for w in ["monte carlo", "stochastic", "probabilistic risk", "uncertainty", "lead time variance"]):
+        return "Use **Stochastic & Monte Carlo Risk Modeling** for demand shocks, lead-time variance and disruption probabilities. This module is **Enterprise**."
+    if any(w in p for w in ["sap", "oracle", "wms", "erp connector", "api connector"]):
+        return "Use **ERP & WMS API Connectors** for SAP, Oracle and WMS synchronization profiles. This module is **Enterprise**."
+    if any(w in p for w in ["scenario version", "compare scenarios", "scenario comparison"]):
+        return "Use **Scenario Versioning** to save named configurations and compare parameter deltas. This module is **Mid-Tier Pro**."
+    if any(w in p for w in ["multi currency", "multicurrency", "currency conversion", "trade compliance"]):
+        return "Use **Localization & Multi-Currency** for currency conversion and regional trade-compliance rules. This module is **Mid-Tier Pro**."
+    if any(w in p for w in ["workspace", "role based", "rbac", "team access", "collaborate"]):
+        return "Use **Team Workspaces & RBAC** for shared workspaces and persistent roles. This module is **Enterprise**."
+    if any(w in p for w in ["executive report", "board report", "powerpoint report", "pdf report"]):
+        return "Use **Executive Report Center** to package current tables and exact captured charts into Excel, PDF or PowerPoint. PDF/PowerPoint are **Enterprise** exports."
+    if any(w in p for w in ["des canvas", "discrete event canvas", "queue simulation", "machine starvation"]):
+        return "Use **Interactive DES Simulation Canvas** for visual process nodes, queues, throughput and bottlenecks. This module is **Enterprise**."
+    if any(w in p for w in ["predictive maintenance", "remaining useful life", "rul", "machine failure"]):
+        return "Use **Predictive Maintenance Digital Twin** for telemetry-based failure probability and RUL estimates. This module is **Enterprise**."
+    if any(w in p for w in ["excel cleaning", "clean this workbook", "clean spreadsheet", "format my excel"]):
+        return "Use **Excel Data Cleaning & Import** to upload, clean, review and download a professional XLSX. This module is **Starter**."
 
     if "optimize" in p or "milp" in p:
         try:
@@ -1217,9 +1242,9 @@ st.sidebar.markdown("---")
 tier_val = st.session_state.user_tier
 is_admin = (st.session_state.current_user == "sho")
 
-tier1_features = ["MILP Solvers", "Inventory Playback", "Core IE Tools", "Subscriptions", "Persistence", "Facility Layout & Warehousing", "Enterprise Integration & Collaboration"]
-tier2_features = tier1_features + ["Carbon Accounting", "IoT Digital Twin", "MEIO Matrix", "Slotting & Gantt", "Fleet Routing", "Warehouse Heatmap", "Supplier Risk Matrix", "Scenarios", "AGV Fleet Dispatcher", "Geospatial Network Designer", "Production Planning & Control (PPC)", "Lean Manufacturing & Shop Floor Operations", "Quality Control, Six Sigma & Reliability", "Engineering Economics & Finance"]
-tier3_features = tier2_features + ["AI Copilot", "FastAPI Gateway", "Monte Carlo Sim", "Sensitivity Analysis", "Webhook Alerts", "Agentic Workflows", "Control Tower", "Cryptographic Ledger", "Predictive Maintenance Hub", "Human Factors & Ergonomics (NIOSH)", "Digital Twin & Discrete-Event Simulation", "Green IE & Sustainability"]
+tier1_features = ["MILP Solvers", "Inventory Playback", "Core IE Tools", "Subscriptions", "Persistence", "Facility Layout & Warehousing", "Enterprise Integration & Collaboration", "Excel Data Cleaning & Import"]
+tier2_features = tier1_features + ["Carbon Accounting", "IoT Digital Twin", "MEIO Matrix", "Slotting & Gantt", "Fleet Routing", "Warehouse Heatmap", "Supplier Risk Matrix", "Scenarios", "AGV Fleet Dispatcher", "Geospatial Network Designer", "Production Planning & Control (PPC)", "Lean Manufacturing & Shop Floor Operations", "Quality Control, Six Sigma & Reliability", "Engineering Economics & Finance", "Scenario Versioning", "Localization & Multi-Currency"]
+tier3_features = tier2_features + ["AI Copilot", "FastAPI Gateway", "Monte Carlo Sim", "Sensitivity Analysis", "Webhook Alerts", "Agentic Workflows", "Control Tower", "Cryptographic Ledger", "Predictive Maintenance Hub", "Human Factors & Ergonomics (NIOSH)", "Digital Twin & Discrete-Event Simulation", "Green IE & Sustainability", "Advanced ML Demand Forecasting", "Stochastic & Monte Carlo Risk Modeling", "ERP & WMS API Connectors", "Team Workspaces & RBAC", "Executive Report Center", "Interactive DES Simulation Canvas", "Predictive Maintenance Digital Twin", "Owner Usage Analytics"]
 # FIX (recurring from an earlier upload of this file - reapplied): this list
 # was missing commas between most entries, which in Python silently
 # concatenates adjacent string literals into one garbled string instead of
@@ -1267,6 +1292,12 @@ elif "Pro" in tier_val or "Trial" in tier_val:
 else:
     allowed_modules = tier1_features
 selected_module = st.sidebar.selectbox("Select Module", allowed_modules)
+st.session_state["upgrade_current_module"] = selected_module
+ensure_upgrade_schema()
+init_upgrade_services()
+if st.session_state.get("_upgrade_last_tracked_module") != selected_module:
+    record_module_usage(st.session_state.get("current_user", "unknown"), selected_module, st.session_state.get("user_tier", ""), "open")
+    st.session_state["_upgrade_last_tracked_module"] = selected_module
 
 st.sidebar.markdown("---")
 if st.sidebar.button("Lock / Logout Workspace"):
