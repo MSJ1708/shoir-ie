@@ -15,3 +15,4 @@ scikit-learn
 requests
 kaleido>=1.0.0
 playwright
+pytest>=8.0,<9
