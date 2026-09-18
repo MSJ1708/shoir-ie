@@ -610,10 +610,80 @@ def currency_convert(df: pd.DataFrame, amount_col: str, currency_col: str, base_
     d["Base Amount"]=d.apply(lambda r: r[amount_col]/float(rates[r[currency_col]]) if r[currency_col] in rates and float(rates[r[currency_col]])>0 else np.nan,axis=1)
     d["Base Currency"]=base_currency.upper(); return d
 
+def _safe_df(value: Any, default: Optional[pd.DataFrame] = None) -> pd.DataFrame:
+    """Return only a real DataFrame; never pass widget/session-state scalars to st.dataframe."""
+    if isinstance(value, pd.DataFrame):
+        return value
+    if isinstance(value, (list, tuple)):
+        try:
+            candidate = pd.DataFrame(value)
+            return candidate
+        except Exception:
+            pass
+    if isinstance(value, dict):
+        # A scalar result dict is one record; nested objects become strings safely.
+        try:
+            return pd.DataFrame([value])
+        except Exception:
+            pass
+    return default.copy() if isinstance(default, pd.DataFrame) else pd.DataFrame()
+
+def sanitize_module_session_state(st) -> None:
+    """Migrate/clear legacy result keys created by previous Shoir-IE releases."""
+    legacy_result_keys = {
+        "sim_des": "sim_des_result",
+        "sim_agent": "sim_agent_result",
+        "factory3d_dist": "factory3d_dist_result",
+    }
+    for old_key, new_key in legacy_result_keys.items():
+        if old_key in st.session_state:
+            legacy_value = st.session_state.get(old_key)
+            # A prior release sometimes used the same key for a button and a result.
+            # Preserve a valid DataFrame under the new key; otherwise discard only the
+            # incompatible widget scalar/object.
+            if isinstance(legacy_value, pd.DataFrame) and new_key not in st.session_state:
+                st.session_state[new_key] = legacy_value.copy(deep=True)
+            if not isinstance(legacy_value, pd.DataFrame):
+                st.session_state.pop(old_key, None)
+
+    if "quality_spc" in st.session_state and not isinstance(st.session_state.get("quality_spc"), dict):
+        st.session_state.pop("quality_spc", None)
+    if "quality_limits" in st.session_state and not isinstance(st.session_state.get("quality_limits"), dict):
+        st.session_state.pop("quality_limits", None)
+
+    # Legacy AGV collections can contain records from older schemas.
+    fleet = st.session_state.get("agv_fleet")
+    if isinstance(fleet, list):
+        normalized = []
+        seen = set()
+        for idx, item in enumerate(fleet):
+            if not isinstance(item, dict):
+                continue
+            agv_id = str(item.get("agv_id") or item.get("id") or item.get("ID") or f"AGV-{idx+1:02d}").strip()
+            if not agv_id or agv_id in seen:
+                agv_id = f"AGV-{idx+1:02d}"
+            seen.add(agv_id)
+            try: battery = float(item.get("battery", item.get("battery_pct", 100)))
+            except Exception: battery = 100.0
+            try: x = float(item.get("x", 50))
+            except Exception: x = 50.0
+            try: y = float(item.get("y", 45))
+            except Exception: y = 45.0
+            normalized.append({
+                "agv_id": agv_id,
+                "task": str(item.get("task") or item.get("mission") or "Unassigned"),
+                "battery": max(0.0, min(100.0, battery)),
+                "status": str(item.get("status") or "Idle"),
+                "x": x,
+                "y": y,
+            })
+        st.session_state["agv_fleet"] = normalized
+
 def render_module(module: str, tier: str, username: str):
     import streamlit as st
     import plotly.express as px
     init_platform_db()
+    sanitize_module_session_state(st)
     render_module_data_exchange(module, st, tier, username)
     required=next((x["tier"] for x in PLATFORM_CATALOG if x["name"]==module),None)
     if required and not tier_allows(tier,required):
@@ -738,8 +808,9 @@ def render_module(module: str, tier: str, username: str):
                     st.session_state["sim_des_result"] = queue_simulation(ar,sr,servers)
                 except Exception as exc:
                     st.error(f"DES simulation failed safely: {exc}")
-            if "sim_des_result" in st.session_state:
-                st.dataframe(st.session_state["sim_des_result"],use_container_width=True)
+            _sim_des_result = _safe_df(st.session_state.get("sim_des_result"))
+            if not _sim_des_result.empty:
+                st.dataframe(_sim_des_result,use_container_width=True)
         with tabs[1]:
             agents=st.slider("Agents",5,200,30,key="sim_agents"); steps=st.slider("Steps",20,500,100,key="sim_steps")
             if st.button("🤖 Run Agent Simulation",use_container_width=True,key="sim_agent_run"):
@@ -747,8 +818,9 @@ def render_module(module: str, tier: str, username: str):
                     st.session_state["sim_agent_result"] = agent_simulation(agents,steps)
                 except Exception as exc:
                     st.error(f"Agent simulation failed safely: {exc}")
-            if "sim_agent_result" in st.session_state:
-                st.dataframe(st.session_state["sim_agent_result"],use_container_width=True)
+            _sim_agent_result = _safe_df(st.session_state.get("sim_agent_result"))
+            if not _sim_agent_result.empty:
+                st.dataframe(_sim_agent_result,use_container_width=True)
         with tabs[2]:
             inv=st.number_input("Initial inventory",0.0,100000.0,5000.0,key="sd_inv"); demand=st.number_input("Demand/day",0.1,10000.0,500.0,key="sd_dem"); repl=st.number_input("Replenishment/day",0.0,10000.0,550.0,key="sd_repl")
             if st.button("📈 Run System Dynamics",use_container_width=True,key="sd_run"): st.session_state["sd"]=system_dynamics_inventory(inv,demand,repl)
@@ -770,7 +842,9 @@ def render_module(module: str, tier: str, username: str):
                 st.session_state["factory3d_dist_result"]=pd.DataFrame(pairs).sort_values("Distance")
             except Exception as exc:
                 st.error(f"Travel analysis failed safely: {exc}")
-        if "factory3d_dist_result" in st.session_state: st.dataframe(st.session_state["factory3d_dist_result"].head(50),use_container_width=True)
+        _factory3d_dist_result = _safe_df(st.session_state.get("factory3d_dist_result"))
+        if not _factory3d_dist_result.empty:
+            st.dataframe(_factory3d_dist_result.head(50),use_container_width=True)
         render_export_bar(module,[("3D Layout",df),("Travel Matrix",st.session_state.get("factory3d_dist_result",pd.DataFrame()))],[("3D Factory",fig)],tier,username)
     elif module=="Industrial Connectivity Hub":
         tabs=st.tabs(["REST / SAP / Oracle / WMS","SQL","MQTT / OPC-UA"])
