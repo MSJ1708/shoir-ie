@@ -413,7 +413,7 @@ def registry_add(username: str, name: str, version: str, model_type: str, payloa
 def registry_list(username: str, db_path="enterprise_full_workspace.db") -> pd.DataFrame:
     ensure_model_registry(db_path)
     with sqlite3.connect(db_path) as c:
-        return pd.read_sql("SELECT * FROM model_registry WHERE username=? ORDER BY id DESC",(username,),c)
+        return pd.read_sql("SELECT * FROM model_registry WHERE username=? ORDER BY id DESC", c, params=(username,))
 
 def experiment_save(username: str, name: str, scenario: Any, result: Any, db_path="enterprise_full_workspace.db"):
     ensure_model_registry(db_path)
