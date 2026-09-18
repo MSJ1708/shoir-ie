@@ -40,13 +40,22 @@ def test_all_excel_functions_have_working_core_paths():
     out,_=apply_excel_function(df,"SUBSTITUTE",old="b",new="B",columns=["Text"])
     assert "B" in out.loc[0,"Text"]
     out,_=apply_excel_function(df,"FIND & REPLACE",find_text="alice",replace_text="ALICE",columns=["Name"])
-    assert out.loc[0,"Name"]==" alice "
+    assert out.loc[0,"Name"]==" ALICE "
 
 def test_workbook_import_supports_csv():
     raw=b"Name,Value\nAlice,1\nBob,2\n"
     sheets=read_uploaded_workbook(raw,"sample.csv")
     assert list(sheets)==["CSV"]
     assert sheets["CSV"].shape==(2,2)
+
+def test_workbook_import_supports_xlsx():
+    import io
+    buf=io.BytesIO()
+    with pd.ExcelWriter(buf,engine="xlsxwriter") as writer:
+        pd.DataFrame({"Name":["Alice"],"Value":[1]}).to_excel(writer,index=False,sheet_name="Data")
+    sheets=read_uploaded_workbook(buf.getvalue(),"sample.xlsx")
+    assert "Data" in sheets
+    assert sheets["Data"].iloc[0]["Name"]=="Alice"
 
 def test_workbook_bundle_contains_xlsx():
     data=build_workbook_bundle("Test",[("Data",pd.DataFrame({"Name":["A","B"],"Value":[1,2]}))])
