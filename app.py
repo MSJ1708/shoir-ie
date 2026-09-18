@@ -23,7 +23,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from PIL import Image
 from scipy import stats
-from shoir_upgrade import align_imported_table, clean_dataframe, build_excel_report
+from shoir_upgrade import (align_imported_table, clean_dataframe, build_excel_report, build_workbook_bundle, read_uploaded_workbook, apply_excel_function, EXCEL_FUNCTIONS, copilot_module_recommendation)
 
 # =====================================================================
 # PAGE CONFIGURATION & CUSTOM CSS (Professional Styling & Hover Zoom)
@@ -8082,24 +8082,118 @@ else:
                 
     elif mod == "AI Copilot":
         st.header("🤖 Natural Language AI Copilot")
-        st.caption(
-            "Grounded in your real workspace data - it won't claim to have checked something it hasn't. "
-            "Connect a real language model for open-ended reasoning (see the note in the code) - until then, "
-            "it handles a genuinely useful, honest set of real commands."
-        )
-        for msg in st.session_state.copilot_messages:
-            with st.chat_message(msg["role"]):
-                st.markdown(msg["content"])
+        st.caption("Upload a workbook, ask Copilot to clean or analyze it, apply Excel-style transformations, and download the improved workbook. Recommendations are grounded in the available modules and your current tier.")
 
-        if prompt := st.chat_input("Ask Copilot (e.g., 'optimize the network', 'check safety stocks', 'what can you do')"):
-            st.session_state.copilot_messages.append({"role": "user", "content": prompt})
-            with st.chat_message("user"):
-                st.markdown(prompt)
-            with st.chat_message("assistant"):
-                with st.spinner("Copilot is working..."):
-                    reply = get_copilot_response(prompt, st.session_state.copilot_messages)
-                st.markdown(reply)
-            st.session_state.copilot_messages.append({"role": "assistant", "content": reply})
+        cp1, cp2 = st.columns([2, 1], gap="large")
+        with cp1:
+            uploaded = st.file_uploader("📤 Upload Excel / CSV for Copilot", type=["xlsx", "csv"], key="copilot_workbook_upload")
+            if uploaded is not None:
+                signature = hashlib.sha256(uploaded.getvalue()).hexdigest()
+                if st.session_state.get("copilot_workbook_signature") != signature:
+                    try:
+                        st.session_state.copilot_workbook = read_uploaded_workbook(uploaded.getvalue(), uploaded.name)
+                        st.session_state.copilot_workbook_signature = signature
+                        st.session_state.copilot_workbook_name = uploaded.name
+                        st.session_state.copilot_workbook_original = {k:v.copy(deep=True) for k,v in st.session_state.copilot_workbook.items()}
+                        st.session_state.copilot_clean_audit = []
+                        st.success(f"Loaded {uploaded.name} with {len(st.session_state.copilot_workbook)} sheet(s).")
+                    except Exception as exc:
+                        st.error(f"Could not read the workbook safely: {exc}")
+
+        workbook = st.session_state.get("copilot_workbook", {})
+        if workbook:
+            sheets=list(workbook.keys())
+            selected_sheet=st.selectbox("Workbook sheet", sheets, key="copilot_sheet")
+            df=workbook[selected_sheet]
+            st.markdown("### 🧹 Excel Data Cleaning Studio")
+            st.caption("These controls implement the 12 cleaning operations shown in your reference image.")
+            fn_names=[x[0] for x in EXCEL_FUNCTIONS]
+            function=st.selectbox("Choose an Excel cleaning function", fn_names, key="copilot_excel_function")
+            all_cols=list(df.columns)
+            cols=st.multiselect("Columns", all_cols, default=all_cols if function not in ("TEXTSPLIT","TEXTJOIN") else [], key="copilot_function_columns")
+            c1,c2,c3=st.columns(3)
+            with c1:
+                delimiter=st.text_input("Delimiter", value=",", key="copilot_delimiter")
+                find_text=st.text_input("Find", key="copilot_find")
+            with c2:
+                replace_text=st.text_input("Replace with", key="copilot_replace")
+                split_col=st.selectbox("TEXTSPLIT column", all_cols, key="copilot_split_col") if all_cols else None
+            with c3:
+                output_col=st.text_input("TEXTJOIN output column", value="Joined", key="copilot_output_col")
+                join_cols=st.multiselect("TEXTJOIN columns", all_cols, key="copilot_join_cols")
+
+            a,b,d=st.columns(3)
+            with a:
+                if st.button("✨ Auto Clean 12 checks", type="primary", use_container_width=True, key="copilot_auto_clean"):
+                    cleaned,audit=clean_dataframe(df)
+                    workbook[selected_sheet]=cleaned
+                    st.session_state.copilot_clean_audit.extend(audit)
+                    st.success("Automatic cleaning completed.")
+                    st.rerun()
+            with b:
+                if st.button("▶ Apply Function", use_container_width=True, key="copilot_apply_function"):
+                    try:
+                        kwargs={"columns":cols}
+                        if function=="TEXTSPLIT": kwargs.update(column=split_col,delimiter=delimiter)
+                        elif function=="TEXTJOIN": kwargs.update(columns=join_cols,delimiter=delimiter,output_column=output_col)
+                        elif function in ("SUBSTITUTE","FIND & REPLACE"):
+                            kwargs.update(old=find_text, new=replace_text, find_text=find_text, replace_text=replace_text)
+                        new_df,message=apply_excel_function(df,function,**kwargs)
+                        workbook[selected_sheet]=new_df
+                        st.session_state.copilot_clean_audit.append({"function":function,"details":message,"sheet":selected_sheet})
+                        st.success(message)
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(f"{function} could not be applied: {exc}")
+            with d:
+                if st.button("↩️ Reset Workbook", use_container_width=True, key="copilot_reset_workbook"):
+                    st.session_state.copilot_workbook={k:v.copy(deep=True) for k,v in st.session_state.copilot_workbook_original.items()}
+                    st.session_state.copilot_clean_audit=[]
+                    st.rerun()
+
+            st.dataframe(workbook[selected_sheet], use_container_width=True, hide_index=True)
+            numeric=[x for x in workbook[selected_sheet].columns if pd.api.types.is_numeric_dtype(workbook[selected_sheet][x])]
+            if numeric and len(workbook[selected_sheet])>0:
+                chart_col=st.selectbox("📊 Preview chart",numeric,key="copilot_chart_column")
+                chart_df=workbook[selected_sheet]
+                x_col=next((x for x in chart_df.columns if x != chart_col and not pd.api.types.is_numeric_dtype(chart_df[x])), chart_df.columns[0])
+                fig=px.bar(chart_df,x=x_col,y=chart_col,title=f"{selected_sheet}: {chart_col}")
+                st.plotly_chart(fig,use_container_width=True)
+            else:
+                fig=None
+
+            export_tables=[(name,data) for name,data in workbook.items()]
+            excel_bytes=build_excel_report("Shoir-IE Copilot Cleaned Workbook",export_tables,audit=st.session_state.get("copilot_clean_audit",[]))
+            st.download_button("📥 Download Cleaned & Formatted Excel",excel_bytes,"shoir_ie_copilot_cleaned.xlsx","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",use_container_width=True)
+            bundle=build_workbook_bundle("Shoir-IE Copilot Cleaned Workbook",export_tables,figures=[(selected_sheet,fig)] if fig is not None else [],audit=st.session_state.get("copilot_clean_audit",[]))
+            st.download_button("📦 Download Workbook + Chart Package",bundle,"shoir_ie_copilot_package.zip","application/zip",use_container_width=True)
+
+            with st.expander("🔎 Cleaning audit"):
+                audit_df=pd.DataFrame(st.session_state.get("copilot_clean_audit",[]))
+                st.dataframe(audit_df if not audit_df.empty else pd.DataFrame({"Status":["No transformations applied yet."]}),use_container_width=True,hide_index=True)
+
+        with cp2:
+            st.markdown("### 🧭 Ask what to use")
+            recommendation_prompt=st.text_area("What result do you want?", placeholder="e.g. I need to forecast SKU demand using weather and promotions", key="copilot_recommendation_prompt")
+            if st.button("Recommend Module", use_container_width=True, key="copilot_recommend"):
+                recommendation=copilot_module_recommendation(recommendation_prompt)
+                st.info(recommendation)
+                current_tier=str(st.session_state.get("user_tier","Starter Tier"))
+                if "Required tier:" in recommendation and current_tier.lower().replace(" tier","") not in recommendation.lower():
+                    st.warning("This module may require a higher tier. Open Subscriptions to review available features.")
+            st.markdown("### 💬 Copilot")
+            for msg in st.session_state.copilot_messages:
+                with st.chat_message(msg["role"]):
+                    st.markdown(msg["content"])
+            if prompt := st.chat_input("Ask Copilot to clean, analyze, recommend a module, or run an available command"):
+                st.session_state.copilot_messages.append({"role":"user","content":prompt})
+                with st.chat_message("user"):
+                    st.markdown(prompt)
+                with st.chat_message("assistant"):
+                    with st.spinner("Copilot is working..."):
+                        reply=get_copilot_response(prompt,st.session_state.copilot_messages)
+                    st.markdown(reply)
+                st.session_state.copilot_messages.append({"role":"assistant","content":reply})
 
     # =========================================================
 # CARBON ACCOUNTING & NET-ZERO STUDIO (Astonishing & Stunning)
