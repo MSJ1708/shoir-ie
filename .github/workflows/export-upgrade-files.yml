@@ -1,0 +1,24 @@
+name: Export Shoir-IE Upgrade Files
+on:
+  push:
+    branches: ["feature/platform-upgrade"]
+  workflow_dispatch:
+jobs:
+  bundle:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Package upgrade files
+        run: |
+          mkdir -p shoir_ie_upgrade
+          cp app.py shoir_ie_upgrade/app.py
+          cp shoir_upgrade.py shoir_ie_upgrade/shoir_upgrade.py
+          cp requirements.txt shoir_ie_upgrade/requirements.txt
+          cp tests/test_platform_upgrades.py shoir_ie_upgrade/test_platform_upgrades.py
+          cp .github/workflows/platform-upgrade-tests.yml shoir_ie_upgrade/platform-upgrade-tests.yml
+      - name: Upload upgrade files
+        uses: actions/upload-artifact@v4
+        with:
+          name: shoir-ie-upgrade-files
+          path: shoir_ie_upgrade/
+          retention-days: 7
