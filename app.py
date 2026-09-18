@@ -73,6 +73,20 @@ st.markdown("""
         text-align: center;
         margin-bottom: 20px;
     }
+    /* Shoir-IE visual system */
+    .stApp { background: radial-gradient(circle at 8% 0%, rgba(37,99,235,.08), transparent 26%), radial-gradient(circle at 92% 4%, rgba(14,165,233,.08), transparent 24%), #f7f9fc; }
+    [data-testid="stSidebar"] { background: linear-gradient(180deg,#0b1220 0%,#111827 58%,#172033 100%); border-right: 1px solid rgba(148,163,184,.18); }
+    [data-testid="stSidebar"] * { color:#e5edf7; }
+    .platform-hero { background:linear-gradient(135deg,#0b1220 0%,#172554 52%,#0f3b66 100%); border:1px solid rgba(148,163,184,.20); border-radius:18px; padding:22px 24px; margin-bottom:18px; box-shadow:0 18px 40px rgba(15,23,42,.14); }
+    .platform-hero h1,.platform-hero h2,.platform-hero p { color:#fff !important; }
+    .platform-kicker { display:inline-block; padding:5px 10px; border-radius:999px; background:rgba(56,189,248,.13); border:1px solid rgba(56,189,248,.25); color:#7dd3fc !important; font-size:11px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; }
+    div[data-testid="stMetric"] { background:rgba(255,255,255,.84); border:1px solid #e2e8f0; padding:10px 14px; border-radius:12px; box-shadow:0 6px 18px rgba(15,23,42,.04); }
+    div[data-baseweb="tab-list"] { gap:6px; border-bottom:1px solid #dbe4ef; }
+    button[kind="primary"] { border-radius:10px !important; font-weight:700 !important; min-height:42px; }
+    button[kind="secondary"] { border-radius:10px !important; min-height:40px; }
+    [data-testid="stDataFrame"] { border:1px solid #e2e8f0; border-radius:12px; overflow:hidden; }
+    .status-pill { display:inline-flex; align-items:center; gap:7px; padding:5px 9px; border-radius:999px; font-size:11px; font-weight:700; border:1px solid #dbe4ef; background:#f8fafc; }
+    .status-dot { width:8px; height:8px; border-radius:50%; display:inline-block; background:#22c55e; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -5041,9 +5055,21 @@ if selected_module == "Geospatial Network Designer":
 
         fig_map = go.Figure()
 
+        # Plotly 6+ uses MapLibre traces (Scattermap). Keep backwards compatibility
+        # with Scattermapbox and provide a geo fallback for older environments.
+        if hasattr(go, "Scattermap"):
+            _MapTrace = go.Scattermap
+            _map_mode = "map"
+        elif hasattr(go, "Scattermapbox"):
+            _MapTrace = go.Scattermapbox
+            _map_mode = "mapbox"
+        else:
+            _MapTrace = go.Scattergeo
+            _map_mode = "geo"
+
         # Add Demand Markets
         if not df_markets.empty:
-            fig_map.add_trace(go.Scattermapbox(
+            fig_map.add_trace(_MapTrace(
                 lat=df_markets["lat"],
                 lon=df_markets["lon"],
                 mode="text+markers",
@@ -5057,7 +5083,7 @@ if selected_module == "Geospatial Network Designer":
 
         # Add Supply Hubs
         if not df_nodes.empty:
-            fig_map.add_trace(go.Scattermapbox(
+            fig_map.add_trace(_MapTrace(
                 lat=df_nodes["lat"],
                 lon=df_nodes["lon"],
                 mode="text+markers",
@@ -5073,7 +5099,7 @@ if selected_module == "Geospatial Network Designer":
         if show_connections and not df_nodes.empty and not df_markets.empty:
             for _, node in df_nodes.iterrows():
                 for _, mkt in df_markets.iterrows():
-                    fig_map.add_trace(go.Scattermapbox(
+                    fig_map.add_trace(_MapTrace(
                         lat=[node["lat"], mkt["lat"]],
                         lon=[node["lon"], mkt["lon"]],
                         mode="lines",
@@ -5082,18 +5108,30 @@ if selected_module == "Geospatial Network Designer":
                         hoverinfo="none"
                     ))
 
-        fig_map.update_layout(
-            mapbox=dict(
-                style=map_style,
-                center=dict(lat=24.0, lon=44.0),
-                zoom=4.8
-            ),
-            height=500,
-            margin=dict(l=0, r=0, t=0, b=0),
-            paper_bgcolor="#0b0f19",
-            font=dict(color="#f3f4f6"),
-            legend=dict(orientation="h", yanchor="bottom", y=0.02, xanchor="left", x=0.02, bgcolor="rgba(15,23,42,0.8)")
-        )
+        if _map_mode == "map":
+            fig_map.update_layout(
+                map=dict(style=map_style, center=dict(lat=24.0, lon=44.0), zoom=4.8),
+                height=500, margin=dict(l=0, r=0, t=0, b=0),
+                paper_bgcolor="#0b0f19", font=dict(color="#f3f4f6"),
+                legend=dict(orientation="h", yanchor="bottom", y=0.02, xanchor="left", x=0.02, bgcolor="rgba(15,23,42,0.8)")
+            )
+        elif _map_mode == "mapbox":
+            fig_map.update_layout(
+                mapbox=dict(style=map_style, center=dict(lat=24.0, lon=44.0), zoom=4.8),
+                height=500, margin=dict(l=0, r=0, t=0, b=0),
+                paper_bgcolor="#0b0f19", font=dict(color="#f3f4f6"),
+                legend=dict(orientation="h", yanchor="bottom", y=0.02, xanchor="left", x=0.02, bgcolor="rgba(15,23,42,0.8)")
+            )
+        else:
+            fig_map.update_layout(
+                geo=dict(scope="world", projection_type="equirectangular",
+                         center=dict(lat=24.0, lon=44.0),
+                         lataxis=dict(range=[16,32]), lonaxis=dict(range=[34,56]),
+                         showland=True, showcountries=True),
+                height=500, margin=dict(l=0, r=0, t=0, b=0),
+                paper_bgcolor="#0b0f19", font=dict(color="#f3f4f6"),
+                legend=dict(orientation="h", yanchor="bottom", y=0.02, xanchor="left", x=0.02, bgcolor="rgba(15,23,42,0.8)")
+            )
         st.plotly_chart(fig_map, use_container_width=True)
 
     # TAB 2: Center of Gravity (CoG) Facility Location Optimizer
@@ -7015,6 +7053,34 @@ if selected_module in ["Digital Twin & Discrete-Event Simulation", "Digital Twin
             {"agv_id": "AGV-01", "task": "Transporting Part #104", "battery": 88.0, "status": "Moving", "x": 30, "y": 20},
             {"agv_id": "AGV-02", "task": "Returning to Charging Dock", "battery": 24.5, "status": "Charging", "x": 60, "y": 70},
         ]
+
+    # Defensive session-state migration for browser sessions created by older
+    # Shoir-IE versions. Every downstream view now receives the same schema.
+    _raw_agvs = st.session_state.get("agv_fleet", [])
+    _normalized_agvs = []
+    _seen_agv_ids = set()
+    for _idx, _agv in enumerate(_raw_agvs if isinstance(_raw_agvs, list) else []):
+        if not isinstance(_agv, dict):
+            continue
+        _id = str(_agv.get("agv_id") or _agv.get("id") or _agv.get("ID") or f"AGV-{_idx+1:02d}").strip()
+        if not _id or _id in _seen_agv_ids:
+            _id = f"AGV-{_idx+1:02d}"
+        _seen_agv_ids.add(_id)
+        try: _battery = float(_agv.get("battery", _agv.get("battery_pct", 100)))
+        except Exception: _battery = 100.0
+        try: _x = float(_agv.get("x", 50))
+        except Exception: _x = 50.0
+        try: _y = float(_agv.get("y", 45))
+        except Exception: _y = 45.0
+        _normalized_agvs.append({
+            "agv_id": _id,
+            "task": str(_agv.get("task") or _agv.get("mission") or "Unassigned"),
+            "battery": max(0.0, min(100.0, _battery)),
+            "status": str(_agv.get("status") or "Idle"),
+            "x": _x,
+            "y": _y,
+        })
+    st.session_state.agv_fleet = _normalized_agvs
 
     if "des_queues" not in st.session_state:
         st.session_state.des_queues = [
