@@ -60,3 +60,14 @@ def test_decision_verify_calculates_error():
     out = decision_verify("TEST-1", pred, actual, verified_by="pytest")
     assert out["Absolute Error"].iloc[0] == 10
     assert out["Percent Error"].iloc[0] == 10
+
+
+def test_scenario_versions_are_not_overwritten_for_identical_inputs(tmp_path, monkeypatch):
+    import industrial_operating_system as ios
+    db = tmp_path / "scenario.db"
+    monkeypatch.chdir(tmp_path)
+    ios.scenario_save("Baseline", {"Demand": 100}, {"Cost": 10}, "pytest")
+    ios.scenario_save("Baseline", {"Demand": 100}, {"Cost": 10}, "pytest")
+    rows = ios.scenario_list()
+    assert len(rows) == 2
+    assert sorted(rows["version"].tolist()) == [1, 2]
