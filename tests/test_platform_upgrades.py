@@ -1,4 +1,9 @@
-import os, sqlite3, tempfile
+import os, sys, sqlite3, tempfile
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
 import pandas as pd
 from shoir_upgrade import clean_dataframe, ensure_upgrade_schema, tier_allows, build_excel_report
 
@@ -16,8 +21,8 @@ def test_migration_is_additive_and_idempotent():
             c.execute("create table users(id integer primary key, username text)")
             c.execute("insert into users(username) values('existing')")
             c.commit()
-        assert ensure_upgrade_schema(db)
-        assert ensure_upgrade_schema(db)
+        assert ensure_upgrade_schema(db) is True
+        assert ensure_upgrade_schema(db) is True
         with sqlite3.connect(db) as c:
             assert c.execute("select username from users").fetchone()[0]=="existing"
             assert c.execute("pragma quick_check").fetchone()[0]=="ok"
