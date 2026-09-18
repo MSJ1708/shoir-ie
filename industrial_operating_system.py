@@ -341,8 +341,29 @@ def render_industrial_operating_system(tier="Enterprise",username="unknown"):
     import plotly.graph_objects as go
     ensure_os_db()
 
-    st.markdown("## 🏭 Industrial Operating System")
-    st.caption("A unified layer for KPIs, engineering methods, scenario control, process intelligence, model health, improvement projects and decision verification.")
+    st.markdown("""
+    <style>
+      .ios-hero{padding:26px 30px;border-radius:20px;background:linear-gradient(135deg,#0f172a,#1e3a8a 55%,#0e7490);box-shadow:0 16px 40px rgba(15,23,42,.14);margin-bottom:18px}
+      .ios-kicker{font-size:11px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:#7dd3fc}
+      .ios-hero h1{color:white;margin:7px 0 5px;font-size:34px;letter-spacing:-.03em}
+      .ios-hero p{color:#cbd5e1;margin:0;max-width:900px}
+      .ios-card{border:1px solid #e2e8f0;border-radius:16px;padding:16px;background:white;box-shadow:0 6px 22px rgba(15,23,42,.05)}
+    </style>
+    <div class="ios-hero">
+      <div class="ios-kicker">Industrial Decision Intelligence · Enterprise</div>
+      <h1>Industrial Operating System</h1>
+      <p>One governed workspace connecting engineering methods, KPIs, scenarios, process intelligence, model health, continuous improvement and closed-loop decision verification.</p>
+    </div>
+    """,unsafe_allow_html=True)
+    health=platform_health()
+    ready=int((health["Status"]=="Ready").sum())
+    total=len(health)
+    c1,c2,c3,c4=st.columns(4)
+    c1.metric("Methods",len(METHOD_LIBRARY))
+    c2.metric("KPI definitions",len(KPI_LIBRARY))
+    c3.metric("Templates",len(TEMPLATE_LIBRARY))
+    c4.metric("Runtime readiness",f"{ready}/{total}")
+    st.caption("Workflow: **Prepare → Analyze → Stress-test → Decide → Verify**. Every analysis remains exportable and auditable.")
     tabs=st.tabs(["📊 KPI Studio","📚 Methods","⚖️ Compare","🌿 Scenario Git","🔎 Process Mining",
                   "🧠 Model Health","✅ Decision Verify","🛠️ DMAIC / A3","🧩 Templates","🩺 Platform Health"])
 
@@ -361,7 +382,8 @@ def render_industrial_operating_system(tier="Enterprise",username="unknown"):
             if st.button("Calculate KPI",type="primary",use_container_width=True,key="os_kpi_run"):
                 try:
                     val=safe_formula(formula,{k:float(v) for k,v in json.loads(variables).items()})
-                    st.metric(kpi,f"{val:,.4g}")
+                    st.metric(kpi,f"{val:,.4g}",row["Unit"])
+            st.caption("Calculated with the restricted Shoir-IE formula evaluator.")
                 except Exception as exc: st.error(f"KPI could not be calculated safely: {exc}")
         st.dataframe(lib,use_container_width=True,hide_index=True)
 
@@ -434,6 +456,12 @@ def render_industrial_operating_system(tier="Enterprise",username="unknown"):
         if isinstance(r,dict):
             q1,q2,q3,q4=st.columns(4); q1.metric("Cases",r["cases"]); q2.metric("Events",r["event_count"]); q3.metric("Variants",r["variant_count"]); q4.metric("Conformance",f'{r["conformance"]:.1f}%')
             st.dataframe(r["variants"],use_container_width=True,hide_index=True)
+            left,right=st.columns(2)
+            with left:
+                st.plotly_chart(px.bar(r["variants"].head(12),x="Cases",y="Variant",orientation="h",title="Top Process Variants"),use_container_width=True)
+            with right:
+                if not r["cycle_times"].empty:
+                    st.plotly_chart(px.histogram(r["cycle_times"],x="Case Cycle Minutes",nbins=12,title="Cycle-Time Distribution"),use_container_width=True)
             if not r["transitions"].empty:
                 tr=r["transitions"].sort_values("Cases",ascending=False).head(20)
                 st.plotly_chart(px.bar(tr,x="From",y="Cases",color="To",title="Observed Process Transitions"),use_container_width=True)
@@ -450,8 +478,12 @@ def render_industrial_operating_system(tier="Enterprise",username="unknown"):
             except Exception as exc: st.error(f"Drift analysis failed safely: {exc}")
         dr=st.session_state.get("os_drift_result")
         if isinstance(dr,pd.DataFrame) and not dr.empty:
+            flagged=int(dr["Flagged"].sum())
+            c1,c2,c3=st.columns(3)
+            c1.metric("Features checked",len(dr)); c2.metric("Flagged",flagged); c3.metric("Highest drift",f'{dr["Drift Score"].max():.3f}')
             st.dataframe(dr,use_container_width=True,hide_index=True)
             st.plotly_chart(px.bar(dr,x="Feature",y="Drift Score",color="Type",title="Drift by Feature"),use_container_width=True)
+            st.caption("Thresholds are governance defaults, not universal pass/fail standards. Configure them to your model policy.")
             render_exports("Model Health",[("Drift Report",dr)],[],tier,username)
 
     with tabs[6]:
