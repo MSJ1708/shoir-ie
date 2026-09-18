@@ -5041,9 +5041,16 @@ if selected_module == "Geospatial Network Designer":
 
         fig_map = go.Figure()
 
+        if hasattr(go, "Scattermap"):
+            _MapTrace, _map_mode = go.Scattermap, "map"
+        elif hasattr(go, "Scattermapbox"):
+            _MapTrace, _map_mode = go.Scattermapbox, "mapbox"
+        else:
+            _MapTrace, _map_mode = go.Scattergeo, "geo"
+
         # Add Demand Markets
         if not df_markets.empty:
-            fig_map.add_trace(go.Scattermapbox(
+            fig_map.add_trace(_MapTrace(
                 lat=df_markets["lat"],
                 lon=df_markets["lon"],
                 mode="text+markers",
@@ -5057,7 +5064,7 @@ if selected_module == "Geospatial Network Designer":
 
         # Add Supply Hubs
         if not df_nodes.empty:
-            fig_map.add_trace(go.Scattermapbox(
+            fig_map.add_trace(_MapTrace(
                 lat=df_nodes["lat"],
                 lon=df_nodes["lon"],
                 mode="text+markers",
@@ -5073,7 +5080,7 @@ if selected_module == "Geospatial Network Designer":
         if show_connections and not df_nodes.empty and not df_markets.empty:
             for _, node in df_nodes.iterrows():
                 for _, mkt in df_markets.iterrows():
-                    fig_map.add_trace(go.Scattermapbox(
+                    fig_map.add_trace(_MapTrace(
                         lat=[node["lat"], mkt["lat"]],
                         lon=[node["lon"], mkt["lon"]],
                         mode="lines",
@@ -5082,18 +5089,13 @@ if selected_module == "Geospatial Network Designer":
                         hoverinfo="none"
                     ))
 
-        fig_map.update_layout(
-            mapbox=dict(
-                style=map_style,
-                center=dict(lat=24.0, lon=44.0),
-                zoom=4.8
-            ),
-            height=500,
-            margin=dict(l=0, r=0, t=0, b=0),
-            paper_bgcolor="#0b0f19",
-            font=dict(color="#f3f4f6"),
-            legend=dict(orientation="h", yanchor="bottom", y=0.02, xanchor="left", x=0.02, bgcolor="rgba(15,23,42,0.8)")
-        )
+        _layout_common = dict(height=500, margin=dict(l=0,r=0,t=0,b=0), paper_bgcolor="#0b0f19", font=dict(color="#f3f4f6"), legend=dict(orientation="h", yanchor="bottom", y=0.02, xanchor="left", x=0.02, bgcolor="rgba(15,23,42,0.8)"))
+        if _map_mode == "map":
+            fig_map.update_layout(map=dict(style=map_style,center=dict(lat=24.0,lon=44.0),zoom=4.8),**_layout_common)
+        elif _map_mode == "mapbox":
+            fig_map.update_layout(mapbox=dict(style=map_style,center=dict(lat=24.0,lon=44.0),zoom=4.8),**_layout_common)
+        else:
+            fig_map.update_layout(geo=dict(scope="world",projection_type="equirectangular",center=dict(lat=24.0,lon=44.0),lataxis=dict(range=[16,32]),lonaxis=dict(range=[34,56]),showland=True,showcountries=True),**_layout_common)
         st.plotly_chart(fig_map, use_container_width=True)
 
     # TAB 2: Center of Gravity (CoG) Facility Location Optimizer
@@ -7015,6 +7017,27 @@ if selected_module in ["Digital Twin & Discrete-Event Simulation", "Digital Twin
             {"agv_id": "AGV-01", "task": "Transporting Part #104", "battery": 88.0, "status": "Moving", "x": 30, "y": 20},
             {"agv_id": "AGV-02", "task": "Returning to Charging Dock", "battery": 24.5, "status": "Charging", "x": 60, "y": 70},
         ]
+
+    # Normalize legacy AGV state so old browser sessions cannot crash when a
+    # newer screen expects the canonical agv_id schema.
+    _fleet = st.session_state.get("agv_fleet", [])
+    _normalized = []
+    _used = set()
+    for _i, _item in enumerate(_fleet if isinstance(_fleet, list) else []):
+        if not isinstance(_item, dict):
+            continue
+        _id = str(_item.get("agv_id") or _item.get("id") or _item.get("ID") or f"AGV-{_i+1:02d}").strip()
+        if not _id or _id in _used:
+            _id = f"AGV-{_i+1:02d}"
+        _used.add(_id)
+        try: _battery = float(_item.get("battery", _item.get("battery_pct", 100)))
+        except Exception: _battery = 100.0
+        try: _x = float(_item.get("x", 50))
+        except Exception: _x = 50.0
+        try: _y = float(_item.get("y", 45))
+        except Exception: _y = 45.0
+        _normalized.append({"agv_id":_id,"task":str(_item.get("task") or _item.get("mission") or "Unassigned"),"battery":max(0,min(100,_battery)),"status":str(_item.get("status") or "Idle"),"x":_x,"y":_y})
+    st.session_state.agv_fleet = _normalized
 
     if "des_queues" not in st.session_state:
         st.session_state.des_queues = [
