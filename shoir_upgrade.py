@@ -268,7 +268,26 @@ def build_workbook_bundle(title: str, tables: Iterable[Tuple[str,pd.DataFrame]],
 
 def copilot_module_recommendation(prompt: str) -> str:
     p=str(prompt or "").lower()
-    rules=[
+    rules=[        (["demand forecasting","forecast sku","weather demand","promotion demand","macro demand"],"Advanced ML Demand Forecasting","Enterprise"),
+        (["predictive maintenance","remaining useful life","rul telemetry","machine health"],"Advanced Predictive Maintenance","Enterprise Plus"),
+        (["scenario version","baseline versus","side by side scenario","scenario delta"],"Scenario Versioning","Enterprise Plus"),
+        (["3d factory","factory layout","3d layout","factory twin"],"3D Factory Designer","Enterprise Plus"),
+        (["connector health","api connector","sap connector","oracle connector","wms connector"],"Industrial Connectivity Hub","Enterprise Plus"),
+        (["executive pdf","board report","executive report"],"Executive Report Center","Enterprise"),
+        (["currency conversion","local currency","trade compliance"],"Localization & Multi-Currency","Mid-Tier Pro"),
+        (["role access","rbac","team permissions"],"Team Workspaces & RBAC","Enterprise"),
+
+        (["aps","advanced planning","finite schedule","production schedule","capacity schedule"],"Advanced Planning & Scheduling (APS)","Enterprise Plus"),
+        (["mes","manufacturing execution","work order execution","shop floor execution"],"Manufacturing Execution System (MES)","Enterprise Plus"),
+        (["spc","cpk","process capability","quality engineering","reliability"],"Quality Engineering & Reliability","Enterprise Plus"),
+        (["discrete event","queue simulation","factory simulation","simulation lab"],"Industrial Simulation Lab","Enterprise Plus"),
+        (["pareto","multi objective","robust optimization","trade off"],"Multi-Objective & Robust Optimization","Enterprise Plus"),
+        (["digital thread","industrial data model","shared industrial model"],"Industrial Digital Thread","Enterprise Plus"),
+        (["opc ua","mqtt","industrial connectivity","iot connector"],"Industrial Connectivity Hub","Enterprise Plus"),
+        (["capex","npv","irr","payback","workforce economics"],"Capital & Workforce Engineering","Enterprise Plus"),
+        (["lca","life cycle assessment","scope 1","scope 2","scope 3"],"Industrial Sustainability & LCA","Enterprise Plus"),
+        (["model registry","reproducibility","model version","audit trail"],"Enterprise Security & Model Governance","Enterprise Plus"),
+
         (["forecast","seasonality","promotion","weather","macro"],"Advanced ML Demand Forecasting","Enterprise"),
         (["monte carlo","stochastic","uncertainty","lead time variance","disruption"],"Stochastic & Monte Carlo Risk Modeling","Enterprise"),
         (["sap","oracle","erp","wms","api connector"],"ERP & WMS API Connectors","Enterprise"),

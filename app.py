@@ -24,6 +24,7 @@ from email.mime.multipart import MIMEMultipart
 from PIL import Image
 from scipy import stats
 from shoir_upgrade import (align_imported_table, clean_dataframe, build_excel_report, build_workbook_bundle, read_uploaded_workbook, apply_excel_function, EXCEL_FUNCTIONS, copilot_module_recommendation)
+from industrial_platform import (NEW_ENTERPRISE_PLUS_MODULES, industrial_data_snapshot, finite_schedule, mes_work_order_table, spc_limits, process_capability, pareto_frontier, weighted_objective, robust_scenario_bounds, discrete_event_simulation, economics, lca_inventory, build_excel_export, data_quality_frame, ensure_model_registry, registry_add, registry_list, ml_demand_forecast, predictive_maintenance_rul, scenario_delta, currency_convert, rbac_can_edit, connector_healthcheck, executive_report_pdf)
 
 # =====================================================================
 # PAGE CONFIGURATION & CUSTOM CSS (Professional Styling & Hover Zoom)
@@ -550,6 +551,45 @@ MODULE_CATALOG = [
      "when": "You need sustainability metrics built into engineering decisions, not bolted on as an afterthought report.",
      "example": "Compare two process redesigns on energy use and waste generation alongside cost and cycle time, in the same view - so sustainability is a design input, not a separate audit."},
 
+    # ---------------- ENTERPRISE PLUS ($299) adds ----------------
+    {"tier": "Enterprise Plus", "category": "Industrial Platform", "name": "Industrial Command Center",
+     "when": "You need one engineering workspace connecting data health, planning, MES, quality, simulation, optimization, economics and sustainability.",
+     "example": "Load operational tables once, validate them, run an APS schedule, simulate queues, compare scenarios, calculate economics and export a traceable workbook from one command center."},
+    {"tier": "Enterprise Plus", "category": "Digital Thread", "name": "Industrial Digital Thread",
+     "when": "Engineering, operations and analytics need a shared model of products, facilities, machines, people and processes.",
+     "example": "Use the same machine, facility and work-order entities across planning, simulation, quality and maintenance instead of copying them between modules."},
+    {"tier": "Enterprise Plus", "category": "Production", "name": "Advanced Planning & Scheduling (APS)",
+     "when": "Production schedules must respect machine capacity, due dates and priorities.",
+     "example": "Create a finite-capacity schedule and flag jobs that cannot fit the configured horizon instead of silently overbooking a machine."},
+    {"tier": "Enterprise Plus", "category": "Production", "name": "Manufacturing Execution System (MES)",
+     "when": "You need work-order progress, production, scrap, yield and status in one execution view.",
+     "example": "Track planned versus produced quantities and yield by work order and export the execution report."},
+    {"tier": "Enterprise Plus", "category": "Quality", "name": "Quality Engineering & Reliability",
+     "when": "You need SPC and capability analysis backed by reproducible calculations.",
+     "example": "Load measurements, generate control limits, calculate Cp/Cpk and export the underlying samples and statistics."},
+    {"tier": "Enterprise Plus", "category": "Simulation", "name": "Industrial Simulation Lab",
+     "when": "You need discrete-event and uncertainty experiments before changing the physical operation.",
+     "example": "Simulate arrivals, service times and server capacity, then stress demand, lead time and capacity with repeatable uncertainty scenarios."},
+    {"tier": "Enterprise Plus", "category": "Optimization", "name": "Multi-Objective & Robust Optimization",
+     "when": "Cost alone is not enough and decisions must balance service, carbon and risk.",
+     "example": "Compare scenarios using weighted objectives and identify Pareto-efficient alternatives."},
+    {"tier": "Enterprise Plus", "category": "Connectivity", "name": "Industrial Connectivity Hub",
+     "when": "Operational data must move safely between industrial systems and Shoir-IE.",
+     "example": "Prepare normalized datasets and governance records for ERP, MES, WMS, IoT and future OPC UA/API connectors."},
+    {"tier": "Enterprise Plus", "category": "Engineering Economics", "name": "Capital & Workforce Engineering",
+     "when": "Investment, labor and operational decisions need a common economic model.",
+     "example": "Compare cash-flow scenarios and connect capacity and workforce assumptions to the resulting economics."},
+    {"tier": "Enterprise Plus", "category": "Sustainability", "name": "Industrial Sustainability & LCA",
+     "when": "Carbon impact needs to be evaluated alongside operational and financial outcomes.",
+     "example": "Calculate activity-based CO2e from configurable quantity and emissions-factor tables and export the audit-ready calculation."},
+    {"tier": "Enterprise Plus", "category": "Governance", "name": "Enterprise Security & Model Governance",
+     "when": "Models, datasets and decisions need traceability and reproducibility.",
+     "example": "Register model versions and dataset hashes so a result can be traced back to its configuration."},
+
+    {"tier": "Enterprise Plus", "category": "AI & Digital Twin", "name": "Advanced Industrial AI & Digital Twin Lab",
+     "when": "You need predictive demand, predictive maintenance, scenario deltas, factory visualization, localization, connector validation and executive reporting in one advanced workspace.",
+     "example": "Train a reproducible demand model with promotion/weather features, estimate machine RUL from telemetry, compare scenarios, validate a connector definition and export an executive PDF."},
+
     # ---------------- RESEARCH PACK ($30 add-on) adds ----------------
     {"tier": "Research Pack", "category": "Research Authoring", "name": "Statistical Hypothesis Testing",
      "when": "You're writing a paper and need a properly-run t-test, ANOVA, or chi-square test with the actual statistics, not a claimed result.",
@@ -611,6 +651,7 @@ MODULE_CATALOG = [
 ]
 
 TIER_BENEFITS = {
+    "Enterprise Plus": {"price":"$299","pitch":"Integrated industrial platform layer: APS, MES, quality engineering, simulation, digital thread, connectivity, robust optimization, economics and sustainability.","gain":"Connects engineering decisions across planning, execution, simulation, quality, cost and sustainability in one traceable workspace."},
     "Starter": {
         "price": "$29",
         "pitch": "The core industrial-engineering toolkit - replace spreadsheet-based network and inventory decisions with solved, defensible answers.",
@@ -1003,7 +1044,7 @@ if not st.session_state.get("current_user"):
     # ------------------------------------------
     with auth_tab2:
         st.subheader("Get Subscription Ticket & Register")
-        reg_tier = st.selectbox("Choose Subscription Tier", ["Starter Tier ($29)", "Research Pack ($30)", "Mid-Tier Pro ($79)", "Enterprise Tier ($120)"])
+        reg_tier = st.selectbox("Choose Subscription Tier", ["Starter Tier ($29)", "Research Pack ($30)", "Mid-Tier Pro ($79)", "Enterprise Tier ($120)", "Enterprise Plus Tier ($299)"])
         reg_name = st.text_input("Name / Username", key="reg_name")
         reg_email = st.text_input("Email Address", placeholder="name@company.com", key="reg_email")
         reg_pass = st.text_input("Password", type="password", key="reg_pass")
@@ -1109,12 +1150,12 @@ if not st.session_state.get("current_user"):
 
         explore_tier = st.radio(
             "Browse by tier",
-            ["Starter", "Mid-Tier Pro", "Enterprise", "Research Pack"],
+            ["Starter", "Mid-Tier Pro", "Enterprise", "Enterprise Plus", "Research Pack"],
             horizontal=True,
             key="explore_tier_radio"
         )
 
-        _tier_order = ["Starter", "Mid-Tier Pro", "Enterprise", "Research Pack"]
+        _tier_order = ["Starter", "Mid-Tier Pro", "Enterprise", "Enterprise Plus", "Research Pack"]
         _cumulative = set(_tier_order[:_tier_order.index(explore_tier) + 1])
         _benefit = TIER_BENEFITS[explore_tier]
         _modules_here = [m for m in MODULE_CATALOG if m["tier"] == explore_tier]
@@ -1218,11 +1259,12 @@ is_admin = (st.session_state.current_user == "sho")
 tier1_features = ["MILP Solvers", "Inventory Playback", "Core IE Tools", "Subscriptions", "Persistence", "Facility Layout & Warehousing", "Enterprise Integration & Collaboration"]
 tier2_features = tier1_features + ["Carbon Accounting", "IoT Digital Twin", "MEIO Matrix", "Slotting & Gantt", "Fleet Routing", "Warehouse Heatmap", "Supplier Risk Matrix", "Scenarios", "AGV Fleet Dispatcher", "Geospatial Network Designer", "Production Planning & Control (PPC)", "Lean Manufacturing & Shop Floor Operations", "Quality Control, Six Sigma & Reliability", "Engineering Economics & Finance"]
 tier3_features = tier2_features + ["AI Copilot", "FastAPI Gateway", "Monte Carlo Sim", "Sensitivity Analysis", "Webhook Alerts", "Agentic Workflows", "Control Tower", "Cryptographic Ledger", "Predictive Maintenance Hub", "Human Factors & Ergonomics (NIOSH)", "Digital Twin & Discrete-Event Simulation", "Green IE & Sustainability"]
+enterprise_plus_features = tier3_features + NEW_ENTERPRISE_PLUS_MODULES
 # FIX (recurring from an earlier upload of this file - reapplied): this list
 # was missing commas between most entries, which in Python silently
 # concatenates adjacent string literals into one garbled string instead of
 # separate list items, and duplicated several Starter-tier names by accident.
-research_pack_features = tier3_features + [
+research_pack_features = enterprise_plus_features + [
     "Statistical Hypothesis Testing",
     "LaTeX Document Formatter",
     "Literature & Citation Matrix",
@@ -1258,12 +1300,16 @@ st.sidebar.markdown("### 🛠️ Enterprise Modules")
 
 if "Research" in tier_val:
     allowed_modules = research_pack_features
+elif "Enterprise Plus" in tier_val:
+    allowed_modules = enterprise_plus_features
 elif "Enterprise" in tier_val or is_admin:
     allowed_modules = tier3_features
 elif "Pro" in tier_val or "Trial" in tier_val:
     allowed_modules = tier2_features
 else:
     allowed_modules = tier1_features
+if is_admin:
+    allowed_modules = research_pack_features + ["Admin Panel"]
 selected_module = st.sidebar.selectbox("Select Module", allowed_modules)
 
 # Universal data workspace controls: available before every module renderer.
@@ -1334,6 +1380,142 @@ if st.sidebar.button("Lock / Logout Workspace"):
     log_audit(st.session_state.get("current_user", "Unknown"), "User Logged Out")
     st.session_state.authenticated = False
     st.rerun()
+elif selected_module == "Industrial Command Center":
+    st.markdown("<h1 style='text-align:center;'>🏭 Industrial Command Center</h1>", unsafe_allow_html=True)
+    st.caption("Unified engineering workspace for data health, planning, MES, quality, simulation, optimization, economics, sustainability and model governance.")
+    ensure_model_registry()
+    snapshot = industrial_data_snapshot(st.session_state)
+    tabs = st.tabs(["📊 Data Health", "🏗️ APS & MES", "🧪 Quality", "🎲 Simulation", "🎯 Optimization", "💰 Economics & ESG", "🧠 Model Registry"])
+    with tabs[0]:
+        if snapshot:
+            chosen=st.selectbox("Workspace dataset",list(snapshot),key="ic_dataset"); df=snapshot[chosen]; q=data_quality_frame(df)
+            a,b,d=st.columns(3); a.metric("Rows",len(df)); b.metric("Columns",len(df.columns)); d.metric("Quality score",f"{float(q.iloc[-1]['Value']):.1f}/100")
+            st.dataframe(df,use_container_width=True,hide_index=True)
+            st.download_button("📥 Download data-health workbook",build_excel_export("Shoir-IE Data Health",{chosen:df,"Data Quality":q}),f"shoir_ie_{chosen.lower()}_health.xlsx","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",use_container_width=True)
+        else: st.info("Load data in a module first; this command center automatically reads shared workspace data.")
+    with tabs[1]:
+        jobs=st.data_editor(pd.DataFrame([{"Job":"WO-1001","Machine":"M-01","Duration":6,"Due Date":"2000-01-02","Priority":2},{"Job":"WO-1002","Machine":"M-02","Duration":4,"Due Date":"2000-01-03","Priority":1}]),num_rows="dynamic",use_container_width=True,key="ic_jobs")
+        machines=st.data_editor(pd.DataFrame([{"Machine":"M-01","Available Hours":168},{"Machine":"M-02","Available Hours":168}]),num_rows="dynamic",use_container_width=True,key="ic_machines")
+        if st.button("▶ Build feasible schedule",type="primary",key="ic_schedule"):
+            try: st.session_state.ic_schedule_result,st.session_state.ic_schedule_summary=finite_schedule(jobs,machines); st.success("Schedule generated and validated.")
+            except Exception as exc: st.error(f"Scheduling validation failed: {exc}")
+        if st.session_state.get("ic_schedule_result") is not None:
+            result=st.session_state.ic_schedule_result; st.dataframe(result,use_container_width=True,hide_index=True)
+            st.download_button("📥 Download APS schedule",build_excel_export("Shoir-IE APS",{"Schedule":result}),"shoir_ie_aps_schedule.xlsx","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",use_container_width=True)
+        mes=st.data_editor(st.session_state.get("ic_mes_orders",pd.DataFrame([{"Order":"WO-1001","Quantity":1000,"Produced":650,"Scrap":12,"Status":"In Process"}])),num_rows="dynamic",use_container_width=True,key="ic_mes")
+        st.session_state.ic_mes_orders=mes; mr=mes_work_order_table(mes); st.dataframe(mr["orders"],use_container_width=True,hide_index=True)
+        st.download_button("📥 Download MES report",build_excel_export("Shoir-IE MES",{"Work Orders":mr["orders"],"Summary":mr["summary"]}),"shoir_ie_mes_report.xlsx","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",use_container_width=True)
+    with tabs[2]:
+        qc=st.data_editor(st.session_state.get("ic_qc",pd.DataFrame({"Sample":range(1,9),"Measurement":[10.1,9.9,10.0,10.2,9.8,10.1,10.0,10.05]})),use_container_width=True,key="ic_qc_editor"); st.session_state.ic_qc=qc
+        vals=pd.to_numeric(qc.get("Measurement",pd.Series(dtype=float)),errors="coerce").dropna().tolist()
+        if len(vals)>=2:
+            lim=spc_limits(vals); fig=px.line(pd.DataFrame({"Sample":range(1,len(vals)+1),"Measurement":vals}),x="Sample",y="Measurement",title="SPC Control Chart")
+            fig.add_hline(y=lim["ucl"],line_dash="dash"); fig.add_hline(y=lim["lcl"],line_dash="dash"); fig.add_hline(y=lim["mean"],line_dash="dot"); st.plotly_chart(fig,use_container_width=True)
+            usl=st.number_input("USL",value=10.5,key="ic_usl"); lsl=st.number_input("LSL",value=9.5,key="ic_lsl"); cap=process_capability(vals,usl,lsl); st.dataframe(pd.DataFrame([cap]),use_container_width=True,hide_index=True)
+            st.download_button("📥 Download quality report",build_excel_export("Shoir-IE Quality",{"Samples":qc,"Capability":pd.DataFrame([cap])},[fig]),"shoir_ie_quality_report.xlsx","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",use_container_width=True)
+        else: st.warning("Enter at least two valid measurements.")
+    with tabs[3]:
+        a,b,d=st.columns(3); servers=a.number_input("Servers",1,20,2,key="ic_servers"); rate=b.number_input("Arrival rate",0.0,100.0,1.5,key="ic_arrival"); service=d.number_input("Average service time",0.0,100.0,0.8,key="ic_service")
+        n=st.number_input("Entities",10,10000,500,step=10,key="ic_entities"); rng=np.random.default_rng(42); arrivals=np.cumsum(rng.exponential(1/max(rate,0.001),int(n))); services=rng.exponential(max(service,0.001),int(n)); sim=discrete_event_simulation(arrivals,services,int(servers))
+        st.json(sim["summary"]); st.dataframe(sim["events"].head(1000),use_container_width=True,hide_index=True)
+        risk=robust_scenario_bounds({"Demand":100,"Lead Time":7,"Capacity":1000},{"Demand":.25,"Lead Time":.30,"Capacity":.15},1000,42); st.dataframe(risk.describe().T.round(2),use_container_width=True)
+        st.download_button("📥 Download simulation & risk workbook",build_excel_export("Shoir-IE Simulation",{"Events":sim["events"],"Risk Scenarios":risk}),"shoir_ie_simulation_risk.xlsx","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",use_container_width=True)
+    with tabs[4]:
+        opts=st.data_editor(pd.DataFrame([{"Scenario":"Baseline","Cost":100,"Carbon":80,"Service":95},{"Scenario":"Low Carbon","Cost":108,"Carbon":55,"Service":94},{"Scenario":"Service First","Cost":118,"Carbon":78,"Service":99}]),use_container_width=True,key="ic_opts")
+        weights=st.multiselect("Objectives",["Cost","Carbon","Service"],default=["Cost","Carbon"],key="ic_weights")
+        if weights:
+            scored=weighted_objective(opts,{x:1/len(weights) for x in weights}); pareto=pareto_frontier(opts,["Cost","Carbon"],["Service"]); st.dataframe(scored,use_container_width=True,hide_index=True); st.dataframe(pareto,use_container_width=True,hide_index=True)
+            st.download_button("📥 Download optimization workbook",build_excel_export("Shoir-IE Optimization",{"Scenarios":scored,"Pareto":pareto}),"shoir_ie_optimization.xlsx","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",use_container_width=True)
+    with tabs[5]:
+        flows=st.text_input("Cash flows (initial investment first)","-180000,45000,55000,70000,85000",key="ic_cashflows"); rate=st.number_input("Discount rate",0.0,1.0,.10,key="ic_rate")
+        try: econ=economics([float(x.strip()) for x in flows.split(",") if x.strip()],rate); st.dataframe(pd.DataFrame([econ]),use_container_width=True,hide_index=True)
+        except Exception as exc: st.warning(f"Economics input: {exc}"); econ={}
+        lca=st.data_editor(pd.DataFrame([{"Activity":"Electricity","Quantity":1000,"Unit":"kWh","Factor_kgCO2e_per_unit":.4},{"Activity":"Transport","Quantity":500,"Unit":"tkm","Factor_kgCO2e_per_unit":.09}]),use_container_width=True,key="ic_lca")
+        try:
+            lo=lca_inventory(lca); st.dataframe(lo,use_container_width=True,hide_index=True); st.download_button("📥 Download economics & ESG workbook",build_excel_export("Shoir-IE Economics ESG",{"Economics":pd.DataFrame([econ]),"LCA":lo}),"shoir_ie_economics_esg.xlsx","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",use_container_width=True)
+        except Exception as exc: st.error(f"LCA validation failed: {exc}")
+    with tabs[6]:
+        name=st.text_input("Model name","Integrated Industrial Study",key="ic_model_name"); version=st.text_input("Version","1.0.0",key="ic_model_version")
+        if st.button("💾 Register model",key="ic_register_model"):
+            registry_add(st.session_state.get("current_user","unknown"),name,version,"industrial",{"modules":NEW_ENTERPRISE_PLUS_MODULES}); st.success("Model registered with reproducible metadata.")
+        reg=registry_list(st.session_state.get("current_user","unknown")); st.dataframe(reg,use_container_width=True,hide_index=True)
+        if not reg.empty: st.download_button("📥 Download registry",build_excel_export("Shoir-IE Model Registry",{"Models":reg}),"shoir_ie_model_registry.xlsx","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",use_container_width=True)
+
+elif selected_module == "Advanced Industrial AI & Digital Twin Lab":
+    st.markdown("<h1 style='text-align:center;'>🧠 Advanced Industrial AI & Digital Twin Lab</h1>", unsafe_allow_html=True)
+    st.caption("Predictive demand, maintenance, scenario comparison, factory visualization, connectivity governance, localization and executive reporting.")
+    lab_tabs=st.tabs(["📈 Demand Forecasting","🛠️ Predictive Maintenance","🔀 Scenario Versioning","🏭 3D Factory","🌐 Connectivity & Localization","📄 Executive Report"])
+    with lab_tabs[0]:
+        hist=st.data_editor(st.session_state.get("lab_forecast_data",pd.DataFrame({
+            "Demand":[120,135,128,150,162,171,168,180,190,205,214,225],
+            "Promotion":[0,0,1,0,1,1,0,1,0,1,1,0],
+            "Weather":[25,26,24,28,30,31,29,27,26,25,23,22],
+            "MacroIndex":[100,101,101,102,103,103,104,105,106,106,107,108],
+        })),num_rows="dynamic",use_container_width=True,key="lab_forecast_editor")
+        st.session_state.lab_forecast_data=hist
+        target=st.selectbox("Target",list(hist.columns),index=0,key="lab_forecast_target")
+        features=st.multiselect("External/model features",[c for c in hist.columns if c!=target],default=[c for c in hist.columns if c!=target],key="lab_forecast_features")
+        model_type=st.selectbox("Model",["Random Forest","Gradient Boosting"],key="lab_forecast_model")
+        if st.button("🚀 Train & Forecast",type="primary",key="lab_forecast_run"):
+            try:
+                out=ml_demand_forecast(hist,target,features,12,model_type); st.session_state.lab_forecast_out=out
+                st.success(f"Model trained. Validation MAE: {out['diagnostics']['MAE']!s}; R²: {out['diagnostics']['R2']!s}")
+            except Exception as exc: st.error(f"Forecast validation failed: {exc}")
+        if st.session_state.get("lab_forecast_out"):
+            out=st.session_state.lab_forecast_out; st.dataframe(out["forecast"],use_container_width=True,hide_index=True); st.dataframe(out["feature_importance"],use_container_width=True,hide_index=True)
+            st.download_button("📥 Download forecast package",build_excel_export("Shoir-IE Demand Forecast",{"Forecast":out["forecast"],"Feature Importance":out["feature_importance"],"Diagnostics":pd.DataFrame([out["diagnostics"]])}),"shoir_ie_demand_forecast.xlsx","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",use_container_width=True)
+    with lab_tabs[1]:
+        telem=st.data_editor(st.session_state.get("lab_telemetry",pd.DataFrame({
+            "Vibration":[.20,.22,.25,.27,.31,.34,.36,.40,.43,.47,.50,.55,.58,.62,.66,.70,.73,.76,.80,.84],
+            "Temperature":[60,61,62,63,65,66,68,69,70,72,73,75,76,78,79,81,82,84,85,87],
+            "Load":[.5,.52,.51,.54,.56,.57,.59,.60,.62,.63,.65,.66,.68,.69,.71,.72,.74,.75,.77,.78],
+            "RUL":[120,116,112,108,103,98,94,89,84,79,74,69,64,59,54,49,44,39,34,29],
+        })),num_rows="dynamic",use_container_width=True,key="lab_telemetry_editor")
+        st.session_state.lab_telemetry=telem
+        target=st.selectbox("RUL target",list(telem.columns),index=3,key="lab_rul_target")
+        features=st.multiselect("Telemetry features",[c for c in telem.columns if c!=target],default=[c for c in telem.columns if c!=target],key="lab_rul_features")
+        if st.button("🛠️ Train RUL model",type="primary",key="lab_rul_run"):
+            try: st.session_state.lab_rul_out=predictive_maintenance_rul(telem,target,features); st.success("Predictive maintenance model trained with holdout validation.")
+            except Exception as exc: st.error(f"RUL validation failed: {exc}")
+        if st.session_state.get("lab_rul_out"):
+            out=st.session_state.lab_rul_out; st.metric("Predicted RUL for latest telemetry",f"{out['predicted_rul']:.1f} periods"); st.dataframe(out["feature_importance"],use_container_width=True,hide_index=True)
+            st.download_button("📥 Download maintenance model report",build_excel_export("Shoir-IE Predictive Maintenance",{"Predictions":out["predictions"],"Feature Importance":out["feature_importance"],"Metrics":pd.DataFrame([{"MAE":out["MAE"],"R2":out["R2"],"Predicted RUL":out["predicted_rul"]}])}),"shoir_ie_predictive_maintenance.xlsx","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",use_container_width=True)
+    with lab_tabs[2]:
+        base=st.data_editor(st.session_state.get("lab_base_scenario",pd.DataFrame([{"Scenario":"Baseline","Cost":100,"Service":95,"Carbon":80},{"Scenario":"Baseline-2","Cost":105,"Service":94,"Carbon":75}])),use_container_width=True,key="lab_base")
+        alt=st.data_editor(st.session_state.get("lab_alt_scenario",pd.DataFrame([{"Scenario":"Candidate","Cost":92,"Service":97,"Carbon":70},{"Scenario":"Candidate-2","Cost":111,"Service":99,"Carbon":68}])),use_container_width=True,key="lab_alt")
+        st.session_state.lab_base_scenario=base; st.session_state.lab_alt_scenario=alt
+        key=st.selectbox("Scenario key",["Scenario"],key="lab_scenario_key")
+        if st.button("🔀 Compare scenarios",type="primary",key="lab_scenario_run"):
+            try: st.session_state.lab_delta=scenario_delta(base,alt,[key])
+            except Exception as exc: st.error(f"Scenario comparison failed: {exc}")
+        if st.session_state.get("lab_delta") is not None:
+            st.dataframe(st.session_state.lab_delta,use_container_width=True,hide_index=True)
+            st.download_button("📥 Download scenario comparison",build_excel_export("Shoir-IE Scenario Versioning",{"Delta":st.session_state.lab_delta}),"shoir_ie_scenario_comparison.xlsx","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",use_container_width=True)
+        st.caption("Saved scenario runs are stored in the model/experiment registry; each run can be reproduced from its recorded parameters.")
+    with lab_tabs[3]:
+        layout=st.data_editor(pd.DataFrame([{"Asset":"Machine A","X":0,"Y":0,"Z":0,"Status":"Running"},{"Asset":"Machine B","X":5,"Y":0,"Z":0,"Status":"Warning"},{"Asset":"Buffer","X":2,"Y":4,"Z":0,"Status":"Healthy"},{"Asset":"Dock","X":8,"Y":4,"Z":0,"Status":"Healthy"}]),num_rows="dynamic",use_container_width=True,key="lab_3d_layout")
+        fig3=go.Figure()
+        for status,grp in layout.groupby("Status"):
+            fig3.add_trace(go.Scatter3d(x=grp["X"],y=grp["Y"],z=grp["Z"],mode="markers+text",text=grp["Asset"],name=status,marker={"size":10}))
+        fig3.update_layout(title="Interactive Factory Digital Twin Layout",scene={"xaxis_title":"X","yaxis_title":"Y","zaxis_title":"Z"})
+        st.plotly_chart(fig3,use_container_width=True)
+        st.download_button("📥 Download factory layout data",build_excel_export("Shoir-IE 3D Factory",{"Layout":layout}),"shoir_ie_factory_layout.xlsx","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",use_container_width=True)
+    with lab_tabs[4]:
+        system=st.selectbox("Connector system",["SAP","Oracle","WMS","MES","OPC UA Gateway","REST API"],key="lab_connector_system")
+        endpoint=st.text_input("Endpoint",placeholder="https://example.internal/api",key="lab_connector_endpoint")
+        conn_check=connector_healthcheck({"name":system,"system":system,"endpoint":endpoint})
+        st.json(conn_check)
+        st.caption("The application validates connector definitions and keeps production credentials outside the database. A live enterprise connection requires the customer's endpoint and secret configuration.")
+        amount=st.number_input("Amount to convert",value=1000.0,key="lab_currency_amount")
+        rate=st.number_input("Rate to base currency",value=3.75,min_value=0.000001,key="lab_currency_rate")
+        st.metric("Converted amount",f"{currency_convert(amount,rate):,.2f}")
+        role=st.selectbox("Workspace role",["Viewer","Planner","Engineer","Manager","Admin"],key="lab_role")
+        action=st.selectbox("Permission",["read","write_scenario","run_model","edit_model","approve","admin"],key="lab_action")
+        st.info(f"Permission {'granted' if rbac_can_edit(role,'workspace',action) else 'not granted'} for {role}.")
+    with lab_tabs[5]:
+        summary={"Workspace":"Shoir-IE","Module":"Advanced Industrial AI & Digital Twin Lab","Tier":str(st.session_state.get("user_tier","unknown"))}
+        report=executive_report_pdf("Shoir-IE Executive Engineering Report",summary,{"Forecast Diagnostics":pd.DataFrame([st.session_state.get("lab_forecast_out",{}).get("diagnostics",{})]) if st.session_state.get("lab_forecast_out") else pd.DataFrame([summary])})
+        st.download_button("📄 Download Executive PDF",report,"shoir_ie_executive_report.pdf","application/pdf",use_container_width=True)
 elif selected_module in ["Autonomous Cognitive Operations & Zero-Knowledge Mesh (ACO-ZKMS)", "⚡ ACO-ZKMS Master Engine"]:
     import streamlit as st
     import pandas as pd
