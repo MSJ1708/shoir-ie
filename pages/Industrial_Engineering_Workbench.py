@@ -16,7 +16,9 @@ from datetime import datetime
 import numpy as np
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import streamlit as st
+import html
 
 from industrial_platform import render_module, PLATFORM_CATALOG, init_platform_db
 from industrial_platform_excellence import (
@@ -41,8 +43,21 @@ USER = st.session_state.get("current_user","guest")
 RAW_TIER = st.session_state.get("user_tier","Enterprise Plus Tier")
 TIER = canonical_tier(RAW_TIER)
 
-st.title("🏭 Shoir-IE Unified Engineering Workbench")
-st.caption("One industrial workspace for data → model → simulation/optimization → decision → report, with shared validation and governance.")
+st.markdown("""
+<style>
+.workbench-hero{padding:22px 24px;border:1px solid #dbe4f0;border-radius:18px;background:linear-gradient(135deg,#f8fbff,#ffffff 58%,#f0fdfa);box-shadow:0 10px 30px rgba(15,23,42,.06);margin-bottom:18px}
+.workbench-kicker{font-size:11px;font-weight:800;letter-spacing:.09em;text-transform:uppercase;color:#0f766e}
+.workbench-hero h1{margin:4px 0 4px;font-size:31px;color:#0f172a}
+.workbench-hero p{margin:0;color:#64748b}
+.result-card{padding:15px 17px;border:1px solid #dbeafe;border-radius:15px;background:#fff;box-shadow:0 5px 18px rgba(15,23,42,.04)}
+.action-row{margin-top:10px}
+</style>
+<div class="workbench-hero">
+  <div class="workbench-kicker">Industrial Decision Platform</div>
+  <h1>🏭 Shoir-IE Engineering Command Center</h1>
+  <p>Validate → Analyze → Visualize → Decide → Export. Technical details stay available without cluttering the engineering result.</p>
+</div>
+""",unsafe_allow_html=True)
 
 # Header health/status strip
 h1,h2,h3,h4,h5 = st.columns(5)
@@ -56,6 +71,54 @@ h4.metric("Datasets", ds_count)
 h5.metric("Models", model_count)
 
 st.divider()
+
+def render_engineering_result(value, title="Analysis result", key_prefix="result"):
+    """Render structured results as readable KPIs/tables/charts, not raw JSON."""
+    st.markdown(f"### {title}")
+    if isinstance(value, dict):
+        scalar={k:v for k,v in value.items() if not isinstance(v,(dict,list,pd.DataFrame,np.ndarray))}
+        frames={k:v for k,v in value.items() if isinstance(v,pd.DataFrame)}
+        nested={k:v for k,v in value.items() if isinstance(v,(dict,list))}
+        if scalar:
+            cols=st.columns(min(4,max(1,len(scalar))))
+            for i,(k,v) in enumerate(scalar.items()):
+                label=str(k).replace("_"," ").title()
+                display=f"{v:,.3f}" if isinstance(v,(float,np.floating)) else f"{v:,}" if isinstance(v,(int,np.integer)) else str(v)
+                cols[i%len(cols)].metric(label,display)
+        for k,df in frames.items():
+            st.markdown(f"**{str(k).replace('_',' ').title()}**")
+            st.dataframe(df,use_container_width=True,hide_index=True)
+            _render_result_chart(df,f"{str(k).replace('_',' ').title()} chart",f"{key_prefix}_{k}")
+        if nested:
+            with st.expander("🔎 Detailed diagnostics",expanded=False):
+                for k,v in nested.items():
+                    st.markdown(f"**{str(k).replace('_',' ').title()}**")
+                    if isinstance(v,(dict,list)):
+                        st.dataframe(pd.json_normalize(v) if isinstance(v,list) else pd.DataFrame([v]),use_container_width=True,hide_index=True)
+        return
+    if isinstance(value,pd.DataFrame):
+        st.dataframe(value,use_container_width=True,hide_index=True)
+        _render_result_chart(value,title+" chart",key_prefix)
+        return
+    st.write(value)
+
+def _render_result_chart(df,title,key_prefix):
+    if not isinstance(df,pd.DataFrame) or df.empty:
+        return
+    numeric=[c for c in df.columns if pd.api.types.is_numeric_dtype(df[c])]
+    if not numeric:
+        return
+    y=st.selectbox("Chart metric",numeric,key=f"{key_prefix}_metric")
+    x_candidates=[c for c in df.columns if c != y]
+    x=st.selectbox("X-axis / category",x_candidates,key=f"{key_prefix}_x") if x_candidates else None
+    chart=st.selectbox("Visualization",["Bar","Line","Scatter"],key=f"{key_prefix}_type")
+    plot=df[[x,y]].dropna() if x else df[[y]].dropna()
+    if plot.empty: return
+    if chart=="Line" and x: fig=px.line(plot,x=x,y=y,markers=True,title=title)
+    elif chart=="Scatter" and x: fig=px.scatter(plot,x=x,y=y,title=title)
+    else: fig=px.bar(plot,x=x,y=y,title=title) if x else px.bar(plot,y=y,title=title)
+    fig.update_layout(height=340,margin=dict(l=10,r=10,t=55,b=10))
+    st.plotly_chart(fig,use_container_width=True)
 
 # Sidebar navigation
 st.sidebar.header("Workbench")
@@ -74,7 +137,22 @@ if not labels:
     st.sidebar.warning("No modules match the current filter.")
     selected = "Engineering Validation Center"
 else:
-    selected = st.sidebar.selectbox("Module", labels)
+    _module_rows = {row["Module"]: row for _, row in filtered.iterrows()}
+    _display_labels = [
+        f"{_module_rows[m]['Category']} · {m}" for m in labels
+    ]
+    _display_to_module = dict(zip(_display_labels, labels))
+    _selected_display = st.sidebar.selectbox("Module", _display_labels, key="workbench_module_selector")
+    selected = _display_to_module[_selected_display]
+    _selected_row = _module_rows[selected]
+    st.sidebar.markdown(
+        f"""<div class="result-card">
+        <div style="font-size:10px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#0f766e">{html.escape(str(_selected_row['Category']))}</div>
+        <div style="font-size:15px;font-weight:800;margin-top:4px;color:#0f172a">{html.escape(str(selected))}</div>
+        <div style="font-size:11px;color:#64748b;margin-top:4px">Required tier: {html.escape(str(required)) if 'required' in locals() else 'Configured'}</div>
+        </div>""",
+        unsafe_allow_html=True,
+    )
 
 required = next((x[2] for x in MODULE_MATRIX if x[1] == selected), "Starter")
 if not tier_allows(RAW_TIER, required):
@@ -125,7 +203,7 @@ if selected == "Engineering Validation Center":
         m1.metric("Data quality",f"{res['schema']['quality']['score']:.1f}%")
         m2.metric("Validation", "PASS" if res["schema"]["valid"] and res["units"]["valid"] else "ATTENTION")
         m3.metric("Rows", len(edited))
-        st.json(res)
+        render_engineering_result(res,"Validation result","validation_result")
     st.dataframe(edited,use_container_width=True)
 
 elif selected == "Industrial Data Model & Digital Thread":
@@ -204,7 +282,7 @@ elif selected == "Advanced Planning & Scheduling":
         sch=st.session_state.get("wb_schedule")
         if sch is not None:
             st.dataframe(sch,use_container_width=True,hide_index=True)
-            st.json(st.session_state["wb_schedule_diag"])
+            render_engineering_result(st.session_state["wb_schedule_diag"],"Schedule diagnostics","schedule_diag")
             fig=px.timeline(sch,x_start="Start",x_end="Finish",y="Machine",color="Product",hover_data=["Order","LateMin"])
             st.plotly_chart(fig,use_container_width=True)
 
@@ -234,7 +312,7 @@ elif selected == "Quality Engineering & Reliability":
         qc=st.data_editor(st.session_state.get("wb_qc",pd.DataFrame({"Measurement":[10.1,10.0,9.9,10.2,9.8,10.05],"Part":[1,1,2,2,3,3],"Operator":["A","B","A","B","A","B"]})),num_rows="dynamic",use_container_width=True,key="wb_qc_editor")
         lsl=st.number_input("LSL",value=9.0); usl=st.number_input("USL",value=11.0); target=st.number_input("Target",value=10.0)
         if st.button("🔬 Capability + Gage R&R",use_container_width=True):
-            st.json({"Capability":capability_extended(qc["Measurement"],lsl,usl,target),"Gage R&R":gage_rr_extended(qc)})
+            render_engineering_result({"Capability":capability_extended(qc["Measurement"],lsl,usl,target),"Gage R&R":gage_rr_extended(qc)},"Capability & Gage R&R","capability_result")
     with tab3:
         doe=st.data_editor(st.session_state.get("wb_doe",pd.DataFrame({"A":[-1,-1,1,1],"B":[-1,1,-1,1],"Response":[10,12,14,16]})),num_rows="dynamic",use_container_width=True,key="wb_doe_editor")
         response=st.selectbox("Response",list(doe.columns),index=2 if len(doe.columns)>2 else 0)
@@ -246,7 +324,7 @@ elif selected == "Quality Engineering & Reliability":
         if st.button("📉 Fit reliability model",use_container_width=True):
             try:
                 nums=[float(x.strip()) for x in failures.split(",") if x.strip()]
-                st.json(reliability_summary(nums))
+                render_engineering_result(reliability_summary(nums),"Reliability result","reliability_result")
             except Exception as exc:
                 st.error(f"Reliability analysis failed safely: {exc}")
 
@@ -257,14 +335,14 @@ elif selected == "Industrial Simulation Lab":
         sim=st.data_editor(st.session_state.get("wb_sim",pd.DataFrame({"Replication":range(1,11),"Throughput":[95,99,101,98,100,102,97,100,99,101],"MeanWait":[11,13,12,14,10,12,13,11,12,12]})),num_rows="dynamic",use_container_width=True,key="wb_sim_editor")
         metric=st.selectbox("Metric", [c for c in sim.columns if c!="Replication"] or ["Throughput"])
         if st.button("📏 Calculate 95% confidence interval",type="primary",use_container_width=True):
-            st.json(simulation_statistics(sim,metric))
+            render_engineering_result(simulation_statistics(sim,metric),"Simulation statistics","simulation_result")
     with tab2:
         series=st.text_area("Observed metric series","100,101,102,102,101,100,100,99,100,100,101,100,100,101,100,100")
         window=st.number_input("Rolling window",3,50,5)
         if st.button("🧭 Diagnose warm-up",use_container_width=True):
             try:
                 nums=[float(x.strip()) for x in series.split(",") if x.strip()]
-                st.json(warmup_diagnostic(nums,int(window)))
+                render_engineering_result(warmup_diagnostic(nums,int(window)),"Warm-up diagnostics","warmup_result")
             except Exception as exc:
                 st.error(f"Warm-up diagnostic failed safely: {exc}")
 
@@ -350,7 +428,7 @@ elif selected == "Workforce Engineering":
     overtime=st.number_input("Overtime hours",0.0,24.0,2.0)
     wage=st.number_input("Wage/hour",0.0,1000.0,25.0)
     if st.button("👷 Evaluate workforce scenario",type="primary",use_container_width=True):
-        st.json(workforce_scenario(staff,minutes,prod,absent,overtime,wage))
+        render_engineering_result(workforce_scenario(staff,minutes,prod,absent,overtime,wage),"Workforce scenario","workforce_result")
 
 elif selected == "Industrial Sustainability & LCA":
     st.subheader("🌱 Industrial Sustainability & LCA")
@@ -418,7 +496,7 @@ elif selected == "Advanced Engineering Copilot":
         st.session_state["wb_plan"]=copilot_execution_plan(prompt)
     plan=st.session_state.get("wb_plan")
     if plan:
-        st.json(plan)
+        render_engineering_result(plan,"Proposed execution plan","copilot_plan")
         approve=st.button("✅ Approve this workflow")
         if approve:
             st.session_state["wb_plan_approved"]=True
@@ -435,7 +513,7 @@ elif selected == "Industrial Connectivity Hub":
     })),num_rows="dynamic",use_container_width=True,key="wb_conn_editor")
     for row in conns.to_dict("records"):
         if st.button(f"🧪 Validate {row['Name']}",use_container_width=True,key="conn_"+re.sub(r"[^A-Za-z0-9]","_",str(row["Name"]))):
-            st.json(connector_validation(row["Name"],row["System Type"],row["Endpoint"]))
+            render_engineering_result(connector_validation(row["Name"],row["System Type"],row["Endpoint"]),f"Connector validation · {row['Name']}","connector_"+re.sub(r"[^A-Za-z0-9]","_",str(row["Name"])))
 
 elif selected in {"Manufacturing Execution System","Industrial Control Center","Executive Report Center","Enterprise Security & Governance","Team Workspaces & RBAC","Engineering Model Registry","Experiment Lab","Live Industrial Digital Twin","Predictive Maintenance Digital Twin","Advanced ML Demand Forecasting","Localization & Multi-Currency"}:
     # Reuse existing mature module implementations under the unified shell.
