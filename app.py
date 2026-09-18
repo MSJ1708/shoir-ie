@@ -25,6 +25,7 @@ from PIL import Image
 from scipy import stats
 from shoir_upgrade import (align_imported_table, clean_dataframe, build_excel_report, build_workbook_bundle, read_uploaded_workbook, apply_excel_function, EXCEL_FUNCTIONS, copilot_module_recommendation)
 from industrial_platform import PLATFORM_CATALOG, render_module as render_industrial_module, ml_demand_forecast, tier_allows as platform_tier_allows
+from industrial_operating_system import render_industrial_operating_system
 
 # =====================================================================
 # PAGE CONFIGURATION & CUSTOM CSS (Professional Styling & Hover Zoom)
@@ -637,6 +638,11 @@ TIER_BENEFITS = {
 for _platform_module in PLATFORM_CATALOG:
     if not any(x.get("name") == _platform_module["name"] for x in MODULE_CATALOG):
         MODULE_CATALOG.append(_platform_module)
+
+# Unified Industrial Operating System — shared decision-intelligence workspace.
+_IOS_CATALOG_ENTRY = {"tier":"Enterprise","category":"Platform","name":"Industrial Operating System","when":"You want one governed workspace connecting KPIs, methods, scenarios, process intelligence, model health, improvement and decision verification.","example":"Use one shared platform layer to compare scenarios, discover process bottlenecks, monitor drift, verify decisions and export auditable results."}
+if not any(x.get("name") == _IOS_CATALOG_ENTRY["name"] for x in MODULE_CATALOG):
+    MODULE_CATALOG.append(_IOS_CATALOG_ENTRY)
 
 # =====================================================================
 # COPILOT
@@ -8249,8 +8255,14 @@ else:
                     st.markdown(reply)
                 st.session_state.copilot_messages.append({"role":"assistant","content":reply})
 
-    # New unified industrial platform modules render through a dedicated, testable service layer.
-    if mod in {x["name"] for x in PLATFORM_CATALOG}:
+    # New unified Industrial Operating System renders as a first-class platform workspace.
+    if mod == "Industrial Operating System":
+        if platform_tier_allows(tier_val, "Enterprise"):
+            render_industrial_operating_system(tier_val, st.session_state.get("current_user", "unknown"))
+        else:
+            st.warning("Industrial Operating System requires the Enterprise tier.")
+    # New unified industrial platform modules render through the existing service layer.
+    elif mod in {x["name"] for x in PLATFORM_CATALOG}:
         render_industrial_module(mod, tier_val, st.session_state.get("current_user", "unknown"))
 
     # =========================================================
