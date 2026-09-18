@@ -43,6 +43,12 @@ PLATFORM_CATALOG = [
     {"tier":"Enterprise","category":"Data Platform","name":"Industrial Data Platform","when":"Ingest, profile, hash, catalog and prepare operational datasets for downstream modules.","example":"Upload a multi-sheet workbook, validate schema and register a reusable dataset."},
     {"tier":"Enterprise Plus","category":"AI","name":"Advanced Engineering Copilot","when":"Orchestrate multi-step engineering workflows with preview, approval and tool execution.","example":"Clean a workbook, forecast demand, test risk, compare scenarios and prepare a report after one approval."},
     {"tier":"Enterprise Plus","category":"Digital Twin","name":"Live Industrial Digital Twin","when":"Maintain a common live state for assets, telemetry, production and planning.","example":"Combine telemetry and production events into a current machine and line state."},
+    {"tier":"Enterprise","category":"AI & Forecasting","name":"Advanced ML Demand Forecasting","when":"Forecast SKU demand using history plus seasonality and optional promotions, weather and macroeconomic variables.","example":"Train a transparent regression forecast with external drivers and export the forecast and uncertainty."},
+    {"tier":"Mid-Tier Pro","category":"Scenario Management","name":"Scenario Versioning & Comparison","when":"Save named baseline and alternative configurations and compare their KPI deltas.","example":"Compare Baseline Q3 Logistics with High-Tariff Expansion side by side."},
+    {"tier":"Enterprise","category":"Collaboration","name":"Team Workspaces & RBAC","when":"Share industrial projects with planners, engineers, managers and viewers using explicit permissions.","example":"Give planners edit rights while managers can approve decisions and viewers remain read-only."},
+    {"tier":"Enterprise","category":"Reporting","name":"Executive Report Center","when":"Turn solver tables and charts into board-ready PDF and PowerPoint packages.","example":"Export a scenario comparison with KPIs, charts, assumptions and decision notes."},
+    {"tier":"Enterprise Plus","category":"Maintenance","name":"Predictive Maintenance Digital Twin","when":"Use telemetry trends or labeled failures to estimate maintenance risk and remaining-useful-life proxies.","example":"Score assets from vibration, temperature and runtime data and schedule inspection candidates."},
+    {"tier":"Mid-Tier Pro","category":"Global Operations","name":"Localization & Multi-Currency","when":"Normalize financial values across currencies and maintain configurable regional trade-compliance rules.","example":"Convert facility costs to a reporting currency and flag routes requiring a compliance rule review."},
     {"tier":"Enterprise Plus","category":"Security","name":"Enterprise Security & Governance","when":"Manage policy, audit, API access, retention, workspace isolation and identity configuration.","example":"Review security posture, role assignments and auditable configuration changes."},
 ]
 
@@ -113,6 +119,10 @@ def init_platform_db(db_path: str="enterprise_full_workspace.db") -> bool:
             ("connector_profiles","CREATE TABLE IF NOT EXISTS connector_profiles(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, system_type TEXT, endpoint TEXT, status TEXT, last_test TEXT, notes TEXT, created_by TEXT)"),
             ("telemetry_events","CREATE TABLE IF NOT EXISTS telemetry_events(id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id TEXT, ts TEXT, metric TEXT, value REAL, source TEXT)"),
             ("security_events","CREATE TABLE IF NOT EXISTS security_events(id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT, event_type TEXT, details TEXT, created_at TEXT)"),
+            ("platform_scenarios","CREATE TABLE IF NOT EXISTS platform_scenarios(scenario_id TEXT PRIMARY KEY, name TEXT UNIQUE, parent_name TEXT, parameters_json TEXT, kpis_json TEXT, created_by TEXT, created_at TEXT)"),
+            ("workspace_members","CREATE TABLE IF NOT EXISTS workspace_members(workspace TEXT, username TEXT, role TEXT, updated_at TEXT, PRIMARY KEY(workspace,username))"),
+            ("fx_rates","CREATE TABLE IF NOT EXISTS fx_rates(currency TEXT PRIMARY KEY, rate_to_base REAL, updated_at TEXT)"),
+            ("trade_rules","CREATE TABLE IF NOT EXISTS trade_rules(id INTEGER PRIMARY KEY AUTOINCREMENT, region_from TEXT, region_to TEXT, product_class TEXT, rule TEXT, active INTEGER, updated_at TEXT)"),
         ]
         for _,sql in ddl: conn.execute(sql)
         conn.commit()
@@ -556,6 +566,50 @@ def render_module_data_exchange(module: str, st, tier: str, username: str) -> No
         module_reset(module,st)
         st.rerun()
 
+def ml_demand_forecast(df: pd.DataFrame, date_col: str, target_col: str, external_cols: Sequence[str]=(), horizon: int=12) -> tuple[pd.DataFrame,dict]:
+    if date_col not in df.columns or target_col not in df.columns: raise ValueError("Forecast requires date and target columns.")
+    d=df.copy(); d[date_col]=pd.to_datetime(d[date_col],errors="coerce"); d[target_col]=pd.to_numeric(d[target_col],errors="coerce")
+    d=d.dropna(subset=[date_col,target_col]).sort_values(date_col).reset_index(drop=True)
+    if len(d)<8: raise ValueError("At least 8 historical observations are required.")
+    x=pd.DataFrame(index=d.index); x["trend"]=np.arange(len(d)); x["sin_month"]=np.sin(2*np.pi*d[date_col].dt.month/12); x["cos_month"]=np.cos(2*np.pi*d[date_col].dt.month/12)
+    used=[]
+    for col in external_cols:
+        if col in d.columns:
+            vals=pd.to_numeric(d[col],errors="coerce")
+            if vals.notna().sum()>=max(5,len(d)//2):
+                x[col]=vals.fillna(vals.median()); used.append(col)
+    model=LinearRegression().fit(x,d[target_col]); pred=model.predict(x); residual=d[target_col]-pred
+    freq=pd.infer_freq(d[date_col]) or "D"; future_dates=pd.date_range(d[date_col].iloc[-1],periods=horizon+1,freq=freq)[1:]
+    fx=pd.DataFrame(index=range(horizon)); fx["trend"]=np.arange(len(d),len(d)+horizon); fx["sin_month"]=np.sin(2*np.pi*future_dates.month/12); fx["cos_month"]=np.cos(2*np.pi*future_dates.month/12)
+    for col in used: fx[col]=float(x[col].iloc[-1])
+    forecast=np.maximum(0,model.predict(fx)); sigma=float(np.std(residual,ddof=max(1,min(1,len(residual)-1))))
+    out=pd.DataFrame({"Date":future_dates,"Forecast":forecast,"Lower 95%":np.maximum(0,forecast-1.96*sigma),"Upper 95%":forecast+1.96*sigma})
+    return out,{"R2":float(r2_score(d[target_col],pred)),"MAE":float(mean_absolute_error(d[target_col],pred)),"RMSE":float(math.sqrt(mean_squared_error(d[target_col],pred))),"Residual Std":sigma,"External Drivers":used}
+
+def save_scenario(name: str, parent_name: str, parameters: dict, kpis: dict, username: str, db_path="enterprise_full_workspace.db") -> str:
+    sid="SCN-"+hashlib.sha256((name+username).encode()).hexdigest()[:12].upper()
+    with sqlite3.connect(db_path) as c:
+        c.execute("INSERT OR REPLACE INTO platform_scenarios VALUES(?,?,?,?,?,?)",(sid,name,parent_name,json.dumps(parameters,default=str),json.dumps(kpis,default=str),username,_now())); c.commit()
+    return sid
+
+def scenario_table(db_path="enterprise_full_workspace.db") -> pd.DataFrame:
+    with sqlite3.connect(db_path) as c: return pd.read_sql("SELECT * FROM platform_scenarios ORDER BY created_at DESC",c)
+
+def predictive_maintenance_score(df: pd.DataFrame) -> pd.DataFrame:
+    req={"Asset","Temperature","Vibration","RuntimeHours"}
+    if not req<=set(df.columns): raise ValueError(f"Maintenance scoring requires {sorted(req)}")
+    d=df.copy()
+    for col in ["Temperature","Vibration","RuntimeHours"]: d[col]=pd.to_numeric(d[col],errors="coerce").fillna(0)
+    d["Risk Score"]=0.35*(d["Temperature"]/(d["Temperature"].abs().median()+1e-9)).clip(0,2)*50 + 0.45*(d["Vibration"]/(d["Vibration"].abs().median()+1e-9)).clip(0,2)*50 + 0.20*(d["RuntimeHours"]/(d["RuntimeHours"].abs().median()+1e-9)).clip(0,2)*50
+    d["Risk Score"]=d["Risk Score"].clip(0,100); d["Maintenance Action"]=np.select([d["Risk Score"]>=75,d["Risk Score"]>=50],["Inspect / schedule maintenance","Monitor closely"],default="Normal monitoring")
+    return d.sort_values("Risk Score",ascending=False)
+
+def currency_convert(df: pd.DataFrame, amount_col: str, currency_col: str, base_currency: str, rates: dict) -> pd.DataFrame:
+    if amount_col not in df.columns or currency_col not in df.columns: raise ValueError("Currency conversion requires amount and currency columns.")
+    d=df.copy(); d[amount_col]=pd.to_numeric(d[amount_col],errors="coerce").fillna(0); d[currency_col]=d[currency_col].astype(str).str.upper()
+    d["Base Amount"]=d.apply(lambda r: r[amount_col]/float(rates[r[currency_col]]) if r[currency_col] in rates and float(rates[r[currency_col]])>0 else np.nan,axis=1)
+    d["Base Currency"]=base_currency.upper(); return d
+
 def render_module(module: str, tier: str, username: str):
     import streamlit as st
     import plotly.express as px
@@ -827,6 +881,64 @@ def render_module(module: str, tier: str, username: str):
         st.dataframe(stored,use_container_width=True,hide_index=True)
         st.success("Twin state synchronized from persisted telemetry.")
         render_export_bar(module,[("Telemetry Input",tel),("Stored Telemetry",stored)],tier,username)
+    elif module=="Advanced ML Demand Forecasting":
+        st.subheader("📈 ML Demand Forecasting")
+        df=st.data_editor(st.session_state.setdefault("forecast_df",pd.DataFrame({"Date":pd.date_range("2026-01-01",periods=24,freq="MS"),"Demand":np.maximum(100,np.linspace(500,700,24)+np.sin(np.arange(24))*60),"Promotion":[0,0,1,0]*6,"WeatherIndex":[20,21,22,19]*6,"MacroIndex":[100,101,102,103]*6})),num_rows="dynamic",use_container_width=True,key="forecast_editor")
+        date_col=st.selectbox("Date column",list(df.columns),index=0,key="forecast_date"); target_col=st.selectbox("Demand/SKU target",list(df.columns),index=1,key="forecast_target"); ext=st.multiselect("External drivers", [c for c in df.columns if c not in [date_col,target_col]],key="forecast_ext"); horizon=st.number_input("Forecast periods",1,104,12,key="forecast_horizon")
+        if st.button("🧠 Train & Forecast",type="primary",use_container_width=True,key="forecast_run"):
+            try: st.session_state["forecast_result"],st.session_state["forecast_metrics"]=ml_demand_forecast(df,date_col,target_col,ext,int(horizon))
+            except Exception as exc: st.error(f"Forecast failed safely: {exc}")
+        if "forecast_result" in st.session_state:
+            fr=st.session_state["forecast_result"]; st.dataframe(fr,use_container_width=True); st.json(st.session_state["forecast_metrics"])
+            fig=px.line(fr,x="Date",y=["Forecast","Lower 95%","Upper 95%"],title="Demand Forecast with 95% uncertainty band"); st.plotly_chart(fig,use_container_width=True)
+            render_export_bar(module,[("History",df),("Forecast",fr)],[("Demand Forecast",fig)],tier,username)
+    elif module=="Scenario Versioning & Comparison":
+        st.subheader("🧪 Scenario Versioning")
+        base=st.data_editor(st.session_state.setdefault("scenario_df",pd.DataFrame({"Scenario":["Baseline Q3 Logistics","High-Tariff Expansion","Supplier Shock"],"Cost":[100000,125000,140000],"Service":[95,91,84],"Capacity":[10000,9500,8200],"Carbon":[1000,1100,1250]})),num_rows="dynamic",use_container_width=True,key="scenario_editor")
+        if st.button("💾 Save Scenario Versions",type="primary",use_container_width=True,key="scenario_save"):
+            for r in base.to_dict("records"): save_scenario(r["Scenario"],"Baseline Q3 Logistics",r,{},username)
+            st.success("Scenario versions saved.")
+        saved=scenario_table(); st.dataframe(saved,use_container_width=True,hide_index=True)
+        if len(base)>=2:
+            st.plotly_chart(px.bar(base,x="Scenario",y=["Cost","Service","Capacity","Carbon"],barmode="group",title="Side-by-side Scenario Comparison"),use_container_width=True)
+        render_export_bar(module,[("Scenario Inputs",base),("Persisted Scenarios",saved)],tier,username)
+    elif module=="Team Workspaces & RBAC":
+        st.subheader("👥 Team Workspace & Role-Based Access")
+        ws=st.text_input("Workspace name","Plant-01 Engineering",key="workspace_name")
+        members=st.data_editor(st.session_state.setdefault("workspace_members_df",pd.DataFrame({"Username":[username],"Role":["Owner"]})),num_rows="dynamic",use_container_width=True,key="workspace_members_editor")
+        if st.button("💾 Save Workspace Members",type="primary",use_container_width=True,key="workspace_save"):
+            with sqlite3.connect("enterprise_full_workspace.db") as c:
+                for r in members.to_dict("records"): c.execute("INSERT OR REPLACE INTO workspace_members VALUES(?,?,?,?)",(ws,r["Username"],r["Role"],_now()))
+                c.commit()
+            st.success("Workspace membership saved with explicit roles.")
+        with sqlite3.connect("enterprise_full_workspace.db") as c: saved=pd.read_sql("SELECT * FROM workspace_members WHERE workspace=?",(c),params=(ws,))
+        st.dataframe(saved,use_container_width=True,hide_index=True)
+        render_export_bar(module,[("Workspace Members",saved)],tier,username)
+    elif module=="Executive Report Center":
+        st.subheader("📋 Executive Report Center")
+        report=st.data_editor(st.session_state.setdefault("exec_report_df",pd.DataFrame({"KPI":["Cost","Service Level","Carbon","Risk"],"Baseline":[100,95,100,10],"Scenario":[92,97,84,8],"Unit":["index","%","index","index"]})),num_rows="dynamic",use_container_width=True,key="exec_report_editor")
+        fig=px.bar(report,x="KPI",y=["Baseline","Scenario"],barmode="group",title="Executive KPI Comparison")
+        st.plotly_chart(fig,use_container_width=True)
+        render_export_bar(module,[("Executive KPIs",report)],[("Executive KPI Chart",fig)],tier,username)
+    elif module=="Predictive Maintenance Digital Twin":
+        st.subheader("🛠️ Predictive Maintenance")
+        maint=st.data_editor(st.session_state.setdefault("maint_df",pd.DataFrame({"Asset":["CNC-01","Press-02","Packing-01"],"Temperature":[65,82,71],"Vibration":[1.1,3.8,2.2],"RuntimeHours":[1200,3200,2100]})),num_rows="dynamic",use_container_width=True,key="maint_editor")
+        if st.button("🔮 Score Maintenance Risk",type="primary",use_container_width=True,key="maint_run"):
+            try: st.session_state["maint_result"]=predictive_maintenance_score(maint)
+            except Exception as exc: st.error(f"Maintenance analysis failed safely: {exc}")
+        if "maint_result" in st.session_state: st.dataframe(st.session_state["maint_result"],use_container_width=True)
+        render_export_bar(module,[("Telemetry Features",maint),("Maintenance Risk",st.session_state.get("maint_result",pd.DataFrame()))],tier,username)
+    elif module=="Localization & Multi-Currency":
+        st.subheader("🌍 Localization & Multi-Currency")
+        fx=st.data_editor(st.session_state.setdefault("currency_df",pd.DataFrame({"Item":["Facility A","Facility B","Supplier C"],"Amount":[100000,85000,120000],"Currency":["USD","EUR","SAR"],"Region":["US","EU","SA"]})),num_rows="dynamic",use_container_width=True,key="currency_editor")
+        rates=st.text_area("Rates to base currency (1 base = rate units)",'{"USD":1,"EUR":0.92,"SAR":3.75}',key="currency_rates")
+        base_cur=st.text_input("Base currency","USD",key="base_currency")
+        if st.button("💱 Convert to Base Currency",type="primary",use_container_width=True,key="currency_run"):
+            try: st.session_state["currency_result"]=currency_convert(fx,"Amount","Currency",base_cur,json.loads(rates))
+            except Exception as exc: st.error(f"Currency conversion failed safely: {exc}")
+        if "currency_result" in st.session_state: st.dataframe(st.session_state["currency_result"],use_container_width=True)
+        rules=st.data_editor(st.session_state.setdefault("trade_rules_df",pd.DataFrame({"Region From":["SA","EU"],"Region To":["EU","SA"],"Product Class":["Industrial","Industrial"],"Rule":["Check customs code","Check origin documentation"],"Active":[True,True]})),num_rows="dynamic",use_container_width=True,key="trade_rules_editor")
+        render_export_bar(module,[("Currency Inputs",fx),("Converted",st.session_state.get("currency_result",pd.DataFrame())),("Trade Rules",rules)],tier,username)
     elif module=="Enterprise Security & Governance":
         tabs=st.tabs(["Posture","Roles","Audit"])
         with tabs[0]:
