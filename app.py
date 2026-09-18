@@ -24,6 +24,7 @@ from email.mime.multipart import MIMEMultipart
 from PIL import Image
 from scipy import stats
 from shoir_upgrade import (align_imported_table, clean_dataframe, build_excel_report, build_workbook_bundle, read_uploaded_workbook, apply_excel_function, EXCEL_FUNCTIONS, copilot_module_recommendation)
+from industrial_platform import PLATFORM_CATALOG, render_module as render_industrial_module
 
 # =====================================================================
 # PAGE CONFIGURATION & CUSTOM CSS (Professional Styling & Hover Zoom)
@@ -633,6 +634,10 @@ TIER_BENEFITS = {
     },
 }
 
+for _platform_module in PLATFORM_CATALOG:
+    if not any(x.get("name") == _platform_module["name"] for x in MODULE_CATALOG):
+        MODULE_CATALOG.append(_platform_module)
+
 # =====================================================================
 # COPILOT
 # ---------------------------------------------------------------------
@@ -1003,7 +1008,7 @@ if not st.session_state.get("current_user"):
     # ------------------------------------------
     with auth_tab2:
         st.subheader("Get Subscription Ticket & Register")
-        reg_tier = st.selectbox("Choose Subscription Tier", ["Starter Tier ($29)", "Research Pack ($30)", "Mid-Tier Pro ($79)", "Enterprise Tier ($120)"])
+        reg_tier = st.selectbox("Choose Subscription Tier", ["Starter Tier ($29)", "Mid-Tier Pro ($79)", "Professional Tier ($129)", "Enterprise Tier ($199)", "Enterprise Plus Tier ($399)", "Research Pack ($30 add-on)"])
         reg_name = st.text_input("Name / Username", key="reg_name")
         reg_email = st.text_input("Email Address", placeholder="name@company.com", key="reg_email")
         reg_pass = st.text_input("Password", type="password", key="reg_pass")
@@ -1215,9 +1220,11 @@ st.sidebar.markdown("---")
 tier_val = st.session_state.user_tier
 is_admin = (st.session_state.current_user == "sho")
 
-tier1_features = ["MILP Solvers", "Inventory Playback", "Core IE Tools", "Subscriptions", "Persistence", "Facility Layout & Warehousing", "Enterprise Integration & Collaboration"]
-tier2_features = tier1_features + ["Carbon Accounting", "IoT Digital Twin", "MEIO Matrix", "Slotting & Gantt", "Fleet Routing", "Warehouse Heatmap", "Supplier Risk Matrix", "Scenarios", "AGV Fleet Dispatcher", "Geospatial Network Designer", "Production Planning & Control (PPC)", "Lean Manufacturing & Shop Floor Operations", "Quality Control, Six Sigma & Reliability", "Engineering Economics & Finance"]
-tier3_features = tier2_features + ["AI Copilot", "FastAPI Gateway", "Monte Carlo Sim", "Sensitivity Analysis", "Webhook Alerts", "Agentic Workflows", "Control Tower", "Cryptographic Ledger", "Predictive Maintenance Hub", "Human Factors & Ergonomics (NIOSH)", "Digital Twin & Discrete-Event Simulation", "Green IE & Sustainability"]
+tier1_features = ["MILP Solvers", "Inventory Playback", "Core IE Tools", "Subscriptions", "Persistence", "Facility Layout & Warehousing", "Enterprise Integration & Collaboration", "Engineering Validation Center", "Excel Data Cleaning & Import"]
+tier2_features = tier1_features + ["Carbon Accounting", "IoT Digital Twin", "MEIO Matrix", "Slotting & Gantt", "Fleet Routing", "Warehouse Heatmap", "Supplier Risk Matrix", "Scenarios", "AGV Fleet Dispatcher", "Geospatial Network Designer", "Production Planning & Control (PPC)", "Lean Manufacturing & Shop Floor Operations", "Quality Control, Six Sigma & Reliability", "Engineering Economics & Finance", "Industrial Data Model & Digital Thread"]
+professional_features = tier2_features + ["Advanced Planning & Scheduling", "Quality Engineering & Reliability", "Capital Investment & Engineering Economics", "Workforce Engineering", "Industrial Sustainability & LCA", "Benchmarking & Engineering Standards"]
+tier3_features = professional_features + ["AI Copilot", "FastAPI Gateway", "Monte Carlo Sim", "Sensitivity Analysis", "Webhook Alerts", "Agentic Workflows", "Control Tower", "Cryptographic Ledger", "Predictive Maintenance Hub", "Human Factors & Ergonomics (NIOSH)", "Digital Twin & Discrete-Event Simulation", "Green IE & Sustainability", "Manufacturing Execution System", "Industrial Simulation Lab", "3D Factory Designer", "Industrial Connectivity Hub", "Multi-Objective Optimization", "Robust & Resilient Optimization", "Engineering Model Registry", "Experiment Lab", "Industrial Control Center", "Engineering Decision Center"]
+tier4_features = tier3_features + ["Industrial Data Platform", "Advanced Engineering Copilot", "Live Industrial Digital Twin", "Enterprise Security & Governance"]
 # FIX (recurring from an earlier upload of this file - reapplied): this list
 # was missing commas between most entries, which in Python silently
 # concatenates adjacent string literals into one garbled string instead of
@@ -1258,8 +1265,12 @@ st.sidebar.markdown("### 🛠️ Enterprise Modules")
 
 if "Research" in tier_val:
     allowed_modules = research_pack_features
+elif "Enterprise Plus" in tier_val or "Industrial Enterprise" in tier_val:
+    allowed_modules = tier4_features
 elif "Enterprise" in tier_val or is_admin:
     allowed_modules = tier3_features
+elif "Professional" in tier_val:
+    allowed_modules = professional_features
 elif "Pro" in tier_val or "Trial" in tier_val:
     allowed_modules = tier2_features
 else:
@@ -8195,6 +8206,10 @@ else:
                     st.markdown(reply)
                 st.session_state.copilot_messages.append({"role":"assistant","content":reply})
 
+    # New unified industrial platform modules render through a dedicated, testable service layer.
+    if mod in {x["name"] for x in PLATFORM_CATALOG}:
+        render_industrial_module(mod, tier_val, st.session_state.get("current_user", "unknown"))
+
     # =========================================================
 # CARBON ACCOUNTING & NET-ZERO STUDIO (Astonishing & Stunning)
 # =========================================================
@@ -10234,7 +10249,7 @@ if mod == "Admin Panel":
         with st.form("manual_code_form"):
             col_g1, col_g2, col_g3 = st.columns(3)
             with col_g1:
-                gen_tier = st.selectbox("Select Tier for Code", ["Free Trial", "Starter Tier ($29)", "Mid-Tier Pro ($79)", "Enterprise Tier ($199)"], key="gen_tier_box")
+                gen_tier = st.selectbox("Select Tier for Code", ["Free Trial", "Starter Tier ($29)", "Mid-Tier Pro ($79)", "Professional Tier ($129)", "Enterprise Tier ($199)", "Enterprise Plus Tier ($399)", "Research Pack ($30 add-on)"], key="gen_tier_box")
             with col_g2:
                 default_code = "TRIAL-" + "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
                 custom_code_input = st.text_input("Ticket / Promo Code", value=default_code, key="custom_code_box")
