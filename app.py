@@ -37,8 +37,29 @@ st.set_page_config(
 )
 
 st.markdown("""
+<div class="hero-card">
+  <div class="kicker">Industrial Decision Platform</div>
+  <div class="hero-title">🏭 Shoir-IE Industrial Engineering Command Center</div>
+  <div class="hero-copy">Analyze → visualize → understand → decide → export. Results stay front and center; technical details remain available when needed.</div>
+</div>
+""", unsafe_allow_html=True)
+
+st.markdown("""
 <style>
-    .main { background-color: #0e1117; }
+    .main { background: linear-gradient(180deg,#f8fafc 0%,#ffffff 42%); }
+    .block-container { max-width: 1500px; padding-top: 1.5rem; padding-bottom: 3rem; }
+    section[data-testid="stSidebar"] { border-right: 1px solid #e2e8f0; }
+    div[data-testid="stMetric"] { border: 1px solid #e2e8f0; border-radius: 14px; padding: 12px 14px; background: #fff; box-shadow: 0 6px 20px rgba(15,23,42,.05); }
+    div.stButton > button, div[data-testid="stFormSubmitButton"] button { border-radius: 11px !important; min-height: 42px !important; font-weight: 700 !important; transition: .18s ease !important; }
+    div.stButton > button:hover, div[data-testid="stFormSubmitButton"] button:hover { transform: translateY(-1px); box-shadow: 0 8px 18px rgba(15,23,42,.10) !important; border-color: #2563eb !important; }
+    div.stButton > button[kind="primary"] { border: 0 !important; background: linear-gradient(135deg,#2563eb,#0f766e) !important; color: white !important; }
+    div[data-testid="stExpander"] { border-radius: 14px; border-color: #e2e8f0; }
+    .module-card { border:1px solid #dbe4f0; border-radius:16px; padding:14px 16px; background:#fff; box-shadow:0 5px 18px rgba(15,23,42,.04); margin-top:8px; }
+    .result-card { border:1px solid #dbeafe; border-radius:16px; padding:15px 17px; background:linear-gradient(135deg,#f8fbff,#fff); box-shadow:0 5px 18px rgba(15,23,42,.04); }
+    .hero-card { border:1px solid #dbe4f0; border-radius:20px; padding:22px 24px; background:linear-gradient(135deg,#f8fbff,#fff 58%,#f0fdfa); box-shadow:0 10px 30px rgba(15,23,42,.06); margin-bottom:18px; }
+    .kicker { font-size:11px; font-weight:800; letter-spacing:.09em; text-transform:uppercase; color:#0f766e; }
+    .hero-title { font-size:30px; font-weight:850; color:#0f172a; margin:3px 0; }
+    .hero-copy { color:#64748b; font-size:14px; }
     .blue-metric {
         color: #0066cc !important;
         font-weight: 700;
@@ -1302,7 +1323,69 @@ elif "Pro" in tier_val or "Trial" in tier_val:
     allowed_modules = tier2_features
 else:
     allowed_modules = tier1_features
-selected_module = st.sidebar.selectbox("Select Module", allowed_modules)
+_module_catalog_by_name = {str(m.get("name")): m for m in PLATFORM_CATALOG if isinstance(m, dict)}
+_module_labels=[]
+for _m in allowed_modules:
+    _meta=_module_catalog_by_name.get(str(_m),{})
+    _cat=str(_meta.get("category","Industrial Engineering"))
+    _module_labels.append(f"{_cat} · {_m}" if _meta else str(_m))
+_module_label_map=dict(zip(_module_labels,allowed_modules))
+_selected_label=st.sidebar.selectbox("Select Module",_module_labels,key="enterprise_module_selector")
+selected_module=_module_label_map[_selected_label]
+_meta=_module_catalog_by_name.get(str(selected_module))
+if _meta:
+    st.sidebar.markdown(
+        f"<div class='module-card'><div class='kicker'>{html.escape(str(_meta.get('category','Industrial Engineering')))}</div>"
+        f"<div style='font-size:15px;font-weight:800;color:#0f172a;margin-top:4px'>{html.escape(str(selected_module))}</div>"
+        f"<div style='font-size:11px;color:#64748b;margin-top:4px'>{html.escape(str(_meta.get('when','Engineering workflow')))}</div></div>",
+        unsafe_allow_html=True,
+    )
+
+def _render_pretty_result(value, title="Result", key_prefix="result"):
+    """Present structured engineering output as cards/tables/charts instead of raw JSON."""
+    st.markdown(f"### {html.escape(title)}")
+    if isinstance(value, dict):
+        scalars={k:v for k,v in value.items() if not isinstance(v,(dict,list,pd.DataFrame,np.ndarray))}
+        frames={k:v for k,v in value.items() if isinstance(v,pd.DataFrame)}
+        nested={k:v for k,v in value.items() if isinstance(v,(dict,list))}
+        if scalars:
+            cols=st.columns(min(4,max(1,len(scalars))))
+            for i,(k,v) in enumerate(scalars.items()):
+                if isinstance(v,(float,np.floating)): display=f"{v:,.3f}"
+                elif isinstance(v,(int,np.integer)): display=f"{v:,}"
+                else: display=str(v)
+                cols[i%len(cols)].metric(str(k).replace("_"," ").title(),display)
+        for name,df in frames.items():
+            st.markdown(f"**{str(name).replace('_',' ').title()}**")
+            st.dataframe(df,use_container_width=True,hide_index=True)
+            _render_result_chart(df,str(name).replace("_"," ").title(),f"{key_prefix}_{name}")
+        if nested:
+            with st.expander("🔎 Detailed diagnostics",expanded=False):
+                for name,val in nested.items():
+                    st.markdown(f"**{str(name).replace('_',' ').title()}**")
+                    if isinstance(val,dict):
+                        st.dataframe(pd.json_normalize(val),use_container_width=True,hide_index=True)
+                    else:
+                        st.dataframe(pd.DataFrame(val) if isinstance(val,list) else pd.DataFrame([val]),use_container_width=True,hide_index=True)
+    elif isinstance(value,pd.DataFrame):
+        st.dataframe(value,use_container_width=True,hide_index=True)
+        _render_result_chart(value,title,key_prefix)
+    else:
+        st.write(value)
+
+def _render_result_chart(df,title,key_prefix):
+    if not isinstance(df,pd.DataFrame) or df.empty: return
+    nums=[x for x in df.columns if pd.api.types.is_numeric_dtype(df[x])]
+    if not nums: return
+    y=st.selectbox("Metric",nums,key=f"{key_prefix}_metric")
+    xs=[x for x in df.columns if x!=y]
+    x=st.selectbox("X-axis / category",xs,key=f"{key_prefix}_x") if xs else None
+    kind=st.selectbox("Chart",["Bar","Line","Scatter"],key=f"{key_prefix}_chart")
+    plot=df[[x,y]].dropna() if x else df[[y]].dropna()
+    if plot.empty: return
+    fig=px.line(plot,x=x,y=y,markers=True,title=title) if kind=="Line" and x else px.scatter(plot,x=x,y=y,title=title) if kind=="Scatter" and x else px.bar(plot,x=x,y=y,title=title) if x else px.bar(plot,y=y,title=title)
+    fig.update_layout(height=340,margin=dict(l=10,r=10,t=55,b=10))
+    st.plotly_chart(fig,use_container_width=True)
 
 # Universal data workspace controls: available before every module renderer.
 def _upgrade_tables_for_module(module_name):
@@ -1813,7 +1896,8 @@ elif selected_module in ["Universal Cross-Domain Mathematical Isomorphism Engine
                 time.sleep(1.0)
             log_ucmie_event(f"Translated proof to {target_or}")
             st.markdown("#### Translated Operations Research Framework")
-            st.code(f"""# UCMIE Automated Paradigm Translator Output
+            with st.expander("🧩 Technical source (optional)",expanded=False):
+                st.code(f"""# UCMIE Automated Paradigm Translator Output
 # Target Framework: {target_or}
 import numpy as np
 from scipy.optimize import milp
@@ -1904,7 +1988,8 @@ if __name__ == "__main__":
 
         if 'latex' in st.session_state['ucmie_generated_artifacts']:
             st.markdown("#### Generated LaTeX Document Preview")
-            st.code(st.session_state['ucmie_generated_artifacts']['latex'], language="latex")
+            with st.expander("🧩 LaTeX source (optional)",expanded=False):
+                st.code(st.session_state['ucmie_generated_artifacts']['latex'], language="latex")
 
     with tab_export:
         st.markdown("**Unified World-Class Export Hub**")
@@ -2423,7 +2508,8 @@ def verify_vault():
 if __name__ == "__main__":
     verify_vault()
 """
-            st.code(verification_script_code, language="python")
+            with st.expander("🧩 Verification script (optional)",expanded=False):
+                st.code(verification_script_code, language="python")
             st.info("💡 Peer reviewers can execute this standalone script to instantly verify bit-for-bit replication without complex local installation.")
         else:
             st.info("Initialize the vault ledger in **Tab 1** to generate the peer reviewer verification portal script.")
@@ -2883,7 +2969,8 @@ status = solver.Solve()
             extraction_mode = st.selectbox("Semantic Extraction Mode", ["Standard OR Ontology", "Stochastic MILP", "Non-Linear Convex"])
         with col_p2:
             st.markdown("**Extracted Structural Tuples (Simulated)**")
-            st.code("Sets: I = {1, 2, 3, 4, 5}\nParameters: c[i], d[i], cap[i]\nVariables: x[i] (Continuous)", language="text")
+            with st.expander("🧩 Structural model details (optional)",expanded=False):
+                st.code("Sets: I = {1, 2, 3, 4, 5}\nParameters: c[i], d[i], cap[i]\nVariables: x[i] (Continuous)", language="text")
 
     with tab_reg:
         st.markdown("#### Universal Code Generation Registry")
@@ -3949,7 +4036,8 @@ elif selected_module == "Advanced Regression Analysis":
                 st.session_state.reg_results = ols_model
                 st.session_state.reg_type = "OLS"
                 st.success("OLS Model Fitted Successfully!")
-                st.code(str(ols_model.summary()), language="text")
+                with st.expander("📋 Statistical model diagnostics",expanded=False):
+                    st.code(str(ols_model.summary()), language="text")
             elif model_type in ["Ridge Regularized", "Lasso Regularized"]:
                 reg = Ridge(alpha=alpha_val) if model_type == "Ridge Regularized" else Lasso(alpha=alpha_val)
                 reg.fit(X, y)
@@ -4017,13 +4105,15 @@ elif selected_module == "Advanced Regression Analysis":
 
             latex_table = summary_table.to_latex(escape=True, column_format="lcccc")
             st.markdown("Generated LaTeX `booktabs` Table Syntax:")
-            st.code(latex_table, language="latex")
+            with st.expander("🧩 LaTeX table source (optional)",expanded=False):
+                st.code(latex_table, language="latex")
 
             coefs = res.params
             eq_terms = [f"{coefs.iloc[i]:.3f} X_{{{i}}}" if i > 0 else f"{coefs.iloc[i]:.3f}" for i in range(len(coefs))]
             latex_eq = "$$Y = " + " + ".join(eq_terms) + " + \\epsilon$$"
             st.markdown("Fitted Equation LaTeX String:")
-            st.code(latex_eq, language="latex")
+            with st.expander("🧩 Fitted equation source (optional)",expanded=False):
+                st.code(latex_eq, language="latex")
 
             col_ex1, col_ex2 = st.columns(2)
             with col_ex1:
@@ -4241,7 +4331,8 @@ elif selected_module == "Literature & Citation Matrix":
         )
         
         st.markdown("Generated LaTeX `booktabs` Table Code Preview:")
-        st.code(latex_table_code, language="latex")
+        with st.expander("🧩 LaTeX table source (optional)",expanded=False):
+            st.code(latex_table_code, language="latex")
         
         bib_content = ""
         for idx, row in df_export.iterrows():
@@ -4368,7 +4459,8 @@ elif selected_module == "LaTeX Document Formatter":
             math_code = "$$\\min Z = \\sum_{i=1}^{n} c_i x_i = " + " + ".join(terms) + "$$"
             st.markdown("Live Rendered Preview:")
             st.markdown(math_code)
-            st.code(math_code, language="latex")
+            with st.expander("🧩 Equation source (optional)",expanded=False):
+                st.code(math_code, language="latex")
             
         elif eq_mode == "Custom Matrix Builder (bmatrix)":
             m_r = st.slider("Matrix Rows", 2, 5, 3)
@@ -4396,7 +4488,8 @@ elif selected_module == "LaTeX Document Formatter":
             b_year = st.text_input("Year", "2026")
             
         bib_output = f"@article{{{b_key},\n  author = {{{b_author}}},\n  title = {{{b_title}}},\n  journal = {{Journal of Industrial Engineering Automation}};\n  year = {{{b_year}}}\n}}"
-        st.code(bib_output, language="bibtex")
+        with st.expander("🧩 BibTeX source (optional)",expanded=False):
+            st.code(bib_output, language="bibtex")
         st.download_button("📥 Download References (.bib)", data=bib_output.encode("utf-8"), file_name="references.bib", mime="text/plain")
 
     with tab_export:
@@ -4426,7 +4519,8 @@ elif selected_module == "LaTeX Document Formatter":
 \\end{{document}}
 """
         st.markdown("Preview Full Source Code:")
-        st.code(complete_latex_document, language="latex")
+        with st.expander("🧩 Full manuscript source (optional)",expanded=False):
+            st.code(complete_latex_document, language="latex")
         
         col_dl1, col_dl2 = st.columns(2)
         with col_dl1:
