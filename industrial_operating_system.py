@@ -178,11 +178,14 @@ def scenario_save(name: str,parameters: Mapping[str,Any],kpis: Mapping[str,Any],
                   created_by: str,parent_id: Optional[str]=None,description: str="") -> str:
     ensure_os_db()
     p=json.dumps(parameters,sort_keys=True,default=str)
-    sid="SCN-"+hashlib.sha256(f"{name}|{p}".encode()).hexdigest()[:12].upper()
+    created=now()
+    # Include the creation timestamp so repeated saves of an identical scenario
+    # remain distinct immutable versions rather than replacing the prior row.
+    sid="SCN-"+hashlib.sha256(f"{name}|{p}|{created}".encode()).hexdigest()[:12].upper()
     with sqlite3.connect("enterprise_full_workspace.db") as c:
         version=int(c.execute("SELECT COALESCE(MAX(version),0) FROM os_scenarios WHERE name=?",(name,)).fetchone()[0])+1
         c.execute("INSERT OR REPLACE INTO os_scenarios VALUES(?,?,?,?,?,?,?,?,?,?)",
-                  (sid,name,parent_id,version,description,p,json.dumps(kpis,default=str),created_by,now(),now()))
+                  (sid,name,parent_id,version,description,p,json.dumps(kpis,default=str),created_by,created,created))
         c.commit()
     return sid
 
