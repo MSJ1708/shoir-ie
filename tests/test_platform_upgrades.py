@@ -5,7 +5,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 import pandas as pd
-from shoir_upgrade import clean_dataframe, ensure_upgrade_schema, tier_allows, build_excel_report, build_pdf_report, build_pptx_report, UPGRADE_MODULES
+from shoir_upgrade import align_imported_table, clean_dataframe, ensure_upgrade_schema, tier_allows, build_excel_report, build_pdf_report, build_pptx_report, UPGRADE_MODULES
 
 def test_clean_dataframe_preserves_leading_zero_ids_and_removes_duplicates():
     df=pd.DataFrame({"SKU":["001","001","002"],"Sales":["1,200","1,200","900"],"Blank":[None,None,None]})
@@ -64,3 +64,12 @@ def test_tier_gating():
     assert tier_allows("Starter Tier","Starter")
     assert tier_allows("Enterprise Tier","Enterprise")
     assert not tier_allows("Mid-Tier Pro","Enterprise")
+
+def test_import_alignment_never_fabricates_missing_values():
+    target=pd.DataFrame({"Customer":["A"],"Demand":[10],"lat":[24.7],"lon":[46.6]})
+    imported=pd.DataFrame({"customer":["B"],"demand":[25],"extra":["keep"]})
+    out=align_imported_table(imported,target)
+    assert list(out.columns)==["Customer","Demand","lat","lon","extra"]
+    assert pd.isna(out.loc[0,"lat"])
+    assert pd.isna(out.loc[0,"lon"])
+    assert out.loc[0,"extra"]=="keep"
