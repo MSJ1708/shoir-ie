@@ -10321,6 +10321,23 @@ if mod == "Admin Panel":
         conn.close()
         st.dataframe(codes_df, use_container_width=True)
 
+        st.markdown("### 📈 Owner Usage Analytics")
+        try:
+            with sqlite3.connect("enterprise_full_workspace.db") as _analytics_conn:
+                usage_by_module = pd.read_sql("SELECT module, COUNT(*) AS Uses FROM platform_usage_events GROUP BY module ORDER BY Uses DESC", _analytics_conn)
+                usage_by_day = pd.read_sql("SELECT substr(event_time,1,10) AS Day, COUNT(DISTINCT username) AS ActiveUsers, COUNT(*) AS ModuleOpens FROM platform_usage_events GROUP BY Day ORDER BY Day DESC LIMIT 30", _analytics_conn)
+            ac1, ac2 = st.columns(2)
+            with ac1:
+                st.caption("Most-used modules")
+                st.dataframe(usage_by_module, use_container_width=True, hide_index=True)
+            with ac2:
+                st.caption("Recent usage trend")
+                st.dataframe(usage_by_day, use_container_width=True, hide_index=True)
+                if not usage_by_day.empty:
+                    st.line_chart(usage_by_day.sort_values("Day").set_index("Day")[["ActiveUsers","ModuleOpens"]])
+        except Exception as exc:
+            st.info(f"Usage analytics will appear after platform activity is recorded. Details: {exc}")
+
 # FIX: this whole "Enterprise Copilot AI Assistant" block used to sit here
 # unindented, meaning it rendered a full second chat widget underneath
 # EVERY module for EVERY signed-in user - including Starter tier accounts,

@@ -119,6 +119,7 @@ def init_platform_db(db_path: str="enterprise_full_workspace.db") -> bool:
             ("connector_profiles","CREATE TABLE IF NOT EXISTS connector_profiles(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, system_type TEXT, endpoint TEXT, status TEXT, last_test TEXT, notes TEXT, created_by TEXT)"),
             ("telemetry_events","CREATE TABLE IF NOT EXISTS telemetry_events(id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id TEXT, ts TEXT, metric TEXT, value REAL, source TEXT)"),
             ("security_events","CREATE TABLE IF NOT EXISTS security_events(id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT, event_type TEXT, details TEXT, created_at TEXT)"),
+            ("platform_usage_events","CREATE TABLE IF NOT EXISTS platform_usage_events(id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT, module TEXT, event_time TEXT)"),
             ("platform_scenarios","CREATE TABLE IF NOT EXISTS platform_scenarios(scenario_id TEXT PRIMARY KEY, name TEXT UNIQUE, parent_name TEXT, parameters_json TEXT, kpis_json TEXT, created_by TEXT, created_at TEXT)"),
             ("workspace_members","CREATE TABLE IF NOT EXISTS workspace_members(workspace TEXT, username TEXT, role TEXT, updated_at TEXT, PRIMARY KEY(workspace,username))"),
             ("fx_rates","CREATE TABLE IF NOT EXISTS fx_rates(currency TEXT PRIMARY KEY, rate_to_base REAL, updated_at TEXT)"),
@@ -516,6 +517,12 @@ MODULE_TABLE_KEYS = {
     "Benchmarking & Engineering Standards":["benchmark_actual","benchmark_targets"],
     "Live Industrial Digital Twin":["twin_tel"],
     "Enterprise Security & Governance":["security_roles"],
+    "Advanced ML Demand Forecasting":["forecast_df"],
+    "Scenario Versioning & Comparison":["scenario_df"],
+    "Team Workspaces & RBAC":["workspace_members_df"],
+    "Executive Report Center":["exec_report_df"],
+    "Predictive Maintenance Digital Twin":["maint_df"],
+    "Localization & Multi-Currency":["currency_df","trade_rules_df"],
 }
 
 def _module_slug(module: str) -> str:
@@ -614,6 +621,9 @@ def render_module(module: str, tier: str, username: str):
     import streamlit as st
     import plotly.express as px
     init_platform_db()
+    with sqlite3.connect("enterprise_full_workspace.db") as _usage_conn:
+        _usage_conn.execute("INSERT INTO platform_usage_events(username,module,event_time) VALUES(?,?,?)",(username,module,_now()))
+        _usage_conn.commit()
     render_module_data_exchange(module, st, tier, username)
     required=next((x["tier"] for x in PLATFORM_CATALOG if x["name"]==module),None)
     if required and not tier_allows(tier,required):
@@ -629,7 +639,7 @@ def render_module(module: str, tier: str, username: str):
         if st.session_state.get("validation_result"):
             res=st.session_state.validation_result; st.metric("Data Quality",f'{res["quality"]["score"]:.1f}%'); st.write(res)
         st.dataframe(edited,use_container_width=True)
-        render_export_bar(module,[("Validation Table",edited)],tier,username=username)
+        render_export_bar(module,[("Validation Table",edited)],tier=tier,username=username)
     elif module=="Industrial Data Model & Digital Thread":
         tabs=st.tabs(["Entities","Relationships","Data Quality"])
         with tabs[0]:
@@ -646,7 +656,7 @@ def render_module(module: str, tier: str, username: str):
             st.info("Relationships are intentionally explicit: use entity IDs and relationship names; no hidden inference.")
         with tabs[2]:
             st.write(data_quality_report(df))
-        render_export_bar(module,[("Entities",df),("Relationships",rel)],tier,username=username)
+        render_export_bar(module,[("Entities",df),("Relationships",rel)],tier=tier,username=username)
     elif module=="Advanced Planning & Scheduling":
         tabs=st.tabs(["Demand / MRP","Finite Schedule","Dispatch"])
         with tabs[0]:
@@ -664,7 +674,7 @@ def render_module(module: str, tier: str, username: str):
             st.dataframe(st.session_state.get("aps_schedule_result",pd.DataFrame()),use_container_width=True)
         tables=[("Demand",demand),("BOM",bom),("Finite Schedule",st.session_state.get("aps_schedule_result",pd.DataFrame()))]
         figs=[("Finite Schedule",fig)] if "fig" in locals() else []
-        render_export_bar(module,tables,figs,tier,username)
+        render_export_bar(module,tables,figs,tier=tier,username=username)
     elif module=="Manufacturing Execution System":
         tabs=st.tabs(["Work Orders","Execution Events","OEE & WIP"])
         with tabs[0]:
@@ -729,7 +739,7 @@ def render_module(module: str, tier: str, username: str):
         if "sim_des" in st.session_state: tables.append(("DES Replications",st.session_state["sim_des"]))
         if "sim_agent" in st.session_state: tables.append(("Agent Summary",st.session_state["sim_agent"]))
         if "sd" in st.session_state: tables.append(("System Dynamics",st.session_state["sd"]))
-        render_export_bar(module,tables,[],tier,username)
+        render_export_bar(module,tables,[],tier=tier,username=username)
     elif module=="3D Factory Designer":
         df=st.data_editor(st.session_state.setdefault("factory3d_df",pd.DataFrame({"Asset":["CNC-01","Assembly","Packing","WIP Buffer"],"Type":["Machine","Station","Station","Storage"],"X":[0,6,12,3],"Y":[0,2,2,5],"Z":[0,0,0,0],"Length":[2,4,4,3],"Width":[2,2,2,3],"Height":[2,3,3,2]})),num_rows="dynamic",use_container_width=True,key="factory3d_editor")
         fig=px.scatter_3d(df,x="X",y="Y",z="Z",color="Type",text="Asset",size="Height",title="3D Factory Model"); st.plotly_chart(fig,use_container_width=True)
