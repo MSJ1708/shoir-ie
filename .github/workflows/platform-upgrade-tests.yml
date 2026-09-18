@@ -1,5 +1,7 @@
 name: Shoir-IE Upgrade Tests
 on:
+  push:
+    branches: ["feature/platform-upgrade"]
   pull_request:
     branches: ["main"]
   workflow_dispatch:
