@@ -24,6 +24,11 @@ from email.mime.multipart import MIMEMultipart
 from PIL import Image
 from scipy import stats
 
+from shoir_upgrade import ensure_upgrade_schema, init_upgrade_services, record_module_usage, render_module_upgrade, render_module_report_panel
+
+# Shoir-IE platform upgrade services
+from shoir_upgrade import ensure_upgrade_schema, init_upgrade_services, record_module_usage, render_module_upgrade, render_module_report_panel
+
 # =====================================================================
 # PAGE CONFIGURATION & CUSTOM CSS (Professional Styling & Hover Zoom)
 # =====================================================================
@@ -662,7 +667,9 @@ def get_copilot_response(prompt, history):
         system_prompt = (
             "You are the Shoir-IE Copilot, embedded in an industrial engineering and "
             "operations research platform covering MILP network optimization, inventory, "
-            "facility layout, quality/Six Sigma, simulation, and research tools. Be concise "
+            "facility layout, quality/Six Sigma, simulation, reporting, Excel data cleaning, "
+            "demand forecasting, stochastic risk, ERP/WMS integration, collaboration, maintenance, "
+            "localization, and research tools. Be concise "
             "and concrete. If asked to run something you can't execute directly, name the "
             "exact module to use. Never invent specific numbers or claim to have checked "
             "data you don't actually have."
@@ -685,6 +692,27 @@ def get_copilot_response(prompt, history):
         return (f"Hello {st.session_state.get('current_user', 'there')}! I can run the MILP optimizer, "
                 f"report your real warehouse/customer/fleet/inventory data, or point you to the right "
                 f"module. What do you need?")
+
+    if any(w in p for w in ["forecast", "demand prediction", "seasonality", "promotion impact"]):
+        return "Use **Advanced ML Demand Forecasting** for SKU-level forecasts with seasonality, promotions, weather and macroeconomic drivers. This module is **Enterprise**."
+    if any(w in p for w in ["monte carlo", "stochastic", "probabilistic risk", "uncertainty", "lead time variance"]):
+        return "Use **Stochastic & Monte Carlo Risk Modeling** for demand shocks, lead-time variance and disruption probabilities. This module is **Enterprise**."
+    if any(w in p for w in ["sap", "oracle", "wms", "erp connector", "api connector"]):
+        return "Use **ERP & WMS API Connectors** for SAP, Oracle and WMS synchronization profiles. This module is **Enterprise**."
+    if any(w in p for w in ["scenario version", "compare scenarios", "scenario comparison"]):
+        return "Use **Scenario Versioning** to save named configurations and compare parameter deltas. This module is **Mid-Tier Pro**."
+    if any(w in p for w in ["multi currency", "multicurrency", "currency conversion", "trade compliance"]):
+        return "Use **Localization & Multi-Currency** for currency conversion and regional trade-compliance rules. This module is **Mid-Tier Pro**."
+    if any(w in p for w in ["workspace", "role based", "rbac", "team access", "collaborate"]):
+        return "Use **Team Workspaces & RBAC** for shared workspaces and persistent roles. This module is **Enterprise**."
+    if any(w in p for w in ["executive report", "board report", "powerpoint report", "pdf report"]):
+        return "Use **Executive Report Center** to package current tables and exact captured charts into Excel, PDF or PowerPoint. PDF/PowerPoint are **Enterprise** exports."
+    if any(w in p for w in ["des canvas", "discrete event canvas", "queue simulation", "machine starvation"]):
+        return "Use **Interactive DES Simulation Canvas** for visual process nodes, queues, throughput and bottlenecks. This module is **Enterprise**."
+    if any(w in p for w in ["predictive maintenance", "remaining useful life", "rul", "machine failure"]):
+        return "Use **Predictive Maintenance Digital Twin** for telemetry-based failure probability and RUL estimates. This module is **Enterprise**."
+    if any(w in p for w in ["excel cleaning", "clean this workbook", "clean spreadsheet", "format my excel"]):
+        return "Use **Excel Data Cleaning & Import** to upload, clean, review and download a professional XLSX. This module is **Starter**."
 
     if "optimize" in p or "milp" in p:
         try:
@@ -1214,9 +1242,9 @@ st.sidebar.markdown("---")
 tier_val = st.session_state.user_tier
 is_admin = (st.session_state.current_user == "sho")
 
-tier1_features = ["MILP Solvers", "Inventory Playback", "Core IE Tools", "Subscriptions", "Persistence", "Facility Layout & Warehousing", "Enterprise Integration & Collaboration"]
-tier2_features = tier1_features + ["Carbon Accounting", "IoT Digital Twin", "MEIO Matrix", "Slotting & Gantt", "Fleet Routing", "Warehouse Heatmap", "Supplier Risk Matrix", "Scenarios", "AGV Fleet Dispatcher", "Geospatial Network Designer", "Production Planning & Control (PPC)", "Lean Manufacturing & Shop Floor Operations", "Quality Control, Six Sigma & Reliability", "Engineering Economics & Finance"]
-tier3_features = tier2_features + ["AI Copilot", "FastAPI Gateway", "Monte Carlo Sim", "Sensitivity Analysis", "Webhook Alerts", "Agentic Workflows", "Control Tower", "Cryptographic Ledger", "Predictive Maintenance Hub", "Human Factors & Ergonomics (NIOSH)", "Digital Twin & Discrete-Event Simulation", "Green IE & Sustainability"]
+tier1_features = ["MILP Solvers", "Inventory Playback", "Core IE Tools", "Subscriptions", "Persistence", "Facility Layout & Warehousing", "Enterprise Integration & Collaboration", "Excel Data Cleaning & Import"]
+tier2_features = tier1_features + ["Carbon Accounting", "IoT Digital Twin", "MEIO Matrix", "Slotting & Gantt", "Fleet Routing", "Warehouse Heatmap", "Supplier Risk Matrix", "Scenarios", "AGV Fleet Dispatcher", "Geospatial Network Designer", "Production Planning & Control (PPC)", "Lean Manufacturing & Shop Floor Operations", "Quality Control, Six Sigma & Reliability", "Engineering Economics & Finance", "Scenario Versioning", "Localization & Multi-Currency"]
+tier3_features = tier2_features + ["AI Copilot", "FastAPI Gateway", "Monte Carlo Sim", "Sensitivity Analysis", "Webhook Alerts", "Agentic Workflows", "Control Tower", "Cryptographic Ledger", "Predictive Maintenance Hub", "Human Factors & Ergonomics (NIOSH)", "Digital Twin & Discrete-Event Simulation", "Green IE & Sustainability", "Advanced ML Demand Forecasting", "Stochastic & Monte Carlo Risk Modeling", "ERP & WMS API Connectors", "Team Workspaces & RBAC", "Executive Report Center", "Interactive DES Simulation Canvas", "Predictive Maintenance Digital Twin", "Owner Usage Analytics"]
 # FIX (recurring from an earlier upload of this file - reapplied): this list
 # was missing commas between most entries, which in Python silently
 # concatenates adjacent string literals into one garbled string instead of
@@ -1264,6 +1292,12 @@ elif "Pro" in tier_val or "Trial" in tier_val:
 else:
     allowed_modules = tier1_features
 selected_module = st.sidebar.selectbox("Select Module", allowed_modules)
+st.session_state["upgrade_current_module"] = selected_module
+ensure_upgrade_schema()
+init_upgrade_services()
+if st.session_state.get("_upgrade_last_tracked_module") != selected_module:
+    record_module_usage(st.session_state.get("current_user", "unknown"), selected_module, st.session_state.get("user_tier", ""), "open")
+    st.session_state["_upgrade_last_tracked_module"] = selected_module
 
 st.sidebar.markdown("---")
 if st.sidebar.button("Lock / Logout Workspace"):
@@ -7995,6 +8029,115 @@ else:
                 st.session_state.onboarded = True
                 st.success("Sample dataset loaded successfully! Review your results below.")
 
+    # Universal workspace controls are rendered BEFORE module-specific branches so they
+    # remain visible even when a module later calls st.stop().
+    def _workspace_table_candidates(module_name):
+        explicit = {
+            "MILP Solvers": [("Customer Demands", "customers_list"), ("Candidate Warehouses", "warehouses_list")],
+            "Excel Data Cleaning & Import": [],
+        }
+        found = list(explicit.get(module_name, []))
+        seen = {k for _, k in found}
+        for k,v in list(st.session_state.items()):
+            if str(k).startswith(("_","upgrade_","copilot_")) or k in seen:
+                continue
+            if isinstance(v, pd.DataFrame) and len(v.columns) > 0:
+                found.append((str(k).replace("_"," ").title(), k))
+            elif isinstance(v, list) and v and isinstance(v[0], dict):
+                found.append((str(k).replace("_"," ").title(), k))
+        return found
+
+    def _workspace_table_to_df(key):
+        value = st.session_state.get(key)
+        if isinstance(value, pd.DataFrame):
+            return value.copy(deep=True)
+        if isinstance(value, list):
+            return pd.DataFrame(value)
+        return pd.DataFrame()
+
+    def _write_workspace_table(key, df):
+        old = st.session_state.get(key)
+        if isinstance(old, pd.DataFrame):
+            st.session_state[key] = df.copy(deep=True)
+        elif isinstance(old, list):
+            st.session_state[key] = df.where(pd.notna(df), None).to_dict("records")
+        else:
+            st.session_state[key] = df.copy(deep=True)
+
+    workspace_tables = _workspace_table_candidates(mod)
+    st.markdown("---")
+    with st.container(border=True):
+        st.subheader("📁 Workspace Data Import, Cleaning & Export")
+        st.caption("Import a CSV/XLSX into a module table, clean it, reset it, or ask Copilot what to do next.")
+        if workspace_tables:
+            table_labels = [x[0] for x in workspace_tables]
+            table_keys = [x[1] for x in workspace_tables]
+            table_selector_key = "workspace_table_selector_" + hashlib.sha1(mod.encode()).hexdigest()[:10]
+            selected_table_label = st.selectbox("Table", table_labels, key=table_selector_key)
+            selected_table_key = table_keys[table_labels.index(selected_table_label)]
+            current_df = _workspace_table_to_df(selected_table_key)
+            default_key = "_workspace_default_" + selected_table_key
+            if default_key not in st.session_state:
+                st.session_state[default_key] = current_df.copy(deep=True)
+            c_imp, c_act, c_exp = st.columns(3)
+            with c_imp:
+                upload_key = "workspace_import_" + hashlib.sha1((mod+"|"+selected_table_key).encode()).hexdigest()[:10]
+                upload = st.file_uploader("📤 Import Excel / CSV", type=["xlsx","csv"], key=upload_key)
+                if upload is not None:
+                    upload_sig = hashlib.sha256(upload.getvalue()).hexdigest()
+                    sig_key = upload_key + "_sig"
+                    if st.session_state.get(sig_key) != upload_sig:
+                        try:
+                            raw = upload.getvalue()
+                            imported = pd.read_excel(io.BytesIO(raw)) if upload.name.lower().endswith(".xlsx") else pd.read_csv(io.BytesIO(raw))
+                            if not imported.columns.size:
+                                raise ValueError("The uploaded file has no columns.")
+                            aligned = align_imported_table(imported, current_df)
+                            _write_workspace_table(selected_table_key, aligned)
+                            st.session_state[sig_key] = upload_sig
+                            st.success(f"Imported {len(aligned):,} rows.")
+                            st.rerun()
+                        except Exception as exc:
+                            st.error("Import failed: " + str(exc))
+            with c_act:
+                if st.button("✨ Auto Clean", type="primary", use_container_width=True, key="workspace_clean_"+hashlib.sha1((mod+selected_table_key).encode()).hexdigest()[:10]):
+                    cleaned, audit = clean_dataframe(_workspace_table_to_df(selected_table_key))
+                    _write_workspace_table(selected_table_key, cleaned)
+                    st.session_state["workspace_clean_audit"] = pd.DataFrame(audit)
+                    st.success("Table cleaned and professionalized.")
+                    st.rerun()
+                if st.button("↩️ Reset Table", use_container_width=True, key="workspace_reset_"+hashlib.sha1((mod+selected_table_key).encode()).hexdigest()[:10]):
+                    _write_workspace_table(selected_table_key, st.session_state[default_key].copy(deep=True))
+                    st.rerun()
+            with c_exp:
+                export_df = _workspace_table_to_df(selected_table_key)
+                export_xlsx = build_excel_report("Shoir-IE · "+mod, [(selected_table_label, export_df)], [])
+                st.download_button("📥 Download XLSX", export_xlsx, "shoir_ie_"+re.sub(r"[^A-Za-z0-9]+","_",mod).lower()+".xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+                if st.session_state.get("workspace_clean_audit") is not None:
+                    audit_xlsx = build_excel_report("Shoir-IE Cleaning Audit", [("Cleaned Data", export_df), ("Cleaning Audit", st.session_state["workspace_clean_audit"])], [])
+                    st.download_button("📋 Download Cleaned + Audit", audit_xlsx, "shoir_ie_cleaned_audit.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+        else:
+            st.info("No editable table has been initialized in this module yet. Open the module's data-entry table first.")
+        st.markdown("#### 🤖 Copilot — act on the current module")
+        st.caption("Examples: “clean this table and remove duplicates”, “which module should I use for demand forecasting?”, “optimize the network”.")
+        copilot_cmd = st.text_input("Copilot command", key="workspace_copilot_command_"+hashlib.sha1(mod.encode()).hexdigest()[:10])
+        if st.button("Ask Copilot", use_container_width=True, key="workspace_copilot_button_"+hashlib.sha1(mod.encode()).hexdigest()[:10]):
+            prompt = copilot_cmd.strip()
+            if not prompt:
+                st.warning("Enter a request for Copilot first.")
+            else:
+                with st.spinner("Copilot is working..."):
+                    lower = prompt.lower()
+                    if workspace_tables and any(x in lower for x in ["clean", "trim", "deduplicate", "remove duplicates", "proper case", "uppercase", "lowercase"]):
+                        before = _workspace_table_to_df(selected_table_key)
+                        cleaned, audit = clean_dataframe(before)
+                        _write_workspace_table(selected_table_key, cleaned)
+                        st.session_state["workspace_clean_audit"] = pd.DataFrame(audit)
+                        st.success("Copilot cleaned the selected table. Review it below and download the XLSX when ready.")
+                        st.dataframe(cleaned.head(25), use_container_width=True)
+                    else:
+                        reply = get_copilot_response(prompt, [{"role":"user","content":prompt}])
+                        st.markdown(reply)
     mod = selected_module
     
     if mod == "Subscriptions":
@@ -8020,9 +8163,35 @@ else:
         st.header("🤖 Natural Language AI Copilot")
         st.caption(
             "Grounded in your real workspace data - it won't claim to have checked something it hasn't. "
-            "Connect a real language model for open-ended reasoning (see the note in the code) - until then, "
-            "it handles a genuinely useful, honest set of real commands."
+            "Upload an XLSX/CSV below to let Copilot inspect, clean and advise on the workbook."
         )
+
+        copilot_file = st.file_uploader("📎 Upload Excel / CSV to Copilot", type=["xlsx", "csv"], key="copilot_excel_upload")
+        if copilot_file is not None:
+            try:
+                copilot_df = pd.read_csv(copilot_file) if copilot_file.name.lower().endswith(".csv") else pd.read_excel(copilot_file)
+                st.session_state["copilot_workbook_df"] = copilot_df
+                st.success(f"Loaded **{len(copilot_df):,} rows × {len(copilot_df.columns):,} columns**.")
+                st.dataframe(copilot_df.head(25), use_container_width=True)
+                c1, c2 = st.columns(2)
+                with c1:
+                    if st.button("✨ Auto Clean Workbook", type="primary", use_container_width=True, key="copilot_auto_clean"):
+                        from shoir_upgrade import clean_dataframe
+                        cleaned, audit = clean_dataframe(copilot_df)
+                        st.session_state["copilot_cleaned_df"] = cleaned
+                        st.session_state["copilot_clean_audit"] = pd.DataFrame(audit)
+                        st.success("Workbook cleaned and professionalized.")
+                with c2:
+                    if st.session_state.get("copilot_cleaned_df") is not None:
+                        from shoir_upgrade import build_excel_report
+                        xlsx = build_excel_report("Shoir-IE Copilot Cleaned Workbook", [("Cleaned Data", st.session_state["copilot_cleaned_df"]), ("Cleaning Audit", st.session_state["copilot_clean_audit"])], [])
+                        st.download_button("📥 Download Cleaned XLSX", xlsx, "shoir_ie_copilot_cleaned.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+                if st.session_state.get("copilot_cleaned_df") is not None:
+                    st.dataframe(st.session_state["copilot_cleaned_df"].head(25), use_container_width=True)
+                    st.caption("You can now ask Copilot what to improve or which module should handle this data.")
+            except Exception as exc:
+                st.error(f"Could not read the workbook: {exc}")
+
         for msg in st.session_state.copilot_messages:
             with st.chat_message(msg["role"]):
                 st.markdown(msg["content"])
@@ -10257,3 +10426,11 @@ if mod == "Cryptographic Ledger":
         st.write("")
         if st.button("Unlock Enterprise Tier", type="primary", use_container_width=True):
             st.info("Redirecting to secure subscription portal...")
+
+
+# Platform upgrade modules and universal module report/export surface.
+try:
+    render_module_upgrade(selected_module)
+    render_module_report_panel(selected_module)
+except Exception as _upgrade_exc:
+    st.error(f"Platform upgrade component error: {_upgrade_exc}")

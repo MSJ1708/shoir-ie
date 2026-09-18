@@ -9,3 +9,9 @@ openpyxl
 scipy
 statsmodels
 scikit-learn
+
+reportlab
+python-pptx
+kaleido==0.2.1
+requests
+pytest
