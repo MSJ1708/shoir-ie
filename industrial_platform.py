@@ -44,7 +44,7 @@ NEW_ENTERPRISE_PLUS_MODULES = [
     "Multi-Objective & Robust Optimization",
     "Capital & Workforce Engineering",
     "Industrial Sustainability & LCA",
-    "Enterprise Security & Governance",
+    "Enterprise Security & Governance", "Advanced Industrial AI & Digital Twin Lab",
 ]
 
 def safe_float(value, default=0.0):
