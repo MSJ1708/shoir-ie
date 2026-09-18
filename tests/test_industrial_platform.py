@@ -7,7 +7,7 @@ from industrial_platform import (
     mrp_explode, calculate_oee, spc_limits, capability, fmea_score,
     weibull_analysis, queue_simulation, pareto_frontier, robust_risk_analysis,
     capital_metrics, line_balance, sustainability_accounting, benchmark_compare,
-    tier_allows, normalize_tier, PLATFORM_CATALOG,
+    tier_allows, normalize_tier, PLATFORM_CATALOG, ml_demand_forecast, predictive_maintenance_score, currency_convert, save_scenario, scenario_table,
 )
 
 def test_catalog_and_tiers():
