@@ -24,6 +24,7 @@ def ensure_upgrade_schema(db_path="enterprise_full_workspace.db"):
         c.execute("INSERT OR IGNORE INTO system_migrations VALUES(1,?,?)",("Additive platform upgrade schema",datetime.utcnow().isoformat()))
         if c.execute("PRAGMA quick_check").fetchone()[0]!="ok": raise RuntimeError("SQLite integrity check failed")
         c.commit()
+    return True
 
 def record_module_usage(username,module,tier,action="open",db_path="enterprise_full_workspace.db"):
     if username:
