@@ -83,6 +83,7 @@ CANONICAL_TIERS = [
 TIER_ORDER = [x["key"] for x in CANONICAL_TIERS]
 
 MODULE_MATRIX = [
+    ("Platform","Industrial Operating System","Enterprise"),
     ("Core Platform","Engineering Validation Center","Starter"),
     ("Core Platform","Excel Data Cleaning & Import","Starter"),
     ("Digital Thread","Industrial Data Model & Digital Thread","Professional"),

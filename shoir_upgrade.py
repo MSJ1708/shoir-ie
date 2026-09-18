@@ -318,6 +318,16 @@ def build_workbook_bundle(title: str, tables: Iterable[Tuple[str,pd.DataFrame]],
 def copilot_module_recommendation(prompt: str) -> str:
     p=str(prompt or "").lower()
     rules=[
+        (["kpi studio","kpi formula","calculate kpi","oee","otif","fpy"],"KPI Studio","Enterprise"),
+        (["method","equation","which method","which technique","ie formula"],"Engineering Methods & Equation Library","Enterprise"),
+        (["compare","comparison","delta","difference between scenarios"],"Compare Anything","Enterprise"),
+        (["scenario version","scenario git","branch scenario","baseline version"],"Scenario Git","Enterprise"),
+        (["process mining","process variant","conformance","event log"],"Process Mining & Conformance","Enterprise"),
+        (["drift","data drift","model drift","psi","distribution shift"],"Model & Data Drift Monitor","Enterprise"),
+        (["verify decision","predicted vs actual","prediction error","decision verification"],"Decision Verification","Enterprise"),
+        (["dmaic","a3","continuous improvement","define measure analyze improve control"],"DMAIC / A3 Continuous Improvement","Enterprise"),
+        (["template","starter model","industrial template"],"Industrial Template Library","Enterprise"),
+        (["platform health","diagnostics","runtime health","system health"],"Platform Health & Diagnostics","Enterprise"),
         (["forecast","seasonality","promotion","weather","macro"],"Advanced ML Demand Forecasting","Enterprise"),
         (["monte carlo","stochastic","uncertainty","lead time variance","disruption"],"Stochastic & Monte Carlo Risk Modeling","Enterprise"),
         (["sap","oracle","erp","wms","api connector"],"ERP & WMS API Connectors","Enterprise"),
