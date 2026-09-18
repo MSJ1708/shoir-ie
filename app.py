@@ -1265,7 +1265,8 @@ elif "Pro" in tier_val or "Trial" in tier_val:
 else:
     allowed_modules = tier1_features
 selected_module = st.sidebar.selectbox("Select Module", allowed_modules)
-\n# Universal data workspace controls: available before every module renderer.
+
+# Universal data workspace controls: available before every module renderer.
 def _upgrade_tables_for_module(module_name):
     candidates=[]
     explicit={"MILP Solvers":[("Customer Demands","customers_list"),("Candidate Warehouses","warehouses_list")]}
