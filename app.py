@@ -10177,6 +10177,22 @@ if mod == "Admin Panel":
                             st.rerun()
 
         st.markdown("---")
+        st.subheader("📈 Owner Usage & Module Trends")
+        conn = sqlite3.connect("enterprise_full_workspace.db")
+        usage_df = pd.read_sql("SELECT date(timestamp) AS Day, action AS Action, COUNT(*) AS Events FROM audit_trail GROUP BY date(timestamp), action ORDER BY Day", conn)
+        conn.close()
+        if usage_df.empty:
+            st.info("Usage trends will appear after real user actions are recorded.")
+        else:
+            u1,u2=st.columns(2)
+            with u1:
+                st.plotly_chart(px.line(usage_df.groupby("Day",as_index=False)["Events"].sum(),x="Day",y="Events",title="Activity Over Time"),use_container_width=True)
+            with u2:
+                top_actions=usage_df.groupby("Action",as_index=False)["Events"].sum().sort_values("Events",ascending=False).head(15)
+                st.plotly_chart(px.bar(top_actions,x="Action",y="Events",title="Most Used Actions"),use_container_width=True)
+            st.dataframe(usage_df,use_container_width=True,hide_index=True)
+
+        st.markdown("---")
         # FIX: everything from here down through the license-codes table
         # below used to sit at the top level of the file (outside this
         # if/else), so it rendered on every page for every signed-in user -
