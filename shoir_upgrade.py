@@ -44,10 +44,13 @@ def clean_dataframe(df):
     out=df.copy(); audit=[]; out.columns=[re.sub(r"\s+"," ",str(c).strip()) or "Unnamed" for c in out.columns]
     out=out.loc[~out.isna().all(axis=1)].copy(); out=out.drop(columns=[c for c in out.columns if out[c].isna().all()])
     for c in out.columns:
-        if pd.api.types.is_object_dtype(out[c]):
+        if pd.api.types.is_object_dtype(out[c]) or pd.api.types.is_string_dtype(out[c]):
             out[c]=out[c].astype("string").str.replace(r"[\x00-\x1F\x7F]","",regex=True).str.strip()
-            x=out[c].dropna().astype(str); n=pd.to_numeric(x.str.replace(",","",regex=False),errors="coerce")
-            if len(x) and n.notna().mean()>=.85 and not (x.str.match(r"^0\d+$").mean()>.25): out[c]=pd.to_numeric(out[c].astype(str).str.replace(",","",regex=False),errors="coerce")
+            x=out[c].dropna().astype(str)
+            n=pd.to_numeric(x.str.replace(",","",regex=False),errors="coerce")
+            leading_zero_ratio=x.str.match(r"^0\d+$").mean() if len(x) else 0
+            if len(x) and n.notna().mean()>=.85 and leading_zero_ratio<=.25:
+                out[c]=pd.to_numeric(out[c].astype(str).str.replace(",","",regex=False),errors="coerce")
             mask=out[c].isin(["#N/A","#VALUE!","#DIV/0!","#REF!","#NAME?"]); out.loc[mask,c]=pd.NA
     out=out.drop_duplicates().reset_index(drop=True); audit.append({"Action":"Final dimensions","Details":f"{len(out)} rows × {len(out.columns)} columns"})
     return out,audit
