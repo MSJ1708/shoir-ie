@@ -8261,12 +8261,25 @@ else:
     # New unified Industrial Operating System renders as a first-class platform workspace.
     if mod == "Industrial Operating System":
         if platform_tier_allows(tier_val, "Enterprise"):
-            render_industrial_operating_system(tier_val, st.session_state.get("current_user", "unknown"))
+            try:
+                render_industrial_operating_system(tier_val, st.session_state.get("current_user", "unknown"))
+            except Exception as exc:
+                # Last-resort UI boundary: never expose a Streamlit traceback to an end user.
+                # The module itself uses defensive validation; this boundary protects the whole app
+                # from a future unexpected renderer failure and preserves a diagnostic for support.
+                st.error("The Industrial Operating System encountered a recoverable rendering issue. Your workspace data was not discarded.")
+                with st.expander("Technical diagnostic"):
+                    st.code(f"{type(exc).__name__}: {exc}")
         else:
             st.warning("Industrial Operating System requires the Enterprise tier.")
     # New unified industrial platform modules render through the existing service layer.
     elif mod in {x["name"] for x in PLATFORM_CATALOG}:
-        render_industrial_module(mod, tier_val, st.session_state.get("current_user", "unknown"))
+        try:
+            render_industrial_module(mod, tier_val, st.session_state.get("current_user", "unknown"))
+        except Exception as exc:
+            st.error(f"{mod} encountered a recoverable rendering issue. The rest of Shoir-IE remains available.")
+            with st.expander("Technical diagnostic"):
+                st.code(f"{type(exc).__name__}: {exc}")
 
     # =========================================================
 # CARBON ACCOUNTING & NET-ZERO STUDIO (Astonishing & Stunning)
