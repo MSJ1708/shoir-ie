@@ -118,7 +118,7 @@ def init_platform_db(db_path: str="enterprise_full_workspace.db") -> bool:
             ("quality_runs","CREATE TABLE IF NOT EXISTS quality_runs(id INTEGER PRIMARY KEY AUTOINCREMENT, study_name TEXT, metric TEXT, result_json TEXT, created_by TEXT, created_at TEXT)"),
             ("connector_profiles","CREATE TABLE IF NOT EXISTS connector_profiles(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, system_type TEXT, endpoint TEXT, status TEXT, last_test TEXT, notes TEXT, created_by TEXT)"),
             ("telemetry_events","CREATE TABLE IF NOT EXISTS telemetry_events(id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id TEXT, ts TEXT, metric TEXT, value REAL, source TEXT)"),
-            ("security_events","CREATE TABLE IF NOT EXISTS security_events(id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT, event_type TEXT, details TEXT, created_at TEXT)"),
+            ("security_events","CREATE TABLE IF NOT EXISTS security_events(id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT, event_type TEXT, details TEXT, created_at TEXT)"),"platform_usage_events","CREATE TABLE IF NOT EXISTS platform_usage_events(id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT, module TEXT, event_time TEXT)"),
             ("platform_scenarios","CREATE TABLE IF NOT EXISTS platform_scenarios(scenario_id TEXT PRIMARY KEY, name TEXT UNIQUE, parent_name TEXT, parameters_json TEXT, kpis_json TEXT, created_by TEXT, created_at TEXT)"),
             ("workspace_members","CREATE TABLE IF NOT EXISTS workspace_members(workspace TEXT, username TEXT, role TEXT, updated_at TEXT, PRIMARY KEY(workspace,username))"),
             ("fx_rates","CREATE TABLE IF NOT EXISTS fx_rates(currency TEXT PRIMARY KEY, rate_to_base REAL, updated_at TEXT)"),
@@ -516,6 +516,12 @@ MODULE_TABLE_KEYS = {
     "Benchmarking & Engineering Standards":["benchmark_actual","benchmark_targets"],
     "Live Industrial Digital Twin":["twin_tel"],
     "Enterprise Security & Governance":["security_roles"],
+    "Advanced ML Demand Forecasting":["forecast_df"],
+    "Scenario Versioning & Comparison":["scenario_df"],
+    "Team Workspaces & RBAC":["workspace_members_df"],
+    "Executive Report Center":["exec_report_df"],
+    "Predictive Maintenance Digital Twin":["maint_df"],
+    "Localization & Multi-Currency":["currency_df","trade_rules_df"],
 }
 
 def _module_slug(module: str) -> str:
@@ -614,6 +620,9 @@ def render_module(module: str, tier: str, username: str):
     import streamlit as st
     import plotly.express as px
     init_platform_db()
+    with sqlite3.connect("enterprise_full_workspace.db") as _usage_conn:
+        _usage_conn.execute("INSERT INTO platform_usage_events(username,module,event_time) VALUES(?,?,?)",(username,module,_now()))
+        _usage_conn.commit()
     render_module_data_exchange(module, st, tier, username)
     required=next((x["tier"] for x in PLATFORM_CATALOG if x["name"]==module),None)
     if required and not tier_allows(tier,required):
