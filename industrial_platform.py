@@ -82,6 +82,410 @@ TIER_FEATURES = {
 
 TIER_ORDER = ["Starter","Mid-Tier Pro","Professional","Enterprise","Enterprise Plus","Research Pack"]
 
+def normalize_tier(value: str) -> str:
+    v=str(value or "Starter").lower()
+    if "research" in v: return "Research Pack"
+    if "enterprise plus" in v or "industrial enterprise" in v: return "Enterprise Plus"
+    if "enterprise" in v: return "Enterprise"
+    if "professional" in v: return "Professional"
+    if "pro" in v: return "Mid-Tier Pro"
+    return "Starter"
+
+def tier_allows(current: str, required: str) -> bool:
+    c=normalize_tier(current); r=normalize_tier(required)
+    if c=="Research Pack": c="Enterprise Plus"
+    if r=="Research Pack": r="Enterprise Plus"
+    return TIER_ORDER.index(c) >= TIER_ORDER.index(r)
+
+def init_platform_db(db_path: str="enterprise_full_workspace.db") -> bool:
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("PRAGMA journal_mode=WAL")
+        ddl = [
+            ("industrial_entities","CREATE TABLE IF NOT EXISTS industrial_entities(entity_id TEXT PRIMARY KEY, entity_type TEXT, name TEXT, attributes_json TEXT, updated_at TEXT)"),
+            ("platform_datasets","CREATE TABLE IF NOT EXISTS platform_datasets(dataset_id TEXT PRIMARY KEY, name TEXT, source_name TEXT, row_count INTEGER, column_count INTEGER, sha256 TEXT, created_at TEXT, schema_json TEXT)"),
+            ("platform_models","CREATE TABLE IF NOT EXISTS platform_models(model_id TEXT PRIMARY KEY, name TEXT, version TEXT, model_type TEXT, parameters_json TEXT, data_hash TEXT, assumptions_json TEXT, created_by TEXT, created_at TEXT, status TEXT)"),
+            ("platform_experiments","CREATE TABLE IF NOT EXISTS platform_experiments(experiment_id TEXT PRIMARY KEY, name TEXT, module TEXT, scenarios_json TEXT, results_json TEXT, created_by TEXT, created_at TEXT)"),
+            ("platform_benchmarks","CREATE TABLE IF NOT EXISTS platform_benchmarks(id INTEGER PRIMARY KEY AUTOINCREMENT, metric TEXT, value REAL, unit TEXT, source TEXT, source_date TEXT, created_at TEXT)"),
+            ("platform_decisions","CREATE TABLE IF NOT EXISTS platform_decisions(decision_id TEXT PRIMARY KEY, title TEXT, module TEXT, metrics_json TEXT, assumptions_json TEXT, uncertainty_json TEXT, created_by TEXT, created_at TEXT, status TEXT)"),
+            ("mes_work_orders","CREATE TABLE IF NOT EXISTS mes_work_orders(work_order TEXT PRIMARY KEY, product TEXT, quantity REAL, due_date TEXT, status TEXT, machine TEXT, operator TEXT, updated_at TEXT)"),
+            ("mes_events","CREATE TABLE IF NOT EXISTS mes_events(id INTEGER PRIMARY KEY AUTOINCREMENT, work_order TEXT, event_type TEXT, event_time TEXT, quantity REAL, reason TEXT, operator TEXT)"),
+            ("quality_runs","CREATE TABLE IF NOT EXISTS quality_runs(id INTEGER PRIMARY KEY AUTOINCREMENT, study_name TEXT, metric TEXT, result_json TEXT, created_by TEXT, created_at TEXT)"),
+            ("connector_profiles","CREATE TABLE IF NOT EXISTS connector_profiles(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, system_type TEXT, endpoint TEXT, status TEXT, last_test TEXT, notes TEXT, created_by TEXT)"),
+            ("telemetry_events","CREATE TABLE IF NOT EXISTS telemetry_events(id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id TEXT, ts TEXT, metric TEXT, value REAL, source TEXT)"),
+            ("security_events","CREATE TABLE IF NOT EXISTS security_events(id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT, event_type TEXT, details TEXT, created_at TEXT)"),
+        ]
+        for _,sql in ddl: conn.execute(sql)
+        conn.commit()
+        if conn.execute("PRAGMA quick_check").fetchone()[0] != "ok": raise RuntimeError("SQLite quick_check failed")
+    return True
+
+def _now() -> str:
+    return datetime.utcnow().isoformat(timespec="seconds")
+
+def log_security_event(username: str, event_type: str, details: str="", db_path: str="enterprise_full_workspace.db"):
+    try:
+        with sqlite3.connect(db_path) as c:
+            c.execute("INSERT INTO security_events(username,event_type,details,created_at) VALUES(?,?,?,?)",(username,event_type,details,_now()))
+            c.commit()
+    except Exception:
+        pass
+
+def register_dataset(name: str, source_name: str, df: pd.DataFrame, db_path: str="enterprise_full_workspace.db") -> str:
+    raw=df.to_csv(index=False).encode()
+    dataset_id="DS-"+hashlib.sha256((name+source_name+str(len(raw))).encode()).hexdigest()[:12].upper()
+    schema={str(c):str(df[c].dtype) for c in df.columns}
+    with sqlite3.connect(db_path) as c:
+        c.execute("INSERT OR REPLACE INTO platform_datasets VALUES(?,?,?,?,?,?,?,?)",(dataset_id,name,source_name,len(df),len(df.columns),hashlib.sha256(raw).hexdigest(),_now(),json.dumps(schema)))
+        c.commit()
+    return dataset_id
+
+def data_quality_report(df: pd.DataFrame) -> dict:
+    if df is None: return {"score":0.0,"rows":0,"columns":0,"missing_pct":100.0,"duplicate_pct":100.0,"issues":["No data"]}
+    rows=max(1,len(df)); missing=float(df.isna().mean().mean()*100) if df.shape[1] else 100.0
+    duplicate=float(df.duplicated().mean()*100) if len(df) else 0.0
+    issues=[]
+    if missing>10: issues.append(f"Missing values: {missing:.1f}%")
+    if duplicate>5: issues.append(f"Duplicate rows: {duplicate:.1f}%")
+    for col in df.select_dtypes(include=np.number).columns:
+        s=pd.to_numeric(df[col],errors="coerce").dropna()
+        if len(s)>=8:
+            q1,q3=s.quantile(.25),s.quantile(.75); iqr=q3-q1
+            if iqr>0 and ((s<q1-1.5*iqr)|(s>q3+1.5*iqr)).mean()>0.1: issues.append(f"Potential outliers: {col}")
+    score=max(0.0,min(100.0,100-missing*0.7-duplicate*0.5-min(30,len(issues)*5)))
+    return {"score":round(score,1),"rows":len(df),"columns":len(df.columns),"missing_pct":round(missing,2),"duplicate_pct":round(duplicate,2),"issues":issues}
+
+def validate_table(df: pd.DataFrame, required: Optional[Sequence[str]]=None, numeric_ranges: Optional[dict]=None) -> dict:
+    errors=[]; warnings=[]
+    required=list(required or [])
+    for c in required:
+        if c not in df.columns: errors.append(f"Missing required column: {c}")
+    if len(df)==0: errors.append("Table is empty")
+    if df.columns.duplicated().any(): errors.append("Duplicate column names")
+    if numeric_ranges:
+        for c,(lo,hi) in numeric_ranges.items():
+            if c in df.columns:
+                s=pd.to_numeric(df[c],errors="coerce")
+                bad=int(((s<lo)|(s>hi)).fillna(False).sum())
+                if bad: errors.append(f"{bad} values outside {c} range [{lo}, {hi}]")
+    q=data_quality_report(df); warnings.extend(q["issues"])
+    feasible=len(errors)==0
+    return {"valid":feasible,"quality":q,"errors":errors,"warnings":warnings}
+
+def model_health(df: pd.DataFrame, feasible: bool=True, solver_status: str="Not Run", stability: str="Not assessed", uncertainty: str="Not assessed", reproducible: bool=True) -> dict:
+    q=data_quality_report(df)
+    return {"data_quality":q["score"],"feasibility":"Pass" if feasible else "Fail","solver_status":solver_status,"model_stability":stability,"forecast_uncertainty":uncertainty,"reproducible":"Yes" if reproducible else "No","issues":q["issues"]}
+
+def upsert_entities(df: pd.DataFrame, entity_type: str, id_col: str, db_path: str="enterprise_full_workspace.db") -> int:
+    if id_col not in df.columns: raise KeyError(f"{id_col} not found")
+    count=0
+    with sqlite3.connect(db_path) as c:
+        for rec in df.to_dict("records"):
+            eid=f"{entity_type}:{rec[id_col]}"
+            name=str(rec.get("name",rec.get("Customer",rec.get("Product",rec[id_col]))))
+            attrs={k:v for k,v in rec.items() if k!=id_col}
+            c.execute("INSERT OR REPLACE INTO industrial_entities VALUES(?,?,?, ?, ?)",(eid,entity_type,name,json.dumps(attrs,default=str),_now()))
+            count+=1
+        c.commit()
+    return count
+
+def finite_schedule(orders: pd.DataFrame, machine_capacity: Optional[dict]=None, start_time: Optional[datetime]=None) -> pd.DataFrame:
+    req={"Order","Product","Qty","DueDate","ProcessingMin"}
+    missing=req-set(orders.columns)
+    if missing: raise ValueError(f"Missing scheduling columns: {sorted(missing)}")
+    d=orders.copy()
+    d["DueDate"]=pd.to_datetime(d["DueDate"],errors="coerce")
+    d["Qty"]=pd.to_numeric(d["Qty"],errors="coerce").fillna(0)
+    d["ProcessingMin"]=pd.to_numeric(d["ProcessingMin"],errors="coerce").fillna(0)
+    d["SetupMin"]=pd.to_numeric(d.get("SetupMin",0),errors="coerce").fillna(0)
+    d["Machine"]=d.get("Machine","M-01").astype(str)
+    d["Priority"]=pd.to_numeric(d.get("Priority",0),errors="coerce").fillna(0)
+    d=d.sort_values(["Priority","DueDate"],ascending=[False,True]).reset_index(drop=True)
+    avail={m:(start_time or datetime.now()) for m in d["Machine"].unique()}
+    rows=[]
+    for r in d.itertuples(index=False):
+        m=str(r.Machine); ready=avail[m]; duration=max(0.1,float(r.ProcessingMin)+float(r.SetupMin))
+        finish=ready+timedelta(minutes=duration)
+        due=r.DueDate.to_pydatetime() if pd.notna(r.DueDate) else finish
+        rows.append({"Order":r.Order,"Product":r.Product,"Qty":r.Qty,"Machine":m,"Start":ready,"Finish":finish,"DueDate":due,"LateMin":max(0,(finish-due).total_seconds()/60)})
+        avail[m]=finish
+    return pd.DataFrame(rows)
+
+def mrp_explode(demand: pd.DataFrame, bom: pd.DataFrame, lead_times: Optional[pd.DataFrame]=None) -> pd.DataFrame:
+    if not {"Product","DemandQty"}<=set(demand.columns) or not {"Parent","Component","QtyPer"}<=set(bom.columns): raise ValueError("Demand needs Product/DemandQty and BOM needs Parent/Component/QtyPer")
+    dt=demand.copy(); b=bom.copy()
+    dt["DemandQty"]=pd.to_numeric(dt["DemandQty"],errors="coerce").fillna(0); b["QtyPer"]=pd.to_numeric(b["QtyPer"],errors="coerce").fillna(0)
+    out=[]
+    for r in dt.itertuples(index=False):
+        for q in b[b["Parent"].astype(str)==str(r.Product)].itertuples(index=False):
+            out.append({"Parent":r.Product,"Component":q.Component,"Gross Requirement":float(r.DemandQty)*float(q.QtyPer)})
+    res=pd.DataFrame(out)
+    if lead_times is not None and not res.empty and {"Component","LeadTimeDays"}<=set(lead_times.columns):
+        res=res.merge(lead_times,on="Component",how="left")
+    return res
+
+def calculate_oee(availability: float, performance: float, quality: float) -> dict:
+    a=max(0,min(100,float(availability))); p=max(0,min(100,float(performance))); q=max(0,min(100,float(quality)))
+    oee=a*p*q/10000
+    return {"Availability %":a,"Performance %":p,"Quality %":q,"OEE %":oee}
+
+def oee_from_events(events: pd.DataFrame) -> dict:
+    req={"PlannedMin","DowntimeMin","IdealCycleSec","TotalCount","GoodCount"}
+    if not req<=set(events.columns): raise ValueError(f"OEE events require {sorted(req)}")
+    r=events.sum(numeric_only=True)
+    planned=max(1,float(r.PlannedMin)); run=max(0,planned-float(r.DowntimeMin))
+    avail=run/planned*100; perf=((float(r.TotalCount)*float(r.IdealCycleSec))/60)/max(run,1)*100; qual=float(r.GoodCount)/max(float(r.TotalCount),1)*100
+    return calculate_oee(avail,perf,qual)
+
+def spc_limits(values: Sequence[float], sigma: float=3.0) -> dict:
+    x=pd.to_numeric(pd.Series(values),errors="coerce").dropna().astype(float)
+    if len(x)<2: raise ValueError("At least two observations are required.")
+    mean=float(x.mean()); sd=float(x.std(ddof=1))
+    return {"mean":mean,"ucl":mean+sigma*sd,"lcl":mean-sigma*sd,"sigma":sd}
+
+def capability(values: Sequence[float], lsl: float, usl: float) -> dict:
+    x=pd.to_numeric(pd.Series(values),errors="coerce").dropna().astype(float)
+    if len(x)<2 or usl<=lsl: raise ValueError("Need at least two values and USL > LSL.")
+    sd=float(x.std(ddof=1)); mean=float(x.mean())
+    cp=(usl-lsl)/(6*sd) if sd else math.inf; cpu=(usl-mean)/(3*sd) if sd else math.inf; cpl=(mean-lsl)/(3*sd) if sd else math.inf
+    return {"mean":mean,"std":sd,"Cp":cp,"Cpk":min(cpu,cpl)}
+
+def pareto_counts(values: Sequence[Any]) -> pd.DataFrame:
+    s=pd.Series(values).astype(str); out=s.value_counts().rename_axis("Category").reset_index(name="Count"); out["Cumulative %"]=out["Count"].cumsum()/max(1,out["Count"].sum())*100; return out
+
+def gage_rr(measurements: pd.DataFrame, part_col="Part", operator_col="Operator", value_col="Measurement") -> dict:
+    req={part_col,operator_col,value_col}
+    if not req<=set(measurements.columns): raise ValueError(f"Gage R&R requires {sorted(req)}")
+    d=measurements.copy(); d[value_col]=pd.to_numeric(d[value_col],errors="coerce"); d=d.dropna(subset=[value_col])
+    grand=d[value_col].mean(); part_means=d.groupby(part_col)[value_col].mean(); op_means=d.groupby(operator_col)[value_col].mean()
+    repeat_var=float(d.groupby([part_col,operator_col])[value_col].var(ddof=1).fillna(0).mean()); part_var=float(part_means.var(ddof=1)) if len(part_means)>1 else 0.0; op_var=float(op_means.var(ddof=1)) if len(op_means)>1 else 0.0
+    total_var=max(1e-12,repeat_var+part_var+op_var); return {"Repeatability SD":math.sqrt(repeat_var),"Part-to-Part SD":math.sqrt(max(part_var,0)),"Operator SD":math.sqrt(max(op_var,0)),"%GRR":repeat_var/total_var*100,"%Part":part_var/total_var*100,"Mean":float(grand)}
+
+def one_way_anova(df: pd.DataFrame, group_col: str, value_col: str) -> dict:
+    groups=[g[value_col].dropna().values for _,g in df.groupby(group_col)]
+    if len(groups)<2: raise ValueError("Need at least two groups.")
+    stat,p=stats.f_oneway(*groups); return {"F":float(stat),"p_value":float(p),"groups":len(groups)}
+
+def regression_fit(df: pd.DataFrame, target: str, features: Sequence[str]) -> tuple[pd.DataFrame,dict]:
+    d=df.dropna(subset=[target]+list(features)).copy()
+    X=d[list(features)].apply(pd.to_numeric,errors="coerce"); y=pd.to_numeric(d[target],errors="coerce")
+    mask=X.notna().all(axis=1)&y.notna(); X=X.loc[mask]; y=y.loc[mask]
+    if len(X)<3: raise ValueError("Need at least three complete observations.")
+    model=LinearRegression().fit(X,y); pred=model.predict(X); metrics={"R2":float(r2_score(y,pred)),"MAE":float(mean_absolute_error(y,pred)),"RMSE":float(math.sqrt(mean_squared_error(y,pred)))}
+    coef=pd.DataFrame({"Feature":list(features),"Coefficient":model.coef_}); metrics["Intercept"]=float(model.intercept_); return coef,metrics
+
+def fmea_score(df: pd.DataFrame, severity="Severity", occurrence="Occurrence", detection="Detection") -> pd.DataFrame:
+    d=df.copy()
+    for c in [severity,occurrence,detection]:
+        d[c]=pd.to_numeric(d[c],errors="coerce")
+    d["RPN"]=d[severity]*d[occurrence]*d[detection]
+    return d.sort_values("RPN",ascending=False)
+
+def weibull_analysis(failures: Sequence[float]) -> dict:
+    x=pd.to_numeric(pd.Series(failures),errors="coerce").dropna().values
+    if len(x)<3 or np.any(x<=0): raise ValueError("Need at least three positive failure times.")
+    shape,loc,scale=stats.weibull_min.fit(x,floc=0)
+    return {"Shape (Beta)":float(shape),"Scale (Eta)":float(scale),"B10 Life":float(scale*(-math.log(0.9))**(1/shape))}
+
+def full_factorial_2level(factors: Sequence[str]) -> pd.DataFrame:
+    rows=[]
+    for vals in product([-1,1], repeat=len(factors)):
+        rows.append(dict(zip(factors,vals)))
+    return pd.DataFrame(rows)
+
+def queue_simulation(arrival_rate: float, service_rate: float, servers: int=1, duration_min: float=1440, replications: int=10, seed: int=42) -> pd.DataFrame:
+    if min(arrival_rate,service_rate,servers,duration_min,replications)<=0: raise ValueError("Rates, servers, duration and replications must be positive.")
+    rows=[]; rng=np.random.default_rng(seed)
+    for rep in range(replications):
+        t=0.; arrivals=[]; n=int(max(1,duration_min*arrival_rate/60*1.25))
+        for _ in range(n):
+            t += rng.exponential(60/arrival_rate); 
+            if t<=duration_min: arrivals.append(t)
+        servers_heap=[0.0]*servers; heapq.heapify(servers_heap); waits=[]
+        for a in arrivals:
+            available=heapq.heappop(servers_heap); start=max(a,available); waits.append(start-a)
+            finish=start+rng.exponential(60/service_rate); heapq.heappush(servers_heap,finish)
+        rows.append({"Replication":rep+1,"Arrivals":len(arrivals),"Mean Wait Min":float(np.mean(waits) if waits else 0),"P95 Wait Min":float(np.percentile(waits,95) if waits else 0),"Utilization":float(min(1.0, len(arrivals)/(max(1,servers)*max(1,duration_min*service_rate/60))))})
+    return pd.DataFrame(rows)
+
+def agent_simulation(agents: int=20, steps: int=100, step_size: float=1.0, seed: int=42) -> pd.DataFrame:
+    rng=np.random.default_rng(seed); pos=rng.uniform(-10,10,size=(agents,2)); rows=[]
+    for step in range(steps):
+        direction=rng.normal(size=(agents,2)); norm=np.linalg.norm(direction,axis=1,keepdims=True); direction=direction/np.maximum(norm,1e-9); pos+=direction*step_size
+        rows.append({"Step":step,"Mean Distance":float(np.linalg.norm(pos,axis=1).mean()),"Max Distance":float(np.linalg.norm(pos,axis=1).max())})
+    return pd.DataFrame(rows)
+
+def system_dynamics_inventory(initial_inventory: float, demand_per_day: float, replenishment_per_day: float, feedback: float=0.15, days: int=90) -> pd.DataFrame:
+    inv=float(initial_inventory); rows=[]
+    for day in range(1,days+1):
+        demand=max(0,demand_per_day*(1+feedback*(1000/(1000+max(inv,0))-0.5)))
+        inv=max(0,inv+replenishment_per_day-demand)
+        rows.append({"Day":day,"Inventory":inv,"Demand":demand,"Replenishment":replenishment_per_day})
+    return pd.DataFrame(rows)
+
+def pareto_frontier(df: pd.DataFrame, objectives: Sequence[str], minimize: Optional[Sequence[bool]]=None) -> pd.DataFrame:
+    if not objectives: return df.copy()
+    d=df.copy(); mins=list(minimize or [True]*len(objectives))
+    mask=np.ones(len(d),dtype=bool)
+    arr=d[list(objectives)].apply(pd.to_numeric,errors="coerce").to_numpy()
+    for i in range(len(arr)):
+        for j in range(len(arr)):
+            if i==j: continue
+            better_or_equal=True; strictly=False
+            for k in range(len(objectives)):
+                if mins[k]:
+                    if arr[j,k] > arr[i,k]: better_or_equal=False; break
+                    if arr[j,k] < arr[i,k]: strictly=True
+                else:
+                    if arr[j,k] < arr[i,k]: better_or_equal=False; break
+                    if arr[j,k] > arr[i,k]: strictly=True
+            if better_or_equal and strictly: mask[i]=False; break
+    return d.loc[mask].reset_index(drop=True)
+
+def robust_risk_analysis(demand_mean: float, demand_std: float, capacity: float, lead_time_mean: float, lead_time_std: float, disruption_probability: float=0.0, disruption_capacity_multiplier: float=0.6, simulations: int=5000, seed: int=42) -> dict:
+    rng=np.random.default_rng(seed); demand=np.maximum(0,rng.normal(demand_mean,max(demand_std,1e-9),simulations)); lead=np.maximum(0,rng.normal(lead_time_mean,max(lead_time_std,1e-9),simulations)); shock=rng.random(simulations)<max(0,min(1,disruption_probability)); effective=np.maximum(0,capacity*np.where(shock,disruption_capacity_multiplier,1.0)); service=(demand<=effective).astype(float); exposure=np.maximum(0,demand-effective)*(1+np.maximum(0,lead-lead_time_mean)/max(lead_time_mean,1e-9))
+    return {"Service Probability":float(service.mean()),"Stockout Probability":float(1-service.mean()),"P50 Exposure":float(np.percentile(exposure,50)),"P90 Exposure":float(np.percentile(exposure,90)),"P95 Exposure":float(np.percentile(exposure,95)),"P99 Exposure":float(np.percentile(exposure,99))}
+
+def multiobjective_score(df: pd.DataFrame, weights: dict, minimize: Optional[dict]=None) -> pd.DataFrame:
+    d=df.copy(); minimize=minimize or {k:True for k in weights}; score=np.zeros(len(d))
+    for col,w in weights.items():
+        x=pd.to_numeric(d[col],errors="coerce").astype(float); lo,hi=x.min(),x.max(); norm=(x-lo)/(hi-lo) if hi>lo else pd.Series(np.zeros(len(d)),index=d.index)
+        score += float(w)*(norm if minimize.get(col,True) else 1-norm)
+    d["Composite Score"]=score
+    return d.sort_values("Composite Score").reset_index(drop=True)
+
+def capital_metrics(initial_investment: float, cash_flows: Sequence[float], discount_rate: float=0.1, salvage_value: float=0.0) -> dict:
+    flows=np.array([-abs(initial_investment)]+[float(x) for x in cash_flows],dtype=float); flows[-1]+=float(salvage_value)
+    npv=float(sum(flows[t]/((1+discount_rate)**t) for t in range(len(flows))))
+    def npv_at(r): return float(sum(flows[t]/((1+r)**t) for t in range(len(flows))))
+    lo,hi=-0.99,10.0
+    low_val, high_val = npv_at(lo), npv_at(hi)
+    if low_val * high_val > 0:
+        irr = None
+    else:
+        mid = 0.1
+        for _ in range(200):
+            mid=(lo+hi)/2; val=npv_at(mid)
+            if abs(val)<1e-8: break
+            if npv_at(lo)*val<=0: hi=mid
+            else: lo=mid
+        irr=float(mid)
+    cumulative=-abs(initial_investment); payback=None
+    for i,cf in enumerate(flows[1:],1):
+        prev=cumulative; cumulative+=cf
+        if cumulative>=0 and cf!=0:
+            payback=(i-1)+(-prev)/cf; break
+    return {"NPV":npv,"IRR":irr,"Payback Period":payback}
+
+def line_balance(elements: pd.DataFrame, takt_min: float, element_col="Element", time_col="TimeMin") -> Tuple[pd.DataFrame,dict]:
+    if takt_min<=0: raise ValueError("Takt must be positive.")
+    d=elements.copy(); d[time_col]=pd.to_numeric(d[time_col],errors="coerce").fillna(0); d=d.sort_values(time_col,ascending=False)
+    stations=[]; loads=[]
+    for r in d.itertuples(index=False):
+        idx=next((i for i,l in enumerate(loads) if l+float(getattr(r,time_col))<=takt_min),None)
+        if idx is None: loads.append(0.0); stations.append([]); idx=len(loads)-1
+        stations[idx].append({"Element":getattr(r,element_col),"TimeMin":float(getattr(r,time_col))}); loads[idx]+=float(getattr(r,time_col))
+    out=[]; 
+    for i,(items,load) in enumerate(zip(stations,loads),1):
+        out.append({"Station":f"S{i}","Load Min":load,"Utilization %":load/takt_min*100,"Elements":", ".join(x["Element"] for x in items)})
+    return pd.DataFrame(out),{"Stations":len(out),"Balance Efficiency %":sum(loads)/(len(loads)*takt_min)*100,"Idle Min":sum(len(loads)*[takt_min][0]-sum(loads) for _ in [0])}
+
+def staffing_capacity(staff: int, minutes_per_shift: float, productive_pct: float, days: int=1) -> dict:
+    productive=max(0,min(100,float(productive_pct))); capacity=max(0,int(staff))*minutes_per_shift*(productive/100)*days
+    return {"Staff":int(staff),"Available Min":staff*minutes_per_shift*days,"Productive Min":capacity,"Productive %":productive}
+
+def sustainability_accounting(df: pd.DataFrame) -> pd.DataFrame:
+    cols=set(df.columns); required={"Activity","Scope","Quantity","EmissionFactor"}
+    if not required<=cols: raise ValueError(f"Sustainability data requires {sorted(required)}")
+    d=df.copy(); d["Quantity"]=pd.to_numeric(d["Quantity"],errors="coerce").fillna(0); d["EmissionFactor"]=pd.to_numeric(d["EmissionFactor"],errors="coerce").fillna(0); d["tCO2e"]=d["Quantity"]*d["EmissionFactor"]/1000
+    if "Energy_kWh" in d.columns: d["Energy_kWh"]=pd.to_numeric(d["Energy_kWh"],errors="coerce").fillna(0)
+    if "Water_m3" in d.columns: d["Water_m3"]=pd.to_numeric(d["Water_m3"],errors="coerce").fillna(0)
+    if "Waste_kg" in d.columns: d["Waste_kg"]=pd.to_numeric(d["Waste_kg"],errors="coerce").fillna(0)
+    return d
+
+def lca_summary(df: pd.DataFrame) -> pd.DataFrame:
+    d=sustainability_accounting(df); group=[c for c in ["LifeCycleStage","Scope"] if c in d.columns] or ["Scope"]; return d.groupby(group,as_index=False)["tCO2e"].sum()
+
+def benchmark_compare(actual: pd.DataFrame, benchmarks: pd.DataFrame, metric_col="Metric", actual_col="Actual", benchmark_col="Benchmark") -> pd.DataFrame:
+    x=actual.merge(benchmarks,on=metric_col,how="left",suffixes=("","_bench")); x["Delta"]=pd.to_numeric(x[actual_col],errors="coerce")-pd.to_numeric(x[benchmark_col],errors="coerce"); x["Gap %"]=x["Delta"]/pd.to_numeric(x[benchmark_col],errors="coerce").replace(0,np.nan)*100; return x
+
+def create_decision_card(title: str, module: str, metrics: dict, assumptions: dict, uncertainty: dict, status="Proposed") -> dict:
+    return {"title":title,"module":module,"metrics":metrics,"assumptions":assumptions,"uncertainty":uncertainty,"status":status,"created_at":_now()}
+
+def save_decision_card(card: dict, username: str, db_path="enterprise_full_workspace.db") -> str:
+    did="DEC-"+hashlib.sha256(json.dumps(card,sort_keys=True,default=str).encode()).hexdigest()[:12].upper()
+    with sqlite3.connect(db_path) as c:
+        c.execute("INSERT OR REPLACE INTO platform_decisions VALUES(?,?,?,?,?,?,?,?,?)",(did,card["title"],card["module"],json.dumps(card["metrics"],default=str),json.dumps(card["assumptions"],default=str),json.dumps(card["uncertainty"],default=str),username,card["created_at"],card["status"])); c.commit()
+    return did
+
+def save_model_snapshot(name: str, model_type: str, parameters: dict, data_hash: str, username: str, assumptions: dict, status="Draft", db_path="enterprise_full_workspace.db") -> str:
+    base=f"{name}|{json.dumps(parameters,sort_keys=True,default=str)}|{data_hash}"
+    mid="MOD-"+hashlib.sha256(base.encode()).hexdigest()[:12].upper()
+    with sqlite3.connect(db_path) as c:
+        c.execute("INSERT OR REPLACE INTO platform_models VALUES(?,?,?,?,?,?,?,?,?,?)",(mid,name,"1.0.0",model_type,json.dumps(parameters,default=str),data_hash,json.dumps(assumptions,default=str),username,_now(),status)); c.commit()
+    return mid
+
+def save_experiment(name: str, module: str, scenarios: list, results: dict, username: str, db_path="enterprise_full_workspace.db") -> str:
+    eid="EXP-"+hashlib.sha256((name+module+_now()).encode()).hexdigest()[:12].upper()
+    with sqlite3.connect(db_path) as c:
+        c.execute("INSERT INTO platform_experiments VALUES(?,?,?,?,?,?)",(eid,name,module,json.dumps(scenarios,default=str),json.dumps(results,default=str),username,_now())); c.commit()
+    return eid
+
+def export_pdf(title: str, tables: Sequence[Tuple[str,pd.DataFrame]], figures: Sequence[Tuple[str,Any]]=()) -> bytes:
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image
+    from reportlab.lib import colors
+    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.lib.units import inch
+    out=io.BytesIO(); doc=SimpleDocTemplate(out,pagesize=landscape(A4)); styles=getSampleStyleSheet(); story=[Paragraph(title,styles["Title"]),Spacer(1,8)]
+    for label,df in tables:
+        safe=df.head(30).fillna("").astype(str); story.append(Paragraph(str(label),styles["Heading2"]))
+        if len(safe.columns):
+            t=Table([list(safe.columns)]+safe.values.tolist(),repeatRows=1); t.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor("#1E3A8A")),("TEXTCOLOR",(0,0),(-1,0),colors.white),("GRID",(0,0),(-1,-1),.25,colors.grey),("FONTSIZE",(0,0),(-1,-1),7)])); story += [t,Spacer(1,8)]
+    for label,fig in figures:
+        try:
+            png=fig.to_image(format="png",width=1200,height=650,scale=2)
+            story += [Paragraph(str(label),styles["Heading2"]),Image(io.BytesIO(png),width=10.5*inch,height=5.7*inch)]
+        except Exception:
+            story += [Paragraph(f"{label} (interactive chart is included in the HTML/Excel export where supported)",styles["Normal"])]
+    doc.build(story); return out.getvalue()
+
+def export_pptx(title: str, tables: Sequence[Tuple[str,pd.DataFrame]], figures: Sequence[Tuple[str,Any]]=()) -> bytes:
+    from pptx import Presentation
+    from pptx.util import Inches
+    prs=Presentation(); cover=prs.slides.add_slide(prs.slide_layouts[0]); cover.shapes.title.text=title; cover.placeholders[1].text="Shoir-IE Industrial Decision Platform"
+    for label,fig in figures:
+        try:
+            png=fig.to_image(format="png",width=1600,height=900,scale=2); s=prs.slides.add_slide(prs.slide_layouts[5]); s.shapes.title.text=str(label); s.shapes.add_picture(io.BytesIO(png),Inches(.4),Inches(1.1),width=Inches(12.5))
+        except Exception: pass
+    for label,df in tables:
+        d=df.head(15).fillna("").astype(str); s=prs.slides.add_slide(prs.slide_layouts[5]); s.shapes.title.text=str(label)
+        rows=max(1,len(d)+1); cols=max(1,len(d.columns)); table=s.shapes.add_table(rows,cols,Inches(.25),Inches(1.1),Inches(12.8),Inches(5.6)).table
+        for j,col in enumerate(d.columns): table.cell(0,j).text=str(col)
+        for i,row in enumerate(d.itertuples(index=False),1):
+            for j,val in enumerate(row): table.cell(i,j).text=str(val)
+    b=io.BytesIO(); prs.save(b); return b.getvalue()
+
+def render_export_bar(module: str, tables: Sequence[Tuple[str,pd.DataFrame]], figures: Sequence[Tuple[str,Any]]=(), tier: str="Starter", username: str="unknown"):
+    import streamlit as st
+    from shoir_upgrade import build_excel_report
+    if not tables: return
+    st.markdown("---"); st.subheader("📤 Results & Executive Exports")
+    x=build_excel_report("Shoir-IE | "+module,tables,figures)
+    a,b,c=st.columns(3)
+    with a:
+        if st.download_button("📊 Download Excel",x,"shoir_ie_"+re.sub(r"[^A-Za-z0-9]+","_",module).lower()+".xlsx","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",use_container_width=True):
+            log_security_event(username,"report_export",module+"|xlsx")
+    with b:
+        if tier_allows(tier,"Enterprise"):
+            y=export_pdf("Shoir-IE | "+module,tables,figures)
+            if st.download_button("📄 Download PDF",y,"shoir_ie_"+re.sub(r"[^A-Za-z0-9]+","_",module).lower()+".pdf","application/pdf",use_container_width=True): log_security_event(username,"report_export",module+"|pdf")
+        else: st.info("PDF export: Enterprise")
+    with c:
+        if tier_allows(tier,"Enterprise"):
+            z=export_pptx("Shoir-IE | "+module,tables,figures)
+            if st.download_button("📽️ Download PowerPoint",z,"shoir_ie_"+re.sub(r"[^A-Za-z0-9]+","_",module).lower()+".pptx","application/vnd.openxmlformats-officedocument.presentationml.presentation",use_container_width=True): log_security_event(username,"report_export",module+"|pptx")
+        else: st.info("PowerPoint: Enterprise")
+
 MODULE_TABLE_KEYS = {
     "Engineering Validation Center":["validation_df"],
     "Industrial Data Model & Digital Thread":["thread_df","thread_rel"],
@@ -128,9 +532,8 @@ def render_module_data_exchange(module: str, st, tier: str, username: str) -> No
                 from shoir_upgrade import read_uploaded_workbook
                 books=read_uploaded_workbook(up.getvalue(),up.name)
                 sheet=st.selectbox("Sheet",list(books),key=f"{slug}_import_sheet")
-                imported=books[sheet].copy(deep=True)
-                st.session_state[f"{slug}_import_df"]=imported
-                st.success(f"Loaded {len(imported):,} rows × {len(imported.columns):,} columns.")
+                st.session_state[f"{slug}_import_df"]=books[sheet].copy(deep=True)
+                st.success(f"Loaded {len(books[sheet]):,} rows × {len(books[sheet].columns):,} columns.")
             except Exception as exc:
                 st.error(f"Import failed safely: {exc}")
     imported=st.session_state.get(f"{slug}_import_df")
