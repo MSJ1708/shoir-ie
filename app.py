@@ -24,7 +24,7 @@ from email.mime.multipart import MIMEMultipart
 from PIL import Image
 from scipy import stats
 from shoir_upgrade import (align_imported_table, clean_dataframe, build_excel_report, build_workbook_bundle, read_uploaded_workbook, apply_excel_function, EXCEL_FUNCTIONS, copilot_module_recommendation)
-from industrial_platform import (NEW_ENTERPRISE_PLUS_MODULES, validate_table, industrial_data_snapshot, finite_schedule, mes_work_order_table, spc_limits, process_capability, pareto_frontier, weighted_objective, robust_scenario_bounds, discrete_event_simulation, economics, lca_inventory, build_excel_export, data_quality_frame, ensure_model_registry, registry_add, registry_list)
+from industrial_platform import (NEW_ENTERPRISE_PLUS_MODULES, industrial_data_snapshot, finite_schedule, mes_work_order_table, spc_limits, process_capability, pareto_frontier, weighted_objective, robust_scenario_bounds, discrete_event_simulation, economics, lca_inventory, build_excel_export, data_quality_frame, ensure_model_registry, registry_add, registry_list)
 
 # =====================================================================
 # PAGE CONFIGURATION & CUSTOM CSS (Professional Styling & Hover Zoom)
@@ -741,9 +741,7 @@ def get_copilot_response(prompt, history):
             stock_df = pd.read_sql("SELECT * FROM inventory LIMIT 5", conn)
             conn.close()
             if not stock_df.empty:
-                return "Here's what's in your inventory table right now:
-
-" + stock_df.to_markdown(index=False)
+                return "Here's what's in your inventory table right now:\n\n" + stock_df.to_markdown(index=False)
             return ("I checked - there's no inventory data yet, so I genuinely don't have a safety-stock "
                     "number to give you rather than guess one. Add records via a supply chain module, "
                     "or use the MEIO Matrix module to calculate optimal levels from scratch.")
@@ -791,22 +789,12 @@ def send_tier_email(receiver_email, username, tier_code, tier_name):
     try:
         msg = EmailMessage()
         msg.set_content(
-            f"Hello {username},
-
-"
-            f"Your payment has been manually verified by the administrator.
-"
-            f"You have been successfully enrolled in the **{tier_name}**.
-
-"
-            f"Your Exclusive License/Tier Code is: {tier_code}
-
-"
-            f"Log in to your Enterprise Operations Suite account to activate your subscription.
-
-"
-            f"Best regards,
-AEGIS Enterprise Operations Team"
+            f"Hello {username},\n\n"
+            f"Your payment has been manually verified by the administrator.\n"
+            f"You have been successfully enrolled in the **{tier_name}**.\n\n"
+            f"Your Exclusive License/Tier Code is: {tier_code}\n\n"
+            f"Log in to your Enterprise Operations Suite account to activate your subscription.\n\n"
+            f"Best regards,\nAEGIS Enterprise Operations Team"
         )
         msg["Subject"] = f"Your Enterprise Suite Subscription Code ({tier_name})"
         msg["From"] = st.secrets["email"]["sender_email"]
@@ -1158,12 +1146,12 @@ if not st.session_state.get("current_user"):
 
         explore_tier = st.radio(
             "Browse by tier",
-            ["Starter", "Mid-Tier Pro", "Enterprise", "Research Pack"],
+            ["Starter", "Mid-Tier Pro", "Enterprise", "Enterprise Plus", "Research Pack"],
             horizontal=True,
             key="explore_tier_radio"
         )
 
-        _tier_order = ["Starter", "Mid-Tier Pro", "Enterprise", "Research Pack"]
+        _tier_order = ["Starter", "Mid-Tier Pro", "Enterprise", "Enterprise Plus", "Research Pack"]
         _cumulative = set(_tier_order[:_tier_order.index(explore_tier) + 1])
         _benefit = TIER_BENEFITS[explore_tier]
         _modules_here = [m for m in MODULE_CATALOG if m["tier"] == explore_tier]
@@ -1312,12 +1300,12 @@ elif "Enterprise Plus" in tier_val:
     allowed_modules = enterprise_plus_features
 elif "Enterprise" in tier_val or is_admin:
     allowed_modules = tier3_features
-if is_admin:
-    allowed_modules = research_pack_features + ["Admin Panel"]
 elif "Pro" in tier_val or "Trial" in tier_val:
     allowed_modules = tier2_features
 else:
     allowed_modules = tier1_features
+if is_admin:
+    allowed_modules = research_pack_features + ["Admin Panel"]
 selected_module = st.sidebar.selectbox("Select Module", allowed_modules)
 
 # Universal data workspace controls: available before every module renderer.
@@ -1392,8 +1380,8 @@ elif selected_module == "Industrial Command Center":
     st.markdown("<h1 style='text-align:center;'>🏭 Industrial Command Center</h1>", unsafe_allow_html=True)
     st.caption("Unified engineering workspace for data health, planning, MES, quality, simulation, optimization, economics, sustainability and model governance.")
     ensure_model_registry()
-    snapshot=industrial_data_snapshot(st.session_state)
-    tabs=st.tabs(["📊 Data Health","🏗️ APS & MES","🧪 Quality","🎲 Simulation","🎯 Optimization","💰 Economics & ESG","🧠 Model Registry"])
+    snapshot = industrial_data_snapshot(st.session_state)
+    tabs = st.tabs(["📊 Data Health", "🏗️ APS & MES", "🧪 Quality", "🎲 Simulation", "🎯 Optimization", "💰 Economics & ESG", "🧠 Model Registry"])
     with tabs[0]:
         if snapshot:
             chosen=st.selectbox("Workspace dataset",list(snapshot),key="ic_dataset"); df=snapshot[chosen]; q=data_quality_frame(df)
@@ -1408,8 +1396,8 @@ elif selected_module == "Industrial Command Center":
             try: st.session_state.ic_schedule_result,st.session_state.ic_schedule_summary=finite_schedule(jobs,machines); st.success("Schedule generated and validated.")
             except Exception as exc: st.error(f"Scheduling validation failed: {exc}")
         if st.session_state.get("ic_schedule_result") is not None:
-            r=st.session_state.ic_schedule_result; st.dataframe(r,use_container_width=True,hide_index=True)
-            st.download_button("📥 Download APS schedule",build_excel_export("Shoir-IE APS",{"Schedule":r}),"shoir_ie_aps_schedule.xlsx","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",use_container_width=True)
+            result=st.session_state.ic_schedule_result; st.dataframe(result,use_container_width=True,hide_index=True)
+            st.download_button("📥 Download APS schedule",build_excel_export("Shoir-IE APS",{"Schedule":result}),"shoir_ie_aps_schedule.xlsx","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",use_container_width=True)
         mes=st.data_editor(st.session_state.get("ic_mes_orders",pd.DataFrame([{"Order":"WO-1001","Quantity":1000,"Produced":650,"Scrap":12,"Status":"In Process"}])),num_rows="dynamic",use_container_width=True,key="ic_mes")
         st.session_state.ic_mes_orders=mes; mr=mes_work_order_table(mes); st.dataframe(mr["orders"],use_container_width=True,hide_index=True)
         st.download_button("📥 Download MES report",build_excel_export("Shoir-IE MES",{"Work Orders":mr["orders"],"Summary":mr["summary"]}),"shoir_ie_mes_report.xlsx","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",use_container_width=True)
@@ -1876,8 +1864,7 @@ elif selected_module in ["Universal Cross-Domain Mathematical Isomorphism Engine
 
         col_t1, col_t2 = st.columns(2)
         with col_t1:
-            foreign_input = st.text_area("Foreign Theoretical Proof Input", value="Let $\\mathcal{M}$ be a Riemannian manifold with metric tensor $g_{\\mu\
-u}$ governing field curvature.")
+            foreign_input = st.text_area("Foreign Theoretical Proof Input", value="Let $\\mathcal{M}$ be a Riemannian manifold with metric tensor $g_{\\mu\\nu}$ governing field curvature.")
         with col_t2:
             target_or = st.selectbox("Target Operations Research Paradigm", [
                 "Mixed-Integer Linear Programming (MILP)",
@@ -2597,11 +2584,7 @@ elif selected_module == "Automated Code-to-Formal-Proof Verifier":
         st.markdown("Paste your Python optimization script or simulation function to parse control-flow paths and build symbolic expressions.")
 
         code_snippet_input = st.text_area("Python Optimization Code / Simulation Logic", 
-            value="def optimize_inventory(demand, stock, capacity):
-    # Conservation of mass balance equation
-    next_stock = stock - demand
-    assert next_stock >= 0, \"Stock violation\"
-    return min(next_stock, capacity)", height=140)
+            value="def optimize_inventory(demand, stock, capacity):\n    # Conservation of mass balance equation\n    next_stock = stock - demand\n    assert next_stock >= 0, \"Stock violation\"\n    return min(next_stock, capacity)", height=140)
 
         selected_engine = st.selectbox("Select Verification Engine", verifier_registry.get_engines())
         engine_meta = verifier_registry.get_metadata(selected_engine)
@@ -2965,9 +2948,7 @@ status = solver.Solve()
             extraction_mode = st.selectbox("Semantic Extraction Mode", ["Standard OR Ontology", "Stochastic MILP", "Non-Linear Convex"])
         with col_p2:
             st.markdown("**Extracted Structural Tuples (Simulated)**")
-            st.code("Sets: I = {1, 2, 3, 4, 5}
-Parameters: c[i], d[i], cap[i]
-Variables: x[i] (Continuous)", language="text")
+            st.code("Sets: I = {1, 2, 3, 4, 5}\nParameters: c[i], d[i], cap[i]\nVariables: x[i] (Continuous)", language="text")
 
     with tab_reg:
         st.markdown("#### Universal Code Generation Registry")
@@ -3054,8 +3035,7 @@ CMD ["pytest"]
                     {
                         "cell_type": "markdown",
                         "metadata": {},
-                        "source": ["# Shoir-IE Interactive Execution Notebook
-", "Run optimization solvers live."]
+                        "source": ["# Shoir-IE Interactive Execution Notebook\n", "Run optimization solvers live."]
                     },
                     {
                         "cell_type": "code",
@@ -3077,10 +3057,7 @@ CMD ["pytest"]
                 zf.writestr("test_model.py", pytest_suite)
                 zf.writestr("Dockerfile", dockerfile_content)
                 zf.writestr("interactive_notebook.ipynb", jupyter_notebook)
-                zf.writestr("test_instances.csv", "id,demand,capacity
-1,120,500
-2,150,600
-")
+                zf.writestr("test_instances.csv", "id,demand,capacity\n1,120,500\n2,150,600\n")
 
             st.download_button(
                 label="📥 Download Complete Formalizer Production Bundle (.zip)",
@@ -3572,9 +3549,7 @@ CMD ["streamlit", "run", "app.py", "--server.port=8501"]
         zip_io = io.BytesIO()
         with zipfile.ZipFile(zip_io, "w", zipfile.ZIP_DEFLATED) as zf:
             zf.writestr("latex_source.tex", latex_source)
-            zf.writestr("execution_script.py", "# Shoir-IE Executable Artifact
-import pandas as pd
-print('Running simulation...')")
+            zf.writestr("execution_script.py", "# Shoir-IE Executable Artifact\nimport pandas as pd\nprint('Running simulation...')")
             zf.writestr("interactive_canvas.html", html_canvas)
             zf.writestr("Dockerfile", dockerfile_content)
             zf.writestr("simulation_data.csv", csv_data)
@@ -4268,8 +4243,7 @@ elif selected_module == "Literature & Citation Matrix":
                 new_bib_rows = []
                 for entry in entries:
                     if "{" in entry and "," in entry:
-                        lines = entry.split("
-")
+                        lines = entry.split("\n")
                         header = lines[0].split("{")
                         entry_key = header[1].split(",")[0].strip() if len(header) > 1 else f"ref_{np.random.randint(10,99)}"
                         
@@ -4338,13 +4312,7 @@ elif selected_module == "Literature & Citation Matrix":
         for idx, row in df_export.iterrows():
             p_id = str(row.get("Paper ID", f"ref_{idx}"))
             author = str(row.get("Authors (Year)", "Unknown"))
-            bib_content += f"@article{{{p_id},
-  author = {{{author}}},
-  title = {{Study on {row.get('Core Methodology', 'Topic')}}},
-  year = {{2026}}
-}}
-
-"
+            bib_content += f"@article{{{p_id},\n  author = {{{author}}},\n  title = {{Study on {row.get('Core Methodology', 'Topic')}}},\n  year = {{2026}}\n}}\n\n"
         
         csv_data = df_export.to_csv(index=False).encode("utf-8")
         
@@ -4417,8 +4385,7 @@ elif selected_module == "LaTeX Document Formatter":
         default_packages = ["amsmath", "amssymb", "graphicx", "booktabs", "hyperref", "algorithm2e", "tikz", "siunitx"]
         selected_packages = st.multiselect("Active LaTeX Preamble Packages", default_packages, default=["amsmath", "graphicx", "booktabs", "hyperref"])
         
-        package_injection_str = "".join([f"\\usepackage{{{pkg}}}
-" for pkg in selected_packages])
+        package_injection_str = "".join([f"\\usepackage{{{pkg}}}\n" for pkg in selected_packages])
 
     with tab_sections:
         st.subheader("Dynamic Section Manager (Add, Delete & Rearrange)")
@@ -4451,16 +4418,9 @@ elif selected_module == "LaTeX Document Formatter":
                 sec['content'] = st.text_area(f"Section Content {i+1}", sec['content'], key=f"sec_content_{i}")
                 
                 if sec['title'].lower() == "abstract":
-                    compiled_sections_latex += f"\\begin{{abstract}}
-{sec['content']}
-\\end{{abstract}}
-
-"
+                    compiled_sections_latex += f"\\begin{{abstract}}\n{sec['content']}\n\\end{{abstract}}\n\n"
                 else:
-                    compiled_sections_latex += f"\\section{{{sec['title']}}}
-{sec['content']}
-
-"
+                    compiled_sections_latex += f"\\section{{{sec['title']}}}\n{sec['content']}\n\n"
 
     with tab_math:
         st.subheader("Industrial Engineering & Matrix Equation Studio")
@@ -4478,13 +4438,8 @@ elif selected_module == "LaTeX Document Formatter":
         elif eq_mode == "Custom Matrix Builder (bmatrix)":
             m_r = st.slider("Matrix Rows", 2, 5, 3)
             m_c = st.slider("Matrix Columns", 2, 5, 3)
-            matrix_body = "
-".join([" & ".join([f"a_{{{r+1}{c+1}}}" for c in range(m_c)]) + " \\\\" for r in range(m_r)])
-            math_code = f"$$
-\\begin{{bmatrix}}
-{matrix_body}
-\\end{{bmatrix}}
-$$"
+            matrix_body = "\n".join([" & ".join([f"a_{{{r+1}{c+1}}}" for c in range(m_c)]) + " \\\\" for r in range(m_r)])
+            math_code = f"$$\n\\begin{{bmatrix}}\n{matrix_body}\n\\end{{bmatrix}}\n$$"
             st.markdown("Live Rendered Preview:")
             st.markdown(math_code)
             st.code(math_code, language="latex")
@@ -4505,12 +4460,7 @@ $$"
             b_title = st.text_input("Article/Book Title", "Cognitive Enterprise Operations Suite")
             b_year = st.text_input("Year", "2026")
             
-        bib_output = f"@article{{{b_key},
-  author = {{{b_author}}},
-  title = {{{b_title}}},
-  journal = {{Journal of Industrial Engineering Automation}};
-  year = {{{b_year}}}
-}}"
+        bib_output = f"@article{{{b_key},\n  author = {{{b_author}}},\n  title = {{{b_title}}},\n  journal = {{Journal of Industrial Engineering Automation}};\n  year = {{{b_year}}}\n}}"
         st.code(bib_output, language="bibtex")
         st.download_button("📥 Download References (.bib)", data=bib_output.encode("utf-8"), file_name="references.bib", mime="text/plain")
 
@@ -8221,23 +8171,17 @@ else:
             with st.container(border=True):
                 st.markdown("### Starter")
                 st.markdown("<h2>$29 <small>/mo</small></h2>", unsafe_allow_html=True)
-                st.markdown("- Core MILP Solvers
-- Basic Inventory
-- Student-Level Access")
+                st.markdown("- Core MILP Solvers\n- Basic Inventory\n- Student-Level Access")
         with col_p2:
             with st.container(border=True):
                 st.markdown("### Pro")
                 st.markdown("<h2>$79 <small>/mo</small></h2>", unsafe_allow_html=True)
-                st.markdown("- Advanced GIS Routing
-- Carbon Accounting
-- Real-Time IoT & MEIO")
+                st.markdown("- Advanced GIS Routing\n- Carbon Accounting\n- Real-Time IoT & MEIO")
         with col_p3:
             with st.container(border=True):
                 st.markdown("### Enterprise")
                 st.markdown("<h2>$199 <small>/mo</small></h2>", unsafe_allow_html=True)
-                st.markdown("- AI Copilot
-- FastAPI Gateway
-- Agentic Workflows & Ledger")
+                st.markdown("- AI Copilot\n- FastAPI Gateway\n- Agentic Workflows & Ledger")
                 
     elif mod == "AI Copilot":
         st.header("🤖 Natural Language AI Copilot")
