@@ -16,6 +16,7 @@ from industrial_platform import (
     lca_inventory,
     model_hash,
     ensure_model_registry,
+    ml_demand_forecast, predictive_maintenance_rul, scenario_delta, currency_convert, rbac_can_edit, connector_healthcheck,
 )
 
 def test_data_quality_detects_duplicates_and_missing():
@@ -94,3 +95,27 @@ def test_registry_schema_initializes(tmp_path):
     with sqlite3.connect(db) as conn:
         tables = {r[0] for r in conn.execute("select name from sqlite_master where type='table'")}
     assert {"model_registry", "experiment_runs", "security_events", "industrial_entities"} <= tables
+
+
+def test_ml_forecast_and_maintenance():
+    df=pd.DataFrame({
+        "Demand":np.arange(30,dtype=float)+100,
+        "Promotion":[0,1]*15,
+        "Weather":np.linspace(20,30,30),
+        "RUL":np.arange(30,0,-1,dtype=float),
+    })
+    forecast=ml_demand_forecast(df,"Demand",["Promotion","Weather"],horizon=6)
+    assert len(forecast["forecast"]) == 6
+    maintenance=predictive_maintenance_rul(df,"RUL",["Demand","Promotion","Weather"])
+    assert maintenance["predicted_rul"] >= 0
+
+def test_scenario_currency_rbac_and_connector_validation():
+    base=pd.DataFrame([{"Scenario":"A","Cost":100,"Service":95}])
+    alt=pd.DataFrame([{"Scenario":"A","Cost":110,"Service":98}])
+    delta=scenario_delta(base,alt,["Scenario"])
+    assert float(delta.loc[0,"Cost Delta"]) == 10
+    assert currency_convert(100,3.75) == 375
+    assert rbac_can_edit("Planner","workspace","run_model")
+    assert not rbac_can_edit("Viewer","workspace","run_model")
+    assert connector_healthcheck({"name":"SAP","system":"SAP","endpoint":"https://example.com"})["valid"]
+    assert not connector_healthcheck({"name":"SAP","system":"SAP","endpoint":"not-a-url"})["valid"]
