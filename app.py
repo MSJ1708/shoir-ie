@@ -8080,6 +8080,9 @@ else:
                 if st.session_state.get("copilot_cleaned_df") is not None:
                     st.dataframe(st.session_state["copilot_cleaned_df"].head(25), use_container_width=True)
                     st.caption("You can now ask Copilot what to improve or which module should handle this data.")
+            except Exception as exc:
+                st.error(f"Could not read the workbook: {exc}")
+
         for msg in st.session_state.copilot_messages:
             with st.chat_message(msg["role"]):
                 st.markdown(msg["content"])
