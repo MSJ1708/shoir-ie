@@ -179,7 +179,7 @@ def finite_schedule(jobs: pd.DataFrame, machines: pd.DataFrame, horizon_hours: f
         if machine not in m_caps:
             continue
         dur = float(r["Duration"])
-        used = sum(x["duration"] for x in rows if x["Machine"] == machine)
+        used = sum(safe_float(x["Duration"]) for x in rows if x["Machine"] == machine)
         if used + dur > m_caps[machine] or used + dur > horizon_hours:
             rows.append({
                 "Job": r["Job"], "Machine": machine, "Duration": dur,
