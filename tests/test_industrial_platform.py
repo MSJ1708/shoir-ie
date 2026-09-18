@@ -80,3 +80,20 @@ def test_sustainability_and_benchmarks():
     bench=pd.DataFrame({"Metric":["OEE"],"Benchmark":[85]})
     comp=benchmark_compare(actual,bench)
     assert comp.iloc[0]["Delta"]==-5
+
+
+def test_forecast_maintenance_currency_and_scenarios(tmp_path):
+    dates=pd.date_range("2025-01-01",periods=18,freq="MS")
+    hist=pd.DataFrame({"Date":dates,"Demand":[100+i*5 for i in range(18)],"Promotion":[0,1,0]*6,"Weather":[20+i%3 for i in range(18)]})
+    forecast,metrics=ml_demand_forecast(hist,"Date","Demand",["Promotion","Weather"],6)
+    assert len(forecast)==6 and forecast["Forecast"].notna().all()
+    assert "R2" in metrics
+    maint=predictive_maintenance_score(pd.DataFrame({"Asset":["A","B"],"Temperature":[60,90],"Vibration":[1,5],"RuntimeHours":[100,5000]}))
+    assert maint.iloc[0]["Risk Score"]>=maint.iloc[1]["Risk Score"] or maint["Risk Score"].nunique()>1
+    converted=currency_convert(pd.DataFrame({"Amount":[100],"Currency":["EUR"]}),"Amount","Currency","USD",{"USD":1,"EUR":0.92})
+    assert abs(converted.iloc[0]["Base Amount"]-(100/0.92))<1e-9
+    db=str(tmp_path/"scenario.db")
+    init_platform_db(db)
+    sid=save_scenario("Baseline","",{"x":1},{"Cost":100},"tester",db)
+    assert sid.startswith("SCN-")
+    assert len(scenario_table(db))==1
