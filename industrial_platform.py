@@ -183,14 +183,14 @@ def finite_schedule(jobs: pd.DataFrame, machines: pd.DataFrame, horizon_hours: f
         if used + dur > m_caps[machine] or used + dur > horizon_hours:
             rows.append({
                 "Job": getattr(r, "Job"), "Machine": machine, "Duration": dur,
-                "Start": pd.NaT, "Finish": pd.NaT, "Due Date": getattr(r, "Due Date"),
+                "Start": pd.NaT, "Finish": pd.NaT, "Due Date": getattr(r, "Due_Date"),
                 "Status": "Capacity exceeded"
             })
             late += 1
             continue
         start = clocks[machine]
         finish = start + pd.Timedelta(hours=dur)
-        due = getattr(r, "Due Date")
+        due = getattr(r, "Due_Date")
         status = "On time" if finish <= due else "Late"
         if status == "Late":
             late += 1
