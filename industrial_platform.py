@@ -82,6 +82,81 @@ TIER_FEATURES = {
 
 TIER_ORDER = ["Starter","Mid-Tier Pro","Professional","Enterprise","Enterprise Plus","Research Pack"]
 
+MODULE_TABLE_KEYS = {
+    "Engineering Validation Center":["validation_df"],
+    "Industrial Data Model & Digital Thread":["thread_df","thread_rel"],
+    "Advanced Planning & Scheduling":["aps_demand","aps_bom","aps_orders"],
+    "Manufacturing Execution System":["mes_wo_df","mes_events_df","mes_oee_df"],
+    "Quality Engineering & Reliability":["quality_df","msa_df","anova_df","fmea_df"],
+    "Industrial Simulation Lab":[],
+    "3D Factory Designer":["factory3d_df"],
+    "Industrial Connectivity Hub":["conn_df"],
+    "Multi-Objective Optimization":["multiobj_df"],
+    "Robust & Resilient Optimization":["robust_df"],
+    "Engineering Model Registry":["model_registry_df"],
+    "Experiment Lab":["experiment_df"],
+    "Industrial Data Platform":[],
+    "Capital Investment & Engineering Economics":["capex_df"],
+    "Workforce Engineering":["work_elements","skills_df"],
+    "Industrial Sustainability & LCA":["sustain_df"],
+    "Benchmarking & Engineering Standards":["benchmark_actual","benchmark_targets"],
+    "Live Industrial Digital Twin":["twin_tel"],
+    "Enterprise Security & Governance":["security_roles"],
+}
+
+def _module_slug(module: str) -> str:
+    return re.sub(r"[^a-z0-9]+","_",module.lower()).strip("_")
+
+def module_reset(module: str, st) -> None:
+    for key in MODULE_TABLE_KEYS.get(module, []):
+        st.session_state.pop(key, None)
+        st.session_state.pop(key.replace("_df","_editor"), None)
+    slug=_module_slug(module)
+    for key in list(st.session_state.keys()):
+        if str(key).startswith(f"{slug}_"):
+            st.session_state.pop(key,None)
+
+def render_module_data_exchange(module: str, st, tier: str, username: str) -> None:
+    slug=_module_slug(module)
+    st.markdown("### 📥 Data Exchange & Workspace Controls")
+    st.caption("Import an Excel/CSV table, map it to this module, restore the module defaults, and export the current results.")
+    up=st.file_uploader("Import Excel / CSV",type=["xlsx","csv"],key=f"{slug}_universal_upload")
+    if up is not None:
+        try:
+            from shoir_upgrade import read_uploaded_workbook
+            books=read_uploaded_workbook(up.getvalue(),up.name)
+            sheet=st.selectbox("Sheet",list(books),key=f"{slug}_import_sheet")
+            st.session_state[f"{slug}_import_df"]=books[sheet].copy(deep=True)
+            st.success(f"Loaded {len(books[sheet]):,} rows × {len(books[sheet].columns):,} columns from {sheet}.")
+        except Exception as exc:
+            st.error(f"Import failed safely: {exc}")
+    imported=st.session_state.get(f"{slug}_import_df")
+    a,b=st.columns(2)
+    with a:
+        if st.button("🔄 Apply imported table",use_container_width=True,key=f"{slug}_apply_import"):
+            if isinstance(imported,pd.DataFrame):
+                applied=0
+                for key in MODULE_TABLE_KEYS.get(module,[]):
+                    target=st.session_state.get(key)
+                    if isinstance(target,pd.DataFrame):
+                        aligned=align_imported_table(imported,target)
+                        if len(set(imported.columns)&set(target.columns)):
+                            st.session_state[key]=aligned
+                            st.session_state.pop(key.replace("_df","_editor"),None)
+                            applied+=1
+                if applied:
+                    st.success(f"Imported data applied to {applied} compatible table(s).")
+                    st.rerun()
+                else:
+                    st.warning("No compatible table was found. Review the module's expected columns or use Industrial Data Platform.")
+            else:
+                st.info("Upload a workbook first.")
+    with b:
+        if st.button("↩️ Reset this module",use_container_width=True,key=f"{slug}_reset"):
+            module_reset(module,st)
+            st.rerun()
+
+
 def normalize_tier(value: str) -> str:
     v=str(value or "Starter").lower()
     if "research" in v: return "Research Pack"
@@ -358,12 +433,17 @@ def capital_metrics(initial_investment: float, cash_flows: Sequence[float], disc
     npv=float(sum(flows[t]/((1+discount_rate)**t) for t in range(len(flows))))
     def npv_at(r): return float(sum(flows[t]/((1+r)**t) for t in range(len(flows))))
     lo,hi=-0.99,10.0
-    for _ in range(200):
-        mid=(lo+hi)/2; val=npv_at(mid)
-        if abs(val)<1e-8: break
-        if npv_at(lo)*val<=0: hi=mid
-        else: lo=mid
-    irr=float(mid)
+    low_val, high_val = npv_at(lo), npv_at(hi)
+    if low_val * high_val > 0:
+        irr = None
+    else:
+        mid = 0.1
+        for _ in range(200):
+            mid=(lo+hi)/2; val=npv_at(mid)
+            if abs(val)<1e-8: break
+            if npv_at(lo)*val<=0: hi=mid
+            else: lo=mid
+        irr=float(mid)
     cumulative=-abs(initial_investment); payback=None
     for i,cf in enumerate(flows[1:],1):
         prev=cumulative; cumulative+=cf
@@ -485,6 +565,7 @@ def render_module(module: str, tier: str, username: str):
     import streamlit as st
     import plotly.express as px
     init_platform_db()
+    render_module_data_exchange(module, st, tier, username)
     required=next((x["tier"] for x in PLATFORM_CATALOG if x["name"]==module),None)
     if required and not tier_allows(tier,required):
         st.warning(f"🔒 {module} requires {required}. Your current tier is {tier}. Open Subscriptions to review upgrade options.")
