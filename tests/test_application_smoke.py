@@ -43,5 +43,5 @@ def test_polished_results_surface_is_wired():
     source = Path("app.py").read_text(encoding="utf-8")
     assert "def _render_pretty_result" in source
     assert "enterprise_module_selector" in source
-    assert "Technical Details" in source
+    assert "Detailed diagnostics" in source
     assert "st.plotly_chart" in source
