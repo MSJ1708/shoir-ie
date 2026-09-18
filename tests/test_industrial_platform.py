@@ -19,7 +19,7 @@ from industrial_platform import (
 )
 
 def test_data_quality_detects_duplicates_and_missing():
-    df = pd.DataFrame({"SKU": ["A", "A"], "Demand": [10, None]})
+    df = pd.DataFrame({"SKU": ["A", "A", "B"], "Demand": [10, 10, None]})
     result = validate_table(df)
     assert result["duplicates"] == 1
     assert result["missing_cells"] == 1
