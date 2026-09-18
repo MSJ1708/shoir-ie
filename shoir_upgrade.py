@@ -55,6 +55,26 @@ def clean_dataframe(df):
     out=out.drop_duplicates().reset_index(drop=True); audit.append({"Action":"Final dimensions","Details":f"{len(out)} rows × {len(out.columns)} columns"})
     return out,audit
 
+def align_imported_table(imported, target):
+    """Align uploaded CSV/XLSX columns to an existing module table without inventing values."""
+    imported = imported.copy()
+    target = target.copy()
+    source_by_normalized = {}
+    for col in imported.columns:
+        source_by_normalized.setdefault(str(col).strip().lower(), col)
+    rename = {}
+    for target_col in target.columns:
+        source_col = source_by_normalized.get(str(target_col).strip().lower())
+        if source_col is not None:
+            rename[source_col] = target_col
+    imported = imported.rename(columns=rename)
+    for col in target.columns:
+        if col not in imported.columns:
+            imported[col] = pd.NA
+    ordered = [col for col in target.columns if col in imported.columns]
+    extras = [col for col in imported.columns if col not in ordered]
+    return imported[ordered + extras]
+
 def _png(fig):
     try: return fig.to_image(format="png",width=1200,height=650,scale=2)
     except Exception: return None
@@ -131,10 +151,11 @@ def init_upgrade_services():
                 if st.session_state.get(sk)!=sig:
                     try:
                         imp=pd.read_csv(io.BytesIO(raw)) if up.name.lower().endswith(".csv") else pd.read_excel(io.BytesIO(raw))
-                        target=st.session_state[fk]; mp={str(c).strip().lower():c for c in imp.columns}; ren={mp[str(c).strip().lower()]:c for c in target.columns if str(c).strip().lower() in mp}; imp=imp.rename(columns=ren)
-                        for c in target.columns:
-                            if c not in imp.columns: imp[c]=target[c].iloc[0] if len(target) else pd.NA
-                        st.session_state[fk+"_active"]=imp[[c for c in target.columns if c in imp]+[c for c in imp.columns if c not in target]]; st.session_state[sk]=sig; st.success(f"Imported {len(imp):,} rows.")
+                        target=st.session_state[fk]
+                        imp=align_imported_table(imp, target)
+                        st.session_state[fk+"_active"]=imp
+                        st.session_state[sk]=sig
+                        st.success(f"Imported {len(imp):,} rows.")
                     except Exception as e: st.error("Import failed: "+str(e))
             if st.button("↩️ Reset this table",key=rk,use_container_width=True): st.session_state[fk+"_active"]=st.session_state[fk].copy(deep=True); st.session_state.pop(sk,None); st.rerun()
         result=_ORIG_EDITOR(st.session_state.get(fk+"_active",data),*a,**k)
