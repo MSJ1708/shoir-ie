@@ -7,7 +7,9 @@ parallel module state.
 import json
 import sqlite3
 import pandas as pd
+import plotly.express as px
 import streamlit as st
+import html
 
 from industrial_platform import (
     PLATFORM_CATALOG, TIER_FEATURES, normalize_tier, tier_allows,
@@ -17,8 +19,14 @@ from industrial_platform import (
 st.set_page_config(page_title="Shoir-IE Command Center", page_icon="🏭", layout="wide")
 init_platform_db()
 
-st.title("🏭 Shoir-IE Industrial Decision Command Center")
-st.caption("Unified view across the shared Industrial Data Model, scenarios, models, decisions, MES, telemetry, quality and governance.")
+st.markdown("""
+<style>
+.cc-hero{padding:24px;border:1px solid #dbe4f0;border-radius:20px;background:linear-gradient(135deg,#f8fbff,#fff 58%,#f0fdfa);box-shadow:0 10px 30px rgba(15,23,42,.06)}
+.cc-kicker{font-size:11px;font-weight:800;letter-spacing:.09em;text-transform:uppercase;color:#0f766e}
+.cc-title{font-size:30px;font-weight:850;color:#0f172a}
+</style>
+<div class="cc-hero"><div class="cc-kicker">Industrial Decision Platform</div><div class="cc-title">🏭 Industrial Decision Command Center</div><div style="color:#64748b">One operational view for digital thread, models, scenarios, decisions, MES, telemetry and governance.</div></div>
+""",unsafe_allow_html=True)
 
 tier = st.session_state.get("user_tier", "Enterprise Plus Tier")
 user = st.session_state.get("current_user", "unknown")
@@ -48,7 +56,11 @@ with left:
     coverage = catalog.assign(
         Available=catalog["name"].map(lambda n: tier_allows(tier, next((x["tier"] for x in PLATFORM_CATALOG if x["name"]==n), "Starter")))
     )[["category","name","tier","Available"]]
-    st.dataframe(coverage, use_container_width=True, hide_index=True)
+    st.dataframe(coverage.rename(columns={"category":"Domain","name":"Module","tier":"Tier","Available":"Availability"}), use_container_width=True, hide_index=True)
+    coverage_chart=coverage.assign(Status=coverage["Available"].map({True:"Available",False:"Locked"})).groupby(["category","Status"]).size().reset_index(name="Modules")
+    fig=px.bar(coverage_chart,x="category",y="Modules",color="Status",barmode="group",title="Module coverage by engineering domain")
+    fig.update_layout(height=300,margin=dict(l=10,r=10,t=55,b=10))
+    st.plotly_chart(fig,use_container_width=True)
 
 with right:
     st.subheader("Operational health")
@@ -61,17 +73,26 @@ with right:
         "Live telemetry store": counts["telemetry_events"] >= 0,
         "Security audit store": counts["security_events"] >= 0,
     }
-    st.dataframe(pd.DataFrame({"Capability":list(health), "Status":["Ready" if v else "Attention" for v in health.values()]}), use_container_width=True, hide_index=True)
+    health_df=pd.DataFrame({"Capability":list(health),"Status":["Ready" if v else "Attention" for v in health.values()]})
+    st.dataframe(health_df,use_container_width=True,hide_index=True)
+    st.progress(sum(health.values())/max(1,len(health)),text=f"{sum(health.values())}/{len(health)} platform services ready")
 
 st.subheader("Scenario and decision workspace")
 scenarios = scenario_table()
 if scenarios.empty:
     st.info("No persisted scenarios yet. Create them from Scenario Versioning & Comparison or Experiment Lab.")
 else:
-    st.dataframe(scenarios, use_container_width=True, hide_index=True)
+    st.dataframe(scenarios,use_container_width=True,hide_index=True)
+    numeric=[c for c in scenarios.columns if pd.api.types.is_numeric_dtype(scenarios[c])]
+    if numeric:
+        metric=st.selectbox("Scenario metric",numeric,key="cc_scenario_metric")
+        fig=px.bar(scenarios,x=scenarios.columns[0],y=metric,title=f"Scenario comparison · {metric}")
+        fig.update_layout(height=300,margin=dict(l=10,r=10,t=55,b=10))
+        st.plotly_chart(fig,use_container_width=True)
 
-with st.expander("Engineering validation snapshot"):
-    st.write("The command center uses the same validation/model-health services exposed to individual modules.")
-    st.json(model_health(pd.DataFrame({"Platform":[1]}), feasible=True, solver_status="Platform services loaded", stability="Service layer loaded", uncertainty="Module-specific", reproducible=True))
+with st.expander("Engineering validation snapshot",expanded=False):
+    st.write("Shared model-health services used by the individual engineering modules.")
+    _health=model_health(pd.DataFrame({"Platform":[1]}), feasible=True, solver_status="Platform services loaded", stability="Service layer loaded", uncertainty="Module-specific", reproducible=True)
+    st.dataframe(pd.DataFrame([{"Metric":str(k).replace("_"," ").title(),"Value":str(v)} for k,v in _health.items()]),use_container_width=True,hide_index=True)
 
 st.info(f"Signed-in context: {user} · {normalize_tier(tier)}. Module permissions remain enforced by the application's existing tier gate.")
