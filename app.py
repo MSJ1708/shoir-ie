@@ -24,6 +24,9 @@ from email.mime.multipart import MIMEMultipart
 from PIL import Image
 from scipy import stats
 
+# Shoir-IE platform upgrade services
+from shoir_upgrade import ensure_upgrade_schema, init_upgrade_services, record_module_usage, render_module_upgrade, render_module_report_panel
+
 # =====================================================================
 # PAGE CONFIGURATION & CUSTOM CSS (Professional Styling & Hover Zoom)
 # =====================================================================
