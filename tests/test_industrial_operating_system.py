@@ -71,3 +71,16 @@ def test_scenario_versions_are_not_overwritten_for_identical_inputs(tmp_path, mo
     rows = ios.scenario_list()
     assert len(rows) == 2
     assert sorted(rows["version"].tolist()) == [1, 2]
+
+
+def test_safe_formula_blocks_complex_or_huge_expressions():
+    with pytest.raises(ValueError):
+        safe_formula("2 ** 13", {})
+    with pytest.raises(ValueError):
+        safe_formula("2" + "*2"*90, {})
+
+
+def test_scenario_parent_validation():
+    import industrial_operating_system as ios
+    with pytest.raises(ValueError):
+        ios.scenario_save("Child", {"Demand": 1}, {"Cost": 1}, "pytest", parent_id="SCN-NOT-FOUND")
