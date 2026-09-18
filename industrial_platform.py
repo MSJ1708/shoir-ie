@@ -22,6 +22,7 @@ from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
 PLATFORM_CATALOG = [
+    {"tier":"Enterprise","category":"Platform","name":"Industrial Operating System","when":"Unified KPI, method, scenario, process, model-health, improvement and decision-verification workspace.","example":"Connect engineering analysis outputs through one governed decision layer with reusable templates and exports."},
     {"tier":"Starter","category":"Core Platform","name":"Engineering Validation Center","when":"Validate tables, model assumptions, units, ranges and result health before acting.","example":"Upload an engineering table and receive a data-quality, feasibility and reproducibility checklist."},
     {"tier":"Mid-Tier Pro","category":"Industrial Model","name":"Industrial Data Model & Digital Thread","when":"Keep products, customers, suppliers, facilities, machines, people, materials, routes and orders linked.","example":"Change a facility or machine attribute once and trace the affected planning records."},
     {"tier":"Professional","category":"Planning","name":"Advanced Planning & Scheduling","when":"Create finite-capacity schedules that respect machines, labor, setup time, material availability and due dates.","example":"Schedule rush orders around maintenance downtime without overbooking a machine."},
@@ -67,6 +68,7 @@ TIER_FEATURES = {
         "Carbon Accounting","MEIO Matrix","Fleet Routing","Production Planning & Control (PPC)",
     ],
     "Enterprise": [
+        "Industrial Operating System",
         "Manufacturing Execution System","Industrial Simulation Lab","3D Factory Designer",
         "Industrial Connectivity Hub","Multi-Objective Optimization","Robust & Resilient Optimization",
         "Engineering Model Registry","Experiment Lab","Industrial Control Center","Engineering Decision Center",
