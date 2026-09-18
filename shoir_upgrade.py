@@ -39,10 +39,6 @@ def clean_dataframe(df: pd.DataFrame) -> Tuple[pd.DataFrame, list]:
     before=len(out)
     out.columns=[str(c).strip() for c in out.columns]
     if len(out)!=before: audit.append({"action":"column_normalization","rows":len(out)})
-    dup=int(out.duplicated().sum())
-    if dup:
-        out=out.drop_duplicates().reset_index(drop=True)
-        audit.append({"action":"remove_duplicates","rows":dup})
     for col in out.columns:
         if pd.api.types.is_object_dtype(out[col]):
             original=out[col].copy()
@@ -56,6 +52,10 @@ def clean_dataframe(df: pd.DataFrame) -> Tuple[pd.DataFrame, list]:
             if int(nonblank.sum()) and float(numeric[nonblank].notna().mean())==1.0:
                 out[col]=numeric
                 audit.append({"action":f"numeric_normalization:{col}","rows":int(nonblank.sum())})
+    dup=int(out.duplicated().sum())
+    if dup:
+        out=out.drop_duplicates().reset_index(drop=True)
+        audit.append({"action":"remove_duplicates","rows":dup})
     return out, audit
 
 def build_excel_report(title: str, tables: Iterable[Tuple[str,pd.DataFrame]], figures=None) -> bytes:
