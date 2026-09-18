@@ -10,7 +10,7 @@ The module functions are deterministic where possible, persist important metadat
 and return explicit diagnostics rather than inventing data.
 """
 from __future__ import annotations
-import io, json, math, os, re, sqlite3, hashlib, heapq, time
+import io, json, math, os, re, sqlite3, hashlib, heapq, time, html
 from datetime import datetime, timedelta
 from itertools import product
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
