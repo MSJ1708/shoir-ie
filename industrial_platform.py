@@ -475,3 +475,110 @@ def data_quality_frame(df: pd.DataFrame) -> pd.DataFrame:
         {"Metric":"Duplicate rows","Value":report["duplicates"]},
         {"Metric":"Data quality score","Value":report["score"]},
     ])
+
+
+def ml_demand_forecast(history: pd.DataFrame, target: str, feature_columns: Sequence[str], horizon: int = 12, model_type: str = "Random Forest") -> dict[str, Any]:
+    """Train a reproducible SKU/demand model from historical rows and return diagnostics.
+    The caller supplies external variables such as promotion, weather and macro indicators.
+    """
+    from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
+    from sklearn.metrics import mean_absolute_error, r2_score
+    if target not in history.columns or not feature_columns:
+        raise ValueError("Provide a target column and at least one feature column.")
+    work = history[list(feature_columns) + [target]].copy()
+    work = work.apply(pd.to_numeric, errors="coerce").dropna()
+    if len(work) < max(12, len(feature_columns) + 3):
+        raise ValueError("Not enough complete historical rows for a stable forecast model.")
+    X = work[list(feature_columns)]; y = work[target]
+    split = max(len(work) - max(3, min(horizon, len(work)//4)), len(feature_columns) + 2)
+    X_train, X_test = X.iloc[:split], X.iloc[split:]
+    y_train, y_test = y.iloc[:split], y.iloc[split:]
+    if model_type == "Gradient Boosting":
+        model = GradientBoostingRegressor(random_state=42)
+    else:
+        model = RandomForestRegressor(n_estimators=200, random_state=42, n_jobs=-1)
+    model.fit(X_train, y_train)
+    pred = model.predict(X_test) if len(X_test) else np.array([])
+    diagnostics = {
+        "MAE": float(mean_absolute_error(y_test, pred)) if len(pred) else None,
+        "R2": float(r2_score(y_test, pred)) if len(pred) > 1 else None,
+        "Training Rows": int(len(X_train)),
+        "Validation Rows": int(len(X_test)),
+        "Model": model_type,
+    }
+    future_X = X.tail(min(horizon, len(X))).copy()
+    forecast = pd.DataFrame({"Period": range(1, len(future_X)+1), "Forecast": model.predict(future_X)})
+    importance = pd.DataFrame({"Feature": list(feature_columns), "Importance": model.feature_importances_}).sort_values("Importance", ascending=False)
+    return {"forecast": forecast, "feature_importance": importance, "diagnostics": diagnostics, "model": model}
+
+def predictive_maintenance_rul(history: pd.DataFrame, target: str, feature_columns: Sequence[str]) -> dict[str, Any]:
+    from sklearn.ensemble import RandomForestRegressor
+    from sklearn.metrics import mean_absolute_error, r2_score
+    if target not in history.columns or not feature_columns:
+        raise ValueError("Provide an RUL target and telemetry feature columns.")
+    work = history[list(feature_columns) + [target]].apply(pd.to_numeric, errors="coerce").dropna()
+    if len(work) < max(20, len(feature_columns) + 5):
+        raise ValueError("At least 20 complete telemetry/RUL rows are required.")
+    X=work[list(feature_columns)]; y=work[target]
+    split=max(len(work)-max(5,len(work)//5),len(feature_columns)+2)
+    model=RandomForestRegressor(n_estimators=250,random_state=42,n_jobs=-1)
+    model.fit(X.iloc[:split],y.iloc[:split])
+    pred=model.predict(X.iloc[split:])
+    latest=model.predict(X.tail(1))[0]
+    return {
+        "predicted_rul": float(max(0,latest)),
+        "MAE": float(mean_absolute_error(y.iloc[split:],pred)),
+        "R2": float(r2_score(y.iloc[split:],pred)) if len(pred)>1 else None,
+        "feature_importance": pd.DataFrame({"Feature":list(feature_columns),"Importance":model.feature_importances_}).sort_values("Importance",ascending=False),
+        "predictions": pd.DataFrame({"Actual RUL":y.iloc[split:].to_numpy(),"Predicted RUL":pred}),
+        "model":model,
+    }
+
+def scenario_delta(baseline: pd.DataFrame, scenario: pd.DataFrame, keys: Sequence[str]) -> pd.DataFrame:
+    if not keys:
+        raise ValueError("Provide at least one scenario key.")
+    a=baseline.copy(); b=scenario.copy()
+    merged=a.merge(b,on=list(keys),how="outer",suffixes=(" Baseline"," Scenario"))
+    for col in list(a.columns):
+        if col in keys or col not in b.columns: continue
+        base_col=f"{col} Baseline"; scen_col=f"{col} Scenario"
+        merged[f"{col} Delta"]=pd.to_numeric(merged[scen_col],errors="coerce")-pd.to_numeric(merged[base_col],errors="coerce")
+    return merged
+
+def currency_convert(amount: float, rate_to_base: float) -> float:
+    if rate_to_base <= 0:
+        raise ValueError("Currency conversion rate must be greater than zero.")
+    return float(amount) * float(rate_to_base)
+
+def rbac_can_edit(role: str, resource: str, action: str) -> bool:
+    permissions={
+        "Viewer":{"read"},
+        "Planner":{"read","write_scenario","run_model"},
+        "Engineer":{"read","write_scenario","run_model","edit_model"},
+        "Manager":{"read","write_scenario","run_model","approve"},
+        "Admin":{"read","write_scenario","run_model","edit_model","approve","admin"},
+    }
+    return action in permissions.get(str(role),set())
+
+def connector_healthcheck(config: dict[str, Any]) -> dict[str, Any]:
+    """Validate a connector definition without storing credentials or claiming a live connection."""
+    required={"name","system","endpoint"}
+    missing=sorted(required-set(config))
+    endpoint=str(config.get("endpoint","")).strip()
+    valid=not missing and (endpoint.startswith("https://") or endpoint.startswith("http://"))
+    return {"valid":valid,"missing":missing,"system":config.get("system"),"endpoint":endpoint,"credential_handling":"External secret store required for production credentials."}
+
+def executive_report_pdf(title: str, summary: dict[str, Any], tables: dict[str, pd.DataFrame]) -> bytes:
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+    buf=io.BytesIO(); doc=SimpleDocTemplate(buf,pagesize=A4,rightMargin=36,leftMargin=36,topMargin=36,bottomMargin=36)
+    styles=getSampleStyleSheet(); story=[Paragraph(title,styles["Title"]),Paragraph(datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC"),styles["Normal"]),Spacer(1,12)]
+    for k,v in summary.items(): story.append(Paragraph(f"<b>{k}</b>: {v}",styles["Normal"]))
+    for name,df in tables.items():
+        story += [Spacer(1,12),Paragraph(str(name),styles["Heading2"])]
+        view=df.head(25).copy().astype(str)
+        data=[list(view.columns)]+view.values.tolist() if not view.empty else [["No rows"]]
+        t=Table(data,repeatRows=1); t.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor("#17365D")),("TEXTCOLOR",(0,0),(-1,0),colors.white),("GRID",(0,0),(-1,-1),0.25,colors.grey),("FONTSIZE",(0,0),(-1,-1),7)])); story.append(t)
+    doc.build(story); return buf.getvalue()
