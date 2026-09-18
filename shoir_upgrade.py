@@ -5,7 +5,13 @@ import pandas as pd
 import numpy as np
 
 TIER_ORDER=["Starter","Mid-Tier Pro","Enterprise","Research Pack"]
-UPGRADE_MODULES={"Excel Data Cleaning & Import":"Starter","Scenario Versioning":"Mid-Tier Pro","Localization & Multi-Currency":"Mid-Tier Pro","Advanced ML Demand Forecasting":"Enterprise","Stochastic & Monte Carlo Risk Modeling":"Enterprise","ERP & WMS API Connectors":"Enterprise","Team Workspaces & RBAC":"Enterprise","Executive Report Center":"Enterprise","Interactive DES Simulation Canvas":"Enterprise","Predictive Maintenance Digital Twin":"Enterprise","Owner Usage Analytics":"Enterprise"}
+UPGRADE_MODULES={
+"Excel Data Cleaning & Import":"Starter","Scenario Versioning":"Mid-Tier Pro","Localization & Multi-Currency":"Mid-Tier Pro",
+"Advanced ML Demand Forecasting":"Enterprise","Stochastic & Monte Carlo Risk Modeling":"Enterprise","ERP & WMS API Connectors":"Enterprise",
+"Team Workspaces & RBAC":"Enterprise","Executive Report Center":"Enterprise","Interactive DES Simulation Canvas":"Enterprise",
+"Predictive Maintenance Digital Twin":"Enterprise","Owner Usage Analytics":"Enterprise",
+"Multi-Echelon Inventory Optimization":"Enterprise","Carbon Footprint & ESG Accounting":"Mid-Tier Pro"
+}
 
 def tier_name(t):
     t=str(t or "Starter")
