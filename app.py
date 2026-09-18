@@ -23,7 +23,8 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from PIL import Image
 from scipy import stats
-from shoir_upgrade import (align_imported_table, clean_dataframe, build_excel_report, build_workbook_bundle, read_uploaded_workbook, apply_excel_function, EXCEL_FUNCTIONS, copilot_module_recommendation)\nfrom industrial_platform import (NEW_ENTERPRISE_PLUS_MODULES, validate_table, industrial_data_snapshot, finite_schedule, mes_work_order_table, spc_limits, process_capability, pareto_frontier, weighted_objective, robust_scenario_bounds, discrete_event_simulation, economics, lca_inventory, build_excel_export, data_quality_frame, ensure_model_registry, registry_add, registry_list)
+from shoir_upgrade import (align_imported_table, clean_dataframe, build_excel_report, build_workbook_bundle, read_uploaded_workbook, apply_excel_function, EXCEL_FUNCTIONS, copilot_module_recommendation)
+from industrial_platform import (NEW_ENTERPRISE_PLUS_MODULES, validate_table, industrial_data_snapshot, finite_schedule, mes_work_order_table, spc_limits, process_capability, pareto_frontier, weighted_objective, robust_scenario_bounds, discrete_event_simulation, economics, lca_inventory, build_excel_export, data_quality_frame, ensure_model_registry, registry_add, registry_list)
 
 # =====================================================================
 # PAGE CONFIGURATION & CUSTOM CSS (Professional Styling & Hover Zoom)
@@ -550,6 +551,41 @@ MODULE_CATALOG = [
      "when": "You need sustainability metrics built into engineering decisions, not bolted on as an afterthought report.",
      "example": "Compare two process redesigns on energy use and waste generation alongside cost and cycle time, in the same view - so sustainability is a design input, not a separate audit."},
 
+    # ---------------- ENTERPRISE PLUS ($299) adds ----------------
+    {"tier": "Enterprise Plus", "category": "Industrial Platform", "name": "Industrial Command Center",
+     "when": "You need one engineering workspace connecting data health, planning, MES, quality, simulation, optimization, economics and sustainability.",
+     "example": "Load operational tables once, validate them, run an APS schedule, simulate queues, compare scenarios, calculate economics and export a traceable workbook from one command center."},
+    {"tier": "Enterprise Plus", "category": "Digital Thread", "name": "Industrial Digital Thread",
+     "when": "Engineering, operations and analytics need a shared model of products, facilities, machines, people and processes.",
+     "example": "Use the same machine, facility and work-order entities across planning, simulation, quality and maintenance instead of copying them between modules."},
+    {"tier": "Enterprise Plus", "category": "Production", "name": "Advanced Planning & Scheduling (APS)",
+     "when": "Production schedules must respect machine capacity, due dates and priorities.",
+     "example": "Create a finite-capacity schedule and flag jobs that cannot fit the configured horizon instead of silently overbooking a machine."},
+    {"tier": "Enterprise Plus", "category": "Production", "name": "Manufacturing Execution System (MES)",
+     "when": "You need work-order progress, production, scrap, yield and status in one execution view.",
+     "example": "Track planned versus produced quantities and yield by work order and export the execution report."},
+    {"tier": "Enterprise Plus", "category": "Quality", "name": "Quality Engineering & Reliability",
+     "when": "You need SPC and capability analysis backed by reproducible calculations.",
+     "example": "Load measurements, generate control limits, calculate Cp/Cpk and export the underlying samples and statistics."},
+    {"tier": "Enterprise Plus", "category": "Simulation", "name": "Industrial Simulation Lab",
+     "when": "You need discrete-event and uncertainty experiments before changing the physical operation.",
+     "example": "Simulate arrivals, service times and server capacity, then stress demand, lead time and capacity with repeatable uncertainty scenarios."},
+    {"tier": "Enterprise Plus", "category": "Optimization", "name": "Multi-Objective & Robust Optimization",
+     "when": "Cost alone is not enough and decisions must balance service, carbon and risk.",
+     "example": "Compare scenarios using weighted objectives and identify Pareto-efficient alternatives."},
+    {"tier": "Enterprise Plus", "category": "Connectivity", "name": "Industrial Connectivity Hub",
+     "when": "Operational data must move safely between industrial systems and Shoir-IE.",
+     "example": "Prepare normalized datasets and governance records for ERP, MES, WMS, IoT and future OPC UA/API connectors."},
+    {"tier": "Enterprise Plus", "category": "Engineering Economics", "name": "Capital & Workforce Engineering",
+     "when": "Investment, labor and operational decisions need a common economic model.",
+     "example": "Compare cash-flow scenarios and connect capacity and workforce assumptions to the resulting economics."},
+    {"tier": "Enterprise Plus", "category": "Sustainability", "name": "Industrial Sustainability & LCA",
+     "when": "Carbon impact needs to be evaluated alongside operational and financial outcomes.",
+     "example": "Calculate activity-based CO2e from configurable quantity and emissions-factor tables and export the audit-ready calculation."},
+    {"tier": "Enterprise Plus", "category": "Governance", "name": "Enterprise Security & Model Governance",
+     "when": "Models, datasets and decisions need traceability and reproducibility.",
+     "example": "Register model versions and dataset hashes so a result can be traced back to its configuration."},
+
     # ---------------- RESEARCH PACK ($30 add-on) adds ----------------
     {"tier": "Research Pack", "category": "Research Authoring", "name": "Statistical Hypothesis Testing",
      "when": "You're writing a paper and need a properly-run t-test, ANOVA, or chi-square test with the actual statistics, not a claimed result.",
@@ -610,7 +646,8 @@ MODULE_CATALOG = [
      "example": "Coordinate verification requests across a team of collaborators, each contributing without exposing their private data to the others - the control-panel view of the ACO-ZKMS mesh."},
 ]
 
-TIER_BENEFITS = {\n    "Enterprise Plus": {"price":"$299","pitch":"Integrated industrial platform layer: APS, MES, quality engineering, simulation, digital thread, connectivity, robust optimization, economics and sustainability.","gain":"Connects engineering decisions across planning, execution, simulation, quality, cost and sustainability in one traceable workspace."},
+TIER_BENEFITS = {
+    "Enterprise Plus": {"price":"$299","pitch":"Integrated industrial platform layer: APS, MES, quality engineering, simulation, digital thread, connectivity, robust optimization, economics and sustainability.","gain":"Connects engineering decisions across planning, execution, simulation, quality, cost and sustainability in one traceable workspace."},
     "Starter": {
         "price": "$29",
         "pitch": "The core industrial-engineering toolkit - replace spreadsheet-based network and inventory decisions with solved, defensible answers.",
@@ -704,7 +741,9 @@ def get_copilot_response(prompt, history):
             stock_df = pd.read_sql("SELECT * FROM inventory LIMIT 5", conn)
             conn.close()
             if not stock_df.empty:
-                return "Here's what's in your inventory table right now:\n\n" + stock_df.to_markdown(index=False)
+                return "Here's what's in your inventory table right now:
+
+" + stock_df.to_markdown(index=False)
             return ("I checked - there's no inventory data yet, so I genuinely don't have a safety-stock "
                     "number to give you rather than guess one. Add records via a supply chain module, "
                     "or use the MEIO Matrix module to calculate optimal levels from scratch.")
@@ -752,12 +791,22 @@ def send_tier_email(receiver_email, username, tier_code, tier_name):
     try:
         msg = EmailMessage()
         msg.set_content(
-            f"Hello {username},\n\n"
-            f"Your payment has been manually verified by the administrator.\n"
-            f"You have been successfully enrolled in the **{tier_name}**.\n\n"
-            f"Your Exclusive License/Tier Code is: {tier_code}\n\n"
-            f"Log in to your Enterprise Operations Suite account to activate your subscription.\n\n"
-            f"Best regards,\nAEGIS Enterprise Operations Team"
+            f"Hello {username},
+
+"
+            f"Your payment has been manually verified by the administrator.
+"
+            f"You have been successfully enrolled in the **{tier_name}**.
+
+"
+            f"Your Exclusive License/Tier Code is: {tier_code}
+
+"
+            f"Log in to your Enterprise Operations Suite account to activate your subscription.
+
+"
+            f"Best regards,
+AEGIS Enterprise Operations Team"
         )
         msg["Subject"] = f"Your Enterprise Suite Subscription Code ({tier_name})"
         msg["From"] = st.secrets["email"]["sender_email"]
@@ -1217,7 +1266,8 @@ is_admin = (st.session_state.current_user == "sho")
 
 tier1_features = ["MILP Solvers", "Inventory Playback", "Core IE Tools", "Subscriptions", "Persistence", "Facility Layout & Warehousing", "Enterprise Integration & Collaboration"]
 tier2_features = tier1_features + ["Carbon Accounting", "IoT Digital Twin", "MEIO Matrix", "Slotting & Gantt", "Fleet Routing", "Warehouse Heatmap", "Supplier Risk Matrix", "Scenarios", "AGV Fleet Dispatcher", "Geospatial Network Designer", "Production Planning & Control (PPC)", "Lean Manufacturing & Shop Floor Operations", "Quality Control, Six Sigma & Reliability", "Engineering Economics & Finance"]
-tier3_features = tier2_features + ["AI Copilot", "FastAPI Gateway", "Monte Carlo Sim", "Sensitivity Analysis", "Webhook Alerts", "Agentic Workflows", "Control Tower", "Cryptographic Ledger", "Predictive Maintenance Hub", "Human Factors & Ergonomics (NIOSH)", "Digital Twin & Discrete-Event Simulation", "Green IE & Sustainability"]\nenterprise_plus_features = tier3_features + NEW_ENTERPRISE_PLUS_MODULES
+tier3_features = tier2_features + ["AI Copilot", "FastAPI Gateway", "Monte Carlo Sim", "Sensitivity Analysis", "Webhook Alerts", "Agentic Workflows", "Control Tower", "Cryptographic Ledger", "Predictive Maintenance Hub", "Human Factors & Ergonomics (NIOSH)", "Digital Twin & Discrete-Event Simulation", "Green IE & Sustainability"]
+enterprise_plus_features = tier3_features + NEW_ENTERPRISE_PLUS_MODULES
 # FIX (recurring from an earlier upload of this file - reapplied): this list
 # was missing commas between most entries, which in Python silently
 # concatenates adjacent string literals into one garbled string instead of
@@ -1256,7 +1306,16 @@ else:
 st.sidebar.markdown("---")
 st.sidebar.markdown("### 🛠️ Enterprise Modules")
 
-if "Research" in tier_val:\n    allowed_modules = research_pack_features\nelif "Enterprise Plus" in tier_val:\n    allowed_modules = enterprise_plus_features\nelif "Enterprise" in tier_val or is_admin:\n    allowed_modules = tier3_features\nelif "Pro" in tier_val or "Trial" in tier_val:\n    allowed_modules = tier2_features\nelse:\n    allowed_modules = tier1_features
+if "Research" in tier_val:
+    allowed_modules = research_pack_features
+elif "Enterprise Plus" in tier_val:
+    allowed_modules = enterprise_plus_features
+elif "Enterprise" in tier_val or is_admin:
+    allowed_modules = tier3_features
+elif "Pro" in tier_val or "Trial" in tier_val:
+    allowed_modules = tier2_features
+else:
+    allowed_modules = tier1_features
 selected_module = st.sidebar.selectbox("Select Module", allowed_modules)
 
 # Universal data workspace controls: available before every module renderer.
@@ -1815,7 +1874,8 @@ elif selected_module in ["Universal Cross-Domain Mathematical Isomorphism Engine
 
         col_t1, col_t2 = st.columns(2)
         with col_t1:
-            foreign_input = st.text_area("Foreign Theoretical Proof Input", value="Let $\\mathcal{M}$ be a Riemannian manifold with metric tensor $g_{\\mu\\nu}$ governing field curvature.")
+            foreign_input = st.text_area("Foreign Theoretical Proof Input", value="Let $\\mathcal{M}$ be a Riemannian manifold with metric tensor $g_{\\mu\
+u}$ governing field curvature.")
         with col_t2:
             target_or = st.selectbox("Target Operations Research Paradigm", [
                 "Mixed-Integer Linear Programming (MILP)",
@@ -2535,7 +2595,11 @@ elif selected_module == "Automated Code-to-Formal-Proof Verifier":
         st.markdown("Paste your Python optimization script or simulation function to parse control-flow paths and build symbolic expressions.")
 
         code_snippet_input = st.text_area("Python Optimization Code / Simulation Logic", 
-            value="def optimize_inventory(demand, stock, capacity):\n    # Conservation of mass balance equation\n    next_stock = stock - demand\n    assert next_stock >= 0, \"Stock violation\"\n    return min(next_stock, capacity)", height=140)
+            value="def optimize_inventory(demand, stock, capacity):
+    # Conservation of mass balance equation
+    next_stock = stock - demand
+    assert next_stock >= 0, \"Stock violation\"
+    return min(next_stock, capacity)", height=140)
 
         selected_engine = st.selectbox("Select Verification Engine", verifier_registry.get_engines())
         engine_meta = verifier_registry.get_metadata(selected_engine)
@@ -2899,7 +2963,9 @@ status = solver.Solve()
             extraction_mode = st.selectbox("Semantic Extraction Mode", ["Standard OR Ontology", "Stochastic MILP", "Non-Linear Convex"])
         with col_p2:
             st.markdown("**Extracted Structural Tuples (Simulated)**")
-            st.code("Sets: I = {1, 2, 3, 4, 5}\nParameters: c[i], d[i], cap[i]\nVariables: x[i] (Continuous)", language="text")
+            st.code("Sets: I = {1, 2, 3, 4, 5}
+Parameters: c[i], d[i], cap[i]
+Variables: x[i] (Continuous)", language="text")
 
     with tab_reg:
         st.markdown("#### Universal Code Generation Registry")
@@ -2986,7 +3052,8 @@ CMD ["pytest"]
                     {
                         "cell_type": "markdown",
                         "metadata": {},
-                        "source": ["# Shoir-IE Interactive Execution Notebook\n", "Run optimization solvers live."]
+                        "source": ["# Shoir-IE Interactive Execution Notebook
+", "Run optimization solvers live."]
                     },
                     {
                         "cell_type": "code",
@@ -3008,7 +3075,10 @@ CMD ["pytest"]
                 zf.writestr("test_model.py", pytest_suite)
                 zf.writestr("Dockerfile", dockerfile_content)
                 zf.writestr("interactive_notebook.ipynb", jupyter_notebook)
-                zf.writestr("test_instances.csv", "id,demand,capacity\n1,120,500\n2,150,600\n")
+                zf.writestr("test_instances.csv", "id,demand,capacity
+1,120,500
+2,150,600
+")
 
             st.download_button(
                 label="📥 Download Complete Formalizer Production Bundle (.zip)",
@@ -3500,7 +3570,9 @@ CMD ["streamlit", "run", "app.py", "--server.port=8501"]
         zip_io = io.BytesIO()
         with zipfile.ZipFile(zip_io, "w", zipfile.ZIP_DEFLATED) as zf:
             zf.writestr("latex_source.tex", latex_source)
-            zf.writestr("execution_script.py", "# Shoir-IE Executable Artifact\nimport pandas as pd\nprint('Running simulation...')")
+            zf.writestr("execution_script.py", "# Shoir-IE Executable Artifact
+import pandas as pd
+print('Running simulation...')")
             zf.writestr("interactive_canvas.html", html_canvas)
             zf.writestr("Dockerfile", dockerfile_content)
             zf.writestr("simulation_data.csv", csv_data)
@@ -4194,7 +4266,8 @@ elif selected_module == "Literature & Citation Matrix":
                 new_bib_rows = []
                 for entry in entries:
                     if "{" in entry and "," in entry:
-                        lines = entry.split("\n")
+                        lines = entry.split("
+")
                         header = lines[0].split("{")
                         entry_key = header[1].split(",")[0].strip() if len(header) > 1 else f"ref_{np.random.randint(10,99)}"
                         
@@ -4263,7 +4336,13 @@ elif selected_module == "Literature & Citation Matrix":
         for idx, row in df_export.iterrows():
             p_id = str(row.get("Paper ID", f"ref_{idx}"))
             author = str(row.get("Authors (Year)", "Unknown"))
-            bib_content += f"@article{{{p_id},\n  author = {{{author}}},\n  title = {{Study on {row.get('Core Methodology', 'Topic')}}},\n  year = {{2026}}\n}}\n\n"
+            bib_content += f"@article{{{p_id},
+  author = {{{author}}},
+  title = {{Study on {row.get('Core Methodology', 'Topic')}}},
+  year = {{2026}}
+}}
+
+"
         
         csv_data = df_export.to_csv(index=False).encode("utf-8")
         
@@ -4336,7 +4415,8 @@ elif selected_module == "LaTeX Document Formatter":
         default_packages = ["amsmath", "amssymb", "graphicx", "booktabs", "hyperref", "algorithm2e", "tikz", "siunitx"]
         selected_packages = st.multiselect("Active LaTeX Preamble Packages", default_packages, default=["amsmath", "graphicx", "booktabs", "hyperref"])
         
-        package_injection_str = "".join([f"\\usepackage{{{pkg}}}\n" for pkg in selected_packages])
+        package_injection_str = "".join([f"\\usepackage{{{pkg}}}
+" for pkg in selected_packages])
 
     with tab_sections:
         st.subheader("Dynamic Section Manager (Add, Delete & Rearrange)")
@@ -4369,9 +4449,16 @@ elif selected_module == "LaTeX Document Formatter":
                 sec['content'] = st.text_area(f"Section Content {i+1}", sec['content'], key=f"sec_content_{i}")
                 
                 if sec['title'].lower() == "abstract":
-                    compiled_sections_latex += f"\\begin{{abstract}}\n{sec['content']}\n\\end{{abstract}}\n\n"
+                    compiled_sections_latex += f"\\begin{{abstract}}
+{sec['content']}
+\\end{{abstract}}
+
+"
                 else:
-                    compiled_sections_latex += f"\\section{{{sec['title']}}}\n{sec['content']}\n\n"
+                    compiled_sections_latex += f"\\section{{{sec['title']}}}
+{sec['content']}
+
+"
 
     with tab_math:
         st.subheader("Industrial Engineering & Matrix Equation Studio")
@@ -4389,8 +4476,13 @@ elif selected_module == "LaTeX Document Formatter":
         elif eq_mode == "Custom Matrix Builder (bmatrix)":
             m_r = st.slider("Matrix Rows", 2, 5, 3)
             m_c = st.slider("Matrix Columns", 2, 5, 3)
-            matrix_body = "\n".join([" & ".join([f"a_{{{r+1}{c+1}}}" for c in range(m_c)]) + " \\\\" for r in range(m_r)])
-            math_code = f"$$\n\\begin{{bmatrix}}\n{matrix_body}\n\\end{{bmatrix}}\n$$"
+            matrix_body = "
+".join([" & ".join([f"a_{{{r+1}{c+1}}}" for c in range(m_c)]) + " \\\\" for r in range(m_r)])
+            math_code = f"$$
+\\begin{{bmatrix}}
+{matrix_body}
+\\end{{bmatrix}}
+$$"
             st.markdown("Live Rendered Preview:")
             st.markdown(math_code)
             st.code(math_code, language="latex")
@@ -4411,7 +4503,12 @@ elif selected_module == "LaTeX Document Formatter":
             b_title = st.text_input("Article/Book Title", "Cognitive Enterprise Operations Suite")
             b_year = st.text_input("Year", "2026")
             
-        bib_output = f"@article{{{b_key},\n  author = {{{b_author}}},\n  title = {{{b_title}}},\n  journal = {{Journal of Industrial Engineering Automation}};\n  year = {{{b_year}}}\n}}"
+        bib_output = f"@article{{{b_key},
+  author = {{{b_author}}},
+  title = {{{b_title}}},
+  journal = {{Journal of Industrial Engineering Automation}};
+  year = {{{b_year}}}
+}}"
         st.code(bib_output, language="bibtex")
         st.download_button("📥 Download References (.bib)", data=bib_output.encode("utf-8"), file_name="references.bib", mime="text/plain")
 
@@ -8122,17 +8219,23 @@ else:
             with st.container(border=True):
                 st.markdown("### Starter")
                 st.markdown("<h2>$29 <small>/mo</small></h2>", unsafe_allow_html=True)
-                st.markdown("- Core MILP Solvers\n- Basic Inventory\n- Student-Level Access")
+                st.markdown("- Core MILP Solvers
+- Basic Inventory
+- Student-Level Access")
         with col_p2:
             with st.container(border=True):
                 st.markdown("### Pro")
                 st.markdown("<h2>$79 <small>/mo</small></h2>", unsafe_allow_html=True)
-                st.markdown("- Advanced GIS Routing\n- Carbon Accounting\n- Real-Time IoT & MEIO")
+                st.markdown("- Advanced GIS Routing
+- Carbon Accounting
+- Real-Time IoT & MEIO")
         with col_p3:
             with st.container(border=True):
                 st.markdown("### Enterprise")
                 st.markdown("<h2>$199 <small>/mo</small></h2>", unsafe_allow_html=True)
-                st.markdown("- AI Copilot\n- FastAPI Gateway\n- Agentic Workflows & Ledger")
+                st.markdown("- AI Copilot
+- FastAPI Gateway
+- Agentic Workflows & Ledger")
                 
     elif mod == "AI Copilot":
         st.header("🤖 Natural Language AI Copilot")
