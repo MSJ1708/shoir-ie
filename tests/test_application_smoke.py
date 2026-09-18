@@ -23,3 +23,25 @@ def test_validation_workflow_covers_compile_and_tests():
     workflow = Path(".github/workflows/shoir-validation.yml").read_text(encoding="utf-8")
     assert "compileall" in workflow
     assert "pytest -q tests" in workflow
+
+
+def test_platform_catalog_has_render_path():
+    """Every catalog module must be wired to an application rendering path."""
+    from industrial_platform import PLATFORM_CATALOG
+    platform_source = Path("industrial_platform.py").read_text(encoding="utf-8")
+    app_source = Path("app.py").read_text(encoding="utf-8")
+    for item in PLATFORM_CATALOG:
+        name = str(item.get("name", "")).strip()
+        assert name, "Catalog contains a module without a name"
+        assert (f'"{name}"' in platform_source) or (f'"{name}"' in app_source), (
+            f"Catalog module is not wired into the application: {name}"
+        )
+
+
+def test_polished_results_surface_is_wired():
+    """Guard against regressions to raw implementation-style result output."""
+    source = Path("app.py").read_text(encoding="utf-8")
+    assert "def _render_pretty_result" in source
+    assert "enterprise_module_selector" in source
+    assert "Technical Details" in source
+    assert "st.plotly_chart" in source
