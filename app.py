@@ -8029,6 +8029,115 @@ else:
                 st.session_state.onboarded = True
                 st.success("Sample dataset loaded successfully! Review your results below.")
 
+    # Universal workspace controls are rendered BEFORE module-specific branches so they
+    # remain visible even when a module later calls st.stop().
+    def _workspace_table_candidates(module_name):
+        explicit = {
+            "MILP Solvers": [("Customer Demands", "customers_list"), ("Candidate Warehouses", "warehouses_list")],
+            "Excel Data Cleaning & Import": [],
+        }
+        found = list(explicit.get(module_name, []))
+        seen = {k for _, k in found}
+        for k,v in list(st.session_state.items()):
+            if str(k).startswith(("_","upgrade_","copilot_")) or k in seen:
+                continue
+            if isinstance(v, pd.DataFrame) and len(v.columns) > 0:
+                found.append((str(k).replace("_"," ").title(), k))
+            elif isinstance(v, list) and v and isinstance(v[0], dict):
+                found.append((str(k).replace("_"," ").title(), k))
+        return found
+
+    def _workspace_table_to_df(key):
+        value = st.session_state.get(key)
+        if isinstance(value, pd.DataFrame):
+            return value.copy(deep=True)
+        if isinstance(value, list):
+            return pd.DataFrame(value)
+        return pd.DataFrame()
+
+    def _write_workspace_table(key, df):
+        old = st.session_state.get(key)
+        if isinstance(old, pd.DataFrame):
+            st.session_state[key] = df.copy(deep=True)
+        elif isinstance(old, list):
+            st.session_state[key] = df.where(pd.notna(df), None).to_dict("records")
+        else:
+            st.session_state[key] = df.copy(deep=True)
+
+    workspace_tables = _workspace_table_candidates(mod)
+    st.markdown("---")
+    with st.container(border=True):
+        st.subheader("📁 Workspace Data Import, Cleaning & Export")
+        st.caption("Import a CSV/XLSX into a module table, clean it, reset it, or ask Copilot what to do next.")
+        if workspace_tables:
+            table_labels = [x[0] for x in workspace_tables]
+            table_keys = [x[1] for x in workspace_tables]
+            table_selector_key = "workspace_table_selector_" + hashlib.sha1(mod.encode()).hexdigest()[:10]
+            selected_table_label = st.selectbox("Table", table_labels, key=table_selector_key)
+            selected_table_key = table_keys[table_labels.index(selected_table_label)]
+            current_df = _workspace_table_to_df(selected_table_key)
+            default_key = "_workspace_default_" + selected_table_key
+            if default_key not in st.session_state:
+                st.session_state[default_key] = current_df.copy(deep=True)
+            c_imp, c_act, c_exp = st.columns(3)
+            with c_imp:
+                upload_key = "workspace_import_" + hashlib.sha1((mod+"|"+selected_table_key).encode()).hexdigest()[:10]
+                upload = st.file_uploader("📤 Import Excel / CSV", type=["xlsx","csv"], key=upload_key)
+                if upload is not None:
+                    upload_sig = hashlib.sha256(upload.getvalue()).hexdigest()
+                    sig_key = upload_key + "_sig"
+                    if st.session_state.get(sig_key) != upload_sig:
+                        try:
+                            raw = upload.getvalue()
+                            imported = pd.read_excel(io.BytesIO(raw)) if upload.name.lower().endswith(".xlsx") else pd.read_csv(io.BytesIO(raw))
+                            if not imported.columns.size:
+                                raise ValueError("The uploaded file has no columns.")
+                            aligned = align_imported_table(imported, current_df)
+                            _write_workspace_table(selected_table_key, aligned)
+                            st.session_state[sig_key] = upload_sig
+                            st.success(f"Imported {len(aligned):,} rows.")
+                            st.rerun()
+                        except Exception as exc:
+                            st.error("Import failed: " + str(exc))
+            with c_act:
+                if st.button("✨ Auto Clean", type="primary", use_container_width=True, key="workspace_clean_"+hashlib.sha1((mod+selected_table_key).encode()).hexdigest()[:10]):
+                    cleaned, audit = clean_dataframe(_workspace_table_to_df(selected_table_key))
+                    _write_workspace_table(selected_table_key, cleaned)
+                    st.session_state["workspace_clean_audit"] = pd.DataFrame(audit)
+                    st.success("Table cleaned and professionalized.")
+                    st.rerun()
+                if st.button("↩️ Reset Table", use_container_width=True, key="workspace_reset_"+hashlib.sha1((mod+selected_table_key).encode()).hexdigest()[:10]):
+                    _write_workspace_table(selected_table_key, st.session_state[default_key].copy(deep=True))
+                    st.rerun()
+            with c_exp:
+                export_df = _workspace_table_to_df(selected_table_key)
+                export_xlsx = build_excel_report("Shoir-IE · "+mod, [(selected_table_label, export_df)], [])
+                st.download_button("📥 Download XLSX", export_xlsx, "shoir_ie_"+re.sub(r"[^A-Za-z0-9]+","_",mod).lower()+".xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+                if st.session_state.get("workspace_clean_audit") is not None:
+                    audit_xlsx = build_excel_report("Shoir-IE Cleaning Audit", [("Cleaned Data", export_df), ("Cleaning Audit", st.session_state["workspace_clean_audit"])], [])
+                    st.download_button("📋 Download Cleaned + Audit", audit_xlsx, "shoir_ie_cleaned_audit.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+        else:
+            st.info("No editable table has been initialized in this module yet. Open the module's data-entry table first.")
+        st.markdown("#### 🤖 Copilot — act on the current module")
+        st.caption("Examples: “clean this table and remove duplicates”, “which module should I use for demand forecasting?”, “optimize the network”.")
+        copilot_cmd = st.text_input("Copilot command", key="workspace_copilot_command_"+hashlib.sha1(mod.encode()).hexdigest()[:10])
+        if st.button("Ask Copilot", use_container_width=True, key="workspace_copilot_button_"+hashlib.sha1(mod.encode()).hexdigest()[:10]):
+            prompt = copilot_cmd.strip()
+            if not prompt:
+                st.warning("Enter a request for Copilot first.")
+            else:
+                with st.spinner("Copilot is working..."):
+                    lower = prompt.lower()
+                    if workspace_tables and any(x in lower for x in ["clean", "trim", "deduplicate", "remove duplicates", "proper case", "uppercase", "lowercase"]):
+                        before = _workspace_table_to_df(selected_table_key)
+                        cleaned, audit = clean_dataframe(before)
+                        _write_workspace_table(selected_table_key, cleaned)
+                        st.session_state["workspace_clean_audit"] = pd.DataFrame(audit)
+                        st.success("Copilot cleaned the selected table. Review it below and download the XLSX when ready.")
+                        st.dataframe(cleaned.head(25), use_container_width=True)
+                    else:
+                        reply = get_copilot_response(prompt, [{"role":"user","content":prompt}])
+                        st.markdown(reply)
     mod = selected_module
     
     if mod == "Subscriptions":
