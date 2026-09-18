@@ -10,6 +10,7 @@ import hashlib
 import json
 import math
 import sqlite3
+import uuid
 from datetime import datetime
 from typing import Any, Mapping, Optional, Sequence
 
@@ -104,14 +105,22 @@ _SAFE_BINOPS={ast.Add:lambda a,b:a+b,ast.Sub:lambda a,b:a-b,ast.Mult:lambda a,b:
 _SAFE_UNARY={ast.UAdd:lambda a:+a,ast.USub:lambda a:-a}
 
 def safe_formula(formula: str, variables: Mapping[str,float]) -> float:
-    tree=ast.parse(str(formula),mode="eval")
+    """Evaluate a bounded arithmetic expression without executing arbitrary Python."""
+    raw=str(formula or "").strip()
+    if not raw or len(raw)>500: raise ValueError("Formula must contain 1–500 characters.")
+    tree=ast.parse(raw,mode="eval")
+    if sum(1 for _ in ast.walk(tree))>80: raise ValueError("Formula is too complex.")
     def visit(node):
         if isinstance(node,ast.Expression): return visit(node.body)
         if isinstance(node,ast.Constant) and isinstance(node.value,(int,float)): return node.value
         if isinstance(node,ast.Name):
             if node.id not in variables: raise ValueError(f"Unknown variable: {node.id}")
             return float(variables[node.id])
-        if isinstance(node,ast.BinOp) and type(node.op) in _SAFE_BINOPS: return _SAFE_BINOPS[type(node.op)](visit(node.left),visit(node.right))
+        if isinstance(node,ast.BinOp) and type(node.op) in _SAFE_BINOPS:
+            left,right=visit(node.left),visit(node.right)
+            if type(node.op) is ast.Pow and abs(float(right))>12: raise ValueError("Exponent magnitude is limited to 12.")
+            if max(abs(float(left)),abs(float(right)))>1e15: raise ValueError("Intermediate values are too large.")
+            return _SAFE_BINOPS[type(node.op)](left,right)
         if isinstance(node,ast.UnaryOp) and type(node.op) in _SAFE_UNARY: return _SAFE_UNARY[type(node.op)](visit(node.operand))
         if isinstance(node,ast.Call) and isinstance(node.func,ast.Name) and node.func.id in _SAFE_FUNCS:
             return _SAFE_FUNCS[node.func.id](*[visit(x) for x in node.args])
@@ -121,10 +130,12 @@ def safe_formula(formula: str, variables: Mapping[str,float]) -> float:
     return out
 
 def now() -> str:
-    return datetime.utcnow().isoformat(timespec="seconds")
+    return datetime.utcnow().isoformat(timespec="microseconds")
 
 def ensure_os_db(db_path: str="enterprise_full_workspace.db") -> None:
-    with sqlite3.connect(db_path) as c:
+    with sqlite3.connect(db_path, timeout=30) as c:
+        c.execute("PRAGMA journal_mode=WAL")
+        c.execute("PRAGMA foreign_keys=ON")
         c.execute("""CREATE TABLE IF NOT EXISTS os_kpi_definitions(
             kpi_id TEXT PRIMARY KEY,name TEXT,formula TEXT,unit TEXT,owner TEXT,
             created_at TEXT,updated_at TEXT)""")
@@ -150,6 +161,9 @@ def ensure_os_db(db_path: str="enterprise_full_workspace.db") -> None:
         c.execute("""CREATE TABLE IF NOT EXISTS os_artifact_manifest(
             artifact_id TEXT PRIMARY KEY,module TEXT,label TEXT,rows INTEGER,
             columns INTEGER,sha256 TEXT,created_by TEXT,created_at TEXT)""")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_os_scenarios_name_version ON os_scenarios(name,version DESC)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_os_verifications_decision ON os_decision_verifications(decision_id,verified_at DESC)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_os_drift_created ON os_drift_runs(created_at DESC)")
         c.commit()
 
 def compare_frames(left: pd.DataFrame,right: pd.DataFrame,key: Optional[str]=None) -> pd.DataFrame:
@@ -177,12 +191,14 @@ def compare_frames(left: pd.DataFrame,right: pd.DataFrame,key: Optional[str]=Non
 def scenario_save(name: str,parameters: Mapping[str,Any],kpis: Mapping[str,Any],
                   created_by: str,parent_id: Optional[str]=None,description: str="") -> str:
     ensure_os_db()
+    name=str(name or "").strip()
+    if not name or len(name)>120: raise ValueError("Scenario name must contain 1–120 characters.")
     p=json.dumps(parameters,sort_keys=True,default=str)
     created=now()
-    # Include the creation timestamp so repeated saves of an identical scenario
-    # remain distinct immutable versions rather than replacing the prior row.
-    sid="SCN-"+hashlib.sha256(f"{name}|{p}|{created}".encode()).hexdigest()[:12].upper()
-    with sqlite3.connect("enterprise_full_workspace.db") as c:
+    sid="SCN-"+uuid.uuid4().hex[:12].upper()
+    with sqlite3.connect("enterprise_full_workspace.db", timeout=30) as c:
+        if parent_id and not c.execute("SELECT 1 FROM os_scenarios WHERE scenario_id=?",(parent_id,)).fetchone():
+            raise ValueError(f"Parent scenario {parent_id} was not found.")
         version=int(c.execute("SELECT COALESCE(MAX(version),0) FROM os_scenarios WHERE name=?",(name,)).fetchone()[0])+1
         c.execute("INSERT OR REPLACE INTO os_scenarios VALUES(?,?,?,?,?,?,?,?,?,?)",
                   (sid,name,parent_id,version,description,p,json.dumps(kpis,default=str),created_by,created,created))
@@ -267,6 +283,8 @@ def drift_report(reference: pd.DataFrame,current: pd.DataFrame) -> pd.DataFrame:
 
 def decision_verify(decision_id: str,predicted: pd.DataFrame,actual: pd.DataFrame,
                     metric_col="Metric",value_col="Value",verified_by="system") -> pd.DataFrame:
+    if metric_col not in predicted.columns or value_col not in predicted.columns or metric_col not in actual.columns or value_col not in actual.columns:
+        raise ValueError(f"Both tables must contain {metric_col!r} and {value_col!r} columns.")
     a=predicted[[metric_col,value_col]].copy().rename(columns={value_col:"Predicted"})
     b=actual[[metric_col,value_col]].copy().rename(columns={value_col:"Actual"})
     out=a.merge(b,on=metric_col,how="outer")
