@@ -177,6 +177,10 @@ def auto_clean_dataframe(df: pd.DataFrame) -> Tuple[pd.DataFrame,list]:
     if not out.equals(before_cols): audit.append({"function":"VALUE","details":"Converted consistently numeric text columns"})
     return out,audit
 
+def clean_dataframe(df: pd.DataFrame):
+    """Backward-compatible name used by the Streamlit application."""
+    return auto_clean_dataframe(df)
+
 def apply_excel_function(df: pd.DataFrame, function_name: str, **kwargs) -> Tuple[pd.DataFrame,str]:
     fn=function_name.strip().upper()
     if fn=="TRIM": return excel_trim(df,kwargs.get("columns")),"TRIM applied"
@@ -221,6 +225,16 @@ def build_excel_report(title: str, tables: Iterable[Tuple[str,pd.DataFrame]], fi
             for j,col in enumerate(safe.columns): ws.write(3,j,col,header_fmt)
             ws.freeze_panes(4,0)
             if len(safe.columns): ws.autofilter(3,0,3+len(safe),len(safe.columns)-1)
+            numeric_cols=[i for i,col in enumerate(safe.columns) if pd.api.types.is_numeric_dtype(safe[col])]
+            if numeric_cols and len(safe) > 0 and len(safe.columns) >= 2:
+                chart=workbook.add_chart({"type":"column"})
+                for i in numeric_cols:
+                    chart.add_series({"name":[safe_name,3,i],"categories":[safe_name,4,0,3+len(safe),0],"values":[safe_name,4,i,3+len(safe),i]})
+                chart.set_title({"name":f"{safe_name} — Numeric Metrics"})
+                chart.set_x_axis({"name":str(safe.columns[0])})
+                chart.set_y_axis({"name":"Value"})
+                chart.set_legend({"position":"bottom"})
+                ws.insert_chart(3,len(safe.columns)+2,chart,{"x_scale":1.25,"y_scale":1.1})
             for j,col in enumerate(safe.columns):
                 vals=safe[col].astype(str) if not safe.empty else pd.Series(dtype=str)
                 width=min(55,max(10,len(str(col))+2,int(vals.map(len).max()+2) if len(vals) else 10))
