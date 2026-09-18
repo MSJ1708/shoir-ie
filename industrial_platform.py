@@ -589,7 +589,7 @@ def ml_demand_forecast(df: pd.DataFrame, date_col: str, target_col: str, externa
 def save_scenario(name: str, parent_name: str, parameters: dict, kpis: dict, username: str, db_path="enterprise_full_workspace.db") -> str:
     sid="SCN-"+hashlib.sha256((name+username).encode()).hexdigest()[:12].upper()
     with sqlite3.connect(db_path) as c:
-        c.execute("INSERT OR REPLACE INTO platform_scenarios VALUES(?,?,?,?,?,?)",(sid,name,parent_name,json.dumps(parameters,default=str),json.dumps(kpis,default=str),username,_now())); c.commit()
+        c.execute("INSERT OR REPLACE INTO platform_scenarios VALUES(?,?,?,?,?,?,?)",(sid,name,parent_name,json.dumps(parameters,default=str),json.dumps(kpis,default=str),username,_now())); c.commit()
     return sid
 
 def scenario_table(db_path="enterprise_full_workspace.db") -> pd.DataFrame:
