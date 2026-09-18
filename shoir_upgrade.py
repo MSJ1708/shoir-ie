@@ -40,7 +40,7 @@ def clean_dataframe(df: pd.DataFrame) -> Tuple[pd.DataFrame, list]:
     out.columns=[str(c).strip() for c in out.columns]
     if len(out)!=before: audit.append({"action":"column_normalization","rows":len(out)})
     for col in out.columns:
-        if pd.api.types.is_object_dtype(out[col]):
+        if pd.api.types.is_object_dtype(out[col]) or pd.api.types.is_string_dtype(out[col]):
             original=out[col].copy()
             cleaned=out[col].map(lambda x: x.strip() if isinstance(x,str) else x)
             changed=int((original.fillna("").astype(str)!=cleaned.fillna("").astype(str)).sum())
