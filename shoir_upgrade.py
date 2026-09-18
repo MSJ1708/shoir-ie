@@ -207,6 +207,48 @@ def read_uploaded_workbook(raw: bytes, filename: str) -> dict[str,pd.DataFrame]:
         return {sheet:pd.read_excel(io.BytesIO(raw),sheet_name=sheet) for sheet in book.sheet_names}
     raise ValueError("Upload an .xlsx or .csv file.")
 
+def _excel_safe_name(raw_name: Any, used: set[str], fallback: str) -> str:
+    """Create a legal, unique Excel worksheet name without ever raising."""
+    name = re.sub(r"[:\\/?*\\[\\]]+", "", str(raw_name or "")).strip()[:31] or fallback
+    base = name
+    n = 2
+    while name in used:
+        suffix = f" ({n})"
+        name = (base[:31-len(suffix)] + suffix)[:31]
+        n += 1
+    used.add(name)
+    return name
+
+def _excel_safe_df(value: Any) -> pd.DataFrame:
+    """Normalize arbitrary module output into an exportable DataFrame."""
+    if isinstance(value, pd.DataFrame):
+        out = value.copy(deep=True)
+    elif isinstance(value, dict):
+        try: out = pd.DataFrame([value])
+        except Exception: out = pd.DataFrame({"Value": [str(value)]})
+    elif isinstance(value, (list, tuple)):
+        try: out = pd.DataFrame(value)
+        except Exception: out = pd.DataFrame({"Value": [str(value)]})
+    else:
+        out = pd.DataFrame({"Value": [] if value is None else [str(value)]})
+    # Excel cannot reliably serialize arbitrary Python objects. Convert only
+    # problematic object cells to readable strings while preserving numbers/dates.
+    for col in out.columns:
+        if out[col].dtype == "object":
+            out[col] = out[col].map(lambda v: v if v is None or isinstance(v, (str, int, float, bool, pd.Timestamp)) else str(v))
+    return out
+
+def _excel_column_width(series: pd.Series, header: Any) -> int:
+    """Calculate a bounded width without vectorized len() failures on mixed objects."""
+    width = len(str(header)) + 2
+    if len(series):
+        for value in series.head(500):
+            try:
+                width = max(width, len(str(value)) + 2)
+            except Exception:
+                width = max(width, 10)
+    return min(55, max(10, width))
+
 def build_excel_report(title: str, tables: Iterable[Tuple[str,pd.DataFrame]], figures=None, audit=None, function_reference=True) -> bytes:
     figures=figures or []; audit=audit or []
     buf=io.BytesIO()
@@ -215,36 +257,38 @@ def build_excel_report(title: str, tables: Iterable[Tuple[str,pd.DataFrame]], fi
         title_fmt=workbook.add_format({"bold":True,"font_size":18,"font_color":"1E3A8A"})
         subtitle_fmt=workbook.add_format({"italic":True,"font_color":"64748B"})
         header_fmt=workbook.add_format({"bold":True,"bg_color":"1E3A8A","font_color":"white","border":1})
-        for i,(name,df) in enumerate(tables):
-            safe_name=re.sub(r"[^A-Za-z0-9_ ]+","",str(name))[:31] or f"Table{i+1}"
-            safe=df.copy() if isinstance(df,pd.DataFrame) else pd.DataFrame(df)
+        used_names=set()
+        for i,(raw_name,df) in enumerate(tables):
+            safe_name=_excel_safe_name(raw_name,used_names,f"Table{i+1}")
+            safe=_excel_safe_df(df)
             safe.to_excel(writer,index=False,sheet_name=safe_name,startrow=3)
             ws=writer.sheets[safe_name]
-            ws.write(0,0,title,title_fmt)
+            ws.write(0,0,str(title),title_fmt)
             ws.write(1,0,f"Generated {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}",subtitle_fmt)
-            for j,col in enumerate(safe.columns): ws.write(3,j,col,header_fmt)
+            for j,col in enumerate(safe.columns): ws.write(3,j,str(col),header_fmt)
             ws.freeze_panes(4,0)
-            if len(safe.columns): ws.autofilter(3,0,3+len(safe),len(safe.columns)-1)
+            if len(safe.columns) and len(safe):
+                ws.autofilter(3,0,3+len(safe),len(safe.columns)-1)
             numeric_cols=[i for i,col in enumerate(safe.columns) if pd.api.types.is_numeric_dtype(safe[col])]
             if numeric_cols and len(safe) > 0 and len(safe.columns) >= 2:
                 chart=workbook.add_chart({"type":"column"})
-                for i in numeric_cols:
-                    chart.add_series({"name":[safe_name,3,i],"categories":[safe_name,4,0,3+len(safe),0],"values":[safe_name,4,i,3+len(safe),i]})
+                for col_idx in numeric_cols:
+                    chart.add_series({"name":[safe_name,3,col_idx],"categories":[safe_name,4,0,3+len(safe),0],"values":[safe_name,4,col_idx,3+len(safe),col_idx]})
                 chart.set_title({"name":f"{safe_name} — Numeric Metrics"})
                 chart.set_x_axis({"name":str(safe.columns[0])})
                 chart.set_y_axis({"name":"Value"})
                 chart.set_legend({"position":"bottom"})
                 ws.insert_chart(3,len(safe.columns)+2,chart,{"x_scale":1.25,"y_scale":1.1})
             for j,col in enumerate(safe.columns):
-                vals=safe[col].astype(str) if not safe.empty else pd.Series(dtype=str)
-                width=min(55,max(10,len(str(col))+2,int(vals.map(len).max()+2) if len(vals) else 10))
-                ws.set_column(j,j,width)
+                ws.set_column(j,j,_excel_column_width(safe[col],col))
         if audit:
-            pd.DataFrame(audit).to_excel(writer,index=False,sheet_name="Cleaning Audit")
+            audit_df=_excel_safe_df(audit)
+            audit_df.to_excel(writer,index=False,sheet_name=_excel_safe_name("Cleaning Audit",used_names,"Audit"))
         if function_reference:
-            ref=pd.DataFrame([{"Function":n,"Purpose":d} for n,d in EXCEL_FUNCTIONS])
-            ref.to_excel(writer,index=False,sheet_name="Excel Functions")
-            writer.sheets["Excel Functions"].freeze_panes(1,0)
+            ref=_excel_safe_df([{"Function":n,"Purpose":d} for n,d in EXCEL_FUNCTIONS])
+            ref_name=_excel_safe_name("Excel Functions",used_names,"Functions")
+            ref.to_excel(writer,index=False,sheet_name=ref_name)
+            writer.sheets[ref_name].freeze_panes(1,0)
     return buf.getvalue()
 
 def build_workbook_bundle(title: str, tables: Iterable[Tuple[str,pd.DataFrame]], figures=None, audit=None) -> bytes:
