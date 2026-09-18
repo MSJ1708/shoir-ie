@@ -383,8 +383,9 @@ def render_industrial_operating_system(tier="Enterprise",username="unknown"):
                 try:
                     val=safe_formula(formula,{k:float(v) for k,v in json.loads(variables).items()})
                     st.metric(kpi,f"{val:,.4g}",row["Unit"])
-            st.caption("Calculated with the restricted Shoir-IE formula evaluator.")
-                except Exception as exc: st.error(f"KPI could not be calculated safely: {exc}")
+                    st.caption("Calculated with the restricted Shoir-IE formula evaluator.")
+                except Exception as exc:
+                    st.error(f"KPI could not be calculated safely: {exc}")
         st.dataframe(lib,use_container_width=True,hide_index=True)
 
     with tabs[1]:
