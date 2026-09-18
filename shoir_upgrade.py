@@ -227,6 +227,7 @@ def build_excel_report(title: str, tables: Iterable[Tuple[str,pd.DataFrame]], fi
             if len(safe.columns): ws.autofilter(3,0,3+len(safe),len(safe.columns)-1)
             numeric_cols=[i for i,col in enumerate(safe.columns) if pd.api.types.is_numeric_dtype(safe[col])]
             if numeric_cols and len(safe) > 0 and len(safe.columns) >= 2:
+                # Native Excel chart remains available for editable workbooks.
                 chart=workbook.add_chart({"type":"column"})
                 for i in numeric_cols:
                     chart.add_series({"name":[safe_name,3,i],"categories":[safe_name,4,0,3+len(safe),0],"values":[safe_name,4,i,3+len(safe),i]})
@@ -235,6 +236,16 @@ def build_excel_report(title: str, tables: Iterable[Tuple[str,pd.DataFrame]], fi
                 chart.set_y_axis({"name":"Value"})
                 chart.set_legend({"position":"bottom"})
                 ws.insert_chart(3,len(safe.columns)+2,chart,{"x_scale":1.25,"y_scale":1.1})
+            # Also embed the exact Plotly figure image in the workbook when a
+            # matching figure label is supplied, so the downloaded XLSX preserves
+            # the same visual used by PDF/PPT/interactive exports.
+            for fig_label, fig in figures:
+                if str(fig_label) == str(name):
+                    try:
+                        png = fig.to_image(format="png", width=1200, height=650, scale=2)
+                        ws.insert_image(3, len(safe.columns)+12, f"exact_{i}.png", {"image_data": io.BytesIO(png), "x_scale": 0.72, "y_scale": 0.72})
+                    except Exception:
+                        pass
             for j,col in enumerate(safe.columns):
                 vals=safe[col].astype(str) if not safe.empty else pd.Series(dtype=str)
                 width=min(55,max(10,len(str(col))+2,int(vals.map(len).max()+2) if len(vals) else 10))
