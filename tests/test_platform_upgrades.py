@@ -12,6 +12,7 @@ def test_clean_dataframe_preserves_leading_zero_ids_and_removes_duplicates():
     out,audit=clean_dataframe(df)
     assert list(out["SKU"])==["001","002"]
     assert float(out["Sales"].iloc[0])==1200
+    assert out["SKU"].dtype.name in ("string","object")
     assert "Blank" not in out.columns
 
 def test_migration_is_additive_and_idempotent():
@@ -26,6 +27,12 @@ def test_migration_is_additive_and_idempotent():
         with sqlite3.connect(db) as c:
             assert c.execute("select username from users").fetchone()[0]=="existing"
             assert c.execute("pragma quick_check").fetchone()[0]=="ok"
+
+def test_clean_dataframe_keeps_zero_prefixed_identifiers():
+    df=pd.DataFrame({"Part":["0007","0012"],"Qty":["10","20"]})
+    out,_=clean_dataframe(df)
+    assert list(out["Part"])==["0007","0012"]
+    assert list(out["Qty"])==[10,20]
 
 def test_report_has_excel_container():
     data=build_excel_report("Test",[("Data",pd.DataFrame({"A":[1,2]}))],[])
