@@ -24,7 +24,7 @@ from email.mime.multipart import MIMEMultipart
 from PIL import Image
 from scipy import stats
 from shoir_upgrade import (align_imported_table, clean_dataframe, build_excel_report, build_workbook_bundle, read_uploaded_workbook, apply_excel_function, EXCEL_FUNCTIONS, copilot_module_recommendation)
-from industrial_platform import PLATFORM_CATALOG, render_module as render_industrial_module
+from industrial_platform import PLATFORM_CATALOG, render_module as render_industrial_module, ml_demand_forecast, tier_allows as platform_tier_allows
 
 # =====================================================================
 # PAGE CONFIGURATION & CUSTOM CSS (Professional Styling & Hover Zoom)
@@ -703,6 +703,24 @@ def get_copilot_response(prompt, history):
         except Exception as e:
             return f"I tried to run the optimizer but it failed: {e}. Check your data in the MILP Solvers module."
 
+    if "forecast" in p or "predict demand" in p:
+        wb=st.session_state.get("copilot_workbook",{})
+        if wb:
+            try:
+                sheet=next(iter(wb)); df=wb[sheet]
+                date_col=next((x for x in df.columns if "date" in str(x).lower()),None)
+                target_col=next((x for x in df.columns if any(k in str(x).lower() for k in ["demand","sales","qty","quantity"])),None)
+                if date_col and target_col:
+                    ext=[x for x in df.columns if x not in [date_col,target_col] and pd.api.types.is_numeric_dtype(df[x])]
+                    forecast,metrics=ml_demand_forecast(df,date_col,target_col,ext[:5],12)
+                    return ("I ran the demand-forecast engine on the first uploaded workbook sheet. "
+                            f"Model R²: **{metrics['R2']:.3f}**, MAE: **{metrics['MAE']:.2f}**. "
+                            "Open Advanced ML Demand Forecasting for the full forecast, uncertainty band and exports.")
+                return "I found the workbook, but could not safely identify both a date column and demand/sales quantity column. Map them explicitly in Advanced ML Demand Forecasting."
+            except Exception as e:
+                return f"I found the workbook but the forecast could not be completed safely: {e}."
+        return "Upload the demand workbook first. Then I can run the grounded forecasting workflow."
+    
     if "safety stock" in p or ("inventory" in p and "stock" in p):
         try:
             conn = sqlite3.connect("enterprise_full_workspace.db")
@@ -8190,8 +8208,10 @@ else:
                 recommendation=copilot_module_recommendation(recommendation_prompt)
                 st.info(recommendation)
                 current_tier=str(st.session_state.get("user_tier","Starter Tier"))
-                if "Required tier:" in recommendation and current_tier.lower().replace(" tier","") not in recommendation.lower():
-                    st.warning("This module may require a higher tier. Open Subscriptions to review available features.")
+                if "Required tier:" in recommendation:
+                    required_tier=recommendation.split("Required tier:",1)[1].strip().rstrip(".")
+                    if not platform_tier_allows(current_tier, required_tier):
+                        st.warning(f"🔒 This module requires **{required_tier}**. Your current tier is **{current_tier}**. Upgrade in Subscriptions to unlock it.")
             st.markdown("### 💬 Copilot")
             for msg in st.session_state.copilot_messages:
                 with st.chat_message(msg["role"]):
