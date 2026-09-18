@@ -1178,10 +1178,17 @@ if not st.session_state.get("current_user"):
 
         for _cat in _cats_seen:
             st.markdown(f"##### {_cat}")
-            for _m in _by_cat[_cat]:
-                with st.expander(_m["name"]):
-                    st.markdown(f"**When to use it:** {_m['when']}")
-                    st.markdown(f"**Example:** {_m['example']}")
+            _cat_items=_by_cat[_cat]
+            for _row in range(0,len(_cat_items),2):
+                _cols=st.columns(2)
+                for _ci,_m in enumerate(_cat_items[_row:_row+2]):
+                    with _cols[_ci]:
+                        st.markdown(
+                            f"<div class='module-card'><div style='font-size:16px;font-weight:800;color:#0f172a'>{html.escape(str(_m['name']))}</div>"
+                            f"<div style='font-size:12px;color:#64748b;margin-top:6px'><b>Use when:</b> {html.escape(str(_m['when']))}</div>"
+                            f"<div style='font-size:12px;color:#475569;margin-top:6px'><b>Example:</b> {html.escape(str(_m['example']))}</div></div>",
+                            unsafe_allow_html=True,
+                        )
 
     # FIX: nothing below this point stopped script execution for a visitor
     # who isn't signed in, so the entire dashboard (sidebar, all modules,
