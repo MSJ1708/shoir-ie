@@ -130,20 +130,68 @@ def build_pptx_report(title,tables,figures):
             for j,v in enumerate(row): t.cell(i,j).text=str(v)
     b=io.BytesIO(); prs.save(b); return b.getvalue()
 
-_ORIG_EDITOR=None; _ORIG_DF=None; _ORIG_PLOT=None; _PATCHED=False
+_ORIG_EDITOR=None; _ORIG_DF=None; _ORIG_PLOT=None; _ORIG_STOP=None; _PATCHED=False
 def _cap(module):
     import streamlit as st
     return st.session_state.setdefault("_upgrade_captures",{}).setdefault(module,{"tables":[],"figures":[]})
 
+def _table_registry():
+    import streamlit as st
+    return st.session_state.setdefault("_upgrade_table_registry",{})
+
+def _register_table(module, key, factory_key, label):
+    reg=_table_registry().setdefault(module,{})
+    reg[key]={"factory_key":factory_key,"label":label}
+
+def _module_tools(module):
+    import streamlit as st
+    reg=_table_registry().get(module,{})
+    if not reg: return
+    st.markdown("---")
+    st.subheader("🧰 Module Table Tools")
+    labels=[v["label"] for v in reg.values()]
+    keys=list(reg.keys())
+    sel_key="upgrade_target_"+hashlib.sha1(module.encode()).hexdigest()[:10]
+    selected_label=st.selectbox("Target table",labels,key=sel_key)
+    selected_key=keys[labels.index(selected_label)]
+    target=reg[selected_key]
+    a,b=st.columns(2)
+    with a:
+        upload_key="upgrade_global_import_"+hashlib.sha1((module+selected_key).encode()).hexdigest()[:10]
+        up=st.file_uploader("Import CSV / Excel into the selected table",type=["csv","xlsx"],key=upload_key)
+        if up is not None:
+            sig=hashlib.sha256(up.getvalue()).hexdigest()
+            sig_key=upload_key+"_sig"
+            if st.session_state.get(sig_key)!=sig:
+                try:
+                    raw=up.getvalue()
+                    imp=pd.read_csv(io.BytesIO(raw)) if up.name.lower().endswith(".csv") else pd.read_excel(io.BytesIO(raw))
+                    base=st.session_state[target["factory_key"]]
+                    st.session_state[target["factory_key"]+"_active"]=align_imported_table(imp,base)
+                    st.session_state[sig_key]=sig
+                    st.success(f"Imported {len(imp):,} rows into {selected_label}.")
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"Import failed: {exc}")
+    with b:
+        reset_key="upgrade_global_reset_"+hashlib.sha1((module+selected_key).encode()).hexdigest()[:10]
+        if st.button("↩️ Reset selected table",key=reset_key,use_container_width=True):
+            st.session_state[target["factory_key"]+"_active"]=st.session_state[target["factory_key"]].copy(deep=True)
+            st.rerun()
+        reset_all_key="upgrade_global_reset_all_"+hashlib.sha1(module.encode()).hexdigest()[:10]
+        if st.button("🧹 Reset all module tables",key=reset_all_key,use_container_width=True):
+            for item in reg.values():
+                st.session_state[item["factory_key"]+"_active"]=st.session_state[item["factory_key"]].copy(deep=True)
+            st.rerun()
 def init_upgrade_services():
-    global _ORIG_EDITOR,_ORIG_DF,_ORIG_PLOT,_PATCHED
+    global _ORIG_EDITOR,_ORIG_DF,_ORIG_PLOT,_ORIG_STOP,_PATCHED
     import streamlit as st
     ensure_upgrade_schema()
     if _PATCHED:return
-    _ORIG_EDITOR,_ORIG_DF,_ORIG_PLOT=st.data_editor,st.dataframe,st.plotly_chart
+    _ORIG_EDITOR,_ORIG_DF,_ORIG_PLOT,_ORIG_STOP=st.data_editor,st.dataframe,st.plotly_chart,st.stop
     def editor(data,*a,**k):
         m=st.session_state.get("upgrade_current_module","Unknown"); key=str(k.get("key") or "table"); d=hashlib.sha1((m+"|"+key).encode()).hexdigest()[:10]; fk="up_factory_"+d; ik="up_import_"+d; sk=ik+"_sig"; rk="up_reset_"+d
-        base=data.copy(deep=True) if isinstance(data,pd.DataFrame) else pd.DataFrame(data); st.session_state.setdefault(fk,base.copy(deep=True))
+        base=data.copy(deep=True) if isinstance(data,pd.DataFrame) else pd.DataFrame(data); st.session_state.setdefault(fk,base.copy(deep=True)); _register_table(m,key,fk,key)
         with st.expander("📥 Import / Reset this table"):
             up=st.file_uploader("Import CSV / Excel",type=["csv","xlsx"],key=ik)
             if up is not None:
@@ -167,7 +215,12 @@ def init_upgrade_services():
         return r
     def plot(fig,*a,**k):
         m=st.session_state.get("upgrade_current_module","Unknown"); _cap(m)["figures"].append((str(k.get("key") or "Chart"),fig)); return _ORIG_PLOT(fig,*a,**k)
-    st.data_editor,st.dataframe,st.plotly_chart=editor,df,plot; _PATCHED=True
+    def stop_with_report(*args,**kwargs):
+        module=st.session_state.get("upgrade_current_module","Unknown")
+        _module_tools(module)
+        render_module_report_panel(module)
+        return _ORIG_STOP(*args,**kwargs)
+    st.data_editor,st.dataframe,st.plotly_chart,st.stop=editor,df,plot,stop_with_report; _PATCHED=True
 
 def render_module_report_panel(module):
     import streamlit as st
