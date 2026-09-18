@@ -7,6 +7,8 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: .
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -19,7 +21,7 @@ jobs:
       - name: Compile all Python modules
         run: python -m compileall -q .
       - name: Run regression tests
-        run: pytest -q tests
+        run: python -m pytest -q tests
       - name: Parse required application modules
         run: |
           python - <<'PY'
