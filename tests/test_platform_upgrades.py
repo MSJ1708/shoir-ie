@@ -5,7 +5,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 import pandas as pd
-from shoir_upgrade import clean_dataframe, ensure_upgrade_schema, tier_allows, build_excel_report
+from shoir_upgrade import clean_dataframe, ensure_upgrade_schema, tier_allows, build_excel_report, build_pdf_report, build_pptx_report, UPGRADE_MODULES
 
 def test_clean_dataframe_preserves_leading_zero_ids_and_removes_duplicates():
     df=pd.DataFrame({"SKU":["001","001","002"],"Sales":["1,200","1,200","900"],"Blank":[None,None,None]})
@@ -37,6 +37,28 @@ def test_clean_dataframe_keeps_zero_prefixed_identifiers():
 def test_report_has_excel_container():
     data=build_excel_report("Test",[("Data",pd.DataFrame({"A":[1,2]}))],[])
     assert data[:2]==b"PK"
+
+def test_pdf_and_powerpoint_exports_have_valid_headers():
+    tables=[("Data",pd.DataFrame({"A":[1,2],"B":["x","y"]}))]
+    pdf=build_pdf_report("Test",tables,[])
+    ppt=build_pptx_report("Test",tables,[])
+    assert pdf.startswith(b"%PDF")
+    assert ppt[:2]==b"PK"
+
+def test_requested_modules_have_tier_gates():
+    for name in [
+        "Advanced ML Demand Forecasting",
+        "Stochastic & Monte Carlo Risk Modeling",
+        "ERP & WMS API Connectors",
+        "Multi-Echelon Inventory Optimization",
+        "Carbon Footprint & ESG Accounting",
+        "Team Workspaces & RBAC",
+        "Executive Report Center",
+        "Interactive DES Simulation Canvas",
+        "Predictive Maintenance Digital Twin",
+        "Localization & Multi-Currency",
+    ]:
+        assert name in UPGRADE_MODULES
 
 def test_tier_gating():
     assert tier_allows("Starter Tier","Starter")
