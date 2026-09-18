@@ -45,3 +45,11 @@ def test_polished_results_surface_is_wired():
     assert "enterprise_module_selector" in source
     assert "Detailed diagnostics" in source
     assert "st.plotly_chart" in source
+
+
+def test_streamlit_application_starts_without_runtime_exception():
+    """Exercise the actual Streamlit script, not only imports and source checks."""
+    from streamlit.testing.v1 import AppTest
+    at = AppTest.from_file(Path(__file__).resolve().parents[1] / "app.py", default_timeout=30)
+    at.run(timeout=30)
+    assert not at.exception, "\n".join(str(e.value) for e in at.exception)
