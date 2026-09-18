@@ -23,6 +23,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from PIL import Image
 from scipy import stats
+from shoir_upgrade import align_imported_table, clean_dataframe, build_excel_report
 
 # =====================================================================
 # PAGE CONFIGURATION & CUSTOM CSS (Professional Styling & Hover Zoom)
@@ -1264,6 +1265,69 @@ elif "Pro" in tier_val or "Trial" in tier_val:
 else:
     allowed_modules = tier1_features
 selected_module = st.sidebar.selectbox("Select Module", allowed_modules)
+
+# Universal data workspace controls: available before every module renderer.
+def _upgrade_tables_for_module(module_name):
+    candidates=[]
+    explicit={"MILP Solvers":[("Customer Demands","customers_list"),("Candidate Warehouses","warehouses_list")]}
+    for label,key in explicit.get(module_name,[]):
+        if key in st.session_state: candidates.append((label,key))
+    seen={k for _,k in candidates}
+    for key,val in list(st.session_state.items()):
+        if key in seen or str(key).startswith(("_","upgrade_","copilot_")): continue
+        if isinstance(val,pd.DataFrame) and len(val.columns): candidates.append((str(key).replace("_"," ").title(),key))
+        elif isinstance(val,list) and val and isinstance(val[0],dict): candidates.append((str(key).replace("_"," ").title(),key))
+    return candidates
+
+def _upgrade_df(key):
+    val=st.session_state.get(key)
+    if isinstance(val,pd.DataFrame): return val.copy(deep=True)
+    if isinstance(val,list): return pd.DataFrame(val)
+    return pd.DataFrame()
+
+def _upgrade_write(key,df):
+    old=st.session_state.get(key)
+    if isinstance(old,list): st.session_state[key]=df.where(pd.notna(df),None).to_dict("records")
+    else: st.session_state[key]=df.copy(deep=True)
+
+_upgrade_candidates=_upgrade_tables_for_module(selected_module)
+with st.container(border=True):
+    st.subheader("📁 Import, Clean, Reset & Export")
+    st.caption("Load Excel/CSV data into an editable module table, clean it safely, restore the original data, or export a formatted workbook.")
+    if _upgrade_candidates:
+        labels=[x[0] for x in _upgrade_candidates]
+        keys=[x[1] for x in _upgrade_candidates]
+        sel=st.selectbox("Table",labels,key="upgrade_table_selector_"+hashlib.sha1(selected_module.encode()).hexdigest()[:8])
+        key=keys[labels.index(sel)]
+        current=_upgrade_df(key)
+        snap_key="upgrade_snapshot_"+key
+        if snap_key not in st.session_state: st.session_state[snap_key]=current.copy(deep=True)
+        up=st.file_uploader("📤 Import Excel / CSV",type=["xlsx","csv"],key="upgrade_uploader_"+hashlib.sha1(selected_module.encode()).hexdigest()[:8])
+        a,b,d=st.columns(3)
+        with a:
+            if up is not None:
+                signature=hashlib.sha256(up.getvalue()).hexdigest()
+                if st.session_state.get("upgrade_import_signature")!=signature:
+                    try:
+                        raw=up.getvalue()
+                        imported=pd.read_excel(io.BytesIO(raw)) if up.name.lower().endswith(("xlsx","xls")) else pd.read_csv(io.BytesIO(raw))
+                        _upgrade_write(key,align_imported_table(imported,current))
+                        st.session_state["upgrade_import_signature"]=signature
+                        st.success(f"Imported {len(imported):,} rows into {sel}.")
+                        st.rerun()
+                    except Exception as exc: st.error(f"Import failed safely: {exc}")
+        with b:
+            if st.button("✨ Auto Clean",key="upgrade_clean_"+hashlib.sha1((selected_module+key).encode()).hexdigest()[:8],use_container_width=True,type="primary"):
+                cleaned,audit=clean_dataframe(_upgrade_df(key)); _upgrade_write(key,cleaned)
+                st.session_state["upgrade_audit"]=pd.DataFrame(audit); st.success("Table cleaned."); st.rerun()
+            if st.button("↩️ Reset Table",key="upgrade_reset_"+hashlib.sha1((selected_module+key+"reset").encode()).hexdigest()[:8],use_container_width=True):
+                _upgrade_write(key,st.session_state[snap_key].copy(deep=True)); st.session_state.pop("upgrade_audit",None); st.rerun()
+        with d:
+            data=build_excel_report("Shoir-IE | "+selected_module,[(sel,_upgrade_df(key))])
+            st.download_button("📥 Download XLSX",data=data,file_name="shoir_ie_"+re.sub(r"[^A-Za-z0-9]+","_",selected_module).lower()+".xlsx",mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",use_container_width=True)
+    else:
+        st.info("Open a module with an editable data table to enable import/export controls.")
+
 
 st.sidebar.markdown("---")
 if st.sidebar.button("Lock / Logout Workspace"):
