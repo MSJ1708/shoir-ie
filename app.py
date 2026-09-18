@@ -8054,9 +8054,32 @@ else:
         st.header("🤖 Natural Language AI Copilot")
         st.caption(
             "Grounded in your real workspace data - it won't claim to have checked something it hasn't. "
-            "Connect a real language model for open-ended reasoning (see the note in the code) - until then, "
-            "it handles a genuinely useful, honest set of real commands."
+            "Upload an XLSX/CSV below to let Copilot inspect, clean and advise on the workbook."
         )
+
+        copilot_file = st.file_uploader("📎 Upload Excel / CSV to Copilot", type=["xlsx", "csv"], key="copilot_excel_upload")
+        if copilot_file is not None:
+            try:
+                copilot_df = pd.read_csv(copilot_file) if copilot_file.name.lower().endswith(".csv") else pd.read_excel(copilot_file)
+                st.session_state["copilot_workbook_df"] = copilot_df
+                st.success(f"Loaded **{len(copilot_df):,} rows × {len(copilot_df.columns):,} columns**.")
+                st.dataframe(copilot_df.head(25), use_container_width=True)
+                c1, c2 = st.columns(2)
+                with c1:
+                    if st.button("✨ Auto Clean Workbook", type="primary", use_container_width=True, key="copilot_auto_clean"):
+                        from shoir_upgrade import clean_dataframe
+                        cleaned, audit = clean_dataframe(copilot_df)
+                        st.session_state["copilot_cleaned_df"] = cleaned
+                        st.session_state["copilot_clean_audit"] = pd.DataFrame(audit)
+                        st.success("Workbook cleaned and professionalized.")
+                with c2:
+                    if st.session_state.get("copilot_cleaned_df") is not None:
+                        from shoir_upgrade import build_excel_report
+                        xlsx = build_excel_report("Shoir-IE Copilot Cleaned Workbook", [("Cleaned Data", st.session_state["copilot_cleaned_df"]), ("Cleaning Audit", st.session_state["copilot_clean_audit"])], [])
+                        st.download_button("📥 Download Cleaned XLSX", xlsx, "shoir_ie_copilot_cleaned.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+                if st.session_state.get("copilot_cleaned_df") is not None:
+                    st.dataframe(st.session_state["copilot_cleaned_df"].head(25), use_container_width=True)
+                    st.caption("You can now ask Copilot what to improve or which module should handle this data.")
         for msg in st.session_state.copilot_messages:
             with st.chat_message(msg["role"]):
                 st.markdown(msg["content"])
@@ -10291,3 +10314,11 @@ if mod == "Cryptographic Ledger":
         st.write("")
         if st.button("Unlock Enterprise Tier", type="primary", use_container_width=True):
             st.info("Redirecting to secure subscription portal...")
+
+
+# Platform upgrade modules and universal module report/export surface.
+try:
+    render_module_upgrade(selected_module)
+    render_module_report_panel(selected_module)
+except Exception as _upgrade_exc:
+    st.error(f"Platform upgrade component error: {_upgrade_exc}")
