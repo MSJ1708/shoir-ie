@@ -24,7 +24,7 @@ from email.mime.multipart import MIMEMultipart
 from PIL import Image
 from scipy import stats
 from shoir_upgrade import (align_imported_table, clean_dataframe, build_excel_report, build_workbook_bundle, read_uploaded_workbook, apply_excel_function, EXCEL_FUNCTIONS, copilot_module_recommendation)
-from industrial_platform import (NEW_ENTERPRISE_PLUS_MODULES, industrial_data_snapshot, finite_schedule, mes_work_order_table, spc_limits, process_capability, pareto_frontier, weighted_objective, robust_scenario_bounds, discrete_event_simulation, economics, lca_inventory, build_excel_export, data_quality_frame, ensure_model_registry, registry_add, registry_list)
+from industrial_platform import (NEW_ENTERPRISE_PLUS_MODULES, industrial_data_snapshot, finite_schedule, mes_work_order_table, spc_limits, process_capability, pareto_frontier, weighted_objective, robust_scenario_bounds, discrete_event_simulation, economics, lca_inventory, build_excel_export, data_quality_frame, ensure_model_registry, registry_add, registry_list, ml_demand_forecast, predictive_maintenance_rul, scenario_delta, currency_convert, rbac_can_edit, connector_healthcheck, executive_report_pdf)
 
 # =====================================================================
 # PAGE CONFIGURATION & CUSTOM CSS (Professional Styling & Hover Zoom)
@@ -585,6 +585,10 @@ MODULE_CATALOG = [
     {"tier": "Enterprise Plus", "category": "Governance", "name": "Enterprise Security & Model Governance",
      "when": "Models, datasets and decisions need traceability and reproducibility.",
      "example": "Register model versions and dataset hashes so a result can be traced back to its configuration."},
+
+    {"tier": "Enterprise Plus", "category": "AI & Digital Twin", "name": "Advanced Industrial AI & Digital Twin Lab",
+     "when": "You need predictive demand, predictive maintenance, scenario deltas, factory visualization, localization, connector validation and executive reporting in one advanced workspace.",
+     "example": "Train a reproducible demand model with promotion/weather features, estimate machine RUL from telemetry, compare scenarios, validate a connector definition and export an executive PDF."},
 
     # ---------------- RESEARCH PACK ($30 add-on) adds ----------------
     {"tier": "Research Pack", "category": "Research Authoring", "name": "Statistical Hypothesis Testing",
@@ -1437,6 +1441,81 @@ elif selected_module == "Industrial Command Center":
         reg=registry_list(st.session_state.get("current_user","unknown")); st.dataframe(reg,use_container_width=True,hide_index=True)
         if not reg.empty: st.download_button("📥 Download registry",build_excel_export("Shoir-IE Model Registry",{"Models":reg}),"shoir_ie_model_registry.xlsx","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",use_container_width=True)
 
+elif selected_module == "Advanced Industrial AI & Digital Twin Lab":
+    st.markdown("<h1 style='text-align:center;'>🧠 Advanced Industrial AI & Digital Twin Lab</h1>", unsafe_allow_html=True)
+    st.caption("Predictive demand, maintenance, scenario comparison, factory visualization, connectivity governance, localization and executive reporting.")
+    lab_tabs=st.tabs(["📈 Demand Forecasting","🛠️ Predictive Maintenance","🔀 Scenario Versioning","🏭 3D Factory","🌐 Connectivity & Localization","📄 Executive Report"])
+    with lab_tabs[0]:
+        hist=st.data_editor(st.session_state.get("lab_forecast_data",pd.DataFrame({
+            "Demand":[120,135,128,150,162,171,168,180,190,205,214,225],
+            "Promotion":[0,0,1,0,1,1,0,1,0,1,1,0],
+            "Weather":[25,26,24,28,30,31,29,27,26,25,23,22],
+            "MacroIndex":[100,101,101,102,103,103,104,105,106,106,107,108],
+        })),num_rows="dynamic",use_container_width=True,key="lab_forecast_editor")
+        st.session_state.lab_forecast_data=hist
+        target=st.selectbox("Target",list(hist.columns),index=0,key="lab_forecast_target")
+        features=st.multiselect("External/model features",[c for c in hist.columns if c!=target],default=[c for c in hist.columns if c!=target],key="lab_forecast_features")
+        model_type=st.selectbox("Model",["Random Forest","Gradient Boosting"],key="lab_forecast_model")
+        if st.button("🚀 Train & Forecast",type="primary",key="lab_forecast_run"):
+            try:
+                out=ml_demand_forecast(hist,target,features,12,model_type); st.session_state.lab_forecast_out=out
+                st.success(f"Model trained. Validation MAE: {out['diagnostics']['MAE']!s}; R²: {out['diagnostics']['R2']!s}")
+            except Exception as exc: st.error(f"Forecast validation failed: {exc}")
+        if st.session_state.get("lab_forecast_out"):
+            out=st.session_state.lab_forecast_out; st.dataframe(out["forecast"],use_container_width=True,hide_index=True); st.dataframe(out["feature_importance"],use_container_width=True,hide_index=True)
+            st.download_button("📥 Download forecast package",build_excel_export("Shoir-IE Demand Forecast",{"Forecast":out["forecast"],"Feature Importance":out["feature_importance"],"Diagnostics":pd.DataFrame([out["diagnostics"]])}),"shoir_ie_demand_forecast.xlsx","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",use_container_width=True)
+    with lab_tabs[1]:
+        telem=st.data_editor(st.session_state.get("lab_telemetry",pd.DataFrame({
+            "Vibration":[.20,.22,.25,.27,.31,.34,.36,.40,.43,.47,.50,.55,.58,.62,.66,.70,.73,.76,.80,.84],
+            "Temperature":[60,61,62,63,65,66,68,69,70,72,73,75,76,78,79,81,82,84,85,87],
+            "Load":[.5,.52,.51,.54,.56,.57,.59,.60,.62,.63,.65,.66,.68,.69,.71,.72,.74,.75,.77,.78],
+            "RUL":[120,116,112,108,103,98,94,89,84,79,74,69,64,59,54,49,44,39,34,29],
+        })),num_rows="dynamic",use_container_width=True,key="lab_telemetry_editor")
+        st.session_state.lab_telemetry=telem
+        target=st.selectbox("RUL target",list(telem.columns),index=3,key="lab_rul_target")
+        features=st.multiselect("Telemetry features",[c for c in telem.columns if c!=target],default=[c for c in telem.columns if c!=target],key="lab_rul_features")
+        if st.button("🛠️ Train RUL model",type="primary",key="lab_rul_run"):
+            try: st.session_state.lab_rul_out=predictive_maintenance_rul(telem,target,features); st.success("Predictive maintenance model trained with holdout validation.")
+            except Exception as exc: st.error(f"RUL validation failed: {exc}")
+        if st.session_state.get("lab_rul_out"):
+            out=st.session_state.lab_rul_out; st.metric("Predicted RUL for latest telemetry",f"{out['predicted_rul']:.1f} periods"); st.dataframe(out["feature_importance"],use_container_width=True,hide_index=True)
+            st.download_button("📥 Download maintenance model report",build_excel_export("Shoir-IE Predictive Maintenance",{"Predictions":out["predictions"],"Feature Importance":out["feature_importance"],"Metrics":pd.DataFrame([{"MAE":out["MAE"],"R2":out["R2"],"Predicted RUL":out["predicted_rul"]}])}),"shoir_ie_predictive_maintenance.xlsx","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",use_container_width=True)
+    with lab_tabs[2]:
+        base=st.data_editor(st.session_state.get("lab_base_scenario",pd.DataFrame([{"Scenario":"Baseline","Cost":100,"Service":95,"Carbon":80},{"Scenario":"Baseline-2","Cost":105,"Service":94,"Carbon":75}])),use_container_width=True,key="lab_base")
+        alt=st.data_editor(st.session_state.get("lab_alt_scenario",pd.DataFrame([{"Scenario":"Candidate","Cost":92,"Service":97,"Carbon":70},{"Scenario":"Candidate-2","Cost":111,"Service":99,"Carbon":68}])),use_container_width=True,key="lab_alt")
+        st.session_state.lab_base_scenario=base; st.session_state.lab_alt_scenario=alt
+        key=st.selectbox("Scenario key",["Scenario"],key="lab_scenario_key")
+        if st.button("🔀 Compare scenarios",type="primary",key="lab_scenario_run"):
+            try: st.session_state.lab_delta=scenario_delta(base,alt,[key])
+            except Exception as exc: st.error(f"Scenario comparison failed: {exc}")
+        if st.session_state.get("lab_delta") is not None:
+            st.dataframe(st.session_state.lab_delta,use_container_width=True,hide_index=True)
+            st.download_button("📥 Download scenario comparison",build_excel_export("Shoir-IE Scenario Versioning",{"Delta":st.session_state.lab_delta}),"shoir_ie_scenario_comparison.xlsx","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",use_container_width=True)
+        st.caption("Saved scenario runs are stored in the model/experiment registry; each run can be reproduced from its recorded parameters.")
+    with lab_tabs[3]:
+        layout=st.data_editor(pd.DataFrame([{"Asset":"Machine A","X":0,"Y":0,"Z":0,"Status":"Running"},{"Asset":"Machine B","X":5,"Y":0,"Z":0,"Status":"Warning"},{"Asset":"Buffer","X":2,"Y":4,"Z":0,"Status":"Healthy"},{"Asset":"Dock","X":8,"Y":4,"Z":0,"Status":"Healthy"}]),num_rows="dynamic",use_container_width=True,key="lab_3d_layout")
+        fig3=go.Figure()
+        for status,grp in layout.groupby("Status"):
+            fig3.add_trace(go.Scatter3d(x=grp["X"],y=grp["Y"],z=grp["Z"],mode="markers+text",text=grp["Asset"],name=status,marker={"size":10}))
+        fig3.update_layout(title="Interactive Factory Digital Twin Layout",scene={"xaxis_title":"X","yaxis_title":"Y","zaxis_title":"Z"})
+        st.plotly_chart(fig3,use_container_width=True)
+        st.download_button("📥 Download factory layout data",build_excel_export("Shoir-IE 3D Factory",{"Layout":layout}),"shoir_ie_factory_layout.xlsx","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",use_container_width=True)
+    with lab_tabs[4]:
+        system=st.selectbox("Connector system",["SAP","Oracle","WMS","MES","OPC UA Gateway","REST API"],key="lab_connector_system")
+        endpoint=st.text_input("Endpoint",placeholder="https://example.internal/api",key="lab_connector_endpoint")
+        conn_check=connector_healthcheck({"name":system,"system":system,"endpoint":endpoint})
+        st.json(conn_check)
+        st.caption("The application validates connector definitions and keeps production credentials outside the database. A live enterprise connection requires the customer's endpoint and secret configuration.")
+        amount=st.number_input("Amount to convert",value=1000.0,key="lab_currency_amount")
+        rate=st.number_input("Rate to base currency",value=3.75,min_value=0.000001,key="lab_currency_rate")
+        st.metric("Converted amount",f"{currency_convert(amount,rate):,.2f}")
+        role=st.selectbox("Workspace role",["Viewer","Planner","Engineer","Manager","Admin"],key="lab_role")
+        action=st.selectbox("Permission",["read","write_scenario","run_model","edit_model","approve","admin"],key="lab_action")
+        st.info(f"Permission {'granted' if rbac_can_edit(role,'workspace',action) else 'not granted'} for {role}.")
+    with lab_tabs[5]:
+        summary={"Workspace":"Shoir-IE","Module":"Advanced Industrial AI & Digital Twin Lab","Tier":str(st.session_state.get("user_tier","unknown"))}
+        report=executive_report_pdf("Shoir-IE Executive Engineering Report",summary,{"Forecast Diagnostics":pd.DataFrame([st.session_state.get("lab_forecast_out",{}).get("diagnostics",{})]) if st.session_state.get("lab_forecast_out") else pd.DataFrame([summary])})
+        st.download_button("📄 Download Executive PDF",report,"shoir_ie_executive_report.pdf","application/pdf",use_container_width=True)
 elif selected_module in ["Autonomous Cognitive Operations & Zero-Knowledge Mesh (ACO-ZKMS)", "⚡ ACO-ZKMS Master Engine"]:
     import streamlit as st
     import pandas as pd
