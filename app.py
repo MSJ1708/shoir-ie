@@ -1312,6 +1312,8 @@ elif "Enterprise Plus" in tier_val:
     allowed_modules = enterprise_plus_features
 elif "Enterprise" in tier_val or is_admin:
     allowed_modules = tier3_features
+if is_admin:
+    allowed_modules = research_pack_features + ["Admin Panel"]
 elif "Pro" in tier_val or "Trial" in tier_val:
     allowed_modules = tier2_features
 else:
