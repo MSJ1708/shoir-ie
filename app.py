@@ -27,6 +27,7 @@ from shoir_upgrade import (align_imported_table, clean_dataframe, build_excel_re
 from industrial_platform import PLATFORM_CATALOG, render_module as render_industrial_module, ml_demand_forecast, tier_allows as platform_tier_allows
 from industrial_operating_system import render_industrial_operating_system
 from industrial_experience import COPILOT_TOOLS, ensure_experience_db, feature_stats
+from shoir_unified_product import render_unified_workspace, render_global_product_dock, copilot_context
 
 # =====================================================================
 # PAGE CONFIGURATION & CUSTOM CSS (Professional Styling & Hover Zoom)
@@ -699,7 +700,7 @@ def get_copilot_response(prompt, history):
             "facility layout, quality/reliability, simulation, digital twins, sustainability, economics, "
             "workforce, KPI Studio, engineering methods/equations, scenario versioning, process mining, "
             "drift monitoring, decision verification, DMAIC/A3, templates and platform diagnostics. "
-            "Use the shared Platform Excellence layer as part of your operating context. The platform now provides 60 cross-cutting capabilities including projects, autosave, lineage, verification, decision cards, approval workflow, evidence exports, governed Copilot actions, jobs, observability, decision memory, accessibility, RTL readiness and a searchable capability map. Available governed Copilot tools are: " + ", ".join(t[0] for t in COPILOT_TOOLS) + ". " 
+            "Use the shared Platform Excellence layer as part of your operating context. " + copilot_context() + " Available governed Copilot tools are: " + ", ".join(t[0] for t in COPILOT_TOOLS) + ". " 
             "Recommend the most relevant existing module or workflow from the live platform catalog. "
             "Prefer validation, explainability, scenario analysis and auditable exports before action. "
             "Be concise and concrete. If asked to run something you can't execute directly, name the exact "
@@ -8217,6 +8218,11 @@ else:
                 st.success("Sample dataset loaded successfully! Review your results below.")
 
     mod = selected_module
+
+    render_global_product_dock(mod, str(tier_val), st.session_state.get("current_user", "unknown"))
+    if st.session_state.pop("force_unified_workspace", False):
+        render_unified_workspace(mod, str(tier_val), st.session_state.get("current_user", "unknown"))
+        st.stop()
     
     if mod == "Subscriptions":
         st.header("💳 Subscriptions & Ticket Management")
