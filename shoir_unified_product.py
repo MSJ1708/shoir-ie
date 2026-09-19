@@ -702,3 +702,28 @@ def render_global_product_dock(module: str, tier: str, username: str) -> None:
             use_container_width=True,
             key="global_quick_evidence_" + key,
         )
+
+def copilot_context() -> str:
+    """Human-readable platform context for the AI Copilot system prompt."""
+    capabilities = [
+        "Unified Studies",
+        "Data Readiness Gate",
+        "Scenario Laboratory",
+        "Before / After impact analysis",
+        "Explain My Result",
+        "Governed Decision Cards",
+        "Implementation Tracker",
+        "Industrial Decision Memory",
+        "Platform Health",
+        "Showcase Mode",
+        "Universal Evidence Export",
+        "Command Palette",
+        "cross-module recommendations",
+    ]
+    return (
+        "Shoir-IE now operates as one unified industrial product. "
+        "Its shared workflow is Problem → Data → Model → Scenario → Decision → Implementation → Lesson. "
+        "Available cross-cutting experience surfaces: " + ", ".join(capabilities) + ". "
+        "Use evidence-first language, never invent values, clearly separate measured results from assumptions, "
+        "and prefer preview/approval before any destructive action."
+    )
