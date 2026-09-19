@@ -26,6 +26,7 @@ from scipy import stats
 from shoir_upgrade import (align_imported_table, clean_dataframe, build_excel_report, build_workbook_bundle, read_uploaded_workbook, apply_excel_function, EXCEL_FUNCTIONS, copilot_module_recommendation)
 from industrial_platform import PLATFORM_CATALOG, render_module as render_industrial_module, ml_demand_forecast, tier_allows as platform_tier_allows
 from industrial_operating_system import render_industrial_operating_system
+from industrial_experience import COPILOT_TOOLS, ensure_experience_db, feature_stats
 
 # =====================================================================
 # PAGE CONFIGURATION & CUSTOM CSS (Professional Styling & Hover Zoom)
@@ -698,6 +699,7 @@ def get_copilot_response(prompt, history):
             "facility layout, quality/reliability, simulation, digital twins, sustainability, economics, "
             "workforce, KPI Studio, engineering methods/equations, scenario versioning, process mining, "
             "drift monitoring, decision verification, DMAIC/A3, templates and platform diagnostics. "
+            "Use the shared Platform Excellence layer as part of your operating context. The platform now provides 60 cross-cutting capabilities including projects, autosave, lineage, verification, decision cards, approval workflow, evidence exports, governed Copilot actions, jobs, observability, decision memory, accessibility, RTL readiness and a searchable capability map. Available governed Copilot tools are: " + ", ".join(t[0] for t in COPILOT_TOOLS) + ". " 
             "Recommend the most relevant existing module or workflow from the live platform catalog. "
             "Prefer validation, explainability, scenario analysis and auditable exports before action. "
             "Be concise and concrete. If asked to run something you can't execute directly, name the exact "
