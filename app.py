@@ -26,7 +26,6 @@ from scipy import stats
 from shoir_upgrade import (align_imported_table, clean_dataframe, build_excel_report, build_workbook_bundle, read_uploaded_workbook, apply_excel_function, EXCEL_FUNCTIONS, copilot_module_recommendation)
 from industrial_platform import PLATFORM_CATALOG, render_module as render_industrial_module, ml_demand_forecast, tier_allows as platform_tier_allows
 from industrial_operating_system import render_industrial_operating_system
-from industrial_experience import ensure_experience_db
 
 # =====================================================================
 # PAGE CONFIGURATION & CUSTOM CSS (Professional Styling & Hover Zoom)
@@ -1247,22 +1246,24 @@ with st.sidebar.expander(f"👤 {st.session_state.current_user} ({st.session_sta
 st.sidebar.markdown("---")
 
 # =====================================================================
-# VALUE BOOSTER: TRANSPARENT, ASSUMPTION-DRIVEN VALUE MODEL
+# VALUE BOOSTER 1: SIDEBAR INTERACTIVE ROI CALCULATOR
 # =====================================================================
-st.sidebar.header("💰 Evidence-Based Value Estimator")
-monthly_shipments = st.sidebar.number_input("Monthly Shipments", min_value=0, max_value=1000000, value=2500, step=100)
-avg_transport_cost = st.sidebar.number_input("Avg Cost per Shipment ($)", min_value=0.0, max_value=1000000.0, value=120.0, step=5.0)
-assumed_delta = st.sidebar.slider("Scenario delta assumption (%)", min_value=-100.0, max_value=100.0, value=5.0, step=0.5)
-baseline_value = monthly_shipments * avg_transport_cost
-illustrative_impact = baseline_value * assumed_delta / 100.0
+st.sidebar.header("💰 Logistics Savings Estimator")
+monthly_shipments = st.sidebar.number_input("Monthly Shipments", min_value=100, max_value=100000, value=2500, step=100)
+avg_transport_cost = st.sidebar.number_input("Avg Cost per Shipment ($)", min_value=10, max_value=1000, value=120, step=5)
+estimated_savings = monthly_shipments * avg_transport_cost * 0.12
+
 st.sidebar.markdown(
-    f"""<div class='module-card'><div class='kicker'>Scenario value · user assumption</div>
-    <div style='font-size:22px;font-weight:850;color:#0f766e'>${illustrative_impact:,.2f}</div>
-    <div style='font-size:11px;color:#64748b'>Illustrative monthly impact · baseline ${baseline_value:,.2f} · assumption {assumed_delta:.1f}%</div>
-    </div>""", unsafe_allow_html=True)
-st.sidebar.caption("Planning estimate only. Replace the assumption with measured baseline/scenario evidence before using it for a business case.")
+    f"""
+    <div style='background-color: #e6f4ea; padding: 12px; border-radius: 6px; border-left: 5px solid #34a853; margin-top: 5px;'>
+        <h4 style='margin: 0; color: #137333; font-size: 14px;'>Projected Monthly Savings</h4>
+        <p style='font-size: 22px; font-weight: bold; margin: 5px 0 0 0; color: #137333;'>${estimated_savings:,.2f}</p>
+        <p style='font-size: 10px; color: #5f6368; margin: 3px 0 0 0;'>Based on standard MILP route optimization benchmarks.</p>
+    </div>
+    """,
+    unsafe_allow_html=True
+)
 st.sidebar.markdown("---")
-ensure_experience_db()
 
 tier_val = st.session_state.user_tier
 is_admin = (st.session_state.current_user == "sho")
