@@ -27,6 +27,7 @@ from shoir_upgrade import (align_imported_table, clean_dataframe, build_excel_re
 from industrial_platform import PLATFORM_CATALOG, render_module as render_industrial_module, ml_demand_forecast, tier_allows as platform_tier_allows
 from industrial_operating_system import render_industrial_operating_system
 from industrial_experience import COPILOT_TOOLS, ensure_experience_db, feature_stats
+from shoir_unified_product import render_unified_workspace, render_global_product_dock, copilot_context
 
 # =====================================================================
 # PAGE CONFIGURATION & CUSTOM CSS (Professional Styling & Hover Zoom)
@@ -8217,6 +8218,13 @@ else:
                 st.success("Sample dataset loaded successfully! Review your results below.")
 
     mod = selected_module
+
+    # Unified product experience: every legacy/specialist module gets a calm
+    # command dock, study context and a one-click path into the shared workflow.
+    render_global_product_dock(mod, str(tier_val), st.session_state.get("current_user", "unknown"))
+    if st.session_state.pop("force_unified_workspace", False):
+        render_unified_workspace(mod, str(tier_val), st.session_state.get("current_user", "unknown"))
+        st.stop()
     
     if mod == "Subscriptions":
         st.header("💳 Subscriptions & Ticket Management")
