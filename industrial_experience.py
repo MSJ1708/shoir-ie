@@ -130,12 +130,12 @@ def ensure_experience_db(db_path: str = "enterprise_full_workspace.db") -> None:
 
 
 def feature_catalog() -> pd.DataFrame:
-    return pd.DataFrame(FEATURES_60, columns=["ID", "Feature", "Description", "Status'])
+    return pd.DataFrame(FEATURES_60, columns=["ID", "Feature", "Description", "Status"])
 
 
 def feature_stats() -> dict:
     df = feature_catalog()
-    return {"total": len(df), "implemented": int((df["Status'] == "Implemented").sum()), "integration_ready": int((df["Status'] == "Integration-ready").sum())}
+    return {"total": len(df), "implemented": int((df["Status"] == "Implemented").sum()), "integration_ready": int((df["Status"] == "Integration-ready").sum())}
 
 
 def save_project(name: str, module: str, owner: str, payload: Mapping[str, Any]) -> str:
@@ -181,7 +181,7 @@ def create_decision(title: str, module: str, metrics: Mapping[str, Any], assumpt
 
 
 def transition_decision(decision_id: str, actor: str, to_status: str, comment: str = "") -> None:
-    allowed = ["Draft", "Validated", "Proposed", "Review", "Approved", "Implemented", "Verified']
+    allowed = ["Draft", "Validated", "Proposed", "Review", "Approved", "Implemented", "Verified"]
     with _db() as c:
         row = c.execute("SELECT status FROM experience_decisions WHERE decision_id=?", (decision_id,)).fetchone()
         if not row: raise ValueError("Decision not found.")
@@ -223,7 +223,7 @@ def create_job(module: str, job_type: str, actor: str, payload: Mapping[str, Any
 def update_job(job_id: str, status: str, progress: float, message: str = "") -> None:
     with _db() as c:
         fields = "status=?,progress=?,message=?"
-        values = [status, float(max(0.0, min(100.0, progress))), message[:500]]
+        values: list[Any] = [status, float(max(0.0, min(100.0, progress))), message[:500]]
         if status == "Running": fields += ",started_at=?"; values.append(_now())
         if status in {"Completed","Failed","Cancelled"}: fields += ",finished_at=?"; values.append(_now())
         values.append(job_id)
@@ -295,15 +295,15 @@ def _export_bundle(module: str, df: pd.DataFrame, result: Mapping[str, Any], act
 
 def _starter_data(module: str) -> pd.DataFrame:
     lower = module.lower()
-    if any(k in lower for k in ["quality","reliability","maintenance']):
-        return pd.DataFrame({"Workcenter":["WC-01","WC-02","WC-03","WC-04","WC-05'],"Baseline":[94,91,88,96,89],"Scenario":[96,93,92,97,94],"Units":["%']*5})
-    if any(k in lower for k in ["sustain","carbon","energy']):
-        return pd.DataFrame({"Area":["Line A","Line B","Warehouse","Fleet","Office'],"Baseline":[120,95,80,110,42],"Scenario":[105,84,66,92,37],"Units":["tCO2e']*5})
-    if any(k in lower for k in ["planning","schedule","production']):
-        return pd.DataFrame({"Workcenter":["M-01","M-02","M-03","M-04","M-05'],"Baseline":[82,90,76,88,84],"Scenario":[88,92,85,94,90],"Units":["% utilization']*5})
-    if any(k in lower for k in ["finance","economics","investment']):
-        return pd.DataFrame({"Option":["Base","Automation","Expansion","Hybrid'],"Baseline":[100,100,100,100],"Scenario":[100,112,118,125],"Units":["index']*4})
-    return pd.DataFrame({"Area":["Demand","Capacity","Service","Inventory","Risk'],"Baseline":[100,100,95,100,10],"Scenario":[110,108,97,92,7],"Units":["index","index","%","index","index']})
+    if any(k in lower for k in ["quality","reliability","maintenance"]):
+        return pd.DataFrame({"Workcenter":["WC-01","WC-02","WC-03","WC-04","WC-05"],"Baseline":[94,91,88,96,89],"Scenario":[96,93,92,97,94],"Units":["%"]*5})
+    if any(k in lower for k in ["sustain","carbon","energy"]):
+        return pd.DataFrame({"Area":["Line A","Line B","Warehouse","Fleet","Office"],"Baseline":[120,95,80,110,42],"Scenario":[105,84,66,92,37],"Units":["tCO2e"]*5})
+    if any(k in lower for k in ["planning","schedule","production"]):
+        return pd.DataFrame({"Workcenter":["M-01","M-02","M-03","M-04","M-05"],"Baseline":[82,90,76,88,84],"Scenario":[88,92,85,94,90],"Units":["% utilization"]*5})
+    if any(k in lower for k in ["finance","economics","investment"]):
+        return pd.DataFrame({"Option":["Base","Automation","Expansion","Hybrid"],"Baseline":[100,100,100,100],"Scenario":[100,112,118,125],"Units":["index"]*4})
+    return pd.DataFrame({"Area":["Demand","Capacity","Service","Inventory","Risk"],"Baseline":[100,100,95,100,10],"Scenario":[110,108,97,92,7],"Units":["index","index","%","index","index"]})
 
 
 def render_experience_shell(module: str, tier: str, username: str) -> None:
@@ -315,7 +315,7 @@ def render_experience_shell(module: str, tier: str, username: str) -> None:
         jobs = c.execute("SELECT COUNT(*) FROM experience_jobs WHERE status IN ('Queued','Running')").fetchone()[0]
     import streamlit as st
     key = _safe_key(module)
-    st.markdown(f"""<div class="sx-hero"><div class="sx-kicker">{meta.get("category","Industrial Engineering")} · {meta.get("tier",tier)} capability</div><div class="sx-title">{module}</div><div class="sx-sub">{meta.get("when","Engineering workspace with validation, scenario, decision and evidence controls.")}</div><div class="sx-badges"><span>● Workspace ready</span><span>✓ {stats['implemented']} core features active</span><span>◈ Evidence-first</span></div></div>""", unsafe_allow_html=True)
+    st.markdown(f"""<div class="sx-hero"><div class="sx-kicker">{meta.get("category","Industrial Engineering")} · {meta.get("tier",tier)} capability</div><div class="sx-title">{module}</div><div class="sx-sub">{meta.get("when","Engineering workspace with validation, scenario, decision and evidence controls.")}</div><div class="sx-badges"><span>● Workspace ready</span><span>✓ {stats["implemented"]} core features active</span><span>◈ Evidence-first</span></div></div>""", unsafe_allow_html=True)
     st.markdown("""<style>
     .sx-hero{padding:24px 26px;border-radius:20px;background:linear-gradient(135deg,#0b1220 0%,#192657 58%,#0f5c63 100%);color:#fff;box-shadow:0 18px 40px rgba(15,23,42,.16);border:1px solid rgba(255,255,255,.08);margin:2px 0 14px;position:relative;overflow:hidden}
     .sx-hero:after{content:"";position:absolute;inset:0;background:linear-gradient(110deg,transparent 0%,rgba(255,255,255,.06) 46%,transparent 60%);transform:translateX(-120%);animation:sxShimmer 8s ease-in-out infinite}
@@ -328,19 +328,19 @@ def render_experience_shell(module: str, tier: str, username: str) -> None:
     </style>""", unsafe_allow_html=True)
 
     m1,m2,m3,m4 = st.columns(4)
-    m1.metric("Core capability set", f'{stats['implemented']}/60', "platform-wide")
+    m1.metric("Core capability set", f'{stats["implemented"]}/60', "platform-wide")
     m2.metric("Saved studies", f"{projects:,}", "workspace")
     m3.metric("Decision records", f"{decisions:,}", "auditable")
     m4.metric("Active jobs", f"{jobs:,}", "queued / running")
 
     steps = st.columns(6)
-    for col,label in zip(steps,["01 Prepare","02 Validate","03 Run","04 Inspect","05 Decide","06 Export']):
+    for col,label in zip(steps,["01 Prepare","02 Validate","03 Run","04 Inspect","05 Decide","06 Export"]):
         col.markdown(f'<div class="sx-step">✓ {label}</div>', unsafe_allow_html=True)
 
     a,b,c,d,e = st.columns(5)
     if a.button("💾 Save Study", use_container_width=True, key=f"sx_save_{key}"):
         pid = save_project(f"{module} Study", module, username, {"module":module,"tier":tier})
-        st.session_state["sx_project_id'] = pid
+        st.session_state["sx_project_id"] = pid
         st.success(f"Study saved: {pid}")
     if b.button("🧪 Create Run", use_container_width=True, key=f"sx_job_{key}"):
         jid = create_job(module, "interactive-analysis", username, {"module":module})
@@ -348,14 +348,14 @@ def render_experience_shell(module: str, tier: str, username: str) -> None:
         st.success(f"Run recorded: {jid}")
     if c.button("📝 Decision Card", use_container_width=True, key=f"sx_decision_{key}"):
         did = create_decision(f"{module} decision", module, {"Status":"Pending review"}, {"Tier":tier}, {"Uncertainty":"Module-specific"}, username)
-        st.session_state["sx_decision_id'] = did
+        st.session_state["sx_decision_id"] = did
         st.success(f"Decision created: {did}")
     if d.button("🤖 Copilot Plan", use_container_width=True, key=f"sx_copilot_{key}"):
         rid = log_copilot_action(module,"Prepare validated multi-step plan",username,True,"Preview",{"features":60})
-        st.session_state["sx_copilot_run_id'] = rid
+        st.session_state["sx_copilot_run_id"] = rid
         st.info("Copilot plan is staged for approval; no external or destructive action is performed automatically.")
     if e.button("📦 Evidence Pack", use_container_width=True, key=f"sx_export_{key}"):
-        st.session_state["sx_show_export'] = True
+        st.session_state["sx_show_export"] = True
 
     if st.session_state.pop("sx_show_export",False):
         sample,result = _starter_data(module),generic_result(_starter_data(module))
@@ -366,10 +366,10 @@ def render_experience_shell(module: str, tier: str, username: str) -> None:
         fc = feature_catalog()
         if search.strip():
             q=search.lower().strip()
-            fc=fc[fc["Feature'].str.lower().str.contains(q,regex=False) | fc["Description'].str.lower().str.contains(q,regex=False)]
+            fc=fc[fc["Feature"].str.lower().str.contains(q,regex=False) | fc["Description"].str.lower().str.contains(q,regex=False)]
         st.dataframe(fc,use_container_width=True,hide_index=True)
         x,y,z=st.columns(3)
-        x.metric("Implemented",stats['implemented'],"active in this build"); y.metric("Integration-ready",stats['integration_ready'],"deployment hooks"); z.metric("Tracked capabilities",stats['total'],"catalogued")
+        x.metric("Implemented",stats["implemented"],"active in this build"); y.metric("Integration-ready",stats["integration_ready"],"deployment hooks"); z.metric("Tracked capabilities",stats["total"],"catalogued")
 
     if "AI" in module or "Copilot" in module:
         with st.expander("🤖 Copilot capability registry", expanded=True):
@@ -389,11 +389,11 @@ def render_blank_module_studio(module: str, tier: str, username: str) -> None:
     df=st.data_editor(st.session_state[data_key],num_rows="dynamic",use_container_width=True,hide_index=True,key=f"sx_blank_editor_{key}")
     st.session_state[data_key]=df
 
-    tabs=st.tabs(["📊 Overview","🧮 Analysis","✅ Verification","🧠 Decision","📤 Export'])
+    tabs=st.tabs(["📊 Overview","🧮 Analysis","✅ Verification","🧠 Decision","📤 Export"])
     with tabs[0]:
         res=generic_result(df)
         c1,c2,c3,c4=st.columns(4)
-        c1.metric("Rows",f'{res["rows']:,}'); c2.metric("Columns",f'{res["columns']:,}'); c3.metric("Data quality",f'{res["quality']:.1f}%'); c4.metric("Numeric fields",f'{res["numeric_fields']:,}')
+        c1.metric("Rows",f'{res["rows"]:,}'); c2.metric("Columns",f'{res["columns"]:,}'); c3.metric("Data quality",f'{res["quality"]:.1f}%'); c4.metric("Numeric fields",f'{res["numeric_fields"]:,}')
         nums=[c for c in df.columns if pd.api.types.is_numeric_dtype(df[c])]
         if nums:
             metric=st.selectbox("Metric",nums,key=f"sx_blank_metric_{key}")
@@ -404,11 +404,11 @@ def render_blank_module_studio(module: str, tier: str, username: str) -> None:
             x=st.selectbox("Baseline metric",nums,key=f"sx_base_{key}"); y=st.selectbox("Scenario metric",nums,index=min(1,len(nums)-1),key=f"sx_scn_{key}")
             if st.button("▶ Run Analysis",type="primary",use_container_width=True,key=f"sx_run_{key}"):
                 start=time.perf_counter_ns(); out=df.copy()
-                out["Delta']=pd.to_numeric(out[y],errors="coerce")-pd.to_numeric(out[x],errors="coerce")
+                out["Delta"]=pd.to_numeric(out[y],errors="coerce")-pd.to_numeric(out[x],errors="coerce")
                 base=pd.to_numeric(out[x],errors="coerce").replace(0,np.nan)
-                out["Delta %']=out["Delta']/base*100
-                st.session_state[f"sx_blank_result_{key}']=out
-                st.session_state[f"sx_blank_run_{key}']=benchmark_duration(module,start,username,len(out),"generic_analysis")
+                out["Delta %"]=out["Delta"]/base*100
+                st.session_state[f"sx_blank_result_{key}"]=out
+                st.session_state[f"sx_blank_run_{key}"]=benchmark_duration(module,start,username,len(out),"generic_analysis")
             out=st.session_state.get(f"sx_blank_result_{key}",pd.DataFrame())
             if not out.empty:
                 st.dataframe(out,use_container_width=True,hide_index=True)
@@ -416,18 +416,18 @@ def render_blank_module_studio(module: str, tier: str, username: str) -> None:
     with tabs[2]:
         out=st.session_state.get(f"sx_blank_result_{key}",df)
         check=verification_snapshot(out if isinstance(out,pd.DataFrame) else df)
-        c1,c2,c3=st.columns(3); c1.metric("Verification score",f'{check["score']:.1f}%'); c2.metric("Checks passed",f'{check["passed']}/{check["total']}'); c3.metric("Run status","PASS" if check["score']>=100 else "REVIEW")
-        st.dataframe(pd.DataFrame([{"Check":k.replace("_"," ").title(),"Status":"✓" if v else "⚠","Detail":str(v)} for k,v in check["checks'].items()]),use_container_width=True,hide_index=True)
+        c1,c2,c3=st.columns(3); c1.metric("Verification score",f'{check["score"]:.1f}%'); c2.metric("Checks passed",f'{check["passed"]}/{check["total"]}'); c3.metric("Run status","PASS" if check["score"]>=100 else "REVIEW")
+        st.dataframe(pd.DataFrame([{"Check":k.replace("_"," ").title(),"Status":"✓" if v else "⚠","Detail":str(v)} for k,v in check["checks"].items()]),use_container_width=True,hide_index=True)
     with tabs[3]:
         st.markdown("#### Decision memory")
         did=st.session_state.get("sx_decision_id")
         if st.button("📝 Create decision from current study",type="primary",use_container_width=True,key=f"sx_decision_blank_{key}"):
-            res=generic_result(df); did=create_decision(f"{module} working decision",module,{"quality":res["quality'],"rows":res["rows']},{"tier":tier},{"verification":verification_snapshot(df)},username)
-            st.session_state["sx_decision_id']=did; st.success(f"Decision {did} created.")
+            res=generic_result(df); did=create_decision(f"{module} working decision",module,{"quality":res["quality"],"rows":res["rows"]},{"tier":tier},{"verification":verification_snapshot(df)},username)
+            st.session_state["sx_decision_id"]=did; st.success(f"Decision {did} created.")
         if did:
             with _db() as c: row=c.execute("SELECT decision_id,title,status,owner,created_at FROM experience_decisions WHERE decision_id=?",(did,)).fetchone()
             if row:
-                st.dataframe(pd.DataFrame([dict(zip(["ID","Title","Status","Owner","Created'],row))]),use_container_width=True,hide_index=True)
+                st.dataframe(pd.DataFrame([dict(zip(["ID","Title","Status","Owner","Created"],row))]),use_container_width=True,hide_index=True)
                 if st.button("➡️ Move to Validated",key=f"sx_validate_dec_{key}",use_container_width=True):
                     transition_decision(did,username,"Validated","Validation evidence captured from module canvas."); st.success("Decision moved to Validated.")
     with tabs[4]:
