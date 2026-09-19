@@ -458,10 +458,33 @@ def render_experience_shell(module: str, tier: str, username: str) -> None:
     )
 
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Core capabilities", "{}/60".format(stats["implemented"]))
-    c2.metric("Saved studies", "{:,}".format(projects))
-    c3.metric("Decision records", "{:,}".format(decisions))
-    c4.metric("Active jobs", "{:,}".format(jobs))
+    c1.metric("Core capabilities", "{}/60".format(stats["implemented"]), "active")
+    c2.metric("Saved studies", "{:,}".format(projects), "persistent")
+    c3.metric("Decision records", "{:,}".format(decisions), "governed")
+    c4.metric("Active jobs", "{:,}".format(jobs), "live")
+
+    # A compact visual pulse keeps the workspace informative without making
+    # every module feel like a dashboard overload.
+    pulse = pd.DataFrame({
+        "State": ["Implemented", "Integration-ready"],
+        "Capabilities": [stats["implemented"], stats["integration_ready"]],
+    })
+    pc1, pc2 = st.columns([1.35, 2.65])
+    with pc1:
+        st.markdown("**Platform pulse**")
+        st.progress(stats["implemented"] / max(1, stats["total"]), text="{}/60 capabilities active".format(stats["implemented"]))
+    with pc2:
+        fig = px.bar(
+            pulse,
+            x="Capabilities",
+            y="State",
+            orientation="h",
+            text="Capabilities",
+            title="Experience readiness",
+        )
+        fig.update_layout(height=155, margin=dict(l=10, r=10, t=38, b=8), showlegend=False)
+        fig.update_traces(textposition="outside", cliponaxis=False)
+        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
     steps = st.columns(6)
     for col, label in zip(steps, ["01 Prepare", "02 Validate", "03 Run", "04 Inspect", "05 Decide", "06 Export"]):
@@ -500,6 +523,7 @@ def render_experience_shell(module: str, tier: str, username: str) -> None:
         )
 
     with st.expander("✨ Platform Excellence · 60 capabilities", expanded=False):
+        st.caption("A calm, searchable capability map — not another wall of controls.")
         search = st.text_input("Search capabilities", key="sx_feature_search_" + key, placeholder="Search data, Copilot, testing, reporting…")
         catalog = feature_catalog()
         if search.strip():
