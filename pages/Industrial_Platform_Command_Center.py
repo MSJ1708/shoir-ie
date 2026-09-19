@@ -11,6 +11,7 @@ import plotly.express as px
 import streamlit as st
 import html
 
+from industrial_experience import ensure_experience_db, feature_stats, feature_catalog
 from industrial_platform import (
     PLATFORM_CATALOG, TIER_FEATURES, normalize_tier, tier_allows,
     init_platform_db, data_quality_report, model_health, scenario_table,
@@ -18,6 +19,7 @@ from industrial_platform import (
 
 st.set_page_config(page_title="Shoir-IE Command Center", page_icon="🏭", layout="wide")
 init_platform_db()
+ensure_experience_db()
 
 st.markdown("""
 <style>
@@ -46,6 +48,25 @@ a.metric("Industrial entities", counts["industrial_entities"])
 b.metric("Registered datasets", counts["platform_datasets"])
 c.metric("Model snapshots", counts["platform_models"])
 d.metric("Saved scenarios", counts["platform_scenarios"])
+
+st.divider()
+
+# Platform Excellence overview: the command center makes the 60 cross-cutting
+# capabilities visible without turning every module into a wall of controls.
+fx = feature_stats()
+p1,p2,p3,p4 = st.columns(4)
+p1.metric("Platform capabilities", f"{fx['total']}/60", "tracked")
+p2.metric("Active in this build", fx["implemented"], "implemented")
+p3.metric("Deployment hooks", fx["integration_ready"], "integration-ready")
+p4.metric("Experience layer", "READY", "shared across modules")
+
+with st.expander("✨ Platform Excellence · capability map", expanded=False):
+    q = st.text_input("Search capability map", key="cc_capability_search", placeholder="data quality, Copilot, testing, reporting…")
+    cap = feature_catalog()
+    if q.strip():
+        term=q.strip().lower()
+        cap=cap[cap["Feature"].str.lower().str.contains(term,regex=False) | cap["Description"].str.lower().str.contains(term,regex=False)]
+    st.dataframe(cap,use_container_width=True,hide_index=True)
 
 st.divider()
 
