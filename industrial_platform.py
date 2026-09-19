@@ -20,6 +20,7 @@ import pandas as pd
 from scipy import stats
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from industrial_experience import render_experience_shell, render_blank_module_studio
 
 PLATFORM_CATALOG = [
     {"tier":"Enterprise","category":"Platform","name":"Industrial Operating System","when":"Unified KPI, method, scenario, process, model-health, improvement and decision-verification workspace.","example":"Connect engineering analysis outputs through one governed decision layer with reusable templates and exports."},
@@ -703,13 +704,7 @@ def render_module(module: str, tier: str, username: str):
     if required and not tier_allows(tier,required):
         st.warning(f"🔒 {module} requires {required}. Your current tier is {tier}. Open Subscriptions to review upgrade options.")
         return
-    _meta = next((x for x in PLATFORM_CATALOG if x["name"]==module), {"category":"Industrial Engineering","tier":required or "Starter","when":"Industrial engineering workspace"})
-    st.markdown(
-        f"""<div style="background:linear-gradient(135deg,#0b1220 0%,#172554 55%,#0f3b66 100%);border:1px solid rgba(148,163,184,.20);border-radius:18px;padding:22px 24px;margin:4px 0 18px;box-shadow:0 18px 40px rgba(15,23,42,.13);">
-        <div style="display:inline-block;padding:5px 10px;border-radius:999px;background:rgba(56,189,248,.13);border:1px solid rgba(56,189,248,.25);color:#7dd3fc;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;">{html.escape(str(_meta.get("category","Industrial Engineering")))} · {html.escape(str(_meta.get("tier","Starter")))} capability</div>
-        <h1 style="margin:10px 0 5px;color:#fff;font-size:28px;font-weight:800;">{html.escape(str(module))}</h1>
-        <p style="margin:0;color:#cbd5e1;font-size:13px;">{html.escape(str(_meta.get("when","Industrial engineering workspace")))}</p>
-        </div>""", unsafe_allow_html=True)
+    render_experience_shell(module, tier, username)
     st.caption("Workflow: Prepare → Validate → Run → Inspect → Explain → Export")
     if module=="Engineering Validation Center":
         df=st.session_state.setdefault("validation_df",pd.DataFrame({"Metric":["Cost","Service Level","Capacity"],"Value":[100000,95,12000],"Unit":["USD","%","units"]}))
@@ -1070,3 +1065,5 @@ def render_module(module: str, tier: str, username: str):
             with sqlite3.connect("enterprise_full_workspace.db") as c: audit=pd.read_sql("SELECT * FROM security_events ORDER BY id DESC LIMIT 200",c)
             st.dataframe(audit,use_container_width=True,hide_index=True)
             render_export_bar(module,[("Roles",role),("Security Events",audit)],tier,username)
+    else:
+        render_blank_module_studio(module, tier, username)
