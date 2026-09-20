@@ -1333,6 +1333,15 @@ for _m in allowed_modules:
     _cat=str(_meta.get("category","Industrial Engineering"))
     _module_labels.append(f"{_cat} · {_m}" if _meta else str(_m))
 _module_label_map=dict(zip(_module_labels,allowed_modules))
+
+# Consume navigation requests BEFORE instantiating the sidebar selectbox.
+# This avoids Streamlit's "WidgetAlreadyInstantiated" error when a button
+# inside a rendered module requests navigation to another module.
+if st.session_state.pop("open_research_lab_requested", False):
+    _research_label = "Experimentation · Experiment Lab"
+    if _research_label in _module_label_map:
+        st.session_state["enterprise_module_selector"] = _research_label
+
 _selected_label=st.sidebar.selectbox("Select Module",_module_labels,key="enterprise_module_selector")
 selected_module=_module_label_map[_selected_label]
 _meta=_module_catalog_by_name.get(str(selected_module))
