@@ -630,11 +630,15 @@ def register_os_model(name: str,model_type: str,parameters: Mapping[str,Any],dat
         conn.execute("INSERT INTO os160_models VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",(mid,str(name)[:160],str(model_type)[:100],"1.0.0",_json(dict(parameters)),str(data_hash),str(code_hash),str(solver),int(seed),"Validated",owner,_now())); conn.commit()
     return mid
 
-def run_engineering_job(module: str,job_type: str,payload: Mapping[str,Any],owner: str) -> str:
-    init_160_platform(); rid=_safe_id("RUN160"); started=time.perf_counter()
-    with _db() as conn:
+def run_engineering_job(module: str,job_type: str,payload: Mapping[str,Any],owner: str,db_path: str="enterprise_full_workspace.db") -> str:
+    init_160_platform(db_path); rid=_safe_id("RUN160"); started=time.perf_counter()
+    with _db(db_path) as conn:
         conn.execute("INSERT INTO os160_runs VALUES(?,?,?,?,?,?,?,?,?,?,?)",(rid,module,job_type,"Running",5.0,"Job accepted",_json(dict(payload)),0.0,owner,_now(),_now()))
+        conn.execute("INSERT OR REPLACE INTO os160_job_control(run_id,updated_at) VALUES(?,?)",(rid,_now()))
         for message,progress in [("Validating inputs",25.0),("Running deterministic engine",70.0),("Verifying output",95.0),("Complete",100.0)]:
+            control=conn.execute("SELECT cancel_requested,pause_requested FROM os160_job_control WHERE run_id=?",(rid,)).fetchone()
+            if control and int(control[0]):
+                conn.execute("UPDATE os160_runs SET status='Cancelled',message='Cancellation requested',updated_at=? WHERE run_id=?",( _now(),rid)); break
             conn.execute("UPDATE os160_runs SET status=?,progress=?,message=?,updated_at=? WHERE run_id=?",
                          ("Completed" if progress>=100 else "Running",progress,message,_now(),rid))
         conn.execute("UPDATE os160_runs SET duration_ms=?,updated_at=? WHERE run_id=?",((time.perf_counter()-started)*1000.0,_now(),rid)); conn.commit()
@@ -855,7 +859,7 @@ def run_verification_suite(username: str,db_path: str="enterprise_full_workspace
     results["doe"]=len(doe_factorial({"A":[0,1],"B":[0,1]}))==4
     results["roi"]=roi_scenario(120,20,50,2)["roi_pct"]>0
     results["ai_context"]=ai_capability_context(db_path)["capability_count"]==160
-    passed=sum(bool(v) for v in results.values()); run_id=run_engineering_job("Industrial Operating System","verification-suite",{"results":results},username)
+    passed=sum(bool(v) for v in results.values()); run_id=run_engineering_job("Industrial Operating System","verification-suite",{"results":results},username,db_path=db_path)
     with _db(db_path) as conn:
         conn.executemany("INSERT INTO os160_health(run_id,check_name,status,detail,created_at) VALUES(?,?,?,?,?)",
                          [(run_id,k,"Pass" if val else "Review",str(val),_now()) for k,val in results.items()]); conn.commit()
