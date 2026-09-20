@@ -324,7 +324,7 @@ def init_160_platform(db_path: str = "enterprise_full_workspace.db") -> bool:
                     int(feature["id"]),
                     capability_coverage(int(feature["id"]))[0],
                     capability_coverage(int(feature["id"]))[1],
-                    "test_shoir_160" if capability_coverage(int(feature["id"]))[0]=="Verified" else "",
+                    "platform regression suite" if capability_coverage(int(feature["id"]))[0]=="Verified" else "",
                     "External services remain deployment-owned where applicable.",
                     _now(),
                 )
@@ -338,15 +338,10 @@ def init_160_platform(db_path: str = "enterprise_full_workspace.db") -> bool:
 # Operational means the capability belongs in the in-app product surface.
 # Coverage says what is actually implemented today: Verified, Implemented, Foundation, or Integration-ready.
 _VERIFIED_IDS = {
-    1,3,4,5,6,8,9,10,11,18,20,26,27,29,31,37,39,40,41,42,47,50,52,
-    62,63,71,72,73,75,77,80,84,85,86,87,88,90,91,92,94,95,99,
-    101,102,103,104,105,106,108,109,115,117,119,120,121,122,123,124,
-    126,127,128,129,130,131,132,133,134,136,137,138,139,142,143,144,
-    145,146,147,149,150,151,152,154,155,156,158,159,160,
-}
-_IMPLEMENTED_IDS = {
-    2,7,15,16,17,22,23,30,34,35,36,43,45,46,48,49,54,59,61,64,65,67,
-    68,74,79,81,82,83,89,93,96,97,100,107,110,113,114,125,135,140,141,148,157,
+    1,3,4,5,6,11,12,24,26,47,50,73,86,90,92,103,104,105,106,111,113,114,
+    115,121,124,127,128,129,130,134,136,138,139,141,158,160,
+}_IMPLEMENTED_IDS = {
+    2,7,8,9,10,15,16,17,18,20,22,23,27,29,30,31,34,35,36,37,39,40,41,42,43,45,46,48,49,52,54,59,61,62,63,64,65,67,68,71,72,74,75,77,79,80,81,82,83,84,85,87,88,89,91,93,94,95,96,97,99,100,101,102,107,108,109,110,112,113,114,116,117,118,119,120,122,123,125,126,131,132,133,135,137,140,141,142,143,144,145,146,147,148,149,150,151,152,154,155,156,157,159,
 }
 _INTEGRATION_IDS = {19,21,51,53,55,56,57,58,98,153}
 _FOUNDATION_IDS = set(range(1, len(FEATURES_160)+1)) - _VERIFIED_IDS - _IMPLEMENTED_IDS - _INTEGRATION_IDS
