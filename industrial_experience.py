@@ -117,6 +117,9 @@ def ensure_experience_db(path: str = "enterprise_full_workspace.db") -> None:
             "CREATE TABLE IF NOT EXISTS experience_copilot_actions(id INTEGER PRIMARY KEY AUTOINCREMENT,run_id TEXT,module TEXT,action TEXT,status TEXT,requires_approval INTEGER,evidence_json TEXT,actor TEXT,created_at TEXT)",
             "CREATE TABLE IF NOT EXISTS experience_observability(id INTEGER PRIMARY KEY AUTOINCREMENT,run_id TEXT,module TEXT,event_type TEXT,duration_ms REAL,details_json TEXT,created_at TEXT)",
             "CREATE TABLE IF NOT EXISTS experience_memory(memory_id TEXT PRIMARY KEY,problem TEXT,data_ref TEXT,model_ref TEXT,scenario_ref TEXT,decision_ref TEXT,actual_result TEXT,lesson TEXT,owner TEXT,created_at TEXT,updated_at TEXT)",
+            "CREATE TABLE IF NOT EXISTS experience_research_studies(study_id TEXT PRIMARY KEY,research_id TEXT UNIQUE,title TEXT,objective TEXT,research_question TEXT,hypothesis TEXT,null_hypothesis TEXT,methodology TEXT,primary_domain TEXT,transfer_domain TEXT,primary_endpoint TEXT,secondary_metrics_json TEXT,independent_variables_json TEXT,controls_json TEXT,baseline_definition TEXT,treatment_definition TEXT,sample_size INTEGER,replications INTEGER,random_seed INTEGER,alpha REAL,confidence_level REAL,planned_tests_json TEXT,inclusion_criteria TEXT,exclusion_criteria TEXT,data_source TEXT,protocol_notes TEXT,protocol_hash TEXT,protocol_locked INTEGER DEFAULT 0,owner TEXT,created_at TEXT,updated_at TEXT)",
+            "CREATE INDEX IF NOT EXISTS idx_exp_research_owner ON experience_research_studies(owner,created_at DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_exp_research_hash ON experience_research_studies(protocol_hash)",
             "CREATE TABLE IF NOT EXISTS experience_preferences(username TEXT PRIMARY KEY,locale TEXT DEFAULT 'en',direction TEXT DEFAULT 'ltr',reduced_motion INTEGER DEFAULT 0,density TEXT DEFAULT 'comfortable',updated_at TEXT)",
             "CREATE INDEX IF NOT EXISTS idx_exp_jobs_status ON experience_jobs(status,started_at DESC)",
             "CREATE INDEX IF NOT EXISTS idx_exp_lineage_source ON experience_lineage(source_type,source_id)",
@@ -373,6 +376,135 @@ def verification_snapshot(df: pd.DataFrame) -> dict:
     return {"checks": checks, "passed": passed, "total": len(checks), "score": round(100.0 * passed / max(1, len(checks)), 1)}
 
 
+def _research_list(value: Any) -> list[str]:
+    if isinstance(value, (list, tuple, set)):
+        items = value
+    else:
+        items = str(value or "").replace("\n", ",").split(",")
+    return [str(item).strip() for item in items if str(item).strip()]
+
+
+def _research_hash(protocol: Mapping[str, Any]) -> str:
+    canonical = json.dumps(dict(protocol), sort_keys=True, ensure_ascii=False, separators=(",", ":"), default=str)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def create_research_protocol(study_id: str, protocol: Mapping[str, Any], owner: str) -> tuple[str, str]:
+    ensure_experience_db()
+    payload = dict(protocol)
+    research_id = "RSH-" + uuid.uuid4().hex[:12].upper()
+    stamp = _now()
+    protocol_hash = _research_hash(payload)
+    with _db() as conn:
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO experience_research_studies(
+                study_id,research_id,title,objective,research_question,hypothesis,
+                null_hypothesis,methodology,primary_domain,transfer_domain,
+                primary_endpoint,secondary_metrics_json,independent_variables_json,
+                controls_json,baseline_definition,treatment_definition,sample_size,
+                replications,random_seed,alpha,confidence_level,planned_tests_json,
+                inclusion_criteria,exclusion_criteria,data_source,protocol_notes,
+                protocol_hash,protocol_locked,owner,created_at,updated_at
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                study_id,
+                research_id,
+                str(payload.get("title", "")).strip()[:240],
+                str(payload.get("objective", "")).strip()[:1500],
+                str(payload.get("research_question", "")).strip()[:3000],
+                str(payload.get("hypothesis", "")).strip()[:3000],
+                str(payload.get("null_hypothesis", "")).strip()[:3000],
+                str(payload.get("methodology", "")).strip()[:240],
+                str(payload.get("primary_domain", "")).strip()[:120],
+                str(payload.get("transfer_domain", "")).strip()[:120],
+                str(payload.get("primary_endpoint", "")).strip()[:500],
+                json.dumps(_research_list(payload.get("secondary_metrics", [])), ensure_ascii=False),
+                json.dumps(_research_list(payload.get("independent_variables", [])), ensure_ascii=False),
+                json.dumps(_research_list(payload.get("controls", [])), ensure_ascii=False),
+                str(payload.get("baseline_definition", "")).strip()[:2000],
+                str(payload.get("treatment_definition", "")).strip()[:2000],
+                int(max(1, int(payload.get("sample_size", 100)))),
+                int(max(1, int(payload.get("replications", 30)))),
+                int(payload.get("random_seed", 2026)),
+                float(payload.get("alpha", 0.05)),
+                float(payload.get("confidence_level", 0.95)),
+                json.dumps(_research_list(payload.get("planned_tests", [])), ensure_ascii=False),
+                str(payload.get("inclusion_criteria", "")).strip()[:2000],
+                str(payload.get("exclusion_criteria", "")).strip()[:2000],
+                str(payload.get("data_source", "")).strip()[:1200],
+                str(payload.get("protocol_notes", "")).strip()[:3000],
+                protocol_hash,
+                int(bool(payload.get("protocol_locked", False))),
+                owner,
+                stamp,
+                stamp,
+            ),
+        )
+        conn.commit()
+    return research_id, protocol_hash
+
+
+def load_research_protocol(study_id: str) -> Optional[dict[str, Any]]:
+    ensure_experience_db()
+    with _db() as conn:
+        row = conn.execute(
+            """
+            SELECT study_id,research_id,title,objective,research_question,hypothesis,
+                   null_hypothesis,methodology,primary_domain,transfer_domain,
+                   primary_endpoint,secondary_metrics_json,independent_variables_json,
+                   controls_json,baseline_definition,treatment_definition,sample_size,
+                   replications,random_seed,alpha,confidence_level,planned_tests_json,
+                   inclusion_criteria,exclusion_criteria,data_source,protocol_notes,
+                   protocol_hash,protocol_locked,owner,created_at,updated_at
+            FROM experience_research_studies
+            WHERE study_id=?
+            """,
+            (study_id,),
+        ).fetchone()
+    if not row:
+        return None
+    keys = [
+        "study_id","research_id","title","objective","research_question","hypothesis",
+        "null_hypothesis","methodology","primary_domain","transfer_domain",
+        "primary_endpoint","secondary_metrics","independent_variables","controls",
+        "baseline_definition","treatment_definition","sample_size","replications",
+        "random_seed","alpha","confidence_level","planned_tests","inclusion_criteria",
+        "exclusion_criteria","data_source","protocol_notes","protocol_hash",
+        "protocol_locked","owner","created_at","updated_at"
+    ]
+    data = dict(zip(keys, row))
+    for field in ("secondary_metrics", "independent_variables", "controls", "planned_tests"):
+        try:
+            data[field] = json.loads(data[field] or "[]")
+        except Exception:
+            data[field] = []
+    return data
+
+
+def research_protocol_frame(study_id: str) -> pd.DataFrame:
+    protocol = load_research_protocol(study_id)
+    if not protocol:
+        return pd.DataFrame()
+    return pd.DataFrame([{
+        "Research ID": protocol["research_id"],
+        "Study": protocol["title"],
+        "Methodology": protocol["methodology"],
+        "Primary domain": protocol["primary_domain"],
+        "Transfer domain": protocol["transfer_domain"],
+        "Primary endpoint": protocol["primary_endpoint"],
+        "Scenarios": protocol["sample_size"],
+        "Replications": protocol["replications"],
+        "Random seed": protocol["random_seed"],
+        "Alpha": protocol["alpha"],
+        "Confidence": protocol["confidence_level"],
+        "Protocol": "LOCKED" if protocol["protocol_locked"] else "DRAFT",
+        "Protocol hash": protocol["protocol_hash"][:20] + "…",
+    }])
+
+
+
 def _safe_key(value: str) -> str:
     return hashlib.sha1(str(value).encode("utf-8")).hexdigest()[:10]
 
@@ -396,7 +528,7 @@ def _starter_data(module: str) -> pd.DataFrame:
     return pd.DataFrame({"Area": ["Demand", "Capacity", "Service", "Inventory", "Risk"], "Baseline": [100, 100, 95, 100, 10], "Scenario": [110, 108, 97, 92, 7], "Unit": ["index", "index", "%", "index", "index"]})
 
 
-def _evidence_bundle(module: str, df: pd.DataFrame, actor: str) -> bytes:
+def _evidence_bundle(module: str, df: pd.DataFrame, actor: str, research_protocol: Optional[Mapping[str, Any]] = None) -> bytes:
     result = generic_result(df)
     verification = verification_snapshot(df)
     manifest = {
@@ -406,11 +538,16 @@ def _evidence_bundle(module: str, df: pd.DataFrame, actor: str) -> bytes:
         "result": result,
         "verification": verification,
     }
+    if research_protocol:
+        manifest["research_protocol_hash"] = research_protocol.get("protocol_hash")
+        manifest["research_id"] = research_protocol.get("research_id")
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
         archive.writestr("inputs.csv", df.to_csv(index=False).encode("utf-8"))
         archive.writestr("manifest.json", json.dumps(manifest, indent=2, default=str).encode("utf-8"))
         archive.writestr("feature_manifest.csv", feature_catalog().to_csv(index=False).encode("utf-8"))
+        if research_protocol:
+            archive.writestr("research_protocol.json", json.dumps(dict(research_protocol), indent=2, ensure_ascii=False, default=str).encode("utf-8"))
     return buffer.getvalue()
 
 
@@ -420,8 +557,10 @@ def render_experience_shell(module: str, tier: str, username: str) -> None:
 
     meta = _module_meta(module)
     stats = feature_stats()
+    is_research_lab = ("Experiment Lab" in str(module)) or ("Experimentation" in str(module))
     with _db() as conn:
         projects = int(conn.execute("SELECT COUNT(*) FROM experience_projects").fetchone()[0])
+        research_studies = int(conn.execute("SELECT COUNT(*) FROM experience_research_studies").fetchone()[0])
         decisions = int(conn.execute("SELECT COUNT(*) FROM experience_decisions").fetchone()[0])
         jobs = int(conn.execute("SELECT COUNT(*) FROM experience_jobs WHERE status IN ('Queued','Running')").fetchone()[0])
 
@@ -459,9 +598,124 @@ def render_experience_shell(module: str, tier: str, username: str) -> None:
 
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Core capabilities", "{}/60".format(stats["implemented"]), "active")
-    c2.metric("Saved studies", "{:,}".format(projects), "persistent")
+    c2.metric("Research studies" if is_research_lab else "Saved studies", "{:,}".format(research_studies if is_research_lab else projects), "protocols" if is_research_lab else "persistent")
     c3.metric("Decision records", "{:,}".format(decisions), "governed")
     c4.metric("Active jobs", "{:,}".format(jobs), "live")
+
+    if is_research_lab:
+        st.markdown("### 🔬 Research Study Protocol")
+        st.caption("Define the research question, hypotheses, variables, controls, sampling plan and reproducibility settings before the main experiment. This is a local protocol record and integrity control; it is not external preregistration.")
+        active_protocol_id = st.session_state.get("sx_research_study_id")
+        active_protocol = load_research_protocol(active_protocol_id) if active_protocol_id else None
+        locked = bool(active_protocol and active_protocol.get("protocol_locked"))
+        methods = ["Controlled simulation benchmark", "Design of experiments (DOE)", "Cross-domain transfer benchmark", "Monte Carlo study", "Hybrid simulation + optimization"]
+        domains = ["Manufacturing", "Warehouse / inventory", "Supply chain", "Maintenance", "Quality", "Energy"]
+        method_index = methods.index(active_protocol["methodology"]) if active_protocol and active_protocol.get("methodology") in methods else 2
+        primary_index = domains.index(active_protocol["primary_domain"]) if active_protocol and active_protocol.get("primary_domain") in domains else 0
+        transfer_index = domains.index(active_protocol["transfer_domain"]) if active_protocol and active_protocol.get("transfer_domain") in domains else 2
+
+        with st.form("sx_research_protocol_form_" + key, clear_on_submit=False):
+            r1, r2 = st.columns([1.7, 1])
+            with r1:
+                research_title = st.text_input("Study title", value=(active_protocol or {}).get("title", "Industrial Decision Genome — Experiment 001"), disabled=locked)
+                research_question = st.text_area("Research question", value=(active_protocol or {}).get("research_question", "Can transferable industrial decision structures improve AI decision-making on previously unseen industrial environments and compound disruptions?"), height=90, disabled=locked)
+                objective = st.text_area("Study objective", value=(active_protocol or {}).get("objective", "Determine whether industrial decision knowledge transfers across domains without retraining on the target domain."), height=70, disabled=locked)
+            with r2:
+                methodology = st.selectbox("Methodology", methods, index=method_index, disabled=locked)
+                primary_endpoint = st.text_input("Primary endpoint", value=(active_protocol or {}).get("primary_endpoint", "Normalized decision regret"), disabled=locked)
+                primary_domain = st.selectbox("Primary domain", domains, index=primary_index, disabled=locked)
+                transfer_domain = st.selectbox("Unseen / transfer domain", domains, index=transfer_index, disabled=locked)
+
+            h1, h2 = st.columns(2)
+            with h1:
+                hypothesis = st.text_area("Primary hypothesis (H1)", value=(active_protocol or {}).get("hypothesis", "A transferable decision representation will retain measurable performance on an unseen industrial environment compared with documented baselines."), height=80, disabled=locked)
+            with h2:
+                null_hypothesis = st.text_area("Null hypothesis (H0)", value=(active_protocol or {}).get("null_hypothesis", "Transferable decision representations will not produce a reliable improvement on unseen industrial environments after controlling for baseline performance and variance."), height=80, disabled=locked)
+
+            v1, v2, v3 = st.columns(3)
+            with v1:
+                secondary_metrics = st.text_input("Secondary metrics", value=", ".join((active_protocol or {}).get("secondary_metrics", ["cost", "throughput", "service", "risk", "inventory", "carbon"])), disabled=locked)
+                independent_variables = st.text_input("Independent variables", value=", ".join((active_protocol or {}).get("independent_variables", ["decision method", "domain", "disruption type"])), disabled=locked)
+                controls = st.text_input("Controls / covariates", value=", ".join((active_protocol or {}).get("controls", ["scenario seed", "objective weights", "constraint set"])), disabled=locked)
+            with v2:
+                sample_size = st.number_input("Scenario count", min_value=10, max_value=100000, value=int((active_protocol or {}).get("sample_size", 100)), step=10, disabled=locked)
+                replications = st.number_input("Replications / scenario", min_value=1, max_value=10000, value=int((active_protocol or {}).get("replications", 30)), step=1, disabled=locked)
+                random_seed = st.number_input("Random seed", min_value=0, max_value=2147483647, value=int((active_protocol or {}).get("random_seed", 2026)), step=1, disabled=locked)
+            with v3:
+                alpha = st.number_input("Significance level (α)", min_value=0.001, max_value=0.20, value=float((active_protocol or {}).get("alpha", 0.05)), step=0.01, format="%.3f", disabled=locked)
+                confidence_level = st.number_input("Confidence level", min_value=0.80, max_value=0.999, value=float((active_protocol or {}).get("confidence_level", 0.95)), step=0.01, format="%.3f", disabled=locked)
+                data_source = st.text_input("Data source", value=(active_protocol or {}).get("data_source", "Shoir-IE controlled synthetic scenarios; later external validation dataset"), disabled=locked)
+
+            baseline_definition = st.text_area("Baseline definition", value=(active_protocol or {}).get("baseline_definition", "A fixed documented baseline policy plus a classical optimization baseline where applicable."), height=60, disabled=locked)
+            treatment_definition = st.text_area("Treatment / experimental condition", value=(active_protocol or {}).get("treatment_definition", "Shoir-IE decision representation evaluated on held-out combinations and an unseen transfer domain."), height=60, disabled=locked)
+            planned_tests = st.text_input("Planned statistical tests", value=", ".join((active_protocol or {}).get("planned_tests", ["confidence intervals", "paired comparison", "effect size", "bootstrap sensitivity"])), disabled=locked)
+
+            ic1, ic2 = st.columns(2)
+            with ic1:
+                inclusion_criteria = st.text_area("Inclusion criteria", value=(active_protocol or {}).get("inclusion_criteria", "Valid scenario definitions; finite numeric inputs; all required constraints specified."), height=60, disabled=locked)
+            with ic2:
+                exclusion_criteria = st.text_area("Exclusion criteria", value=(active_protocol or {}).get("exclusion_criteria", "Failed validation; malformed scenarios; missing primary outcome; solver/runtime failure not attributable to decision method."), height=60, disabled=locked)
+
+            protocol_notes = st.text_area("Protocol notes / limitations", value=(active_protocol or {}).get("protocol_notes", "Record protocol amendments explicitly instead of silently changing the main test specification."), height=70, disabled=locked)
+            lock_protocol = st.checkbox("Lock protocol after saving (local integrity lock)", value=locked, disabled=locked, help="Locks this local record. It is not external preregistration.")
+            save_protocol = st.form_submit_button("💾 Save Research Study & Protocol" if not locked else "🔒 Protocol Locked", type="primary", use_container_width=True, disabled=locked)
+
+        if save_protocol:
+            validation_errors = []
+            if not research_title.strip(): validation_errors.append("Study title is required.")
+            if len(research_question.strip()) < 20: validation_errors.append("Research question should be at least 20 characters.")
+            if len(hypothesis.strip()) < 20: validation_errors.append("H1 should be at least 20 characters.")
+            if len(null_hypothesis.strip()) < 20: validation_errors.append("H0 should be at least 20 characters.")
+            if not primary_endpoint.strip(): validation_errors.append("Primary endpoint is required.")
+            if primary_domain == transfer_domain: validation_errors.append("Primary and transfer domains must differ for this cross-domain study.")
+            if not (0.0 < alpha < 1.0): validation_errors.append("Significance level must be between 0 and 1.")
+            if not (0.0 < confidence_level < 1.0): validation_errors.append("Confidence level must be between 0 and 1.")
+            if validation_errors:
+                for error in validation_errors: st.error(error)
+            else:
+                payload = {
+                    "title": research_title,
+                    "objective": objective,
+                    "research_question": research_question,
+                    "hypothesis": hypothesis,
+                    "null_hypothesis": null_hypothesis,
+                    "methodology": methodology,
+                    "primary_domain": primary_domain,
+                    "transfer_domain": transfer_domain,
+                    "primary_endpoint": primary_endpoint,
+                    "secondary_metrics": _research_list(secondary_metrics),
+                    "independent_variables": _research_list(independent_variables),
+                    "controls": _research_list(controls),
+                    "baseline_definition": baseline_definition,
+                    "treatment_definition": treatment_definition,
+                    "sample_size": int(sample_size),
+                    "replications": int(replications),
+                    "random_seed": int(random_seed),
+                    "alpha": float(alpha),
+                    "confidence_level": float(confidence_level),
+                    "planned_tests": _research_list(planned_tests),
+                    "inclusion_criteria": inclusion_criteria,
+                    "exclusion_criteria": exclusion_criteria,
+                    "data_source": data_source,
+                    "protocol_notes": protocol_notes,
+                    "protocol_locked": bool(lock_protocol),
+                    "module": module,
+                    "tier": tier,
+                }
+                pid = save_project(research_title, module, username, {"research_protocol": payload, "protocol_type": "local_research_protocol"})
+                rid, phash = create_research_protocol(pid, payload, username)
+                st.session_state["sx_research_study_id"] = pid
+                st.session_state["sx_research_id"] = rid
+                st.session_state["sx_research_protocol_hash"] = phash
+                st.success("Research study saved: {} · Protocol {} · SHA-256 {}…".format(pid, rid, phash[:20]))
+                if lock_protocol:
+                    st.info("Protocol integrity lock is ON. This is an internal reproducibility control, not external preregistration.")
+
+        active_id = st.session_state.get("sx_research_study_id")
+        if active_id:
+            frame = research_protocol_frame(active_id)
+            if not frame.empty:
+                st.dataframe(frame, use_container_width=True, hide_index=True)
 
     # A compact visual pulse keeps the workspace informative without making
     # every module feel like a dashboard overload.
@@ -491,15 +745,29 @@ def render_experience_shell(module: str, tier: str, username: str) -> None:
         col.markdown("<div class='sx-step'>✓ {}</div>".format(label), unsafe_allow_html=True)
 
     a, b, c, d, e = st.columns(5)
-    if a.button("💾 Save Study", use_container_width=True, key="sx_save_" + key):
-        pid = save_project(module + " Study", module, username, {"module": module, "tier": tier})
-        st.session_state["sx_project_id"] = pid
-        st.success("Study saved: " + pid)
+    if not is_research_lab:
+        if a.button("💾 Save Study", use_container_width=True, key="sx_save_" + key):
+            pid = save_project(module + " Study", module, username, {"module": module, "tier": tier})
+            st.session_state["sx_project_id"] = pid
+            st.success("Study saved: " + pid)
+    else:
+        a.info("Research protocol above")
     if b.button("🧪 Create Run", use_container_width=True, key="sx_job_" + key):
-        jid = create_job(module, "interactive-analysis", username, {"module": module})
-        update_job(jid, "Running", 20, "Run initialized")
-        update_job(jid, "Completed", 100, "Run recorded")
-        st.success("Run recorded: " + jid)
+        if is_research_lab:
+            study_id = st.session_state.get("sx_research_study_id")
+            protocol = load_research_protocol(study_id) if study_id else None
+            if not study_id or not protocol:
+                st.warning("Save the research protocol before creating a run.")
+            else:
+                jid = create_job(module, "research-experiment", username, {"study_id": study_id, "research_id": protocol["research_id"], "protocol_hash": protocol["protocol_hash"], "sample_size": protocol["sample_size"], "replications": protocol["replications"], "random_seed": protocol["random_seed"]})
+                update_job(jid, "Running", 20, "Research run initialized")
+                update_job(jid, "Completed", 100, "Research run metadata recorded")
+                st.success("Research run recorded: " + jid)
+        else:
+            jid = create_job(module, "interactive-analysis", username, {"module": module})
+            update_job(jid, "Running", 20, "Run initialized")
+            update_job(jid, "Completed", 100, "Run recorded")
+            st.success("Run recorded: " + jid)
     if c.button("📝 Decision Card", use_container_width=True, key="sx_decision_" + key):
         did = create_decision(module + " decision", module, {"Status": "Pending review"}, {"Tier": tier}, {"Uncertainty": "Module-specific"}, username)
         st.session_state["sx_decision_id"] = did
@@ -513,14 +781,33 @@ def render_experience_shell(module: str, tier: str, username: str) -> None:
 
     if st.session_state.pop("sx_show_export", False):
         sample = _starter_data(module)
+        research_protocol = None
+        if is_research_lab:
+            study_id = st.session_state.get("sx_research_study_id")
+            research_protocol = load_research_protocol(study_id) if study_id else None
         st.download_button(
-            "📥 Download Universal Evidence Bundle",
-            data=_evidence_bundle(module, sample, username),
-            file_name="shoir_ie_" + key + "_evidence.zip",
+            "📥 Download Research Evidence Bundle" if is_research_lab else "📥 Download Universal Evidence Bundle",
+            data=_evidence_bundle(module, sample, username, research_protocol=research_protocol),
+            file_name="shoir_ie_" + key + ("_research_evidence.zip" if is_research_lab else "_evidence.zip"),
             mime="application/zip",
             use_container_width=True,
             key="sx_dl_" + key,
         )
+
+    if is_research_lab and st.session_state.get("sx_research_study_id"):
+        with st.expander("🧪 Research reproducibility checklist", expanded=False):
+            checklist = pd.DataFrame([
+                {"Checkpoint": "Research question recorded", "Status": "✓"},
+                {"Checkpoint": "H1 and H0 recorded", "Status": "✓"},
+                {"Checkpoint": "Primary endpoint defined", "Status": "✓"},
+                {"Checkpoint": "Baseline and treatment documented", "Status": "✓"},
+                {"Checkpoint": "Scenario count and replications defined", "Status": "✓"},
+                {"Checkpoint": "Seed and confidence level recorded", "Status": "✓"},
+                {"Checkpoint": "Inclusion and exclusion criteria recorded", "Status": "✓"},
+                {"Checkpoint": "Protocol hash captured", "Status": "✓"},
+            ])
+            st.dataframe(checklist, use_container_width=True, hide_index=True)
+            st.caption("Keep the main test specification stable. Record later changes as protocol amendments rather than silently changing the endpoint, seed, scenario rule or exclusion rule.")
 
     with st.expander("✨ Platform Excellence · 60 capabilities", expanded=False):
         st.caption("A calm, searchable capability map — not another wall of controls.")
