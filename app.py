@@ -272,9 +272,11 @@ def init_db():
         # private repo) or shared anywhere, treat it as compromised and
         # change it via secrets.toml.
         try:
-            admin_password = st.secrets["admin"]["password"]
+            admin_password = str(st.secrets["admin"]["password"])
         except Exception:
-            admin_password = "mohammedsuhail172008chennai!"
+            admin_password = os.environ.get("SHOIR_ADMIN_PASSWORD", "")
+        if not admin_password:
+            raise RuntimeError("Admin password is not configured. Set [admin].password in Streamlit secrets or SHOIR_ADMIN_PASSWORD.")
         admin_pass_hash = hash_password(admin_password)
         cursor.execute("""
             INSERT OR REPLACE INTO enterprise_users
