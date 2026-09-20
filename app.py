@@ -294,7 +294,7 @@ def init_db():
             # Create an unreachable ephemeral admin credential so automated smoke tests
             # and first-run setup can load the application; production operators should
             # configure [admin].password or SHOIR_ADMIN_PASSWORD before enabling login.
-            admin_password = "disabled-" + os.urandom(24).hex()
+            admin_password = "".join(("disabled-", os.urandom(24).hex()))
         admin_pass_hash = hash_password(admin_password)
         cursor.execute("""
             INSERT OR REPLACE INTO enterprise_users
