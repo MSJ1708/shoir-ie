@@ -749,10 +749,11 @@ def render_experience_shell(module: str, tier: str, username: str) -> None:
         a.info("Research protocol above")
     elif module == "Engineering Decision Center":
         if a.button("🔬 Open Research Lab", use_container_width=True, key="sx_open_research_" + key):
-            # Research protocols belong to Experiment Lab. Prevent the generic
-            # Save Study action here from creating a non-research project that
-            # looks like the beginning of a research workflow.
-            st.session_state["enterprise_module_selector"] = "Experimentation · Experiment Lab"
+            # The sidebar selectbox is already instantiated on this run, so
+            # mutating its widget-owned session key here raises
+            # StreamlitWidgetAlreadyInstantiatedError. Set a one-run request
+            # flag instead; app.py consumes it before creating the selectbox.
+            st.session_state["open_research_lab_requested"] = True
             st.rerun()
         a.caption("Research studies start in Experiment Lab; return here later for governed decision cards.")
     else:
