@@ -3375,7 +3375,7 @@ elif selected_module == "Adversarial Chaos & Shock Injector":
             help="1.0 = Routine Seasonal Volatility | 5.0 = Catastrophic Macro Collapse")
 
         st.markdown("---")
-        st.markdown("#### 🔒 3. Differential Privacy Guard ($\\epsilon, \delta$)")
+        st.markdown("#### 🔒 3. Differential Privacy Guard ($\\epsilon, \\delta$)")
         apply_dp = st.checkbox("Enable Differential Privacy Shield", value=True)
         epsilon = st.slider("Privacy Budget ($\\epsilon$)", 0.1, 10.0, 1.5, 0.1, help="Lower epsilon increases privacy protection.")
         delta = st.selectbox("Failure Probability ($\\delta$)", [1e-5, 1e-6, 1e-7], index=1)
