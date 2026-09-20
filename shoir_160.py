@@ -998,7 +998,9 @@ def render_160_command_center(username: str,tier: str) -> None:
         with c: st.markdown("<div class='os160-card'><b>3 · Decide</b><div class='os160-check'>✓ Decision record</div><div class='os160-check'>✓ Approval</div><div class='os160-check'>✓ Verification</div></div>",unsafe_allow_html=True)
         d1,d2,d3,d4=st.columns(4)
         with d1:
-            if st.button("🧭 Run readiness scan",type="primary",key="os160_readiness"): st.success(f"Readiness scan passed {health['passed']}/{health['total']} checks ({health['score']:.0f}%).")
+            if st.button("🧪 Run full 160 verification",type="primary",key="os160_readiness"):
+                suite=run_verification_suite(username)
+                st.success(f"160 verification passed {suite['passed']}/{suite['total']} checks.")
         with d2:
             if st.button("🌱 Seed demo graph",key="os160_seed_graph"):
                 ids=demo_entities(username); st.session_state["os160_demo_entity"]=ids.get("Machine")
@@ -1196,6 +1198,17 @@ def render_160_command_center(username: str,tier: str) -> None:
         if runs.empty: st.info("No run history yet.")
         else:
             st.dataframe(runs,use_container_width=True,hide_index=True)
+            selected_run=st.selectbox("Run control target",runs["run_id"].tolist(),key="os160_run_control_target")
+            rc1,rc2,rc3=st.columns(3)
+            with rc1:
+                if st.button("⏸ Pause",key="os160_pause_run"):
+                    request_run_control(selected_run,"pause"); st.rerun()
+            with rc2:
+                if st.button("▶ Resume",key="os160_resume_run"):
+                    request_run_control(selected_run,"resume"); st.rerun()
+            with rc3:
+                if st.button("⛔ Cancel",key="os160_cancel_run"):
+                    request_run_control(selected_run,"cancel"); st.rerun()
             fig=px.line(runs.sort_values("created_at"),x="created_at",y="duration_ms",markers=True,title="Run duration trend"); fig.update_layout(height=280,margin=dict(l=8,r=8,t=50,b=8)); st.plotly_chart(fig,use_container_width=True,config={"displayModeBar":False})
 
     with tabs[7]:
@@ -1230,6 +1243,24 @@ def render_160_command_center(username: str,tier: str) -> None:
         flow.update_layout(height=320,margin=dict(l=8,r=8,t=30,b=8),title="Industrial flow view"); st.plotly_chart(flow,use_container_width=True,config={"displayModeBar":False})
         grid=pd.DataFrame(np.array([[92,88,76,81],[85,91,73,78],[79,87,84,89]]),index=["Line A","Line B","Line C"],columns=["Quality","Delivery","Cost","Energy"])
         heat=px.imshow(grid,text_auto=True,aspect="auto",title="Operational health heatmap"); heat.update_layout(height=260,margin=dict(l=8,r=8,t=50,b=8)); st.plotly_chart(heat,use_container_width=True,config={"displayModeBar":False})
+        st.markdown("<div class='os160-section'>Live-state inspection tools</div>",unsafe_allow_html=True)
+        i1,i2=st.columns(2)
+        with i1:
+            tdf=telemetry_frame()
+            if tdf.empty:
+                st.info("No telemetry captured yet. Telemetry records are only created from explicit writes or connected deployments.")
+            else:
+                st.dataframe(tdf,use_container_width=True,hide_index=True)
+        with i2:
+            st.caption("Model drift uses aligned actual-vs-baseline observations; it is deterministic and does not invent a live feed.")
+            actual_text=st.text_input("Actual values (comma-separated)",value="100,101,99,104",key="os160_actual")
+            baseline_text=st.text_input("Baseline values (comma-separated)",value="100,100,100,100",key="os160_baseline")
+            try:
+                actual=[float(x.strip()) for x in actual_text.split(",") if x.strip()]
+                baseline=[float(x.strip()) for x in baseline_text.split(",") if x.strip()]
+                st.json(model_drift_report(actual,baseline))
+            except ValueError:
+                st.warning("Enter numeric comma-separated values for drift analysis.")
 
     with tabs[9]:
         st.markdown("<div class='os160-section'>Every requested capability is searchable and status-labelled</div>",unsafe_allow_html=True)
@@ -1240,5 +1271,10 @@ def render_160_command_center(username: str,tier: str) -> None:
             matrix=matrix[matrix["name"].str.lower().str.contains(term,regex=False)|matrix["area"].str.lower().str.contains(term,regex=False)|matrix["state"].str.lower().str.contains(term,regex=False)]
         states=st.multiselect("Status filter",["Operational","Integration-ready"],default=["Operational","Integration-ready"],key="os160_state_filter")
         matrix=matrix[matrix["state"].isin(states)]
+        m1,m2,m3,m4=st.columns(4)
+        m1.metric("Verified",stats["verified"])
+        m2.metric("Implemented",stats["implemented"])
+        m3.metric("Foundation",stats["foundation"])
+        m4.metric("Integration-ready",stats["coverage_integration_ready"])
         st.dataframe(matrix.assign(Status=matrix["state"].map({"Operational":"✅ Operational","Integration-ready":"🔌 Adapter / deployment ready"})).drop(columns=["state"]),use_container_width=True,hide_index=True,height=520)
-        st.caption("Operational = implemented in-app. Integration-ready = the in-app contract, persistence, UI, validation and workflow are implemented; activation requires customer infrastructure, credentials or external services.")
+        st.caption("Availability and implementation coverage are intentionally separate. Verified = regression-tested; Implemented = working surface with verification still expanding; Foundation = architecture/UI hook; Integration-ready = requires external deployment/infrastructure.")
