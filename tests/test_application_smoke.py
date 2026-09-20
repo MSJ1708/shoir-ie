@@ -60,4 +60,4 @@ def test_160_operating_system_route_is_wired():
     app_source = Path("app.py").read_text(encoding="utf-8")
     assert '"🚀 160 Operating System"' in app_source
     assert "render_160_command_center" in app_source
-    assert "if menu_choice == "🚀 160 Operating System"" in app_source
+    assert 'if menu_choice == "🚀 160 Operating System"' in app_source
