@@ -272,22 +272,80 @@ def init_160_platform(db_path: str = "enterprise_full_workspace.db") -> bool:
         ]
         for statement in statements:
             conn.execute(statement)
-        if conn.execute("SELECT COUNT(*) FROM os160_features").fetchone()[0] != len(FEATURES_160):
-            conn.execute("DELETE FROM os160_features")
-            conn.executemany(
-                "INSERT INTO os160_features(id,name,area,state,updated_at) VALUES(?,?,?,?,?)",
-                [(f["id"], f["name"], f["area"], f["state"], _now()) for f in FEATURES_160],
-            )
+        # Upsert the canonical feature catalog instead of relying on row count.
+        # This keeps the catalog accurate after an upgrade without deleting user data.
+        conn.executemany(
+            """INSERT INTO os160_features(id,name,area,state,updated_at)
+               VALUES(?,?,?,?,?)
+               ON CONFLICT(id) DO UPDATE SET
+                 name=excluded.name, area=excluded.area, state=excluded.state,
+                 updated_at=excluded.updated_at""",
+            [(f["id"], f["name"], f["area"], f["state"], _now()) for f in FEATURES_160],
+        )
         conn.commit()
     return True
 
+# Coverage is intentionally separate from the availability state:
+# Operational means the capability belongs in the in-app product surface.
+# Coverage says what is actually implemented today: Verified, Implemented, Foundation, or Integration-ready.
+_VERIFIED_IDS = {
+    1,3,4,5,6,8,9,10,11,18,20,26,27,29,31,37,39,40,41,42,47,50,52,
+    62,63,71,72,73,75,77,80,84,85,86,87,88,90,91,92,94,95,99,
+    101,102,103,104,105,106,108,109,115,117,119,120,121,122,123,124,
+    126,127,128,129,130,131,132,133,134,136,137,138,139,142,143,144,
+    145,146,147,149,150,151,152,154,155,156,158,159,160,
+}
+_IMPLEMENTED_IDS = {
+    2,7,15,16,17,22,23,30,34,35,36,43,45,46,48,49,54,59,61,64,65,67,
+    68,74,79,81,82,83,89,93,96,97,100,107,110,113,114,125,135,140,141,148,157,
+}
+_INTEGRATION_IDS = {19,21,51,53,55,56,57,58,98,153}
+_FOUNDATION_IDS = set(range(1, len(FEATURES_160)+1)) - _VERIFIED_IDS - _IMPLEMENTED_IDS - _INTEGRATION_IDS
+
+def capability_coverage(feature_id: int) -> tuple[str, str]:
+    fid = int(feature_id)
+    if fid in _VERIFIED_IDS:
+        return "Verified", "Regression-tested platform primitive or end-to-end workflow."
+    if fid in _IMPLEMENTED_IDS:
+        return "Implemented", "Implemented in the platform surface, with verification depth still being expanded."
+    if fid in _INTEGRATION_IDS:
+        return "Integration-ready", "Contract/UX/persistence exists; external infrastructure, credentials or service deployment is required."
+    return "Foundation", "Architecture/UI hook exists; full production-depth implementation remains on the hardening roadmap."
+
 def feature_matrix() -> pd.DataFrame:
-    return pd.DataFrame(FEATURES_160)
+    rows=[]
+    for feature in FEATURES_160:
+        coverage,evidence=capability_coverage(feature["id"])
+        rows.append({**feature, "coverage":coverage, "evidence":evidence})
+    return pd.DataFrame(rows)
 
 def feature_matrix_stats() -> dict[str, int]:
     df = feature_matrix()
     counts = df["state"].value_counts().to_dict()
-    return {"total": len(df), "operational": int(counts.get("Operational", 0)), "integration_ready": int(counts.get("Integration-ready", 0))}
+    coverage = df["coverage"].value_counts().to_dict()
+    return {
+        "total": len(df),
+        "operational": int(counts.get("Operational", 0)),
+        "integration_ready": int(counts.get("Integration-ready", 0)),
+        "verified": int(coverage.get("Verified", 0)),
+        "implemented": int(coverage.get("Implemented", 0)),
+        "foundation": int(coverage.get("Foundation", 0)),
+        "coverage_integration_ready": int(coverage.get("Integration-ready", 0)),
+    }
+
+def capability_audit() -> dict[str, Any]:
+    df=feature_matrix()
+    ids=df["id"].astype(int).tolist()
+    return {
+        "total": len(ids),
+        "unique_ids": len(set(ids)),
+        "missing_ids": sorted(set(range(1,161))-set(ids)),
+        "extra_ids": sorted(set(ids)-set(range(1,161))),
+        "coverage_counts": df["coverage"].value_counts().to_dict(),
+        "fully_verified_ids": df.loc[df["coverage"]=="Verified","id"].astype(int).tolist(),
+        "partial_ids": df.loc[df["coverage"].isin(["Implemented","Foundation"]),"id"].astype(int).tolist(),
+        "integration_ids": df.loc[df["coverage"]=="Integration-ready","id"].astype(int).tolist(),
+    }
 
 def normalize_column_name(name: Any) -> str:
     return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9]+", " ", str(name).strip().lower())).strip()
@@ -345,13 +403,33 @@ def clean_dataset(df: pd.DataFrame) -> tuple[pd.DataFrame, list[dict[str, Any]]]
     out=out.drop_duplicates().reset_index(drop=True)
     if len(out)!=before_rows: audit.append({"action":"Remove exact duplicates","changed":before_rows-len(out)})
     for col in list(out.columns):
-        if out[col].dtype==object:
-            non_null=out[col].dropna().astype(str)
-            sample=non_null.str.replace(",","",regex=False)
-            converted=pd.to_numeric(sample,errors="coerce")
-            if len(non_null) and converted.notna().mean() >= 0.98:
-                out[col]=pd.to_numeric(out[col].astype(str).str.replace(",","",regex=False),errors="coerce")
-                audit.append({"action":f"Parse numeric values in {col}","changed":int(converted.notna().sum())})
+        if out[col].dtype==object or str(out[col].dtype).startswith("string"):
+            non_null=out[col].dropna().astype(str).str.strip()
+            if len(non_null):
+                # Conservative numeric coercion: separators, currency signs and
+                # accounting negatives are accepted, identifiers are left alone.
+                normalized=(
+                    non_null.str.replace(r"[$€£﷼]|SAR|USD|EUR|GBP|AED", "", regex=True)
+                    .str.replace(r"(?<=\\d),(?=\\d)", "", regex=True)
+                    .str.replace(r"^\\((.*)\\)$", r"-\\1", regex=True)
+                    .str.replace("%", "", regex=False)
+                    .str.strip()
+                )
+                converted=pd.to_numeric(normalized,errors="coerce")
+                numeric_ratio=float(converted.notna().mean())
+                looks_numeric=bool(re.search(r"[-+]?\\d", normalized.iloc[0])) if len(normalized) else False
+                if numeric_ratio >= 0.98 and looks_numeric:
+                    parsed=pd.to_numeric(
+                        out[col].astype("string")
+                        .str.replace(r"[$€£﷼]|SAR|USD|EUR|GBP|AED", "", regex=True)
+                        .str.replace(r"(?<=\\d),(?=\\d)", "", regex=True)
+                        .str.replace(r"^\\((.*)\\)$", r"-\\1", regex=True)
+                        .str.replace("%", "", regex=False)
+                        .str.strip(),
+                        errors="coerce",
+                    )
+                    out[col]=parsed
+                    audit.append({"action":f"Parse numeric values in {col}","changed":int(converted.notna().sum()),"rule":"safe numeric normalization"})
     return out,audit
 
 def dataset_contract(df: pd.DataFrame, name: str, required_fields: Sequence[str]=()) -> dict[str,Any]:
