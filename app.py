@@ -278,7 +278,7 @@ def init_db():
         # .streamlit/secrets.toml (same file your email credentials already
         # live in):
         #   [admin]
-        #   password = "your-password-here"
+        #   password = "<set-your-admin-password-in-secrets>"
         # Until you do, it falls back to the exact same password that was
         # already hardcoded here, so sho's login does not change today.
         # IMPORTANT: since that password has been sitting in plain text in
