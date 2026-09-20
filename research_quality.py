@@ -145,7 +145,7 @@ def regression_analysis(
     metrics = {
         "R2": float(r2_score(y, pred)),
         "MAE": float(mean_absolute_error(y, pred)),
-        "RMSE": float(mean_squared_error(y, pred, squared=False)),
+        "RMSE": float(np.sqrt(mean_squared_error(y, pred))),
         "n": int(len(clean)),
         "polynomial_degree": int(polynomial_degree),
         "evidence_status": "Computed from supplied data",
@@ -202,7 +202,7 @@ def fit_surrogate(
     metrics = {
         "R2_test": float(r2_score(yv[test_idx], pred)) if len(test_idx) >= 2 else float("nan"),
         "MAE_test": float(mean_absolute_error(yv[test_idx], pred)),
-        "RMSE_test": float(mean_squared_error(yv[test_idx], pred, squared=False)),
+        "RMSE_test": float(np.sqrt(mean_squared_error(yv[test_idx], pred))),
         "train_rows": int(len(train_idx)),
         "test_rows": int(len(test_idx)),
         "seed": int(seed),
