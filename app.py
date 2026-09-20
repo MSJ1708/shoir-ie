@@ -28,6 +28,7 @@ from industrial_platform import PLATFORM_CATALOG, render_module as render_indust
 from industrial_operating_system import render_industrial_operating_system
 from industrial_experience import COPILOT_TOOLS, ensure_experience_db, feature_stats
 from industrial_excellence_hub import render_platform_excellence_hub
+from shoir_160 import init_160_platform, render_160_command_center
 
 # =====================================================================
 # PAGE CONFIGURATION & CUSTOM CSS (Professional Styling & Hover Zoom)
@@ -1305,7 +1306,7 @@ if is_admin:
     tier3_features.append("Admin Panel")
 
 st.sidebar.markdown("### 🧭 Navigation Menu")
-menu_choice = st.sidebar.radio("Go to Section", ["Dashboard", "✨ Excellence Hub", "Become an affiliate", "Feedback", "Edit Account"], label_visibility="collapsed")
+menu_choice = st.sidebar.radio("Go to Section", ["Dashboard", "🚀 160 Operating System", "✨ Excellence Hub", "Become an affiliate", "Feedback", "Edit Account"], label_visibility="collapsed")
 if menu_choice != "Dashboard":
     st.session_state.selected_nav = menu_choice
 else:
@@ -1456,6 +1457,13 @@ with st.container(border=True):
 # =====================================================================
 # PLATFORM EXCELLENCE HUB — unified cross-cutting command center
 # =====================================================================
+if st.session_state.get("selected_nav") == "🚀 160 Operating System":
+    render_160_command_center(
+        st.session_state.get("current_user", "unknown"),
+        st.session_state.get("user_tier", "Starter Tier"),
+    )
+    st.stop()
+
 if st.session_state.get("selected_nav") == "✨ Excellence Hub":
     render_platform_excellence_hub(
         st.session_state.get("current_user", "unknown"),
