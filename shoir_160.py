@@ -459,20 +459,20 @@ def clean_dataset(df: pd.DataFrame) -> tuple[pd.DataFrame, list[dict[str, Any]]]
                 # accounting negatives are accepted, identifiers are left alone.
                 normalized=(
                     non_null.str.replace(r"[$€£﷼]|SAR|USD|EUR|GBP|AED", "", regex=True)
-                    .str.replace(r"(?<=\\d),(?=\\d)", "", regex=True)
-                    .str.replace(r"^\\((.*)\\)$", r"-\\1", regex=True)
+                    .str.replace(r"(?<=\d),(?=\d)", "", regex=True)
+                    .str.replace(r"^\((.*)\)$", r"-\\1", regex=True)
                     .str.replace("%", "", regex=False)
                     .str.strip()
                 )
                 converted=pd.to_numeric(normalized,errors="coerce")
                 numeric_ratio=float(converted.notna().mean())
-                looks_numeric=bool(re.search(r"[-+]?\\d", normalized.iloc[0])) if len(normalized) else False
+                looks_numeric=bool(re.search(r"[-+]?\d", normalized.iloc[0])) if len(normalized) else False
                 if numeric_ratio >= 0.98 and looks_numeric:
                     parsed=pd.to_numeric(
                         out[col].astype("string")
                         .str.replace(r"[$€£﷼]|SAR|USD|EUR|GBP|AED", "", regex=True)
-                        .str.replace(r"(?<=\\d),(?=\\d)", "", regex=True)
-                        .str.replace(r"^\\((.*)\\)$", r"-\\1", regex=True)
+                        .str.replace(r"(?<=\d),(?=\d)", "", regex=True)
+                        .str.replace(r"^\((.*)\)$", r"-\\1", regex=True)
                         .str.replace("%", "", regex=False)
                         .str.strip(),
                         errors="coerce",
