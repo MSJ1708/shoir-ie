@@ -12,6 +12,7 @@ import streamlit as st
 import html
 
 from industrial_experience import ensure_experience_db, feature_stats, feature_catalog
+from platform_excellence_ui import render_platform_excellence_center
 from industrial_platform import (
     PLATFORM_CATALOG, TIER_FEATURES, normalize_tier, tier_allows,
     init_platform_db, data_quality_report, model_health, scenario_table,
@@ -67,6 +68,10 @@ with st.expander("✨ Platform Excellence · capability map", expanded=False):
         term=q.strip().lower()
         cap=cap[cap["Feature"].str.lower().str.contains(term,regex=False) | cap["Description"].str.lower().str.contains(term,regex=False)]
     st.dataframe(cap,use_container_width=True,hide_index=True)
+
+st.divider()
+
+render_platform_excellence_center(user, tier)
 
 st.divider()
 
