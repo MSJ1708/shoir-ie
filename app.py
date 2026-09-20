@@ -15,6 +15,8 @@ import plotly.express as px
 import hashlib
 import re
 import html
+import io
+import zipfile
 import time
 import smtplib
 from email.message import EmailMessage
