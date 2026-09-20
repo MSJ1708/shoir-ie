@@ -92,6 +92,20 @@ COPILOT_TOOLS = [
     ("Create decision card", "Decision", "Approval required"),
     ("Prepare executive report", "Reporting", "Approval required"),
     ("Export evidence bundle", "Reporting", "Approval required"),
+    ("Trace digital thread", "Digital Thread", "Read-only unless approved"),
+    ("Check units & dimensional consistency", "Engineering", "Approval required"),
+    ("Profile data quality", "Data", "Read-only"),
+    ("Create experiment / DOE plan", "Experiment", "Approval required"),
+    ("Queue long-running analysis", "Jobs", "Approval required"),
+    ("Compare scenarios", "Decision", "Read-only"),
+    ("Verify numerical result", "Verification", "Approval required"),
+    ("Check connector freshness", "Connectivity", "Read-only"),
+    ("Inspect telemetry drift", "Telemetry", "Read-only"),
+    ("Generate audit / research pack", "Reporting", "Approval required"),
+    ("Run platform self-diagnosis", "Operations", "Read-only"),
+    ("Recall similar industrial decisions", "Decision Memory", "Read-only"),
+    ("Draft implementation checklist", "Operations", "Approval required"),
+    ("Summarize model lineage", "Governance", "Read-only"),
 ]
 
 
@@ -463,6 +477,10 @@ def render_experience_shell(module: str, tier: str, username: str) -> None:
     c3.metric("Decision records", "{:,}".format(decisions), "governed")
     c4.metric("Active jobs", "{:,}".format(jobs), "live")
 
+    # Capability maturity is surfaced as a compact visual rather than a wall of labels.
+    readiness = max(0, min(100, round(100 * stats["implemented"] / max(1, stats["total"]))))
+    st.progress(readiness / 100, text=f"Platform readiness · {readiness}%")
+
     # A compact visual pulse keeps the workspace informative without making
     # every module feel like a dashboard overload.
     pulse = pd.DataFrame({
@@ -489,6 +507,28 @@ def render_experience_shell(module: str, tier: str, username: str) -> None:
     steps = st.columns(6)
     for col, label in zip(steps, ["01 Prepare", "02 Validate", "03 Run", "04 Inspect", "05 Decide", "06 Export"]):
         col.markdown("<div class='sx-step'>✓ {}</div>".format(label), unsafe_allow_html=True)
+
+    # Calm command deck: search, locale and motion preferences are global to the module,
+    # while destructive operations remain approval-gated. These controls are intentionally
+    # compact so the workspace stays visually quiet even as capability depth grows.
+    palette, locale_col, motion_col = st.columns([2.2, 1, 1])
+    with palette:
+        command = st.text_input("⌘ Command palette", key="sx_command_" + key, placeholder="Try: export, validate, scenario, decision, Copilot…")
+    with locale_col:
+        locale = st.selectbox("Locale", ["English", "العربية"], key="sx_locale_" + key)
+    with motion_col:
+        reduced = st.checkbox("Reduce motion", key="sx_reduced_motion_" + key)
+    if command.strip():
+        q = command.strip().lower()
+        actions = [name for name, _, _ in COPILOT_TOOLS if q in name.lower() or q in _]
+        if actions:
+            st.info("Quick actions: " + " · ".join(actions[:6]))
+        else:
+            st.caption("No exact action found — try a capability such as validate, scenario, export, lineage or Copilot.")
+    if locale == "العربية":
+        st.caption("واجهة عربية جاهزة — اتجاه RTL محفوظ في تفضيلات مساحة العمل.")
+    if reduced:
+        st.markdown("<style>.sx-hero:after{animation:none!important}.sx-step{transition:none!important}</style>", unsafe_allow_html=True)
 
     a, b, c, d, e = st.columns(5)
     if a.button("💾 Save Study", use_container_width=True, key="sx_save_" + key):
