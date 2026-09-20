@@ -7027,7 +7027,7 @@ if selected_module in ["Engineering Economics & Finance", "Engineering Economics
         st.markdown("#### 🎲 Monte Carlo NPV Risk & Uncertainty Simulation")
         st.markdown("""
         <div style="background: rgba(31, 41, 55, 0.5); padding: 12px; border-radius: 8px; border-left: 3px solid #f43f5e; font-size: 12px; color: #d1d5db; margin-bottom: 16px;">
-            <b>Probabilistic Risk Modeler:</b> Simulates 1,000 randomized project futures by adding Gaussian noise ($\\pm 15\%$) to annual cash flows to calculate the probability of a positive NPV.
+            <b>Probabilistic Risk Modeler:</b> Simulates 1,000 randomized project futures by adding Gaussian noise ($\\pm 15\\%$) to annual cash flows to calculate the probability of a positive NPV.
         </div>
         """, unsafe_allow_html=True)
 
