@@ -14,6 +14,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import zipfile
 import math
 import sqlite3
 import uuid
@@ -39,6 +40,23 @@ from industrial_experience import (
 )
 
 LIFECYCLE = ["Draft", "Data Validated", "Analysis", "Peer Review", "Decision", "Approved", "Implemented", "Verified", "Closed"]
+MARKET_READINESS_40 = [
+    "Global command palette", "Universal workspace search", "Keyboard-first navigation",
+    "Reduced-motion preference", "Responsive layout system", "Theme tokens",
+    "Module health center", "Release readiness checklist", "Changelog surface",
+    "Guided onboarding", "Study templates", "Scenario comparison view",
+    "Baseline-versus-scenario KPI cards", "Interactive radar/spider charts", "Sensitivity/tornado charts",
+    "Distribution/histogram views", "Box-and-whisker views", "Correlation heatmaps",
+    "Evidence bundle export", "Study manifest", "Data contract preview",
+    "Field mapping preview", "Missing-data gate", "Duplicate-data gate",
+    "Finite-number gate", "Assumption register", "Unit recognition",
+    "Lifecycle tracking", "Implementation task tracker", "Durable run IDs",
+    "Run status timeline", "Decision record creation", "Decision evidence capture",
+    "Audit-ready metadata", "Recovery snapshots", "Workspace persistence",
+    "Cross-module experience shell", "Safe module fallback", "Copilot action catalog",
+    "Industrial engineering design system", "Accessibility-aware motion"
+]
+
 DEFAULT_ASSUMPTIONS = [
     {"Assumption": "Planning horizon", "Value": "12 weeks", "Unit": "weeks", "Source": "User / project"},
     {"Assumption": "Base currency", "Value": "USD", "Unit": "currency", "Source": "Workspace"},
@@ -230,7 +248,7 @@ def render_module_enrichment(module: str, tier: str, username: str, df: pd.DataF
         unsafe_allow_html=True,
     )
 
-    with st.expander("⚡ Integrated Engineering Workspace", expanded=False):
+    with st.expander("⚡ Integrated Engineering Workspace · 100-capability experience layer", expanded=False):
         _render_maturity(module, frame, contract)
         tabs=st.tabs(["📁 Data Contract","⚙️ Assumptions & Units","🧪 Scenario Studio","📊 Visual Studio","📋 Study Control","🚀 Implementation"])
         with tabs[0]:
