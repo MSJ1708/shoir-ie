@@ -114,7 +114,7 @@ def test_all_capabilities_have_audit_coverage_and_unique_ids():
 
 
 def test_ai_knows_all_160_and_has_tool_registry():
-    ctx = ai_capability_context(":memory:")
+    ctx = ai_capability_context(str(Path(tempfile.gettempdir()) / "shoir_ai_context_test.db"))
     assert ctx["capability_count"] == 160
     assert len(ctx["capabilities"]) == 160
     assert ctx["trust_policy"]
