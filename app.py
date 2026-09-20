@@ -28,6 +28,7 @@ from industrial_platform import PLATFORM_CATALOG, render_module as render_indust
 from industrial_operating_system import render_industrial_operating_system
 from industrial_experience import COPILOT_TOOLS, ensure_experience_db, feature_stats
 from industrial_excellence_hub import render_platform_excellence_hub
+from shoir_commercial import render_module_enrichment
 
 # =====================================================================
 # PAGE CONFIGURATION & CUSTOM CSS (Professional Styling & Hover Zoom)
@@ -1464,6 +1465,27 @@ if st.session_state.get("selected_nav") == "✨ Excellence Hub":
         st.session_state.get("user_tier", "Starter Tier"),
     )
     st.stop()
+
+# =====================================================================
+# UNIVERSAL COMMERCIAL ENGINEERING EXPERIENCE LAYER
+# ---------------------------------------------------------------------
+# One consistent shell is injected before specialist module renderers so
+# every module gets the same governed data/assumption/scenario/visual/study
+# experience without duplicating specialist engineering logic.
+# =====================================================================
+try:
+    _enrich_tables = _upgrade_tables_for_module(selected_module)
+    _enrich_df = _upgrade_df(_enrich_tables[0][1]) if _enrich_tables else pd.DataFrame()
+    render_module_enrichment(
+        selected_module,
+        st.session_state.get("user_tier", "Starter Tier"),
+        st.session_state.get("current_user", "unknown"),
+        _enrich_df,
+    )
+except Exception as _experience_error:
+    # The commercial shell must never prevent a specialist engineering module
+    # from opening. Surface a concise diagnostic instead of crashing the app.
+    st.warning(f"Integrated workspace notice: {_experience_error}")
 
 st.sidebar.markdown("---")
 if st.sidebar.button("Lock / Logout Workspace"):
