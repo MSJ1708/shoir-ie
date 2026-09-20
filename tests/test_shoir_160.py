@@ -18,6 +18,15 @@ from shoir_160 import (
     profile_dataset,
     smart_map_columns,
     validate_balance,
+    ai_capability_context,
+    ai_tool_registry,
+    capability_audit,
+    doe_factorial,
+    model_drift_report,
+    monte_carlo_summary,
+    roi_scenario,
+    run_verification_suite,
+    scenario_sweep,
 )
 
 
@@ -92,3 +101,42 @@ def test_profile_is_numeric_safe():
     assert result["rows"] == 3
     assert result["columns"] == 2
     assert 0 <= result["quality_score"] <= 100
+
+
+def test_all_capabilities_have_audit_coverage_and_unique_ids():
+    audit = capability_audit()
+    assert audit["total"] == 160
+    assert audit["unique_ids"] == 160
+    assert audit["missing_ids"] == []
+    assert audit["extra_ids"] == []
+    assert sum(audit["coverage_counts"].values()) == 160
+    assert {"Verified", "Implemented", "Foundation", "Integration-ready"} <= set(audit["coverage_counts"])
+
+
+def test_ai_knows_all_160_and_has_tool_registry():
+    ctx = ai_capability_context(":memory:")
+    assert ctx["capability_count"] == 160
+    assert len(ctx["capabilities"]) == 160
+    assert ctx["trust_policy"]
+    # In-memory DBs are not used by the app, but the capability payload must still
+    # be complete even when persistence is unavailable.
+
+
+def test_scenario_monte_carlo_doe_roi_and_drift_are_deterministic():
+    sweep = scenario_sweep({"throughput":100,"cost":1000},{"capacity_pct":[0,10],"cost_pct":[0,5]})
+    assert len(sweep) == 4
+    assert set(["throughput","cost","service"]) <= set(sweep.columns)
+    mc1 = monte_carlo_summary(100,10,trials=500,seed=42)
+    mc2 = monte_carlo_summary(100,10,trials=500,seed=42)
+    assert mc1 == mc2
+    assert len(doe_factorial({"A":[0,1],"B":[0,1]})) == 4
+    roi = roi_scenario(120,20,50,2)
+    assert roi["net_benefit"] > 0 and roi["roi_pct"] > 0
+    assert model_drift_report([1,2,3],[1,2,3])["status"] == "Stable"
+
+
+def test_verification_suite_has_core_passes(tmp_path):
+    db = str(tmp_path / "verification.db")
+    result = run_verification_suite("test-user", db_path=db)
+    assert result["passed"] == result["total"]
+    assert all(result["results"].values())
