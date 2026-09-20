@@ -1537,7 +1537,7 @@ elif selected_module in ["Autonomous Cognitive Operations & Zero-Knowledge Mesh 
         col_n1, col_n2 = st.columns(2)
         with col_n1:
             bargaining_strategy = st.selectbox("Solution Protocol", ["Nash Cooperative Bargaining", "Rubinstein Alternating Offers", "VCG Mechanism"])
-            risk_weight = st.slider("Risk-Sharing Coefficient ($\omega$)", 0.1, 1.0, 0.85, 0.05)
+            risk_weight = st.slider("Risk-Sharing Coefficient ($\\omega$)", 0.1, 1.0, 0.85, 0.05)
         with col_n2:
             st.metric("Equilibrium Convergence Speed", "8.4 ms", delta="Global Optimum")
             st.metric("Pareto Efficiency Surplus", "+38.2%", delta="Maximized")
@@ -2778,7 +2778,7 @@ elif selected_module == "Real-Time Quantum-Classical Hybrid Optimization Router"
         col_q1, col_q2 = st.columns(2)
         with col_q1:
             routing_nodes = st.slider("Routing Network Nodes ($N$)", 10, 100, 35, 5)
-            penalty_multiplier = st.number_input("Constraint Penalty Weight ($\gamma$)", value=1000.0, step=100.0)
+            penalty_multiplier = st.number_input("Constraint Penalty Weight ($\\gamma$)", value=1000.0, step=100.0)
         with col_q2:
             graph_topology = st.selectbox("Underlying Graph Topology", ["Complete Graph ($K_n$)", "Scale-Free Barabási–Albert", "Small-World Lattice", "Bipartite Supply Network"])
             slack_variable_encoding = st.selectbox("Slack Variable Encoding", ["Binary Expansion", "Unary Encoding", "Logarithmic Binary"])
@@ -3181,7 +3181,7 @@ elif selected_module == "Adversarially Stressed Synthetic Industrial Twins":
         
         col_d1, col_d2 = st.columns(2)
         with col_d1:
-            mean_val = st.number_input("Process Mean / Rate ($\lambda$)", value=120.0, step=5.0)
+            mean_val = st.number_input("Process Mean / Rate ($\\lambda$)", value=120.0, step=5.0)
             scale_val = st.number_input("Volatility / Scale Parameter", value=18.0, step=1.0)
         with col_d2:
             shape_val = st.number_input("Tail Shape Parameter (Weibull)", value=1.5, step=0.1)
@@ -3195,10 +3195,10 @@ elif selected_module == "Adversarially Stressed Synthetic Industrial Twins":
         enable_dp = st.checkbox("Enforce Differential Privacy Shield", value=True)
         col_p1, col_p2 = st.columns(2)
         with col_p1:
-            epsilon_val = st.slider("Privacy Budget ($\epsilon$)", 0.1, 5.0, 1.2, 0.1,
+            epsilon_val = st.slider("Privacy Budget ($\\epsilon$)", 0.1, 5.0, 1.2, 0.1,
                 help="Lower epsilon enforces stricter privacy protection against telemetry reverse-engineering.")
         with col_p2:
-            delta_val = st.selectbox("Failure Probability ($\delta$)", [1e-5, 1e-6, 1e-7], index=1)
+            delta_val = st.selectbox("Failure Probability ($\\delta$)", [1e-5, 1e-6, 1e-7], index=1)
 
         st.info(f"🛡️ **Compliance Status**: Configured for $\\epsilon = {epsilon_val}$ and $\\delta = {delta_val}$. Synthetic datasets are mathematically certified safe for public academic publication.")
 
@@ -3375,10 +3375,10 @@ elif selected_module == "Adversarial Chaos & Shock Injector":
             help="1.0 = Routine Seasonal Volatility | 5.0 = Catastrophic Macro Collapse")
 
         st.markdown("---")
-        st.markdown("#### 🔒 3. Differential Privacy Guard ($\epsilon, \delta$)")
+        st.markdown("#### 🔒 3. Differential Privacy Guard ($\\epsilon, \delta$)")
         apply_dp = st.checkbox("Enable Differential Privacy Shield", value=True)
-        epsilon = st.slider("Privacy Budget ($\epsilon$)", 0.1, 10.0, 1.5, 0.1, help="Lower epsilon increases privacy protection.")
-        delta = st.selectbox("Failure Probability ($\delta$)", [1e-5, 1e-6, 1e-7], index=1)
+        epsilon = st.slider("Privacy Budget ($\\epsilon$)", 0.1, 10.0, 1.5, 0.1, help="Lower epsilon increases privacy protection.")
+        delta = st.selectbox("Failure Probability ($\\delta$)", [1e-5, 1e-6, 1e-7], index=1)
 
         run_chaos_sim = st.button("🚀 Deploy Chaos Simulation & Stress Test", type="primary", use_container_width=True)
 
@@ -3427,7 +3427,7 @@ elif selected_module == "Adversarial Chaos & Shock Injector":
             m1, m2, m3 = st.columns(3)
             m1.metric("Resilience Index", f"{resilience_score} / 100", delta=f"-{chaos_severity*12:.1f}% vs baseline", delta_color="inverse")
             m2.metric("Critical Stockout Periods", f"{recovery_periods} cycles", delta=f"+{recovery_periods} critical")
-            m3.metric("DP Privacy Leakage ($\epsilon$)", f"{epsilon} (Certified)", delta="Secured")
+            m3.metric("DP Privacy Leakage ($\\epsilon$)", f"{epsilon} (Certified)", delta="Secured")
 
             st.markdown("**Comparative Stress Trajectory: Baseline vs Adversarial Shock**")
             comparison_df = pd.DataFrame({
@@ -3508,7 +3508,7 @@ elif selected_module == "Live Reproducible Paper Canvas":
         st.session_state['canvas_checkpoints'] = []
     if 'active_params' not in st.session_state:
         st.session_state['active_params'] = {
-            "Demand Rate ($\lambda$)": 120.0,
+            "Demand Rate ($\\lambda$)": 120.0,
             "Holding Cost ($h$)": 2.0,
             "Capacity Limit ($Q_{max}$)": 1000.0
         }
@@ -3519,10 +3519,10 @@ elif selected_module == "Live Reproducible Paper Canvas":
         st.markdown("#### 📝 Bi-Digital Narrative & Inline Sliders")
         st.markdown("Adjust inline parameters embedded directly within the research text paragraphs. Changes trigger immediate re-simulation.")
         
-        p_demand = st.slider("Inline Demand Parameter ($\lambda$)", 50.0, 300.0, float(st.session_state['active_params']["Demand Rate ($\lambda$)"]))
+        p_demand = st.slider("Inline Demand Parameter ($\\lambda$)", 50.0, 300.0, float(st.session_state['active_params']["Demand Rate ($\\lambda$)"]))
         p_holding = st.slider("Inline Holding Cost ($h$)", 0.5, 5.0, float(st.session_state['active_params']["Holding Cost ($h$)"]))
         
-        st.session_state['active_params']["Demand Rate ($\lambda$)"] = p_demand
+        st.session_state['active_params']["Demand Rate ($\\lambda$)"] = p_demand
         st.session_state['active_params']["Holding Cost ($h$)"] = p_holding
 
         st.markdown("---")
@@ -3550,7 +3550,7 @@ elif selected_module == "Live Reproducible Paper Canvas":
         # Execute simulation based on active live-linked parameters
         periods = 40
         t = np.arange(periods)
-        demand_val = st.session_state['active_params']["Demand Rate ($\lambda$)"]
+        demand_val = st.session_state['active_params']["Demand Rate ($\\lambda$)"]
         holding_val = st.session_state['active_params']["Holding Cost ($h$)"]
         
         inventory_curve = np.maximum(0, 1000 - demand_val * t * 0.12 + np.cumsum(np.random.normal(0, 10, periods)))
@@ -3820,7 +3820,7 @@ elif selected_module == "Paper-to-Simulation Auto-Engine":
         
         # Interactive Sliders for Customization
         st.session_state['sim_config']["demand_rate"] = st.slider(
-            "Base Demand Rate ($\lambda$)", 50.0, 500.0, float(st.session_state['sim_config']["demand_rate"])
+            "Base Demand Rate ($\\lambda$)", 50.0, 500.0, float(st.session_state['sim_config']["demand_rate"])
         )
         st.session_state['sim_config']["holding_cost"] = st.slider(
             "Unit Holding Cost ($h$)", 0.5, 10.0, float(st.session_state['sim_config']["holding_cost"])
@@ -4007,7 +4007,7 @@ elif selected_module == "Advanced Regression Analysis":
         with col_f1:
             st.markdown("#### Transformation Pipeline")
             trans_col = st.selectbox("Select Numeric Column to Transform", numeric_cols, key="trans_col")
-            trans_type = st.selectbox("Transformation Type", ["Log (ln)", "Square Root ($\sqrt{x}$)", "Square ($x^2$)"])
+            trans_type = st.selectbox("Transformation Type", ["Log (ln)", "Square Root ($\\sqrt{x}$)", "Square ($x^2$)"])
             if st.button("Apply Transformation"):
                 new_col_name = f"{trans_col}_{trans_type.split()[0]}"
                 if trans_type.startswith("Log"):
@@ -4622,7 +4622,7 @@ if df is not None and not df.empty:
         with col_v1:
             target_col = st.selectbox("Numeric Target Column", numeric_cols)
         with col_v2:
-            pop_mean = st.number_input("Hypothesized Mean ($\mu_0$)", value=75.0)
+            pop_mean = st.number_input("Hypothesized Mean ($\\mu_0$)", value=75.0)
     elif test_type in ["Independent Two-Sample t-Test", "Mann-Whitney U Test", "Paired t-Test", "Levene's Homogeneity Test"]:
         with col_v1:
             col_a = st.selectbox("Variable / Group 1", numeric_cols)
@@ -4667,7 +4667,7 @@ if df is not None and not df.empty:
             res = stats.ttest_1samp(df[target_col].dropna(), pop_mean, alternative=alternative)
             stat_value, p_value, df_value = res.statistic, res.pvalue, len(df[target_col].dropna()) - 1
             
-            fig = px.violin(df, y=target_col, box=True, points="all", title=f"Distribution & Violin Plot: {target_col} vs $\mu_0$ = {pop_mean}")
+            fig = px.violin(df, y=target_col, box=True, points="all", title=f"Distribution & Violin Plot: {target_col} vs $\\mu_0$ = {pop_mean}")
             st.plotly_chart(fig, use_container_width=True)
 
         elif test_type == "Independent Two-Sample t-Test":
@@ -7027,7 +7027,7 @@ if selected_module in ["Engineering Economics & Finance", "Engineering Economics
         st.markdown("#### 🎲 Monte Carlo NPV Risk & Uncertainty Simulation")
         st.markdown("""
         <div style="background: rgba(31, 41, 55, 0.5); padding: 12px; border-radius: 8px; border-left: 3px solid #f43f5e; font-size: 12px; color: #d1d5db; margin-bottom: 16px;">
-            <b>Probabilistic Risk Modeler:</b> Simulates 1,000 randomized project futures by adding Gaussian noise ($\pm 15\%$) to annual cash flows to calculate the probability of a positive NPV.
+            <b>Probabilistic Risk Modeler:</b> Simulates 1,000 randomized project futures by adding Gaussian noise ($\\pm 15\%$) to annual cash flows to calculate the probability of a positive NPV.
         </div>
         """, unsafe_allow_html=True)
 
@@ -7318,8 +7318,8 @@ if selected_module in ["Digital Twin & Discrete-Event Simulation", "Digital Twin
             with st.form("add_queue_form"):
                 q_id = f"Q-{str(uuid.uuid4())[:4].upper()}"
                 q_station = st.text_input("Queue / Station Name", value="Assembly Line Staging")
-                arr_rate = st.number_input("Arrival Rate ($\lambda$ parts/hr)", 1.0, 50.0, 14.0, 0.5)
-                srv_rate = st.number_input("Service Rate ($\mu$ parts/hr)", 1.0, 60.0, 18.0, 0.5)
+                arr_rate = st.number_input("Arrival Rate ($\\lambda$ parts/hr)", 1.0, 50.0, 14.0, 0.5)
+                srv_rate = st.number_input("Service Rate ($\\mu$ parts/hr)", 1.0, 60.0, 18.0, 0.5)
                 q_cap = st.number_input("Max Queue Buffer Capacity", 5, 100, 30)
 
                 if st.form_submit_button("📥 Add Queue Slot", use_container_width=True):
