@@ -29,6 +29,17 @@ from industrial_operating_system import render_industrial_operating_system
 from industrial_experience import COPILOT_TOOLS, ensure_experience_db, feature_stats
 from industrial_excellence_hub import render_platform_excellence_hub
 from shoir_commercial import render_module_enrichment
+COMMERCIAL_COPILOT_TOOLS = [
+    ("Validate dataset contract", "Data", "Preview first; approval before execution"),
+    ("Open visual studio", "Visualization", "Generate bar/line/scatter/box/heatmap/radar views"),
+    ("Run scenario comparison", "Experiment", "Approval before scenario execution"),
+    ("Register engineering study", "Governance", "Persist lifecycle and evidence"),
+    ("Create decision record", "Decision", "Approval required"),
+    ("Export evidence bundle", "Reporting", "Approval required"),
+    ("Track implementation task", "Execution", "Human owner required"),
+]
+COPILOT_TOOLS = list(COPILOT_TOOLS) + COMMERCIAL_COPILOT_TOOLS
+
 
 # =====================================================================
 # PAGE CONFIGURATION & CUSTOM CSS (Professional Styling & Hover Zoom)
