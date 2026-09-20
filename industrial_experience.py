@@ -92,6 +92,13 @@ COPILOT_TOOLS = [
     ("Create decision card", "Decision", "Approval required"),
     ("Prepare executive report", "Reporting", "Approval required"),
     ("Export evidence bundle", "Reporting", "Approval required"),
+    ("Trace digital thread", "Digital Thread", "Approval before cross-module changes"),
+    ("Check units & currency", "Engineering Data", "Approval before normalization"),
+    ("Run experiment / DOE", "Experiment", "Approval required"),
+    ("Start / cancel engineering job", "Operations", "Approval required"),
+    ("Generate audit / research pack", "Governance", "Approval required"),
+    ("Search saved studies & decisions", "Workspace", "Read-only"),
+    ("Create decision-memory lesson", "Decision Memory", "Approval required"),
 ]
 
 
@@ -490,6 +497,27 @@ def render_experience_shell(module: str, tier: str, username: str) -> None:
     for col, label in zip(steps, ["01 Prepare", "02 Validate", "03 Run", "04 Inspect", "05 Decide", "06 Export"]):
         col.markdown("<div class='sx-step'>✓ {}</div>".format(label), unsafe_allow_html=True)
 
+    # Command rail: a calm, reusable control surface shared by every engineering module.
+    r1, r2, r3, r4 = st.columns([1.55, 1.15, 1.15, 1.15])
+    with r1:
+        command = st.text_input("⌘ Command palette", placeholder="Search capability, action, dataset…", key="sx_command_" + key)
+    with r2:
+        density = st.selectbox("Density", ["Comfortable", "Compact"], key="sx_density_" + key)
+    with r3:
+        locale = st.selectbox("Locale", ["English", "العربية"], key="sx_locale_" + key)
+    with r4:
+        reduced = st.checkbox("Reduce motion", key="sx_reduced_" + key)
+    if locale == "العربية":
+        st.info("العربية / RTL readiness is enabled for this workspace. Full translated module copy remains a deployment setting.")
+    if command.strip():
+        term = command.strip().lower()
+        matches = feature_catalog()
+        matches = matches[matches["Feature"].str.lower().str.contains(term, regex=False) | matches["Description"].str.lower().str.contains(term, regex=False)]
+        if not matches.empty:
+            st.dataframe(matches[["ID", "Feature", "Status"]].head(8), use_container_width=True, hide_index=True)
+        else:
+            st.caption("No capability matched that command.")
+
     a, b, c, d, e = st.columns(5)
     if a.button("💾 Save Study", use_container_width=True, key="sx_save_" + key):
         pid = save_project(module + " Study", module, username, {"module": module, "tier": tier})
@@ -552,6 +580,27 @@ def render_blank_module_studio(module: str, tier: str, username: str) -> None:
     ensure_experience_db()
     key = _safe_key(module)
     data_key = "sx_blank_data_" + key
+
+    meta = _module_meta(module)
+    category = str(meta.get("category", "Industrial Engineering"))
+    required_tier = str(meta.get("tier", tier))
+    st.markdown(
+        "<div class='bs-hero'><div class='bs-kicker'>{} · {}</div><div class='bs-title'>{} <span>• Guided Studio</span></div>"
+        "<div class='bs-copy'>A complete engineering canvas for modules that need a starting workspace: model → scenario → verification → decision → evidence.</div>"
+        "<div class='bs-chips'><span>✓ Inputs</span><span>✓ Analysis</span><span>✓ Verification</span><span>✓ Decision</span><span>✓ Export</span></div></div>".format(
+            category, required_tier, html.escape(str(module))
+        ),
+        unsafe_allow_html=True,
+    )
+    st.markdown("""
+    <style>
+    .bs-hero{padding:20px 22px;border:1px solid #dbe4f0;border-radius:18px;background:linear-gradient(135deg,#f8fbff,#ffffff 55%,#eefcf9);box-shadow:0 10px 28px rgba(15,23,42,.06);margin:8px 0 14px}
+    .bs-kicker{font-size:10px;font-weight:850;letter-spacing:.10em;text-transform:uppercase;color:#0f766e}
+    .bs-title{font-size:25px;font-weight:850;color:#0f172a;margin-top:4px}.bs-title span{font-size:12px;color:#64748b;font-weight:700}
+    .bs-copy{font-size:13px;color:#64748b;margin-top:5px}.bs-chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:11px}
+    .bs-chips span{font-size:11px;font-weight:750;color:#334155;border:1px solid #dbe4f0;background:#fff;border-radius:999px;padding:5px 9px}
+    </style>
+    """, unsafe_allow_html=True)
     if data_key not in st.session_state:
         st.session_state[data_key] = _starter_data(module)
 
@@ -577,7 +626,19 @@ def render_blank_module_studio(module: str, tier: str, username: str) -> None:
             metric = st.selectbox("Metric", numbers, key="sx_metric_" + key)
             plot = df[[df.columns[0], metric]].dropna()
             if not plot.empty:
-                st.plotly_chart(px.bar(plot, x=df.columns[0], y=metric, title=module + " · " + metric), use_container_width=True)
+                o1, o2 = st.columns([1.4, 1])
+                with o1:
+                    st.plotly_chart(px.bar(plot, x=df.columns[0], y=metric, title=module + " · " + metric), use_container_width=True)
+                with o2:
+                    if len(numbers) >= 2:
+                        compare = st.selectbox("Compare with", [n for n in numbers if n != metric], key="sx_compare_" + key)
+                        summary = pd.DataFrame({
+                            "Metric": ["Baseline", "Scenario", "Delta"],
+                            "Value": [float(pd.to_numeric(df[metric], errors="coerce").mean()),
+                                      float(pd.to_numeric(df[compare], errors="coerce").mean()),
+                                      float(pd.to_numeric(df[compare], errors="coerce").mean() - pd.to_numeric(df[metric], errors="coerce").mean())],
+                        })
+                        st.dataframe(summary, use_container_width=True, hide_index=True)
 
     with tabs[1]:
         numbers = [column for column in df.columns if pd.api.types.is_numeric_dtype(df[column])]
@@ -596,7 +657,19 @@ def render_blank_module_studio(module: str, tier: str, username: str) -> None:
             output = st.session_state.get("sx_result_" + key, pd.DataFrame())
             if isinstance(output, pd.DataFrame) and not output.empty:
                 st.dataframe(output, use_container_width=True, hide_index=True)
-                st.plotly_chart(px.bar(output, x=output.columns[0], y="Delta %", title="Scenario delta (%)"), use_container_width=True)
+                if "Delta %" in output.columns:
+                    fig_delta = px.bar(output, x=output.columns[0], y="Delta %", title="Scenario delta (%)", text="Delta %")
+                    fig_delta.update_layout(height=330, margin=dict(l=10,r=10,t=55,b=10))
+                    fig_delta.update_traces(texttemplate="%{text:.1f}%", textposition="outside", cliponaxis=False)
+                    st.plotly_chart(fig_delta, use_container_width=True)
+                st.download_button(
+                    "📥 Download analysis table",
+                    output.to_csv(index=False).encode("utf-8"),
+                    file_name="shoir_ie_" + key + "_analysis.csv",
+                    mime="text/csv",
+                    use_container_width=True,
+                    key="sx_analysis_csv_" + key,
+                )
 
     with tabs[2]:
         output = st.session_state.get("sx_result_" + key, df)
@@ -607,11 +680,15 @@ def render_blank_module_studio(module: str, tier: str, username: str) -> None:
         v3.metric("Run status", "PASS" if check["score"] >= 100 else "REVIEW")
         verification_table = pd.DataFrame(
             [
-                {"Check": name.replace("_", " ").title(), "Status": "✓" if ok else "⚠", "Detail": str(ok)}
+                {"Check": name.replace("_", " ").title(), "Status": "✓ PASS" if ok else "⚠ REVIEW", "Detail": "Verified" if ok else "Needs operator review"}
                 for name, ok in check["checks"].items()
             ]
         )
         st.dataframe(verification_table, use_container_width=True, hide_index=True)
+        if check["score"] >= 100:
+            st.success("✓ All automated verification checks passed.")
+        else:
+            st.warning("⚠ Verification is not complete. Resolve the flagged checks before approving a decision.")
 
     with tabs[3]:
         if st.button("📝 Create decision from current study", type="primary", use_container_width=True, key="sx_decision_blank_" + key):
@@ -639,11 +716,20 @@ def render_blank_module_studio(module: str, tier: str, username: str) -> None:
                     use_container_width=True,
                     hide_index=True,
                 )
-                if st.button("➡️ Move to Validated", use_container_width=True, key="sx_validate_" + key):
-                    transition_decision(did, username, "Validated", "Validation evidence captured from module canvas.")
-                    st.success("Decision moved to Validated.")
+                d1, d2 = st.columns(2)
+                with d1:
+                    if st.button("➡️ Move to Validated", use_container_width=True, key="sx_validate_" + key):
+                        transition_decision(did, username, "Validated", "Validation evidence captured from module canvas.")
+                        st.success("Decision moved to Validated.")
+                with d2:
+                    if st.button("📋 Add review note", use_container_width=True, key="sx_comment_" + key):
+                        add_comment(None, did, username, "Operator review note captured from guided module studio.")
+                        st.success("Review note recorded.")
 
     with tabs[4]:
+        st.markdown("**Evidence checklist**")
+        for label in ["Inputs captured", "Analysis result", "Verification snapshot", "Decision context", "Feature manifest"]:
+            st.markdown("✓ " + label)
         st.download_button(
             "📥 Download Module Evidence Bundle",
             data=_evidence_bundle(module, df, username),
