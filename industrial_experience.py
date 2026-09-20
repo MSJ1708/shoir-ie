@@ -745,13 +745,21 @@ def render_experience_shell(module: str, tier: str, username: str) -> None:
         col.markdown("<div class='sx-step'>✓ {}</div>".format(label), unsafe_allow_html=True)
 
     a, b, c, d, e = st.columns(5)
-    if not is_research_lab:
+    if is_research_lab:
+        a.info("Research protocol above")
+    elif module == "Engineering Decision Center":
+        if a.button("🔬 Open Research Lab", use_container_width=True, key="sx_open_research_" + key):
+            # Research protocols belong to Experiment Lab. Prevent the generic
+            # Save Study action here from creating a non-research project that
+            # looks like the beginning of a research workflow.
+            st.session_state["enterprise_module_selector"] = "Experimentation · Experiment Lab"
+            st.rerun()
+        a.caption("Research studies start in Experiment Lab; return here later for governed decision cards.")
+    else:
         if a.button("💾 Save Study", use_container_width=True, key="sx_save_" + key):
             pid = save_project(module + " Study", module, username, {"module": module, "tier": tier})
             st.session_state["sx_project_id"] = pid
             st.success("Study saved: " + pid)
-    else:
-        a.info("Research protocol above")
     if b.button("🧪 Create Run", use_container_width=True, key="sx_job_" + key):
         if is_research_lab:
             study_id = st.session_state.get("sx_research_study_id")
