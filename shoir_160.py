@@ -652,7 +652,15 @@ def copilot_guard(text_value: str) -> dict[str,Any]:
 def copilot_plan(prompt: str,current_module: str="",context: Optional[Mapping[str,Any]]=None) -> dict[str,Any]:
     text_value=str(prompt or ""); guard=copilot_guard(text_value); lower=text_value.lower(); steps=[]
     def add(name: str,detail: str,approval: bool=True): steps.append({"tool":name,"detail":detail,"approval_required":approval})
-    if not guard["safe_as_data"]: return {"safe":False,"blocked_reason":"Imported text contains instruction-like content and is treated as untrusted data.","steps":[]}
+    if not guard["safe_as_data"]:
+        return {"safe":False,"blocked_reason":"Imported text contains instruction-like content and is treated as untrusted data.","steps":[]}
+    context_data=dict(context or {})
+    platform_context=ai_capability_context()
+    context_data.setdefault("capability_count",platform_context["capability_count"])
+    context_data.setdefault("capability_coverage",platform_context["coverage_summary"])
+    context_data.setdefault("known_capabilities",platform_context["capabilities"])
+    context_data.setdefault("tool_registry",platform_context["tools"])
+    context_data.setdefault("specialist_modules",platform_context["specialist_modules"])
     if any(k in lower for k in ("excel","workbook","csv","dataset","data")):
         add("Validate dataset","Profile rows, columns, missingness, duplicates, units and schema.")
         add("Clean workbook","Apply deterministic cleaning and preserve an audit.")
@@ -666,7 +674,43 @@ def copilot_plan(prompt: str,current_module: str="",context: Optional[Mapping[st
     if any(k in lower for k in ("quality","spc","cpk","fmea","reliability")): add("Validate quality model","Run statistical verification and evidence checks.")
     if any(k in lower for k in ("report","ppt","powerpoint","pdf","export")): add("Prepare evidence report","Build a governed executive/engineering/audit package.")
     if not steps: add("Inspect workspace","Search current projects, datasets, models, scenarios and decisions.",False)
-    return {"safe":True,"current_module":current_module,"steps":steps,"approval_required":any(s["approval_required"] for s in steps),"context":dict(context or {})}
+    return {"safe":True,"current_module":current_module,"steps":steps,"approval_required":any(s["approval_required"] for s in steps),"context":context_data}
+
+def copilot_execute_preview(prompt: str,df: Optional[pd.DataFrame]=None,db_path: str="enterprise_full_workspace.db") -> dict[str,Any]:
+    """Execute only deterministic, local, non-destructive Copilot tools against supplied data."""
+    plan=copilot_plan(prompt,current_module="Copilot",context={"execution_mode":"preview-only"})
+    if not plan.get("safe"): return plan
+    outputs={}
+    frame=df if isinstance(df,pd.DataFrame) else pd.DataFrame()
+    lower=str(prompt or "").lower()
+    if not frame.empty and any(k in lower for k in ("data","dataset","excel","workbook","csv","clean")):
+        outputs["profile"]=profile_dataset(frame)
+        if any(k in lower for k in ("clean","excel","workbook","csv")):
+            cleaned,audit_log=clean_dataset(frame); outputs["cleaned_rows"]=int(len(cleaned)); outputs["cleaning_audit"]=audit_log; outputs["cleaned_preview"]=cleaned.head(25)
+        if any(k in lower for k in ("map","canonical","industrial")):
+            outputs["mapping"]=smart_map_columns(frame)
+    if any(k in lower for k in ("search","workspace","project","decision","scenario")):
+        outputs["workspace"]=search_workspace(str(prompt),db_path=db_path)
+    return {"safe":True,"plan":plan,"outputs":outputs,"non_destructive":True}
+
+def search_engineering_catalog(query: str,db_path: str="enterprise_full_workspace.db") -> pd.DataFrame:
+    term=str(query or "").strip().lower()
+    db=search_workspace(term,db_path=db_path)
+    mods=[]
+    for item in PLATFORM_CATALOG:
+        name=str(item.get("name","")).strip()
+        category=str(item.get("category","")).strip()
+        if term and (term in name.lower() or term in category.lower()):
+            mods.append({"Type":"Module","ID":"","Name":name,"Status":f"Catalog · {category}"})
+    cap=feature_matrix()
+    if term:
+        cap=cap[cap["name"].str.lower().str.contains(term,regex=False)|cap["area"].str.lower().str.contains(term,regex=False)]
+        cap=cap.rename(columns={"id":"ID","name":"Name","area":"Area","coverage":"Coverage","state":"State"})[["ID","Name","Area","Coverage","State"]]
+    else:
+        cap=pd.DataFrame(columns=["ID","Name","Area","Coverage","State"])
+    if mods: db=pd.concat([db,pd.DataFrame(mods)],ignore_index=True)
+    if not cap.empty: db=pd.concat([db,cap.assign(Type="Capability")],ignore_index=True,sort=False)
+    return db.fillna("")
 
 def search_workspace(query: str,db_path: str="enterprise_full_workspace.db") -> pd.DataFrame:
     init_160_platform(db_path); q=str(query or "").strip().lower()
@@ -928,7 +972,7 @@ def render_160_command_center(username: str,tier: str) -> None:
             st.session_state["os160_focus_mode"]=not focus_mode
             st.rerun()
     if command.strip():
-        cmd_results=search_workspace(command)
+        cmd_results=search_engineering_catalog(command)
         term=command.strip().lower()
         capability_hits=feature_matrix()
         capability_hits=capability_hits[
@@ -1067,7 +1111,10 @@ def render_160_command_center(username: str,tier: str) -> None:
     with tabs[4]:
         st.markdown("<div class='os160-section'>Engineering Copilot — evidence-first, approval-gated</div>",unsafe_allow_html=True)
         prompt=st.text_area("Describe the engineering task",value="Analyze why throughput fell and compare a capacity scenario.",height=110,key="os160_prompt")
-        context={"tier":tier,"workspace":"Shoir-IE 160 Operating System","entity_count":entity_count,"project_count":project_count,"platform_health":health["score"],"160_capabilities":160}
+        platform_context=ai_capability_context()
+        context={"tier":tier,"workspace":"Shoir-IE 160 Operating System","entity_count":entity_count,"project_count":project_count,
+                 "platform_health":health["score"],"capability_count":platform_context["capability_count"],
+                 "coverage":platform_context["coverage_summary"],"specialist_module_count":len(platform_context["specialist_modules"])}
         plan=copilot_plan(prompt,current_module="Industrial Operating System",context=context)
         c1,c2=st.columns([1.2,1])
         with c1:
@@ -1083,9 +1130,36 @@ def render_160_command_center(username: str,tier: str) -> None:
                     st.success(f"Copilot plan recorded as {rid}.")
         with c2:
             st.markdown("**Copilot context**")
-            for label,value in context.items(): st.markdown(f"<div class='os160-check'>✓ {label}: <b>{value}</b></div>",unsafe_allow_html=True)
+            for label,value in context.items():
+                st.markdown(f"<div class='os160-check'>✓ {label}: <b>{value}</b></div>",unsafe_allow_html=True)
+            st.markdown(f"<div class='os160-check'>✓ AI capability catalog loaded: <b>{platform_context['capability_count']}/160</b></div>",unsafe_allow_html=True)
+            st.markdown(f"<div class='os160-check'>✓ AI tool registry loaded: <b>{len(platform_context['tools'])}</b> tools</div>",unsafe_allow_html=True)
             st.markdown("**Trust labels**")
-            st.markdown("🟢 Computed from data · 🔵 Deterministic local engine · 🟡 Illustrative demo · ⚪ Adapter-ready")
+            st.markdown("🟢 Verified · 🔵 Implemented · 🟡 Foundation · ⚪ Integration-ready")
+            if not focus_mode:
+                with st.expander("AI knowledge base preview",expanded=False):
+                    st.dataframe(pd.DataFrame(platform_context["capabilities"])[["id","name","area","coverage","state"]],use_container_width=True,hide_index=True,height=360)
+
+        if not focus_mode:
+            st.markdown("**Deterministic execution preview**")
+            st.caption("Preview mode is non-destructive. Saving, sending or changing external systems still requires an explicit action and deployment integration.")
+            if st.button("▶ Preview approved-safe tools",key="os160_copilot_preview"):
+                preview=copilot_execute_preview(prompt,st.session_state.get("os160_cleaned_df",pd.DataFrame()))
+                if preview.get("safe"):
+                    st.session_state["os160_copilot_preview"]=preview
+                    st.success(f"Preview complete: {len(preview.get('outputs',{}))} local outputs generated.")
+                else:
+                    st.error(preview.get("blocked_reason","Copilot preview blocked."))
+        if st.session_state.get("os160_copilot_preview"):
+            preview=st.session_state["os160_copilot_preview"]
+            for key,value in preview.get("outputs",{}).items():
+                st.markdown(f"**{key.replace('_',' ').title()}**")
+                if isinstance(value,pd.DataFrame):
+                    st.dataframe(value,use_container_width=True,hide_index=True)
+                elif isinstance(value,dict):
+                    st.json(value)
+                else:
+                    st.write(value)
 
     with tabs[5]:
         st.markdown("<div class='os160-section'>Decision Center — evidence → approval → implementation → verification</div>",unsafe_allow_html=True)
