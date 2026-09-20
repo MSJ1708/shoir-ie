@@ -432,3 +432,11 @@ See [LICENSE](LICENSE).
 [View Repository](https://github.com/MSJ1708/shoir-ie) · [View Validation](https://github.com/MSJ1708/shoir-ie/actions) · [Contact](mailto:shoirtheagent@gmail.com)
 
 </div>
+
+## Shoir-IE 160 Industrial Operating System
+
+The latest platform layer adds a unified 160-capability operating center over the existing engineering engines. It preserves existing modules and data while adding canonical data mapping, validation gates, digital-thread tracing, scenario management, evidence-first Copilot planning, decision lifecycle controls, connector diagnostics, run history, visual health surfaces, and a searchable 160-capability matrix.
+
+**Trust model:** capabilities marked **Operational** run inside the application. Capabilities marked **Integration-ready** provide the in-app contract, persistence, validation and UX but require customer infrastructure, credentials, certificates, network access or external services before activation.
+
+Launch the app and choose **🚀 160 Operating System** from the navigation menu.
