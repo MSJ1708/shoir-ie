@@ -1847,14 +1847,14 @@ elif selected_module in ["Universal Cross-Domain Mathematical Isomorphism Engine
             matching_sensitivity = st.slider("Topological Isomorphism Sensitivity Threshold", 0.85, 0.99, 0.96, 0.01)
             tensor_metric = st.selectbox("Tensor Distance Metric", ["Frobenius Norm", "Wasserstein Earth Mover's Distance", "Spectral Graph Divergence"])
         with col_m2:
-            st.metric("Global Preprint Database Index", "8.4 Million Papers", delta="+28,100 today")
-            st.metric("Isomorphism Accuracy Index", "99.4%", delta="State-of-the-Art")
+            st.metric("Illustrative Research Corpus Index", "Illustrative demo corpus", delta="+28,100 today")
+            st.metric("Illustrative Isomorphism Score", "Illustrative score", delta="State-of-the-Art")
 
         if st.button("🔍 Execute Deep Isomorphism Tensor Scan", type="primary", use_container_width=True):
-            with st.spinner("Executing multi-core tensor contractions across 8.4M preprints..."):
+            with st.spinner("Running the local structural-analysis demo..."):
                 time.sleep(1.2)
             log_ucmie_event(f"Executed deep tensor scan for: {selected_target_ie}")
-            st.success(f"Isomorphism match verified! Structural homology isolated between **{selected_target_ie}** and quantum superposition state operators.")
+            st.success(f"Illustrative structural-analysis result generated: Structural homology isolated between **{selected_target_ie}** and quantum superposition state operators.")
 
         st.markdown("**Active Isomorphism Registry**")
         iso_df = pd.DataFrame(st.session_state['ucmie_isomorphism_pairs'])
@@ -7206,7 +7206,7 @@ if selected_module in ["Digital Twin & Discrete-Event Simulation", "Digital Twin
                 <p style="margin:0; color: #9ca3af; font-size: 13px;">Factory Floor &bull; AGV Fleet &bull; DES Queues &bull; IoT Hub &bull; Kanban Buffers &bull; MTBF Reliability &bull; Full CRUD ID Management</p>
             </div>
             <div style="background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.4); padding: 8px 16px; border-radius: 30px; color: #34d399; font-weight: 600; font-size: 12px; display: flex; align-items: center; gap: 6px;">
-                <span style="width: 8px; height: 8px; background: #34d399; border-radius: 50%; display: inline-block; box-shadow: 0 0 8px #34d399;"></span> MES Synchronized
+                <span style="width: 8px; height: 8px; background: #34d399; border-radius: 50%; display: inline-block; box-shadow: 0 0 8px #34d399;"></span> MES integration-ready
             </div>
         </div>
     </div>
@@ -7527,7 +7527,7 @@ if selected_module in ["Green IE & Sustainability", "Sustainability & Circular E
                 <p style="margin:0; color: #a7f3d0; font-size: 13px;">Scope 1-3 Carbon Footprint &bull; ISO 50001 Energy Profiling &bull; Life Cycle Assessment (LCA) &bull; Full CRUD Customization</p>
             </div>
             <div style="background: rgba(16, 185, 129, 0.2); border: 1px solid rgba(52, 211, 153, 0.4); padding: 8px 16px; border-radius: 30px; color: #6ee7b7; font-weight: 600; font-size: 12px; display: flex; align-items: center; gap: 6px;">
-                <span style="width: 8px; height: 8px; background: #34d399; border-radius: 50%; display: inline-block; box-shadow: 0 0 8px #34d399;"></span> ESG Verified
+                <span style="width: 8px; height: 8px; background: #34d399; border-radius: 50%; display: inline-block; box-shadow: 0 0 8px #34d399;"></span> ESG calculation workspace
             </div>
         </div>
     </div>
@@ -9496,24 +9496,24 @@ if mod == "Webhook Alerts":
         alert_trigger = st.selectbox("Simulated Trigger Event", ["Stockout Risk Breached", "Critical Route Delayed", "Inventory Threshold Exceeded", "Automated Sensor Alert"])
         payload_priority = st.select_slider("Alert Priority Level", options=["Low", "Medium", "High", "Critical"], value="High")
 
-        if st.button("Send Test Webhook Notification", type="primary"):
+        if st.button("Preview Webhook Notification", type="primary"):
             if "current_user" in st.session_state and "log_audit" in globals():
                 log_audit(st.session_state.current_user, f"Triggered Webhook Alert: {alert_trigger}")
             st.session_state.webhook_sent = True
-            st.toast("Webhook notification dispatched successfully!", icon="🔔")
+            st.toast("Webhook dispatch preview generated; no external request was sent.", icon="🔔")
 
     with col_wh2:
         st.subheader("Live Webhook Dispatch Status")
         if st.session_state.get("webhook_sent", False):
-            st.success(f"Webhook alert successfully dispatched to **{channel_type}**!")
+            st.success(f"Webhook alert preview generated for **{channel_type}**. No external request was sent.")
             st.markdown(f"""
             <div class="api-card">
-                <h4 style="margin:0;">Webhook Payload Dispatched <span style="font-size: 12px; color: #28a745; float: right;">● Delivered in 38ms</span></h4>
+                <h4 style="margin:0;">Webhook Payload Preview <span style="font-size: 12px; color: #f59e0b; float: right;">● Illustrative · not sent</span></h4>
                 <hr style="margin: 8px 0;">
                 <p><b>Target Endpoint:</b> <code>{webhook_url}</code></p>
                 <p><b>Trigger Event:</b> <code>{alert_trigger}</code></p>
                 <p><b>Priority:</b> <span class="blue-metric">{payload_priority}</span></p>
-                <p><b>HTTP Response:</b> <span class="blue-metric">200 OK</span></p>
+                <p><b>HTTP Response:</b> <span class="blue-metric">Not sent — preview only</span></p>
             </div>
             """, unsafe_allow_html=True)
 
@@ -9523,10 +9523,10 @@ if mod == "Webhook Alerts":
                     "channel": channel_type,
                     "priority": payload_priority,
                     "timestamp": "2026-08-12T19:06:00Z",
-                    "status": "delivered"
+                    "status": "preview_only"
                 })
         else:
-            st.info("Configure your webhook settings on the left and click **'Send Test Webhook Notification'** to test the dispatch stream.")
+            st.info("Configure your webhook settings on the left and click **'Preview Webhook Notification'** to test the dispatch stream.")
 
 # =========================================================
 # MODULE 5: MULTI-CRITERIA SUPPLIER RISK SCORING MATRIX
@@ -9674,12 +9674,12 @@ elif mod == "FastAPI Gateway":
             disruption_severity = st.slider("Disruption Severity Factor", 1, 10, 5)
             payload_preview = {"disruption_level": disruption_severity, "target_region": "Sector-7"}
 
-        if st.button("Send Test API Request", type="primary"):
+        if st.button("Preview API Response", type="primary"):
             st.session_state.api_tested = True
             st.session_state.last_endpoint = endpoint_url
             st.session_state.api_payload = payload_preview
             log_audit(st.session_state.current_user, f"Tested API Endpoint: {endpoint_url}")
-            st.toast("API request executed successfully!", icon="🚀")
+            st.toast("API response preview generated; no external request was sent.", icon="🚀")
 
     with col_api2:
         st.subheader("Structured API Response Output")
@@ -9691,7 +9691,7 @@ elif mod == "FastAPI Gateway":
                 carbon_est = (p.get("supply_a", 1200) + p.get("supply_b", 1800)) * 0.18
                 response_html = f"""
                 <div class="api-card">
-                    <h4 style="margin:0;">HTTP 200 OK <span style="font-size: 12px; color: #28a745; float: right;">● Latency: 28ms</span></h4>
+                    <h4 style="margin:0;">API Response Preview <span style="font-size: 12px; color: #f59e0b; float: right;">● Illustrative · not sent</span></h4>
                     <hr style="margin: 8px 0;">
                     <p><b>Endpoint:</b> <code>{endpoint}</code></p>
                     <p><b>Solver Status:</b> <span class="blue-metric">Optimal (Simplex v4.2)</span></p>
@@ -9702,7 +9702,7 @@ elif mod == "FastAPI Gateway":
             elif "status" in endpoint:
                 response_html = """
                 <div class="api-card">
-                    <h4 style="margin:0;">HTTP 200 OK <span style="font-size: 12px; color: #28a745; float: right;">● Latency: 12ms</span></h4>
+                    <h4 style="margin:0;">API Response Preview <span style="font-size: 12px; color: #f59e0b; float: right;">● Illustrative · not sent</span></h4>
                     <hr style="margin: 8px 0;">
                     <p><b>Endpoint:</b> <code>GET /api/v1/status</code></p>
                     <p><b>System Status:</b> <span class="blue-metric">Operational</span></p>
@@ -9713,7 +9713,7 @@ elif mod == "FastAPI Gateway":
             else:
                 response_html = """
                 <div class="api-card">
-                    <h4 style="margin:0;">HTTP 200 OK <span style="font-size: 12px; color: #ffc107; float: right;">● Latency: 45ms</span></h4>
+                    <h4 style="margin:0;">API Response Preview <span style="font-size: 12px; color: #f59e0b; float: right;">● Illustrative · not sent</span></h4>
                     <hr style="margin: 8px 0;">
                     <p><b>Endpoint:</b> <code>POST /api/v1/simulate-disruption</code></p>
                     <p><b>Mitigation Status:</b> <span class="blue-metric">Rerouted Successfully</span></p>
@@ -9724,14 +9724,14 @@ elif mod == "FastAPI Gateway":
             
             with st.expander("🔍 Inspect Raw JSON Response Payload"):
                 st.json({
-                    "status_code": 200,
+                    "status_code": null,
                     "endpoint": endpoint,
                     "payload_sent": st.session_state.api_payload,
                     "server_timestamp": "2026-08-12T17:58:00Z",
-                    "message": "Execution completed without errors."
+                    "message": "Illustrative response preview; no external request was sent."
                 })
         else:
-            st.info("Configure your request parameters on the left and click **'Send Test API Request'** to evaluate the REST endpoint response.")
+            st.info("Configure your request parameters on the left and click **'Preview API Response'** to evaluate the REST endpoint response.")
 
 if mod == "Scenarios":
     st.header("🔀 What-If Scenario Manager & Impact Analysis")
