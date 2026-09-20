@@ -867,7 +867,8 @@ def run_verification_suite(username: str,db_path: str="enterprise_full_workspace
 
 def render_160_command_center(username: str,tier: str) -> None:
     init_160_platform()
-    stats=feature_matrix_stats(); health=health_snapshot()
+    stats=feature_matrix_stats(); health=health_snapshot(); audit=capability_audit()
+    focus_mode=st.session_state.get("os160_focus_mode",False)
     st.markdown("""
     <style>
       .os160-hero{position:relative;overflow:hidden;border-radius:26px;padding:30px 32px;margin-bottom:16px;
@@ -905,8 +906,8 @@ def render_160_command_center(username: str,tier: str) -> None:
     """.replace("__TIER__",str(tier)).replace("__USERNAME__",str(username)),unsafe_allow_html=True)
 
     c1,c2,c3,c4,c5=st.columns(5)
-    c1.metric("160-layer coverage",f"{stats['operational']}/160","in-app operational")
-    c2.metric("Adapter-ready",f"{stats['integration_ready']}","external deployment hooks")
+    c1.metric("Verified capabilities",f"{stats['verified']}/160","regression-tested")
+    c2.metric("Implemented + verified",f"{stats['verified']+stats['implemented']}/160","production-depth coverage")
     c3.metric("Health",f"{health['score']:.0f}%","platform checks")
     with _db() as conn:
         project_count=conn.execute("SELECT COUNT(*) FROM os160_projects").fetchone()[0]
@@ -915,6 +916,33 @@ def render_160_command_center(username: str,tier: str) -> None:
     c4.metric("Engineering projects",f"{project_count:,}","governed")
     c5.metric("Decisions",f"{decision_count:,}","auditable")
 
+    q1,q2,q3=st.columns([2,1,1])
+    with q1:
+        command=st.text_input("⌘ Search / command palette",placeholder="Search capabilities, projects, modules…",key="os160_command",label_visibility="collapsed")
+    with q2:
+        if st.button("🧭 Sync current module",key="os160_sync_current",help="Bridge curated module state into the Digital Thread."):
+            synced=sync_session_to_digital_thread(username)
+            st.success(f"Digital Thread synced: {synced['entities']} curated entities.")
+    with q3:
+        if st.button("🎯 Focus mode",key="os160_focus_toggle"):
+            st.session_state["os160_focus_mode"]=not focus_mode
+            st.rerun()
+    if command.strip():
+        cmd_results=search_workspace(command)
+        term=command.strip().lower()
+        capability_hits=feature_matrix()
+        capability_hits=capability_hits[
+            capability_hits["name"].str.lower().str.contains(term,regex=False)
+            | capability_hits["area"].str.lower().str.contains(term,regex=False)
+        ]
+        if not cmd_results.empty or not capability_hits.empty:
+            st.markdown("**Command results**")
+            if not cmd_results.empty:
+                st.dataframe(cmd_results,use_container_width=True,hide_index=True,height=180)
+            if not capability_hits.empty:
+                st.dataframe(capability_hits[["id","name","area","coverage","state"]],use_container_width=True,hide_index=True,height=180)
+        else:
+            st.info("No command or capability match.")
     st.markdown("<div style='height:6px'></div>",unsafe_allow_html=True)
     tabs=st.tabs(["⚡ Command Center","📁 Data Studio","🕸️ Digital Thread","🧪 Scenarios","🧠 Copilot","✅ Decisions","⚙️ Jobs & Runs","📡 Connectors","📊 Insights","📚 160 Matrix"])
 
