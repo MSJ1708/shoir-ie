@@ -560,7 +560,16 @@ def render_experience_shell(module: str, tier: str, username: str) -> None:
     is_research_lab = ("Experiment Lab" in str(module)) or ("Experimentation" in str(module))
     with _db() as conn:
         projects = int(conn.execute("SELECT COUNT(*) FROM experience_projects").fetchone()[0])
-        research_studies = int(conn.execute("SELECT COUNT(*) FROM experience_research_studies").fetchone()[0])
+        # Research counts should reflect the current workspace owner, not the
+        # entire local database. This prevents a "Research studies = 2" badge
+        # from appearing when the visible list only contains another owner's
+        # record.
+        research_studies = int(
+            conn.execute(
+                "SELECT COUNT(*) FROM experience_research_studies WHERE owner=?",
+                (username,),
+            ).fetchone()[0]
+        )
         decisions = int(conn.execute("SELECT COUNT(*) FROM experience_decisions").fetchone()[0])
         jobs = int(conn.execute("SELECT COUNT(*) FROM experience_jobs WHERE status IN ('Queued','Running')").fetchone()[0])
 
@@ -714,7 +723,42 @@ def render_experience_shell(module: str, tier: str, username: str) -> None:
         if active_id:
             frame = research_protocol_frame(active_id)
             if not frame.empty:
+                st.markdown("#### Current research study")
                 st.dataframe(frame, use_container_width=True, hide_index=True)
+
+        # Always show the saved research studies for the current workspace.
+        # Previously the UI rendered only the currently active protocol, while
+        # the metric counted all records in the database. That made saved
+        # studies appear to "disappear" even though they were persisted.
+        with _db() as conn:
+            rows = conn.execute(
+                """
+                SELECT research_id,study_id,title,methodology,primary_domain,
+                       transfer_domain,primary_endpoint,sample_size,replications,
+                       protocol_locked,created_at,updated_at
+                FROM experience_research_studies
+                WHERE owner=?
+                ORDER BY updated_at DESC
+                """,
+                (username,),
+            ).fetchall()
+
+        st.markdown("#### 📚 Saved research studies")
+        if rows:
+            saved_df = pd.DataFrame(
+                rows,
+                columns=[
+                    "Research ID","Study ID","Study title","Methodology",
+                    "Primary domain","Transfer domain","Primary endpoint",
+                    "Scenarios","Replications","Protocol","Created","Updated",
+                ],
+            )
+            saved_df["Protocol"] = saved_df["Protocol"].map(
+                lambda value: "LOCKED" if bool(value) else "DRAFT"
+            )
+            st.dataframe(saved_df, use_container_width=True, hide_index=True)
+        else:
+            st.info("No research studies are saved in this workspace yet.")
 
     # A compact visual pulse keeps the workspace informative without making
     # every module feel like a dashboard overload.
