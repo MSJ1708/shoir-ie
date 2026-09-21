@@ -705,6 +705,11 @@ def render_module(module: str, tier: str, username: str):
         st.warning(f"🔒 {module} requires {required}. Your current tier is {tier}. Open Subscriptions to review upgrade options.")
         return
     render_experience_shell(module, tier, username)
+    if module == "Experiment Lab":
+        # Experiment Lab is a dedicated research workspace. Its UI and
+        # persistence are rendered by render_research_workspace, so do not
+        # append the old generic scenario screen underneath it.
+        return
     st.caption("Workflow: Prepare → Validate → Run → Inspect → Explain → Export")
     if module=="Engineering Validation Center":
         df=st.session_state.setdefault("validation_df",pd.DataFrame({"Metric":["Cost","Service Level","Capacity"],"Value":[100000,95,12000],"Unit":["USD","%","units"]}))
