@@ -654,6 +654,7 @@ def research_evidence_bundle(study_id: str, owner: str) -> bytes:
 
 
 def render_research_workspace(module: str, tier: str, username: str) -> None:
+    import streamlit as st
     ensure_experience_db()
     studies = list_research_studies(username)
     active_id = st.session_state.get("sx_research_study_id")
