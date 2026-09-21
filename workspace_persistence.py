@@ -184,10 +184,9 @@ def load_user_workspace(
         for key, value in payload.items():
             if _excluded(str(key)):
                 continue
-            # Do not overwrite a value that Streamlit has already created
-            # for a widget during this run.
-            if key not in session_state:
-                session_state[key] = _unpack(value)
+            # Load persisted workspace values before module widgets are rendered.
+            # This intentionally replaces initial defaults on first login.
+            session_state[key] = _unpack(value)
         return True
     except Exception:
         return False
