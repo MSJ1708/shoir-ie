@@ -511,6 +511,365 @@ def research_protocol_frame(study_id: str) -> pd.DataFrame:
 
 
 
+
+def list_research_studies(owner: str) -> pd.DataFrame:
+    ensure_experience_db()
+    with _db() as conn:
+        rows = conn.execute(
+            """
+            SELECT research_id,study_id,title,objective,research_question,methodology,
+                   primary_domain,transfer_domain,primary_endpoint,sample_size,
+                   replications,random_seed,alpha,confidence_level,protocol_locked,
+                   protocol_hash,owner,created_at,updated_at
+            FROM experience_research_studies
+            WHERE owner=?
+            ORDER BY updated_at DESC
+            """,
+            (owner,),
+        ).fetchall()
+    columns = [
+        "Research ID","Study ID","Title","Objective","Research question",
+        "Methodology","Primary domain","Transfer domain","Primary endpoint",
+        "Scenarios","Replications","Random seed","Alpha","Confidence",
+        "Protocol","Protocol hash","Owner","Created","Updated",
+    ]
+    if not rows:
+        return pd.DataFrame(columns=columns)
+    frame = pd.DataFrame(rows, columns=columns)
+    frame["Protocol"] = frame["Protocol"].map(lambda value: "LOCKED" if bool(value) else "DRAFT")
+    frame["Protocol hash"] = frame["Protocol hash"].astype(str).str[:20] + "..."
+    return frame
+
+
+def recover_legacy_research_studies(owner: str) -> pd.DataFrame:
+    """Recover protocols persisted inside older project payloads."""
+    ensure_experience_db()
+    recovered = []
+    with _db() as conn:
+        rows = conn.execute(
+            """
+            SELECT project_id,name,module,payload_json,created_at
+            FROM experience_projects
+            WHERE owner=?
+            ORDER BY updated_at DESC
+            """,
+            (owner,),
+        ).fetchall()
+        existing_ids = {
+            str(row[0])
+            for row in conn.execute(
+                "SELECT study_id FROM experience_research_studies WHERE owner=?",
+                (owner,),
+            ).fetchall()
+        }
+    for project_id, name, module, raw, created_at in rows:
+        try:
+            payload = json.loads(raw or "{}")
+        except Exception:
+            continue
+        protocol = payload.get("research_protocol")
+        if not isinstance(protocol, dict) or str(project_id) in existing_ids:
+            continue
+        try:
+            rid, phash = create_research_protocol(str(project_id), protocol, owner)
+        except Exception:
+            continue
+        recovered.append({
+            "Study ID": str(project_id),
+            "Research ID": rid,
+            "Title": str(protocol.get("title") or name or "Recovered research study"),
+            "Protocol hash": phash[:20] + "...",
+            "Recovered from": "legacy project payload",
+            "Original created": created_at,
+        })
+    return pd.DataFrame(recovered)
+
+
+def research_runs_frame(study_id: Optional[str]) -> pd.DataFrame:
+    columns = ["Run ID","Module","Job type","Status","Progress","Message","Started","Finished"]
+    if not study_id:
+        return pd.DataFrame(columns=columns)
+    ensure_experience_db()
+    matches = []
+    with _db() as conn:
+        rows = conn.execute(
+            """
+            SELECT job_id,module,job_type,status,progress,message,payload_json,
+                   started_at,finished_at
+            FROM experience_jobs
+            ORDER BY COALESCE(started_at,finished_at) DESC
+            """
+        ).fetchall()
+    for job_id, module, job_type, status, progress, message, raw, started, finished in rows:
+        try:
+            payload = json.loads(raw or "{}")
+        except Exception:
+            payload = {}
+        if str(payload.get("study_id", "")) != str(study_id):
+            continue
+        matches.append([job_id,module,job_type,status,float(progress or 0),message,started,finished])
+    return pd.DataFrame(matches, columns=columns)
+
+
+def research_decisions_frame(owner: str) -> pd.DataFrame:
+    columns = ["Decision ID","Title","Module","Status","Metrics","Assumptions","Uncertainty","Created","Updated"]
+    ensure_experience_db()
+    with _db() as conn:
+        rows = conn.execute(
+            """
+            SELECT decision_id,title,module,status,metrics_json,assumptions_json,
+                   uncertainty_json,created_at,updated_at
+            FROM experience_decisions
+            WHERE owner=?
+            ORDER BY updated_at DESC
+            """,
+            (owner,),
+        ).fetchall()
+    return pd.DataFrame(rows, columns=columns) if rows else pd.DataFrame(columns=columns)
+
+
+def research_evidence_bundle(study_id: str, owner: str) -> bytes:
+    protocol = load_research_protocol(study_id)
+    studies = list_research_studies(owner)
+    runs = research_runs_frame(study_id)
+    decisions = research_decisions_frame(owner)
+    manifest = {
+        "bundle_type": "Shoir-IE research workspace evidence",
+        "generated_at": _now(),
+        "owner": owner,
+        "study_id": study_id,
+        "research_id": protocol.get("research_id") if protocol else None,
+        "protocol_hash": protocol.get("protocol_hash") if protocol else None,
+        "note": "Persisted research records only; this bundle does not establish that an experiment has been executed or that a scientific result has been proven.",
+    }
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("manifest.json", json.dumps(manifest, indent=2, ensure_ascii=False, default=str))
+        if protocol:
+            archive.writestr("research_protocol.json", json.dumps(protocol, indent=2, ensure_ascii=False, default=str))
+        archive.writestr("saved_research_studies.csv", studies.to_csv(index=False).encode("utf-8"))
+        archive.writestr("research_runs.csv", runs.to_csv(index=False).encode("utf-8"))
+        archive.writestr("decision_records.csv", decisions.to_csv(index=False).encode("utf-8"))
+    return buffer.getvalue()
+
+
+def render_research_workspace(module: str, tier: str, username: str) -> None:
+    ensure_experience_db()
+    studies = list_research_studies(username)
+    active_id = st.session_state.get("sx_research_study_id")
+    active_protocol = load_research_protocol(active_id) if active_id else None
+    decisions = research_decisions_frame(username)
+    runs = research_runs_frame(active_id)
+
+    st.markdown(
+        "<div class='sx-hero'><div class='sx-kicker'>Research Workspace</div>"
+        "<div class='sx-title'>🔬 Shoir-IE Research Workspace</div>"
+        "<div class='sx-sub'>One place to recover, inspect and manage saved research studies, protocols, run history, decision records and evidence.</div>"
+        f"<div class='sx-badges'><span>● {len(studies)} saved studies</span><span>✓ Research records are persistent</span><span>◈ No placeholder action strip</span></div></div>",
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        """
+        <style>
+        .sx-hero{padding:24px 26px;border-radius:20px;background:linear-gradient(135deg,#0b1220 0%,#192657 58%,#0f5c63 100%);color:#fff;box-shadow:0 18px 40px rgba(15,23,42,.16);margin:2px 0 16px}
+        .sx-kicker{font-size:11px;font-weight:800;letter-spacing:.10em;text-transform:uppercase;color:#7dd3fc}
+        .sx-title{font-size:29px;font-weight:850;margin-top:5px;line-height:1.16}.sx-sub{font-size:13px;color:#dbeafe;margin-top:8px;max-width:1000px}
+        .sx-badges{display:flex;gap:10px;flex-wrap:wrap;margin-top:13px}.sx-badges span{font-size:11px;padding:5px 10px;border-radius:999px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);color:#e2e8f0}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    c1,c2,c3,c4 = st.columns(4)
+    c1.metric("Saved studies", len(studies))
+    c2.metric("Active study", "Selected" if active_protocol else "None")
+    c3.metric("Runs for active study", len(runs))
+    c4.metric("Decision records", len(decisions))
+
+    tabs = st.tabs(["📚 Studies & Recovery","📋 Protocol","🧪 Runs & Results","📝 Decisions","📦 Evidence & Export"])
+
+    with tabs[0]:
+        st.markdown("### Saved research studies")
+        if studies.empty:
+            st.info("No research studies are currently indexed for this workspace.")
+        else:
+            labels = [f"{row['Title']} · {row['Research ID']}" for _, row in studies.iterrows()]
+            ids = [str(x) for x in studies["Study ID"].tolist()]
+            active_index = ids.index(str(active_id)) if active_id in ids else 0
+            choice = st.selectbox("Select a saved study", labels, index=active_index, key="research_saved_study_selector")
+            selected_id = ids[labels.index(choice)]
+            if st.button("📂 Open selected study", type="primary", use_container_width=True, key="research_open_saved_study"):
+                st.session_state["sx_research_study_id"] = selected_id
+                st.rerun()
+            st.dataframe(studies, use_container_width=True, hide_index=True)
+
+        st.markdown("### Legacy recovery")
+        st.caption("Older Shoir-IE versions stored the full protocol inside the project record. Recovery rebuilds the research index from those persisted project payloads.")
+        if st.button("♻️ Recover legacy research protocols", use_container_width=True, key="research_recover_legacy"):
+            recovered = recover_legacy_research_studies(username)
+            if recovered.empty:
+                st.info("No unrecovered legacy research protocols were found.")
+            else:
+                st.success(f"Recovered {len(recovered)} research protocol record(s).")
+                st.dataframe(recovered, use_container_width=True, hide_index=True)
+                st.rerun()
+
+        if st.button("➕ Start a new research study", use_container_width=True, key="research_new_study"):
+            st.session_state.pop("sx_research_study_id", None)
+            st.rerun()
+
+    with tabs[1]:
+        st.markdown("### Research protocol")
+        if active_protocol and active_protocol.get("protocol_locked"):
+            st.success("Protocol is LOCKED. It remains readable and reproducible, but its main specification cannot be edited from this screen.")
+        elif not active_protocol:
+            st.info("No study is selected. Complete the form below to create the first study.")
+        
+        protocol = active_protocol or {
+            "title":"Industrial AI Decision-Readiness Boundary — Experiment 001",
+            "objective":"Determine how evidence degradation and operational disturbances affect industrial decision reliability and whether a reproducible decision-readiness boundary can be identified.",
+            "research_question":"Can an industrial decision system identify a measurable boundary beyond which degraded, stale, missing, or conflicting evidence makes an operational recommendation unreliable?",
+            "hypothesis":"Joint degradation of evidence quality and operating conditions will produce nonlinear deterioration in industrial decision reliability, allowing a measurable decision-readiness boundary to be identified.",
+            "null_hypothesis":"Joint evidence degradation and operational disturbances will not produce a reproducible decision-readiness boundary beyond the effects of the individual factors.",
+            "methodology":"Controlled simulation benchmark","primary_domain":"Manufacturing","transfer_domain":"Maintenance",
+            "primary_endpoint":"Normalized decision regret",
+            "secondary_metrics":["total cost","throughput","service level","constraint violations","quality impact","energy impact","decision reversal rate"],
+            "independent_variables":["evidence completeness","evidence freshness","evidence conflict","uncertainty level","operational shock severity"],
+            "controls":["scenario seed","baseline operating state","decision objective weights","constraint set","decision horizon"],
+            "sample_size":200,"replications":20,"random_seed":2026,"alpha":0.05,"confidence_level":0.95,
+            "data_source":"Shoir-IE controlled synthetic industrial scenarios; public dataset validation in a subsequent phase",
+            "baseline_definition":"A documented decision policy operating with complete, fresh and internally consistent evidence under the defined baseline industrial conditions.",
+            "treatment_definition":"The same decision problem evaluated under systematically controlled degradation of evidence completeness, freshness, conflict and uncertainty, combined with controlled operational disturbances.",
+            "planned_tests":["confidence intervals","paired comparisons","effect sizes","bootstrap sensitivity","factorial interaction analysis"],
+            "inclusion_criteria":"Valid industrial scenarios with complete baseline definitions, finite numeric inputs, specified decision constraints, identifiable evidence-quality conditions, and a computable decision outcome. Scenarios must contain sufficient information to calculate the primary endpoint, normalized decision regret.",
+            "exclusion_criteria":"Malformed or incomplete scenarios; missing primary outcome; non-finite or invalid numeric values; unspecified decision constraints; failed model validation; solver or runtime failures unrelated to the decision method; duplicate experimental scenarios that violate the planned sampling design.",
+            "protocol_notes":"This study will first use controlled Shoir-IE synthetic industrial scenarios to isolate causal effects of evidence degradation and operational disturbances. The decision-readiness boundary must be derived from experimental evidence and must not be predefined as a desired result. Results from synthetic scenarios may not generalize directly to every real industrial environment. Public external datasets will be used for subsequent validation where suitable. Protocol amendments, parameter changes and deviations from the planned experiment will be recorded explicitly rather than silently changing the original specification.",
+            "protocol_locked":False,
+        }
+        locked = bool(active_protocol and active_protocol.get("protocol_locked"))
+        form_key = "research_protocol_form_" + (_safe_key(active_id) if active_id else "new")
+        with st.form(form_key, clear_on_submit=False):
+            r1,r2 = st.columns([1.7,1])
+            with r1:
+                title = st.text_input("Study title", value=str(protocol["title"]), disabled=locked, key=form_key+"_title")
+                question = st.text_area("Research question", value=str(protocol["research_question"]), height=90, disabled=locked, key=form_key+"_question")
+                objective = st.text_area("Study objective", value=str(protocol["objective"]), height=75, disabled=locked, key=form_key+"_objective")
+            with r2:
+                methods=["Controlled simulation benchmark","Design of experiments (DOE)","Cross-domain transfer benchmark","Monte Carlo study","Hybrid simulation + optimization"]
+                domains=["Manufacturing","Warehouse / inventory","Supply chain","Maintenance","Quality","Energy"]
+                method_index=methods.index(protocol["methodology"]) if protocol.get("methodology") in methods else 0
+                primary_index=domains.index(protocol["primary_domain"]) if protocol.get("primary_domain") in domains else 0
+                transfer_index=domains.index(protocol["transfer_domain"]) if protocol.get("transfer_domain") in domains else 3
+                methodology=st.selectbox("Methodology",methods,index=method_index,disabled=locked,key=form_key+"_method")
+                endpoint=st.text_input("Primary endpoint",value=str(protocol["primary_endpoint"]),disabled=locked,key=form_key+"_endpoint")
+                primary_domain=st.selectbox("Primary domain",domains,index=primary_index,disabled=locked,key=form_key+"_primary")
+                transfer_domain=st.selectbox("Unseen / transfer domain",domains,index=transfer_index,disabled=locked,key=form_key+"_transfer")
+            h1,h0=st.columns(2)
+            with h1:
+                hypothesis=st.text_area("Primary hypothesis (H1)",value=str(protocol["hypothesis"]),height=90,disabled=locked,key=form_key+"_h1")
+            with h0:
+                null_hypothesis=st.text_area("Null hypothesis (H0)",value=str(protocol["null_hypothesis"]),height=90,disabled=locked,key=form_key+"_h0")
+            v1,v2,v3=st.columns(3)
+            with v1:
+                secondary=st.text_input("Secondary metrics",value=", ".join(protocol["secondary_metrics"]),disabled=locked,key=form_key+"_secondary")
+                independent=st.text_input("Independent variables",value=", ".join(protocol["independent_variables"]),disabled=locked,key=form_key+"_independent")
+                controls=st.text_input("Controls / covariates",value=", ".join(protocol["controls"]),disabled=locked,key=form_key+"_controls")
+            with v2:
+                sample_size=st.number_input("Scenario count",10,100000,int(protocol["sample_size"]),10,disabled=locked,key=form_key+"_sample")
+                replications=st.number_input("Replications / scenario",1,10000,int(protocol["replications"]),1,disabled=locked,key=form_key+"_rep")
+                random_seed=st.number_input("Random seed",0,2147483647,int(protocol["random_seed"]),1,disabled=locked,key=form_key+"_seed")
+            with v3:
+                alpha=st.number_input("Significance level (α)",0.001,0.20,float(protocol["alpha"]),0.01,"%.3f",disabled=locked,key=form_key+"_alpha")
+                confidence=st.number_input("Confidence level",0.80,0.999,float(protocol["confidence_level"]),0.01,"%.3f",disabled=locked,key=form_key+"_confidence")
+                data_source=st.text_input("Data source",value=str(protocol["data_source"]),disabled=locked,key=form_key+"_source")
+            baseline=st.text_area("Baseline definition",value=str(protocol["baseline_definition"]),height=70,disabled=locked,key=form_key+"_baseline")
+            treatment=st.text_area("Treatment / experimental condition",value=str(protocol["treatment_definition"]),height=70,disabled=locked,key=form_key+"_treatment")
+            planned=st.text_input("Planned statistical tests",value=", ".join(protocol["planned_tests"]),disabled=locked,key=form_key+"_tests")
+            ic1,ic2=st.columns(2)
+            with ic1:
+                inclusion=st.text_area("Inclusion criteria",value=str(protocol["inclusion_criteria"]),height=90,disabled=locked,key=form_key+"_include")
+            with ic2:
+                exclusion=st.text_area("Exclusion criteria",value=str(protocol["exclusion_criteria"]),height=90,disabled=locked,key=form_key+"_exclude")
+            notes=st.text_area("Protocol notes / limitations",value=str(protocol["protocol_notes"]),height=120,disabled=locked,key=form_key+"_notes")
+            lock_request=st.checkbox("Lock protocol after saving (local integrity lock)",value=locked,disabled=locked,key=form_key+"_lock")
+            save=st.form_submit_button("💾 Update Research Study & Protocol" if active_protocol else "💾 Save Research Study & Protocol",type="primary",use_container_width=True,disabled=locked)
+        if save:
+            errors=[]
+            if not title.strip(): errors.append("Study title is required.")
+            if len(question.strip())<20: errors.append("Research question should be at least 20 characters.")
+            if len(hypothesis.strip())<20: errors.append("H1 should be at least 20 characters.")
+            if len(null_hypothesis.strip())<20: errors.append("H0 should be at least 20 characters.")
+            if not endpoint.strip(): errors.append("Primary endpoint is required.")
+            if primary_domain == transfer_domain: errors.append("Primary and transfer domains must differ.")
+            if errors:
+                for error in errors: st.error(error)
+            else:
+                payload={
+                    "title":title,"objective":objective,"research_question":question,"hypothesis":hypothesis,
+                    "null_hypothesis":null_hypothesis,"methodology":methodology,"primary_domain":primary_domain,
+                    "transfer_domain":transfer_domain,"primary_endpoint":endpoint,
+                    "secondary_metrics":_research_list(secondary),"independent_variables":_research_list(independent),
+                    "controls":_research_list(controls),"baseline_definition":baseline,
+                    "treatment_definition":treatment,"sample_size":int(sample_size),"replications":int(replications),
+                    "random_seed":int(random_seed),"alpha":float(alpha),"confidence_level":float(confidence),
+                    "planned_tests":_research_list(planned),"inclusion_criteria":inclusion,
+                    "exclusion_criteria":exclusion,"data_source":data_source,"protocol_notes":notes,
+                    "protocol_locked":bool(lock_request),"module":module,"tier":tier,
+                }
+                if active_protocol:
+                    pid=active_protocol["study_id"]
+                    autosave_project(pid,{"research_protocol":payload,"protocol_type":"local_research_protocol"})
+                else:
+                    pid=save_project(title,module,username,{"research_protocol":payload,"protocol_type":"local_research_protocol"})
+                rid,phash=create_research_protocol(pid,payload,username)
+                st.session_state["sx_research_study_id"]=pid
+                st.session_state["sx_research_id"]=rid
+                st.session_state["sx_research_protocol_hash"]=phash
+                st.success(f"Research study saved: {pid} · Protocol {rid}")
+                st.rerun()
+
+    with tabs[2]:
+        st.markdown("### Run history")
+        if not active_protocol:
+            st.info("Select a saved study first.")
+        elif runs.empty:
+            st.info("No persisted experiment runs exist for this study yet. This tab intentionally does not present a fake run button.")
+        else:
+            st.dataframe(runs, use_container_width=True, hide_index=True)
+
+    with tabs[3]:
+        st.markdown("### Decision records")
+        if decisions.empty:
+            st.info("No persisted decision records exist for this workspace.")
+        else:
+            st.dataframe(decisions, use_container_width=True, hide_index=True)
+
+    with tabs[4]:
+        st.markdown("### Evidence & export")
+        if not active_protocol:
+            st.info("Select a saved study first.")
+        else:
+            st.dataframe(
+                pd.DataFrame([
+                    {"Field":"Research ID","Value":active_protocol["research_id"]},
+                    {"Field":"Study ID","Value":active_protocol["study_id"]},
+                    {"Field":"Protocol hash","Value":active_protocol["protocol_hash"]},
+                    {"Field":"Runs captured","Value":len(runs)},
+                    {"Field":"Decision records visible","Value":len(decisions)},
+                ]),
+                use_container_width=True,
+                hide_index=True,
+            )
+            st.download_button(
+                "📥 Download complete research workspace bundle",
+                data=research_evidence_bundle(active_protocol["study_id"],username),
+                file_name="shoir_ie_" + _safe_key(active_protocol["study_id"]) + "_research_workspace.zip",
+                mime="application/zip",
+                type="primary",
+                use_container_width=True,
+                key="research_workspace_export",
+            )
+            st.caption("The export contains persisted protocol, study index, run history and decision records. It is an evidence archive, not a scientific conclusion.")
+
 def _safe_key(value: str) -> str:
     return hashlib.sha1(str(value).encode("utf-8")).hexdigest()[:10]
 
