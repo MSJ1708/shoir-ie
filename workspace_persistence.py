@@ -63,7 +63,6 @@ _PREFIX_EXCLUDE = (
     "sx_copilot_",
     "sx_export_",
     "sx_dl_",
-    "copilot_",
 )
 
 _ACTION_KEYS = {
