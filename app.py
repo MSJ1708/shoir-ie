@@ -28,6 +28,7 @@ from industrial_platform import PLATFORM_CATALOG, render_module as render_indust
 from industrial_operating_system import render_industrial_operating_system
 from industrial_experience import COPILOT_TOOLS, ensure_experience_db, feature_stats
 from industrial_excellence_hub import render_platform_excellence_hub
+from workspace_persistence import ensure_workspace_state_db, load_user_workspace, save_user_workspace
 
 # =====================================================================
 # PAGE CONFIGURATION & CUSTOM CSS (Professional Styling & Hover Zoom)
@@ -935,6 +936,19 @@ if "onboarded" not in st.session_state:
 if "show_qr" not in st.session_state:
     st.session_state.show_qr = False
 
+# Public authentication screen: keep login/register full-width.
+# The authenticated workspace retains its normal Shoir-IE sidebar.
+if not st.session_state.get("authenticated", False):
+    st.markdown("""
+    <style>
+        section[data-testid="stSidebar"] { display: none !important; }
+        [data-testid="stSidebarCollapsedControl"] { display: none !important; }
+        button[data-testid="stSidebarCollapseButton"] { display: none !important; }
+        div[data-testid="stAppViewContainer"] { margin-left: 0 !important; }
+    </style>
+    """, unsafe_allow_html=True)
+
+
 # ==========================================
 # AUTHENTICATION & REGISTRATION GATE (FRONT PAGE)
 # ==========================================
@@ -1204,6 +1218,16 @@ if not st.session_state.get("current_user"):
     st.stop()
 
 # =====================================================================
+# PERSISTENT USER WORKSPACE — load once after authentication
+# =====================================================================
+if st.session_state.get("current_user") and st.session_state.get("authenticated"):
+    _workspace_user = st.session_state["current_user"]
+    if st.session_state.get("_workspace_loaded_for_user") != _workspace_user:
+        ensure_workspace_state_db()
+        load_user_workspace(_workspace_user, st.session_state)
+        st.session_state["_workspace_loaded_for_user"] = _workspace_user
+
+# =====================================================================
 # ENSURE AFFILIATE CODE IS LOADED IN SESSION STATE
 # =====================================================================
 if not st.session_state.get("user_affiliate"):
@@ -1463,6 +1487,12 @@ with st.container(border=True):
 
 
 # =====================================================================
+# AUTOSAVE LAST KNOWN USER WORKSPACE STATE
+# =====================================================================
+if st.session_state.get("authenticated") and st.session_state.get("current_user"):
+    save_user_workspace(st.session_state["current_user"], st.session_state)
+
+# =====================================================================
 # PLATFORM EXCELLENCE HUB — unified cross-cutting command center
 # =====================================================================
 if st.session_state.get("selected_nav") == "✨ Excellence Hub":
@@ -1474,8 +1504,12 @@ if st.session_state.get("selected_nav") == "✨ Excellence Hub":
 
 st.sidebar.markdown("---")
 if st.sidebar.button("Lock / Logout Workspace"):
-    log_audit(st.session_state.get("current_user", "Unknown"), "User Logged Out")
-    st.session_state.authenticated = False
+    _logout_user = st.session_state.get("current_user", "")
+    if _logout_user:
+        save_user_workspace(_logout_user, st.session_state)
+        log_audit(_logout_user, "User Logged Out")
+    for _key in list(st.session_state.keys()):
+        del st.session_state[_key]
     st.rerun()
 elif selected_module in ["Autonomous Cognitive Operations & Zero-Knowledge Mesh (ACO-ZKMS)", "⚡ ACO-ZKMS Master Engine"]:
     import streamlit as st
