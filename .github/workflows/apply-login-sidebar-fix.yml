@@ -1,9 +1,8 @@
 name: Apply login sidebar fix
 
 on:
-  push:
-    branches:
-      - fix/hide-sidebar-on-login
+  pull_request:
+    types: [opened, synchronize]
 
 permissions:
   contents: write
