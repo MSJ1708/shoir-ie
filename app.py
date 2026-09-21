@@ -1797,8 +1797,7 @@ elif selected_module in ["Universal Cross-Domain Mathematical Isomorphism Engine
     import json
     import time
 
-    st.markdown("### 🔌 Universal Cross-Domain Mathematical Isomorphism Engine (UCMIE v10.0 - World-Class Edition)")
-    st.markdown("The pinnacle of interdisciplinary research intelligence. Discover paradigm-shifting innovations by mapping hidden tensor topologies, executing quantum-classical isomorphism routing, translating foreign theorems into Operations Research, and compiling production-ready LaTeX papers with executable Python frameworks.")
+    st.markdown("### 🔌 Universal Cross-Domain Mathematical Isomorphism Engine (UCMIE v10.0 - World-Class Edition)")    st.markdown("The pinnacle of interdisciplinary research intelligence. Discover paradigm-shifting innovations by mapping hidden tensor topologies, executing quantum-classical isomorphism routing, translating foreign theorems into Operations Research, and compiling production-ready LaTeX papers with executable Python frameworks.")
     # World-Class Persistent Session State Management
     if 'ucmie_domains_registry' not in st.session_state:
         st.session_state['ucmie_domains_registry'] = pd.DataFrame([
@@ -3596,9 +3595,9 @@ elif selected_module == "Live Reproducible Paper Canvas":
         
         st.caption("🔒 Execution Hash: `sha256:8f4c29a... [Verified Reproducible]`")
         
-        st.markdown("---")        st.markdown("#### 📦 One-Click Publication Bundle Generator")
-                # Packaging export bundle with LaTeX, Python script, HTML canvas, and Dockerfile
-        csv_data = canvas_df.to_csv(index=False).encode('utf-8')
+        st.markdown("---")
+        st.markdown("#### 📦 One-Click Publication Bundle Generator")
+                # Packaging export bundle with LaTeX, Python script, HTML canvas, and Dockerfile        csv_data = canvas_df.to_csv(index=False).encode('utf-8')
         latex_source = r"""\documentclass{article}
 \usepackage{amsmath, booktabs, interactive}
 \begin{document}
@@ -5397,8 +5396,7 @@ if selected_module == "Predictive Maintenance Hub":
             {"asset_id": "CONV-12", "name": "Main Assembly Line Conveyor", "type": "Conveyor System", "health": 92, "status": "Optimal", "vibration_mm_s": 1.5, "temp_c": 54.0, "rul_hours": 2100},            {"asset_id": "PUMP-02", "name": "Hydraulic Press Pump B", "type": "Fluid Power", "health": 41, "status": "Critical", "vibration_mm_s": 7.4, "temp_c": 89.5, "rul_hours": 85}
         ]
     if "maintenance_work_orders" not in st.session_state:
-        st.session_state.maintenance_work_orders = [
-            {"wo_id": "WO-1001", "asset": "Hydraulic Press Pump B", "type": "Urgent Overhaul", "priority": "Emergency (P1)", "status": "Dispatched"},
+        st.session_state.maintenance_work_orders = [            {"wo_id": "WO-1001", "asset": "Hydraulic Press Pump B", "type": "Urgent Overhaul", "priority": "Emergency (P1)", "status": "Dispatched"},
             {"wo_id": "WO-1002", "asset": "Heavy Payload AGV Fleet Unit", "type": "Component Replacement", "priority": "High (P2)", "status": "In Progress"}
         ]
 
@@ -7198,7 +7196,6 @@ if selected_module in ["Digital Twin & Discrete-Event Simulation", "Digital Twin
             {"sensor_id": "SNS-901", "name": "Spindle Vibration (CNC A)", "type": "Vibration (mm/s)", "reading": 2.45, "threshold": 4.5, "status": "Normal"},            {"sensor_id": "SNS-902", "name": "Hydraulic Pressure (Press)", "type": "Pressure (Bar)", "reading": 182.1, "threshold": 210.0, "status": "Normal"},
             {"sensor_id": "SNS-903", "name": "Thermal Core (Welding Cell)", "type": "Temperature (°C)", "reading": 78.4, "threshold": 85.0, "status": "Warning"},
         ]
-
     if "kanban_buffers" not in st.session_state:
         st.session_state.kanban_buffers = [
             {"buffer_id": "BUF-01", "from_ws": "CNC Milling Center A", "to_ws": "Automated Stamping Press", "current_wip": 18, "max_capacity": 20, "state": "Near Capacity"},            {"buffer_id": "BUF-02", "from_ws": "Automated Stamping Press", "to_ws": "Robotic Welding Cell", "current_wip": 4, "max_capacity": 25, "state": "Starved"},
@@ -8997,8 +8994,7 @@ elif mod == "Slotting & Gantt":
     st.header("🗂️ Warehouse Slotting & Project Gantt Suite")    st.markdown("Optimize SKU placement velocity and track multi-phase warehouse automation deployment schedules.")
 
     # 1. Robust Session State Initialization for Slotting Data
-    if "slotting_data" not in st.session_state:
-        st.session_state.slotting_data = [
+    if "slotting_data" not in st.session_state:        st.session_state.slotting_data = [
             {"SKU": "SKU-A101", "Description": "High-Velocity Fast-Mover", "Pallets": 120, "Velocity (picks/wk)": 850, "Zone": "Zone A - Front Staging"},            {"SKU": "SKU-B204", "Description": "Medium-Velocity Standard", "Pallets": 75, "Velocity (picks/wk)": 320, "Zone": "Zone B - Mid Aisle"},
             {"SKU": "SKU-C309", "Description": "Bulk Seasonal Stock", "Pallets": 200, "Velocity (picks/wk)": 95, "Zone": "Zone C - High Bay Storage"},
             {"SKU": "SKU-D412", "Description": "Fast-Moving Electronics", "Pallets": 60, "Velocity (picks/wk)": 620, "Zone": "Zone A - Front Staging"}
