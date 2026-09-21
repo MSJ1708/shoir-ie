@@ -920,6 +920,10 @@ def render_experience_shell(module: str, tier: str, username: str) -> None:
     ensure_experience_db()
     import streamlit as st
 
+    if "Experiment Lab" in str(module) or "Experimentation" in str(module):
+        render_research_workspace(module, tier, username)
+        return
+
     meta = _module_meta(module)
     stats = feature_stats()
     is_research_lab = ("Experiment Lab" in str(module)) or ("Experimentation" in str(module))
