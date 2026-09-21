@@ -392,8 +392,14 @@ def _research_hash(protocol: Mapping[str, Any]) -> str:
 def create_research_protocol(study_id: str, protocol: Mapping[str, Any], owner: str) -> tuple[str, str]:
     ensure_experience_db()
     payload = dict(protocol)
-    research_id = "RSH-" + uuid.uuid4().hex[:12].upper()
+    with _db() as conn:
+        existing = conn.execute(
+            "SELECT research_id,created_at FROM experience_research_studies WHERE study_id=?",
+            (study_id,),
+        ).fetchone()
+    research_id = str(existing[0]) if existing else "RSH-" + uuid.uuid4().hex[:12].upper()
     stamp = _now()
+    created_at = str(existing[1]) if existing and existing[1] else stamp
     protocol_hash = _research_hash(payload)
     with _db() as conn:
         conn.execute(
@@ -438,7 +444,7 @@ def create_research_protocol(study_id: str, protocol: Mapping[str, Any], owner: 
                 protocol_hash,
                 int(bool(payload.get("protocol_locked", False))),
                 owner,
-                stamp,
+                created_at,
                 stamp,
             ),
         )
