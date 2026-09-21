@@ -936,7 +936,7 @@ if "onboarded" not in st.session_state:
 if "show_qr" not in st.session_state:
     st.session_state.show_qr = False
 
-# Public authentication screen: keep the login/register experience full-width.
+# Public authentication screen: keep login/register full-width.
 # The authenticated workspace retains its normal Shoir-IE sidebar.
 if not st.session_state.get("authenticated", False):
     st.markdown("""
@@ -947,6 +947,7 @@ if not st.session_state.get("authenticated", False):
         div[data-testid="stAppViewContainer"] { margin-left: 0 !important; }
     </style>
     """, unsafe_allow_html=True)
+
 
 # ==========================================
 # AUTHENTICATION & REGISTRATION GATE (FRONT PAGE)
@@ -1797,7 +1798,9 @@ elif selected_module in ["Universal Cross-Domain Mathematical Isomorphism Engine
     import json
     import time
 
-    st.markdown("### 🔌 Universal Cross-Domain Mathematical Isomorphism Engine (UCMIE v10.0 - World-Class Edition)")    st.markdown("The pinnacle of interdisciplinary research intelligence. Discover paradigm-shifting innovations by mapping hidden tensor topologies, executing quantum-classical isomorphism routing, translating foreign theorems into Operations Research, and compiling production-ready LaTeX papers with executable Python frameworks.")
+    st.markdown("### 🔌 Universal Cross-Domain Mathematical Isomorphism Engine (UCMIE v10.0 - World-Class Edition)")
+    st.markdown("The pinnacle of interdisciplinary research intelligence. Discover paradigm-shifting innovations by mapping hidden tensor topologies, executing quantum-classical isomorphism routing, translating foreign theorems into Operations Research, and compiling production-ready LaTeX papers with executable Python frameworks.")
+
     # World-Class Persistent Session State Management
     if 'ucmie_domains_registry' not in st.session_state:
         st.session_state['ucmie_domains_registry'] = pd.DataFrame([
@@ -1807,6 +1810,7 @@ elif selected_module in ["Universal Cross-Domain Mathematical Isomorphism Engine
             {"Domain": "Evolutionary Biology", "Core Topology": "Quasispecies Fitness Landscape", "Math Signature": "Wright-Fisher Markov Chain", "Weight": 0.89, "Active": True},
             {"Domain": "Quantum Computing", "Core Topology": "Entanglement Superposition", "Math Signature": "Hilbert Space Operator", "Weight": 0.97, "Active": True}
         ])
+
     if 'ucmie_isomorphism_pairs' not in st.session_state:
         st.session_state['ucmie_isomorphism_pairs'] = [
             {"Match ID": "ISO_01", "Source Domain": "Theoretical Physics", "Target IE Problem": "Multi-Echelon Supply Chain Bottleneck", "Structural Homology": "Fluid Viscosity $\\leftrightarrow$ Inventory Lead-Time Friction", "Confidence": "99.2%"},
@@ -1827,7 +1831,8 @@ elif selected_module in ["Universal Cross-Domain Mathematical Isomorphism Engine
         })
 
     # Advanced Multi-Tab Architecture
-    tab_strip, tab_match, tab_quantum, tab_trans, tab_gen, tab_export = st.tabs([        "🔬 Topological Jargon-Stripper",
+    tab_strip, tab_match, tab_quantum, tab_trans, tab_gen, tab_export = st.tabs([
+        "🔬 Topological Jargon-Stripper",
         "🔗 Isomorphism Matcher Studio",
         "⚛️ Quantum-Classical Hybrid Router",
         "🔄 Automated Paradigm Translator",
@@ -3597,14 +3602,17 @@ elif selected_module == "Live Reproducible Paper Canvas":
         
         st.markdown("---")
         st.markdown("#### 📦 One-Click Publication Bundle Generator")
-                # Packaging export bundle with LaTeX, Python script, HTML canvas, and Dockerfile        csv_data = canvas_df.to_csv(index=False).encode('utf-8')
+        
+        # Packaging export bundle with LaTeX, Python script, HTML canvas, and Dockerfile
+        csv_data = canvas_df.to_csv(index=False).encode('utf-8')
         latex_source = r"""\documentclass{article}
 \usepackage{amsmath, booktabs, interactive}
 \begin{document}
 \title{Live Executable Research Artifact}
 \author{Shoir-IE Autonomous Engine}
 \maketitle
-\section{Live Simulation Results}This document contains live-linked execution blocks verified via Shoir-IE.
+\section{Live Simulation Results}
+This document contains live-linked execution blocks verified via Shoir-IE.
 \end{document}"""
         
         dockerfile_content = """FROM python:3.11-slim
@@ -3623,6 +3631,7 @@ CMD ["streamlit", "run", "app.py", "--server.port=8501"]
             zf.writestr("interactive_canvas.html", html_canvas)
             zf.writestr("Dockerfile", dockerfile_content)
             zf.writestr("simulation_data.csv", csv_data)
+
         st.download_button(
             label="🌐 Download Publication-Ready Docker & LaTeX Bundle (.zip)",
             data=zip_io.getvalue(),
@@ -5393,10 +5402,13 @@ if selected_module == "Predictive Maintenance Hub":
         st.session_state.maintenance_assets = [
             {"asset_id": "CNC-01", "name": "5-Axis CNC Mill Alpha", "type": "Machining Center", "health": 88, "status": "Healthy", "vibration_mm_s": 2.1, "temp_c": 62.4, "rul_hours": 1450},
             {"asset_id": "AGV-04", "name": "Heavy Payload AGV Fleet Unit", "type": "Material Handling", "health": 64, "status": "Warning", "vibration_mm_s": 4.8, "temp_c": 78.1, "rul_hours": 320},
-            {"asset_id": "CONV-12", "name": "Main Assembly Line Conveyor", "type": "Conveyor System", "health": 92, "status": "Optimal", "vibration_mm_s": 1.5, "temp_c": 54.0, "rul_hours": 2100},            {"asset_id": "PUMP-02", "name": "Hydraulic Press Pump B", "type": "Fluid Power", "health": 41, "status": "Critical", "vibration_mm_s": 7.4, "temp_c": 89.5, "rul_hours": 85}
+            {"asset_id": "CONV-12", "name": "Main Assembly Line Conveyor", "type": "Conveyor System", "health": 92, "status": "Optimal", "vibration_mm_s": 1.5, "temp_c": 54.0, "rul_hours": 2100},
+            {"asset_id": "PUMP-02", "name": "Hydraulic Press Pump B", "type": "Fluid Power", "health": 41, "status": "Critical", "vibration_mm_s": 7.4, "temp_c": 89.5, "rul_hours": 85}
         ]
+
     if "maintenance_work_orders" not in st.session_state:
-        st.session_state.maintenance_work_orders = [            {"wo_id": "WO-1001", "asset": "Hydraulic Press Pump B", "type": "Urgent Overhaul", "priority": "Emergency (P1)", "status": "Dispatched"},
+        st.session_state.maintenance_work_orders = [
+            {"wo_id": "WO-1001", "asset": "Hydraulic Press Pump B", "type": "Urgent Overhaul", "priority": "Emergency (P1)", "status": "Dispatched"},
             {"wo_id": "WO-1002", "asset": "Heavy Payload AGV Fleet Unit", "type": "Component Replacement", "priority": "High (P2)", "status": "In Progress"}
         ]
 
@@ -7192,13 +7204,17 @@ if selected_module in ["Digital Twin & Discrete-Event Simulation", "Digital Twin
             {"queue_id": "Q-102", "station": "Robotic Welding Cell", "arrival_rate": 10.0, "service_rate": 11.5, "capacity": 20},
         ]
 
-    if "iot_sensors" not in st.session_state:        st.session_state.iot_sensors = [
-            {"sensor_id": "SNS-901", "name": "Spindle Vibration (CNC A)", "type": "Vibration (mm/s)", "reading": 2.45, "threshold": 4.5, "status": "Normal"},            {"sensor_id": "SNS-902", "name": "Hydraulic Pressure (Press)", "type": "Pressure (Bar)", "reading": 182.1, "threshold": 210.0, "status": "Normal"},
+    if "iot_sensors" not in st.session_state:
+        st.session_state.iot_sensors = [
+            {"sensor_id": "SNS-901", "name": "Spindle Vibration (CNC A)", "type": "Vibration (mm/s)", "reading": 2.45, "threshold": 4.5, "status": "Normal"},
+            {"sensor_id": "SNS-902", "name": "Hydraulic Pressure (Press)", "type": "Pressure (Bar)", "reading": 182.1, "threshold": 210.0, "status": "Normal"},
             {"sensor_id": "SNS-903", "name": "Thermal Core (Welding Cell)", "type": "Temperature (°C)", "reading": 78.4, "threshold": 85.0, "status": "Warning"},
         ]
+
     if "kanban_buffers" not in st.session_state:
         st.session_state.kanban_buffers = [
-            {"buffer_id": "BUF-01", "from_ws": "CNC Milling Center A", "to_ws": "Automated Stamping Press", "current_wip": 18, "max_capacity": 20, "state": "Near Capacity"},            {"buffer_id": "BUF-02", "from_ws": "Automated Stamping Press", "to_ws": "Robotic Welding Cell", "current_wip": 4, "max_capacity": 25, "state": "Starved"},
+            {"buffer_id": "BUF-01", "from_ws": "CNC Milling Center A", "to_ws": "Automated Stamping Press", "current_wip": 18, "max_capacity": 20, "state": "Near Capacity"},
+            {"buffer_id": "BUF-02", "from_ws": "Automated Stamping Press", "to_ws": "Robotic Welding Cell", "current_wip": 4, "max_capacity": 25, "state": "Starved"},
         ]
 
     if "reliability_data" not in st.session_state:
@@ -8989,13 +9005,17 @@ if mod == "MEIO Matrix":
         )
 
     # =========================================================
-# WAREHOUSE SLOTTING & PROJECT GANTT SUITE (Fixed & Enhanced)# =========================================================
+# WAREHOUSE SLOTTING & PROJECT GANTT SUITE (Fixed & Enhanced)
+# =========================================================
 elif mod == "Slotting & Gantt":
-    st.header("🗂️ Warehouse Slotting & Project Gantt Suite")    st.markdown("Optimize SKU placement velocity and track multi-phase warehouse automation deployment schedules.")
+    st.header("🗂️ Warehouse Slotting & Project Gantt Suite")
+    st.markdown("Optimize SKU placement velocity and track multi-phase warehouse automation deployment schedules.")
 
     # 1. Robust Session State Initialization for Slotting Data
-    if "slotting_data" not in st.session_state:        st.session_state.slotting_data = [
-            {"SKU": "SKU-A101", "Description": "High-Velocity Fast-Mover", "Pallets": 120, "Velocity (picks/wk)": 850, "Zone": "Zone A - Front Staging"},            {"SKU": "SKU-B204", "Description": "Medium-Velocity Standard", "Pallets": 75, "Velocity (picks/wk)": 320, "Zone": "Zone B - Mid Aisle"},
+    if "slotting_data" not in st.session_state:
+        st.session_state.slotting_data = [
+            {"SKU": "SKU-A101", "Description": "High-Velocity Fast-Mover", "Pallets": 120, "Velocity (picks/wk)": 850, "Zone": "Zone A - Front Staging"},
+            {"SKU": "SKU-B204", "Description": "Medium-Velocity Standard", "Pallets": 75, "Velocity (picks/wk)": 320, "Zone": "Zone B - Mid Aisle"},
             {"SKU": "SKU-C309", "Description": "Bulk Seasonal Stock", "Pallets": 200, "Velocity (picks/wk)": 95, "Zone": "Zone C - High Bay Storage"},
             {"SKU": "SKU-D412", "Description": "Fast-Moving Electronics", "Pallets": 60, "Velocity (picks/wk)": 620, "Zone": "Zone A - Front Staging"}
         ]
@@ -9011,7 +9031,8 @@ elif mod == "Slotting & Gantt":
         st.markdown("Edit inventory attributes directly in the table to evaluate real-time storage layout efficiency.")
 
         # Use native st.data_editor for reliable, interactive data modification
-        slot_df_input = pd.DataFrame(st.session_state.slotting_data)        slot_df = st.data_editor(
+        slot_df_input = pd.DataFrame(st.session_state.slotting_data)
+        slot_df = st.data_editor(
             slot_df_input,
             use_container_width=True,
             num_rows="dynamic",
