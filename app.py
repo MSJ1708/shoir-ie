@@ -26,7 +26,7 @@ from scipy import stats
 from shoir_upgrade import (align_imported_table, clean_dataframe, build_excel_report, build_workbook_bundle, read_uploaded_workbook, apply_excel_function, EXCEL_FUNCTIONS, copilot_module_recommendation)
 from industrial_platform import PLATFORM_CATALOG, render_module as render_industrial_module, ml_demand_forecast, tier_allows as platform_tier_allows
 from industrial_operating_system import render_industrial_operating_system
-from industrial_experience import COPILOT_TOOLS, ensure_experience_db, feature_stats
+from industrial_experience import COPILOT_TOOLS, ensure_experience_db, feature_stats, load_research_protocol, list_research_studies
 from industrial_excellence_hub import render_platform_excellence_hub
 from workspace_persistence import ensure_workspace_state_db, load_user_workspace, save_user_workspace
 
@@ -1306,6 +1306,7 @@ tier4_features = tier3_features + ["Industrial Data Platform", "Advanced Enginee
 # separate list items, and duplicated several Starter-tier names by accident.
 research_pack_features = tier3_features + [
     "Statistical Hypothesis Testing",
+    "Evidence Degradation & Decision-Readiness Lab",
     "LaTeX Document Formatter",
     "Literature & Citation Matrix",
     "Advanced Regression Analysis",
@@ -3359,6 +3360,302 @@ elif selected_module == "Adversarially Stressed Synthetic Industrial Twins":
             )
         else:
             st.info("Execute a simulation run in **Tab 4 (Live Stress Canvas)** to unlock the frictionless export bundle.")
+
+elif selected_module == "Evidence Degradation & Decision-Readiness Lab":
+    import streamlit as st
+    import pandas as pd
+    import numpy as np
+    import json
+    import io
+    import zipfile
+
+    st.markdown("### 🧭 Evidence Degradation & Decision-Readiness Lab")
+    st.markdown(
+        "A controlled research module for testing how evidence quality and operating stress affect industrial decision reliability."
+    )
+
+    active_study_id = st.session_state.get("sx_research_study_id")
+    active_protocol = load_research_protocol(active_study_id) if active_study_id else None
+    if active_protocol is None:
+        studies = list_research_studies(st.session_state.current_user)
+        if not studies.empty:
+            preferred = studies[studies["Title"].astype(str).str.contains(
+                "Decision-Readiness Boundary", case=False, na=False
+            )]
+            if not preferred.empty:
+                active_study_id = str(preferred.iloc[0]["Study ID"])
+                active_protocol = load_research_protocol(active_study_id)
+                st.session_state["sx_research_study_id"] = active_study_id
+
+    if active_protocol:
+        st.success(
+            "Linked study: " + str(active_protocol["title"]) +
+            " · " + str(active_protocol["research_id"])
+        )
+    else:
+        st.warning("No research study is selected. Open Experiment Lab → Studies & Recovery first.")
+
+    tab_design, tab_run, tab_results, tab_export = st.tabs([
+        "🧪 Experiment Design",
+        "▶️ Controlled Run",
+        "📊 Results",
+        "📦 Export"
+    ])
+
+    with tab_design:
+        st.markdown("#### Experimental factors")
+        c1, c2 = st.columns(2)
+        with c1:
+            completeness = st.slider(
+                "Evidence completeness (%)", 25, 100, 100, 5,
+                key="edrb_completeness"
+            )
+            freshness = st.select_slider(
+                "Evidence freshness delay (hours)",
+                options=[0, 1, 6, 12, 24, 48],
+                value=0,
+                key="edrb_freshness"
+            )
+            conflict = st.slider(
+                "Evidence conflict (%)", 0, 50, 0, 5,
+                key="edrb_conflict"
+            )
+        with c2:
+            uncertainty = st.slider(
+                "Evidence uncertainty (%)", 0, 60, 0, 5,
+                key="edrb_uncertainty"
+            )
+            shock = st.slider(
+                "Operational shock severity", 0.0, 3.0, 0.0, 0.5,
+                key="edrb_shock"
+            )
+            seed = st.number_input(
+                "Random seed", 0, 2147483647, 2026, 1,
+                key="edrb_seed"
+            )
+
+        st.markdown("#### Decision definition")
+        decision_type = st.selectbox(
+            "Industrial decision",
+            [
+                "Next-shift production target",
+                "Capacity allocation",
+                "Inventory replenishment"
+            ],
+            key="edrb_decision_type"
+        )
+        baseline_policy = st.selectbox(
+            "Baseline decision policy",
+            [
+                "Evidence-following policy",
+                "Historical-average policy"
+            ],
+            key="edrb_baseline"
+        )
+
+        st.info(
+            "The readiness boundary is not pre-set. The experiment records evidence conditions and realized decision regret; the boundary is estimated later from the observed data."
+        )
+
+        design_summary = pd.DataFrame([
+            ["Evidence completeness", completeness, "%"],
+            ["Evidence freshness", freshness, "hours delayed"],
+            ["Evidence conflict", conflict, "%"],
+            ["Evidence uncertainty", uncertainty, "%"],
+            ["Operational shock", shock, "severity"],
+            ["Decision", decision_type, ""],
+            ["Baseline", baseline_policy, ""]
+        ], columns=["Factor", "Value", "Unit"])
+        st.dataframe(design_summary, use_container_width=True, hide_index=True)
+
+    with tab_run:
+        st.markdown("#### Controlled experiment")
+        r1, r2, r3 = st.columns(3)
+        scenario_count = r1.number_input(
+            "Scenarios", 20, 5000,
+            int((active_protocol or {}).get("sample_size", 200)), 20,
+            key="edrb_scenarios"
+        )
+        replications = r2.number_input(
+            "Replications / scenario", 1, 200,
+            int((active_protocol or {}).get("replications", 20)), 1,
+            key="edrb_reps"
+        )
+        holdout_fraction = r3.slider(
+            "Held-out fraction", 0.10, 0.40, 0.20, 0.05,
+            key="edrb_holdout"
+        )
+
+        if st.button(
+            "🚀 Run Controlled Evidence Experiment",
+            type="primary",
+            use_container_width=True,
+            key="edrb_run"
+        ):
+            rng = np.random.default_rng(int(seed))
+            n = int(scenario_count) * int(replications)
+
+            # Generate a controlled industrial state with several evidence channels.
+            latent_demand = np.clip(rng.normal(120.0, 15.0, n), 50.0, 220.0)
+            latent_capacity = np.clip(rng.normal(125.0, 10.0, n), 80.0, 170.0)
+            latent_quality_risk = np.clip(rng.normal(8.0, 2.0, n), 0.0, 20.0)
+            latent_energy_limit = np.clip(rng.normal(130.0, 10.0, n), 90.0, 170.0)
+
+            # Controlled evidence degradation.
+            evidence = latent_demand.copy()
+            if int(freshness) > 0:
+                evidence = evidence - (rng.normal(0.0, 7.0, n) * min(float(freshness) / 24.0, 2.0))
+            evidence += rng.normal(
+                0.0,
+                np.maximum(0.5, latent_demand * float(uncertainty) / 100.0),
+                n
+            )
+
+            missing = rng.random(n) > (float(completeness) / 100.0)
+            evidence[missing] = np.nan
+
+            conflict_mask = rng.random(n) < (float(conflict) / 100.0)
+            evidence[conflict_mask] = np.where(
+                np.isfinite(evidence[conflict_mask]),
+                2.0 * latent_demand[conflict_mask] - evidence[conflict_mask],
+                np.nan
+            )
+
+            operational_shock = rng.normal(0.0, 10.0 * float(shock), n)
+            realized_demand = np.clip(latent_demand + operational_shock, 40.0, 280.0)
+            realized_capacity = np.clip(
+                latent_capacity - operational_shock * 0.20, 60.0, 180.0
+            )
+
+            if baseline_policy == "Historical-average policy":
+                baseline_action = np.full(n, 120.0)
+            else:
+                baseline_action = np.where(
+                    np.isfinite(evidence),
+                    evidence,
+                    120.0
+                )
+
+            baseline_action = np.clip(
+                np.minimum(baseline_action, latent_energy_limit),
+                30.0,
+                180.0
+            )
+
+            feasible_target = np.minimum(realized_demand, realized_capacity)
+            baseline_regret = (
+                np.abs(baseline_action - feasible_target)
+                / np.maximum(np.abs(feasible_target), 1.0)
+            )
+
+            readiness_score = (
+                0.30 * float(completeness) / 100.0
+                + 0.20 * np.exp(-float(freshness) / 24.0)
+                + 0.20 * (1.0 - float(conflict) / 50.0)
+                + 0.20 * (1.0 - float(uncertainty) / 60.0)
+                + 0.10 * (1.0 - float(shock) / 3.0)
+            )
+
+            observations = pd.DataFrame({
+                "scenario": np.arange(1, n + 1),
+                "latent_demand": latent_demand,
+                "evidence": evidence,
+                "latent_capacity": latent_capacity,
+                "realized_demand": realized_demand,
+                "realized_capacity": realized_capacity,
+                "action": baseline_action,
+                "decision_regret": baseline_regret,
+                "readiness_score": readiness_score,
+                "evidence_completeness": completeness,
+                "evidence_freshness_hours": freshness,
+                "evidence_conflict_pct": conflict,
+                "evidence_uncertainty_pct": uncertainty,
+                "shock_severity": shock
+            })
+
+            split_point = int(n * (1.0 - float(holdout_fraction)))
+            observations["split"] = np.where(
+                observations.index >= split_point, "holdout", "development"
+            )
+
+            st.session_state["edrb_results"] = observations
+            st.session_state["edrb_config"] = {
+                "study_id": active_study_id,
+                "research_id": (active_protocol or {}).get("research_id"),
+                "decision_type": decision_type,
+                "baseline_policy": baseline_policy,
+                "scenario_count": int(scenario_count),
+                "replications": int(replications),
+                "holdout_fraction": float(holdout_fraction),
+                "random_seed": int(seed)
+            }
+            st.success("Controlled experiment completed: " + str(n) + " observations.")
+
+    with tab_results:
+        results = st.session_state.get("edrb_results")
+        if isinstance(results, pd.DataFrame) and not results.empty:
+            holdout = results[results["split"] == "holdout"].copy()
+
+            st.markdown("#### Primary endpoint")
+            st.metric(
+                "Mean normalized decision regret",
+                "{:.5f}".format(float(holdout["decision_regret"].mean()))
+            )
+
+            st.markdown("#### Observed readiness-response relationship")
+            curve = (
+                results.groupby("readiness_score", as_index=False)
+                .agg(
+                    mean_regret=("decision_regret", "mean"),
+                    observations=("decision_regret", "size")
+                )
+                .sort_values("readiness_score")
+            )
+            st.line_chart(curve.set_index("readiness_score")[["mean_regret"]])
+
+            st.markdown("#### Experimental observations")
+            st.dataframe(holdout.head(100), use_container_width=True, hide_index=True)
+            st.caption(
+                "This visualization describes the observed relationship. It does not declare a scientifically valid threshold until the planned statistical analysis and robustness checks are complete."
+            )
+        else:
+            st.info("No run has been executed for this experiment yet.")
+
+    with tab_export:
+        results = st.session_state.get("edrb_results")
+        config = st.session_state.get("edrb_config", {})
+        if isinstance(results, pd.DataFrame) and not results.empty:
+            payload = io.BytesIO()
+            with zipfile.ZipFile(payload, "w", zipfile.ZIP_DEFLATED) as zf:
+                zf.writestr(
+                    "experiment_results.csv",
+                    results.to_csv(index=False).encode("utf-8")
+                )
+                zf.writestr(
+                    "experiment_configuration.json",
+                    json.dumps(config, indent=2, default=str).encode("utf-8")
+                )
+                zf.writestr(
+                    "research_protocol.json",
+                    json.dumps(active_protocol or {}, indent=2, default=str).encode("utf-8")
+                )
+                zf.writestr(
+                    "README.txt",
+                    "Shoir-IE controlled evidence-degradation experiment. Statistical validation is required before scientific conclusions are stated.\n"
+                )
+
+            st.download_button(
+                "📥 Download experiment evidence bundle",
+                data=payload.getvalue(),
+                file_name="shoir_ie_decision_readiness_experiment.zip",
+                mime="application/zip",
+                type="primary",
+                use_container_width=True,
+                key="edrb_export"
+            )
+        else:
+            st.info("Run the experiment first to create the evidence bundle.")
+
 elif selected_module == "Adversarial Chaos & Shock Injector":
     import streamlit as st
     import pandas as pd
