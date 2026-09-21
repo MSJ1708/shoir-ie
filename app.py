@@ -1797,8 +1797,7 @@ elif selected_module in ["Universal Cross-Domain Mathematical Isomorphism Engine
     import json
     import time
 
-    st.markdown("### 🔌 Universal Cross-Domain Mathematical Isomorphism Engine (UCMIE v10.0 - World-Class Edition)")
-    st.markdown("The pinnacle of interdisciplinary research intelligence. Discover paradigm-shifting innovations by mapping hidden tensor topologies, executing quantum-classical isomorphism routing, translating foreign theorems into Operations Research, and compiling production-ready LaTeX papers with executable Python frameworks.")
+    st.markdown("### 🔌 Universal Cross-Domain Mathematical Isomorphism Engine (UCMIE v10.0 - World-Class Edition)")    st.markdown("The pinnacle of interdisciplinary research intelligence. Discover paradigm-shifting innovations by mapping hidden tensor topologies, executing quantum-classical isomorphism routing, translating foreign theorems into Operations Research, and compiling production-ready LaTeX papers with executable Python frameworks.")
 
     # World-Class Persistent Session State Management
     if 'ucmie_domains_registry' not in st.session_state:
@@ -3597,8 +3596,7 @@ elif selected_module == "Live Reproducible Paper Canvas":
         
         st.caption("🔒 Execution Hash: `sha256:8f4c29a... [Verified Reproducible]`")
         
-        st.markdown("---")
-        st.markdown("#### 📦 One-Click Publication Bundle Generator")
+        st.markdown("---")        st.markdown("#### 📦 One-Click Publication Bundle Generator")
         
         # Packaging export bundle with LaTeX, Python script, HTML canvas, and Dockerfile
         csv_data = canvas_df.to_csv(index=False).encode('utf-8')
@@ -5397,8 +5395,7 @@ if selected_module == "Predictive Maintenance Hub":
         st.session_state.maintenance_assets = [
             {"asset_id": "CNC-01", "name": "5-Axis CNC Mill Alpha", "type": "Machining Center", "health": 88, "status": "Healthy", "vibration_mm_s": 2.1, "temp_c": 62.4, "rul_hours": 1450},
             {"asset_id": "AGV-04", "name": "Heavy Payload AGV Fleet Unit", "type": "Material Handling", "health": 64, "status": "Warning", "vibration_mm_s": 4.8, "temp_c": 78.1, "rul_hours": 320},
-            {"asset_id": "CONV-12", "name": "Main Assembly Line Conveyor", "type": "Conveyor System", "health": 92, "status": "Optimal", "vibration_mm_s": 1.5, "temp_c": 54.0, "rul_hours": 2100},
-            {"asset_id": "PUMP-02", "name": "Hydraulic Press Pump B", "type": "Fluid Power", "health": 41, "status": "Critical", "vibration_mm_s": 7.4, "temp_c": 89.5, "rul_hours": 85}
+            {"asset_id": "CONV-12", "name": "Main Assembly Line Conveyor", "type": "Conveyor System", "health": 92, "status": "Optimal", "vibration_mm_s": 1.5, "temp_c": 54.0, "rul_hours": 2100},            {"asset_id": "PUMP-02", "name": "Hydraulic Press Pump B", "type": "Fluid Power", "health": 41, "status": "Critical", "vibration_mm_s": 7.4, "temp_c": 89.5, "rul_hours": 85}
         ]
 
     if "maintenance_work_orders" not in st.session_state:
@@ -5407,7 +5404,8 @@ if selected_module == "Predictive Maintenance Hub":
             {"wo_id": "WO-1002", "asset": "Heavy Payload AGV Fleet Unit", "type": "Component Replacement", "priority": "High (P2)", "status": "In Progress"}
         ]
 
-    # 2. Astonishing Glassmorphism Header Banner    st.markdown("""
+    # 2. Astonishing Glassmorphism Header Banner
+    st.markdown("""
     <div style="background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #312e81 100%); padding: 30px; border-radius: 16px; color: white; margin-bottom: 24px; box-shadow: 0 10px 25px rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.08);">
         <div style="display: flex; align-items: center; justify-content: space-between;">
             <div>
@@ -5425,7 +5423,8 @@ if selected_module == "Predictive Maintenance Hub":
     import pandas as pd
     import plotly.express as px
     import plotly.graph_objects as go
-    import numpy as np    import datetime
+    import numpy as np
+    import datetime
 
     assets_df = pd.DataFrame(st.session_state.maintenance_assets)
     wo_df = pd.DataFrame(st.session_state.maintenance_work_orders)
@@ -7197,8 +7196,7 @@ if selected_module in ["Digital Twin & Discrete-Event Simulation", "Digital Twin
             {"queue_id": "Q-102", "station": "Robotic Welding Cell", "arrival_rate": 10.0, "service_rate": 11.5, "capacity": 20},
         ]
 
-    if "iot_sensors" not in st.session_state:
-        st.session_state.iot_sensors = [
+    if "iot_sensors" not in st.session_state:        st.session_state.iot_sensors = [
             {"sensor_id": "SNS-901", "name": "Spindle Vibration (CNC A)", "type": "Vibration (mm/s)", "reading": 2.45, "threshold": 4.5, "status": "Normal"},
             {"sensor_id": "SNS-902", "name": "Hydraulic Pressure (Press)", "type": "Pressure (Bar)", "reading": 182.1, "threshold": 210.0, "status": "Normal"},
             {"sensor_id": "SNS-903", "name": "Thermal Core (Welding Cell)", "type": "Temperature (°C)", "reading": 78.4, "threshold": 85.0, "status": "Warning"},
@@ -8997,8 +8995,7 @@ if mod == "MEIO Matrix":
         )
 
     # =========================================================
-# WAREHOUSE SLOTTING & PROJECT GANTT SUITE (Fixed & Enhanced)
-# =========================================================
+# WAREHOUSE SLOTTING & PROJECT GANTT SUITE (Fixed & Enhanced)# =========================================================
 elif mod == "Slotting & Gantt":
     st.header("🗂️ Warehouse Slotting & Project Gantt Suite")
     st.markdown("Optimize SKU placement velocity and track multi-phase warehouse automation deployment schedules.")
