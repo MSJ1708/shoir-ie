@@ -48,3 +48,23 @@ def test_workspace_isolated_per_user(tmp_path: Path):
     assert load_user_workspace("Bob", bob, db)
     assert alice["selection"] == "A"
     assert bob["selection"] == "B"
+
+
+def test_workspace_does_not_restore_streamlit_action_widget_keys(tmp_path: Path):
+    db = str(tmp_path / "workspace.db")
+    source = {
+        "sidebar_edit_acc": True,
+        "btn_confirm_pay": True,
+        "enterprise_module_selector": "Inventory · EOQ",
+        "research_title": "My Study",
+        "research_question": "A durable question that should be restored.",
+    }
+    assert save_user_workspace("Alice", source, db)
+
+    restored = {}
+    assert load_user_workspace("Alice", restored, db)
+
+    assert "sidebar_edit_acc" not in restored
+    assert "btn_confirm_pay" not in restored
+    assert restored["enterprise_module_selector"] == "Inventory · EOQ"
+    assert restored["research_title"] == "My Study"
