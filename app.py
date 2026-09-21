@@ -936,6 +936,18 @@ if "onboarded" not in st.session_state:
 if "show_qr" not in st.session_state:
     st.session_state.show_qr = False
 
+# Public authentication screen: keep the login/register experience full-width.
+# The authenticated workspace retains its normal Shoir-IE sidebar.
+if not st.session_state.get("authenticated", False):
+    st.markdown("""
+    <style>
+        section[data-testid="stSidebar"] { display: none !important; }
+        [data-testid="stSidebarCollapsedControl"] { display: none !important; }
+        button[data-testid="stSidebarCollapseButton"] { display: none !important; }
+        div[data-testid="stAppViewContainer"] { margin-left: 0 !important; }
+    </style>
+    """, unsafe_allow_html=True)
+
 # ==========================================
 # AUTHENTICATION & REGISTRATION GATE (FRONT PAGE)
 # ==========================================
@@ -1797,7 +1809,6 @@ elif selected_module in ["Universal Cross-Domain Mathematical Isomorphism Engine
             {"Domain": "Evolutionary Biology", "Core Topology": "Quasispecies Fitness Landscape", "Math Signature": "Wright-Fisher Markov Chain", "Weight": 0.89, "Active": True},
             {"Domain": "Quantum Computing", "Core Topology": "Entanglement Superposition", "Math Signature": "Hilbert Space Operator", "Weight": 0.97, "Active": True}
         ])
-
     if 'ucmie_isomorphism_pairs' not in st.session_state:
         st.session_state['ucmie_isomorphism_pairs'] = [
             {"Match ID": "ISO_01", "Source Domain": "Theoretical Physics", "Target IE Problem": "Multi-Echelon Supply Chain Bottleneck", "Structural Homology": "Fluid Viscosity $\\leftrightarrow$ Inventory Lead-Time Friction", "Confidence": "99.2%"},
@@ -3597,8 +3608,7 @@ elif selected_module == "Live Reproducible Paper Canvas":
 \title{Live Executable Research Artifact}
 \author{Shoir-IE Autonomous Engine}
 \maketitle
-\section{Live Simulation Results}
-This document contains live-linked execution blocks verified via Shoir-IE.
+\section{Live Simulation Results}This document contains live-linked execution blocks verified via Shoir-IE.
 \end{document}"""
         
         dockerfile_content = """FROM python:3.11-slim
@@ -5397,8 +5407,7 @@ if selected_module == "Predictive Maintenance Hub":
             {"wo_id": "WO-1002", "asset": "Heavy Payload AGV Fleet Unit", "type": "Component Replacement", "priority": "High (P2)", "status": "In Progress"}
         ]
 
-    # 2. Astonishing Glassmorphism Header Banner
-    st.markdown("""
+    # 2. Astonishing Glassmorphism Header Banner    st.markdown("""
     <div style="background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #312e81 100%); padding: 30px; border-radius: 16px; color: white; margin-bottom: 24px; box-shadow: 0 10px 25px rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.08);">
         <div style="display: flex; align-items: center; justify-content: space-between;">
             <div>
@@ -7197,8 +7206,7 @@ if selected_module in ["Digital Twin & Discrete-Event Simulation", "Digital Twin
 
     if "kanban_buffers" not in st.session_state:
         st.session_state.kanban_buffers = [
-            {"buffer_id": "BUF-01", "from_ws": "CNC Milling Center A", "to_ws": "Automated Stamping Press", "current_wip": 18, "max_capacity": 20, "state": "Near Capacity"},
-            {"buffer_id": "BUF-02", "from_ws": "Automated Stamping Press", "to_ws": "Robotic Welding Cell", "current_wip": 4, "max_capacity": 25, "state": "Starved"},
+            {"buffer_id": "BUF-01", "from_ws": "CNC Milling Center A", "to_ws": "Automated Stamping Press", "current_wip": 18, "max_capacity": 20, "state": "Near Capacity"},            {"buffer_id": "BUF-02", "from_ws": "Automated Stamping Press", "to_ws": "Robotic Welding Cell", "current_wip": 4, "max_capacity": 25, "state": "Starved"},
         ]
 
     if "reliability_data" not in st.session_state:
@@ -7215,7 +7223,8 @@ if selected_module in ["Digital Twin & Discrete-Event Simulation", "Digital Twin
             {"timestamp": "07:59:12", "category": "AGV Fleet", "message": "AGV-01 completed delivery to WS-03."},
         ]
 
-    # 2. Glassmorphism Header Banner    st.markdown("""
+    # 2. Glassmorphism Header Banner
+    st.markdown("""
     <div style="background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #312e81 100%); padding: 30px; border-radius: 16px; color: white; margin-bottom: 24px; box-shadow: 0 10px 25px rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.08);">
         <div style="display: flex; align-items: center; justify-content: space-between;">
             <div>
@@ -8997,8 +9006,7 @@ elif mod == "Slotting & Gantt":
     # 1. Robust Session State Initialization for Slotting Data
     if "slotting_data" not in st.session_state:
         st.session_state.slotting_data = [
-            {"SKU": "SKU-A101", "Description": "High-Velocity Fast-Mover", "Pallets": 120, "Velocity (picks/wk)": 850, "Zone": "Zone A - Front Staging"},
-            {"SKU": "SKU-B204", "Description": "Medium-Velocity Standard", "Pallets": 75, "Velocity (picks/wk)": 320, "Zone": "Zone B - Mid Aisle"},
+            {"SKU": "SKU-A101", "Description": "High-Velocity Fast-Mover", "Pallets": 120, "Velocity (picks/wk)": 850, "Zone": "Zone A - Front Staging"},            {"SKU": "SKU-B204", "Description": "Medium-Velocity Standard", "Pallets": 75, "Velocity (picks/wk)": 320, "Zone": "Zone B - Mid Aisle"},
             {"SKU": "SKU-C309", "Description": "Bulk Seasonal Stock", "Pallets": 200, "Velocity (picks/wk)": 95, "Zone": "Zone C - High Bay Storage"},
             {"SKU": "SKU-D412", "Description": "Fast-Moving Electronics", "Pallets": 60, "Velocity (picks/wk)": 620, "Zone": "Zone A - Front Staging"}
         ]
