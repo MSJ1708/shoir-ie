@@ -555,11 +555,12 @@ def recover_legacy_research_studies(owner: str) -> pd.DataFrame:
             """,
             (owner,),
         ).fetchall()
+        # A study ID is globally unique. Never overwrite another owner's
+        # already-indexed protocol during recovery.
         existing_ids = {
             str(row[0])
             for row in conn.execute(
-                "SELECT study_id FROM experience_research_studies WHERE owner=?",
-                (owner,),
+                "SELECT study_id FROM experience_research_studies"
             ).fetchall()
         }
     for project_id, name, module, raw, created_at in rows:
