@@ -52,10 +52,48 @@ _PREFIX_EXCLUDE = (
     "payment_",
     "uploaded_",
     "_workspace_",
+    # Streamlit action widgets are event controls, not durable workspace values.
+    "upgrade_clean_",
+    "upgrade_reset_",
+    "upgrade_uploader_",
+    "sx_save_",
+    "sx_open_",
+    "sx_job_",
+    "sx_decision_",
+    "sx_copilot_",
+    "sx_export_",
+    "sx_dl_",
+    "copilot_",
 )
 
+_ACTION_KEYS = {
+    "btn_sign_action",
+    "btn_confirm_pay",
+    "btn_send_request",
+    "sidebar_edit_acc",
+    "run_milp_solver_btn_tab1",
+    "generate_pdf_summary_btn",
+    "run_meio_opt_btn",
+    "btn_run_slotting_opt",
+    "btn_render_gantt",
+    "update_status_btn",
+    "btn_add_truck",
+    "btn_remove_truck",
+    "btn_add_landmark",
+    "btn_remove_landmark",
+    "run_monte_carlo_btn",
+    "payment_screenshot_upload",
+}
+
 def _excluded(key: str) -> bool:
-    return key in _EXACT_EXCLUDE or any(key.startswith(p) for p in _PREFIX_EXCLUDE)
+    lowered = str(key).lower()
+    return (
+        key in _EXACT_EXCLUDE
+        or key in _ACTION_KEYS
+        or any(key.startswith(p) for p in _PREFIX_EXCLUDE)
+        or lowered.startswith(("download_", "upload_"))
+        or lowered.endswith(("_button", "_btn", "_submit"))
+    )
 
 def _pack(value: Any) -> Any:
     if value is None or isinstance(value, (bool, int, str)):
