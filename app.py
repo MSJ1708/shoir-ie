@@ -28,6 +28,7 @@ from industrial_platform import PLATFORM_CATALOG, render_module as render_indust
 from industrial_operating_system import render_industrial_operating_system
 from industrial_experience import COPILOT_TOOLS, ensure_experience_db, feature_stats
 from industrial_excellence_hub import render_platform_excellence_hub
+from workspace_persistence import ensure_workspace_state_db, load_user_workspace, save_user_workspace
 
 # =====================================================================
 # PAGE CONFIGURATION & CUSTOM CSS (Professional Styling & Hover Zoom)
@@ -1204,6 +1205,16 @@ if not st.session_state.get("current_user"):
     st.stop()
 
 # =====================================================================
+# PERSISTENT USER WORKSPACE — load once after authentication
+# =====================================================================
+if st.session_state.get("current_user") and st.session_state.get("authenticated"):
+    _workspace_user = st.session_state["current_user"]
+    if st.session_state.get("_workspace_loaded_for_user") != _workspace_user:
+        ensure_workspace_state_db()
+        load_user_workspace(_workspace_user, st.session_state)
+        st.session_state["_workspace_loaded_for_user"] = _workspace_user
+
+# =====================================================================
 # ENSURE AFFILIATE CODE IS LOADED IN SESSION STATE
 # =====================================================================
 if not st.session_state.get("user_affiliate"):
@@ -1463,6 +1474,12 @@ with st.container(border=True):
 
 
 # =====================================================================
+# AUTOSAVE LAST KNOWN USER WORKSPACE STATE
+# =====================================================================
+if st.session_state.get("authenticated") and st.session_state.get("current_user"):
+    save_user_workspace(st.session_state["current_user"], st.session_state)
+
+# =====================================================================
 # PLATFORM EXCELLENCE HUB — unified cross-cutting command center
 # =====================================================================
 if st.session_state.get("selected_nav") == "✨ Excellence Hub":
@@ -1474,8 +1491,12 @@ if st.session_state.get("selected_nav") == "✨ Excellence Hub":
 
 st.sidebar.markdown("---")
 if st.sidebar.button("Lock / Logout Workspace"):
-    log_audit(st.session_state.get("current_user", "Unknown"), "User Logged Out")
-    st.session_state.authenticated = False
+    _logout_user = st.session_state.get("current_user", "")
+    if _logout_user:
+        save_user_workspace(_logout_user, st.session_state)
+        log_audit(_logout_user, "User Logged Out")
+    for _key in list(st.session_state.keys()):
+        del st.session_state[_key]
     st.rerun()
 elif selected_module in ["Autonomous Cognitive Operations & Zero-Knowledge Mesh (ACO-ZKMS)", "⚡ ACO-ZKMS Master Engine"]:
     import streamlit as st
@@ -1797,8 +1818,7 @@ elif selected_module in ["Universal Cross-Domain Mathematical Isomorphism Engine
         })
 
     # Advanced Multi-Tab Architecture
-    tab_strip, tab_match, tab_quantum, tab_trans, tab_gen, tab_export = st.tabs([
-        "🔬 Topological Jargon-Stripper",
+    tab_strip, tab_match, tab_quantum, tab_trans, tab_gen, tab_export = st.tabs([        "🔬 Topological Jargon-Stripper",
         "🔗 Isomorphism Matcher Studio",
         "⚛️ Quantum-Classical Hybrid Router",
         "🔄 Automated Paradigm Translator",
@@ -3597,7 +3617,6 @@ CMD ["streamlit", "run", "app.py", "--server.port=8501"]
             zf.writestr("interactive_canvas.html", html_canvas)
             zf.writestr("Dockerfile", dockerfile_content)
             zf.writestr("simulation_data.csv", csv_data)
-
         st.download_button(
             label="🌐 Download Publication-Ready Docker & LaTeX Bundle (.zip)",
             data=zip_io.getvalue(),
@@ -5397,8 +5416,7 @@ if selected_module == "Predictive Maintenance Hub":
     import pandas as pd
     import plotly.express as px
     import plotly.graph_objects as go
-    import numpy as np
-    import datetime
+    import numpy as np    import datetime
 
     assets_df = pd.DataFrame(st.session_state.maintenance_assets)
     wo_df = pd.DataFrame(st.session_state.maintenance_work_orders)
@@ -7197,8 +7215,7 @@ if selected_module in ["Digital Twin & Discrete-Event Simulation", "Digital Twin
             {"timestamp": "07:59:12", "category": "AGV Fleet", "message": "AGV-01 completed delivery to WS-03."},
         ]
 
-    # 2. Glassmorphism Header Banner
-    st.markdown("""
+    # 2. Glassmorphism Header Banner    st.markdown("""
     <div style="background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #312e81 100%); padding: 30px; border-radius: 16px; color: white; margin-bottom: 24px; box-shadow: 0 10px 25px rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.08);">
         <div style="display: flex; align-items: center; justify-content: space-between;">
             <div>
@@ -8997,8 +9014,7 @@ elif mod == "Slotting & Gantt":
         st.markdown("Edit inventory attributes directly in the table to evaluate real-time storage layout efficiency.")
 
         # Use native st.data_editor for reliable, interactive data modification
-        slot_df_input = pd.DataFrame(st.session_state.slotting_data)
-        slot_df = st.data_editor(
+        slot_df_input = pd.DataFrame(st.session_state.slotting_data)        slot_df = st.data_editor(
             slot_df_input,
             use_container_width=True,
             num_rows="dynamic",
