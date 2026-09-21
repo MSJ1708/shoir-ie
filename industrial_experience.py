@@ -614,51 +614,50 @@ def render_experience_shell(module: str, tier: str, username: str) -> None:
         primary_index = domains.index(active_protocol["primary_domain"]) if active_protocol and active_protocol.get("primary_domain") in domains else 0
         transfer_index = domains.index(active_protocol["transfer_domain"]) if active_protocol and active_protocol.get("transfer_domain") in domains else 2
 
-        with st.form("sx_research_protocol_form_" + key, clear_on_submit=False):
-            r1, r2 = st.columns([1.7, 1])
-            with r1:
-                research_title = st.text_input("Study title", value=(active_protocol or {}).get("title", "Industrial Decision Genome — Experiment 001"), disabled=locked, key="sx_research_title_" + key)
-                research_question = st.text_area("Research question", value=(active_protocol or {}).get("research_question", "Can transferable industrial decision structures improve AI decision-making on previously unseen industrial environments and compound disruptions?"), height=90, disabled=locked, key="sx_research_question_" + key)
-                objective = st.text_area("Study objective", value=(active_protocol or {}).get("objective", "Determine whether industrial decision knowledge transfers across domains without retraining on the target domain."), height=70, disabled=locked, key="sx_research_objective_" + key)
-            with r2:
-                methodology = st.selectbox("Methodology", methods, index=method_index, disabled=locked, key="sx_research_methodology_" + key)
-                primary_endpoint = st.text_input("Primary endpoint", value=(active_protocol or {}).get("primary_endpoint", "Normalized decision regret"), disabled=locked, key="sx_research_endpoint_" + key)
-                primary_domain = st.selectbox("Primary domain", domains, index=primary_index, disabled=locked, key="sx_research_primary_domain_" + key)
-                transfer_domain = st.selectbox("Unseen / transfer domain", domains, index=transfer_index, disabled=locked, key="sx_research_transfer_domain_" + key)
+        r1, r2 = st.columns([1.7, 1])
+        with r1:
+            research_title = st.text_input("Study title", value=(active_protocol or {}).get("title", "Industrial Decision Genome — Experiment 001"), disabled=locked, key="sx_research_title_" + key)
+            research_question = st.text_area("Research question", value=(active_protocol or {}).get("research_question", "Can transferable industrial decision structures improve AI decision-making on previously unseen industrial environments and compound disruptions?"), height=90, disabled=locked, key="sx_research_question_" + key)
+            objective = st.text_area("Study objective", value=(active_protocol or {}).get("objective", "Determine whether industrial decision knowledge transfers across domains without retraining on the target domain."), height=70, disabled=locked, key="sx_research_objective_" + key)
+        with r2:
+            methodology = st.selectbox("Methodology", methods, index=method_index, disabled=locked, key="sx_research_methodology_" + key)
+            primary_endpoint = st.text_input("Primary endpoint", value=(active_protocol or {}).get("primary_endpoint", "Normalized decision regret"), disabled=locked, key="sx_research_endpoint_" + key)
+            primary_domain = st.selectbox("Primary domain", domains, index=primary_index, disabled=locked, key="sx_research_primary_domain_" + key)
+            transfer_domain = st.selectbox("Unseen / transfer domain", domains, index=transfer_index, disabled=locked, key="sx_research_transfer_domain_" + key)
 
-            h1, h2 = st.columns(2)
-            with h1:
-                hypothesis = st.text_area("Primary hypothesis (H1)", value=(active_protocol or {}).get("hypothesis", "A transferable decision representation will retain measurable performance on an unseen industrial environment compared with documented baselines."), height=80, disabled=locked, key="sx_research_h1_" + key)
-            with h2:
-                null_hypothesis = st.text_area("Null hypothesis (H0)", value=(active_protocol or {}).get("null_hypothesis", "Transferable decision representations will not produce a reliable improvement on unseen industrial environments after controlling for baseline performance and variance."), height=80, disabled=locked, key="sx_research_h0_" + key)
+        h1, h2 = st.columns(2)
+        with h1:
+            hypothesis = st.text_area("Primary hypothesis (H1)", value=(active_protocol or {}).get("hypothesis", "A transferable decision representation will retain measurable performance on an unseen industrial environment compared with documented baselines."), height=80, disabled=locked, key="sx_research_h1_" + key)
+        with h2:
+            null_hypothesis = st.text_area("Null hypothesis (H0)", value=(active_protocol or {}).get("null_hypothesis", "Transferable decision representations will not produce a reliable improvement on unseen industrial environments after controlling for baseline performance and variance."), height=80, disabled=locked, key="sx_research_h0_" + key)
 
-            v1, v2, v3 = st.columns(3)
-            with v1:
-                secondary_metrics = st.text_input("Secondary metrics", value=", ".join((active_protocol or {}).get("secondary_metrics", ["cost", "throughput", "service", "risk", "inventory", "carbon"])), disabled=locked, key="sx_research_secondary_" + key)
-                independent_variables = st.text_input("Independent variables", value=", ".join((active_protocol or {}).get("independent_variables", ["decision method", "domain", "disruption type"])), disabled=locked, key="sx_research_independent_" + key)
-                controls = st.text_input("Controls / covariates", value=", ".join((active_protocol or {}).get("controls", ["scenario seed", "objective weights", "constraint set"])), disabled=locked, key="sx_research_controls_" + key)
-            with v2:
-                sample_size = st.number_input("Scenario count", min_value=10, max_value=100000, value=int((active_protocol or {}).get("sample_size", 100)), step=10, disabled=locked, key="sx_research_sample_size_" + key)
-                replications = st.number_input("Replications / scenario", min_value=1, max_value=10000, value=int((active_protocol or {}).get("replications", 30)), step=1, disabled=locked, key="sx_research_replications_" + key)
-                random_seed = st.number_input("Random seed", min_value=0, max_value=2147483647, value=int((active_protocol or {}).get("random_seed", 2026)), step=1, disabled=locked, key="sx_research_seed_" + key)
-            with v3:
-                alpha = st.number_input("Significance level (α)", min_value=0.001, max_value=0.20, value=float((active_protocol or {}).get("alpha", 0.05)), step=0.01, format="%.3f", disabled=locked, key="sx_research_alpha_" + key)
-                confidence_level = st.number_input("Confidence level", min_value=0.80, max_value=0.999, value=float((active_protocol or {}).get("confidence_level", 0.95)), step=0.01, format="%.3f", disabled=locked, key="sx_research_confidence_" + key)
-                data_source = st.text_input("Data source", value=(active_protocol or {}).get("data_source", "Shoir-IE controlled synthetic scenarios; later external validation dataset"), disabled=locked, key="sx_research_data_source_" + key)
+        v1, v2, v3 = st.columns(3)
+        with v1:
+            secondary_metrics = st.text_input("Secondary metrics", value=", ".join((active_protocol or {}).get("secondary_metrics", ["cost", "throughput", "service", "risk", "inventory", "carbon"])), disabled=locked, key="sx_research_secondary_" + key)
+            independent_variables = st.text_input("Independent variables", value=", ".join((active_protocol or {}).get("independent_variables", ["decision method", "domain", "disruption type"])), disabled=locked, key="sx_research_independent_" + key)
+            controls = st.text_input("Controls / covariates", value=", ".join((active_protocol or {}).get("controls", ["scenario seed", "objective weights", "constraint set"])), disabled=locked, key="sx_research_controls_" + key)
+        with v2:
+            sample_size = st.number_input("Scenario count", min_value=10, max_value=100000, value=int((active_protocol or {}).get("sample_size", 100)), step=10, disabled=locked, key="sx_research_sample_size_" + key)
+            replications = st.number_input("Replications / scenario", min_value=1, max_value=10000, value=int((active_protocol or {}).get("replications", 30)), step=1, disabled=locked, key="sx_research_replications_" + key)
+            random_seed = st.number_input("Random seed", min_value=0, max_value=2147483647, value=int((active_protocol or {}).get("random_seed", 2026)), step=1, disabled=locked, key="sx_research_seed_" + key)
+        with v3:
+            alpha = st.number_input("Significance level (α)", min_value=0.001, max_value=0.20, value=float((active_protocol or {}).get("alpha", 0.05)), step=0.01, format="%.3f", disabled=locked, key="sx_research_alpha_" + key)
+            confidence_level = st.number_input("Confidence level", min_value=0.80, max_value=0.999, value=float((active_protocol or {}).get("confidence_level", 0.95)), step=0.01, format="%.3f", disabled=locked, key="sx_research_confidence_" + key)
+            data_source = st.text_input("Data source", value=(active_protocol or {}).get("data_source", "Shoir-IE controlled synthetic scenarios; later external validation dataset"), disabled=locked, key="sx_research_data_source_" + key)
 
-            baseline_definition = st.text_area("Baseline definition", value=(active_protocol or {}).get("baseline_definition", "A fixed documented baseline policy plus a classical optimization baseline where applicable."), height=60, disabled=locked, key="sx_research_baseline_" + key)
-            treatment_definition = st.text_area("Treatment / experimental condition", value=(active_protocol or {}).get("treatment_definition", "Shoir-IE decision representation evaluated on held-out combinations and an unseen transfer domain."), height=60, disabled=locked, key="sx_research_treatment_" + key)
-            planned_tests = st.text_input("Planned statistical tests", value=", ".join((active_protocol or {}).get("planned_tests", ["confidence intervals", "paired comparison", "effect size", "bootstrap sensitivity"])), disabled=locked, key="sx_research_tests_" + key)
+        baseline_definition = st.text_area("Baseline definition", value=(active_protocol or {}).get("baseline_definition", "A fixed documented baseline policy plus a classical optimization baseline where applicable."), height=60, disabled=locked, key="sx_research_baseline_" + key)
+        treatment_definition = st.text_area("Treatment / experimental condition", value=(active_protocol or {}).get("treatment_definition", "Shoir-IE decision representation evaluated on held-out combinations and an unseen transfer domain."), height=60, disabled=locked, key="sx_research_treatment_" + key)
+        planned_tests = st.text_input("Planned statistical tests", value=", ".join((active_protocol or {}).get("planned_tests", ["confidence intervals", "paired comparison", "effect size", "bootstrap sensitivity"])), disabled=locked, key="sx_research_tests_" + key)
 
-            ic1, ic2 = st.columns(2)
-            with ic1:
-                inclusion_criteria = st.text_area("Inclusion criteria", value=(active_protocol or {}).get("inclusion_criteria", "Valid scenario definitions; finite numeric inputs; all required constraints specified."), height=60, disabled=locked, key="sx_research_inclusion_" + key)
-            with ic2:
-                exclusion_criteria = st.text_area("Exclusion criteria", value=(active_protocol or {}).get("exclusion_criteria", "Failed validation; malformed scenarios; missing primary outcome; solver/runtime failure not attributable to decision method."), height=60, disabled=locked, key="sx_research_exclusion_" + key)
+        ic1, ic2 = st.columns(2)
+        with ic1:
+            inclusion_criteria = st.text_area("Inclusion criteria", value=(active_protocol or {}).get("inclusion_criteria", "Valid scenario definitions; finite numeric inputs; all required constraints specified."), height=60, disabled=locked, key="sx_research_inclusion_" + key)
+        with ic2:
+            exclusion_criteria = st.text_area("Exclusion criteria", value=(active_protocol or {}).get("exclusion_criteria", "Failed validation; malformed scenarios; missing primary outcome; solver/runtime failure not attributable to decision method."), height=60, disabled=locked, key="sx_research_exclusion_" + key)
 
-            protocol_notes = st.text_area("Protocol notes / limitations", value=(active_protocol or {}).get("protocol_notes", "Record protocol amendments explicitly instead of silently changing the main test specification."), height=70, disabled=locked, key="sx_research_notes_" + key)
-            lock_protocol = st.checkbox("Lock protocol after saving (local integrity lock)", value=locked, disabled=locked, key="sx_research_lock_" + key, help="Locks this local record. It is not external preregistration.")
-            save_protocol = st.form_submit_button("💾 Save Research Study & Protocol" if not locked else "🔒 Protocol Locked", type="primary", use_container_width=True, disabled=locked)
+        protocol_notes = st.text_area("Protocol notes / limitations", value=(active_protocol or {}).get("protocol_notes", "Record protocol amendments explicitly instead of silently changing the main test specification."), height=70, disabled=locked, key="sx_research_notes_" + key)
+        lock_protocol = st.checkbox("Lock protocol after saving (local integrity lock)", value=locked, disabled=locked, key="sx_research_lock_" + key, help="Locks this local record. It is not external preregistration.")
+        save_protocol = st.button("💾 Save Research Study & Protocol" if not locked else "🔒 Protocol Locked", type="primary", use_container_width=True, disabled=locked, key="sx_save_research_protocol_" + key)
 
         if save_protocol:
             validation_errors = []
