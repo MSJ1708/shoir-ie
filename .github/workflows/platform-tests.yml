@@ -10,48 +10,10 @@ jobs:
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    permissions:
-      contents: write
     env:
       PYTHONPATH: .
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Apply login sidebar visibility fix
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          p = Path("app.py")
-          text = p.read_text(encoding="utf-8")
-          marker = 'if "show_qr" not in st.session_state:\n    st.session_state.show_qr = False'
-          patch = marker + '''
-
-# Hide the Streamlit sidebar on the public authentication/registration screen.
-# The authenticated application keeps its full sidebar navigation and controls.
-if not st.session_state.get("authenticated", False):
-    st.markdown("""
-    <style>
-        section[data-testid="stSidebar"] { display: none !important; }
-        [data-testid="stSidebarCollapsedControl"] { display: none !important; }
-        button[data-testid="stSidebarCollapseButton"] { display: none !important; }
-        div[data-testid="stAppViewContainer"] { margin-left: 0 !important; }
-    </style>
-    """, unsafe_allow_html=True)
-'''
-          if "Hide the Streamlit sidebar on the public authentication/registration screen." not in text:
-              if marker not in text:
-                  raise SystemExit("Session-state marker not found")
-              p.write_text(text.replace(marker, patch, 1), encoding="utf-8")
-          PY
-
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add app.py
-          git commit -m "Hide sidebar on login and registration screen" || true
-          git push origin HEAD:${{ github.head_ref || github.ref_name }}
-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
