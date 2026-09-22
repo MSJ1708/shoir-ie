@@ -886,6 +886,8 @@ init_db()
 # back into the local cache after every fresh app process.
 try:
     _durable_accounts_ready = sync_durable_accounts()
+    if _durable_accounts_ready:
+        sync_remote_requests_to_local()
 except Exception:
     _durable_accounts_ready = False
 
