@@ -5026,37 +5026,51 @@ if selected_module == "Statistical Hypothesis Testing":
 
     st.title("📊 Research-Grade Statistical Hypothesis Testing Suite")
     st.caption(
-        "Upload a research dataset and Shoir-IE will clean common spreadsheet formatting problems, "
-        "expose the correct variables/groups, validate assumptions, run the selected test, and export auditable results."
+        "A stable research workflow: upload data → map variables → validate → test → "
+        "review effect size/post-hoc results → export."
     )
 
-    def _clean_download_excel(dataframe: pd.DataFrame, results: pd.DataFrame | None = None,
-                              posthoc: pd.DataFrame | None = None) -> bytes:
+    def _preferred_index(columns, patterns):
+        lowered = [str(c).strip().lower() for c in columns]
+        for pattern in patterns:
+            for i, value in enumerate(lowered):
+                if pattern in value:
+                    return i
+        return 0
+
+    def _analysis_excel(dataframe, summary=None, details=None, posthoc=None):
         buf = BytesIO()
         with pd.ExcelWriter(buf, engine="xlsxwriter") as writer:
             dataframe.to_excel(writer, sheet_name="Analysis_Data", index=False)
-            if results is not None and not results.empty:
-                results.to_excel(writer, sheet_name="Test_Result", index=False)
+            if summary is not None and not summary.empty:
+                summary.to_excel(writer, sheet_name="Test_Result", index=False)
+            if details is not None and not details.empty:
+                details.to_excel(writer, sheet_name="Group_Details", index=False)
             if posthoc is not None and not posthoc.empty:
                 posthoc.to_excel(writer, sheet_name="Post_Hoc", index=False)
         return buf.getvalue()
 
+    # ---------------------------------------------------------------
+    # 1. INGESTION
+    # ---------------------------------------------------------------
     ingestion_mode = st.radio(
         "Data Ingestion Mode",
         ["Upload CSV/Excel", "Interactive Data Editor", "Benchmark Dataset"],
         horizontal=True,
+        key="stats_ingestion_mode",
     )
 
     df = None
     source_name = "Generated"
     detected_header_row = 0
-    available_sheets: list[str] = []
+    available_sheets = []
 
     if ingestion_mode == "Upload CSV/Excel":
         uploaded_file = st.file_uploader(
             "Upload research dataset",
             type=["csv", "xlsx"],
-            help="Shoir-IE automatically detects the real header row, removes blank/Unnamed columns, and cleans numeric fields.",
+            key="stats_upload",
+            help="Shoir-IE detects title/metadata rows, normalizes headers, removes blank columns, and converts numeric fields.",
         )
         if uploaded_file:
             source_name = uploaded_file.name
@@ -5067,14 +5081,15 @@ if selected_module == "Statistical Hypothesis Testing":
                     xls = pd.ExcelFile(BytesIO(file_bytes), engine="openpyxl")
                     available_sheets = xls.sheet_names
                 except Exception as exc:
-                    st.error(f"Could not read the Excel workbook: {exc}")
+                    st.error(f"Excel workbook could not be read: {exc}")
 
             selected_sheet = None
             if available_sheets:
                 selected_sheet = st.selectbox(
                     "Excel sheet",
                     available_sheets,
-                    help="Choose the sheet containing the observations. The header row can appear below titles/metadata.",
+                    key="stats_sheet",
+                    help="Choose the sheet containing the observations. Shoir-IE will detect the table header automatically.",
                 )
 
             try:
@@ -5084,44 +5099,31 @@ if selected_module == "Statistical Hypothesis Testing":
                     selected_sheet,
                 )
             except Exception as exc:
-                st.error(f"Could not load the dataset: {exc}")
+                st.error(f"Dataset could not be loaded: {exc}")
                 df = None
 
             if df is not None and not df.empty:
-                left, mid, right = st.columns(3)
-                with left:
-                    st.metric("Clean rows", f"{len(df):,}")
-                with mid:
-                    st.metric("Clean columns", f"{len(df.columns):,}")
-                with right:
-                    st.metric("Detected header row", str(detected_header_row + 1))
-
                 if detected_header_row > 0:
                     st.success(
-                        f"✅ Shoir-IE detected the table header on row {detected_header_row + 1} "
+                        f"✅ Detected the table header on source row {detected_header_row + 1} "
                         "and removed the title/metadata rows above it."
                     )
-
                 unnamed = [c for c in df.columns if str(c).lower().startswith("unnamed")]
                 if unnamed:
-                    st.error(
-                        "Some Unnamed columns remain after cleaning. Review the source sheet; "
-                        "these columns may contain meaningful data hidden behind merged cells."
-                    )
+                    st.error(f"❌ Unresolved blank columns remain: {', '.join(map(str, unnamed))}")
                 else:
-                    st.success("✅ No Unnamed columns detected.")
-
-                with st.expander("Preview cleaned dataset", expanded=False):
-                    st.dataframe(df.head(25), use_container_width=True)
+                    st.success("✅ No Unnamed columns remain after cleaning.")
 
     elif ingestion_mode == "Interactive Data Editor":
-        default_data = pd.DataFrame({
-            "Process_A": [88.5, 91.2, 84.1, 89.0, 92.4, 87.1, 85.9, 90.3],
-            "Process_B": [82.1, 85.4, 80.0, 83.2, 86.1, 81.9, 79.8, 84.5],
-            "Shift": ["Morning", "Evening", "Night", "Morning", "Evening", "Night", "Morning", "Evening"],
-        })
-        df = st.data_editor(default_data, num_rows="dynamic", use_container_width=True)
-
+        df = st.data_editor(
+            pd.DataFrame({
+                "Process_A": [88.5, 91.2, 84.1, 89.0, 92.4, 87.1, 85.9, 90.3],
+                "Process_B": [82.1, 85.4, 80.0, 83.2, 86.1, 81.9, 79.8, 84.5],
+                "Shift": ["Morning", "Evening", "Night", "Morning", "Evening", "Night", "Morning", "Evening"],
+            }),
+            num_rows="dynamic",
+            use_container_width=True,
+        )
     else:
         np.random.seed(42)
         df = pd.DataFrame({
@@ -5136,141 +5138,212 @@ if selected_module == "Statistical Hypothesis Testing":
         categorical_cols = df.select_dtypes(include=["object", "category", "string"]).columns.tolist()
         grouping_candidates = groupable_columns(df, max_unique=30)
 
+        # Make the column names immediately visible, so a bad upload can never
+        # silently turn into Scenario ID / Unnamed selections.
         st.markdown("---")
-        st.subheader("🔎 Data Readiness Check")
-        missing_cells = int(df.isna().sum().sum())
-        duplicate_rows = int(df.duplicated().sum())
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Rows", f"{len(df):,}")
-        c2.metric("Numeric variables", f"{len(numeric_cols):,}")
-        c3.metric("Group-capable variables", f"{len(grouping_candidates):,}")
-        c4.metric("Missing cells", f"{missing_cells:,}")
+        st.subheader("🔎 Data Readiness & Column Map")
+        q1, q2, q3, q4 = st.columns(4)
+        q1.metric("Rows", f"{len(df):,}")
+        q2.metric("Numeric columns", f"{len(numeric_cols):,}")
+        q3.metric("Grouping candidates", f"{len(grouping_candidates):,}")
+        q4.metric("Missing cells", f"{int(df.isna().sum().sum()):,}")
 
-        if duplicate_rows:
-            st.warning(f"{duplicate_rows:,} duplicate rows detected; they are retained unless you explicitly remove them.")
-        if not grouping_candidates:
-            st.warning("No categorical/discrete grouping variables were detected. For group-based tests, add a condition/group column.")
+        if numeric_cols:
+            st.caption("Numeric columns: " + ", ".join(map(str, numeric_cols)))
+        if grouping_candidates:
+            st.caption("Group-capable columns: " + ", ".join(map(str, grouping_candidates)))
         else:
-            st.success("✅ Dataset structure is suitable for statistical variable selection.")
+            st.warning(
+                "No group-capable column was detected. You can still use the two-numeric-column "
+                "t-test layouts, or add a condition/group column."
+            )
+
+        with st.expander("Preview cleaned data", expanded=False):
+            st.dataframe(df.head(25), use_container_width=True)
 
         st.markdown("---")
         st.subheader("⚙️ Test Configuration & Parameters")
 
-        col_c1, col_c2, col_c3, col_c4 = st.columns(4)
-        with col_c1:
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
             test_category = st.selectbox(
                 "Test Category",
                 ["Parametric", "Non-Parametric", "Variance & Goodness"],
+                key="stats_category",
             )
-        with col_c2:
+        with c2:
             if test_category == "Parametric":
                 test_type = st.selectbox(
                     "Select Test",
                     ["One-Sample t-Test", "Independent Two-Sample t-Test", "Paired t-Test", "One-Way ANOVA"],
+                    key="stats_test_type",
                 )
             elif test_category == "Non-Parametric":
                 test_type = st.selectbox(
                     "Select Test",
                     ["Mann-Whitney U Test", "Kruskal-Wallis H-Test"],
+                    key="stats_test_type",
                 )
             else:
                 test_type = st.selectbox(
                     "Select Test",
                     ["Chi-Square Test of Independence", "Levene's Homogeneity Test"],
+                    key="stats_test_type",
                 )
-        with col_c3:
-            alpha = st.selectbox("Significance Level (α)", [0.01, 0.05, 0.10], index=1)
-        with col_c4:
-            alternative = st.selectbox("Alternative Hypothesis", ["two-sided", "less", "greater"])
+        with c3:
+            alpha = st.selectbox("Significance Level (α)", [0.01, 0.05, 0.10], index=1, key="stats_alpha")
+        with c4:
+            alternative = st.selectbox(
+                "Alternative Hypothesis",
+                ["two-sided", "less", "greater"],
+                key="stats_alt",
+            )
 
         cfg = {}
 
         if test_type == "One-Sample t-Test":
             if not numeric_cols:
-                st.error("This test requires at least one numeric column.")
+                st.error("A numeric target column is required.")
             else:
-                cfg["target_col"] = st.selectbox("Numeric Target Column", numeric_cols)
-                cfg["pop_mean"] = st.number_input("Hypothesized Mean (μ₀)", value=0.0)
+                default_idx = _preferred_index(numeric_cols, ["decision regret", "regret", "response", "outcome", "score"])
+                cfg["target_col"] = st.selectbox(
+                    "Numeric Target Column",
+                    numeric_cols,
+                    index=default_idx,
+                    key="stats_onesample_target",
+                )
+                cfg["pop_mean"] = st.number_input(
+                    "Hypothesized Mean (μ₀)",
+                    value=0.0,
+                    key="stats_pop_mean",
+                )
 
         elif test_type in ["Independent Two-Sample t-Test", "Mann-Whitney U Test"]:
+            # Keep the simple two-numeric-column workflow available and make the
+            # more flexible group-column mode an explicit option.
             layout = st.radio(
-                "Data Layout",
-                ["Outcome + Group Column (recommended)", "Two Numeric Columns"],
+                "Comparison Layout",
+                ["Variable / Group 1 + Variable / Group 2 (simple)", "Numeric Outcome + Grouping Column"],
                 horizontal=True,
+                key="stats_ind_layout",
             )
-            if layout == "Outcome + Group Column (recommended)":
-                if not numeric_cols or not grouping_candidates:
-                    st.error("This layout requires a numeric outcome and a grouping/condition column.")
-                else:
-                    cfg["mode"] = "group"
-                    cfg["target_col"] = st.selectbox("Numeric Outcome", numeric_cols)
-                    group_options = [c for c in grouping_candidates if c != cfg["target_col"]]
-                    cfg["group_col"] = st.selectbox(
-                        "Grouping / Condition Column",
-                        group_options,
-                        help="Pick the column containing the experimental groups/conditions.",
-                    )
-                    gser = groups_from_column(df, cfg["group_col"])
-                    vals = sorted([str(v) for v in pd.unique(gser.dropna())])
-                    if len(vals) < 2:
-                        st.error("The selected grouping column must contain at least two groups.")
-                    else:
-                        cfg["group_1"] = st.selectbox("Group 1", vals, index=0)
-                        cfg["group_2"] = st.selectbox("Group 2", vals, index=1)
-                        st.info(f"Detected {len(vals)} groups; the test compares the two selected groups.")
-            else:
+
+            if layout.startswith("Variable"):
                 cfg["mode"] = "columns"
                 if len(numeric_cols) < 2:
-                    st.error("Two numeric columns are required.")
+                    st.error("At least two numeric columns are required.")
                 else:
-                    cfg["col_a"] = st.selectbox("Variable / Group 1", numeric_cols, index=0)
-                    cfg["col_b"] = st.selectbox("Variable / Group 2", numeric_cols, index=1)
+                    idx_a = _preferred_index(numeric_cols, ["0%", "control", "baseline", "group 1", "decision regret"])
+                    idx_b = 0 if idx_a != 0 else 1
+                    cfg["col_a"] = st.selectbox("Variable / Group 1", numeric_cols, index=idx_a, key="stats_ind_a")
+                    cfg["col_b"] = st.selectbox("Variable / Group 2", numeric_cols, index=idx_b, key="stats_ind_b")
+            else:
+                cfg["mode"] = "group"
+                if not numeric_cols or not grouping_candidates:
+                    st.error("This layout requires a numeric outcome and a grouping column.")
+                else:
+                    cfg["target_col"] = st.selectbox(
+                        "Numeric Outcome",
+                        numeric_cols,
+                        index=_preferred_index(numeric_cols, ["decision regret", "regret", "outcome", "response"]),
+                        key="stats_ind_target",
+                    )
+                    group_options = [c for c in grouping_candidates if c != cfg["target_col"]]
+                    if not group_options:
+                        st.error("No grouping column is available.")
+                    else:
+                        cfg["group_col"] = st.selectbox(
+                            "Grouping / Condition Column",
+                            group_options,
+                            index=_preferred_index(group_options, ["experiment", "group", "condition", "treatment"]),
+                            key="stats_ind_groupcol",
+                        )
+                        gser = groups_from_column(df, cfg["group_col"])
+                        vals = sorted([str(v) for v in pd.unique(gser.dropna())])
+                        if len(vals) >= 2:
+                            cfg["group_1"] = st.selectbox("Group 1", vals, index=0, key="stats_ind_g1")
+                            cfg["group_2"] = st.selectbox("Group 2", vals, index=1, key="stats_ind_g2")
 
         elif test_type == "Paired t-Test":
+            # Legacy-compatible two-column mode is the default. The long-format
+            # option is available for general research datasets.
             layout = st.radio(
-                "Data Layout",
-                ["Long Format: Outcome + Pair ID + Condition (recommended)", "Two Paired Numeric Columns"],
+                "Paired Data Layout",
+                ["Variable / Group 1 + Variable / Group 2 (simple)", "Long Format: Outcome + Pair ID + Condition"],
                 horizontal=True,
+                key="stats_paired_layout",
             )
-            if layout.startswith("Long"):
-                if not numeric_cols or not grouping_candidates:
-                    st.error("Long-format paired analysis requires a numeric outcome and a condition column.")
+
+            if layout.startswith("Variable"):
+                cfg["mode"] = "columns"
+                if len(numeric_cols) < 2:
+                    st.error("At least two numeric columns are required for a paired t-test.")
                 else:
-                    cfg["mode"] = "long"
-                    cfg["target_col"] = st.selectbox("Numeric Outcome", numeric_cols)
-                    possible_id = [c for c in df.columns if c != cfg["target_col"]]
-                    id_candidates = [c for c in possible_id if re.search(r"id|scenario|subject|sample|operator|machine|batch", str(c), re.I)]
-                    cfg["pair_col"] = st.selectbox(
-                        "Pair / Entity ID Column",
-                        id_candidates or possible_id,
-                        help="Identifies the same entity/scenario measured under both conditions.",
+                    idx_a = _preferred_index(numeric_cols, ["0% uncertainty", "0% conflict", "baseline", "control", "group 1", "decision regret"])
+                    idx_b = 0 if idx_a != 0 else 1
+                    cfg["col_a"] = st.selectbox(
+                        "Variable / Group 1",
+                        numeric_cols,
+                        index=idx_a,
+                        key="stats_paired_a",
                     )
-                    cond_options = [c for c in grouping_candidates if c != cfg["target_col"] and c != cfg["pair_col"]]
+                    cfg["col_b"] = st.selectbox(
+                        "Variable / Group 2",
+                        numeric_cols,
+                        index=idx_b,
+                        key="stats_paired_b",
+                    )
+                if len(numeric_cols) >= 2:
+                    st.caption("Use two columns containing the paired outcome measurements. The row order must represent the same entity/scenario in both columns.")
+
+            else:
+                cfg["mode"] = "long"
+                if not numeric_cols or not grouping_candidates:
+                    st.error("Long-format paired testing requires a numeric outcome and condition column.")
+                else:
+                    cfg["target_col"] = st.selectbox(
+                        "Numeric Outcome",
+                        numeric_cols,
+                        index=_preferred_index(numeric_cols, ["decision regret", "regret", "outcome", "response"]),
+                        key="stats_paired_target",
+                    )
+                    possible_id = [c for c in df.columns if c != cfg["target_col"]]
+                    id_candidates = [
+                        c for c in possible_id
+                        if re.search(r"\b(id|identifier|scenario|subject|sample|batch|machine)\b", str(c), re.I)
+                    ]
+                    cfg["pair_col"] = st.selectbox(
+                        "Pair / Entity ID",
+                        id_candidates or possible_id,
+                        index=_preferred_index(id_candidates or possible_id, ["scenario id", "subject id", "sample id", "id"]),
+                        key="stats_paired_id",
+                    )
+                    cond_options = [c for c in grouping_candidates if c not in {cfg["target_col"], cfg["pair_col"]}]
                     if not cond_options:
                         st.error("No condition column is available.")
                     else:
-                        cfg["condition_col"] = st.selectbox("Condition Column", cond_options)
+                        cfg["condition_col"] = st.selectbox(
+                            "Condition Column",
+                            cond_options,
+                            index=_preferred_index(cond_options, ["experiment", "condition", "group", "treatment"]),
+                            key="stats_paired_condition",
+                        )
                         cser = groups_from_column(df, cfg["condition_col"])
                         vals = sorted([str(v) for v in pd.unique(cser.dropna())])
-                        if len(vals) < 2:
-                            st.error("The condition column must contain at least two conditions.")
-                        else:
-                            cfg["condition_1"] = st.selectbox("Condition 1", vals, index=0)
-                            cfg["condition_2"] = st.selectbox("Condition 2", vals, index=1)
-                            st.caption("Shoir-IE automatically matches the same Pair/Entity ID across the two conditions.")
-            else:
-                cfg["mode"] = "columns"
-                if len(numeric_cols) < 2:
-                    st.error("Two numeric columns are required.")
-                else:
-                    cfg["col_a"] = st.selectbox("Variable / Group 1", numeric_cols, index=0)
-                    cfg["col_b"] = st.selectbox("Variable / Group 2", numeric_cols, index=1)
+                        if len(vals) >= 2:
+                            cfg["condition_1"] = st.selectbox("Condition 1", vals, index=0, key="stats_paired_c1")
+                            cfg["condition_2"] = st.selectbox("Condition 2", vals, index=1, key="stats_paired_c2")
 
         elif test_type in ["One-Way ANOVA", "Kruskal-Wallis H-Test"]:
             if not numeric_cols:
                 st.error("A numeric outcome column is required.")
             else:
-                cfg["val_col"] = st.selectbox("Dependent Variable (Numeric)", numeric_cols)
+                cfg["val_col"] = st.selectbox(
+                    "Dependent Variable (Numeric)",
+                    numeric_cols,
+                    index=_preferred_index(numeric_cols, ["decision regret", "regret", "outcome", "response"]),
+                    key="stats_anova_target",
+                )
                 group_options = [c for c in grouping_candidates if c != cfg["val_col"]]
                 if not group_options:
                     st.error("No categorical/discrete grouping column is available.")
@@ -5278,14 +5351,15 @@ if selected_module == "Statistical Hypothesis Testing":
                     cfg["group_col"] = st.selectbox(
                         "Independent Grouping Column",
                         group_options,
-                        help="Categorical and low-cardinality numeric factors are both supported.",
+                        index=_preferred_index(group_options, ["experiment", "group", "condition", "treatment"]),
+                        key="stats_anova_group",
                     )
                     gser = groups_from_column(df, cfg["group_col"])
                     cfg["detected_groups"] = sorted([str(v) for v in pd.unique(gser.dropna())])
                     st.info(
                         f"Detected {len(cfg['detected_groups'])} groups: "
-                        + ", ".join(cfg["detected_groups"][:12])
-                        + ("…" if len(cfg["detected_groups"]) > 12 else "")
+                        + ", ".join(cfg["detected_groups"][:20])
+                        + ("…" if len(cfg["detected_groups"]) > 20 else "")
                     )
 
         elif test_type == "Chi-Square Test of Independence":
@@ -5293,16 +5367,21 @@ if selected_module == "Statistical Hypothesis Testing":
             if len(cat_options) < 2:
                 st.error("Two categorical/discrete columns are required.")
             else:
-                cfg["cat_1"] = st.selectbox("Categorical Column 1", cat_options, index=0)
-                cfg["cat_2"] = st.selectbox("Categorical Column 2", [c for c in cat_options if c != cfg["cat_1"]], index=0)
+                cfg["cat_1"] = st.selectbox("Categorical Column 1", cat_options, key="stats_chi1")
+                cat2 = [c for c in cat_options if c != cfg["cat_1"]]
+                cfg["cat_2"] = st.selectbox("Categorical Column 2", cat2, key="stats_chi2")
 
         else:
             if not numeric_cols or not grouping_candidates:
                 st.error("Levene's test requires a numeric outcome and grouping column.")
             else:
-                cfg["levene_val"] = st.selectbox("Numeric Outcome", numeric_cols)
-                cfg["levene_group"] = st.selectbox("Grouping Column", [c for c in grouping_candidates if c != cfg["levene_val"]])
+                cfg["levene_val"] = st.selectbox("Numeric Outcome", numeric_cols, key="stats_lev_val")
+                lev_options = [c for c in grouping_candidates if c != cfg["levene_val"]]
+                cfg["levene_group"] = st.selectbox("Grouping Column", lev_options, key="stats_lev_group")
 
+        # ---------------------------------------------------------------
+        # 3. ASSUMPTION DIAGNOSTICS
+        # ---------------------------------------------------------------
         st.markdown("---")
         st.subheader("🔍 Automated Assumption Diagnostics")
 
@@ -5310,11 +5389,10 @@ if selected_module == "Statistical Hypothesis Testing":
             x = pd.to_numeric(series, errors="coerce").dropna().to_numpy(dtype=float)
             if len(x) < 3:
                 return np.nan, np.nan
-            if len(x) > 5000:
-                x = x[:5000]
+            x = x[:5000]
             try:
-                res = stats.shapiro(x)
-                return float(res.statistic), float(res.pvalue)
+                result = stats.shapiro(x)
+                return float(result.statistic), float(result.pvalue)
             except Exception:
                 return np.nan, np.nan
 
@@ -5325,40 +5403,33 @@ if selected_module == "Statistical Hypothesis Testing":
             or cfg.get("col_a")
         )
 
-        if diag_col and diag_col in df.columns:
+        if diag_col in df.columns:
             _, diag_p = _safe_shapiro(df[diag_col])
             d1, d2, d3 = st.columns(3)
             d1.metric("Normality p-value", "N/A" if np.isnan(diag_p) else f"{diag_p:.4f}")
             d2.metric("Valid values", f"{df[diag_col].notna().sum():,}")
-            d3.metric("Duplicate rows", f"{duplicate_rows:,}")
-            if not np.isnan(diag_p):
-                if diag_p <= alpha:
-                    st.warning("Overall outcome normality is questionable at the selected α. Consider residual/group-level diagnostics or a non-parametric alternative.")
-                else:
-                    st.success("Overall outcome normality check did not flag a violation at the selected α.")
+            d3.metric("Duplicate rows", f"{int(df.duplicated().sum()):,}")
 
+        # ---------------------------------------------------------------
+        # 4. EXECUTION
+        # ---------------------------------------------------------------
         st.markdown("---")
-        st.subheader("📊 Results")
-        run_analysis = st.button("🚀 Run Rigorous Statistical Analysis", type="primary", use_container_width=True)
-
-        if run_analysis:
+        if st.button("🚀 Run Rigorous Statistical Analysis", type="primary", use_container_width=True, key="stats_run"):
             stat_value = np.nan
             p_value = np.nan
             df_value = np.nan
             effect_label = ""
             effect_value = np.nan
-            result_rows = []
+            detail_rows = []
             posthoc_df = pd.DataFrame()
 
             try:
                 if test_type == "One-Sample t-Test":
                     x = pd.to_numeric(df[cfg["target_col"]], errors="coerce").dropna()
-                    if len(x) < 2:
-                        raise ValueError("At least two valid observations are required.")
                     res = stats.ttest_1samp(x, cfg["pop_mean"], alternative=alternative)
                     stat_value, p_value, df_value = float(res.statistic), float(res.pvalue), len(x) - 1
                     effect_label = "Cohen's d vs μ₀"
-                    effect_value = float((x.mean() - cfg["pop_mean"]) / x.std(ddof=1)) if x.std(ddof=1) > 0 else 0.0
+                    effect_value = float((x.mean() - cfg["pop_mean"]) / x.std(ddof=1)) if len(x) > 1 and x.std(ddof=1) > 0 else np.nan
 
                 elif test_type in ["Independent Two-Sample t-Test", "Mann-Whitney U Test"]:
                     if cfg["mode"] == "group":
@@ -5370,12 +5441,14 @@ if selected_module == "Statistical Hypothesis Testing":
                         x = pd.to_numeric(df[cfg["col_a"]], errors="coerce").dropna()
                         y = pd.to_numeric(df[cfg["col_b"]], errors="coerce").dropna()
                         label_x, label_y = cfg["col_a"], cfg["col_b"]
+
                     if len(x) < 2 or len(y) < 2:
                         raise ValueError("Each comparison group needs at least two valid observations.")
+
                     if test_type == "Independent Two-Sample t-Test":
                         res = stats.ttest_ind(x, y, equal_var=False, alternative=alternative)
                         stat_value, p_value = float(res.statistic), float(res.pvalue)
-                        df_value = float(len(x) + len(y) - 2)
+                        df_value = np.nan
                         effect_label, effect_value = "Cohen's d", cohens_d(x, y)
                     else:
                         res = stats.mannwhitneyu(x, y, alternative=alternative)
@@ -5383,94 +5456,105 @@ if selected_module == "Statistical Hypothesis Testing":
                         df_value = np.nan
                         effect_label = "Rank-biserial effect"
                         effect_value = float(1 - (2 * float(res.statistic)) / (len(x) * len(y)))
-                    result_rows = [
+
+                    detail_rows = [
                         {"Group": label_x, "N": len(x), "Mean": float(x.mean()), "SD": float(x.std(ddof=1))},
                         {"Group": label_y, "N": len(y), "Mean": float(y.mean()), "SD": float(y.std(ddof=1))},
                     ]
 
                 elif test_type == "Paired t-Test":
-                    if cfg["mode"] == "long":
-                        pivot = paired_from_long(
-                            df, cfg["target_col"], cfg["pair_col"], cfg["condition_col"],
-                            cfg["condition_1"], cfg["condition_2"],
-                        )
-                        if len(pivot) < 2:
-                            raise ValueError("Fewer than two matched pairs are available after cleaning.")
-                        x = pivot.iloc[:, 0].to_numpy(dtype=float)
-                        y = pivot.iloc[:, 1].to_numpy(dtype=float)
-                        label_x, label_y = cfg["condition_1"], cfg["condition_2"]
-                    else:
+                    if cfg["mode"] == "columns":
                         aligned = pd.concat(
                             [pd.to_numeric(df[cfg["col_a"]], errors="coerce"),
                              pd.to_numeric(df[cfg["col_b"]], errors="coerce")],
                             axis=1,
                         ).dropna()
-                        if len(aligned) < 2:
-                            raise ValueError("Fewer than two complete paired observations are available.")
+                        label_x, label_y = cfg["col_a"], cfg["col_b"]
                         x = aligned.iloc[:, 0].to_numpy(dtype=float)
                         y = aligned.iloc[:, 1].to_numpy(dtype=float)
-                        label_x, label_y = cfg["col_a"], cfg["col_b"]
+                    else:
+                        pivot = paired_from_long(
+                            df,
+                            cfg["target_col"],
+                            cfg["pair_col"],
+                            cfg["condition_col"],
+                            cfg["condition_1"],
+                            cfg["condition_2"],
+                        )
+                        if len(pivot) < 2:
+                            raise ValueError("Fewer than two complete matched pairs are available.")
+                        x = pivot.iloc[:, 0].to_numpy(dtype=float)
+                        y = pivot.iloc[:, 1].to_numpy(dtype=float)
+                        label_x, label_y = cfg["condition_1"], cfg["condition_2"]
+
+                    if len(x) < 2:
+                        raise ValueError("At least two matched observations are required.")
+                    diff = x - y
+                    diff_sd = float(np.std(diff, ddof=1))
+                    mean_diff = float(np.mean(diff))
+                    if diff_sd == 0:
+                        if np.isclose(mean_diff, 0.0):
+                            raise ValueError("The paired differences are all exactly zero. The t-statistic is not estimable because the paired-difference variance is zero.")
+                        raise ValueError("The paired differences have zero variance, so the t-statistic is not estimable.")
+
                     res = stats.ttest_rel(x, y, alternative=alternative)
                     stat_value, p_value, df_value = float(res.statistic), float(res.pvalue), len(x) - 1
-                    diff = x - y
                     effect_label = "Paired Cohen's d"
-                    effect_value = float(np.mean(diff) / np.std(diff, ddof=1)) if np.std(diff, ddof=1) > 0 else 0.0
-                    result_rows = [
-                        {"Condition": label_x, "N matched": len(x), "Mean": float(np.mean(x))},
-                        {"Condition": label_y, "N matched": len(y), "Mean": float(np.mean(y))},
-                        {"Paired Mean Difference": float(np.mean(diff)), "N matched": len(x)},
+                    effect_value = mean_diff / diff_sd
+                    detail_rows = [
+                        {"Condition": label_x, "N matched": len(x), "Mean": float(x.mean()), "SD": float(np.std(x, ddof=1))},
+                        {"Condition": label_y, "N matched": len(y), "Mean": float(y.mean()), "SD": float(np.std(y, ddof=1))},
+                        {"Paired Mean Difference": mean_diff, "N matched": len(x)},
                     ]
 
                 elif test_type in ["One-Way ANOVA", "Kruskal-Wallis H-Test"]:
                     gser = groups_from_column(df, cfg["group_col"])
                     group_arrays = {}
                     for name in sorted(gser.dropna().unique().tolist(), key=lambda v: str(v)):
-                        vals = pd.to_numeric(df.loc[gser == name, cfg["val_col"]], errors="coerce").dropna().to_numpy(dtype=float)
+                        vals = pd.to_numeric(
+                            df.loc[gser == name, cfg["val_col"]], errors="coerce"
+                        ).dropna().to_numpy(dtype=float)
                         if len(vals) >= 2:
                             group_arrays[str(name)] = vals
+
                     if len(group_arrays) < 2:
                         raise ValueError("At least two groups with two or more valid observations are required.")
+
                     arrays = list(group_arrays.values())
                     if test_type == "One-Way ANOVA":
                         res = stats.f_oneway(*arrays)
                         stat_value, p_value = float(res.statistic), float(res.pvalue)
                         df_value = len(arrays) - 1
                         effect_label, effect_value = "Eta squared (η²)", eta_squared(arrays)
-                        result_rows = [
-                            {"Group": name, "N": len(vals), "Mean": float(vals.mean()), "SD": float(vals.std(ddof=1))}
-                            for name, vals in group_arrays.items()
-                        ]
-                        if p_value < alpha:
-                            posthoc_df = tukey_hsd_table(group_arrays)
                     else:
                         res = stats.kruskal(*arrays)
                         stat_value, p_value = float(res.statistic), float(res.pvalue)
                         df_value = len(arrays) - 1
-                        result_rows = [
-                            {"Group": name, "N": len(vals), "Mean": float(vals.mean()), "SD": float(vals.std(ddof=1))}
-                            for name, vals in group_arrays.items()
-                        ]
+
+                    detail_rows = [
+                        {"Group": name, "N": len(vals), "Mean": float(vals.mean()), "SD": float(vals.std(ddof=1))}
+                        for name, vals in group_arrays.items()
+                    ]
+                    if test_type == "One-Way ANOVA" and p_value < alpha:
+                        posthoc_df = tukey_hsd_table(group_arrays)
 
                 elif test_type == "Chi-Square Test of Independence":
-                    table = pd.crosstab(
-                        df[cfg["cat_1"]].astype("string"),
-                        df[cfg["cat_2"]].astype("string"),
-                    )
+                    table = pd.crosstab(df[cfg["cat_1"]], df[cfg["cat_2"]])
                     res = stats.chi2_contingency(table)
                     stat_value, p_value, df_value = float(res[0]), float(res[1]), float(res[2])
 
                 else:
                     gser = groups_from_column(df, cfg["levene_group"])
-                    groups = [
+                    arrays = [
                         pd.to_numeric(df.loc[gser == name, cfg["levene_val"]], errors="coerce").dropna().to_numpy(dtype=float)
                         for name in sorted(gser.dropna().unique().tolist(), key=lambda v: str(v))
                     ]
-                    groups = [g for g in groups if len(g) >= 2]
-                    if len(groups) < 2:
+                    arrays = [a for a in arrays if len(a) >= 2]
+                    if len(arrays) < 2:
                         raise ValueError("At least two groups with two or more observations are required.")
-                    res = stats.levene(*groups, center="median")
+                    res = stats.levene(*arrays, center="median")
                     stat_value, p_value = float(res.statistic), float(res.pvalue)
-                    df_value = len(groups) - 1
+                    df_value = len(arrays) - 1
 
                 decision = (
                     "Reject H₀ — statistically significant at the selected α."
@@ -5491,52 +5575,54 @@ if selected_module == "Statistical Hypothesis Testing":
                     "Source Dataset": source_name,
                 }])
 
-                st.success(f"**Result:** {decision}  |  p = {p_value:.8f}")
-                k1, k2, k3, k4 = st.columns(4)
-                k1.metric("Test statistic", f"{stat_value:.4f}")
-                k2.metric("p-value", f"{p_value:.6f}")
-                k3.metric("α", f"{alpha:.2f}")
-                k4.metric(effect_label or "Effect size", "N/A" if np.isnan(effect_value) else f"{effect_value:.4f}")
+                st.success(f"**Result:** {decision} | p = {p_value:.8f}")
+                m1, m2, m3, m4 = st.columns(4)
+                m1.metric("Test statistic", "N/A" if np.isnan(stat_value) else f"{stat_value:.4f}")
+                m2.metric("p-value", "N/A" if np.isnan(p_value) else f"{p_value:.6f}")
+                m3.metric("α", f"{alpha:.2f}")
+                m4.metric(effect_label or "Effect size", "N/A" if np.isnan(effect_value) else f"{effect_value:.4f}")
 
-                if result_rows:
+                if detail_rows:
                     st.markdown("#### Group / Condition Summary")
-                    st.dataframe(pd.DataFrame(result_rows), use_container_width=True)
+                    st.dataframe(pd.DataFrame(detail_rows), use_container_width=True)
 
-                if test_type == "One-Way ANOVA":
-                    if p_value < alpha and not posthoc_df.empty:
-                        st.markdown("#### 🔬 Automatic Post-Hoc Analysis — Tukey HSD")
-                        st.dataframe(posthoc_df, use_container_width=True)
-                        st.caption("Tukey HSD controls family-wise error for the pairwise comparisons following the omnibus ANOVA.")
-                    elif p_value < alpha:
-                        st.warning("ANOVA was significant, but Tukey HSD is unavailable in this runtime.")
-                    else:
-                        st.info("Post-hoc pairwise testing was not run because the omnibus ANOVA was not significant.")
+                if test_type == "One-Way ANOVA" and not posthoc_df.empty:
+                    st.markdown("#### 🔬 Tukey HSD Post-Hoc Comparisons")
+                    st.dataframe(posthoc_df, use_container_width=True)
+                    st.caption("Tukey HSD is automatically generated after a significant one-way ANOVA.")
 
-                excel_payload = _clean_download_excel(
+                payload = _analysis_excel(
                     df,
-                    pd.concat([summary, pd.DataFrame([{}]), pd.DataFrame(result_rows)], ignore_index=True),
-                    posthoc_df,
+                    summary=summary,
+                    details=pd.DataFrame(detail_rows),
+                    posthoc=posthoc_df,
                 )
                 st.download_button(
-                    "📥 Download Analysis Workbook (Data + Results + Post-Hoc)",
-                    data=excel_payload,
+                    "📥 Download Analysis Workbook",
+                    data=payload,
                     file_name="shoir_ie_statistical_analysis_results.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     type="primary",
+                    key="stats_download_results",
                 )
 
             except Exception as exc:
                 st.error(f"Analysis could not be completed safely: {exc}")
 
         st.markdown("---")
-        with st.expander("🧭 Research Factor Scan (exploratory)", expanded=False):
+        with st.expander("🧭 Exploratory Factor Scan", expanded=False):
             st.caption(
-                "Scans categorical/discrete variables against a selected numeric outcome. "
-                "This is exploratory and does not replace a prespecified factorial model."
+                "For exploratory screening only. This compares a numeric outcome across each suitable "
+                "low-cardinality factor and reports Holm-adjusted p-values."
             )
-            scan_outcome = st.selectbox("Outcome for factor scan", numeric_cols, key="scan_outcome")
+            scan_outcome = st.selectbox(
+                "Outcome for factor scan",
+                numeric_cols,
+                index=_preferred_index(numeric_cols, ["decision regret", "regret", "outcome", "response"]),
+                key="stats_scan_outcome",
+            )
             scan_candidates = [c for c in grouping_candidates if c != scan_outcome]
-            if scan_candidates and st.button("Run Exploratory Factor Scan", key="run_factor_scan"):
+            if scan_candidates and st.button("Run Exploratory Factor Scan", key="stats_scan_run"):
                 scan_rows = []
                 for factor in scan_candidates:
                     gs = groups_from_column(df, factor)
@@ -5560,16 +5646,18 @@ if selected_module == "Statistical Hypothesis Testing":
                     except Exception:
                         continue
                 if scan_rows:
-                    scan_df = pd.DataFrame(scan_rows).sort_values("Raw p-value").reset_index(drop=True)
-                    scan_df["Holm adjusted p-value"] = holm_adjust(scan_df["Raw p-value"].to_numpy())
-                    st.dataframe(scan_df, use_container_width=True)
-                    st.caption("Holm-adjusted p-values are reported because multiple exploratory factors are being tested.")
-                else:
-                    st.info("No suitable factor columns were detected.")
+                    scan_df = pd.DataFrame(scan_rows)
+                    scan_df["Holm adjusted p-value"] = holm_adjust(
+                        scan_df["Raw p-value"].to_numpy(dtype=float)
+                    )
+                    st.dataframe(
+                        scan_df.sort_values("Holm adjusted p-value").reset_index(drop=True),
+                        use_container_width=True,
+                    )
 
-        if st.button("↩️ Reset Statistical Analysis", use_container_width=True):
+        if st.button("↩️ Reset Statistical Analysis", use_container_width=True, key="stats_reset"):
             for key in list(st.session_state.keys()):
-                if str(key).startswith("scan_"):
+                if str(key).startswith("stats_"):
                     del st.session_state[key]
             st.rerun()
 
