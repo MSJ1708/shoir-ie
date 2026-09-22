@@ -5192,7 +5192,7 @@ if selected_module == "Statistical Hypothesis Testing":
                 cfg["target_col"] = st.selectbox("Numeric Target Column", numeric_cols)
                 cfg["pop_mean"] = st.number_input("Hypothesized Mean (μ₀)", value=0.0)
 
-        elif test_type == "Independent Two-Sample t-Test":
+        elif test_type in ["Independent Two-Sample t-Test", "Mann-Whitney U Test"]:
             layout = st.radio(
                 "Data Layout",
                 ["Outcome + Group Column (recommended)", "Two Numeric Columns"],
@@ -5360,7 +5360,7 @@ if selected_module == "Statistical Hypothesis Testing":
                     effect_label = "Cohen's d vs μ₀"
                     effect_value = float((x.mean() - cfg["pop_mean"]) / x.std(ddof=1)) if x.std(ddof=1) > 0 else 0.0
 
-                elif test_type == "Independent Two-Sample t-Test":
+                elif test_type in ["Independent Two-Sample t-Test", "Mann-Whitney U Test"]:
                     if cfg["mode"] == "group":
                         gser = groups_from_column(df, cfg["group_col"])
                         x = pd.to_numeric(df.loc[gser == cfg["group_1"], cfg["target_col"]], errors="coerce").dropna()
@@ -5372,10 +5372,17 @@ if selected_module == "Statistical Hypothesis Testing":
                         label_x, label_y = cfg["col_a"], cfg["col_b"]
                     if len(x) < 2 or len(y) < 2:
                         raise ValueError("Each comparison group needs at least two valid observations.")
-                    res = stats.ttest_ind(x, y, equal_var=False, alternative=alternative)
-                    stat_value, p_value = float(res.statistic), float(res.pvalue)
-                    df_value = float(len(x) + len(y) - 2)
-                    effect_label, effect_value = "Cohen's d", cohens_d(x, y)
+                    if test_type == "Independent Two-Sample t-Test":
+                        res = stats.ttest_ind(x, y, equal_var=False, alternative=alternative)
+                        stat_value, p_value = float(res.statistic), float(res.pvalue)
+                        df_value = float(len(x) + len(y) - 2)
+                        effect_label, effect_value = "Cohen's d", cohens_d(x, y)
+                    else:
+                        res = stats.mannwhitneyu(x, y, alternative=alternative)
+                        stat_value, p_value = float(res.statistic), float(res.pvalue)
+                        df_value = np.nan
+                        effect_label = "Rank-biserial effect"
+                        effect_value = float(1 - (2 * float(res.statistic)) / (len(x) * len(y)))
                     result_rows = [
                         {"Group": label_x, "N": len(x), "Mean": float(x.mean()), "SD": float(x.std(ddof=1))},
                         {"Group": label_y, "N": len(y), "Mean": float(y.mean()), "SD": float(y.std(ddof=1))},
@@ -5443,10 +5450,6 @@ if selected_module == "Statistical Hypothesis Testing":
                             {"Group": name, "N": len(vals), "Mean": float(vals.mean()), "SD": float(vals.std(ddof=1))}
                             for name, vals in group_arrays.items()
                         ]
-
-                elif test_type == "Mann-Whitney U Test":
-                    st.error("Select Independent Two-Sample t-Test or use the Non-Parametric group layout; Mann-Whitney needs a two-group outcome + grouping configuration.")
-                    raise ValueError("Mann-Whitney configuration is not available in this layout.")
 
                 elif test_type == "Chi-Square Test of Independence":
                     table = pd.crosstab(
