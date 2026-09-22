@@ -10802,7 +10802,30 @@ if mod == "Admin Panel":
                                            ("sho", f"Approved payment & issued ticket code {t_code} for user {row['username']}"))
                             conn.commit()
                             conn.close()
-                            
+
+                            # Persist the approved account/subscription in the managed
+                            # database so a Streamlit Cloud restart cannot erase it.
+                            if _durable_accounts_ready:
+                                try:
+                                    upsert_remote_account({
+                                        "username": login_username,
+                                        "password_hash": login_password,
+                                        "role": "User",
+                                        "tier": row["tier"],
+                                        "email": row["email"],
+                                        "created_at": (
+                                            existing_local[5] if existing_local and request_type == "Renewal"
+                                            else now_dt.isoformat()
+                                        ),
+                                        "subscription_expires_at": new_expiry,
+                                        "active": True,
+                                    })
+                                    update_latest_remote_request(login_username, request_type, "Approved")
+                                except Exception:
+                                    # Local activation remains valid; remote sync can
+                                    # retry on the next application restart.
+                                    pass
+
                             email_success = send_tier_email(row['email'], row['username'], t_code, row['tier'])
                             if email_success:
                                 st.success(f"Payment approved! Code **{t_code}** generated and successfully emailed to **{row['email']}**.")
