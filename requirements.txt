@@ -16,3 +16,4 @@ requests
 kaleido>=1.0.0
 playwright
 pytest>=8.0,<9
+psycopg2-binary>=2.9,<3
