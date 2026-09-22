@@ -297,28 +297,29 @@ def init_db():
             admin_password = "mohammedsuhail172008chennai!"
         admin_pass_hash = hash_password(admin_password)
         cursor.execute("""
-            INSERT OR REPLACE INTO enterprise_users
+            INSERT OR IGNORE INTO enterprise_users
             (username, password_hash, role, tier, email, trial_expires, affiliate_code, ticket_expiry)
-            VALUES (?, ?, ?, ?, ?, ?, COALESCE((SELECT affiliate_code FROM enterprise_users WHERE username = 'sho'), 'AFF-SHO-15'), ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """, (
-            "sho",
-            admin_pass_hash,
-            "Enterprise Admin",
-            "Enterprise Tier",
-            "mohsuhailji@gmail.com",
-            "2030-01-01T00:00:00",
-            "2030-01-01T00:00:00"
+            "sho", admin_pass_hash, "Enterprise Admin", "Enterprise Tier",
+            "mohsuhailji@gmail.com", "2030-01-01T00:00:00",
+            "AFF-SHO-15", "2030-01-01T00:00:00"
         ))
-
-        # 11. Seed Admin User 'sho' login credentials (this is what Sign In checks)
-        # SECURITY FIX: password is now stored hashed (salted PBKDF2), not
-        # plain text. sho still logs in with the exact same password as
-        # before - only the stored value's format changed.
-        cursor.execute("DELETE FROM users WHERE LOWER(username) = 'sho'")
         cursor.execute("""
-            INSERT INTO users (username, password, role, tier, email, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, ("sho", admin_pass_hash, "admin", "Enterprise Tier ($199)", "shoirtheagent@gmail.com", "2020-01-01T00:00:00"))
+            UPDATE enterprise_users
+            SET password_hash=?, role=?, tier=?, email=?
+            WHERE LOWER(username)='sho'
+        """, (admin_pass_hash, "Enterprise Admin", "Enterprise Tier", "mohsuhailji@gmail.com"))
+
+        # Never recreate/delete accounts on app startup.
+        cursor.execute("SELECT 1 FROM users WHERE LOWER(username)='sho' LIMIT 1")
+        if cursor.fetchone() is None:
+            cursor.execute("""
+                INSERT INTO users
+                (username,password,role,tier,email,created_at,subscription_expires_at)
+                VALUES (?,?,?,?,?,?,?)
+            """, ("sho", admin_pass_hash, "admin", "Enterprise Tier ($199)",
+                  "shoirtheagent@gmail.com", "2020-01-01T00:00:00", "2030-01-01T00:00:00"))
 
         conn.commit()
 
@@ -998,23 +999,21 @@ if is_free_mode and not st.session_state.get("current_user"):
     st.session_state["user_tier"] = "Enterprise Tier"
     st.session_state["authenticated"] = True
 
-# Enforce 30-day subscription expiry check for active sessions
+# Enforce the durable subscription expiry timestamp for active sessions.
 if st.session_state.get("authenticated") and st.session_state.get("current_user") != "Guest Visitor":
     try:
+        active_user = st.session_state.get("current_user", "")
         conn = sqlite3.connect("enterprise_full_workspace.db")
-        cursor = conn.cursor()
-        cursor.execute("SELECT created_at FROM users WHERE LOWER(username) = ?", (st.session_state.get("current_user").lower(),))
-        row = cursor.fetchone()
+        row = conn.execute(
+            "SELECT subscription_expires_at,email FROM users WHERE LOWER(username)=? LIMIT 1",
+            (active_user.lower(),),
+        ).fetchone()
         conn.close()
-
-        if row and row[0]:
-            created_dt = datetime.datetime.fromisoformat(row[0])
-            # Check if 30 days have passed (excluding master admin 'sho')
-            if datetime.datetime.now() > created_dt + datetime.timedelta(days=30) and st.session_state.get("current_user").lower() != "sho":
-                for key in list(st.session_state.keys()):
-                    del st.session_state[key]
-                st.error("🚨 Your 30-day subscription has expired. Your session has ended. Please renew your subscription to continue.")
-                st.stop()
+        if row and row[0] and active_user.lower() != "sho" and account_is_expired(row[0]):
+            save_user_workspace(active_user, st.session_state)
+            st.session_state["authenticated"] = False
+            st.session_state["current_user"] = ""
+            st.session_state["subscription_expired_notice"] = True
     except Exception:
         pass
 
@@ -1052,47 +1051,110 @@ if not st.session_state.get("current_user"):
             # the first time it's used, with zero change to the password
             # itself).
             cursor.execute(
-                "SELECT * FROM users WHERE LOWER(username) = ?",
+                """
+                SELECT id,username,password,role,tier,email,created_at,subscription_expires_at
+                FROM users
+                WHERE LOWER(username)=?
+                LIMIT 1
+                """,
                 (signin_user.strip().lower(),)
             )
             user_row = cursor.fetchone()
+            remote_row = None
+            if _durable_accounts_ready:
+                try:
+                    remote_row = remote_account(signin_user)
+                except Exception:
+                    remote_row = None
 
             is_valid = False
-            if user_row:
+            effective_account = remote_row
+            if effective_account:
+                is_valid, _ = verify_password(effective_account.get("password_hash",""), signin_pass)
+            elif user_row:
                 is_valid, needs_upgrade = verify_password(user_row[2], signin_pass)
                 if is_valid and needs_upgrade:
-                    cursor.execute(
-                        "UPDATE users SET password = ? WHERE id = ?",
-                        (hash_password(signin_pass), user_row[0])
-                    )
+                    upgraded = hash_password(signin_pass)
+                    cursor.execute("UPDATE users SET password=? WHERE id=?", (upgraded, user_row[0]))
                     conn.commit()
 
             record_login_attempt(signin_user, is_valid)
             conn.close()
 
             if is_valid:
-                # Bypass 30-day expiration completely for master admin 'sho'
-                if user_row[1].lower() != "sho":
-                    created_at_str = user_row[6] if len(user_row) > 6 else None
-                    if created_at_str:
-                        try:
-                            created_dt = datetime.datetime.fromisoformat(created_at_str)
-                            if datetime.datetime.now() > created_dt + datetime.timedelta(days=30):
-                                st.error("⚠️ Your 30-day subscription has expired. Please renew your subscription to log in.")
-                                st.stop()
-                        except Exception:
-                            pass
+                account = effective_account or {
+                    "username": user_row[1],
+                    "role": user_row[3],
+                    "tier": user_row[4],
+                    "email": user_row[5],
+                    "created_at": user_row[6],
+                    "subscription_expires_at": user_row[7],
+                }
+                username = str(account.get("username") or user_row[1])
+                role = account.get("role") or "User"
+                tier = account.get("tier") or "Starter Tier"
+                email = account.get("email") or ""
+                expiry = account.get("subscription_expires_at")
+                created = account.get("created_at")
+                if username.lower() != "sho" and not expiry and created:
+                    try:
+                        expiry = (datetime.datetime.fromisoformat(str(created).replace("Z","+00:00")) + datetime.timedelta(days=30)).isoformat()
+                    except Exception:
+                        expiry = None
 
-                st.session_state["current_user"] = user_row[1]
-                st.session_state["user_role"] = user_row[3]
-                st.session_state["user_tier"] = user_row[4]
-                # FIX: this flag was never being set on sign-in anywhere in the
-                # file, even though the Admin Panel (and the 30-day-expiry
-                # check above) both require it to be True. That alone was
-                # enough to make "sho" permanently see "Access Denied" on the
-                # Admin Panel even after a correct, successful login.
+                if _durable_accounts_ready and account.get("password_hash"):
+                    try:
+                        upsert_remote_account(account)
+                    except Exception:
+                        pass
+
+                if username.lower() != "sho" and expiry and account_is_expired(expiry):
+                    st.error("⏰ Your 30-day Shoir-IE subscription has expired.")
+                    st.info("Your account, profile and saved workspace are preserved. Submit a renewal request below to regain access.")
+                    renew_options = ["Starter Tier ($29)", "Mid-Tier Pro ($79)", "Professional Tier ($129)", "Enterprise Tier ($199)", "Enterprise Plus Tier ($399)", "Research Pack ($30 add-on)"]
+                    current_tier = tier if tier in renew_options else renew_options[0]
+                    renewal_tier = st.selectbox("Renewal tier", renew_options, index=renew_options.index(current_tier), key="renewal_tier_login")
+                    renewal_tx = st.text_input("Renewal transaction/reference", key="renewal_transaction_login")
+                    renewal_proof = st.file_uploader("Renewal payment screenshot", type=["png","jpg","jpeg"], key="renewal_proof_login")
+                    renewal_accept = st.checkbox("I confirm the renewal is for this account and I accept the 30-day subscription term.", key="renewal_accept_login")
+                    if renewal_accept and st.button("🔄 Submit Renewal Request", type="primary", key="renewal_submit_login"):
+                        if renewal_proof is None:
+                            st.warning("Please upload the renewal payment screenshot.")
+                        else:
+                            os.makedirs("payment_proofs", exist_ok=True)
+                            safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", renewal_proof.name)
+                            proof_path = os.path.join("payment_proofs", f"{username}_{safe_name}")
+                            with open(proof_path, "wb") as fh:
+                                fh.write(renewal_proof.getbuffer())
+                            conn_r = sqlite3.connect("enterprise_full_workspace.db")
+                            conn_r.execute(
+                                """INSERT INTO pending_payments
+                                   (username,password,email,tier,payment_method,transaction_id,screenshot_path,status,timestamp,request_type)
+                                   VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                                (username, "", email, renewal_tier, "STC Pay (QR)", renewal_tx or None,
+                                 proof_path, "Pending", datetime.datetime.now().isoformat(), "Renewal")
+                            )
+                            conn_r.commit()
+                            conn_r.close()
+                            if _durable_accounts_ready:
+                                try:
+                                    insert_remote_request({
+                                        "username": username, "email": email, "tier": renewal_tier,
+                                        "request_type": "Renewal", "payment_method": "STC Pay (QR)",
+                                        "transaction_id": renewal_tx or None, "screenshot_path": proof_path, "status": "Pending"
+                                    })
+                                except Exception:
+                                    pass
+                            st.success("Renewal request submitted for administrator approval.")
+                    st.stop()
+
+                st.session_state["current_user"] = username
+                st.session_state["user_role"] = role
+                st.session_state["user_tier"] = tier
+                st.session_state["user_email"] = email
+                st.session_state["subscription_expires_at"] = expiry
                 st.session_state["authenticated"] = True
-                st.success(f"Welcome back, {user_row[1]}!")
+                st.success(f"Welcome back, {username}!")
                 st.rerun()
             else:
                 st.error("Invalid username or password. Note: Access requires admin approval and ticket delivery.")
@@ -1158,6 +1220,10 @@ if not st.session_state.get("current_user"):
                     # from being usable as a stored XSS payload later.
                     if reg_name and not is_valid_username(reg_name):
                         st.warning("Username can only contain letters, numbers, periods, underscores, and hyphens (3-32 characters).")
+                    elif reg_name and (remote_account(reg_name) if _durable_accounts_ready else False):
+                        st.warning("This username already has an account. Please sign in instead of creating a duplicate.")
+                    elif reg_name and sqlite3.connect("enterprise_full_workspace.db").execute("SELECT 1 FROM users WHERE LOWER(username)=? LIMIT 1", (reg_name.strip().lower(),)).fetchone():
+                        st.warning("This username already has an account. Please sign in instead of creating a duplicate.")
                     elif reg_email and not is_valid_email(reg_email):
                         st.warning("Please enter a valid email address.")
                     elif reg_name and reg_pass and reg_email and uploaded_screenshot is not None:
@@ -1170,8 +1236,8 @@ if not st.session_state.get("current_user"):
                         cursor = conn.cursor()
                         cursor.execute("""
                             INSERT INTO pending_payments
-                                (username, password, email, tier, payment_method, transaction_id, screenshot_path, status, timestamp)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                (username, password, email, tier, payment_method, transaction_id, screenshot_path, status, timestamp, request_type)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'New')
                         """, (
                             reg_name,
                             hash_password(reg_pass),
@@ -1186,6 +1252,17 @@ if not st.session_state.get("current_user"):
 
                         conn.commit()
                         conn.close()
+
+                        if _durable_accounts_ready:
+                            try:
+                                insert_remote_request({
+                                    "username": reg_name, "email": reg_email, "tier": reg_tier,
+                                    "request_type": "New", "payment_method": "STC Pay (QR)",
+                                    "transaction_id": reg_ticket_code if reg_ticket_code else None,
+                                    "screenshot_path": file_path, "status": "Pending"
+                                })
+                            except Exception:
+                                pass
 
                         st.success("Request sent successfully! Your code will be emailed to you from shoirtheagent@gmail.com")
                         st.session_state.show_qr = False
