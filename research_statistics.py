@@ -120,7 +120,10 @@ def clean_research_dataframe(raw: pd.DataFrame) -> tuple[pd.DataFrame, int]:
     if raw is None or raw.empty:
         return pd.DataFrame(), 0
 
-    raw = raw.dropna(axis=0, how="all").dropna(axis=1, how="all")
+    # Preserve row positions while detecting the header so the UI can report the
+    # real source-sheet row number. Empty rows are removed only after the header
+    # has been identified.
+    raw = raw.dropna(axis=1, how="all")
     if raw.empty:
         return pd.DataFrame(), 0
 
@@ -172,7 +175,11 @@ def groupable_columns(df: pd.DataFrame, max_unique: int = 30) -> list[str]:
         if s.empty:
             continue
         nunique = s.nunique(dropna=True)
-        if pd.api.types.is_object_dtype(df[col]) or pd.api.types.is_categorical_dtype(df[col]):
+        if (
+            pd.api.types.is_object_dtype(df[col])
+            or pd.api.types.is_string_dtype(df[col])
+            or isinstance(df[col].dtype, pd.CategoricalDtype)
+        ):
             if 2 <= nunique <= max_unique:
                 cols.append(col)
         elif pd.api.types.is_numeric_dtype(df[col]):
