@@ -10746,30 +10746,72 @@ if mod == "Admin Panel":
                                 WHERE username = ?
                             """, (row['tier'], row['email'], row['username']))
                             
-                            # Create/refresh the actual login account (this is what Sign In checks)
-                            # FIX: this used to be "INSERT OR REPLACE INTO users (...)", but
-                            # username isn't the primary key on this table (id is), so REPLACE
-                            # never actually matched anything - it just kept adding a brand new
-                            # duplicate row every time the same person was approved. Delete any
-                            # existing row for this username first instead.
-                            # SECURITY FIX: the password is now hashed at the moment
-                            # someone submits the registration form (see the register
-                            # tab above), so it's never stored in plain text anywhere,
-                            # not even temporarily in the pending-requests queue while
-                            # it's waiting on your review. This just carries that hash
-                            # straight through into the real login table.
-                            login_password = row['password'] if 'password' in row.index and row['password'] else ''
-                            cursor.execute("DELETE FROM users WHERE LOWER(username) = ?", (row['username'].strip().lower(),))
-                            cursor.execute("""
-                                INSERT INTO users (username, password, role, tier, email, created_at)
-                                VALUES (?, ?, ?, ?, ?, ?)
-                            """, (row['username'], login_password, "User", row['tier'], row['email'], datetime.datetime.now().isoformat()))
-                            cursor.execute("UPDATE pending_payments SET status = 'Approved' WHERE id = ?", (row['id'],))
-                            cursor.execute("INSERT INTO audit_trail (timestamp, user, action) VALUES (datetime('now'), ?, ?)", 
-                                           ("sho", f"Approved payment & issued ticket code {t_code} for user {row['username']}"))
-                            conn.commit()
-                            conn.close()
-                            
+                            # Create or renew the durable login account without deleting it.
+                            login_username = str(row["username"]).strip()
+                            request_type = str(row.get("request_type", "New") or "New")
+                            request_type = request_type if request_type in {"New", "Renewal"} else "New"
+                            login_password = str(row.get("password") or "")
+                            now_dt = datetime.datetime.now(datetime.timezone.utc)
+
+                            existing_local = cursor.execute(
+                                "SELECT username,password,role,tier,email,created_at,subscription_expires_at FROM users WHERE LOWER(username)=? LIMIT 1",
+                                (login_username.lower(),),
+                            ).fetchone()
+
+                            if request_type == "Renewal" and existing_local:
+                                new_expiry = renewed_expiry(existing_local[6], 30, now_dt).isoformat()
+                                if not login_password:
+                                    login_password = existing_local[1]
+                                cursor.execute(
+                                    """
+                                    UPDATE users
+                                    SET role='User', tier=?, email=?, subscription_expires_at=?
+                                    WHERE LOWER(username)=?
+                                    """,
+                                    (row["tier"], row["email"], new_expiry, login_username.lower()),
+                                )
+                            else:
+                                new_expiry = (now_dt + datetime.timedelta(days=30)).isoformat()
+                                if existing_local and not login_password:
+                                    login_password = existing_local[1]
+                                if existing_local:
+                                    cursor.execute(
+                                        """
+                                        UPDATE users
+                                        SET password=?, role='User', tier=?, email=?, subscription_expires_at=?
+                                        WHERE LOWER(username)=?
+                                        """,
+                                        (login_password, row["tier"], row["email"], new_expiry, login_username.lower()),
+                                    )
+                                else:
+                                    cursor.execute(
+                                        """
+                                        INSERT INTO users
+                                        (username,password,role,tier,email,created_at,subscription_expires_at)
+                                        VALUES (?,?,?,?,?,?,?)
+                                        """,
+                                        (login_username, login_password, "User", row["tier"], row["email"],
+                                         now_dt.isoformat(), new_expiry),
+                                    )
+
+                            # Preserve the existing enterprise profile/workspace.
+                            cursor.execute(
+                                "INSERT OR IGNORE INTO enterprise_users (username) VALUES (?)",
+                                (login_username,),
+                            )
+                            cursor.execute(
+                                """
+                                UPDATE enterprise_users
+                                SET role='User', tier=?, email=?, ticket_expiry=?
+                                WHERE LOWER(username)=?
+                                """,
+                                (row["tier"], new_expiry, new_expiry, login_username.lower()),
+                            )
+                            cursor.execute("UPDATE pending_payments SET status='Approved' WHERE id=?", (row["id"],))
+                            cursor.execute(
+                                "INSERT INTO audit_trail (timestamp,user,action) VALUES (datetime('now'),?,?)",
+                                ("sho", f"Approved {request_type.lower()} for {login_username}; subscription through {new_expiry}")
+                            )
                             email_success = send_tier_email(row['email'], row['username'], t_code, row['tier'])
                             if email_success:
                                 st.success(f"Payment approved! Code **{t_code}** generated and successfully emailed to **{row['email']}**.")
