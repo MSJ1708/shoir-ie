@@ -396,6 +396,14 @@ _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 def is_valid_email(email):
     return bool(email) and bool(_EMAIL_RE.match(email.strip()))
 
+def local_account_exists(username):
+    """Check the local cache without leaking SQLite connections."""
+    with sqlite3.connect("enterprise_full_workspace.db") as conn:
+        return conn.execute(
+            "SELECT 1 FROM users WHERE LOWER(username)=? LIMIT 1",
+            (str(username or "").strip().lower(),)
+        ).fetchone() is not None
+
 # =====================================================================
 # LEGAL CONTENT
 # ---------------------------------------------------------------------
@@ -1222,9 +1230,13 @@ if not st.session_state.get("current_user"):
                     # from being usable as a stored XSS payload later.
                     if reg_name and not is_valid_username(reg_name):
                         st.warning("Username can only contain letters, numbers, periods, underscores, and hyphens (3-32 characters).")
-                    elif reg_name and (remote_account(reg_name) if _durable_accounts_ready else False):
-                        st.warning("This username already has an account. Please sign in instead of creating a duplicate.")
-                    elif reg_name and sqlite3.connect("enterprise_full_workspace.db").execute("SELECT 1 FROM users WHERE LOWER(username)=? LIMIT 1", (reg_name.strip().lower(),)).fetchone():
+                    elif reg_name and (
+                        local_account_exists(reg_name)
+                        or (
+                            _durable_accounts_ready
+                            and remote_account(reg_name) is not None
+                        )
+                    ):
                         st.warning("This username already has an account. Please sign in instead of creating a duplicate.")
                     elif reg_email and not is_valid_email(reg_email):
                         st.warning("Please enter a valid email address.")
@@ -1374,6 +1386,8 @@ st.sidebar.markdown(f"### ≡ AEGIS Enterprise Suite")
 with st.sidebar.expander(f"👤 {st.session_state.current_user} ({st.session_state.user_tier})", expanded=False):
     st.markdown(f"**Email:** {st.session_state.get('user_email', 'N/A')}")
     st.markdown(f"**Role:** {st.session_state.user_role}")
+    if st.session_state.get("subscription_expires_at") and st.session_state.get("current_user", "").lower() != "sho":
+        st.caption("Subscription expires: " + str(st.session_state.get("subscription_expires_at")))
     if st.button("Edit Account / Profile Setup", key="sidebar_edit_acc"):
         st.session_state.selected_nav = "Edit Account"
         st.rerun()
@@ -10645,6 +10659,8 @@ if mod == "Admin Panel":
         st.error("Access Denied: The Admin Panel is exclusively restricted to administrator 'sho'.")
     else:
         st.success("Welcome, Administrator sho! Full administrative controls unlocked.")
+        if not _durable_accounts_ready:
+            st.warning("Durable account backend is not configured. Streamlit Cloud restarts may not retain the local SQLite cache. Configure the Supabase/PostgreSQL secret described in DURABLE_ACCOUNTS_SETUP.md.")
         
         st.subheader("📥 Pending Payment & Ticket Requests")
         
