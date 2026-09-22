@@ -175,6 +175,20 @@ def groupable_columns(df: pd.DataFrame, max_unique: int = 30) -> list[str]:
         if s.empty:
             continue
         nunique = s.nunique(dropna=True)
+        unique_ratio = nunique / max(1, len(s))
+        name = str(col)
+        identifier_like = bool(
+            pd.Series([name]).str.contains(
+                r"(^|[ _-])(id|identifier|index|key)([ _-]|$)",
+                case=False,
+                regex=True,
+            ).iloc[0]
+        )
+        # High-cardinality identifier fields (Scenario ID, Subject ID, etc.) are
+        # not meaningful experimental grouping variables even when the dataset
+        # is small enough to have <= max_unique distinct values.
+        if identifier_like and unique_ratio > 0.80:
+            continue
         if (
             pd.api.types.is_object_dtype(df[col])
             or pd.api.types.is_string_dtype(df[col])
