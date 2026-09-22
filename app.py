@@ -10812,6 +10812,29 @@ if mod == "Admin Panel":
                                 "INSERT INTO audit_trail (timestamp,user,action) VALUES (datetime('now'),?,?)",
                                 ("sho", f"Approved {request_type.lower()} for {login_username}; subscription through {new_expiry}")
                             )
+                            conn.commit()
+                            conn.close()
+
+                            if _durable_accounts_ready:
+                                try:
+                                    upsert_remote_account({
+                                        "username": login_username,
+                                        "password_hash": login_password,
+                                        "role": "User",
+                                        "tier": row["tier"],
+                                        "email": row["email"],
+                                        "created_at": (
+                                            existing_local[5]
+                                            if existing_local and request_type == "Renewal"
+                                            else now_dt.isoformat()
+                                        ),
+                                        "subscription_expires_at": new_expiry,
+                                        "active": True,
+                                    })
+                                    update_latest_remote_request(login_username, request_type, "Approved")
+                                except Exception:
+                                    pass
+
                             email_success = send_tier_email(row['email'], row['username'], t_code, row['tier'])
                             if email_success:
                                 st.success(f"Payment approved! Code **{t_code}** generated and successfully emailed to **{row['email']}**.")
