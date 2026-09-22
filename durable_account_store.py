@@ -227,6 +227,83 @@ def update_remote_request_status(request_id: int, status: str) -> None:
             )
         conn.commit()
 
+def update_latest_remote_request(username: str, request_type: str, status: str) -> None:
+    """Update the latest pending request for a user/type without requiring its local ID."""
+    ensure_remote_schema()
+    with _pg_connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE shoir_subscription_requests
+                SET status=%s, updated_at=NOW(), approved_at=CASE
+                    WHEN %s='Approved' THEN NOW() ELSE approved_at END
+                WHERE id = (
+                    SELECT id FROM shoir_subscription_requests
+                    WHERE username_lc=%s AND request_type=%s AND status='Pending'
+                    ORDER BY requested_at DESC
+                    LIMIT 1
+                )
+                """,
+                (status, status, str(username).strip().lower(), str(request_type or "New")),
+            )
+        conn.commit()
+
+
+def sync_remote_requests_to_local(db_path: str = "enterprise_full_workspace.db") -> int:
+    """Hydrate pending subscription requests from PostgreSQL into SQLite cache."""
+    if not durable_backend_configured():
+        return 0
+    ensure_remote_schema()
+    with _pg_connect() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT username,email,tier,request_type,payment_method,transaction_id,
+                       screenshot_path,status,requested_at
+                FROM shoir_subscription_requests
+                WHERE status='Pending'
+                ORDER BY requested_at ASC
+                """
+            )
+            rows = [dict(row) for row in cur.fetchall()]
+    inserted = 0
+    with sqlite3.connect(db_path) as conn:
+        for row in rows:
+            exists = conn.execute(
+                """
+                SELECT 1 FROM pending_payments
+                WHERE LOWER(username)=? AND COALESCE(transaction_id,'')=COALESCE(?, '')
+                  AND COALESCE(request_type,'New')=?
+                  AND status='Pending'
+                LIMIT 1
+                """,
+                (
+                    str(row["username"]).strip().lower(),
+                    row.get("transaction_id"),
+                    row.get("request_type") or "New",
+                ),
+            ).fetchone()
+            if exists:
+                continue
+            conn.execute(
+                """
+                INSERT INTO pending_payments
+                (username,password,email,tier,payment_method,transaction_id,
+                 screenshot_path,status,timestamp,request_type)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                """,
+                (
+                    row["username"], "", row.get("email") or "", row.get("tier") or "",
+                    row.get("payment_method") or "", row.get("transaction_id"),
+                    row.get("screenshot_path") or "", "Pending",
+                    _iso(row.get("requested_at")) or dt.datetime.now(dt.timezone.utc).isoformat(),
+                    row.get("request_type") or "New",
+                ),
+            )
+            inserted += 1
+        conn.commit()
+    return inserted
+
 
 def sync_remote_accounts_to_local(db_path: str = "enterprise_full_workspace.db") -> int:
     """Hydrate local SQLite from remote accounts; never delete remote/local rows."""
