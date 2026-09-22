@@ -29,7 +29,7 @@ from industrial_operating_system import render_industrial_operating_system
 from industrial_experience import COPILOT_TOOLS, ensure_experience_db, feature_stats, load_research_protocol, list_research_studies
 from industrial_excellence_hub import render_platform_excellence_hub
 from workspace_persistence import ensure_workspace_state_db, load_user_workspace, save_user_workspace
-from durable_account_store import durable_backend_configured, sync_durable_accounts, upsert_remote_account, insert_remote_request, update_remote_request_status, account_is_expired, renewed_expiry
+from durable_account_store import (durable_backend_configured, sync_durable_accounts, sync_remote_requests_to_local, upsert_remote_account, insert_remote_request, update_remote_request_status, update_latest_remote_request, remote_account, account_is_expired, renewed_expiry)
 
 # =====================================================================
 # PAGE CONFIGURATION & CUSTOM CSS (Professional Styling & Hover Zoom)
