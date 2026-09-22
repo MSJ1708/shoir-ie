@@ -29,6 +29,7 @@ from industrial_operating_system import render_industrial_operating_system
 from industrial_experience import COPILOT_TOOLS, ensure_experience_db, feature_stats, load_research_protocol, list_research_studies
 from industrial_excellence_hub import render_platform_excellence_hub
 from workspace_persistence import ensure_workspace_state_db, load_user_workspace, save_user_workspace
+from durable_account_store import durable_backend_configured, sync_durable_accounts, upsert_remote_account, insert_remote_request, update_remote_request_status, account_is_expired, renewed_expiry
 
 # =====================================================================
 # PAGE CONFIGURATION & CUSTOM CSS (Professional Styling & Hover Zoom)
@@ -175,8 +176,21 @@ def init_db():
                 role TEXT,
                 tier TEXT,
                 email TEXT,
-                created_at TEXT
+                created_at TEXT,
+                subscription_expires_at TEXT
             )
+        """)
+
+        try:
+            cursor.execute("ALTER TABLE users ADD COLUMN subscription_expires_at TEXT")
+        except sqlite3.OperationalError:
+            pass
+        cursor.execute("""
+            UPDATE users
+            SET subscription_expires_at = datetime(created_at, '+30 days')
+            WHERE (subscription_expires_at IS NULL OR subscription_expires_at = '')
+              AND created_at IS NOT NULL
+              AND LOWER(username) <> 'sho'
         """)
 
         # 4. License Codes Table (Stores generated tier subscription keys)
@@ -235,6 +249,11 @@ def init_db():
                 timestamp TEXT
             )
         """)
+
+        try:
+            cursor.execute("ALTER TABLE pending_payments ADD COLUMN request_type TEXT DEFAULT 'New'")
+        except sqlite3.OperationalError:
+            pass
 
         # 8. System Settings Table (Stores global free-mode toggle)
         cursor.execute("""
@@ -426,23 +445,25 @@ TERMS_AND_CONDITIONS_TEXT = """
 
 **2. Accounts & registration.** You must provide accurate registration information. Accounts are activated manually after payment verification by an administrator - this may take time, and we don't guarantee a specific activation window. You're responsible for keeping your password confidential and for all activity on your account.
 
-**3. Payment.** You agree to pay the exact price listed for your selected tier. See the separate Refund Policy for cancellation terms.
+**3. Subscription period & renewal.** Each paid subscription is active for **30 days from the date it is activated or renewed**. When the 30-day period ends, access to the Shoir-IE workspace is blocked until a renewal payment is submitted and approved. Your account, saved workspace, research data, and profile are not deleted merely because the subscription expires.
 
-**4. Acceptable use.** You may not: share your account with others, attempt to access another user's data or the administrator area, attempt to reverse-engineer, scrape, or resell access to the platform, or use it for any unlawful purpose.
+**4. Payment.** You agree to pay the exact price listed for your selected tier. See the separate Refund Policy for cancellation terms.
 
-**5. Outputs are not professional advice.** Simulation results, optimizations, and analyses produced by the platform are decision-support tools, not certified engineering, financial, or legal advice. You're responsible for independently verifying anything you rely on for real-world decisions.
+**5. Acceptable use.** You may not: share your account with others, attempt to access another user's data or the administrator area, attempt to reverse-engineer, scrape, or resell access to the platform, or use it for any unlawful purpose.
 
-**6. Availability.** The service is provided "as is." We don't guarantee uninterrupted or error-free operation.
+**6. Outputs are not professional advice.** Simulation results, optimizations, and analyses produced by the platform are decision-support tools, not certified engineering, financial, or legal advice. You're responsible for independently verifying anything you rely on for real-world decisions.
 
-**7. Termination.** We may suspend or terminate accounts that violate these terms or that were activated based on fraudulent payment proof.
+**7. Availability.** The service is provided "as is." We don't guarantee uninterrupted or error-free operation.
 
-**8. Intellectual property.** The platform, its modules, and its content are owned by Shoir-IE. Nothing here transfers ownership of that to you.
+**8. Termination.** We may suspend or terminate accounts that violate these terms or that were activated based on fraudulent payment proof.
 
-**9. Limitation of liability.** To the extent permitted by applicable law, Shoir-IE is not liable for indirect or consequential damages arising from use of the platform.
+**9. Intellectual property.** The platform, its modules, and its content are owned by Shoir-IE. Nothing here transfers ownership of that to you.
 
-**10. Governing law.** _(state the jurisdiction whose law governs this agreement, e.g. Kingdom of Saudi Arabia)_.
+**10. Limitation of liability.** To the extent permitted by applicable law, Shoir-IE is not liable for indirect or consequential damages arising from use of the platform.
 
-**11. Changes.** We may update these terms; continued use after a change means you accept the update.
+**11. Governing law.** _(state the jurisdiction whose law governs this agreement, e.g. Kingdom of Saudi Arabia)_.
+
+**12. Changes.** We may update these terms; continued use after a change means you accept the update.
 """
 
 REFUND_POLICY_TEXT = """
@@ -858,6 +879,14 @@ def log_audit(user, action):
         pass
 
 init_db()
+
+# Managed PostgreSQL is the durable authority when configured. Existing local
+# accounts are migrated only when absent remotely; remote accounts are hydrated
+# back into the local cache after every fresh app process.
+try:
+    _durable_accounts_ready = sync_durable_accounts()
+except Exception:
+    _durable_accounts_ready = False
 
 # =====================================================================
 # SESSION STATE INITIALIZATION
