@@ -18,6 +18,7 @@ from industrial_experience import (
     recover_legacy_research_studies,
     restore_decision_readiness_study,
     register_research_run,
+    import_research_run_csv,
     research_runs_frame,
     save_project,
 )
@@ -247,3 +248,38 @@ def test_research_run_history_persists_completed_run(monkeypatch):
         loaded = ie.load_research_run(run_id, owner="alice")
         assert loaded is not None
         assert len(loaded["results"]) == 4
+
+
+def test_previous_lab_csv_can_be_imported_into_research_registry(monkeypatch):
+    with tempfile.TemporaryDirectory() as td:
+        db = str(Path(td) / "research.db")
+        monkeypatch.setattr(ie, "_db", lambda path=db: sqlite3.connect(path, timeout=30))
+        ensure_experience_db(db)
+        protocol = {
+            "title": "Boundary Study",
+            "primary_endpoint": "Normalized decision regret",
+            "sample_size": 200,
+            "replications": 20,
+            "methodology": "Controlled simulation benchmark",
+            "primary_domain": "Manufacturing",
+            "transfer_domain": "Maintenance",
+        }
+        create_research_protocol("PRJ-IMPORT", protocol, "alice")
+        csv = (
+            "scenario,decision_regret,readiness_score,evidence_completeness,evidence_freshness_hours,"
+            "evidence_conflict_pct,evidence_uncertainty_pct,shock_severity,split\n"
+            "1,0.12,0.77409,75,6,10,20,0.0,development\n"
+            "2,0.10,0.77409,75,6,10,20,0.0,holdout\n"
+        )
+        class Upload:
+            def getvalue(self):
+                return csv.encode("utf-8")
+        run_id, summary = import_research_run_csv(
+            "PRJ-IMPORT", "RSH-TEST", "alice", Upload()
+        )
+        assert run_id.startswith("RRUN-")
+        assert summary["experiment_code"] == "001I"
+        assert summary["observations"] == 2
+        frame = research_runs_frame("PRJ-IMPORT", owner="alice")
+        assert len(frame) == 1
+        assert frame.iloc[0]["Experiment"] == "001I"

@@ -869,6 +869,109 @@ def register_research_run(
     return run_id
 
 
+def import_research_run_csv(
+    study_id: str,
+    research_id: str,
+    owner: str,
+    uploaded: Any,
+    experiment_code: Optional[str] = None,
+) -> tuple[str, dict[str, Any]]:
+    """Import a previously exported Lab CSV into the persistent run registry."""
+    ensure_experience_db()
+    raw = uploaded.getvalue() if hasattr(uploaded, "getvalue") else uploaded
+    if isinstance(raw, str):
+        raw = raw.encode("utf-8")
+    if not raw:
+        raise ValueError("The uploaded CSV is empty.")
+
+    try:
+        df = pd.read_csv(io.BytesIO(raw))
+    except Exception as exc:
+        raise ValueError(f"Could not read the CSV: {exc}") from exc
+
+    aliases = {
+        "decision_regret": ["decision_regret", "Decision Regret", "decision regret"],
+        "readiness_score": ["readiness_score", "Readiness Score", "readiness score"],
+        "split": ["split", "Split"],
+        "evidence_completeness": ["evidence_completeness", "Evidence Completeness", "evidence completeness"],
+        "evidence_freshness_hours": ["evidence_freshness_hours", "Evidence Freshness Hours", "evidence freshness hours"],
+        "evidence_conflict_pct": ["evidence_conflict_pct", "Evidence Conflict Pct", "evidence conflict pct"],
+        "evidence_uncertainty_pct": ["evidence_uncertainty_pct", "Evidence Uncertainty Pct", "evidence uncertainty pct"],
+        "shock_severity": ["shock_severity", "Shock Severity", "shock severity"],
+    }
+
+    def resolve(field: str) -> Optional[str]:
+        normalized = {str(col).strip().casefold(): col for col in df.columns}
+        for alias in aliases[field]:
+            if alias.casefold() in normalized:
+                return normalized[alias.casefold()]
+        return None
+
+    required = {field: resolve(field) for field in aliases}
+    missing = [field for field in ("decision_regret", "readiness_score") if not required[field]]
+    if missing:
+        raise ValueError(
+            "This is not a Shoir-IE Evidence Degradation Lab CSV. Missing: "
+            + ", ".join(missing)
+        )
+
+    clean = df.copy()
+    clean = clean.rename(columns={col: field for field, col in required.items() if col})
+    for field in ("decision_regret", "readiness_score"):
+        clean[field] = pd.to_numeric(clean[field], errors="coerce")
+    if "split" not in clean.columns:
+        clean["split"] = "development"
+    clean["split"] = clean["split"].astype(str)
+    if clean["decision_regret"].isna().all():
+        raise ValueError("Decision Regret contains no usable numeric values.")
+    clean = clean.dropna(subset=["decision_regret"]).reset_index(drop=True)
+
+    config = {
+        "study_id": str(study_id),
+        "research_id": str(research_id),
+        "decision_type": "Next-shift production target",
+        "baseline_policy": "Evidence-following policy",
+        "scenario_count": int(len(clean)),
+        "replications": 1,
+        "holdout_fraction": float(
+            (clean["split"].str.casefold() == "holdout").mean()
+            if len(clean) else 0.0
+        ),
+        "random_seed": 2026,
+    }
+    for field in (
+        "evidence_completeness",
+        "evidence_freshness_hours",
+        "evidence_conflict_pct",
+        "evidence_uncertainty_pct",
+        "shock_severity",
+    ):
+        if field in clean.columns:
+            values = pd.to_numeric(clean[field], errors="coerce").dropna()
+            if not values.empty:
+                value = float(values.iloc[0])
+                config[field] = int(value) if field != "shock_severity" else value
+
+    code = str(experiment_code or "").strip().upper()
+    if code in {"", "AUTO"}:
+        code = _research_experiment_code(config)
+    config["experiment_code"] = code
+
+    run_id = register_research_run(
+        study_id=str(study_id),
+        research_id=str(research_id),
+        owner=str(owner),
+        config=config,
+        results=clean,
+    )
+    return run_id, {
+        "experiment_code": code,
+        "observations": int(len(clean)),
+        "mean_decision_regret": float(clean["decision_regret"].mean()),
+        "mean_readiness_score": float(clean["readiness_score"].mean()),
+    }
+
+
 def load_research_run(run_id: str, owner: Optional[str] = None) -> Optional[dict[str, Any]]:
     ensure_experience_db()
     with _db() as conn:
@@ -1238,10 +1341,62 @@ def render_research_workspace(module: str, tier: str, username: str) -> None:
         st.markdown("### Run history")
         if not active_protocol:
             st.info("Select a saved study first.")
-        elif runs.empty:
-            st.info("No persisted experiment runs exist for this study yet. This tab intentionally does not present a fake run button.")
         else:
-            st.dataframe(runs, use_container_width=True, hide_index=True)
+            if runs.empty:
+                st.info("No persisted experiment runs exist for this study yet.")
+            else:
+                st.dataframe(runs, use_container_width=True, hide_index=True)
+
+            st.markdown("#### ♻️ Recover a previously completed Lab run")
+            st.caption(
+                "Use this only for an experiment that was completed before persistent run history was enabled. "
+                "The original CSV is imported into the same research-run registry used by new experiments."
+            )
+            recovery_file = st.file_uploader(
+                "Upload the completed Evidence Degradation Lab CSV",
+                type=["csv"],
+                key="research_run_recovery_csv",
+                help="Expected fields include decision_regret, readiness_score and the evidence-factor columns.",
+            )
+            rc1, rc2 = st.columns([1, 1])
+            with rc1:
+                recovery_code = st.selectbox(
+                    "Experiment code",
+                    ["Auto-detect","001A","001B","001C","001D","001E","001F","001G","001H","001I","001J"],
+                    index=0,
+                    key="research_run_recovery_code",
+                )
+            with rc2:
+                st.write("")
+                st.write("")
+                recover_clicked = st.button(
+                    "📥 Import & Persist Run",
+                    type="primary",
+                    use_container_width=True,
+                    disabled=recovery_file is None,
+                    key="research_run_recovery_button",
+                )
+            if recover_clicked and recovery_file is not None:
+                try:
+                    from industrial_experience import import_research_run_csv
+                    run_id, summary = import_research_run_csv(
+                        study_id=str(active_protocol["study_id"]),
+                        research_id=str(active_protocol["research_id"]),
+                        owner=str(username),
+                        uploaded=recovery_file,
+                        experiment_code=None if recovery_code == "Auto-detect" else recovery_code,
+                    )
+                    st.success(
+                        "Recovered {} · {} observations · mean regret {:.5f}".format(
+                            summary["experiment_code"],
+                            summary["observations"],
+                            summary["mean_decision_regret"],
+                        )
+                    )
+                    st.session_state["sx_last_recovered_run_id"] = run_id
+                    st.rerun()
+                except Exception as exc:
+                    st.error("Run recovery failed: " + str(exc))
 
     with tabs[3]:
         st.markdown("### Decision records")
