@@ -134,6 +134,8 @@ def ensure_experience_db(path: str = "enterprise_full_workspace.db") -> None:
             "CREATE TABLE IF NOT EXISTS experience_observability(id INTEGER PRIMARY KEY AUTOINCREMENT,run_id TEXT,module TEXT,event_type TEXT,duration_ms REAL,details_json TEXT,created_at TEXT)",
             "CREATE TABLE IF NOT EXISTS experience_memory(memory_id TEXT PRIMARY KEY,problem TEXT,data_ref TEXT,model_ref TEXT,scenario_ref TEXT,decision_ref TEXT,actual_result TEXT,lesson TEXT,owner TEXT,created_at TEXT,updated_at TEXT)",
             "CREATE TABLE IF NOT EXISTS experience_research_studies(study_id TEXT PRIMARY KEY,research_id TEXT UNIQUE,title TEXT,objective TEXT,research_question TEXT,hypothesis TEXT,null_hypothesis TEXT,methodology TEXT,primary_domain TEXT,transfer_domain TEXT,primary_endpoint TEXT,secondary_metrics_json TEXT,independent_variables_json TEXT,controls_json TEXT,baseline_definition TEXT,treatment_definition TEXT,sample_size INTEGER,replications INTEGER,random_seed INTEGER,alpha REAL,confidence_level REAL,planned_tests_json TEXT,inclusion_criteria TEXT,exclusion_criteria TEXT,data_source TEXT,protocol_notes TEXT,protocol_hash TEXT,protocol_locked INTEGER DEFAULT 0,owner TEXT,created_at TEXT,updated_at TEXT)",
+            "CREATE TABLE IF NOT EXISTS experience_research_runs(run_id TEXT PRIMARY KEY,study_id TEXT NOT NULL,research_id TEXT NOT NULL,owner TEXT NOT NULL,experiment_code TEXT NOT NULL,config_json TEXT NOT NULL,summary_json TEXT NOT NULL,results_csv TEXT NOT NULL,created_at TEXT NOT NULL)",
+            "CREATE INDEX IF NOT EXISTS idx_exp_research_runs_study ON experience_research_runs(study_id,created_at DESC)",
             "CREATE INDEX IF NOT EXISTS idx_exp_research_owner ON experience_research_studies(owner,created_at DESC)",
             "CREATE INDEX IF NOT EXISTS idx_exp_research_hash ON experience_research_studies(protocol_hash)",
             "CREATE TABLE IF NOT EXISTS experience_preferences(username TEXT PRIMARY KEY,locale TEXT DEFAULT 'en',direction TEXT DEFAULT 'ltr',reduced_motion INTEGER DEFAULT 0,density TEXT DEFAULT 'comfortable',updated_at TEXT)",
@@ -768,14 +770,152 @@ def recover_legacy_research_studies(owner: str) -> pd.DataFrame:
     return pd.DataFrame(recovered)
 
 
+def _research_experiment_code(config: Mapping[str, Any]) -> str:
+    """Map the protocol's planned A-J conditions to stable experiment labels."""
+    key = (
+        int(config.get("evidence_completeness", -1)),
+        int(config.get("evidence_freshness_hours", -1)),
+        int(config.get("evidence_conflict_pct", -1)),
+        int(config.get("evidence_uncertainty_pct", -1)),
+        float(config.get("shock_severity", -1)),
+    )
+    known = {
+        (100,0,0,0,0.0): "001A",
+        (90,0,0,0,0.0): "001B",
+        (75,0,0,0,0.0): "001C",
+        (50,0,0,0,0.0): "001D",
+        (100,6,0,0,0.0): "001E",
+        (100,24,0,0,0.0): "001F",
+        (100,0,10,0,0.0): "001G",
+        (100,0,0,20,0.0): "001H",
+        (75,6,10,20,0.0): "001I",
+        (75,6,10,20,1.5): "001J",
+    }
+    return known.get(key, "CUSTOM-" + hashlib.sha1(json.dumps(key).encode("utf-8")).hexdigest()[:8].upper())
+
+
+def register_research_run(
+    study_id: str,
+    research_id: str,
+    owner: str,
+    config: Mapping[str, Any],
+    results: pd.DataFrame,
+) -> str:
+    """Persist a completed controlled experiment and its evidence data."""
+    ensure_experience_db()
+    run_id = "RRUN-" + uuid.uuid4().hex[:12].upper()
+    cfg = dict(config)
+    cfg["study_id"] = study_id
+    cfg["research_id"] = research_id
+    code = _research_experiment_code(cfg)
+    summary = {
+        "observations": int(len(results)) if isinstance(results, pd.DataFrame) else 0,
+        "columns": int(len(results.columns)) if isinstance(results, pd.DataFrame) else 0,
+        "mean_decision_regret": (
+            float(pd.to_numeric(results["decision_regret"], errors="coerce").mean())
+            if isinstance(results, pd.DataFrame) and "decision_regret" in results.columns else None
+        ),
+        "mean_readiness_score": (
+            float(pd.to_numeric(results["readiness_score"], errors="coerce").mean())
+            if isinstance(results, pd.DataFrame) and "readiness_score" in results.columns else None
+        ),
+        "holdout_mean_decision_regret": (
+            float(pd.to_numeric(
+                results.loc[results["split"].astype(str).str.casefold() == "holdout","decision_regret"],
+                errors="coerce",
+            ).mean())
+            if isinstance(results, pd.DataFrame) and {"decision_regret","split"} <= set(results.columns)
+            and not results.loc[results["split"].astype(str).str.casefold() == "holdout"].empty else None
+        ),
+    }
+    created_at = _now()
+    raw_results = results.to_csv(index=False) if isinstance(results, pd.DataFrame) else ""
+    with _db() as conn:
+        conn.execute(
+            """
+            INSERT INTO experience_research_runs(
+                run_id,study_id,research_id,owner,experiment_code,
+                config_json,summary_json,results_csv,created_at
+            ) VALUES(?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                run_id, str(study_id), str(research_id), str(owner), code,
+                json.dumps(cfg, ensure_ascii=False, default=str),
+                json.dumps(summary, ensure_ascii=False, default=str),
+                raw_results,
+                created_at,
+            ),
+        )
+        conn.commit()
+    return run_id
+
+
+def load_research_run(run_id: str, owner: Optional[str] = None) -> Optional[dict[str, Any]]:
+    ensure_experience_db()
+    with _db() as conn:
+        if owner:
+            row = conn.execute(
+                "SELECT run_id,study_id,research_id,owner,experiment_code,config_json,summary_json,results_csv,created_at FROM experience_research_runs WHERE run_id=? AND owner=?",
+                (str(run_id), str(owner)),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT run_id,study_id,research_id,owner,experiment_code,config_json,summary_json,results_csv,created_at FROM experience_research_runs WHERE run_id=?",
+                (str(run_id),),
+            ).fetchone()
+    if not row:
+        return None
+    keys = ["run_id","study_id","research_id","owner","experiment_code","config_json","summary_json","results_csv","created_at"]
+    data = dict(zip(keys,row))
+    try: data["config"] = json.loads(data.pop("config_json") or "{}")
+    except Exception: data["config"] = {}
+    try: data["summary"] = json.loads(data.pop("summary_json") or "{}")
+    except Exception: data["summary"] = {}
+    data["results"] = pd.read_csv(io.StringIO(data.pop("results_csv") or "")) if data.get("results_csv") else pd.DataFrame()
+    return data
+
+
 def research_runs_frame(study_id: Optional[str]) -> pd.DataFrame:
-    columns = ["Run ID","Module","Job type","Status","Progress","Message","Started","Finished"]
+    columns = [
+        "Run ID","Experiment","Module","Job type","Status","Progress",
+        "Observations","Mean regret","Mean readiness","Message","Created","Finished"
+    ]
     if not study_id:
         return pd.DataFrame(columns=columns)
     ensure_experience_db()
-    matches = []
+    records = []
+
+    # Primary source: persisted research runs with full evidence data.
     with _db() as conn:
         rows = conn.execute(
+            """
+            SELECT run_id,experiment_code,config_json,summary_json,created_at
+            FROM experience_research_runs
+            WHERE study_id=?
+            ORDER BY created_at DESC
+            """,
+            (str(study_id),),
+        ).fetchall()
+    for run_id, code, raw_cfg, raw_summary, created_at in rows:
+        try: cfg = json.loads(raw_cfg or "{}")
+        except Exception: cfg = {}
+        try: summary = json.loads(raw_summary or "{}")
+        except Exception: summary = {}
+        records.append([
+            run_id, code,
+            "Evidence Degradation & Decision-Readiness Lab",
+            "controlled-evidence-experiment",
+            "Completed", 100.0,
+            summary.get("observations", 0),
+            summary.get("holdout_mean_decision_regret", summary.get("mean_decision_regret")),
+            summary.get("mean_readiness_score"),
+            "Persisted experiment evidence",
+            created_at, created_at,
+        ])
+
+    # Compatibility source: governed experience jobs created by the generic shell.
+    with _db() as conn:
+        jobs = conn.execute(
             """
             SELECT job_id,module,job_type,status,progress,message,payload_json,
                    started_at,finished_at
@@ -783,15 +923,23 @@ def research_runs_frame(study_id: Optional[str]) -> pd.DataFrame:
             ORDER BY COALESCE(started_at,finished_at) DESC
             """
         ).fetchall()
-    for job_id, module, job_type, status, progress, message, raw, started, finished in rows:
-        try:
-            payload = json.loads(raw or "{}")
-        except Exception:
-            payload = {}
+    existing_ids = {str(r[0]) for r in records}
+    for job_id, module, job_type, status, progress, message, raw, started, finished in jobs:
+        try: payload = json.loads(raw or "{}")
+        except Exception: payload = {}
         if str(payload.get("study_id", "")) != str(study_id):
             continue
-        matches.append([job_id,module,job_type,status,float(progress or 0),message,started,finished])
-    return pd.DataFrame(matches, columns=columns)
+        if str(job_id) in existing_ids:
+            continue
+        records.append([
+            job_id, payload.get("experiment_code",""),
+            module, job_type, status, float(progress or 0),
+            payload.get("observations", 0),
+            payload.get("mean_regret"),
+            payload.get("mean_readiness"),
+            message, started, finished,
+        ])
+    return pd.DataFrame(records, columns=columns)
 
 
 def research_decisions_frame(owner: str) -> pd.DataFrame:
