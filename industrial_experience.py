@@ -875,6 +875,21 @@ def render_research_workspace(module: str, tier: str, username: str) -> None:
         st.markdown("### Saved research studies")
         if studies.empty:
             st.info("No research studies are currently indexed for this workspace.")
+            st.caption(
+                "Your previous Decision-Readiness study can be restored here if a restart cleared the local research cache. "
+                "Future saves are also persisted to the managed database when it is configured."
+            )
+            if st.button(
+                "↩️ Restore Decision-Readiness Boundary — Experiment 001",
+                type="primary",
+                use_container_width=True,
+                key="research_restore_decision_readiness",
+            ):
+                study_id, research_id = restore_decision_readiness_study(username)
+                st.session_state["sx_research_study_id"] = study_id
+                st.session_state["sx_research_id"] = research_id
+                st.success("Research study restored and linked to this workspace.")
+                st.rerun()
         else:
             labels = [f"{row['Title']} · {row['Research ID']}" for _, row in studies.iterrows()]
             ids = [str(x) for x in studies["Study ID"].tolist()]
