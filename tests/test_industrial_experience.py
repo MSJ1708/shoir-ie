@@ -16,6 +16,7 @@ from industrial_experience import (
     load_research_protocol,
     list_research_studies,
     recover_legacy_research_studies,
+    restore_decision_readiness_study,
     save_project,
 )
 
@@ -144,3 +145,64 @@ def test_legacy_research_project_can_be_recovered(monkeypatch):
         assert restored is not None
         assert restored["title"] == "Recovered Study"
         assert len(list_research_studies("alice")) == 1
+
+
+def test_legacy_app_saved_project_can_be_recovered(monkeypatch):
+    with tempfile.TemporaryDirectory() as td:
+        db = str(Path(td) / "research.db")
+        monkeypatch.setattr(ie, "_db", lambda path=db: sqlite3.connect(path, timeout=30))
+        ensure_experience_db(db)
+        protocol = {
+            "title": "Recovered App-Level Study",
+            "objective": "Recover a protocol from the legacy saved-project table.",
+            "research_question": "Can the older saved_projects record be recovered?",
+            "hypothesis": "Legacy app storage can reconstruct the research protocol.",
+            "null_hypothesis": "Legacy app storage cannot reconstruct the research protocol.",
+            "methodology": "Controlled simulation benchmark",
+            "primary_domain": "Manufacturing",
+            "transfer_domain": "Maintenance",
+            "primary_endpoint": "Normalized decision regret",
+            "secondary_metrics": ["cost"],
+            "independent_variables": ["evidence uncertainty"],
+            "controls": ["scenario seed"],
+            "baseline_definition": "Baseline.",
+            "treatment_definition": "Treatment.",
+            "sample_size": 20,
+            "replications": 2,
+            "random_seed": 2026,
+            "alpha": 0.05,
+            "confidence_level": 0.95,
+            "planned_tests": ["paired comparison"],
+            "inclusion_criteria": "Valid.",
+            "exclusion_criteria": "Invalid.",
+            "data_source": "Synthetic",
+            "protocol_notes": "Legacy app recovery test.",
+            "protocol_locked": False,
+        }
+        with sqlite3.connect(db) as conn:
+            conn.execute("CREATE TABLE saved_projects (name TEXT PRIMARY KEY, data TEXT, updated_at TEXT)")
+            payload = {"research_protocol": protocol, "owner": "alice"}
+            conn.execute(
+                "INSERT INTO saved_projects(name,data,updated_at) VALUES(?,?,?)",
+                ("Recovered App-Level Study", __import__("json").dumps(payload), "2026-09-24T00:00:00Z"),
+            )
+            conn.commit()
+
+        recovered = recover_legacy_research_studies("alice")
+        assert len(recovered) == 1
+        assert recovered.iloc[0]["Title"] == "Recovered App-Level Study"
+        assert len(list_research_studies("alice")) == 1
+
+
+def test_decision_readiness_restore_is_idempotent(monkeypatch):
+    with tempfile.TemporaryDirectory() as td:
+        db = str(Path(td) / "research.db")
+        monkeypatch.setattr(ie, "_db", lambda path=db: sqlite3.connect(path, timeout=30))
+        ensure_experience_db(db)
+        first_id, first_rid = restore_decision_readiness_study("alice")
+        second_id, second_rid = restore_decision_readiness_study("alice")
+        assert first_id == second_id
+        assert first_rid == second_rid
+        restored = load_research_protocol(first_id, owner="alice")
+        assert restored is not None
+        assert restored["title"] == "Industrial AI Decision-Readiness Boundary — Experiment 001"
