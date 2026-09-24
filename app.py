@@ -3715,6 +3715,8 @@ elif selected_module == "Evidence Degradation & Decision-Readiness Lab":
                 "evidence_completeness": int(completeness),
                 "evidence_freshness_hours": int(freshness),
                 "evidence_conflict_pct": int(conflict),
+                "conflict_signal_bias_pct": 20,
+                "conflict_mix_weight": 0.50,
                 "evidence_uncertainty_pct": int(uncertainty),
                 "shock_severity": float(shock),
             }
