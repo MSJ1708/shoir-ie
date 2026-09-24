@@ -26,6 +26,8 @@ try:
         upsert_remote_research_study,
         remote_research_study,
         remote_research_studies,
+        upsert_remote_research_run,
+        remote_research_runs,
     )
 except Exception:  # Local/unit-test fallback when the durable module is unavailable.
     durable_backend_configured = lambda: False
@@ -33,6 +35,8 @@ except Exception:  # Local/unit-test fallback when the durable module is unavail
     upsert_remote_research_study = lambda *_args, **_kwargs: None
     remote_research_study = lambda *_args, **_kwargs: None
     remote_research_studies = lambda *_args, **_kwargs: []
+    upsert_remote_research_run = lambda *_args, **_kwargs: None
+    remote_research_runs = lambda *_args, **_kwargs: []
 
 
 
@@ -847,6 +851,21 @@ def register_research_run(
             ),
         )
         conn.commit()
+    try:
+        if durable_backend_configured():
+            upsert_remote_research_run({
+                "run_id": run_id,
+                "study_id": study_id,
+                "research_id": research_id,
+                "owner": owner,
+                "experiment_code": code,
+                "config": cfg,
+                "summary": summary,
+                "results_csv": raw_results,
+                "created_at": created_at,
+            })
+    except Exception:
+        pass
     return run_id
 
 
@@ -875,7 +894,7 @@ def load_research_run(run_id: str, owner: Optional[str] = None) -> Optional[dict
     return data
 
 
-def research_runs_frame(study_id: Optional[str]) -> pd.DataFrame:
+def research_runs_frame(study_id: Optional[str], owner: Optional[str] = None) -> pd.DataFrame:
     columns = [
         "Run ID","Experiment","Module","Job type","Status","Progress",
         "Observations","Mean regret","Mean readiness","Message","Created","Finished"
@@ -884,6 +903,47 @@ def research_runs_frame(study_id: Optional[str]) -> pd.DataFrame:
         return pd.DataFrame(columns=columns)
     ensure_experience_db()
     records = []
+
+    # Hydrate durable PostgreSQL runs into the local cache after a restart.
+    if owner:
+        try:
+            if durable_backend_configured():
+                for remote in remote_research_runs(owner, str(study_id)):
+                    cfg = {}
+                    summary = {}
+                    try: cfg = dict(remote.get("config") or {})
+                    except Exception: cfg = {}
+                    try: summary = dict(remote.get("summary") or {})
+                    except Exception: summary = {}
+                    with _db() as conn:
+                        exists = conn.execute(
+                            "SELECT 1 FROM experience_research_runs WHERE run_id=? LIMIT 1",
+                            (str(remote.get("run_id")),),
+                        ).fetchone()
+                    if not exists:
+                        with _db() as conn:
+                            conn.execute(
+                                """
+                                INSERT INTO experience_research_runs(
+                                    run_id,study_id,research_id,owner,experiment_code,
+                                    config_json,summary_json,results_csv,created_at
+                                ) VALUES(?,?,?,?,?,?,?,?,?)
+                                """,
+                                (
+                                    str(remote.get("run_id")),
+                                    str(remote.get("study_id")),
+                                    str(remote.get("research_id")),
+                                    str(remote.get("owner") or owner),
+                                    str(remote.get("experiment_code") or ""),
+                                    json.dumps(cfg, ensure_ascii=False, default=str),
+                                    json.dumps(summary, ensure_ascii=False, default=str),
+                                    str(remote.get("results_csv") or ""),
+                                    str(remote.get("created_at") or _now()),
+                                ),
+                            )
+                            conn.commit()
+        except Exception:
+            pass
 
     # Primary source: persisted research runs with full evidence data.
     with _db() as conn:
@@ -991,7 +1051,7 @@ def render_research_workspace(module: str, tier: str, username: str) -> None:
     active_id = st.session_state.get("sx_research_study_id")
     active_protocol = load_research_protocol(active_id, owner=username) if active_id else None
     decisions = research_decisions_frame(username)
-    runs = research_runs_frame(active_id)
+    runs = research_runs_frame(active_id, owner=username)
 
     st.markdown(
         "<div class='sx-hero'><div class='sx-kicker'>Research Workspace</div>"
