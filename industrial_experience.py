@@ -589,7 +589,7 @@ def load_research_protocol(study_id: str, owner: Optional[str] = None) -> Option
     return data
 
 
-def research_protocol_frame(study_id: str) -> pd.DataFrame:
+def research_protocol_frame(study_id: str, owner: Optional[str] = None) -> pd.DataFrame:
     protocol = load_research_protocol(study_id, owner=owner)
     if not protocol:
         return pd.DataFrame()
@@ -1289,7 +1289,7 @@ def render_experience_shell(module: str, tier: str, username: str) -> None:
 
         active_id = st.session_state.get("sx_research_study_id")
         if active_id:
-            frame = research_protocol_frame(active_id)
+            frame = research_protocol_frame(active_id, owner=username)
             if not frame.empty:
                 st.markdown("#### Current research study")
                 st.dataframe(frame, use_container_width=True, hide_index=True)
