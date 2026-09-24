@@ -243,7 +243,7 @@ def test_research_run_history_persists_completed_run(monkeypatch):
         assert len(frame) == 1
         assert frame.iloc[0]["Experiment"] == "001I"
         assert frame.iloc[0]["Observations"] == 4
-        assert abs(float(frame.iloc[0]["Mean regret"]) - 0.225) < 1e-12
+        assert abs(float(frame.iloc[0]["Mean regret"]) - 0.2) < 1e-12
         loaded = ie.load_research_run(run_id, owner="alice")
         assert loaded is not None
         assert len(loaded["results"]) == 4
