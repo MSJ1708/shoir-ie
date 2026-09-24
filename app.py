@@ -26,7 +26,7 @@ from scipy import stats
 from shoir_upgrade import (align_imported_table, clean_dataframe, build_excel_report, build_workbook_bundle, read_uploaded_workbook, apply_excel_function, EXCEL_FUNCTIONS, copilot_module_recommendation)
 from industrial_platform import PLATFORM_CATALOG, render_module as render_industrial_module, ml_demand_forecast, tier_allows as platform_tier_allows
 from industrial_operating_system import render_industrial_operating_system
-from industrial_experience import COPILOT_TOOLS, ensure_experience_db, feature_stats, load_research_protocol, list_research_studies
+from industrial_experience import COPILOT_TOOLS, ensure_experience_db, feature_stats, load_research_protocol, list_research_studies, register_research_run
 from industrial_excellence_hub import render_platform_excellence_hub
 from workspace_persistence import ensure_workspace_state_db, load_user_workspace, save_user_workspace
 from durable_account_store import (durable_backend_configured, sync_durable_accounts, sync_remote_requests_to_local, upsert_remote_account, insert_remote_request, update_latest_remote_request, remote_account, account_is_expired, renewed_expiry)
@@ -3707,14 +3707,37 @@ elif selected_module == "Evidence Degradation & Decision-Readiness Lab":
                 "scenario_count": int(scenario_count),
                 "replications": int(replications),
                 "holdout_fraction": float(holdout_fraction),
-                "random_seed": int(seed)
+                "random_seed": int(seed),
+                "evidence_completeness": int(completeness),
+                "evidence_freshness_hours": int(freshness),
+                "evidence_conflict_pct": int(conflict),
+                "evidence_uncertainty_pct": int(uncertainty),
+                "shock_severity": float(shock),
             }
-            st.success("Controlled experiment completed: " + str(n) + " observations.")
+            if active_study_id and active_protocol:
+                try:
+                    run_id = register_research_run(
+                        study_id=str(active_study_id),
+                        research_id=str(active_protocol.get("research_id")),
+                        owner=str(st.session_state.current_user),
+                        config=st.session_state["edrb_config"],
+                        results=observations,
+                    )
+                    st.session_state["edrb_run_id"] = run_id
+                    st.success("Controlled experiment completed and permanently recorded: " + str(n) + " observations.")
+                except Exception as exc:
+                    st.warning("Experiment completed, but the durable run-history record could not be written: " + str(exc))
+            else:
+                st.success("Controlled experiment completed: " + str(n) + " observations.")
 
     with tab_results:
         results = st.session_state.get("edrb_results")
         if isinstance(results, pd.DataFrame) and not results.empty:
             holdout = results[results["split"] == "holdout"].copy()
+
+            persisted_run_id = st.session_state.get("edrb_run_id")
+            if persisted_run_id:
+                st.info("Research run permanently recorded: " + str(persisted_run_id))
 
             st.markdown("#### Primary endpoint")
             st.metric(
