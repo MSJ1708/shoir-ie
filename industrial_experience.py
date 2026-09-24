@@ -19,6 +19,22 @@ import numpy as np
 import pandas as pd
 import plotly.express as px
 
+try:
+    from durable_account_store import (
+        durable_backend_configured,
+        ensure_remote_research_schema,
+        upsert_remote_research_study,
+        remote_research_study,
+        remote_research_studies,
+    )
+except Exception:  # Local/unit-test fallback when the durable module is unavailable.
+    durable_backend_configured = lambda: False
+    ensure_remote_research_schema = lambda: None
+    upsert_remote_research_study = lambda *_args, **_kwargs: None
+    remote_research_study = lambda *_args, **_kwargs: None
+    remote_research_studies = lambda *_args, **_kwargs: []
+
+
 
 FEATURES_60 = [
     ("01", "Canonical industrial data model", "Shared industrial entities and identifiers.", "Implemented"),
@@ -449,10 +465,87 @@ def create_research_protocol(study_id: str, protocol: Mapping[str, Any], owner: 
             ),
         )
         conn.commit()
+    try:
+        if durable_backend_configured():
+            upsert_remote_research_study({
+                "study_id": study_id,
+                "research_id": research_id,
+                "owner": owner,
+                "title": payload.get("title"),
+                "protocol": payload,
+                "created_at": created_at,
+                "updated_at": stamp,
+            })
+    except Exception:
+        # Local persistence remains the fallback if managed storage is temporarily unavailable.
+        pass
     return research_id, protocol_hash
 
 
-def load_research_protocol(study_id: str) -> Optional[dict[str, Any]]:
+def _hydrate_remote_research_to_local(remote: Mapping[str, Any]) -> Optional[dict[str, Any]]:
+    """Restore a durable research record into the local SQLite cache."""
+    protocol = remote.get("protocol") if isinstance(remote, Mapping) else None
+    if not isinstance(protocol, dict):
+        return None
+    study_id = str(remote.get("study_id") or "").strip()
+    research_id = str(remote.get("research_id") or "").strip()
+    owner = str(remote.get("owner") or "").strip()
+    if not study_id or not research_id or not owner:
+        return None
+    protocol = dict(protocol)
+    protocol.setdefault("title", remote.get("title") or "Research Study")
+    with _db() as conn:
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO experience_research_studies(
+                study_id,research_id,title,objective,research_question,hypothesis,
+                null_hypothesis,methodology,primary_domain,transfer_domain,
+                primary_endpoint,secondary_metrics_json,independent_variables_json,
+                controls_json,baseline_definition,treatment_definition,sample_size,
+                replications,random_seed,alpha,confidence_level,planned_tests_json,
+                inclusion_criteria,exclusion_criteria,data_source,protocol_notes,
+                protocol_hash,protocol_locked,owner,created_at,updated_at
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                study_id,
+                research_id,
+                str(protocol.get("title", "")).strip()[:240],
+                str(protocol.get("objective", "")).strip()[:1500],
+                str(protocol.get("research_question", "")).strip()[:3000],
+                str(protocol.get("hypothesis", "")).strip()[:3000],
+                str(protocol.get("null_hypothesis", "")).strip()[:3000],
+                str(protocol.get("methodology", "")).strip()[:240],
+                str(protocol.get("primary_domain", "")).strip()[:120],
+                str(protocol.get("transfer_domain", "")).strip()[:120],
+                str(protocol.get("primary_endpoint", "")).strip()[:500],
+                json.dumps(_research_list(protocol.get("secondary_metrics", [])), ensure_ascii=False),
+                json.dumps(_research_list(protocol.get("independent_variables", [])), ensure_ascii=False),
+                json.dumps(_research_list(protocol.get("controls", [])), ensure_ascii=False),
+                str(protocol.get("baseline_definition", "")).strip()[:2000],
+                str(protocol.get("treatment_definition", "")).strip()[:2000],
+                int(max(1, int(protocol.get("sample_size", 100)))),
+                int(max(1, int(protocol.get("replications", 30)))),
+                int(protocol.get("random_seed", 2026)),
+                float(protocol.get("alpha", 0.05)),
+                float(protocol.get("confidence_level", 0.95)),
+                json.dumps(_research_list(protocol.get("planned_tests", [])), ensure_ascii=False),
+                str(protocol.get("inclusion_criteria", "")).strip()[:2000],
+                str(protocol.get("exclusion_criteria", "")).strip()[:2000],
+                str(protocol.get("data_source", "")).strip()[:1200],
+                str(protocol.get("protocol_notes", "")).strip()[:3000],
+                str(protocol.get("protocol_hash") or remote.get("protocol_hash") or _research_hash(protocol)),
+                int(bool(protocol.get("protocol_locked", False))),
+                owner,
+                str(remote.get("created_at") or _now()),
+                str(remote.get("updated_at") or _now()),
+            ),
+        )
+        conn.commit()
+    return load_research_protocol(study_id, owner=owner)
+
+
+def load_research_protocol(study_id: str, owner: Optional[str] = None) -> Optional[dict[str, Any]]:
     ensure_experience_db()
     with _db() as conn:
         row = conn.execute(
@@ -470,6 +563,13 @@ def load_research_protocol(study_id: str) -> Optional[dict[str, Any]]:
             (study_id,),
         ).fetchone()
     if not row:
+        try:
+            remote = remote_research_study(study_id, owner=owner)
+            hydrated = _hydrate_remote_research_to_local(remote) if remote else None
+            if hydrated:
+                return hydrated
+        except Exception:
+            pass
         return None
     keys = [
         "study_id","research_id","title","objective","research_question","hypothesis",
@@ -489,8 +589,8 @@ def load_research_protocol(study_id: str) -> Optional[dict[str, Any]]:
     return data
 
 
-def research_protocol_frame(study_id: str) -> pd.DataFrame:
-    protocol = load_research_protocol(study_id)
+def research_protocol_frame(study_id: str, owner: Optional[str] = None) -> pd.DataFrame:
+    protocol = load_research_protocol(study_id, owner=owner)
     if not protocol:
         return pd.DataFrame()
     return pd.DataFrame([{
@@ -514,6 +614,15 @@ def research_protocol_frame(study_id: str) -> pd.DataFrame:
 
 def list_research_studies(owner: str) -> pd.DataFrame:
     ensure_experience_db()
+    try:
+        if durable_backend_configured():
+            for remote in remote_research_studies(owner):
+                try:
+                    _hydrate_remote_research_to_local(remote)
+                except Exception:
+                    pass
+    except Exception:
+        pass
     with _db() as conn:
         rows = conn.execute(
             """
@@ -541,6 +650,56 @@ def list_research_studies(owner: str) -> pd.DataFrame:
     return frame
 
 
+def restore_decision_readiness_study(owner: str) -> tuple[str, str]:
+    """Recreate the study/protocol used by the Decision-Readiness research workflow.
+
+    This is a recovery action for a study that was previously created in the
+    transient/local workspace but is no longer visible after a restart.
+    """
+    ensure_experience_db()
+    title = "Industrial AI Decision-Readiness Boundary — Experiment 001"
+    existing = list_research_studies(owner)
+    if not existing.empty:
+        match = existing[existing["Title"].astype(str).str.strip().str.casefold() == title.casefold()]
+        if not match.empty:
+            sid = str(match.iloc[0]["Study ID"])
+            protocol = load_research_protocol(sid, owner=owner)
+            return sid, str(protocol.get("research_id")) if protocol else str(match.iloc[0]["Research ID"])
+
+    protocol = {
+        "title": title,
+        "objective": "Determine how evidence degradation and operational disturbances affect industrial decision reliability and whether a reproducible decision-readiness boundary can be identified.",
+        "research_question": "Can an industrial decision system identify a measurable boundary beyond which degraded, stale, missing, or conflicting evidence makes an operational recommendation unreliable?",
+        "hypothesis": "Joint degradation of evidence quality and operating conditions will produce nonlinear deterioration in industrial decision reliability, allowing a measurable decision-readiness boundary to be identified.",
+        "null_hypothesis": "Joint evidence degradation and operational disturbances will not produce a reproducible decision-readiness boundary beyond the effects of the individual factors.",
+        "methodology": "Controlled simulation benchmark",
+        "primary_domain": "Manufacturing",
+        "transfer_domain": "Maintenance",
+        "primary_endpoint": "Normalized decision regret",
+        "secondary_metrics": ["total cost","throughput","service level","constraint violations","quality impact","energy impact","decision reversal rate"],
+        "independent_variables": ["evidence completeness","evidence freshness","evidence conflict","uncertainty level","operational shock severity"],
+        "controls": ["scenario seed","baseline operating state","decision objective weights","constraint set","decision horizon"],
+        "sample_size": 200,
+        "replications": 20,
+        "random_seed": 2026,
+        "alpha": 0.05,
+        "confidence_level": 0.95,
+        "data_source": "Shoir-IE controlled synthetic industrial scenarios; public dataset validation in a subsequent phase",
+        "baseline_definition": "A documented decision policy operating with complete, fresh and internally consistent evidence under the defined baseline industrial conditions.",
+        "treatment_definition": "The same decision problem evaluated under systematically controlled degradation of evidence completeness, freshness, conflict and uncertainty, combined with controlled operational disturbances.",
+        "planned_tests": ["confidence intervals","paired comparisons","effect sizes","bootstrap sensitivity","factorial interaction analysis"],
+        "inclusion_criteria": "Valid industrial scenarios with complete baseline definitions, finite numeric inputs, specified decision constraints, identifiable evidence-quality conditions, and a computable decision outcome. Scenarios must contain sufficient information to calculate the primary endpoint, normalized decision regret.",
+        "exclusion_criteria": "Malformed or incomplete scenarios; missing primary outcome; non-finite or invalid numeric values; unspecified decision constraints; failed model validation; solver or runtime failures unrelated to the decision method; duplicate experimental scenarios that violate the planned sampling design.",
+        "protocol_notes": "This study will first use controlled Shoir-IE synthetic industrial scenarios to isolate causal effects of evidence degradation and operational disturbances. The decision-readiness boundary must be derived from experimental evidence and must not be predefined as a desired result. Results from synthetic scenarios may not generalize directly to every real industrial environment. Public external datasets will be used for subsequent validation where suitable. Protocol amendments, parameter changes and deviations from the planned experiment will be recorded explicitly rather than silently changing the original specification.",
+        "protocol_locked": False,
+        "module": "Experiment Lab",
+        "tier": "Research Pack",
+    }
+    study_id = save_project(title, "Experiment Lab", owner, {"research_protocol": protocol, "protocol_type": "local_research_protocol"})
+    research_id, _ = create_research_protocol(study_id, protocol, owner)
+    return study_id, research_id
+
+
 def recover_legacy_research_studies(owner: str) -> pd.DataFrame:
     """Recover protocols persisted inside older project payloads."""
     ensure_experience_db()
@@ -555,6 +714,29 @@ def recover_legacy_research_studies(owner: str) -> pd.DataFrame:
             """,
             (owner,),
         ).fetchall()
+        # Also inspect the older app-level saved_projects table. Older releases
+        # stored research protocols there without an owner column.
+        try:
+            legacy_rows = conn.execute(
+                "SELECT name,data,updated_at FROM saved_projects ORDER BY updated_at DESC"
+            ).fetchall()
+        except Exception:
+            legacy_rows = []
+        for name, raw, updated_at in legacy_rows:
+            try:
+                payload = json.loads(raw or "{}")
+            except Exception:
+                continue
+            protocol = payload.get("research_protocol")
+            if not isinstance(protocol, dict):
+                continue
+            record_owner = str(payload.get("owner") or payload.get("username") or owner).strip()
+            if record_owner.lower() != str(owner).strip().lower():
+                continue
+            project_id = "LEGACY-" + hashlib.sha1(
+                (str(name) + str(owner)).encode("utf-8")
+            ).hexdigest()[:12].upper()
+            rows.append((project_id, str(name), "Experiment Lab", json.dumps(payload), str(updated_at or _now())))
         # A study ID is globally unique. Never overwrite another owner's
         # already-indexed protocol during recovery.
         existing_ids = {
@@ -659,7 +841,7 @@ def render_research_workspace(module: str, tier: str, username: str) -> None:
     ensure_experience_db()
     studies = list_research_studies(username)
     active_id = st.session_state.get("sx_research_study_id")
-    active_protocol = load_research_protocol(active_id) if active_id else None
+    active_protocol = load_research_protocol(active_id, owner=username) if active_id else None
     decisions = research_decisions_frame(username)
     runs = research_runs_frame(active_id)
 
@@ -693,6 +875,21 @@ def render_research_workspace(module: str, tier: str, username: str) -> None:
         st.markdown("### Saved research studies")
         if studies.empty:
             st.info("No research studies are currently indexed for this workspace.")
+            st.caption(
+                "Your previous Decision-Readiness study can be restored here if a restart cleared the local research cache. "
+                "Future saves are also persisted to the managed database when it is configured."
+            )
+            if st.button(
+                "↩️ Restore Decision-Readiness Boundary — Experiment 001",
+                type="primary",
+                use_container_width=True,
+                key="research_restore_decision_readiness",
+            ):
+                study_id, research_id = restore_decision_readiness_study(username)
+                st.session_state["sx_research_study_id"] = study_id
+                st.session_state["sx_research_id"] = research_id
+                st.success("Research study restored and linked to this workspace.")
+                st.rerun()
         else:
             labels = [f"{row['Title']} · {row['Research ID']}" for _, row in studies.iterrows()]
             ids = [str(x) for x in studies["Study ID"].tolist()]
@@ -986,7 +1183,7 @@ def render_experience_shell(module: str, tier: str, username: str) -> None:
         st.markdown("### 🔬 Research Study Protocol")
         st.caption("Define the research question, hypotheses, variables, controls, sampling plan and reproducibility settings before the main experiment. This is a local protocol record and integrity control; it is not external preregistration.")
         active_protocol_id = st.session_state.get("sx_research_study_id")
-        active_protocol = load_research_protocol(active_protocol_id) if active_protocol_id else None
+        active_protocol = load_research_protocol(active_protocol_id, owner=username) if active_protocol_id else None
         locked = bool(active_protocol and active_protocol.get("protocol_locked"))
         methods = ["Controlled simulation benchmark", "Design of experiments (DOE)", "Cross-domain transfer benchmark", "Monte Carlo study", "Hybrid simulation + optimization"]
         domains = ["Manufacturing", "Warehouse / inventory", "Supply chain", "Maintenance", "Quality", "Energy"]
@@ -1092,7 +1289,7 @@ def render_experience_shell(module: str, tier: str, username: str) -> None:
 
         active_id = st.session_state.get("sx_research_study_id")
         if active_id:
-            frame = research_protocol_frame(active_id)
+            frame = research_protocol_frame(active_id, owner=username)
             if not frame.empty:
                 st.markdown("#### Current research study")
                 st.dataframe(frame, use_container_width=True, hide_index=True)
