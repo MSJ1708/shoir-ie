@@ -27,6 +27,7 @@ from shoir_upgrade import (align_imported_table, clean_dataframe, build_excel_re
 from industrial_platform import PLATFORM_CATALOG, render_module as render_industrial_module, ml_demand_forecast, tier_allows as platform_tier_allows
 from industrial_operating_system import render_industrial_operating_system
 from industrial_experience import COPILOT_TOOLS, ensure_experience_db, feature_stats, load_research_protocol, list_research_studies, register_research_run
+from research_experiment_engine import apply_evidence_conflict
 from industrial_excellence_hub import render_platform_excellence_hub
 from workspace_persistence import ensure_workspace_state_db, load_user_workspace, save_user_workspace
 from durable_account_store import (durable_backend_configured, sync_durable_accounts, sync_remote_requests_to_local, upsert_remote_account, insert_remote_request, update_latest_remote_request, remote_account, account_is_expired, renewed_expiry)
@@ -3634,11 +3635,14 @@ elif selected_module == "Evidence Degradation & Decision-Readiness Lab":
             missing = rng.random(n) > (float(completeness) / 100.0)
             evidence[missing] = np.nan
 
-            conflict_mask = rng.random(n) < (float(conflict) / 100.0)
-            evidence[conflict_mask] = np.where(
-                np.isfinite(evidence[conflict_mask]),
-                2.0 * latent_demand[conflict_mask] - evidence[conflict_mask],
-                np.nan
+            # Apply a balanced contradictory evidence signal. The previous
+            # reflection rule could preserve absolute error, making the conflict
+            # factor statistically degenerate for many scenarios.
+            evidence, conflict_mask = apply_evidence_conflict(
+                latent_demand,
+                evidence,
+                float(conflict),
+                rng,
             )
 
             operational_shock = rng.normal(0.0, 10.0 * float(shock), n)
@@ -3711,6 +3715,8 @@ elif selected_module == "Evidence Degradation & Decision-Readiness Lab":
                 "evidence_completeness": int(completeness),
                 "evidence_freshness_hours": int(freshness),
                 "evidence_conflict_pct": int(conflict),
+                "conflict_signal_bias_pct": 20,
+                "conflict_mix_weight": 0.50,
                 "evidence_uncertainty_pct": int(uncertainty),
                 "shock_severity": float(shock),
             }
