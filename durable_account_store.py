@@ -111,6 +111,121 @@ def ensure_remote_schema() -> None:
         conn.commit()
 
 
+
+
+def ensure_remote_research_schema() -> None:
+    """Create the durable research-study table alongside account storage."""
+    if not durable_backend_configured():
+        return
+    schema = """
+    CREATE TABLE IF NOT EXISTS shoir_research_studies (
+        study_id TEXT PRIMARY KEY,
+        research_id TEXT UNIQUE NOT NULL,
+        owner TEXT NOT NULL,
+        owner_lc TEXT NOT NULL,
+        title TEXT NOT NULL,
+        protocol_json TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_shoir_research_owner
+        ON shoir_research_studies(owner_lc, updated_at DESC);
+    """
+    with _pg_connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(schema)
+        conn.commit()
+
+
+def upsert_remote_research_study(study: Mapping[str, Any]) -> None:
+    """Persist a research protocol durably when the managed DB is configured."""
+    if not durable_backend_configured():
+        return
+    ensure_remote_research_schema()
+    import json
+    now = dt.datetime.now(dt.timezone.utc)
+    created = study.get("created_at") or now
+    updated = study.get("updated_at") or now
+    protocol = study.get("protocol") or {}
+    owner = str(study.get("owner") or "").strip()
+    with _pg_connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO shoir_research_studies
+                    (study_id,research_id,owner,owner_lc,title,protocol_json,created_at,updated_at)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+                ON CONFLICT (study_id) DO UPDATE SET
+                    research_id=EXCLUDED.research_id,
+                    owner=EXCLUDED.owner,
+                    owner_lc=EXCLUDED.owner_lc,
+                    title=EXCLUDED.title,
+                    protocol_json=EXCLUDED.protocol_json,
+                    updated_at=EXCLUDED.updated_at
+                """,
+                (
+                    str(study["study_id"]),
+                    str(study["research_id"]),
+                    owner,
+                    owner.lower(),
+                    str(study.get("title") or protocol.get("title") or "Research Study"),
+                    json.dumps(dict(protocol), ensure_ascii=False, sort_keys=True, default=str),
+                    created,
+                    updated,
+                ),
+            )
+        conn.commit()
+
+
+def remote_research_study(study_id: str, owner: Optional[str] = None) -> Optional[dict[str, Any]]:
+    """Load one durable research protocol, optionally owner-scoped."""
+    if not durable_backend_configured():
+        return None
+    ensure_remote_research_schema()
+    import json
+    with _pg_connect() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            if owner:
+                cur.execute(
+                    "SELECT * FROM shoir_research_studies WHERE study_id=%s AND owner_lc=%s LIMIT 1",
+                    (str(study_id), str(owner).strip().lower()),
+                )
+            else:
+                cur.execute(
+                    "SELECT * FROM shoir_research_studies WHERE study_id=%s LIMIT 1",
+                    (str(study_id),),
+                )
+            row = cur.fetchone()
+    if not row:
+        return None
+    data = dict(row)
+    try:
+        data["protocol"] = json.loads(data.get("protocol_json") or "{}")
+    except Exception:
+        data["protocol"] = {}
+    return data
+
+
+def remote_research_studies(owner: str) -> list[dict[str, Any]]:
+    """List all durable research protocols for one workspace owner."""
+    if not durable_backend_configured():
+        return []
+    ensure_remote_research_schema()
+    import json
+    with _pg_connect() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                "SELECT * FROM shoir_research_studies WHERE owner_lc=%s ORDER BY updated_at DESC",
+                (str(owner).strip().lower(),),
+            )
+            rows = [dict(row) for row in cur.fetchall()]
+    for row in rows:
+        try:
+            row["protocol"] = json.loads(row.get("protocol_json") or "{}")
+        except Exception:
+            row["protocol"] = {}
+    return rows
+
 def _iso(value: Any) -> Optional[str]:
     if value is None or value == "":
         return None
