@@ -869,6 +869,109 @@ def register_research_run(
     return run_id
 
 
+def import_research_run_csv(
+    study_id: str,
+    research_id: str,
+    owner: str,
+    uploaded: Any,
+    experiment_code: Optional[str] = None,
+) -> tuple[str, dict[str, Any]]:
+    """Import a previously exported Lab CSV into the persistent run registry."""
+    ensure_experience_db()
+    raw = uploaded.getvalue() if hasattr(uploaded, "getvalue") else uploaded
+    if isinstance(raw, str):
+        raw = raw.encode("utf-8")
+    if not raw:
+        raise ValueError("The uploaded CSV is empty.")
+
+    try:
+        df = pd.read_csv(io.BytesIO(raw))
+    except Exception as exc:
+        raise ValueError(f"Could not read the CSV: {exc}") from exc
+
+    aliases = {
+        "decision_regret": ["decision_regret", "Decision Regret", "decision regret"],
+        "readiness_score": ["readiness_score", "Readiness Score", "readiness score"],
+        "split": ["split", "Split"],
+        "evidence_completeness": ["evidence_completeness", "Evidence Completeness", "evidence completeness"],
+        "evidence_freshness_hours": ["evidence_freshness_hours", "Evidence Freshness Hours", "evidence freshness hours"],
+        "evidence_conflict_pct": ["evidence_conflict_pct", "Evidence Conflict Pct", "evidence conflict pct"],
+        "evidence_uncertainty_pct": ["evidence_uncertainty_pct", "Evidence Uncertainty Pct", "evidence uncertainty pct"],
+        "shock_severity": ["shock_severity", "Shock Severity", "shock severity"],
+    }
+
+    def resolve(field: str) -> Optional[str]:
+        normalized = {str(col).strip().casefold(): col for col in df.columns}
+        for alias in aliases[field]:
+            if alias.casefold() in normalized:
+                return normalized[alias.casefold()]
+        return None
+
+    required = {field: resolve(field) for field in aliases}
+    missing = [field for field in ("decision_regret", "readiness_score") if not required[field]]
+    if missing:
+        raise ValueError(
+            "This is not a Shoir-IE Evidence Degradation Lab CSV. Missing: "
+            + ", ".join(missing)
+        )
+
+    clean = df.copy()
+    clean = clean.rename(columns={col: field for field, col in required.items() if col})
+    for field in ("decision_regret", "readiness_score"):
+        clean[field] = pd.to_numeric(clean[field], errors="coerce")
+    if "split" not in clean.columns:
+        clean["split"] = "development"
+    clean["split"] = clean["split"].astype(str)
+    if clean["decision_regret"].isna().all():
+        raise ValueError("Decision Regret contains no usable numeric values.")
+    clean = clean.dropna(subset=["decision_regret"]).reset_index(drop=True)
+
+    config = {
+        "study_id": str(study_id),
+        "research_id": str(research_id),
+        "decision_type": "Next-shift production target",
+        "baseline_policy": "Evidence-following policy",
+        "scenario_count": int(len(clean)),
+        "replications": 1,
+        "holdout_fraction": float(
+            (clean["split"].str.casefold() == "holdout").mean()
+            if len(clean) else 0.0
+        ),
+        "random_seed": 2026,
+    }
+    for field in (
+        "evidence_completeness",
+        "evidence_freshness_hours",
+        "evidence_conflict_pct",
+        "evidence_uncertainty_pct",
+        "shock_severity",
+    ):
+        if field in clean.columns:
+            values = pd.to_numeric(clean[field], errors="coerce").dropna()
+            if not values.empty:
+                value = float(values.iloc[0])
+                config[field] = int(value) if field != "shock_severity" else value
+
+    code = str(experiment_code or "").strip().upper()
+    if code in {"", "AUTO"}:
+        code = _research_experiment_code(config)
+    config["experiment_code"] = code
+
+    run_id = register_research_run(
+        study_id=str(study_id),
+        research_id=str(research_id),
+        owner=str(owner),
+        config=config,
+        results=clean,
+    )
+    return run_id, {
+        "experiment_code": code,
+        "observations": int(len(clean)),
+        "mean_decision_regret": float(clean["decision_regret"].mean()),
+        "mean_readiness_score": float(clean["readiness_score"].mean()),
+    }
+
+
 def load_research_run(run_id: str, owner: Optional[str] = None) -> Optional[dict[str, Any]]:
     ensure_experience_db()
     with _db() as conn:
