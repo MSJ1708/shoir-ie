@@ -1341,10 +1341,62 @@ def render_research_workspace(module: str, tier: str, username: str) -> None:
         st.markdown("### Run history")
         if not active_protocol:
             st.info("Select a saved study first.")
-        elif runs.empty:
-            st.info("No persisted experiment runs exist for this study yet. This tab intentionally does not present a fake run button.")
         else:
-            st.dataframe(runs, use_container_width=True, hide_index=True)
+            if runs.empty:
+                st.info("No persisted experiment runs exist for this study yet.")
+            else:
+                st.dataframe(runs, use_container_width=True, hide_index=True)
+
+            st.markdown("#### ♻️ Recover a previously completed Lab run")
+            st.caption(
+                "Use this only for an experiment that was completed before persistent run history was enabled. "
+                "The original CSV is imported into the same research-run registry used by new experiments."
+            )
+            recovery_file = st.file_uploader(
+                "Upload the completed Evidence Degradation Lab CSV",
+                type=["csv"],
+                key="research_run_recovery_csv",
+                help="Expected fields include decision_regret, readiness_score and the evidence-factor columns.",
+            )
+            rc1, rc2 = st.columns([1, 1])
+            with rc1:
+                recovery_code = st.selectbox(
+                    "Experiment code",
+                    ["Auto-detect","001A","001B","001C","001D","001E","001F","001G","001H","001I","001J"],
+                    index=0,
+                    key="research_run_recovery_code",
+                )
+            with rc2:
+                st.write("")
+                st.write("")
+                recover_clicked = st.button(
+                    "📥 Import & Persist Run",
+                    type="primary",
+                    use_container_width=True,
+                    disabled=recovery_file is None,
+                    key="research_run_recovery_button",
+                )
+            if recover_clicked and recovery_file is not None:
+                try:
+                    from industrial_experience import import_research_run_csv
+                    run_id, summary = import_research_run_csv(
+                        study_id=str(active_protocol["study_id"]),
+                        research_id=str(active_protocol["research_id"]),
+                        owner=str(username),
+                        uploaded=recovery_file,
+                        experiment_code=None if recovery_code == "Auto-detect" else recovery_code,
+                    )
+                    st.success(
+                        "Recovered {} · {} observations · mean regret {:.5f}".format(
+                            summary["experiment_code"],
+                            summary["observations"],
+                            summary["mean_decision_regret"],
+                        )
+                    )
+                    st.session_state["sx_last_recovered_run_id"] = run_id
+                    st.rerun()
+                except Exception as exc:
+                    st.error("Run recovery failed: " + str(exc))
 
     with tabs[3]:
         st.markdown("### Decision records")
