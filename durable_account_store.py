@@ -130,6 +130,20 @@ def ensure_remote_research_schema() -> None:
     );
     CREATE INDEX IF NOT EXISTS idx_shoir_research_owner
         ON shoir_research_studies(owner_lc, updated_at DESC);
+    CREATE TABLE IF NOT EXISTS shoir_research_runs (
+        run_id TEXT PRIMARY KEY,
+        study_id TEXT NOT NULL,
+        research_id TEXT NOT NULL,
+        owner TEXT NOT NULL,
+        owner_lc TEXT NOT NULL,
+        experiment_code TEXT NOT NULL,
+        config_json TEXT NOT NULL,
+        summary_json TEXT NOT NULL,
+        results_csv TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_shoir_research_runs_study
+        ON shoir_research_runs(owner_lc, study_id, created_at DESC);
     """
     with _pg_connect() as conn:
         with conn.cursor() as cur:
@@ -204,6 +218,85 @@ def remote_research_study(study_id: str, owner: Optional[str] = None) -> Optiona
     except Exception:
         data["protocol"] = {}
     return data
+
+
+
+def upsert_remote_research_run(run: Mapping[str, Any]) -> None:
+    """Persist a completed research run and its CSV evidence."""
+    if not durable_backend_configured():
+        return
+    ensure_remote_research_schema()
+    import json
+    created = run.get("created_at") or dt.datetime.now(dt.timezone.utc)
+    owner = str(run.get("owner") or "").strip()
+    config = run.get("config") or {}
+    summary = run.get("summary") or {}
+    with _pg_connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO shoir_research_runs
+                    (run_id,study_id,research_id,owner,owner_lc,experiment_code,
+                     config_json,summary_json,results_csv,created_at)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                ON CONFLICT (run_id) DO UPDATE SET
+                    study_id=EXCLUDED.study_id,
+                    research_id=EXCLUDED.research_id,
+                    owner=EXCLUDED.owner,
+                    owner_lc=EXCLUDED.owner_lc,
+                    experiment_code=EXCLUDED.experiment_code,
+                    config_json=EXCLUDED.config_json,
+                    summary_json=EXCLUDED.summary_json,
+                    results_csv=EXCLUDED.results_csv
+                """,
+                (
+                    str(run["run_id"]),
+                    str(run["study_id"]),
+                    str(run["research_id"]),
+                    owner,
+                    owner.lower(),
+                    str(run["experiment_code"]),
+                    json.dumps(dict(config), ensure_ascii=False, sort_keys=True, default=str),
+                    json.dumps(dict(summary), ensure_ascii=False, sort_keys=True, default=str),
+                    str(run.get("results_csv") or ""),
+                    created,
+                ),
+            )
+        conn.commit()
+
+
+def remote_research_runs(owner: str, study_id: Optional[str] = None) -> list[dict[str, Any]]:
+    """Return durable research runs for one owner, optionally one study."""
+    if not durable_backend_configured():
+        return []
+    ensure_remote_research_schema()
+    import json
+    with _pg_connect() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            if study_id:
+                cur.execute(
+                    """
+                    SELECT * FROM shoir_research_runs
+                    WHERE owner_lc=%s AND study_id=%s
+                    ORDER BY created_at DESC
+                    """,
+                    (str(owner).strip().lower(), str(study_id)),
+                )
+            else:
+                cur.execute(
+                    """
+                    SELECT * FROM shoir_research_runs
+                    WHERE owner_lc=%s
+                    ORDER BY created_at DESC
+                    """,
+                    (str(owner).strip().lower(),),
+                )
+            rows = [dict(row) for row in cur.fetchall()]
+    for row in rows:
+        for key in ("config_json","summary_json"):
+            try: row[key[:-5]] = json.loads(row.get(key) or "{}")
+            except Exception: row[key[:-5]] = {}
+    return rows
 
 
 def remote_research_studies(owner: str) -> list[dict[str, Any]]:

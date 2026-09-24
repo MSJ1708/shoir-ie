@@ -17,6 +17,8 @@ from industrial_experience import (
     list_research_studies,
     recover_legacy_research_studies,
     restore_decision_readiness_study,
+    register_research_run,
+    research_runs_frame,
     save_project,
 )
 
@@ -206,3 +208,42 @@ def test_decision_readiness_restore_is_idempotent(monkeypatch):
         restored = load_research_protocol(first_id, owner="alice")
         assert restored is not None
         assert restored["title"] == "Industrial AI Decision-Readiness Boundary — Experiment 001"
+
+
+def test_research_run_history_persists_completed_run(monkeypatch):
+    with tempfile.TemporaryDirectory() as td:
+        db = str(Path(td) / "research.db")
+        monkeypatch.setattr(ie, "_db", lambda path=db: sqlite3.connect(path, timeout=30))
+        ensure_experience_db(db)
+        protocol = {
+            "title": "Run History Study",
+            "research_id": "RSH-TEST123",
+            "primary_endpoint": "Normalized decision regret",
+            "sample_size": 20,
+            "replications": 2,
+        }
+        create_research_protocol("PRJ-RUN-HISTORY", protocol, "alice")
+        results = pd.DataFrame({
+            "scenario": [1,2,3,4],
+            "decision_regret": [0.10,0.20,0.15,0.25],
+            "readiness_score": [0.8,0.7,0.75,0.65],
+            "split": ["development","development","holdout","holdout"],
+        })
+        cfg = {
+            "evidence_completeness": 75,
+            "evidence_freshness_hours": 6,
+            "evidence_conflict_pct": 10,
+            "evidence_uncertainty_pct": 20,
+            "shock_severity": 0.0,
+        }
+        run_id = register_research_run(
+            "PRJ-RUN-HISTORY", "RSH-TEST123", "alice", cfg, results
+        )
+        frame = research_runs_frame("PRJ-RUN-HISTORY", owner="alice")
+        assert len(frame) == 1
+        assert frame.iloc[0]["Experiment"] == "001I"
+        assert frame.iloc[0]["Observations"] == 4
+        assert abs(float(frame.iloc[0]["Mean regret"]) - 0.2) < 1e-12
+        loaded = ie.load_research_run(run_id, owner="alice")
+        assert loaded is not None
+        assert len(loaded["results"]) == 4
