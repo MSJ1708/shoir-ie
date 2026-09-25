@@ -1028,13 +1028,6 @@ if st.session_state.get("authenticated") and st.session_state.get("current_user"
 if not st.session_state.get("current_user"):
     st.title("🔐 Welcome to Shoir-IE Workspace")
     st.markdown("Please sign in with your approved account or register and submit your payment ticket below.")
-    if not _durable_accounts_ready:
-        st.warning(
-            "⚠️ Persistent cloud storage is not connected. Accounts and workspace history "
-            "cannot be guaranteed across a Streamlit restart until the Supabase/PostgreSQL "
-            "database secret is configured. Local development still uses SQLite."
-        )
-
     auth_tab1, auth_tab2, auth_tab3 = st.tabs(["🔑 Sign In", "📝 Get Ticket & Register", "🧭 Explore the Modules"])
 
     # ------------------------------------------
@@ -1084,25 +1077,36 @@ if not st.session_state.get("current_user"):
                 # source of truth for authentication or workspace persistence.
                 try:
                     conn_local = sqlite3.connect("enterprise_full_workspace.db")
-                    conn_local.execute(
-                        """
-                        INSERT INTO users
-                        (username,password,role,tier,email,created_at,subscription_expires_at)
-                        VALUES (?,?,?,?,?,?,?)
-                        ON CONFLICT(username) DO UPDATE SET
-                            role=excluded.role,tier=excluded.tier,email=excluded.email,
-                            subscription_expires_at=excluded.subscription_expires_at
-                        """,
-                        (
-                            username,
-                            "REMOTE_MANAGED",
-                            role,
-                            tier,
-                            email,
-                            datetime.datetime.now(datetime.timezone.utc).isoformat(),
-                            expiry,
-                        ),
-                    )
+                    local_row = conn_local.execute(
+                        "SELECT id FROM users WHERE LOWER(username)=? LIMIT 1",
+                        (username.lower(),),
+                    ).fetchone()
+                    if local_row:
+                        conn_local.execute(
+                            """
+                            UPDATE users
+                            SET role=?, tier=?, email=?, subscription_expires_at=?
+                            WHERE id=?
+                            """,
+                            (role, tier, email, expiry, local_row[0]),
+                        )
+                    else:
+                        conn_local.execute(
+                            """
+                            INSERT INTO users
+                            (username,password,role,tier,email,created_at,subscription_expires_at)
+                            VALUES (?,?,?,?,?,?,?)
+                            """,
+                            (
+                                username,
+                                "REMOTE_MANAGED",
+                                role,
+                                tier,
+                                email,
+                                datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                                expiry,
+                            ),
+                        )
                     conn_local.execute(
                         "INSERT OR IGNORE INTO enterprise_users (username) VALUES (?)",
                         (username,),
