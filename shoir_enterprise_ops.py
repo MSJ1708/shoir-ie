@@ -920,8 +920,26 @@ def build_realtime_monitoring(df: pd.DataFrame, threshold: float | None = None) 
     return d
 
 
+def _load_persisted_telemetry(limit: int = 500) -> pd.DataFrame:
+    try:
+        import sqlite3
+        with sqlite3.connect("enterprise_full_workspace.db", timeout=10) as conn:
+            data = pd.read_sql(
+                "SELECT asset_id AS Asset, ts AS Timestamp, metric AS Metric, value AS Value, source AS Source "
+                "FROM telemetry_events ORDER BY id DESC LIMIT ?",
+                conn,
+                params=(int(limit),),
+            )
+        return data.sort_values("Timestamp")
+    except Exception:
+        return pd.DataFrame()
+
+
 def render_realtime_monitoring_extension(sensor_df: Any = None, module: str = "Digital Twin & DES") -> None:
     source = _df(sensor_df if sensor_df is not None else st.session_state.get("iot_sensors", []))
+    persisted = _load_persisted_telemetry()
+    if not persisted.empty and (source.empty or "Timestamp" not in source.columns):
+        source = persisted
     monitor = build_realtime_monitoring(source)
     st.session_state[f"realtime_monitoring_{hashlib.sha1(module.encode()).hexdigest()[:10]}"] = monitor
     st.markdown("### 📡 Real-Time Monitoring & Anomaly Detection")
@@ -931,6 +949,10 @@ def render_realtime_monitoring_extension(sensor_df: Any = None, module: str = "D
     numeric = [c for c in monitor.columns if pd.api.types.is_numeric_dtype(monitor[c])]
     metric = st.selectbox("Telemetry measure", numeric, key=f"rt_metric_{module}")
     threshold = st.number_input("Optional alert threshold", value=float(_numeric(monitor[metric]).median()) if monitor[metric].notna().any() else 0.0, key=f"rt_threshold_{module}")
+    if st.button("↻ Refresh persisted telemetry", use_container_width=True, key=f"rt_refresh_{module}"):
+        refreshed = _load_persisted_telemetry()
+        if not refreshed.empty:
+            source = refreshed
     updated = build_realtime_monitoring(source, threshold)
     st.session_state[f"realtime_monitoring_{hashlib.sha1(module.encode()).hexdigest()[:10]}"] = updated
     anomalies = int(updated.get("Anomaly", pd.Series(dtype=bool)).sum()) if "Anomaly" in updated.columns else 0
