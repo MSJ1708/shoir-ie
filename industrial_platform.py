@@ -485,7 +485,7 @@ def save_model_snapshot(
                 mid, name, str(version or "1.0.0"), model_type,
                 json.dumps(parameters, default=str), data_hash,
                 json.dumps(assumptions, default=str), username, _now(), status,
-                solver_version, result_hash,
+                solver_version, result_hash, dataset_id, run_id,
             ),
         )
         c.commit()
