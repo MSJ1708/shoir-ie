@@ -71,7 +71,7 @@ _MODULE_KEYS = {
     "Predictive Maintenance Hub": ["maintenance_assets","maintenance_telemetry","enterprise_twin_anomalies_df","enterprise_artifact_ledger"],
     "Engineering Economics & Finance": ["economic_summary","df_economic_summary","df_amort","capex_result","enterprise_artifact_ledger"],
     "Green IE & Sustainability": ["lca_materials","carbon_latest_df","sustain_result","enterprise_artifact_ledger"],
-    "Control Tower": ["control_tower_metrics", "control_tower_disruption_df"],
+    "Control Tower": ["control_tower_metrics", "control_tower_disruption_df", "enterprise_control_tower_health_df", "enterprise_artifact_ledger"],
     "Cryptographic Ledger": ["ledger_history"],
     "Carbon Accounting": ["carbon_latest_df"],
 }
