@@ -319,9 +319,13 @@ def explain_results(prompt: str, inspection: Mapping[str, Any], method: Mapping[
             "The forecast engine returned an R² of "
             f"{float(metrics.get('R2', 0.0)):.3f} and MAE of {float(metrics.get('MAE', 0.0)):.3f} on the fitted historical data."
         )
-    elif meta.get("type") == "optimization_readiness":
+    elif meta.get("type") in {"optimization_readiness", "milp_optimization"}:
         if meta.get("type") == "milp_optimization":
-            parts.append(f"Solver status: {meta.get("solver_status", "Unknown")}; total cost {float(meta.get("total_cost", 0.0)):,.2f} and total carbon {float(meta.get("total_carbon", 0.0)):,.2f}.")
+            parts.append(
+                f"Solver status: {meta.get('solver_status', 'Unknown')}; total cost "
+                f"{float(meta.get('total_cost', 0.0)):,.2f} and total carbon "
+                f"{float(meta.get('total_carbon', 0.0)):,.2f}."
+            )
         else:
             parts.append(str(meta.get("readiness", "Optimization readiness was assessed.")))
     elif meta.get("type") == "scenario_grouped" and not result.empty:
