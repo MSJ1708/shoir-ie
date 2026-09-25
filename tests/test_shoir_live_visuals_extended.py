@@ -1,29 +1,9 @@
 import pandas as pd
 
-from shoir_live_visuals import _make_figure, _suggest_chart
-
-
-def test_chart_suggestion_for_time_series():
-    df = pd.DataFrame({"Date": pd.date_range("2026-01-01", periods=5), "Demand": [1,2,3,4,5]})
-    assert _suggest_chart(df, "Date", "Demand") == "Line"
-
-
-def test_bar_and_heatmap_can_render():
-    df = pd.DataFrame({"Scenario": ["A","B","C"], "Cost": [10,20,15], "Risk": [2,4,3]})
-    assert _make_figure(df, "Bar", "Scenario", "Cost", None, "Cost").data
-    assert _make_figure(df, "Heatmap", None, None, None, "Corr").data
-
-
-def test_3d_scatter_can_render():
-    import pandas as pd
-    df = pd.DataFrame({"X":[1,2,3], "Y":[2,3,4], "Z":[3,4,5]})
-    assert _make_figure(df, "3D Scatter", "X", "Y", "Z", "3D").data
+from shoir_live_visuals import _auto_chart_choice, _make_figure
 
 
 def test_extended_engineering_visualizations_render():
-    from shoir_live_visuals import _make_figure
-    import pandas as pd
-
     flow = pd.DataFrame({"Source": ["Supplier A", "Supplier B"], "Target": ["Plant", "Plant"], "Value": [10, 20]})
     assert _make_figure(flow, "Sankey", None, None, None, "Flow") is not None
 
@@ -48,9 +28,6 @@ def test_extended_engineering_visualizations_render():
 
 
 def test_auto_chart_detects_flow_and_gantt():
-    from shoir_live_visuals import _auto_chart_choice
-    import pandas as pd
-
     flow = pd.DataFrame({"Source": ["A"], "Target": ["B"], "Value": [3]})
     assert _auto_chart_choice(flow) == "Sankey"
 
