@@ -30,6 +30,13 @@ from shoir_optimization import (
     solve_linear_program, solve_quadratic_program, solve_robust_linear_program,
     solve_stochastic_linear_program, pareto_weight_sweep,
 )
+# Mainline also exposes workspace-artifact provenance. Keep it optional on this
+# branch so CI remains independent of the newer mainline service file.
+try:
+    from shoir_enterprise_services import record_workspace_artifact
+except Exception:
+    record_workspace_artifact = None
+
 from shoir_enterprise_ops import (
     render_connectivity_extension,
     render_model_registry_extension,
@@ -1128,6 +1135,22 @@ def render_module(module: str, tier: str, username: str):
                     dataset_id=dataset_id.strip(),
                     run_id=run_id.strip(),
                 )
+                if callable(record_workspace_artifact):
+                    try:
+                        record_workspace_artifact(
+                            "model",
+                            name,
+                            username,
+                            {
+                                "data_hash": source_hash,
+                                "solver_version": solver_version.strip(),
+                                "result_hash": result_hash,
+                                "dataset_id": dataset_id.strip(),
+                                "run_id": run_id.strip(),
+                            },
+                        )
+                    except Exception:
+                        pass
                 st.success(f"Registered {mid}")
             except Exception as exc: st.error(f"Could not register model: {exc}")
         with sqlite3.connect("enterprise_full_workspace.db") as c: reg=pd.read_sql("SELECT * FROM platform_models ORDER BY created_at DESC",c)
