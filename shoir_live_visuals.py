@@ -447,36 +447,6 @@ def _make_figure(df: pd.DataFrame, chart: str, x: str | None, y: str | None, z: 
     return px.bar(df, x=x, y=y, title=title or f"{y} by {x}" if y else title or "Engineering Data")
 
 
-    fig.update_layout(title=title or f"Pareto · {y}", yaxis2=dict(title="Cumulative %", overlaying="y", side="right", range=[0,100]))
-        else:
-            d["Cumulative %"] = d[y].cumsum() / d[y].sum() * 100
-            fig = go.Figure()
-            fig.add_bar(x=list(range(1, len(d)+1)), y=d[y], name=y)
-            fig.add_scatter(x=list(range(1, len(d)+1)), y=d["Cumulative %"], name="Cumulative %", yaxis="y2", mode="lines+markers")
-            fig.update_layout(title=title or f"Pareto · {y}", yaxis2=dict(title="Cumulative %", overlaying="y", side="right", range=[0,100]))
-    elif chart == "3D Scatter" and x and y and z:
-        fig = px.scatter_3d(df, x=x, y=y, z=z, title=title or "3D Engineering View")
-    elif not x and y:
-        fig = px.bar(df, y=y, title=title or y)
-    elif chart == "Line":
-        fig = px.line(df, x=x, y=y, markers=True, title=title or f"{y} over {x}")
-    elif chart == "Area":
-        fig = px.area(df, x=x, y=y, title=title or f"{y} over {x}")
-    elif chart == "Scatter":
-        fig = px.scatter(df, x=x, y=y, title=title or f"{y} vs {x}")
-    else:
-        fig = px.bar(df, x=x, y=y, title=title or f"{y} by {x}")
-
-    fig.update_layout(
-        height=430,
-        margin=dict(l=12, r=18, t=55, b=12),
-        template="plotly_white",
-        hovermode="x unified" if chart in {"Line", "Area"} else "closest",
-        legend_title_text="",
-    )
-    return fig
-
-
 def _render_auto_kpi_dashboard(module: str, df: pd.DataFrame, chart_token: str) -> None:
     """Generate a compact KPI dashboard and one automatically selected engineering view."""
     if not isinstance(df, pd.DataFrame) or df.empty:
