@@ -56,7 +56,7 @@ _MODULE_KEYS = {
     "Workforce Engineering": ["work_elements", "balance_result", "skills_df"],
     "Industrial Sustainability & LCA": ["sustain_df", "sustain_result", "enterprise_artifact_ledger"],
     "Benchmarking & Engineering Standards": ["benchmark_actual", "benchmark_targets", "benchmark_result"],
-    "Live Industrial Digital Twin": ["twin_tel", "twin_whatif_result", "enterprise_artifact_ledger"],
+    "Live Industrial Digital Twin": ["twin_tel", "twin_whatif_result", "enterprise_twin_anomalies_df", "enterprise_artifact_ledger"],
     "Advanced ML Demand Forecasting": ["forecast_df", "forecast_result", "forecast_universal_df", "forecast_universal_result"],
     "Scenario Versioning & Comparison": ["scenario_df"],
     "Team Workspaces & RBAC": ["workspace_members_df", "workspace_users", "enterprise_collaboration_assignments", "enterprise_artifact_ledger"],
