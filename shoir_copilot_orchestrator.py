@@ -386,18 +386,9 @@ def build_export_bundle(
     result: pd.DataFrame,
     explanation: str,
     figure: go.Figure | None,
-    knowledge_context: str | bool = "",
-    knowledge_context_used: bool | None = None,
+    knowledge_context: str = "",
 ) -> bytes:
-    """Package evidence while preserving backward compatibility for older callers."""
     from shoir_upgrade import build_excel_report
-    if isinstance(knowledge_context, bool) and knowledge_context_used is None:
-        knowledge_context_used = bool(knowledge_context)
-        knowledge_text = ""
-    else:
-        knowledge_text = str(knowledge_context or "").strip()
-    knowledge_context_used = bool(knowledge_text) if knowledge_context_used is None else bool(knowledge_context_used)
-
     tables = [("Analysis Result", result)]
     if "numeric_columns" in inspection:
         tables.append(("Data Profile", pd.DataFrame([{
@@ -408,11 +399,7 @@ def build_export_bundle(
             "Numeric Fields": len(inspection.get("numeric_columns", [])),
             "Date Fields": len(inspection.get("date_like_columns", [])),
         }])))
-    xlsx = build_excel_report(
-        "Shoir-IE Engineering Copilot",
-        tables,
-        [(module, figure)] if figure is not None else [],
-    )
+    xlsx = build_excel_report("Shoir-IE Engineering Copilot", tables, [(module, figure)] if figure is not None else [])
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("request.txt", str(prompt).encode("utf-8"))
@@ -422,26 +409,21 @@ def build_export_bundle(
         zf.writestr("method.json", json.dumps(dict(method), indent=2, default=str).encode("utf-8"))
         zf.writestr("results.csv", result.to_csv(index=False).encode("utf-8"))
         zf.writestr("explanation.md", explanation.encode("utf-8"))
-        if knowledge_text:
-            zf.writestr("knowledge_context.txt", knowledge_text[:12000].encode("utf-8"))
+        if str(knowledge_context).strip():
+            zf.writestr("knowledge_context.txt", str(knowledge_context)[:12000].encode("utf-8"))
         zf.writestr("copilot_analysis.xlsx", xlsx)
         if figure is not None:
             zf.writestr("chart.html", figure.to_html(full_html=True, include_plotlyjs="cdn").encode("utf-8"))
             zf.writestr("chart.json", figure.to_json().encode("utf-8"))
-        zf.writestr(
-            "manifest.json",
-            json.dumps(
-                {
-                    "contract": WORKFLOW_STEPS,
-                    "run_id": run_id,
-                    "module": module,
-                    "generated_at": datetime.now(timezone.utc).isoformat(),
-                    "knowledge_context_used": knowledge_context_used,
-                },
-                indent=2,
-            ).encode("utf-8"),
-        )
+        zf.writestr("manifest.json", json.dumps({
+            "contract": WORKFLOW_STEPS,
+            "run_id": run_id,
+            "module": module,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+        }, indent=2).encode("utf-8"))
     return buf.getvalue()
+
+
 
 def build_workflow_plan(
     prompt: str,
