@@ -580,6 +580,107 @@ def render_collaboration_extension(username: str) -> None:
 # Research Studio + Reporting
 # ---------------------------------------------------------------------------
 
+def _latex_escape(text: str) -> str:
+    value = str(text or "")
+    for old, new in [("\\", "\\textbackslash{}"), ("&", "\\&"), ("%", "\\%"),
+                     ("_", "\\_"), ("#", "\\#"), ("{", "\\{"), ("}", "\\}")]:
+        value = value.replace(old, new)
+    return value
+
+
+def build_research_manuscript(
+    protocol: Mapping[str, Any],
+    citations: pd.DataFrame,
+    results_tables: Sequence[tuple[str, pd.DataFrame]],
+    username: str,
+) -> tuple[str, str]:
+    """Generate an evidence-bounded manuscript scaffold in Markdown and LaTeX."""
+    protocol = dict(protocol or {})
+    title = str(protocol.get("title") or protocol.get("research_question") or "Shoir-IE Engineering Study").strip()
+
+    md_lines = [
+        f"# {title}",
+        "",
+        "## Abstract",
+        f"**Objective:** {protocol.get('objective') or '[not recorded]'}",
+        f"**Research question:** {protocol.get('research_question') or '[not recorded]'}",
+        f"**Hypothesis:** {protocol.get('hypothesis') or '[not recorded]'}",
+        "",
+        "## Methods",
+        f"- Methodology: {protocol.get('methodology') or '[not recorded]'}",
+        f"- Primary endpoint: {protocol.get('primary_endpoint') or '[not recorded]'}",
+        f"- Sample size: {protocol.get('sample_size') if protocol.get('sample_size') is not None else '[not recorded]'}",
+        f"- Replications: {protocol.get('replications') if protocol.get('replications') is not None else '[not recorded]'}",
+        f"- Alpha: {protocol.get('alpha') if protocol.get('alpha') is not None else '[not recorded]'}",
+        f"- Confidence level: {protocol.get('confidence_level') if protocol.get('confidence_level') is not None else '[not recorded]'}",
+        f"- Random seed: {protocol.get('random_seed') if protocol.get('random_seed') is not None else '[not recorded]'}",
+        "",
+        "## Results",
+    ]
+
+    has_results = False
+    for name, frame in results_tables:
+        if isinstance(frame, pd.DataFrame) and not frame.empty:
+            has_results = True
+            md_lines.append(f"### {name}")
+            md_lines.append(frame.head(50).to_html(index=False))
+            md_lines.append("")
+    if not has_results:
+        md_lines.append("[No verified result table is currently recorded.]")
+
+    md_lines.extend([
+        "",
+        "## Discussion",
+        "[Interpret the observed results, uncertainty, practical implications, and competing explanations using only the recorded evidence.]",
+        "",
+        "## Limitations",
+        "- Confirm all assumptions, exclusions, data-quality findings, and validation limitations before submission.",
+        "",
+        "## Reproducibility",
+        f"- Study owner: {username}",
+        f"- Protocol hash: {protocol.get('protocol_hash') or '[not recorded]'}",
+        "- Include the supplementary evidence bundle and provenance manifest with the manuscript.",
+        "",
+        "## References",
+    ])
+
+    if isinstance(citations, pd.DataFrame) and not citations.empty:
+        for _, row in citations.iterrows():
+            citation = str(row.get("Citation", "")).strip()
+            locator = str(row.get("DOI / URL", "")).strip()
+            combined = citation or locator
+            if combined:
+                md_lines.append(f"- {combined}")
+    if len(md_lines) == 0:
+        md_lines.append("[No citation records]")
+
+    latex_title = _latex_escape(title)
+    latex_lines = [
+        "\\documentclass{article}",
+        "\\usepackage[margin=1in]{geometry}",
+        "\\begin{document}",
+        f"\\section*{{{latex_title}}}",
+        f"\\textbf{{Objective:}} {_latex_escape(protocol.get('objective') or '[not recorded]')}\\par",
+        f"\\textbf{{Research question:}} {_latex_escape(protocol.get('research_question') or '[not recorded]')}\\par",
+        f"\\textbf{{Hypothesis:}} {_latex_escape(protocol.get('hypothesis') or '[not recorded]')}",
+        "\\section*{Methods}",
+        "\\begin{itemize}",
+        f"\\item Methodology: {_latex_escape(protocol.get('methodology') or '[not recorded]')}",
+        f"\\item Primary endpoint: {_latex_escape(protocol.get('primary_endpoint') or '[not recorded]')}",
+        f"\\item Replications: {_latex_escape(protocol.get('replications') if protocol.get('replications') is not None else '[not recorded]')}",
+        "\\end{itemize}",
+        "\\section*{Results}",
+        "Insert verified study tables and exact exported figures from the supplementary evidence bundle.",
+        "\\section*{Discussion}",
+        "Interpret only the recorded evidence and documented limitations.",
+        "\\section*{Reproducibility}",
+        f"Study owner: {_latex_escape(username)}. Protocol hash: {_latex_escape(protocol.get('protocol_hash') or '[not recorded]')}.",
+        "\\end{document}",
+    ]
+
+    return "\\n".join(md_lines) + "\\n", "\\n".join(latex_lines) + "\\n"
+
+
 def render_research_extension(username: str) -> None:
     st.markdown("### 📝 Research Studio Integration")
     st.caption("Protocol → hypothesis → run tracking → citations → results → manuscript/supplementary evidence.")
@@ -621,6 +722,32 @@ def render_research_extension(username: str) -> None:
         manifest = st.session_state.get("research_manuscript_manifest")
         if isinstance(manifest, dict):
             st.download_button("📥 Download research manifest", json.dumps(manifest, indent=2, default=str).encode(), "shoir_ie_research_manifest.json", "application/json", use_container_width=True)
+
+        protocol_for_paper = proto if isinstance(proto, dict) else {}
+        result_tables = []
+        for key in [
+            "experiment_results", "experiment_factorial_effects", "experiment_mc_results",
+            "experiment_bootstrap_results", "experiment_sensitivity_results",
+            "experiment_engine_effects_df", "experiment_engine_mc_samples",
+            "experiment_engine_bootstrap_df", "experiment_engine_sensitivity_df",
+            "experiment_engine_replication_df",
+        ]:
+            frame = _df(st.session_state.get(key))
+            if not frame.empty:
+                result_tables.append((key.replace("_", " ").title(), frame))
+        st.markdown("#### 📝 Manuscript & Supplementary Package")
+        st.caption("Generates a reproducible manuscript scaffold from the recorded protocol and observed result tables. Missing findings stay marked as gaps.")
+        if st.button("✍️ Generate manuscript draft", use_container_width=True, key="research_generate_manuscript"):
+            md, tex = build_research_manuscript(protocol_for_paper, citations, result_tables, username)
+            st.session_state["research_manuscript_md"] = md
+            st.session_state["research_manuscript_tex"] = tex
+            st.success("Manuscript scaffold generated from the recorded evidence.")
+        md = st.session_state.get("research_manuscript_md")
+        tex = st.session_state.get("research_manuscript_tex")
+        if isinstance(md, str) and md:
+            st.download_button("📄 Download manuscript (Markdown)", md.encode("utf-8"), "shoir_ie_manuscript.md", "text/markdown", use_container_width=True, key="research_md_download")
+        if isinstance(tex, str) and tex:
+            st.download_button("📐 Download manuscript scaffold (LaTeX)", tex.encode("utf-8"), "shoir_ie_manuscript.tex", "text/x-tex", use_container_width=True, key="research_tex_download")
 
 
 def build_provenance_manifest(module: str, tables: Sequence[tuple[str, pd.DataFrame]], owner: str) -> dict[str, Any]:
