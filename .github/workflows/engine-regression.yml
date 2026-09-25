@@ -12,6 +12,8 @@ on:
 jobs:
   engine-regression:
     runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: .
     timeout-minutes: 20
     steps:
       - name: Checkout
