@@ -24,7 +24,29 @@ from email.mime.multipart import MIMEMultipart
 from PIL import Image
 from scipy import stats
 from shoir_upgrade import (align_imported_table, clean_dataframe, build_excel_report, build_workbook_bundle, read_uploaded_workbook, apply_excel_function, EXCEL_FUNCTIONS, copilot_module_recommendation)
-from industrial_platform import (NEW_ENTERPRISE_PLUS_MODULES, industrial_data_snapshot, finite_schedule, mes_work_order_table, spc_limits, process_capability, pareto_frontier, weighted_objective, robust_scenario_bounds, discrete_event_simulation, economics, lca_inventory, build_excel_export, data_quality_frame, ensure_model_registry, registry_add, registry_list, ml_demand_forecast, predictive_maintenance_rul, scenario_delta, currency_convert, rbac_can_edit, connector_healthcheck, executive_report_pdf)
+from industrial_platform import PLATFORM_CATALOG, render_module as render_industrial_module, ml_demand_forecast, tier_allows as platform_tier_allows
+from industrial_operating_system import render_industrial_operating_system
+from industrial_experience import COPILOT_TOOLS, ensure_experience_db, feature_stats, load_research_protocol, list_research_studies, register_research_run, log_copilot_action, benchmark_duration
+from research_experiment_engine import apply_evidence_conflict
+from industrial_excellence_hub import render_platform_excellence_hub
+from workspace_persistence import ensure_workspace_state_db, load_user_workspace, save_user_workspace
+from shoir_visual_system import apply_shoir_design_system, render_workspace_status
+from shoir_live_visuals import render_live_visualization_studio, discover_visual_tables
+from shoir_module_parity import render_universal_module_parity
+from shoir_copilot_orchestrator import build_workflow_plan, recommend_module, run_orchestration
+from shoir_digital_thread import render_global_project_digital_thread
+from shoir_enterprise_services import render_enterprise_bridge
+from durable_account_store import (durable_backend_configured, sync_durable_accounts, sync_remote_requests_to_local, edge_login, edge_admin_list_requests, edge_renew_request, upsert_remote_account, insert_remote_request, remote_account, account_is_expired, renewed_expiry)
+from shoir_enterprise_layer import (
+    ensure_enterprise_schema, save_twin_snapshot, load_twin_state, save_twin_scenario,
+    list_twin_scenarios, twin_what_if, twin_replay, build_control_tower_health,
+    record_connector_health, connector_health_frame, validate_connector_profile,
+    check_rest_connector, add_collaboration_item, collaboration_frame,
+    add_knowledge_document, search_knowledge, profile_data_intelligence,
+    create_generic_audit_event, list_jobs, inspect_upload, security_policy,
+    upsert_security_policy, record_artifact, save_report_provenance,
+    build_research_paper_bundle,
+)
 
 # =====================================================================
 # PAGE CONFIGURATION & CUSTOM CSS (Professional Styling & Hover Zoom)
@@ -36,8 +58,29 @@ st.set_page_config(
 )
 
 st.markdown("""
+<div class="hero-card shoir-live-pulse">
+  <div class="kicker">Industrial Decision Platform • Engineering Intelligence</div>
+  <div class="hero-title">🏭 Shoir-IE Industrial Engineering Command Center</div>
+  <div class="hero-copy">Turn industrial data into defensible decisions — analyze, simulate, optimize, compare, explain, and export from one workspace.</div>
+</div>
+""", unsafe_allow_html=True)
+
+st.markdown("""
 <style>
-    .main { background-color: #0e1117; }
+    .main { background: linear-gradient(180deg,#f8fafc 0%,#ffffff 42%); }
+    .block-container { max-width: 1500px; padding-top: 1.5rem; padding-bottom: 3rem; }
+    section[data-testid="stSidebar"] { border-right: 1px solid #e2e8f0; }
+    div[data-testid="stMetric"] { border: 1px solid #e2e8f0; border-radius: 14px; padding: 12px 14px; background: #fff; box-shadow: 0 6px 20px rgba(15,23,42,.05); }
+    div.stButton > button, div[data-testid="stFormSubmitButton"] button { border-radius: 11px !important; min-height: 42px !important; font-weight: 700 !important; transition: .18s ease !important; }
+    div.stButton > button:hover, div[data-testid="stFormSubmitButton"] button:hover { transform: translateY(-1px); box-shadow: 0 8px 18px rgba(15,23,42,.10) !important; border-color: #2563eb !important; }
+    div.stButton > button[kind="primary"] { border: 0 !important; background: linear-gradient(135deg,#2563eb,#0f766e) !important; color: white !important; }
+    div[data-testid="stExpander"] { border-radius: 14px; border-color: #e2e8f0; }
+    .module-card { border:1px solid #dbe4f0; border-radius:16px; padding:14px 16px; background:#fff; box-shadow:0 5px 18px rgba(15,23,42,.04); margin-top:8px; }
+    .result-card { border:1px solid #dbeafe; border-radius:16px; padding:15px 17px; background:linear-gradient(135deg,#f8fbff,#fff); box-shadow:0 5px 18px rgba(15,23,42,.04); }
+    .hero-card { border:1px solid #dbe4f0; border-radius:20px; padding:22px 24px; background:linear-gradient(135deg,#f8fbff,#fff 58%,#f0fdfa); box-shadow:0 10px 30px rgba(15,23,42,.06); margin-bottom:18px; }
+    .kicker { font-size:11px; font-weight:800; letter-spacing:.09em; text-transform:uppercase; color:#0f766e; }
+    .hero-title { font-size:30px; font-weight:850; color:#0f172a; margin:3px 0; }
+    .hero-copy { color:#64748b; font-size:14px; }
     .blue-metric {
         color: #0066cc !important;
         font-weight: 700;
@@ -75,6 +118,12 @@ st.markdown("""
     }
 </style>
 """, unsafe_allow_html=True)
+
+apply_shoir_design_system()
+try:
+    ensure_enterprise_schema()
+except Exception:
+    pass
 
 os.makedirs("payment_proofs", exist_ok=True)
 
@@ -150,8 +199,21 @@ def init_db():
                 role TEXT,
                 tier TEXT,
                 email TEXT,
-                created_at TEXT
+                created_at TEXT,
+                subscription_expires_at TEXT
             )
+        """)
+
+        try:
+            cursor.execute("ALTER TABLE users ADD COLUMN subscription_expires_at TEXT")
+        except sqlite3.OperationalError:
+            pass
+        cursor.execute("""
+            UPDATE users
+            SET subscription_expires_at = datetime(created_at, '+30 days')
+            WHERE (subscription_expires_at IS NULL OR subscription_expires_at = '')
+              AND created_at IS NOT NULL
+              AND LOWER(username) <> 'sho'
         """)
 
         # 4. License Codes Table (Stores generated tier subscription keys)
@@ -211,6 +273,11 @@ def init_db():
             )
         """)
 
+        try:
+            cursor.execute("ALTER TABLE pending_payments ADD COLUMN request_type TEXT DEFAULT 'New'")
+        except sqlite3.OperationalError:
+            pass
+
         # 8. System Settings Table (Stores global free-mode toggle)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS system_settings (
@@ -253,28 +320,26 @@ def init_db():
             admin_password = "mohammedsuhail172008chennai!"
         admin_pass_hash = hash_password(admin_password)
         cursor.execute("""
-            INSERT OR REPLACE INTO enterprise_users
+            INSERT OR IGNORE INTO enterprise_users
             (username, password_hash, role, tier, email, trial_expires, affiliate_code, ticket_expiry)
-            VALUES (?, ?, ?, ?, ?, ?, COALESCE((SELECT affiliate_code FROM enterprise_users WHERE username = 'sho'), 'AFF-SHO-15'), ?)
-        """, (
-            "sho",
-            admin_pass_hash,
-            "Enterprise Admin",
-            "Enterprise Tier",
-            "mohsuhailji@gmail.com",
-            "2030-01-01T00:00:00",
-            "2030-01-01T00:00:00"
-        ))
-
-        # 11. Seed Admin User 'sho' login credentials (this is what Sign In checks)
-        # SECURITY FIX: password is now stored hashed (salted PBKDF2), not
-        # plain text. sho still logs in with the exact same password as
-        # before - only the stored value's format changed.
-        cursor.execute("DELETE FROM users WHERE LOWER(username) = 'sho'")
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, ("sho", admin_pass_hash, "Enterprise Admin", "Enterprise Tier",
+              "mohsuhailji@gmail.com", "2030-01-01T00:00:00", "AFF-SHO-15", "2030-01-01T00:00:00"))
         cursor.execute("""
-            INSERT INTO users (username, password, role, tier, email, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, ("sho", admin_pass_hash, "admin", "Enterprise Tier ($199)", "shoirtheagent@gmail.com", "2020-01-01T00:00:00"))
+            UPDATE enterprise_users
+            SET password_hash=?, role=?, tier=?, email=?
+            WHERE LOWER(username)='sho'
+        """, (admin_pass_hash, "Enterprise Admin", "Enterprise Tier", "mohsuhailji@gmail.com"))
+
+        # Never recreate/delete accounts on app startup.
+        cursor.execute("SELECT 1 FROM users WHERE LOWER(username)='sho' LIMIT 1")
+        if cursor.fetchone() is None:
+            cursor.execute("""
+                INSERT INTO users
+                (username,password,role,tier,email,created_at,subscription_expires_at)
+                VALUES (?,?,?,?,?,?,?)
+            """, ("sho", admin_pass_hash, "admin", "Enterprise Tier ($199)",
+                  "shoirtheagent@gmail.com", "2020-01-01T00:00:00", "2030-01-01T00:00:00"))
 
         conn.commit()
 
@@ -351,6 +416,13 @@ _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 def is_valid_email(email):
     return bool(email) and bool(_EMAIL_RE.match(email.strip()))
 
+def local_account_exists(username):
+    with sqlite3.connect("enterprise_full_workspace.db") as conn:
+        return conn.execute(
+            "SELECT 1 FROM users WHERE LOWER(username)=? LIMIT 1",
+            (str(username or "").strip().lower(),)
+        ).fetchone() is not None
+
 # =====================================================================
 # LEGAL CONTENT
 # ---------------------------------------------------------------------
@@ -401,23 +473,25 @@ TERMS_AND_CONDITIONS_TEXT = """
 
 **2. Accounts & registration.** You must provide accurate registration information. Accounts are activated manually after payment verification by an administrator - this may take time, and we don't guarantee a specific activation window. You're responsible for keeping your password confidential and for all activity on your account.
 
-**3. Payment.** You agree to pay the exact price listed for your selected tier. See the separate Refund Policy for cancellation terms.
+**3. Subscription period & renewal.** Each paid subscription is active for **30 days from the date it is activated or renewed**. When the 30-day period ends, access to the Shoir-IE workspace is blocked until a renewal payment is submitted and approved. Your account, saved workspace, research data, and profile are preserved; subscription expiry does not delete your data.
 
-**4. Acceptable use.** You may not: share your account with others, attempt to access another user's data or the administrator area, attempt to reverse-engineer, scrape, or resell access to the platform, or use it for any unlawful purpose.
+**4. Payment.** You agree to pay the exact price listed for your selected tier. See the separate Refund Policy for cancellation terms.
 
-**5. Outputs are not professional advice.** Simulation results, optimizations, and analyses produced by the platform are decision-support tools, not certified engineering, financial, or legal advice. You're responsible for independently verifying anything you rely on for real-world decisions.
+**5. Acceptable use.** You may not: share your account with others, attempt to access another user's data or the administrator area, attempt to reverse-engineer, scrape, or resell access to the platform, or use it for any unlawful purpose.
 
-**6. Availability.** The service is provided "as is." We don't guarantee uninterrupted or error-free operation.
+**6. Outputs are not professional advice.** Simulation results, optimizations, and analyses produced by the platform are decision-support tools, not certified engineering, financial, or legal advice. You're responsible for independently verifying anything you rely on for real-world decisions.
 
-**7. Termination.** We may suspend or terminate accounts that violate these terms or that were activated based on fraudulent payment proof.
+**7. Availability.** The service is provided "as is." We don't guarantee uninterrupted or error-free operation.
 
-**8. Intellectual property.** The platform, its modules, and its content are owned by Shoir-IE. Nothing here transfers ownership of that to you.
+**8. Termination.** We may suspend or terminate accounts that violate these terms or that were activated based on fraudulent payment proof.
 
-**9. Limitation of liability.** To the extent permitted by applicable law, Shoir-IE is not liable for indirect or consequential damages arising from use of the platform.
+**9. Intellectual property.** The platform, its modules, and its content are owned by Shoir-IE. Nothing here transfers ownership of that to you.
 
-**10. Governing law.** _(state the jurisdiction whose law governs this agreement, e.g. Kingdom of Saudi Arabia)_.
+**10. Limitation of liability.** To the extent permitted by applicable law, Shoir-IE is not liable for indirect or consequential damages arising from use of the platform.
 
-**11. Changes.** We may update these terms; continued use after a change means you accept the update.
+**11. Governing law.** _(state the jurisdiction whose law governs this agreement, e.g. Kingdom of Saudi Arabia)_.
+
+**12. Changes.** We may update these terms; continued use after a change means you accept the update.
 """
 
 REFUND_POLICY_TEXT = """
@@ -551,45 +625,6 @@ MODULE_CATALOG = [
      "when": "You need sustainability metrics built into engineering decisions, not bolted on as an afterthought report.",
      "example": "Compare two process redesigns on energy use and waste generation alongside cost and cycle time, in the same view - so sustainability is a design input, not a separate audit."},
 
-    # ---------------- ENTERPRISE PLUS ($299) adds ----------------
-    {"tier": "Enterprise Plus", "category": "Industrial Platform", "name": "Industrial Command Center",
-     "when": "You need one engineering workspace connecting data health, planning, MES, quality, simulation, optimization, economics and sustainability.",
-     "example": "Load operational tables once, validate them, run an APS schedule, simulate queues, compare scenarios, calculate economics and export a traceable workbook from one command center."},
-    {"tier": "Enterprise Plus", "category": "Digital Thread", "name": "Industrial Digital Thread",
-     "when": "Engineering, operations and analytics need a shared model of products, facilities, machines, people and processes.",
-     "example": "Use the same machine, facility and work-order entities across planning, simulation, quality and maintenance instead of copying them between modules."},
-    {"tier": "Enterprise Plus", "category": "Production", "name": "Advanced Planning & Scheduling (APS)",
-     "when": "Production schedules must respect machine capacity, due dates and priorities.",
-     "example": "Create a finite-capacity schedule and flag jobs that cannot fit the configured horizon instead of silently overbooking a machine."},
-    {"tier": "Enterprise Plus", "category": "Production", "name": "Manufacturing Execution System (MES)",
-     "when": "You need work-order progress, production, scrap, yield and status in one execution view.",
-     "example": "Track planned versus produced quantities and yield by work order and export the execution report."},
-    {"tier": "Enterprise Plus", "category": "Quality", "name": "Quality Engineering & Reliability",
-     "when": "You need SPC and capability analysis backed by reproducible calculations.",
-     "example": "Load measurements, generate control limits, calculate Cp/Cpk and export the underlying samples and statistics."},
-    {"tier": "Enterprise Plus", "category": "Simulation", "name": "Industrial Simulation Lab",
-     "when": "You need discrete-event and uncertainty experiments before changing the physical operation.",
-     "example": "Simulate arrivals, service times and server capacity, then stress demand, lead time and capacity with repeatable uncertainty scenarios."},
-    {"tier": "Enterprise Plus", "category": "Optimization", "name": "Multi-Objective & Robust Optimization",
-     "when": "Cost alone is not enough and decisions must balance service, carbon and risk.",
-     "example": "Compare scenarios using weighted objectives and identify Pareto-efficient alternatives."},
-    {"tier": "Enterprise Plus", "category": "Connectivity", "name": "Industrial Connectivity Hub",
-     "when": "Operational data must move safely between industrial systems and Shoir-IE.",
-     "example": "Prepare normalized datasets and governance records for ERP, MES, WMS, IoT and future OPC UA/API connectors."},
-    {"tier": "Enterprise Plus", "category": "Engineering Economics", "name": "Capital & Workforce Engineering",
-     "when": "Investment, labor and operational decisions need a common economic model.",
-     "example": "Compare cash-flow scenarios and connect capacity and workforce assumptions to the resulting economics."},
-    {"tier": "Enterprise Plus", "category": "Sustainability", "name": "Industrial Sustainability & LCA",
-     "when": "Carbon impact needs to be evaluated alongside operational and financial outcomes.",
-     "example": "Calculate activity-based CO2e from configurable quantity and emissions-factor tables and export the audit-ready calculation."},
-    {"tier": "Enterprise Plus", "category": "Governance", "name": "Enterprise Security & Model Governance",
-     "when": "Models, datasets and decisions need traceability and reproducibility.",
-     "example": "Register model versions and dataset hashes so a result can be traced back to its configuration."},
-
-    {"tier": "Enterprise Plus", "category": "AI & Digital Twin", "name": "Advanced Industrial AI & Digital Twin Lab",
-     "when": "You need predictive demand, predictive maintenance, scenario deltas, factory visualization, localization, connector validation and executive reporting in one advanced workspace.",
-     "example": "Train a reproducible demand model with promotion/weather features, estimate machine RUL from telemetry, compare scenarios, validate a connector definition and export an executive PDF."},
-
     # ---------------- RESEARCH PACK ($30 add-on) adds ----------------
     {"tier": "Research Pack", "category": "Research Authoring", "name": "Statistical Hypothesis Testing",
      "when": "You're writing a paper and need a properly-run t-test, ANOVA, or chi-square test with the actual statistics, not a claimed result.",
@@ -651,7 +686,6 @@ MODULE_CATALOG = [
 ]
 
 TIER_BENEFITS = {
-    "Enterprise Plus": {"price":"$299","pitch":"Integrated industrial platform layer: APS, MES, quality engineering, simulation, digital thread, connectivity, robust optimization, economics and sustainability.","gain":"Connects engineering decisions across planning, execution, simulation, quality, cost and sustainability in one traceable workspace."},
     "Starter": {
         "price": "$29",
         "pitch": "The core industrial-engineering toolkit - replace spreadsheet-based network and inventory decisions with solved, defensible answers.",
@@ -673,6 +707,15 @@ TIER_BENEFITS = {
         "gain": "Cuts the gap between 'I have a model' and 'I have a submittable, defensible, reproducible result' - the adversarial review and falsification tools specifically catch the weaknesses a real peer reviewer would catch, before submission instead of after rejection.",
     },
 }
+
+for _platform_module in PLATFORM_CATALOG:
+    if not any(x.get("name") == _platform_module["name"] for x in MODULE_CATALOG):
+        MODULE_CATALOG.append(_platform_module)
+
+# Unified Industrial Operating System — shared decision-intelligence workspace.
+_IOS_CATALOG_ENTRY = {"tier":"Enterprise","category":"Platform","name":"Industrial Operating System","when":"You want one governed workspace connecting KPIs, methods, scenarios, process intelligence, model health, improvement and decision verification.","example":"Use one shared platform layer to compare scenarios, discover process bottlenecks, monitor drift, verify decisions and export auditable results."}
+if not any(x.get("name") == _IOS_CATALOG_ENTRY["name"] for x in MODULE_CATALOG):
+    MODULE_CATALOG.append(_IOS_CATALOG_ENTRY)
 
 # =====================================================================
 # COPILOT
@@ -703,11 +746,15 @@ def get_copilot_response(prompt, history):
         client = anthropic.Anthropic(api_key=api_key)
         system_prompt = (
             "You are the Shoir-IE Copilot, embedded in an industrial engineering and "
-            "operations research platform covering MILP network optimization, inventory, "
-            "facility layout, quality/Six Sigma, simulation, and research tools. Be concise "
-            "and concrete. If asked to run something you can't execute directly, name the "
-            "exact module to use. Never invent specific numbers or claim to have checked "
-            "data you don't actually have."
+            "operations research platform covering MILP/optimization, inventory, supply chain, APS/MES, "
+            "facility layout, quality/reliability, simulation, digital twins, sustainability, economics, "
+            "workforce, KPI Studio, engineering methods/equations, scenario versioning, process mining, "
+            "drift monitoring, decision verification, DMAIC/A3, templates and platform diagnostics. "
+            "Use the shared Platform Excellence layer as part of your operating context. The platform now provides 60 cross-cutting capabilities including projects, autosave, lineage, verification, decision cards, approval workflow, evidence exports, governed Copilot actions, jobs, observability, decision memory, accessibility, RTL readiness and a searchable capability map. Available governed Copilot tools are: " + ", ".join(t[0] for t in COPILOT_TOOLS) + ". " 
+            "Recommend the most relevant existing module or workflow from the live platform catalog. "
+            "Prefer validation, explainability, scenario analysis and auditable exports before action. "
+            "Be concise and concrete. If asked to run something you can't execute directly, name the exact "
+            "module to use. Never invent numbers, connectivity, model results or data you don't have."
         )
         msgs = [{"role": m["role"], "content": m["content"]} for m in history if m["role"] in ("user", "assistant")]
         msgs.append({"role": "user", "content": prompt})
@@ -739,6 +786,24 @@ def get_copilot_response(prompt, history):
         except Exception as e:
             return f"I tried to run the optimizer but it failed: {e}. Check your data in the MILP Solvers module."
 
+    if "forecast" in p or "predict demand" in p:
+        wb=st.session_state.get("copilot_workbook",{})
+        if wb:
+            try:
+                sheet=next(iter(wb)); df=wb[sheet]
+                date_col=next((x for x in df.columns if "date" in str(x).lower()),None)
+                target_col=next((x for x in df.columns if any(k in str(x).lower() for k in ["demand","sales","qty","quantity"])),None)
+                if date_col and target_col:
+                    ext=[x for x in df.columns if x not in [date_col,target_col] and pd.api.types.is_numeric_dtype(df[x])]
+                    forecast,metrics=ml_demand_forecast(df,date_col,target_col,ext[:5],12)
+                    return ("I ran the demand-forecast engine on the first uploaded workbook sheet. "
+                            f"Model R²: **{metrics['R2']:.3f}**, MAE: **{metrics['MAE']:.2f}**. "
+                            "Open Advanced ML Demand Forecasting for the full forecast, uncertainty band and exports.")
+                return "I found the workbook, but could not safely identify both a date column and demand/sales quantity column. Map them explicitly in Advanced ML Demand Forecasting."
+            except Exception as e:
+                return f"I found the workbook but the forecast could not be completed safely: {e}."
+        return "Upload the demand workbook first. Then I can run the grounded forecasting workflow."
+    
     if "safety stock" in p or ("inventory" in p and "stock" in p):
         try:
             conn = sqlite3.connect("enterprise_full_workspace.db")
@@ -843,6 +908,17 @@ def log_audit(user, action):
 
 init_db()
 
+# Managed PostgreSQL/Supabase is the durable account authority when configured.
+# Existing local-only accounts are migrated only when absent remotely, then
+# durable accounts and pending requests are hydrated back into SQLite.
+try:
+    _durable_accounts_ready = sync_durable_accounts()
+    if _durable_accounts_ready:
+        sync_remote_requests_to_local()
+except Exception:
+    _durable_accounts_ready = False
+
+
 # =====================================================================
 # SESSION STATE INITIALIZATION
 # =====================================================================
@@ -920,6 +996,19 @@ if "onboarded" not in st.session_state:
 if "show_qr" not in st.session_state:
     st.session_state.show_qr = False
 
+# Public authentication screen: keep login/register full-width.
+# The authenticated workspace retains its normal Shoir-IE sidebar.
+if not st.session_state.get("authenticated", False):
+    st.markdown("""
+    <style>
+        section[data-testid="stSidebar"] { display: none !important; }
+        [data-testid="stSidebarCollapsedControl"] { display: none !important; }
+        button[data-testid="stSidebarCollapseButton"] { display: none !important; }
+        div[data-testid="stAppViewContainer"] { margin-left: 0 !important; }
+    </style>
+    """, unsafe_allow_html=True)
+
+
 # ==========================================
 # AUTHENTICATION & REGISTRATION GATE (FRONT PAGE)
 # ==========================================
@@ -940,30 +1029,27 @@ if is_free_mode and not st.session_state.get("current_user"):
     st.session_state["user_tier"] = "Enterprise Tier"
     st.session_state["authenticated"] = True
 
-# Enforce 30-day subscription expiry check for active sessions
+# Enforce the explicit 30-day subscription expiry timestamp.
 if st.session_state.get("authenticated") and st.session_state.get("current_user") != "Guest Visitor":
     try:
+        active_user = st.session_state.get("current_user", "")
         conn = sqlite3.connect("enterprise_full_workspace.db")
-        cursor = conn.cursor()
-        cursor.execute("SELECT created_at FROM users WHERE LOWER(username) = ?", (st.session_state.get("current_user").lower(),))
-        row = cursor.fetchone()
+        row = conn.execute(
+            "SELECT subscription_expires_at,email FROM users WHERE LOWER(username)=? LIMIT 1",
+            (active_user.lower(),),
+        ).fetchone()
         conn.close()
-
-        if row and row[0]:
-            created_dt = datetime.datetime.fromisoformat(row[0])
-            # Check if 30 days have passed (excluding master admin 'sho')
-            if datetime.datetime.now() > created_dt + datetime.timedelta(days=30) and st.session_state.get("current_user").lower() != "sho":
-                for key in list(st.session_state.keys()):
-                    del st.session_state[key]
-                st.error("🚨 Your 30-day subscription has expired. Your session has ended. Please renew your subscription to continue.")
-                st.stop()
+        if row and row[0] and active_user.lower() != "sho" and account_is_expired(row[0]):
+            save_user_workspace(active_user, st.session_state)
+            st.session_state["authenticated"] = False
+            st.session_state["current_user"] = ""
+            st.session_state["subscription_expired_notice"] = True
     except Exception:
         pass
 
 if not st.session_state.get("current_user"):
     st.title("🔐 Welcome to Shoir-IE Workspace")
     st.markdown("Please sign in with your approved account or register and submit your payment ticket below.")
-
     auth_tab1, auth_tab2, auth_tab3 = st.tabs(["🔑 Sign In", "📝 Get Ticket & Register", "🧭 Explore the Modules"])
 
     # ------------------------------------------
@@ -975,76 +1061,95 @@ if not st.session_state.get("current_user"):
         signin_pass = st.text_input("Password", type="password", key="signin_password_input")
 
         if st.button("Sign In", type="primary", key="btn_sign_action"):
-            # SECURITY: brute-force throttle. Checked before touching the
-            # database at all - this is what "rate limiting" on the login
-            # form actually means for an app with no separate API layer.
             if signin_user and is_login_rate_limited(signin_user):
                 st.error("Too many failed sign-in attempts. Please wait 10 minutes and try again.")
                 st.stop()
 
-            conn = sqlite3.connect("enterprise_full_workspace.db")
-            cursor = conn.cursor()
-
-            # SECURITY FIX: this used to be "... AND password = ?", comparing
-            # the typed password directly against a plain-text column in
-            # SQL. Passwords are now hashed, so the row is fetched by
-            # username only and the password is checked in Python via
-            # verify_password() below (which also transparently upgrades
-            # any old plain-text row - including sho's - to a proper hash
-            # the first time it's used, with zero change to the password
-            # itself).
-            cursor.execute(
-                "SELECT * FROM users WHERE LOWER(username) = ?",
-                (signin_user.strip().lower(),)
-            )
-            user_row = cursor.fetchone()
-
-            is_valid = False
-            if user_row:
-                is_valid, needs_upgrade = verify_password(user_row[2], signin_pass)
-                if is_valid and needs_upgrade:
-                    cursor.execute(
-                        "UPDATE users SET password = ? WHERE id = ?",
-                        (hash_password(signin_pass), user_row[0])
-                    )
-                    conn.commit()
-
-            record_login_attempt(signin_user, is_valid)
-            conn.close()
-
-            if is_valid:
-                # Bypass 30-day expiration completely for master admin 'sho'
-                if user_row[1].lower() != "sho":
-                    created_at_str = user_row[6] if len(user_row) > 6 else None
-                    if created_at_str:
-                        try:
-                            created_dt = datetime.datetime.fromisoformat(created_at_str)
-                            if datetime.datetime.now() > created_dt + datetime.timedelta(days=30):
-                                st.error("⚠️ Your 30-day subscription has expired. Please renew your subscription to log in.")
-                                st.stop()
-                        except Exception:
-                            pass
-
-                st.session_state["current_user"] = user_row[1]
-                st.session_state["user_role"] = user_row[3]
-                st.session_state["user_tier"] = user_row[4]
-                # FIX: this flag was never being set on sign-in anywhere in the
-                # file, even though the Admin Panel (and the 30-day-expiry
-                # check above) both require it to be True. That alone was
-                # enough to make "sho" permanently see "Access Denied" on the
-                # Admin Panel even after a correct, successful login.
-                st.session_state["authenticated"] = True
-                st.success(f"Welcome back, {user_row[1]}!")
-                st.rerun()
-            else:
+            try:
+                # Supabase Edge is the authoritative authentication service.
+                auth = edge_login(signin_user, signin_pass)
+                record_login_attempt(signin_user, True)
+            except Exception:
+                record_login_attempt(signin_user, False)
                 st.error("Invalid username or password. Note: Access requires admin approval and ticket delivery.")
+                st.stop()
 
+            username = str(auth.get("username") or signin_user).strip()
+            role = str(auth.get("role") or "User")
+            tier = str(auth.get("tier") or "Starter Tier")
+            email = str(auth.get("email") or "")
+            expiry = auth.get("expires_at")
+            token = str(auth.get("token") or "")
+
+            # Expiry is enforced by the durable authentication service.
+            if auth.get("error") == "SUBSCRIPTION_EXPIRED":
+                st.error("⏰ Your Shoir-IE subscription expired after 30 days.")
+                st.info("Your account, profile, research data and workspace are preserved. Submit a renewal request to regain access after administrator approval.")
+            elif token:
+                st.session_state["remote_session_token"] = token
+                st.session_state["current_user"] = username
+                st.session_state["user_role"] = role
+                st.session_state["user_tier"] = tier
+                st.session_state["user_email"] = email
+                st.session_state["subscription_expires_at"] = expiry
+                st.session_state["authenticated"] = True
+
+                # Populate the ephemeral local cache for modules that still
+                # read user metadata from SQLite. This cache is never the
+                # source of truth for authentication or workspace persistence.
+                try:
+                    conn_local = sqlite3.connect("enterprise_full_workspace.db")
+                    local_row = conn_local.execute(
+                        "SELECT id FROM users WHERE LOWER(username)=? LIMIT 1",
+                        (username.lower(),),
+                    ).fetchone()
+                    if local_row:
+                        conn_local.execute(
+                            """
+                            UPDATE users
+                            SET role=?, tier=?, email=?, subscription_expires_at=?
+                            WHERE id=?
+                            """,
+                            (role, tier, email, expiry, local_row[0]),
+                        )
+                    else:
+                        conn_local.execute(
+                            """
+                            INSERT INTO users
+                            (username,password,role,tier,email,created_at,subscription_expires_at)
+                            VALUES (?,?,?,?,?,?,?)
+                            """,
+                            (
+                                username,
+                                "REMOTE_MANAGED",
+                                role,
+                                tier,
+                                email,
+                                datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                                expiry,
+                            ),
+                        )
+                    conn_local.execute(
+                        "INSERT OR IGNORE INTO enterprise_users (username) VALUES (?)",
+                        (username,),
+                    )
+                    conn_local.execute(
+                        "UPDATE enterprise_users SET role=?,tier=?,email=?,ticket_expiry=? WHERE LOWER(username)=?",
+                        (role,tier,email,expiry,username.lower()),
+                    )
+                    conn_local.commit()
+                    conn_local.close()
+                except Exception:
+                    pass
+
+                st.success(f"Welcome back, {username}!")
+                st.rerun()
     # ------------------------------------------
     # TAB 2: GET TICKET & REGISTER
     # ------------------------------------------
     with auth_tab2:
         st.subheader("Get Subscription Ticket & Register")
-        reg_tier = st.selectbox("Choose Subscription Tier", ["Starter Tier ($29)", "Research Pack ($30)", "Mid-Tier Pro ($79)", "Enterprise Tier ($120)", "Enterprise Plus Tier ($299)"])
+        reg_tier = st.selectbox("Choose Subscription Tier", ["Starter Tier ($29)", "Mid-Tier Pro ($79)", "Professional Tier ($129)", "Enterprise Tier ($199)", "Enterprise Plus Tier ($399)", "Research Pack ($30 add-on)"])
         reg_name = st.text_input("Name / Username", key="reg_name")
         reg_email = st.text_input("Email Address", placeholder="name@company.com", key="reg_email")
         reg_pass = st.text_input("Password", type="password", key="reg_pass")
@@ -1100,6 +1205,14 @@ if not st.session_state.get("current_user"):
                     # from being usable as a stored XSS payload later.
                     if reg_name and not is_valid_username(reg_name):
                         st.warning("Username can only contain letters, numbers, periods, underscores, and hyphens (3-32 characters).")
+                    elif reg_name and (
+                        local_account_exists(reg_name)
+                        or (
+                            _durable_accounts_ready
+                            and remote_account(reg_name) is not None
+                        )
+                    ):
+                        st.warning("This username already has an account. Please sign in instead of creating a duplicate.")
                     elif reg_email and not is_valid_email(reg_email):
                         st.warning("Please enter a valid email address.")
                     elif reg_name and reg_pass and reg_email and uploaded_screenshot is not None:
@@ -1112,8 +1225,8 @@ if not st.session_state.get("current_user"):
                         cursor = conn.cursor()
                         cursor.execute("""
                             INSERT INTO pending_payments
-                                (username, password, email, tier, payment_method, transaction_id, screenshot_path, status, timestamp)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                (username, password, email, tier, payment_method, transaction_id, screenshot_path, status, timestamp, request_type)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'New')
                         """, (
                             reg_name,
                             hash_password(reg_pass),
@@ -1128,6 +1241,19 @@ if not st.session_state.get("current_user"):
 
                         conn.commit()
                         conn.close()
+
+                        if _durable_accounts_ready:
+                            try:
+                                insert_remote_request({
+                                    "username": reg_name, "password": reg_pass,
+                                    "email": reg_email, "tier": reg_tier,
+                                    "request_type": "New", "payment_method": "STC Pay (QR)",
+                                    "transaction_id": reg_ticket_code if reg_ticket_code else None,
+                                    "screenshot_path": file_path, "status": "Pending"
+                                })
+                            except Exception as exc:
+                                st.error(f"Could not create the durable account request: {exc}")
+                                st.stop()
 
                         st.success("Request sent successfully! Your code will be emailed to you from shoirtheagent@gmail.com")
                         st.session_state.show_qr = False
@@ -1150,12 +1276,12 @@ if not st.session_state.get("current_user"):
 
         explore_tier = st.radio(
             "Browse by tier",
-            ["Starter", "Mid-Tier Pro", "Enterprise", "Enterprise Plus", "Research Pack"],
+            ["Starter", "Mid-Tier Pro", "Enterprise", "Research Pack"],
             horizontal=True,
             key="explore_tier_radio"
         )
 
-        _tier_order = ["Starter", "Mid-Tier Pro", "Enterprise", "Enterprise Plus", "Research Pack"]
+        _tier_order = ["Starter", "Mid-Tier Pro", "Enterprise", "Research Pack"]
         _cumulative = set(_tier_order[:_tier_order.index(explore_tier) + 1])
         _benefit = TIER_BENEFITS[explore_tier]
         _modules_here = [m for m in MODULE_CATALOG if m["tier"] == explore_tier]
@@ -1187,6 +1313,26 @@ if not st.session_state.get("current_user"):
     # including the module list that reveals "Admin Panel") was rendering
     # underneath the login form for anyone, logged in or not.
     st.stop()
+
+# =====================================================================
+# PERSISTENT USER WORKSPACE — load once after authentication
+# =====================================================================
+if st.session_state.get("current_user") and st.session_state.get("authenticated"):
+    _workspace_user = st.session_state["current_user"]
+    if st.session_state.get("_workspace_loaded_for_user") != _workspace_user:
+        ensure_workspace_state_db()
+        load_user_workspace(_workspace_user, st.session_state)
+        st.session_state["_workspace_loaded_for_user"] = _workspace_user
+
+# =====================================================================
+# WORKSPACE STATUS RIBBON — durable state + autosave visibility
+# =====================================================================
+render_workspace_status(
+    user=st.session_state.get("current_user", "Workspace"),
+    tier=st.session_state.get("user_tier", "Starter Tier"),
+    durable=bool(durable_backend_configured() and st.session_state.get("remote_session_token")),
+    autosave=bool(st.session_state.get("authenticated") and st.session_state.get("current_user")),
+)
 
 # =====================================================================
 # ENSURE AFFILIATE CODE IS LOADED IN SESSION STATE
@@ -1256,16 +1402,18 @@ st.sidebar.markdown("---")
 tier_val = st.session_state.user_tier
 is_admin = (st.session_state.current_user == "sho")
 
-tier1_features = ["MILP Solvers", "Inventory Playback", "Core IE Tools", "Subscriptions", "Persistence", "Facility Layout & Warehousing", "Enterprise Integration & Collaboration"]
-tier2_features = tier1_features + ["Carbon Accounting", "IoT Digital Twin", "MEIO Matrix", "Slotting & Gantt", "Fleet Routing", "Warehouse Heatmap", "Supplier Risk Matrix", "Scenarios", "AGV Fleet Dispatcher", "Geospatial Network Designer", "Production Planning & Control (PPC)", "Lean Manufacturing & Shop Floor Operations", "Quality Control, Six Sigma & Reliability", "Engineering Economics & Finance"]
-tier3_features = tier2_features + ["AI Copilot", "FastAPI Gateway", "Monte Carlo Sim", "Sensitivity Analysis", "Webhook Alerts", "Agentic Workflows", "Control Tower", "Cryptographic Ledger", "Predictive Maintenance Hub", "Human Factors & Ergonomics (NIOSH)", "Digital Twin & Discrete-Event Simulation", "Green IE & Sustainability"]
-enterprise_plus_features = tier3_features + NEW_ENTERPRISE_PLUS_MODULES
+tier1_features = ["MILP Solvers", "Inventory Playback", "Core IE Tools", "Subscriptions", "Persistence", "Facility Layout & Warehousing", "Enterprise Integration & Collaboration", "Engineering Validation Center", "Excel Data Cleaning & Import"]
+tier2_features = tier1_features + ["Carbon Accounting", "IoT Digital Twin", "MEIO Matrix", "Slotting & Gantt", "Fleet Routing", "Warehouse Heatmap", "Supplier Risk Matrix", "Scenarios", "AGV Fleet Dispatcher", "Geospatial Network Designer", "Production Planning & Control (PPC)", "Lean Manufacturing & Shop Floor Operations", "Quality Control, Six Sigma & Reliability", "Engineering Economics & Finance", "Industrial Data Model & Digital Thread"]
+professional_features = tier2_features + ["Advanced Planning & Scheduling", "Quality Engineering & Reliability", "Capital Investment & Engineering Economics", "Workforce Engineering", "Industrial Sustainability & LCA", "Benchmarking & Engineering Standards", "Scenario Versioning & Comparison", "Localization & Multi-Currency"]
+tier3_features = professional_features + ["AI Copilot", "FastAPI Gateway", "Monte Carlo Sim", "Sensitivity Analysis", "Webhook Alerts", "Agentic Workflows", "Control Tower", "Cryptographic Ledger", "Predictive Maintenance Hub", "Human Factors & Ergonomics (NIOSH)", "Digital Twin & Discrete-Event Simulation", "Green IE & Sustainability", "Manufacturing Execution System", "Industrial Simulation Lab", "3D Factory Designer", "Industrial Connectivity Hub", "Multi-Objective Optimization", "Robust & Resilient Optimization", "Engineering Model Registry", "Experiment Lab", "Industrial Control Center", "Engineering Decision Center", "Advanced ML Demand Forecasting", "Team Workspaces & RBAC", "Executive Report Center", "Global Project & Digital Thread"]
+tier4_features = tier3_features + ["Industrial Data Platform", "Advanced Engineering Copilot", "Live Industrial Digital Twin", "Enterprise Security & Governance", "Predictive Maintenance Digital Twin"]
 # FIX (recurring from an earlier upload of this file - reapplied): this list
 # was missing commas between most entries, which in Python silently
 # concatenates adjacent string literals into one garbled string instead of
 # separate list items, and duplicated several Starter-tier names by accident.
-research_pack_features = enterprise_plus_features + [
+research_pack_features = tier3_features + [
     "Statistical Hypothesis Testing",
+    "Evidence Degradation & Decision-Readiness Lab",
     "LaTeX Document Formatter",
     "Literature & Citation Matrix",
     "Advanced Regression Analysis",
@@ -1288,8 +1436,29 @@ research_pack_features = enterprise_plus_features + [
 if is_admin:
     tier3_features.append("Admin Panel")
 
+def _render_post_module_layers(module_name: str) -> None:
+    """Run cross-cutting enterprise/visualization layers before legacy st.stop()."""
+    try:
+        render_enterprise_bridge(str(module_name), tier_val, st.session_state.get("current_user", "unknown"))
+    except Exception as exc:
+        st.warning("Enterprise capability layer could not render for this legacy module; native results remain available.")
+        with st.expander("Enterprise layer diagnostic"):
+            st.code(f"{type(exc).__name__}: {exc}")
+    try:
+        render_universal_module_parity(str(module_name), phase="results")
+    except Exception as exc:
+        st.warning("Universal Module Studio could not render for this legacy module; native results remain available.")
+        with st.expander("Visualization layer diagnostic"):
+            st.code(f"{type(exc).__name__}: {exc}")
+    finally:
+        # Persistence is deliberately independent from cross-cutting rendering.
+        # A visualization failure must never prevent recovery of module state.
+        if st.session_state.get("current_user"):
+            save_user_workspace(st.session_state["current_user"], st.session_state)
+
+
 st.sidebar.markdown("### 🧭 Navigation Menu")
-menu_choice = st.sidebar.radio("Go to Section", ["Dashboard", "Become an affiliate", "Feedback", "Edit Account"], label_visibility="collapsed")
+menu_choice = st.sidebar.radio("Go to Section", ["Dashboard", "✨ Excellence Hub", "Become an affiliate", "Feedback", "Edit Account"], label_visibility="collapsed")
 if menu_choice != "Dashboard":
     st.session_state.selected_nav = menu_choice
 else:
@@ -1300,222 +1469,133 @@ st.sidebar.markdown("### 🛠️ Enterprise Modules")
 
 if "Research" in tier_val:
     allowed_modules = research_pack_features
-elif "Enterprise Plus" in tier_val:
-    allowed_modules = enterprise_plus_features
+elif "Enterprise Plus" in tier_val or "Industrial Enterprise" in tier_val:
+    allowed_modules = tier4_features
 elif "Enterprise" in tier_val or is_admin:
     allowed_modules = tier3_features
+elif "Professional" in tier_val:
+    allowed_modules = professional_features
 elif "Pro" in tier_val or "Trial" in tier_val:
     allowed_modules = tier2_features
 else:
     allowed_modules = tier1_features
-if is_admin:
-    allowed_modules = research_pack_features + ["Admin Panel"]
-selected_module = st.sidebar.selectbox("Select Module", allowed_modules)
+_module_catalog_by_name = {str(m.get("name")): m for m in PLATFORM_CATALOG if isinstance(m, dict)}
+_module_labels=[]
+for _m in allowed_modules:
+    _meta=_module_catalog_by_name.get(str(_m),{})
+    _cat=str(_meta.get("category","Industrial Engineering"))
+    _module_labels.append(f"{_cat} · {_m}" if _meta else str(_m))
+_module_label_map=dict(zip(_module_labels,allowed_modules))
 
-# Universal data workspace controls: available before every module renderer.
-def _upgrade_tables_for_module(module_name):
-    candidates=[]
-    explicit={"MILP Solvers":[("Customer Demands","customers_list"),("Candidate Warehouses","warehouses_list")]}
-    for label,key in explicit.get(module_name,[]):
-        if key in st.session_state: candidates.append((label,key))
-    seen={k for _,k in candidates}
-    for key,val in list(st.session_state.items()):
-        if key in seen or str(key).startswith(("_","upgrade_","copilot_")): continue
-        if isinstance(val,pd.DataFrame) and len(val.columns): candidates.append((str(key).replace("_"," ").title(),key))
-        elif isinstance(val,list) and val and isinstance(val[0],dict): candidates.append((str(key).replace("_"," ").title(),key))
-    return candidates
+# Consume navigation requests BEFORE instantiating the sidebar selectbox.
+# This avoids Streamlit's "WidgetAlreadyInstantiated" error when a button
+# inside a rendered module requests navigation to another module.
+if st.session_state.pop("open_research_lab_requested", False):
+    _research_label = "Experimentation · Experiment Lab"
+    if _research_label in _module_label_map:
+        st.session_state["enterprise_module_selector"] = _research_label
 
-def _upgrade_df(key):
-    val=st.session_state.get(key)
-    if isinstance(val,pd.DataFrame): return val.copy(deep=True)
-    if isinstance(val,list): return pd.DataFrame(val)
-    return pd.DataFrame()
+_selected_label=st.sidebar.selectbox("Select Module",_module_labels,key="enterprise_module_selector")
+selected_module=_module_label_map[_selected_label]
+_meta=_module_catalog_by_name.get(str(selected_module))
+if _meta:
+    st.sidebar.markdown(
+        f"<div class='module-card'><div class='kicker'>{html.escape(str(_meta.get('category','Industrial Engineering')))}</div>"
+        f"<div style='font-size:15px;font-weight:800;color:#0f172a;margin-top:4px'>{html.escape(str(selected_module))}</div>"
+        f"<div style='font-size:11px;color:#64748b;margin-top:4px'>{html.escape(str(_meta.get('when','Engineering workflow')))}</div></div>",
+        unsafe_allow_html=True,
+    )
 
-def _upgrade_write(key,df):
-    old=st.session_state.get(key)
-    if isinstance(old,list): st.session_state[key]=df.where(pd.notna(df),None).to_dict("records")
-    else: st.session_state[key]=df.copy(deep=True)
-
-_upgrade_candidates=_upgrade_tables_for_module(selected_module)
-with st.container(border=True):
-    st.subheader("📁 Import, Clean, Reset & Export")
-    st.caption("Load Excel/CSV data into an editable module table, clean it safely, restore the original data, or export a formatted workbook.")
-    if _upgrade_candidates:
-        labels=[x[0] for x in _upgrade_candidates]
-        keys=[x[1] for x in _upgrade_candidates]
-        sel=st.selectbox("Table",labels,key="upgrade_table_selector_"+hashlib.sha1(selected_module.encode()).hexdigest()[:8])
-        key=keys[labels.index(sel)]
-        current=_upgrade_df(key)
-        snap_key="upgrade_snapshot_"+key
-        if snap_key not in st.session_state: st.session_state[snap_key]=current.copy(deep=True)
-        up=st.file_uploader("📤 Import Excel / CSV",type=["xlsx","csv"],key="upgrade_uploader_"+hashlib.sha1(selected_module.encode()).hexdigest()[:8])
-        a,b,d=st.columns(3)
-        with a:
-            if up is not None:
-                signature=hashlib.sha256(up.getvalue()).hexdigest()
-                if st.session_state.get("upgrade_import_signature")!=signature:
-                    try:
-                        raw=up.getvalue()
-                        imported=pd.read_excel(io.BytesIO(raw)) if up.name.lower().endswith(("xlsx","xls")) else pd.read_csv(io.BytesIO(raw))
-                        _upgrade_write(key,align_imported_table(imported,current))
-                        st.session_state["upgrade_import_signature"]=signature
-                        st.success(f"Imported {len(imported):,} rows into {sel}.")
-                        st.rerun()
-                    except Exception as exc: st.error(f"Import failed safely: {exc}")
-        with b:
-            if st.button("✨ Auto Clean",key="upgrade_clean_"+hashlib.sha1((selected_module+key).encode()).hexdigest()[:8],use_container_width=True,type="primary"):
-                cleaned,audit=clean_dataframe(_upgrade_df(key)); _upgrade_write(key,cleaned)
-                st.session_state["upgrade_audit"]=pd.DataFrame(audit); st.success("Table cleaned."); st.rerun()
-            if st.button("↩️ Reset Table",key="upgrade_reset_"+hashlib.sha1((selected_module+key+"reset").encode()).hexdigest()[:8],use_container_width=True):
-                _upgrade_write(key,st.session_state[snap_key].copy(deep=True)); st.session_state.pop("upgrade_audit",None); st.rerun()
-        with d:
-            data=build_excel_report("Shoir-IE | "+selected_module,[(sel,_upgrade_df(key))])
-            st.download_button("📥 Download XLSX",data=data,file_name="shoir_ie_"+re.sub(r"[^A-Za-z0-9]+","_",selected_module).lower()+".xlsx",mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",use_container_width=True)
+def _render_pretty_result(value, title="Result", key_prefix="result"):
+    """Present structured engineering output as cards/tables/charts instead of raw JSON."""
+    st.markdown(f"### {html.escape(title)}")
+    if isinstance(value, dict):
+        scalars={k:v for k,v in value.items() if not isinstance(v,(dict,list,pd.DataFrame,np.ndarray))}
+        frames={k:v for k,v in value.items() if isinstance(v,pd.DataFrame)}
+        nested={k:v for k,v in value.items() if isinstance(v,(dict,list))}
+        if scalars:
+            cols=st.columns(min(4,max(1,len(scalars))))
+            for i,(k,v) in enumerate(scalars.items()):
+                if isinstance(v,(float,np.floating)): display=f"{v:,.3f}"
+                elif isinstance(v,(int,np.integer)): display=f"{v:,}"
+                else: display=str(v)
+                cols[i%len(cols)].metric(str(k).replace("_"," ").title(),display)
+        for name,df in frames.items():
+            st.markdown(f"**{str(name).replace('_',' ').title()}**")
+            st.dataframe(df,use_container_width=True,hide_index=True)
+            _render_result_chart(df,str(name).replace("_"," ").title(),f"{key_prefix}_{name}")
+        if nested:
+            with st.expander("🔎 Detailed diagnostics",expanded=False):
+                for name,val in nested.items():
+                    st.markdown(f"**{str(name).replace('_',' ').title()}**")
+                    if isinstance(val,dict):
+                        st.dataframe(pd.json_normalize(val),use_container_width=True,hide_index=True)
+                    else:
+                        st.dataframe(pd.DataFrame(val) if isinstance(val,list) else pd.DataFrame([val]),use_container_width=True,hide_index=True)
+    elif isinstance(value,pd.DataFrame):
+        st.dataframe(value,use_container_width=True,hide_index=True)
+        _render_result_chart(value,title,key_prefix)
     else:
-        st.info("Open a module with an editable data table to enable import/export controls.")
+        st.write(value)
 
+def _render_result_chart(df,title,key_prefix):
+    if not isinstance(df,pd.DataFrame) or df.empty: return
+    nums=[x for x in df.columns if pd.api.types.is_numeric_dtype(df[x])]
+    if not nums: return
+    y=st.selectbox("Metric",nums,key=f"{key_prefix}_metric")
+    xs=[x for x in df.columns if x!=y]
+    x=st.selectbox("X-axis / category",xs,key=f"{key_prefix}_x") if xs else None
+    kind=st.selectbox("Chart",["Bar","Line","Scatter"],key=f"{key_prefix}_chart")
+    plot=df[[x,y]].dropna() if x else df[[y]].dropna()
+    if plot.empty: return
+    fig=px.line(plot,x=x,y=y,markers=True,title=title) if kind=="Line" and x else px.scatter(plot,x=x,y=y,title=title) if kind=="Scatter" and x else px.bar(plot,x=x,y=y,title=title) if x else px.bar(plot,y=y,title=title)
+    fig.update_layout(height=340,margin=dict(l=10,r=10,t=55,b=10))
+    st.plotly_chart(fig,use_container_width=True)
+
+# =====================================================================
+# UNIVERSAL MODULE PARITY — PREPARE
+# ---------------------------------------------------------------------
+# Every module receives the same import / validation / editable-data entry
+# point. The specialized module renderer remains untouched and can consume
+# its own canonical tables/results as before.
+# =====================================================================
+if (
+    st.session_state.get("authenticated")
+    and st.session_state.get("current_user")
+    and st.session_state.get("selected_nav", "Dashboard") == "Dashboard"
+):
+    try:
+        render_universal_module_parity(str(selected_module), phase="prepare")
+    except Exception as exc:
+        st.warning("Universal Module Studio could not render the preparation surface; the selected module remains available.")
+        with st.expander("Module parity diagnostic"):
+            st.code(f"{type(exc).__name__}: {exc}")
+
+# =====================================================================
+# AUTOSAVE LAST KNOWN USER WORKSPACE STATE
+# =====================================================================
+if st.session_state.get("authenticated") and st.session_state.get("current_user"):
+    save_user_workspace(st.session_state["current_user"], st.session_state)
+
+# =====================================================================
+# PLATFORM EXCELLENCE HUB — unified cross-cutting command center
+# =====================================================================
+if st.session_state.get("selected_nav") == "✨ Excellence Hub":
+    render_platform_excellence_hub(
+        st.session_state.get("current_user", "unknown"),
+        st.session_state.get("user_tier", "Starter Tier"),
+    )
+    st.stop()
 
 st.sidebar.markdown("---")
 if st.sidebar.button("Lock / Logout Workspace"):
-    log_audit(st.session_state.get("current_user", "Unknown"), "User Logged Out")
-    st.session_state.authenticated = False
+    _logout_user = st.session_state.get("current_user", "")
+    if _logout_user:
+        save_user_workspace(_logout_user, st.session_state)
+        log_audit(_logout_user, "User Logged Out")
+    for _key in list(st.session_state.keys()):
+        del st.session_state[_key]
     st.rerun()
-elif selected_module == "Industrial Command Center":
-    st.markdown("<h1 style='text-align:center;'>🏭 Industrial Command Center</h1>", unsafe_allow_html=True)
-    st.caption("Unified engineering workspace for data health, planning, MES, quality, simulation, optimization, economics, sustainability and model governance.")
-    ensure_model_registry()
-    snapshot = industrial_data_snapshot(st.session_state)
-    tabs = st.tabs(["📊 Data Health", "🏗️ APS & MES", "🧪 Quality", "🎲 Simulation", "🎯 Optimization", "💰 Economics & ESG", "🧠 Model Registry"])
-    with tabs[0]:
-        if snapshot:
-            chosen=st.selectbox("Workspace dataset",list(snapshot),key="ic_dataset"); df=snapshot[chosen]; q=data_quality_frame(df)
-            a,b,d=st.columns(3); a.metric("Rows",len(df)); b.metric("Columns",len(df.columns)); d.metric("Quality score",f"{float(q.iloc[-1]['Value']):.1f}/100")
-            st.dataframe(df,use_container_width=True,hide_index=True)
-            st.download_button("📥 Download data-health workbook",build_excel_export("Shoir-IE Data Health",{chosen:df,"Data Quality":q}),f"shoir_ie_{chosen.lower()}_health.xlsx","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",use_container_width=True)
-        else: st.info("Load data in a module first; this command center automatically reads shared workspace data.")
-    with tabs[1]:
-        jobs=st.data_editor(pd.DataFrame([{"Job":"WO-1001","Machine":"M-01","Duration":6,"Due Date":"2000-01-02","Priority":2},{"Job":"WO-1002","Machine":"M-02","Duration":4,"Due Date":"2000-01-03","Priority":1}]),num_rows="dynamic",use_container_width=True,key="ic_jobs")
-        machines=st.data_editor(pd.DataFrame([{"Machine":"M-01","Available Hours":168},{"Machine":"M-02","Available Hours":168}]),num_rows="dynamic",use_container_width=True,key="ic_machines")
-        if st.button("▶ Build feasible schedule",type="primary",key="ic_schedule"):
-            try: st.session_state.ic_schedule_result,st.session_state.ic_schedule_summary=finite_schedule(jobs,machines); st.success("Schedule generated and validated.")
-            except Exception as exc: st.error(f"Scheduling validation failed: {exc}")
-        if st.session_state.get("ic_schedule_result") is not None:
-            result=st.session_state.ic_schedule_result; st.dataframe(result,use_container_width=True,hide_index=True)
-            st.download_button("📥 Download APS schedule",build_excel_export("Shoir-IE APS",{"Schedule":result}),"shoir_ie_aps_schedule.xlsx","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",use_container_width=True)
-        mes=st.data_editor(st.session_state.get("ic_mes_orders",pd.DataFrame([{"Order":"WO-1001","Quantity":1000,"Produced":650,"Scrap":12,"Status":"In Process"}])),num_rows="dynamic",use_container_width=True,key="ic_mes")
-        st.session_state.ic_mes_orders=mes; mr=mes_work_order_table(mes); st.dataframe(mr["orders"],use_container_width=True,hide_index=True)
-        st.download_button("📥 Download MES report",build_excel_export("Shoir-IE MES",{"Work Orders":mr["orders"],"Summary":mr["summary"]}),"shoir_ie_mes_report.xlsx","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",use_container_width=True)
-    with tabs[2]:
-        qc=st.data_editor(st.session_state.get("ic_qc",pd.DataFrame({"Sample":range(1,9),"Measurement":[10.1,9.9,10.0,10.2,9.8,10.1,10.0,10.05]})),use_container_width=True,key="ic_qc_editor"); st.session_state.ic_qc=qc
-        vals=pd.to_numeric(qc.get("Measurement",pd.Series(dtype=float)),errors="coerce").dropna().tolist()
-        if len(vals)>=2:
-            lim=spc_limits(vals); fig=px.line(pd.DataFrame({"Sample":range(1,len(vals)+1),"Measurement":vals}),x="Sample",y="Measurement",title="SPC Control Chart")
-            fig.add_hline(y=lim["ucl"],line_dash="dash"); fig.add_hline(y=lim["lcl"],line_dash="dash"); fig.add_hline(y=lim["mean"],line_dash="dot"); st.plotly_chart(fig,use_container_width=True)
-            usl=st.number_input("USL",value=10.5,key="ic_usl"); lsl=st.number_input("LSL",value=9.5,key="ic_lsl"); cap=process_capability(vals,usl,lsl); st.dataframe(pd.DataFrame([cap]),use_container_width=True,hide_index=True)
-            st.download_button("📥 Download quality report",build_excel_export("Shoir-IE Quality",{"Samples":qc,"Capability":pd.DataFrame([cap])},[fig]),"shoir_ie_quality_report.xlsx","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",use_container_width=True)
-        else: st.warning("Enter at least two valid measurements.")
-    with tabs[3]:
-        a,b,d=st.columns(3); servers=a.number_input("Servers",1,20,2,key="ic_servers"); rate=b.number_input("Arrival rate",0.0,100.0,1.5,key="ic_arrival"); service=d.number_input("Average service time",0.0,100.0,0.8,key="ic_service")
-        n=st.number_input("Entities",10,10000,500,step=10,key="ic_entities"); rng=np.random.default_rng(42); arrivals=np.cumsum(rng.exponential(1/max(rate,0.001),int(n))); services=rng.exponential(max(service,0.001),int(n)); sim=discrete_event_simulation(arrivals,services,int(servers))
-        st.json(sim["summary"]); st.dataframe(sim["events"].head(1000),use_container_width=True,hide_index=True)
-        risk=robust_scenario_bounds({"Demand":100,"Lead Time":7,"Capacity":1000},{"Demand":.25,"Lead Time":.30,"Capacity":.15},1000,42); st.dataframe(risk.describe().T.round(2),use_container_width=True)
-        st.download_button("📥 Download simulation & risk workbook",build_excel_export("Shoir-IE Simulation",{"Events":sim["events"],"Risk Scenarios":risk}),"shoir_ie_simulation_risk.xlsx","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",use_container_width=True)
-    with tabs[4]:
-        opts=st.data_editor(pd.DataFrame([{"Scenario":"Baseline","Cost":100,"Carbon":80,"Service":95},{"Scenario":"Low Carbon","Cost":108,"Carbon":55,"Service":94},{"Scenario":"Service First","Cost":118,"Carbon":78,"Service":99}]),use_container_width=True,key="ic_opts")
-        weights=st.multiselect("Objectives",["Cost","Carbon","Service"],default=["Cost","Carbon"],key="ic_weights")
-        if weights:
-            scored=weighted_objective(opts,{x:1/len(weights) for x in weights}); pareto=pareto_frontier(opts,["Cost","Carbon"],["Service"]); st.dataframe(scored,use_container_width=True,hide_index=True); st.dataframe(pareto,use_container_width=True,hide_index=True)
-            st.download_button("📥 Download optimization workbook",build_excel_export("Shoir-IE Optimization",{"Scenarios":scored,"Pareto":pareto}),"shoir_ie_optimization.xlsx","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",use_container_width=True)
-    with tabs[5]:
-        flows=st.text_input("Cash flows (initial investment first)","-180000,45000,55000,70000,85000",key="ic_cashflows"); rate=st.number_input("Discount rate",0.0,1.0,.10,key="ic_rate")
-        try: econ=economics([float(x.strip()) for x in flows.split(",") if x.strip()],rate); st.dataframe(pd.DataFrame([econ]),use_container_width=True,hide_index=True)
-        except Exception as exc: st.warning(f"Economics input: {exc}"); econ={}
-        lca=st.data_editor(pd.DataFrame([{"Activity":"Electricity","Quantity":1000,"Unit":"kWh","Factor_kgCO2e_per_unit":.4},{"Activity":"Transport","Quantity":500,"Unit":"tkm","Factor_kgCO2e_per_unit":.09}]),use_container_width=True,key="ic_lca")
-        try:
-            lo=lca_inventory(lca); st.dataframe(lo,use_container_width=True,hide_index=True); st.download_button("📥 Download economics & ESG workbook",build_excel_export("Shoir-IE Economics ESG",{"Economics":pd.DataFrame([econ]),"LCA":lo}),"shoir_ie_economics_esg.xlsx","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",use_container_width=True)
-        except Exception as exc: st.error(f"LCA validation failed: {exc}")
-    with tabs[6]:
-        name=st.text_input("Model name","Integrated Industrial Study",key="ic_model_name"); version=st.text_input("Version","1.0.0",key="ic_model_version")
-        if st.button("💾 Register model",key="ic_register_model"):
-            registry_add(st.session_state.get("current_user","unknown"),name,version,"industrial",{"modules":NEW_ENTERPRISE_PLUS_MODULES}); st.success("Model registered with reproducible metadata.")
-        reg=registry_list(st.session_state.get("current_user","unknown")); st.dataframe(reg,use_container_width=True,hide_index=True)
-        if not reg.empty: st.download_button("📥 Download registry",build_excel_export("Shoir-IE Model Registry",{"Models":reg}),"shoir_ie_model_registry.xlsx","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",use_container_width=True)
-
-elif selected_module == "Advanced Industrial AI & Digital Twin Lab":
-    st.markdown("<h1 style='text-align:center;'>🧠 Advanced Industrial AI & Digital Twin Lab</h1>", unsafe_allow_html=True)
-    st.caption("Predictive demand, maintenance, scenario comparison, factory visualization, connectivity governance, localization and executive reporting.")
-    lab_tabs=st.tabs(["📈 Demand Forecasting","🛠️ Predictive Maintenance","🔀 Scenario Versioning","🏭 3D Factory","🌐 Connectivity & Localization","📄 Executive Report"])
-    with lab_tabs[0]:
-        hist=st.data_editor(st.session_state.get("lab_forecast_data",pd.DataFrame({
-            "Demand":[120,135,128,150,162,171,168,180,190,205,214,225],
-            "Promotion":[0,0,1,0,1,1,0,1,0,1,1,0],
-            "Weather":[25,26,24,28,30,31,29,27,26,25,23,22],
-            "MacroIndex":[100,101,101,102,103,103,104,105,106,106,107,108],
-        })),num_rows="dynamic",use_container_width=True,key="lab_forecast_editor")
-        st.session_state.lab_forecast_data=hist
-        target=st.selectbox("Target",list(hist.columns),index=0,key="lab_forecast_target")
-        features=st.multiselect("External/model features",[c for c in hist.columns if c!=target],default=[c for c in hist.columns if c!=target],key="lab_forecast_features")
-        model_type=st.selectbox("Model",["Random Forest","Gradient Boosting"],key="lab_forecast_model")
-        if st.button("🚀 Train & Forecast",type="primary",key="lab_forecast_run"):
-            try:
-                out=ml_demand_forecast(hist,target,features,12,model_type); st.session_state.lab_forecast_out=out
-                st.success(f"Model trained. Validation MAE: {out['diagnostics']['MAE']!s}; R²: {out['diagnostics']['R2']!s}")
-            except Exception as exc: st.error(f"Forecast validation failed: {exc}")
-        if st.session_state.get("lab_forecast_out"):
-            out=st.session_state.lab_forecast_out; st.dataframe(out["forecast"],use_container_width=True,hide_index=True); st.dataframe(out["feature_importance"],use_container_width=True,hide_index=True)
-            st.download_button("📥 Download forecast package",build_excel_export("Shoir-IE Demand Forecast",{"Forecast":out["forecast"],"Feature Importance":out["feature_importance"],"Diagnostics":pd.DataFrame([out["diagnostics"]])}),"shoir_ie_demand_forecast.xlsx","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",use_container_width=True)
-    with lab_tabs[1]:
-        telem=st.data_editor(st.session_state.get("lab_telemetry",pd.DataFrame({
-            "Vibration":[.20,.22,.25,.27,.31,.34,.36,.40,.43,.47,.50,.55,.58,.62,.66,.70,.73,.76,.80,.84],
-            "Temperature":[60,61,62,63,65,66,68,69,70,72,73,75,76,78,79,81,82,84,85,87],
-            "Load":[.5,.52,.51,.54,.56,.57,.59,.60,.62,.63,.65,.66,.68,.69,.71,.72,.74,.75,.77,.78],
-            "RUL":[120,116,112,108,103,98,94,89,84,79,74,69,64,59,54,49,44,39,34,29],
-        })),num_rows="dynamic",use_container_width=True,key="lab_telemetry_editor")
-        st.session_state.lab_telemetry=telem
-        target=st.selectbox("RUL target",list(telem.columns),index=3,key="lab_rul_target")
-        features=st.multiselect("Telemetry features",[c for c in telem.columns if c!=target],default=[c for c in telem.columns if c!=target],key="lab_rul_features")
-        if st.button("🛠️ Train RUL model",type="primary",key="lab_rul_run"):
-            try: st.session_state.lab_rul_out=predictive_maintenance_rul(telem,target,features); st.success("Predictive maintenance model trained with holdout validation.")
-            except Exception as exc: st.error(f"RUL validation failed: {exc}")
-        if st.session_state.get("lab_rul_out"):
-            out=st.session_state.lab_rul_out; st.metric("Predicted RUL for latest telemetry",f"{out['predicted_rul']:.1f} periods"); st.dataframe(out["feature_importance"],use_container_width=True,hide_index=True)
-            st.download_button("📥 Download maintenance model report",build_excel_export("Shoir-IE Predictive Maintenance",{"Predictions":out["predictions"],"Feature Importance":out["feature_importance"],"Metrics":pd.DataFrame([{"MAE":out["MAE"],"R2":out["R2"],"Predicted RUL":out["predicted_rul"]}])}),"shoir_ie_predictive_maintenance.xlsx","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",use_container_width=True)
-    with lab_tabs[2]:
-        base=st.data_editor(st.session_state.get("lab_base_scenario",pd.DataFrame([{"Scenario":"Baseline","Cost":100,"Service":95,"Carbon":80},{"Scenario":"Baseline-2","Cost":105,"Service":94,"Carbon":75}])),use_container_width=True,key="lab_base")
-        alt=st.data_editor(st.session_state.get("lab_alt_scenario",pd.DataFrame([{"Scenario":"Candidate","Cost":92,"Service":97,"Carbon":70},{"Scenario":"Candidate-2","Cost":111,"Service":99,"Carbon":68}])),use_container_width=True,key="lab_alt")
-        st.session_state.lab_base_scenario=base; st.session_state.lab_alt_scenario=alt
-        key=st.selectbox("Scenario key",["Scenario"],key="lab_scenario_key")
-        if st.button("🔀 Compare scenarios",type="primary",key="lab_scenario_run"):
-            try: st.session_state.lab_delta=scenario_delta(base,alt,[key])
-            except Exception as exc: st.error(f"Scenario comparison failed: {exc}")
-        if st.session_state.get("lab_delta") is not None:
-            st.dataframe(st.session_state.lab_delta,use_container_width=True,hide_index=True)
-            st.download_button("📥 Download scenario comparison",build_excel_export("Shoir-IE Scenario Versioning",{"Delta":st.session_state.lab_delta}),"shoir_ie_scenario_comparison.xlsx","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",use_container_width=True)
-        st.caption("Saved scenario runs are stored in the model/experiment registry; each run can be reproduced from its recorded parameters.")
-    with lab_tabs[3]:
-        layout=st.data_editor(pd.DataFrame([{"Asset":"Machine A","X":0,"Y":0,"Z":0,"Status":"Running"},{"Asset":"Machine B","X":5,"Y":0,"Z":0,"Status":"Warning"},{"Asset":"Buffer","X":2,"Y":4,"Z":0,"Status":"Healthy"},{"Asset":"Dock","X":8,"Y":4,"Z":0,"Status":"Healthy"}]),num_rows="dynamic",use_container_width=True,key="lab_3d_layout")
-        fig3=go.Figure()
-        for status,grp in layout.groupby("Status"):
-            fig3.add_trace(go.Scatter3d(x=grp["X"],y=grp["Y"],z=grp["Z"],mode="markers+text",text=grp["Asset"],name=status,marker={"size":10}))
-        fig3.update_layout(title="Interactive Factory Digital Twin Layout",scene={"xaxis_title":"X","yaxis_title":"Y","zaxis_title":"Z"})
-        st.plotly_chart(fig3,use_container_width=True)
-        st.download_button("📥 Download factory layout data",build_excel_export("Shoir-IE 3D Factory",{"Layout":layout}),"shoir_ie_factory_layout.xlsx","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",use_container_width=True)
-    with lab_tabs[4]:
-        system=st.selectbox("Connector system",["SAP","Oracle","WMS","MES","OPC UA Gateway","REST API"],key="lab_connector_system")
-        endpoint=st.text_input("Endpoint",placeholder="https://example.internal/api",key="lab_connector_endpoint")
-        conn_check=connector_healthcheck({"name":system,"system":system,"endpoint":endpoint})
-        st.json(conn_check)
-        st.caption("The application validates connector definitions and keeps production credentials outside the database. A live enterprise connection requires the customer's endpoint and secret configuration.")
-        amount=st.number_input("Amount to convert",value=1000.0,key="lab_currency_amount")
-        rate=st.number_input("Rate to base currency",value=3.75,min_value=0.000001,key="lab_currency_rate")
-        st.metric("Converted amount",f"{currency_convert(amount,rate):,.2f}")
-        role=st.selectbox("Workspace role",["Viewer","Planner","Engineer","Manager","Admin"],key="lab_role")
-        action=st.selectbox("Permission",["read","write_scenario","run_model","edit_model","approve","admin"],key="lab_action")
-        st.info(f"Permission {'granted' if rbac_can_edit(role,'workspace',action) else 'not granted'} for {role}.")
-    with lab_tabs[5]:
-        summary={"Workspace":"Shoir-IE","Module":"Advanced Industrial AI & Digital Twin Lab","Tier":str(st.session_state.get("user_tier","unknown"))}
-        report=executive_report_pdf("Shoir-IE Executive Engineering Report",summary,{"Forecast Diagnostics":pd.DataFrame([st.session_state.get("lab_forecast_out",{}).get("diagnostics",{})]) if st.session_state.get("lab_forecast_out") else pd.DataFrame([summary])})
-        st.download_button("📄 Download Executive PDF",report,"shoir_ie_executive_report.pdf","application/pdf",use_container_width=True)
 elif selected_module in ["Autonomous Cognitive Operations & Zero-Knowledge Mesh (ACO-ZKMS)", "⚡ ACO-ZKMS Master Engine"]:
     import streamlit as st
     import pandas as pd
@@ -1957,7 +2037,8 @@ elif selected_module in ["Universal Cross-Domain Mathematical Isomorphism Engine
                 time.sleep(1.0)
             log_ucmie_event(f"Translated proof to {target_or}")
             st.markdown("#### Translated Operations Research Framework")
-            st.code(f"""# UCMIE Automated Paradigm Translator Output
+            with st.expander("🧩 Technical source (optional)",expanded=False):
+                st.code(f"""# UCMIE Automated Paradigm Translator Output
 # Target Framework: {target_or}
 import numpy as np
 from scipy.optimize import milp
@@ -2048,7 +2129,8 @@ if __name__ == "__main__":
 
         if 'latex' in st.session_state['ucmie_generated_artifacts']:
             st.markdown("#### Generated LaTeX Document Preview")
-            st.code(st.session_state['ucmie_generated_artifacts']['latex'], language="latex")
+            with st.expander("🧩 LaTeX source (optional)",expanded=False):
+                st.code(st.session_state['ucmie_generated_artifacts']['latex'], language="latex")
 
     with tab_export:
         st.markdown("**Unified World-Class Export Hub**")
@@ -2567,7 +2649,8 @@ def verify_vault():
 if __name__ == "__main__":
     verify_vault()
 """
-            st.code(verification_script_code, language="python")
+            with st.expander("🧩 Verification script (optional)",expanded=False):
+                st.code(verification_script_code, language="python")
             st.info("💡 Peer reviewers can execute this standalone script to instantly verify bit-for-bit replication without complex local installation.")
         else:
             st.info("Initialize the vault ledger in **Tab 1** to generate the peer reviewer verification portal script.")
@@ -3027,7 +3110,8 @@ status = solver.Solve()
             extraction_mode = st.selectbox("Semantic Extraction Mode", ["Standard OR Ontology", "Stochastic MILP", "Non-Linear Convex"])
         with col_p2:
             st.markdown("**Extracted Structural Tuples (Simulated)**")
-            st.code("Sets: I = {1, 2, 3, 4, 5}\nParameters: c[i], d[i], cap[i]\nVariables: x[i] (Continuous)", language="text")
+            with st.expander("🧩 Structural model details (optional)",expanded=False):
+                st.code("Sets: I = {1, 2, 3, 4, 5}\nParameters: c[i], d[i], cap[i]\nVariables: x[i] (Continuous)", language="text")
 
     with tab_reg:
         st.markdown("#### Universal Code Generation Registry")
@@ -3360,6 +3444,330 @@ elif selected_module == "Adversarially Stressed Synthetic Industrial Twins":
             )
         else:
             st.info("Execute a simulation run in **Tab 4 (Live Stress Canvas)** to unlock the frictionless export bundle.")
+
+elif selected_module == "Evidence Degradation & Decision-Readiness Lab":
+    import streamlit as st
+    import pandas as pd
+    import numpy as np
+    import json
+    import io
+    import zipfile
+
+    st.markdown("### 🧭 Evidence Degradation & Decision-Readiness Lab")
+    st.markdown(
+        "A controlled research module for testing how evidence quality and operating stress affect industrial decision reliability."
+    )
+
+    active_study_id = st.session_state.get("sx_research_study_id")
+    active_protocol = load_research_protocol(active_study_id) if active_study_id else None
+    if active_protocol is None:
+        studies = list_research_studies(st.session_state.current_user)
+        if not studies.empty:
+            preferred = studies[studies["Title"].astype(str).str.contains(
+                "Decision-Readiness Boundary", case=False, na=False
+            )]
+            if not preferred.empty:
+                active_study_id = str(preferred.iloc[0]["Study ID"])
+                active_protocol = load_research_protocol(active_study_id)
+                st.session_state["sx_research_study_id"] = active_study_id
+
+    if active_protocol:
+        st.success(
+            "Linked study: " + str(active_protocol["title"]) +
+            " · " + str(active_protocol["research_id"])
+        )
+    else:
+        st.warning("No research study is selected. Open Experiment Lab → Studies & Recovery first.")
+
+    tab_design, tab_run, tab_results, tab_export = st.tabs([
+        "🧪 Experiment Design",
+        "▶️ Controlled Run",
+        "📊 Results",
+        "📦 Export"
+    ])
+
+    with tab_design:
+        st.markdown("#### Experimental factors")
+        c1, c2 = st.columns(2)
+        with c1:
+            completeness = st.slider(
+                "Evidence completeness (%)", 25, 100, 100, 5,
+                key="edrb_completeness"
+            )
+            freshness = st.select_slider(
+                "Evidence freshness delay (hours)",
+                options=[0, 1, 6, 12, 24, 48],
+                value=0,
+                key="edrb_freshness"
+            )
+            conflict = st.slider(
+                "Evidence conflict (%)", 0, 50, 0, 5,
+                key="edrb_conflict"
+            )
+        with c2:
+            uncertainty = st.slider(
+                "Evidence uncertainty (%)", 0, 60, 0, 5,
+                key="edrb_uncertainty"
+            )
+            shock = st.slider(
+                "Operational shock severity", 0.0, 3.0, 0.0, 0.5,
+                key="edrb_shock"
+            )
+            seed = st.number_input(
+                "Random seed", 0, 2147483647, 2026, 1,
+                key="edrb_seed"
+            )
+
+        st.markdown("#### Decision definition")
+        decision_type = st.selectbox(
+            "Industrial decision",
+            [
+                "Next-shift production target",
+                "Capacity allocation",
+                "Inventory replenishment"
+            ],
+            key="edrb_decision_type"
+        )
+        baseline_policy = st.selectbox(
+            "Baseline decision policy",
+            [
+                "Evidence-following policy",
+                "Historical-average policy"
+            ],
+            key="edrb_baseline"
+        )
+
+        st.info(
+            "The readiness boundary is not pre-set. The experiment records evidence conditions and realized decision regret; the boundary is estimated later from the observed data."
+        )
+
+        design_summary = pd.DataFrame([
+            ["Evidence completeness", completeness, "%"],
+            ["Evidence freshness", freshness, "hours delayed"],
+            ["Evidence conflict", conflict, "%"],
+            ["Evidence uncertainty", uncertainty, "%"],
+            ["Operational shock", shock, "severity"],
+            ["Decision", decision_type, ""],
+            ["Baseline", baseline_policy, ""]
+        ], columns=["Factor", "Value", "Unit"])
+        st.dataframe(design_summary, use_container_width=True, hide_index=True)
+
+    with tab_run:
+        st.markdown("#### Controlled experiment")
+        r1, r2, r3 = st.columns(3)
+        scenario_count = r1.number_input(
+            "Scenarios", 20, 5000,
+            int((active_protocol or {}).get("sample_size", 200)), 20,
+            key="edrb_scenarios"
+        )
+        replications = r2.number_input(
+            "Replications / scenario", 1, 200,
+            int((active_protocol or {}).get("replications", 20)), 1,
+            key="edrb_reps"
+        )
+        holdout_fraction = r3.slider(
+            "Held-out fraction", 0.10, 0.40, 0.20, 0.05,
+            key="edrb_holdout"
+        )
+
+        if st.button(
+            "🚀 Run Controlled Evidence Experiment",
+            type="primary",
+            use_container_width=True,
+            key="edrb_run"
+        ):
+            rng = np.random.default_rng(int(seed))
+            n = int(scenario_count) * int(replications)
+
+            # Generate a controlled industrial state with several evidence channels.
+            latent_demand = np.clip(rng.normal(120.0, 15.0, n), 50.0, 220.0)
+            latent_capacity = np.clip(rng.normal(125.0, 10.0, n), 80.0, 170.0)
+            latent_quality_risk = np.clip(rng.normal(8.0, 2.0, n), 0.0, 20.0)
+            latent_energy_limit = np.clip(rng.normal(130.0, 10.0, n), 90.0, 170.0)
+
+            # Controlled evidence degradation.
+            evidence = latent_demand.copy()
+            if int(freshness) > 0:
+                evidence = evidence - (rng.normal(0.0, 7.0, n) * min(float(freshness) / 24.0, 2.0))
+            evidence += rng.normal(
+                0.0,
+                np.maximum(0.5, latent_demand * float(uncertainty) / 100.0),
+                n
+            )
+
+            missing = rng.random(n) > (float(completeness) / 100.0)
+            evidence[missing] = np.nan
+
+            # Apply a balanced contradictory evidence signal. The previous
+            # reflection rule could preserve absolute error, making the conflict
+            # factor statistically degenerate for many scenarios.
+            evidence, conflict_mask = apply_evidence_conflict(
+                latent_demand,
+                evidence,
+                float(conflict),
+                rng,
+            )
+
+            operational_shock = rng.normal(0.0, 10.0 * float(shock), n)
+            realized_demand = np.clip(latent_demand + operational_shock, 40.0, 280.0)
+            realized_capacity = np.clip(
+                latent_capacity - operational_shock * 0.20, 60.0, 180.0
+            )
+
+            if baseline_policy == "Historical-average policy":
+                baseline_action = np.full(n, 120.0)
+            else:
+                baseline_action = np.where(
+                    np.isfinite(evidence),
+                    evidence,
+                    120.0
+                )
+
+            baseline_action = np.clip(
+                np.minimum(baseline_action, latent_energy_limit),
+                30.0,
+                180.0
+            )
+
+            feasible_target = np.minimum(realized_demand, realized_capacity)
+            baseline_regret = (
+                np.abs(baseline_action - feasible_target)
+                / np.maximum(np.abs(feasible_target), 1.0)
+            )
+
+            readiness_score = (
+                0.30 * float(completeness) / 100.0
+                + 0.20 * np.exp(-float(freshness) / 24.0)
+                + 0.20 * (1.0 - float(conflict) / 50.0)
+                + 0.20 * (1.0 - float(uncertainty) / 60.0)
+                + 0.10 * (1.0 - float(shock) / 3.0)
+            )
+
+            observations = pd.DataFrame({
+                "scenario": np.arange(1, n + 1),
+                "latent_demand": latent_demand,
+                "evidence": evidence,
+                "latent_capacity": latent_capacity,
+                "realized_demand": realized_demand,
+                "realized_capacity": realized_capacity,
+                "action": baseline_action,
+                "decision_regret": baseline_regret,
+                "readiness_score": readiness_score,
+                "evidence_completeness": completeness,
+                "evidence_freshness_hours": freshness,
+                "evidence_conflict_pct": conflict,
+                "evidence_uncertainty_pct": uncertainty,
+                "shock_severity": shock
+            })
+
+            split_point = int(n * (1.0 - float(holdout_fraction)))
+            observations["split"] = np.where(
+                observations.index >= split_point, "holdout", "development"
+            )
+
+            st.session_state["edrb_results"] = observations
+            st.session_state["edrb_config"] = {
+                "study_id": active_study_id,
+                "research_id": (active_protocol or {}).get("research_id"),
+                "decision_type": decision_type,
+                "baseline_policy": baseline_policy,
+                "scenario_count": int(scenario_count),
+                "replications": int(replications),
+                "holdout_fraction": float(holdout_fraction),
+                "random_seed": int(seed),
+                "evidence_completeness": int(completeness),
+                "evidence_freshness_hours": int(freshness),
+                "evidence_conflict_pct": int(conflict),
+                "conflict_signal_bias_pct": 20,
+                "conflict_mix_weight": 0.50,
+                "evidence_uncertainty_pct": int(uncertainty),
+                "shock_severity": float(shock),
+            }
+            if active_study_id and active_protocol:
+                try:
+                    run_id = register_research_run(
+                        study_id=str(active_study_id),
+                        research_id=str(active_protocol.get("research_id")),
+                        owner=str(st.session_state.current_user),
+                        config=st.session_state["edrb_config"],
+                        results=observations,
+                    )
+                    st.session_state["edrb_run_id"] = run_id
+                    st.success("Controlled experiment completed and permanently recorded: " + str(n) + " observations.")
+                except Exception as exc:
+                    st.warning("Experiment completed, but the durable run-history record could not be written: " + str(exc))
+            else:
+                st.success("Controlled experiment completed: " + str(n) + " observations.")
+
+    with tab_results:
+        results = st.session_state.get("edrb_results")
+        if isinstance(results, pd.DataFrame) and not results.empty:
+            holdout = results[results["split"] == "holdout"].copy()
+
+            persisted_run_id = st.session_state.get("edrb_run_id")
+            if persisted_run_id:
+                st.info("Research run permanently recorded: " + str(persisted_run_id))
+
+            st.markdown("#### Primary endpoint")
+            st.metric(
+                "Mean normalized decision regret",
+                "{:.5f}".format(float(holdout["decision_regret"].mean()))
+            )
+
+            st.markdown("#### Observed readiness-response relationship")
+            curve = (
+                results.groupby("readiness_score", as_index=False)
+                .agg(
+                    mean_regret=("decision_regret", "mean"),
+                    observations=("decision_regret", "size")
+                )
+                .sort_values("readiness_score")
+            )
+            st.line_chart(curve.set_index("readiness_score")[["mean_regret"]])
+
+            st.markdown("#### Experimental observations")
+            st.dataframe(holdout.head(100), use_container_width=True, hide_index=True)
+            st.caption(
+                "This visualization describes the observed relationship. It does not declare a scientifically valid threshold until the planned statistical analysis and robustness checks are complete."
+            )
+        else:
+            st.info("No run has been executed for this experiment yet.")
+
+    with tab_export:
+        results = st.session_state.get("edrb_results")
+        config = st.session_state.get("edrb_config", {})
+        if isinstance(results, pd.DataFrame) and not results.empty:
+            payload = io.BytesIO()
+            with zipfile.ZipFile(payload, "w", zipfile.ZIP_DEFLATED) as zf:
+                zf.writestr(
+                    "experiment_results.csv",
+                    results.to_csv(index=False).encode("utf-8")
+                )
+                zf.writestr(
+                    "experiment_configuration.json",
+                    json.dumps(config, indent=2, default=str).encode("utf-8")
+                )
+                zf.writestr(
+                    "research_protocol.json",
+                    json.dumps(active_protocol or {}, indent=2, default=str).encode("utf-8")
+                )
+                zf.writestr(
+                    "README.txt",
+                    "Shoir-IE controlled evidence-degradation experiment. Statistical validation is required before scientific conclusions are stated.\n"
+                )
+
+            st.download_button(
+                "📥 Download experiment evidence bundle",
+                data=payload.getvalue(),
+                file_name="shoir_ie_decision_readiness_experiment.zip",
+                mime="application/zip",
+                type="primary",
+                use_container_width=True,
+                key="edrb_export"
+            )
+        else:
+            st.info("Run the experiment first to create the evidence bundle.")
+
 elif selected_module == "Adversarial Chaos & Shock Injector":
     import streamlit as st
     import pandas as pd
@@ -4093,7 +4501,8 @@ elif selected_module == "Advanced Regression Analysis":
                 st.session_state.reg_results = ols_model
                 st.session_state.reg_type = "OLS"
                 st.success("OLS Model Fitted Successfully!")
-                st.code(str(ols_model.summary()), language="text")
+                with st.expander("📋 Statistical model diagnostics",expanded=False):
+                    st.code(str(ols_model.summary()), language="text")
             elif model_type in ["Ridge Regularized", "Lasso Regularized"]:
                 reg = Ridge(alpha=alpha_val) if model_type == "Ridge Regularized" else Lasso(alpha=alpha_val)
                 reg.fit(X, y)
@@ -4161,13 +4570,15 @@ elif selected_module == "Advanced Regression Analysis":
 
             latex_table = summary_table.to_latex(escape=True, column_format="lcccc")
             st.markdown("Generated LaTeX `booktabs` Table Syntax:")
-            st.code(latex_table, language="latex")
+            with st.expander("🧩 LaTeX table source (optional)",expanded=False):
+                st.code(latex_table, language="latex")
 
             coefs = res.params
             eq_terms = [f"{coefs.iloc[i]:.3f} X_{{{i}}}" if i > 0 else f"{coefs.iloc[i]:.3f}" for i in range(len(coefs))]
             latex_eq = "$$Y = " + " + ".join(eq_terms) + " + \\epsilon$$"
             st.markdown("Fitted Equation LaTeX String:")
-            st.code(latex_eq, language="latex")
+            with st.expander("🧩 Fitted equation source (optional)",expanded=False):
+                st.code(latex_eq, language="latex")
 
             col_ex1, col_ex2 = st.columns(2)
             with col_ex1:
@@ -4385,7 +4796,8 @@ elif selected_module == "Literature & Citation Matrix":
         )
         
         st.markdown("Generated LaTeX `booktabs` Table Code Preview:")
-        st.code(latex_table_code, language="latex")
+        with st.expander("🧩 LaTeX table source (optional)",expanded=False):
+            st.code(latex_table_code, language="latex")
         
         bib_content = ""
         for idx, row in df_export.iterrows():
@@ -4512,7 +4924,8 @@ elif selected_module == "LaTeX Document Formatter":
             math_code = "$$\\min Z = \\sum_{i=1}^{n} c_i x_i = " + " + ".join(terms) + "$$"
             st.markdown("Live Rendered Preview:")
             st.markdown(math_code)
-            st.code(math_code, language="latex")
+            with st.expander("🧩 Equation source (optional)",expanded=False):
+                st.code(math_code, language="latex")
             
         elif eq_mode == "Custom Matrix Builder (bmatrix)":
             m_r = st.slider("Matrix Rows", 2, 5, 3)
@@ -4540,7 +4953,8 @@ elif selected_module == "LaTeX Document Formatter":
             b_year = st.text_input("Year", "2026")
             
         bib_output = f"@article{{{b_key},\n  author = {{{b_author}}},\n  title = {{{b_title}}},\n  journal = {{Journal of Industrial Engineering Automation}};\n  year = {{{b_year}}}\n}}"
-        st.code(bib_output, language="bibtex")
+        with st.expander("🧩 BibTeX source (optional)",expanded=False):
+            st.code(bib_output, language="bibtex")
         st.download_button("📥 Download References (.bib)", data=bib_output.encode("utf-8"), file_name="references.bib", mime="text/plain")
 
     with tab_export:
@@ -4570,7 +4984,8 @@ elif selected_module == "LaTeX Document Formatter":
 \\end{{document}}
 """
         st.markdown("Preview Full Source Code:")
-        st.code(complete_latex_document, language="latex")
+        with st.expander("🧩 Full manuscript source (optional)",expanded=False):
+            st.code(complete_latex_document, language="latex")
         
         col_dl1, col_dl2 = st.columns(2)
         with col_dl1:
@@ -4589,175 +5004,655 @@ elif selected_module == "LaTeX Document Formatter":
                 mime="text/plain"
             )
 if selected_module == "Statistical Hypothesis Testing":
-    st.title("📊 Advanced Statistical Hypothesis Testing Suite")
-    st.markdown("A research-grade interactive suite featuring live data editing, automated diagnostics, parametric/non-parametric tests, and visualizations.")
+    from io import BytesIO
+    from research_statistics import (
+        read_research_upload,
+        groupable_columns,
+        groups_from_column,
+        paired_from_long,
+        eta_squared,
+        cohens_d,
+        tukey_hsd_table,
+        holm_adjust,
+    )
 
-# --- 1. FLEXIBLE DATA INGESTION & LIVE EDITOR ---
-ingestion_mode = st.radio("Data Ingestion Mode", ["Interactive Data Editor (Add/Delete/Modify)", "Upload CSV/Excel", "Benchmark Dataset"], horizontal=True)
+    st.title("📊 Research-Grade Statistical Hypothesis Testing Suite")
+    st.caption(
+        "A stable research workflow: upload data → map variables → validate → test → "
+        "review effect size/post-hoc results → export."
+    )
 
-if ingestion_mode == "Interactive Data Editor (Add/Delete/Modify)":
-    st.info("💡 Double-click any cell to edit values. Use the table controls to add or delete rows dynamically.")
-    default_data = pd.DataFrame({
-        "Process_A": [88.5, 91.2, 84.1, 89.0, 92.4, 87.1, 85.9, 90.3],
-        "Process_B": [82.1, 85.4, 80.0, 83.2, 86.1, 81.9, 79.8, 84.5],
-        "Shift": ["Morning", "Evening", "Night", "Morning", "Evening", "Night", "Morning", "Evening"]
-    })
-    # Streamlit data editor allows full add/delete/change capability
-    df = st.data_editor(default_data, num_rows="dynamic", use_container_width=True)
+    def _preferred_index(columns, patterns):
+        lowered = [str(c).strip().lower() for c in columns]
+        for pattern in patterns:
+            for i, value in enumerate(lowered):
+                if pattern in value:
+                    return i
+        return 0
 
-elif ingestion_mode == "Upload CSV/Excel":
-    uploaded_file = st.file_uploader("Upload dataset", type=["csv", "xlsx"])
-    if uploaded_file:
-        df = pd.read_csv(uploaded_file) if uploaded_file.name.endswith('.csv') else pd.read_excel(uploaded_file)
-        df = st.data_editor(df, num_rows="dynamic", use_container_width=True)
+    def _analysis_excel(dataframe, summary=None, details=None, posthoc=None):
+        buf = BytesIO()
+        with pd.ExcelWriter(buf, engine="xlsxwriter") as writer:
+            dataframe.to_excel(writer, sheet_name="Analysis_Data", index=False)
+            if summary is not None and not summary.empty:
+                summary.to_excel(writer, sheet_name="Test_Result", index=False)
+            if details is not None and not details.empty:
+                details.to_excel(writer, sheet_name="Group_Details", index=False)
+            if posthoc is not None and not posthoc.empty:
+                posthoc.to_excel(writer, sheet_name="Post_Hoc", index=False)
+        return buf.getvalue()
+
+    # ---------------------------------------------------------------
+    # 1. INGESTION
+    # ---------------------------------------------------------------
+    ingestion_mode = st.radio(
+        "Data Ingestion Mode",
+        ["Upload CSV/Excel", "Interactive Data Editor", "Benchmark Dataset"],
+        horizontal=True,
+        key="stats_ingestion_mode",
+    )
+
+    df = None
+    source_name = "Generated"
+    detected_header_row = 0
+    available_sheets = []
+
+    if ingestion_mode == "Upload CSV/Excel":
+        uploaded_file = st.file_uploader(
+            "Upload research dataset",
+            type=["csv", "xlsx"],
+            key="stats_upload",
+            help="Shoir-IE detects title/metadata rows, normalizes headers, removes blank columns, and converts numeric fields.",
+        )
+        if uploaded_file:
+            source_name = uploaded_file.name
+            file_bytes = uploaded_file.getvalue()
+
+            if uploaded_file.name.lower().endswith(".xlsx"):
+                try:
+                    xls = pd.ExcelFile(BytesIO(file_bytes), engine="openpyxl")
+                    available_sheets = xls.sheet_names
+                except Exception as exc:
+                    st.error(f"Excel workbook could not be read: {exc}")
+
+            selected_sheet = None
+            if available_sheets:
+                selected_sheet = st.selectbox(
+                    "Excel sheet",
+                    available_sheets,
+                    key="stats_sheet",
+                    help="Choose the sheet containing the observations. Shoir-IE will detect the table header automatically.",
+                )
+
+            try:
+                df, detected_header_row, _ = read_research_upload(
+                    file_bytes,
+                    uploaded_file.name,
+                    selected_sheet,
+                )
+            except Exception as exc:
+                st.error(f"Dataset could not be loaded: {exc}")
+                df = None
+
+            if df is not None and not df.empty:
+                if detected_header_row > 0:
+                    st.success(
+                        f"✅ Detected the table header on source row {detected_header_row + 1} "
+                        "and removed the title/metadata rows above it."
+                    )
+                unnamed = [c for c in df.columns if str(c).lower().startswith("unnamed")]
+                if unnamed:
+                    st.error(f"❌ Unresolved blank columns remain: {', '.join(map(str, unnamed))}")
+                else:
+                    st.success("✅ No Unnamed columns remain after cleaning.")
+
+    elif ingestion_mode == "Interactive Data Editor":
+        df = st.data_editor(
+            pd.DataFrame({
+                "Process_A": [88.5, 91.2, 84.1, 89.0, 92.4, 87.1, 85.9, 90.3],
+                "Process_B": [82.1, 85.4, 80.0, 83.2, 86.1, 81.9, 79.8, 84.5],
+                "Shift": ["Morning", "Evening", "Night", "Morning", "Evening", "Night", "Morning", "Evening"],
+            }),
+            num_rows="dynamic",
+            use_container_width=True,
+        )
     else:
-        df = None
-        st.warning("Please upload a file to begin.")
-else:
-    np.random.seed(42)
-    df = pd.DataFrame({
-        "Control_Group": np.random.normal(78.5, 3.8, 120),
-        "Treatment_Group": np.random.normal(83.2, 4.1, 120),
-        "Operator": np.random.choice(["Alpha", "Beta", "Gamma"], 120)
-    })
-    df = st.data_editor(df, num_rows="dynamic", use_container_width=True)
+        np.random.seed(42)
+        df = pd.DataFrame({
+            "Control_Group": np.random.normal(78.5, 3.8, 120),
+            "Treatment_Group": np.random.normal(83.2, 4.1, 120),
+            "Operator": np.random.choice(["Alpha", "Beta", "Gamma"], 120),
+        })
 
-if df is not None and not df.empty:
-    numeric_cols = df.select_dtypes(include=np.number).columns.tolist()
-    categorical_cols = df.select_dtypes(include=['object', 'category']).columns.tolist()
-    
-    # --- 2. CONFIGURABLE TEST BUILDER ---
-    st.markdown("---")
-    st.subheader("⚙️ Test Configuration & Parameters")
-    
-    col_c1, col_c2, col_c3, col_c4 = st.columns(4)
-    with col_c1:
-        test_category = st.selectbox("Test Category", ["Parametric", "Non-Parametric", "Variance & Goodness"])
-    with col_c2:
-        if test_category == "Parametric":
-            test_type = st.selectbox("Select Test", ["One-Sample t-Test", "Independent Two-Sample t-Test", "Paired t-Test", "One-Way ANOVA"])
-        elif test_category == "Non-Parametric":
-            test_type = st.selectbox("Select Test", ["Mann-Whitney U Test", "Kruskal-Wallis H-Test"])
+    if df is not None and not df.empty:
+        df = df.dropna(axis=0, how="all").copy()
+        numeric_cols = df.select_dtypes(include=np.number).columns.tolist()
+        categorical_cols = df.select_dtypes(include=["object", "category", "string"]).columns.tolist()
+        grouping_candidates = groupable_columns(df, max_unique=30)
+
+        # Make the column names immediately visible, so a bad upload can never
+        # silently turn into Scenario ID / Unnamed selections.
+        st.markdown("---")
+        st.subheader("🔎 Data Readiness & Column Map")
+        q1, q2, q3, q4 = st.columns(4)
+        q1.metric("Rows", f"{len(df):,}")
+        q2.metric("Numeric columns", f"{len(numeric_cols):,}")
+        q3.metric("Grouping candidates", f"{len(grouping_candidates):,}")
+        q4.metric("Missing cells", f"{int(df.isna().sum().sum()):,}")
+
+        if numeric_cols:
+            st.caption("Numeric columns: " + ", ".join(map(str, numeric_cols)))
+        if grouping_candidates:
+            st.caption("Group-capable columns: " + ", ".join(map(str, grouping_candidates)))
         else:
-            test_type = st.selectbox("Select Test", ["Chi-Square Test of Independence", "Levene's Homogeneity Test"])
-    with col_c3:
-        alpha = st.selectbox("Significance Level ($\alpha$)", [0.01, 0.05, 0.10], index=1)
-    with col_c4:
-        alternative = st.selectbox("Alternative Hypothesis", ["two-sided", "less", "greater"])
+            st.warning(
+                "No group-capable column was detected. You can still use the two-numeric-column "
+                "t-test layouts, or add a condition/group column."
+            )
 
-    # Dynamic Variable Selectors based on Test Type
-    col_v1, col_v2 = st.columns(2)
-    if test_type == "One-Sample t-Test":
-        with col_v1:
-            target_col = st.selectbox("Numeric Target Column", numeric_cols)
-        with col_v2:
-            pop_mean = st.number_input("Hypothesized Mean ($\mu_0$)", value=75.0)
-    elif test_type in ["Independent Two-Sample t-Test", "Mann-Whitney U Test", "Paired t-Test", "Levene's Homogeneity Test"]:
-        with col_v1:
-            col_a = st.selectbox("Variable / Group 1", numeric_cols)
-        with col_v2:
-            col_b = st.selectbox("Variable / Group 2", numeric_cols, index=1 if len(numeric_cols) > 1 else 0)
-    elif test_type in ["One-Way ANOVA", "Kruskal-Wallis H-Test"]:
-        with col_v1:
-            val_col = st.selectbox("Dependent Variable (Numeric)", numeric_cols)
-        with col_v2:
-            group_col = st.selectbox("Independent Grouping Column", categorical_cols if categorical_cols else numeric_cols)
-    elif test_type == "Chi-Square Test of Independence":
-        with col_v1:
-            cat_1 = st.selectbox("Categorical Column 1", categorical_cols if categorical_cols else numeric_cols)
-        with col_v2:
-            cat_2 = st.selectbox("Categorical Column 2", categorical_cols if categorical_cols else numeric_cols)
+        with st.expander("Preview cleaned data", expanded=False):
+            st.dataframe(df.head(25), use_container_width=True)
 
-    # --- 3. AUTOMATED ASSUMPTION DIAGNOSTICS ---
-    st.markdown("---")
-    st.subheader("🔍 Automated Assumption Diagnostics")
-    
-    if len(numeric_cols) > 0 and test_type not in ["Chi-Square Test of Independence"]:
-        check_col = numeric_cols[0] if 'target_col' not in locals() else target_col
-        clean_data = df[check_col].dropna()
-        
-        shapiro_stat, shapiro_p = stats.shapiro(clean_data)
-        norm_status = "✅ Normal (Parametric Safe)" if shapiro_p > alpha else "⚠️ Non-Normal (Consider Non-Parametric)"
-        
-        d1, d2 = st.columns(2)
-        with d1:
-            st.metric("Shapiro-Wilk Normality Test ($p$)", f"{shapiro_p:.4f}", norm_status)
-        with d2:
-            st.info(f"Dataset Size: {len(clean_data)} valid observations | Selected $\\alpha$: {alpha}")
+        st.markdown("---")
+        st.subheader("⚙️ Test Configuration & Parameters")
 
-    # --- 4. EXECUTION & RICH PLOTLY VISUALIZATIONS ---
-    st.markdown("---")
-    st.subheader("📊 Interactive Distribution & Analytics Visualizer")
-    
-    if st.button("🚀 Run Rigorous Statistical Analysis", type="primary"):
-        stat_value, p_value, df_value = 0.0, 1.0, 1
-        
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            test_category = st.selectbox(
+                "Test Category",
+                ["Parametric", "Non-Parametric", "Variance & Goodness"],
+                key="stats_category",
+            )
+        with c2:
+            if test_category == "Parametric":
+                test_type = st.selectbox(
+                    "Select Test",
+                    ["One-Sample t-Test", "Independent Two-Sample t-Test", "Paired t-Test", "One-Way ANOVA"],
+                    key="stats_test_type",
+                )
+            elif test_category == "Non-Parametric":
+                test_type = st.selectbox(
+                    "Select Test",
+                    ["Mann-Whitney U Test", "Kruskal-Wallis H-Test"],
+                    key="stats_test_type",
+                )
+            else:
+                test_type = st.selectbox(
+                    "Select Test",
+                    ["Chi-Square Test of Independence", "Levene's Homogeneity Test"],
+                    key="stats_test_type",
+                )
+        with c3:
+            alpha = st.selectbox("Significance Level (α)", [0.01, 0.05, 0.10], index=1, key="stats_alpha")
+        with c4:
+            alternative = st.selectbox(
+                "Alternative Hypothesis",
+                ["two-sided", "less", "greater"],
+                key="stats_alt",
+            )
+
+        cfg = {}
+
         if test_type == "One-Sample t-Test":
-            res = stats.ttest_1samp(df[target_col].dropna(), pop_mean, alternative=alternative)
-            stat_value, p_value, df_value = res.statistic, res.pvalue, len(df[target_col].dropna()) - 1
-            
-            fig = px.violin(df, y=target_col, box=True, points="all", title=f"Distribution & Violin Plot: {target_col} vs $\mu_0$ = {pop_mean}")
-            st.plotly_chart(fig, use_container_width=True)
+            if not numeric_cols:
+                st.error("A numeric target column is required.")
+            else:
+                default_idx = _preferred_index(numeric_cols, ["decision regret", "regret", "response", "outcome", "score"])
+                cfg["target_col"] = st.selectbox(
+                    "Numeric Target Column",
+                    numeric_cols,
+                    index=default_idx,
+                    key="stats_onesample_target",
+                )
+                cfg["pop_mean"] = st.number_input(
+                    "Hypothesized Mean (μ₀)",
+                    value=0.0,
+                    key="stats_pop_mean",
+                )
 
-        elif test_type == "Independent Two-Sample t-Test":
-            res = stats.ttest_ind(df[col_a].dropna(), df[col_b].dropna(), alternative=alternative)
-            stat_value, p_value, df_value = res.statistic, res.pvalue, len(df[col_a].dropna()) + len(df[col_b].dropna()) - 2
-            
-            plot_df = pd.DataFrame({'Value': pd.concat([df[col_a], df[col_b]]), 'Group': [col_a]*len(df) + [col_b]*len(df)})
-            fig = px.box(plot_df, x="Group", y="Value", color="Group", points="all", title=f"Comparative Box Plot: {col_a} vs {col_b}")
-            st.plotly_chart(fig, use_container_width=True)
-
-        elif test_type == "Mann-Whitney U Test":
-            res = stats.mannwhitneyu(df[col_a].dropna(), df[col_b].dropna(), alternative=alternative)
-            stat_value, p_value, df_value = res.statistic, res.pvalue, 1
-            
-            fig = px.histogram(df, x=[col_a, col_b], barmode="overlay", title="Non-Parametric Rank Distribution Overlay")
-            st.plotly_chart(fig, use_container_width=True)
-
-        elif test_type == "One-Way ANOVA":
-            groups = [group[val_col].dropna().values for name, group in df.groupby(group_col)]
-            res = stats.f_oneway(*groups)
-            stat_value, p_value, df_value = res.statistic, res.pvalue, len(groups) - 1
-            
-            fig = px.box(df, x=group_col, y=val_col, color=group_col, title=f"ANOVA Variance Breakdown across {group_col}")
-            st.plotly_chart(fig, use_container_width=True)
-
-        # --- 5. STRUCTURED REPORT & ONE-CLICK DOWNLOAD ---
-        decision = f"Reject Null Hypothesis ($H_0$) — Statistically Significant" if p_value < alpha else f"Fail to Reject Null Hypothesis ($H_0$) — No Significant Difference"
-        
-        results_summary = {
-            "Test Performed": [test_type],
-            "Alternative Hypothesis": [alternative],
-            "Test Statistic": [round(float(stat_value), 4)],
-            "P-Value": [round(float(p_value), 5)],
-            "Significance Level ($\alpha$)": [alpha],
-            "Degrees of Freedom": [df_value],
-            "Final Conclusion": [decision]
-        }
-
-        results_df = pd.DataFrame(results_summary)
-        
-        st.success(f"**Verdict:** {decision} ($p = {p_value:.5f}$)")
-        st.dataframe(results_df, use_container_width=True)
-
-        col_dwn1, col_dwn2 = st.columns(2)
-        with col_dwn1:
-            csv_payload = results_df.to_csv(index=False).encode("utf-8")
-            st.download_button(
-                label="📥 Download Test Summary Report (CSV)",
-                data=csv_payload,
-                file_name="hypothesis_test_report.csv",
-                mime="text/csv",
+        elif test_type in ["Independent Two-Sample t-Test", "Mann-Whitney U Test"]:
+            # Keep the simple two-numeric-column workflow available and make the
+            # more flexible group-column mode an explicit option.
+            layout = st.radio(
+                "Comparison Layout",
+                ["Variable / Group 1 + Variable / Group 2 (simple)", "Numeric Outcome + Grouping Column"],
+                horizontal=True,
+                key="stats_ind_layout",
             )
-        with col_dwn2:
-            dataset_payload = df.to_csv(index=False).encode("utf-8")
-            st.download_button(
-                label="📥 Download Modified Dataset (CSV)",
-                data=dataset_payload,
-                file_name="modified_research_dataset.csv",
-                mime="text/csv",
+
+            if layout.startswith("Variable"):
+                cfg["mode"] = "columns"
+                if len(numeric_cols) < 2:
+                    st.error("At least two numeric columns are required.")
+                else:
+                    idx_a = _preferred_index(numeric_cols, ["0%", "control", "baseline", "group 1", "decision regret"])
+                    idx_b = 0 if idx_a != 0 else 1
+                    cfg["col_a"] = st.selectbox("Variable / Group 1", numeric_cols, index=idx_a, key="stats_ind_a")
+                    cfg["col_b"] = st.selectbox("Variable / Group 2", numeric_cols, index=idx_b, key="stats_ind_b")
+            else:
+                cfg["mode"] = "group"
+                if not numeric_cols or not grouping_candidates:
+                    st.error("This layout requires a numeric outcome and a grouping column.")
+                else:
+                    cfg["target_col"] = st.selectbox(
+                        "Numeric Outcome",
+                        numeric_cols,
+                        index=_preferred_index(numeric_cols, ["decision regret", "regret", "outcome", "response"]),
+                        key="stats_ind_target",
+                    )
+                    group_options = [c for c in grouping_candidates if c != cfg["target_col"]]
+                    if not group_options:
+                        st.error("No grouping column is available.")
+                    else:
+                        cfg["group_col"] = st.selectbox(
+                            "Grouping / Condition Column",
+                            group_options,
+                            index=_preferred_index(group_options, ["experiment", "group", "condition", "treatment"]),
+                            key="stats_ind_groupcol",
+                        )
+                        gser = groups_from_column(df, cfg["group_col"])
+                        vals = sorted([str(v) for v in pd.unique(gser.dropna())])
+                        if len(vals) >= 2:
+                            cfg["group_1"] = st.selectbox("Group 1", vals, index=0, key="stats_ind_g1")
+                            cfg["group_2"] = st.selectbox("Group 2", vals, index=1, key="stats_ind_g2")
+
+        elif test_type == "Paired t-Test":
+            # Legacy-compatible two-column mode is the default. The long-format
+            # option is available for general research datasets.
+            layout = st.radio(
+                "Paired Data Layout",
+                ["Variable / Group 1 + Variable / Group 2 (simple)", "Long Format: Outcome + Pair ID + Condition"],
+                horizontal=True,
+                key="stats_paired_layout",
             )
-# ==============================================================================
+
+            if layout.startswith("Variable"):
+                cfg["mode"] = "columns"
+                if len(numeric_cols) < 2:
+                    st.error("At least two numeric columns are required for a paired t-test.")
+                else:
+                    idx_a = _preferred_index(numeric_cols, ["0% uncertainty", "0% conflict", "baseline", "control", "group 1", "decision regret"])
+                    idx_b = 0 if idx_a != 0 else 1
+                    cfg["col_a"] = st.selectbox(
+                        "Variable / Group 1",
+                        numeric_cols,
+                        index=idx_a,
+                        key="stats_paired_a",
+                    )
+                    cfg["col_b"] = st.selectbox(
+                        "Variable / Group 2",
+                        numeric_cols,
+                        index=idx_b,
+                        key="stats_paired_b",
+                    )
+                if len(numeric_cols) >= 2:
+                    st.caption("Use two columns containing the paired outcome measurements. The row order must represent the same entity/scenario in both columns.")
+
+            else:
+                cfg["mode"] = "long"
+                if not numeric_cols or not grouping_candidates:
+                    st.error("Long-format paired testing requires a numeric outcome and condition column.")
+                else:
+                    cfg["target_col"] = st.selectbox(
+                        "Numeric Outcome",
+                        numeric_cols,
+                        index=_preferred_index(numeric_cols, ["decision regret", "regret", "outcome", "response"]),
+                        key="stats_paired_target",
+                    )
+                    possible_id = [c for c in df.columns if c != cfg["target_col"]]
+                    id_candidates = [
+                        c for c in possible_id
+                        if re.search(r"\b(id|identifier|scenario|subject|sample|batch|machine)\b", str(c), re.I)
+                    ]
+                    cfg["pair_col"] = st.selectbox(
+                        "Pair / Entity ID",
+                        id_candidates or possible_id,
+                        index=_preferred_index(id_candidates or possible_id, ["scenario id", "subject id", "sample id", "id"]),
+                        key="stats_paired_id",
+                    )
+                    cond_options = [c for c in grouping_candidates if c not in {cfg["target_col"], cfg["pair_col"]}]
+                    if not cond_options:
+                        st.error("No condition column is available.")
+                    else:
+                        cfg["condition_col"] = st.selectbox(
+                            "Condition Column",
+                            cond_options,
+                            index=_preferred_index(cond_options, ["experiment", "condition", "group", "treatment"]),
+                            key="stats_paired_condition",
+                        )
+                        cser = groups_from_column(df, cfg["condition_col"])
+                        vals = sorted([str(v) for v in pd.unique(cser.dropna())])
+                        if len(vals) >= 2:
+                            cfg["condition_1"] = st.selectbox("Condition 1", vals, index=0, key="stats_paired_c1")
+                            cfg["condition_2"] = st.selectbox("Condition 2", vals, index=1, key="stats_paired_c2")
+
+        elif test_type in ["One-Way ANOVA", "Kruskal-Wallis H-Test"]:
+            if not numeric_cols:
+                st.error("A numeric outcome column is required.")
+            else:
+                cfg["val_col"] = st.selectbox(
+                    "Dependent Variable (Numeric)",
+                    numeric_cols,
+                    index=_preferred_index(numeric_cols, ["decision regret", "regret", "outcome", "response"]),
+                    key="stats_anova_target",
+                )
+                group_options = [c for c in grouping_candidates if c != cfg["val_col"]]
+                if not group_options:
+                    st.error("No categorical/discrete grouping column is available.")
+                else:
+                    cfg["group_col"] = st.selectbox(
+                        "Independent Grouping Column",
+                        group_options,
+                        index=_preferred_index(group_options, ["experiment", "group", "condition", "treatment"]),
+                        key="stats_anova_group",
+                    )
+                    gser = groups_from_column(df, cfg["group_col"])
+                    cfg["detected_groups"] = sorted([str(v) for v in pd.unique(gser.dropna())])
+                    st.info(
+                        f"Detected {len(cfg['detected_groups'])} groups: "
+                        + ", ".join(cfg["detected_groups"][:20])
+                        + ("…" if len(cfg["detected_groups"]) > 20 else "")
+                    )
+
+        elif test_type == "Chi-Square Test of Independence":
+            cat_options = categorical_cols or grouping_candidates
+            if len(cat_options) < 2:
+                st.error("Two categorical/discrete columns are required.")
+            else:
+                cfg["cat_1"] = st.selectbox("Categorical Column 1", cat_options, key="stats_chi1")
+                cat2 = [c for c in cat_options if c != cfg["cat_1"]]
+                cfg["cat_2"] = st.selectbox("Categorical Column 2", cat2, key="stats_chi2")
+
+        else:
+            if not numeric_cols or not grouping_candidates:
+                st.error("Levene's test requires a numeric outcome and grouping column.")
+            else:
+                cfg["levene_val"] = st.selectbox("Numeric Outcome", numeric_cols, key="stats_lev_val")
+                lev_options = [c for c in grouping_candidates if c != cfg["levene_val"]]
+                cfg["levene_group"] = st.selectbox("Grouping Column", lev_options, key="stats_lev_group")
+
+        # ---------------------------------------------------------------
+        # 3. ASSUMPTION DIAGNOSTICS
+        # ---------------------------------------------------------------
+        st.markdown("---")
+        st.subheader("🔍 Automated Assumption Diagnostics")
+
+        def _safe_shapiro(series):
+            x = pd.to_numeric(series, errors="coerce").dropna().to_numpy(dtype=float)
+            if len(x) < 3:
+                return np.nan, np.nan
+            x = x[:5000]
+            try:
+                result = stats.shapiro(x)
+                return float(result.statistic), float(result.pvalue)
+            except Exception:
+                return np.nan, np.nan
+
+        diag_col = (
+            cfg.get("target_col")
+            or cfg.get("val_col")
+            or cfg.get("levene_val")
+            or cfg.get("col_a")
+        )
+
+        if diag_col in df.columns:
+            _, diag_p = _safe_shapiro(df[diag_col])
+            d1, d2, d3 = st.columns(3)
+            d1.metric("Normality p-value", "N/A" if np.isnan(diag_p) else f"{diag_p:.4f}")
+            d2.metric("Valid values", f"{df[diag_col].notna().sum():,}")
+            d3.metric("Duplicate rows", f"{int(df.duplicated().sum()):,}")
+
+        # ---------------------------------------------------------------
+        # 4. EXECUTION
+        # ---------------------------------------------------------------
+        st.markdown("---")
+        if st.button("🚀 Run Rigorous Statistical Analysis", type="primary", use_container_width=True, key="stats_run"):
+            stat_value = np.nan
+            p_value = np.nan
+            df_value = np.nan
+            effect_label = ""
+            effect_value = np.nan
+            detail_rows = []
+            posthoc_df = pd.DataFrame()
+
+            try:
+                if test_type == "One-Sample t-Test":
+                    x = pd.to_numeric(df[cfg["target_col"]], errors="coerce").dropna()
+                    res = stats.ttest_1samp(x, cfg["pop_mean"], alternative=alternative)
+                    stat_value, p_value, df_value = float(res.statistic), float(res.pvalue), len(x) - 1
+                    effect_label = "Cohen's d vs μ₀"
+                    effect_value = float((x.mean() - cfg["pop_mean"]) / x.std(ddof=1)) if len(x) > 1 and x.std(ddof=1) > 0 else np.nan
+
+                elif test_type in ["Independent Two-Sample t-Test", "Mann-Whitney U Test"]:
+                    if cfg["mode"] == "group":
+                        gser = groups_from_column(df, cfg["group_col"])
+                        x = pd.to_numeric(df.loc[gser == cfg["group_1"], cfg["target_col"]], errors="coerce").dropna()
+                        y = pd.to_numeric(df.loc[gser == cfg["group_2"], cfg["target_col"]], errors="coerce").dropna()
+                        label_x, label_y = cfg["group_1"], cfg["group_2"]
+                    else:
+                        x = pd.to_numeric(df[cfg["col_a"]], errors="coerce").dropna()
+                        y = pd.to_numeric(df[cfg["col_b"]], errors="coerce").dropna()
+                        label_x, label_y = cfg["col_a"], cfg["col_b"]
+
+                    if len(x) < 2 or len(y) < 2:
+                        raise ValueError("Each comparison group needs at least two valid observations.")
+
+                    if test_type == "Independent Two-Sample t-Test":
+                        res = stats.ttest_ind(x, y, equal_var=False, alternative=alternative)
+                        stat_value, p_value = float(res.statistic), float(res.pvalue)
+                        df_value = np.nan
+                        effect_label, effect_value = "Cohen's d", cohens_d(x, y)
+                    else:
+                        res = stats.mannwhitneyu(x, y, alternative=alternative)
+                        stat_value, p_value = float(res.statistic), float(res.pvalue)
+                        df_value = np.nan
+                        effect_label = "Rank-biserial effect"
+                        effect_value = float(1 - (2 * float(res.statistic)) / (len(x) * len(y)))
+
+                    detail_rows = [
+                        {"Group": label_x, "N": len(x), "Mean": float(x.mean()), "SD": float(x.std(ddof=1))},
+                        {"Group": label_y, "N": len(y), "Mean": float(y.mean()), "SD": float(y.std(ddof=1))},
+                    ]
+
+                elif test_type == "Paired t-Test":
+                    if cfg["mode"] == "columns":
+                        aligned = pd.concat(
+                            [pd.to_numeric(df[cfg["col_a"]], errors="coerce"),
+                             pd.to_numeric(df[cfg["col_b"]], errors="coerce")],
+                            axis=1,
+                        ).dropna()
+                        label_x, label_y = cfg["col_a"], cfg["col_b"]
+                        x = aligned.iloc[:, 0].to_numpy(dtype=float)
+                        y = aligned.iloc[:, 1].to_numpy(dtype=float)
+                    else:
+                        pivot = paired_from_long(
+                            df,
+                            cfg["target_col"],
+                            cfg["pair_col"],
+                            cfg["condition_col"],
+                            cfg["condition_1"],
+                            cfg["condition_2"],
+                        )
+                        if len(pivot) < 2:
+                            raise ValueError("Fewer than two complete matched pairs are available.")
+                        x = pivot.iloc[:, 0].to_numpy(dtype=float)
+                        y = pivot.iloc[:, 1].to_numpy(dtype=float)
+                        label_x, label_y = cfg["condition_1"], cfg["condition_2"]
+
+                    if len(x) < 2:
+                        raise ValueError("At least two matched observations are required.")
+                    diff = x - y
+                    diff_sd = float(np.std(diff, ddof=1))
+                    mean_diff = float(np.mean(diff))
+                    if diff_sd == 0:
+                        if np.isclose(mean_diff, 0.0):
+                            raise ValueError("The paired differences are all exactly zero. The t-statistic is not estimable because the paired-difference variance is zero.")
+                        raise ValueError("The paired differences have zero variance, so the t-statistic is not estimable.")
+
+                    res = stats.ttest_rel(x, y, alternative=alternative)
+                    stat_value, p_value, df_value = float(res.statistic), float(res.pvalue), len(x) - 1
+                    effect_label = "Paired Cohen's d"
+                    effect_value = mean_diff / diff_sd
+                    detail_rows = [
+                        {"Condition": label_x, "N matched": len(x), "Mean": float(x.mean()), "SD": float(np.std(x, ddof=1))},
+                        {"Condition": label_y, "N matched": len(y), "Mean": float(y.mean()), "SD": float(np.std(y, ddof=1))},
+                        {"Paired Mean Difference": mean_diff, "N matched": len(x)},
+                    ]
+
+                elif test_type in ["One-Way ANOVA", "Kruskal-Wallis H-Test"]:
+                    gser = groups_from_column(df, cfg["group_col"])
+                    group_arrays = {}
+                    for name in sorted(gser.dropna().unique().tolist(), key=lambda v: str(v)):
+                        vals = pd.to_numeric(
+                            df.loc[gser == name, cfg["val_col"]], errors="coerce"
+                        ).dropna().to_numpy(dtype=float)
+                        if len(vals) >= 2:
+                            group_arrays[str(name)] = vals
+
+                    if len(group_arrays) < 2:
+                        raise ValueError("At least two groups with two or more valid observations are required.")
+
+                    arrays = list(group_arrays.values())
+                    if test_type == "One-Way ANOVA":
+                        res = stats.f_oneway(*arrays)
+                        stat_value, p_value = float(res.statistic), float(res.pvalue)
+                        df_value = len(arrays) - 1
+                        effect_label, effect_value = "Eta squared (η²)", eta_squared(arrays)
+                    else:
+                        res = stats.kruskal(*arrays)
+                        stat_value, p_value = float(res.statistic), float(res.pvalue)
+                        df_value = len(arrays) - 1
+
+                    detail_rows = [
+                        {"Group": name, "N": len(vals), "Mean": float(vals.mean()), "SD": float(vals.std(ddof=1))}
+                        for name, vals in group_arrays.items()
+                    ]
+                    if test_type == "One-Way ANOVA" and p_value < alpha:
+                        posthoc_df = tukey_hsd_table(group_arrays)
+
+                elif test_type == "Chi-Square Test of Independence":
+                    table = pd.crosstab(df[cfg["cat_1"]], df[cfg["cat_2"]])
+                    res = stats.chi2_contingency(table)
+                    stat_value, p_value, df_value = float(res[0]), float(res[1]), float(res[2])
+
+                else:
+                    gser = groups_from_column(df, cfg["levene_group"])
+                    arrays = [
+                        pd.to_numeric(df.loc[gser == name, cfg["levene_val"]], errors="coerce").dropna().to_numpy(dtype=float)
+                        for name in sorted(gser.dropna().unique().tolist(), key=lambda v: str(v))
+                    ]
+                    arrays = [a for a in arrays if len(a) >= 2]
+                    if len(arrays) < 2:
+                        raise ValueError("At least two groups with two or more observations are required.")
+                    res = stats.levene(*arrays, center="median")
+                    stat_value, p_value = float(res.statistic), float(res.pvalue)
+                    df_value = len(arrays) - 1
+
+                decision = (
+                    "Reject H₀ — statistically significant at the selected α."
+                    if p_value < alpha
+                    else "Fail to reject H₀ — the test did not detect a statistically significant difference at the selected α."
+                )
+
+                summary = pd.DataFrame([{
+                    "Test Performed": test_type,
+                    "Significance Level (α)": alpha,
+                    "Alternative Hypothesis": alternative,
+                    "Test Statistic": round(stat_value, 6) if not np.isnan(stat_value) else np.nan,
+                    "P-Value": round(p_value, 8) if not np.isnan(p_value) else np.nan,
+                    "Degrees of Freedom": df_value,
+                    "Effect Size": effect_value,
+                    "Effect Metric": effect_label,
+                    "Final Conclusion": decision,
+                    "Source Dataset": source_name,
+                }])
+
+                st.success(f"**Result:** {decision} | p = {p_value:.8f}")
+                m1, m2, m3, m4 = st.columns(4)
+                m1.metric("Test statistic", "N/A" if np.isnan(stat_value) else f"{stat_value:.4f}")
+                m2.metric("p-value", "N/A" if np.isnan(p_value) else f"{p_value:.6f}")
+                m3.metric("α", f"{alpha:.2f}")
+                m4.metric(effect_label or "Effect size", "N/A" if np.isnan(effect_value) else f"{effect_value:.4f}")
+
+                if detail_rows:
+                    st.markdown("#### Group / Condition Summary")
+                    st.dataframe(pd.DataFrame(detail_rows), use_container_width=True)
+
+                if test_type == "One-Way ANOVA" and not posthoc_df.empty:
+                    st.markdown("#### 🔬 Tukey HSD Post-Hoc Comparisons")
+                    st.dataframe(posthoc_df, use_container_width=True)
+                    st.caption("Tukey HSD is automatically generated after a significant one-way ANOVA.")
+
+                payload = _analysis_excel(
+                    df,
+                    summary=summary,
+                    details=pd.DataFrame(detail_rows),
+                    posthoc=posthoc_df,
+                )
+                st.download_button(
+                    "📥 Download Analysis Workbook",
+                    data=payload,
+                    file_name="shoir_ie_statistical_analysis_results.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    type="primary",
+                    key="stats_download_results",
+                )
+
+            except Exception as exc:
+                st.error(f"Analysis could not be completed safely: {exc}")
+
+        st.markdown("---")
+        with st.expander("🧭 Exploratory Factor Scan", expanded=False):
+            st.caption(
+                "For exploratory screening only. This compares a numeric outcome across each suitable "
+                "low-cardinality factor and reports Holm-adjusted p-values."
+            )
+            scan_outcome = st.selectbox(
+                "Outcome for factor scan",
+                numeric_cols,
+                index=_preferred_index(numeric_cols, ["decision regret", "regret", "outcome", "response"]),
+                key="stats_scan_outcome",
+            )
+            scan_candidates = [c for c in grouping_candidates if c != scan_outcome]
+            if scan_candidates and st.button("Run Exploratory Factor Scan", key="stats_scan_run"):
+                scan_rows = []
+                for factor in scan_candidates:
+                    gs = groups_from_column(df, factor)
+                    arrays = []
+                    for name in sorted(gs.dropna().unique().tolist(), key=lambda v: str(v)):
+                        vals = pd.to_numeric(df.loc[gs == name, scan_outcome], errors="coerce").dropna().to_numpy(dtype=float)
+                        if len(vals) >= 2:
+                            arrays.append(vals)
+                    if len(arrays) < 2:
+                        continue
+                    try:
+                        r = stats.f_oneway(*arrays)
+                        scan_rows.append({
+                            "Factor": factor,
+                            "Groups": len(arrays),
+                            "N": int(sum(len(a) for a in arrays)),
+                            "F statistic": float(r.statistic),
+                            "Raw p-value": float(r.pvalue),
+                            "Eta squared": eta_squared(arrays),
+                        })
+                    except Exception:
+                        continue
+                if scan_rows:
+                    scan_df = pd.DataFrame(scan_rows)
+                    scan_df["Holm adjusted p-value"] = holm_adjust(
+                        scan_df["Raw p-value"].to_numpy(dtype=float)
+                    )
+                    st.dataframe(
+                        scan_df.sort_values("Holm adjusted p-value").reset_index(drop=True),
+                        use_container_width=True,
+                    )
+
+        if st.button("↩️ Reset Statistical Analysis", use_container_width=True, key="stats_reset"):
+            for key in list(st.session_state.keys()):
+                if str(key).startswith("stats_"):
+                    del st.session_state[key]
+            st.rerun()
+
 # SHOIR-IE: ELITE ENTERPRISE AGV/AMR FLEET COMMAND TOWER (V2.1 BULLETPROOF EDITION)
 # ==============================================================================
 if selected_module == "AGV Fleet Dispatcher":
@@ -5194,9 +6089,16 @@ if selected_module == "Geospatial Network Designer":
 
         fig_map = go.Figure()
 
+        if hasattr(go, "Scattermap"):
+            _MapTrace, _map_mode = go.Scattermap, "map"
+        elif hasattr(go, "Scattermapbox"):
+            _MapTrace, _map_mode = go.Scattermapbox, "mapbox"
+        else:
+            _MapTrace, _map_mode = go.Scattergeo, "geo"
+
         # Add Demand Markets
         if not df_markets.empty:
-            fig_map.add_trace(go.Scattermapbox(
+            fig_map.add_trace(_MapTrace(
                 lat=df_markets["lat"],
                 lon=df_markets["lon"],
                 mode="text+markers",
@@ -5210,7 +6112,7 @@ if selected_module == "Geospatial Network Designer":
 
         # Add Supply Hubs
         if not df_nodes.empty:
-            fig_map.add_trace(go.Scattermapbox(
+            fig_map.add_trace(_MapTrace(
                 lat=df_nodes["lat"],
                 lon=df_nodes["lon"],
                 mode="text+markers",
@@ -5226,7 +6128,7 @@ if selected_module == "Geospatial Network Designer":
         if show_connections and not df_nodes.empty and not df_markets.empty:
             for _, node in df_nodes.iterrows():
                 for _, mkt in df_markets.iterrows():
-                    fig_map.add_trace(go.Scattermapbox(
+                    fig_map.add_trace(_MapTrace(
                         lat=[node["lat"], mkt["lat"]],
                         lon=[node["lon"], mkt["lon"]],
                         mode="lines",
@@ -5235,18 +6137,13 @@ if selected_module == "Geospatial Network Designer":
                         hoverinfo="none"
                     ))
 
-        fig_map.update_layout(
-            mapbox=dict(
-                style=map_style,
-                center=dict(lat=24.0, lon=44.0),
-                zoom=4.8
-            ),
-            height=500,
-            margin=dict(l=0, r=0, t=0, b=0),
-            paper_bgcolor="#0b0f19",
-            font=dict(color="#f3f4f6"),
-            legend=dict(orientation="h", yanchor="bottom", y=0.02, xanchor="left", x=0.02, bgcolor="rgba(15,23,42,0.8)")
-        )
+        _layout_common = dict(height=500, margin=dict(l=0,r=0,t=0,b=0), paper_bgcolor="#0b0f19", font=dict(color="#f3f4f6"), legend=dict(orientation="h", yanchor="bottom", y=0.02, xanchor="left", x=0.02, bgcolor="rgba(15,23,42,0.8)"))
+        if _map_mode == "map":
+            fig_map.update_layout(map=dict(style=map_style,center=dict(lat=24.0,lon=44.0),zoom=4.8),**_layout_common)
+        elif _map_mode == "mapbox":
+            fig_map.update_layout(mapbox=dict(style=map_style,center=dict(lat=24.0,lon=44.0),zoom=4.8),**_layout_common)
+        else:
+            fig_map.update_layout(geo=dict(scope="world",projection_type="equirectangular",center=dict(lat=24.0,lon=44.0),lataxis=dict(range=[16,32]),lonaxis=dict(range=[34,56]),showland=True,showcountries=True),**_layout_common)
         st.plotly_chart(fig_map, use_container_width=True)
 
     # TAB 2: Center of Gravity (CoG) Facility Location Optimizer
@@ -5382,6 +6279,7 @@ if selected_module == "Geospatial Network Designer":
                 )
                 st.plotly_chart(bar_cap, use_container_width=True)
 
+    _render_post_module_layers("Geospatial Network Designer")
     st.stop()
 
 # ==============================================================================
@@ -5596,6 +6494,7 @@ if selected_module == "Predictive Maintenance Hub":
                 st.success(f"Asset **{selected_to_remove}** successfully decommissioned.")
                 st.rerun()
 
+    _render_post_module_layers("Predictive Maintenance Hub")
     st.stop()
 # ==============================================================================
 # SHOIR-IE: ELITE PRODUCTION PLANNING, SCHEDULING & CONTROL (PPC) SUITE (V2.2)
@@ -6814,6 +7713,7 @@ if selected_module in ["Human Factors & Ergonomics (NIOSH)", "Human Factors, Erg
             st.metric("Required Rest Time", f"{rest_mins_per_hour:.1f} mins / hour")
             st.metric("Total Shift Rest", f"{rest_mins_per_hour * shift_hours:.1f} minutes")
 
+    _render_post_module_layers("Human Factors & Ergonomics (NIOSH)")
     st.stop()
 
 # ==============================================================================
@@ -7139,6 +8039,7 @@ if selected_module in ["Engineering Economics & Finance", "Engineering Economics
                 "Interest Tax Shield": "${:,.2f}", "Ending Balance": "${:,.2f}"
             }), use_container_width=True, hide_index=True)
 
+    _render_post_module_layers("Engineering Economics & Finance")
     st.stop()
 
 # ==============================================================================
@@ -7168,6 +8069,27 @@ if selected_module in ["Digital Twin & Discrete-Event Simulation", "Digital Twin
             {"agv_id": "AGV-01", "task": "Transporting Part #104", "battery": 88.0, "status": "Moving", "x": 30, "y": 20},
             {"agv_id": "AGV-02", "task": "Returning to Charging Dock", "battery": 24.5, "status": "Charging", "x": 60, "y": 70},
         ]
+
+    # Normalize legacy AGV state so old browser sessions cannot crash when a
+    # newer screen expects the canonical agv_id schema.
+    _fleet = st.session_state.get("agv_fleet", [])
+    _normalized = []
+    _used = set()
+    for _i, _item in enumerate(_fleet if isinstance(_fleet, list) else []):
+        if not isinstance(_item, dict):
+            continue
+        _id = str(_item.get("agv_id") or _item.get("id") or _item.get("ID") or f"AGV-{_i+1:02d}").strip()
+        if not _id or _id in _used:
+            _id = f"AGV-{_i+1:02d}"
+        _used.add(_id)
+        try: _battery = float(_item.get("battery", _item.get("battery_pct", 100)))
+        except Exception: _battery = 100.0
+        try: _x = float(_item.get("x", 50))
+        except Exception: _x = 50.0
+        try: _y = float(_item.get("y", 45))
+        except Exception: _y = 45.0
+        _normalized.append({"agv_id":_id,"task":str(_item.get("task") or _item.get("mission") or "Unassigned"),"battery":max(0,min(100,_battery)),"status":str(_item.get("status") or "Idle"),"x":_x,"y":_y})
+    st.session_state.agv_fleet = _normalized
 
     if "des_queues" not in st.session_state:
         st.session_state.des_queues = [
@@ -7484,6 +8406,7 @@ if selected_module in ["Digital Twin & Discrete-Event Simulation", "Digital Twin
             st.session_state.event_logs = []
             st.rerun()
 
+    _render_post_module_layers("Digital Twin & Discrete-Event Simulation")
     st.stop()
 
 # ==============================================================================
@@ -7679,6 +8602,7 @@ if selected_module in ["Green IE & Sustainability", "Sustainability & Circular E
                 fig_lca.update_layout(plot_bgcolor="#0b0f19", paper_bgcolor="#0b0f19", font=dict(color="#f3f4f6"), height=290)
                 st.plotly_chart(fig_lca, use_container_width=True)
 
+    _render_post_module_layers("Green IE & Sustainability")
     st.stop()
 
 # ==============================================================================
@@ -8051,6 +8975,7 @@ if selected_module in ["Enterprise Integration & Collaboration", "Enterprise Int
                 </div>
                 """, unsafe_allow_html=True)
 
+    _render_post_module_layers("Enterprise Integration & Collaboration")
     st.stop()
     
 def render_data_editor(df, key_name):
@@ -8266,116 +9191,352 @@ else:
         st.header("🤖 Natural Language AI Copilot")
         st.caption("Upload a workbook, ask Copilot to clean or analyze it, apply Excel-style transformations, and download the improved workbook. Recommendations are grounded in the available modules and your current tier.")
 
-        cp1, cp2 = st.columns([2, 1], gap="large")
-        with cp1:
-            uploaded = st.file_uploader("📤 Upload Excel / CSV for Copilot", type=["xlsx", "csv"], key="copilot_workbook_upload")
-            if uploaded is not None:
-                signature = hashlib.sha256(uploaded.getvalue()).hexdigest()
-                if st.session_state.get("copilot_workbook_signature") != signature:
-                    try:
-                        st.session_state.copilot_workbook = read_uploaded_workbook(uploaded.getvalue(), uploaded.name)
-                        st.session_state.copilot_workbook_signature = signature
-                        st.session_state.copilot_workbook_name = uploaded.name
-                        st.session_state.copilot_workbook_original = {k:v.copy(deep=True) for k,v in st.session_state.copilot_workbook.items()}
-                        st.session_state.copilot_clean_audit = []
-                        st.success(f"Loaded {uploaded.name} with {len(st.session_state.copilot_workbook)} sheet(s).")
-                    except Exception as exc:
-                        st.error(f"Could not read the workbook safely: {exc}")
+        st.markdown("## 🧠 Engineering Copilot Orchestrator")
+        st.caption("Give Shoir-IE an engineering goal. Copilot will inspect the selected module data, route the request, choose a compatible method, execute read-only analysis, generate evidence-backed visuals, compare scenarios when available, explain the result, and prepare an export.")
 
-        workbook = st.session_state.get("copilot_workbook", {})
-        if workbook:
-            sheets=list(workbook.keys())
-            selected_sheet=st.selectbox("Workbook sheet", sheets, key="copilot_sheet")
-            df=workbook[selected_sheet]
-            st.markdown("### 🧹 Excel Data Cleaning Studio")
-            st.caption("These controls implement the 12 cleaning operations shown in your reference image.")
-            fn_names=[x[0] for x in EXCEL_FUNCTIONS]
-            function=st.selectbox("Choose an Excel cleaning function", fn_names, key="copilot_excel_function")
-            all_cols=list(df.columns)
-            cols=st.multiselect("Columns", all_cols, default=all_cols if function not in ("TEXTSPLIT","TEXTJOIN") else [], key="copilot_function_columns")
-            c1,c2,c3=st.columns(3)
-            with c1:
-                delimiter=st.text_input("Delimiter", value=",", key="copilot_delimiter")
-                find_text=st.text_input("Find", key="copilot_find")
-            with c2:
-                replace_text=st.text_input("Replace with", key="copilot_replace")
-                split_col=st.selectbox("TEXTSPLIT column", all_cols, key="copilot_split_col") if all_cols else None
-            with c3:
-                output_col=st.text_input("TEXTJOIN output column", value="Joined", key="copilot_output_col")
-                join_cols=st.multiselect("TEXTJOIN columns", all_cols, key="copilot_join_cols")
+        available_modules = [str(m) for m in allowed_modules if str(m) != "AI Copilot"]
+        o1, o2 = st.columns([1.6, 1], gap="large")
+        with o1:
+            workflow_prompt = st.text_area(
+                "🎯 Engineering goal",
+                placeholder="Example: Forecast SKU demand, show the uncertainty, and compare the current plan with the scenario in my data.",
+                height=95,
+                key="copilot_orchestrator_goal",
+            )
+        with o2:
+            route_choices = ["🤖 Auto-route from goal"] + available_modules
+            route_label = st.selectbox("🧭 Target module", route_choices, key="copilot_orchestrator_target")
+            requested_module = None if route_label.startswith("🤖") else route_label
 
-            a,b,d=st.columns(3)
-            with a:
-                if st.button("✨ Auto Clean 12 checks", type="primary", use_container_width=True, key="copilot_auto_clean"):
-                    cleaned,audit=clean_dataframe(df)
-                    workbook[selected_sheet]=cleaned
-                    st.session_state.copilot_clean_audit.extend(audit)
-                    st.success("Automatic cleaning completed.")
-                    st.rerun()
-            with b:
-                if st.button("▶ Apply Function", use_container_width=True, key="copilot_apply_function"):
-                    try:
-                        kwargs={"columns":cols}
-                        if function=="TEXTSPLIT": kwargs.update(column=split_col,delimiter=delimiter)
-                        elif function=="TEXTJOIN": kwargs.update(columns=join_cols,delimiter=delimiter,output_column=output_col)
-                        elif function in ("SUBSTITUTE","FIND & REPLACE"):
-                            kwargs.update(old=find_text, new=replace_text, find_text=find_text, replace_text=replace_text)
-                        new_df,message=apply_excel_function(df,function,**kwargs)
-                        workbook[selected_sheet]=new_df
-                        st.session_state.copilot_clean_audit.append({"function":function,"details":message,"sheet":selected_sheet})
-                        st.success(message)
+        candidate_module = requested_module or (available_modules[0] if available_modules else "")
+        source_tables = discover_visual_tables(candidate_module) if candidate_module else []
+
+        upload_override = st.file_uploader(
+            "📤 Optional data override (Excel / CSV)",
+            type=["xlsx", "csv"],
+            key="copilot_orchestrator_upload",
+            help="Leave empty to let Copilot inspect the selected module's existing workspace data.",
+        )
+
+        source_df = pd.DataFrame()
+        source_name = "No dataset"
+        if upload_override is not None:
+            try:
+                imported_books = read_uploaded_workbook(upload_override.getvalue(), upload_override.name)
+                imported_sheets = list(imported_books.keys())
+                selected_import_sheet = st.selectbox("Imported sheet", imported_sheets, key="copilot_orchestrator_import_sheet")
+                source_df = imported_books[selected_import_sheet].copy(deep=True)
+                source_name = f"{upload_override.name} · {selected_import_sheet}"
+            except Exception as exc:
+                st.error(f"Copilot could not read the uploaded dataset safely: {exc}")
+        elif source_tables:
+            source_labels = [label for label, _, _ in source_tables]
+            selected_source = st.selectbox("📚 Workspace data source", source_labels, key="copilot_orchestrator_source")
+            source_df = source_tables[source_labels.index(selected_source)][2].copy(deep=True)
+            source_name = selected_source
+        else:
+            st.info("No existing table was found for this target module. Upload a dataset above to activate orchestration.")
+
+        routed_module = candidate_module
+        route_reason = "Manual module selection."
+        if workflow_prompt and available_modules:
+            routed_module, route_reason = recommend_module(workflow_prompt, available_modules, requested_module)
+            if routed_module != candidate_module and requested_module is None:
+                st.info(f"🤖 Auto-routing: **{routed_module}** · {route_reason}")
+                routed_tables = discover_visual_tables(routed_module)
+                if routed_tables and not upload_override:
+                    source_labels = [label for label, _, _ in routed_tables]
+                    routed_source = st.selectbox("Routed module data source", source_labels, key="copilot_orchestrator_routed_source")
+                    source_df = routed_tables[source_labels.index(routed_source)][2].copy(deep=True)
+                    source_name = routed_source
+
+        if workflow_prompt and not source_df.empty:
+            try:
+                from shoir_enterprise_services import knowledge_context
+                linked_knowledge = knowledge_context()
+                linked_knowledge_count = len(st.session_state.get("knowledge_documents", []))
+            except Exception:
+                linked_knowledge = ""
+                linked_knowledge_count = 0
+            plan = build_workflow_plan(workflow_prompt, routed_module, source_df, linked_knowledge_count)
+            st.markdown("### 🗺️ Proposed engineering workflow")
+            st.caption(f"Source: **{source_name}** · Module: **{routed_module}**")
+            plan_df = pd.DataFrame([
+                {"Step": item["step"], "Status": item["status"], "What Copilot will do": item["detail"]}
+                for item in plan["steps"]
+            ])
+            st.dataframe(plan_df, use_container_width=True, hide_index=True)
+
+            p1, p2, p3, p4 = st.columns(4)
+            p1.metric("Rows inspected", f'{plan["inspection"]["rows"]:,}')
+            p2.metric("Columns", f'{plan["inspection"]["columns"]:,}')
+            p3.metric("Missing cells", f'{plan["inspection"]["missing_cells"]:,}')
+            p4.metric("Selected method", plan["method"].get("method", "Profile"))
+
+            approve = st.checkbox(
+                "I approve this read-only workflow to execute against the selected dataset.",
+                key="copilot_orchestrator_approval",
+            )
+            run_workflow = st.button(
+                "🚀 Execute Engineering Workflow",
+                type="primary",
+                use_container_width=True,
+                disabled=not approve,
+                key="copilot_orchestrator_run",
+            )
+
+            if run_workflow:
+                started_ns = time.perf_counter_ns()
+                try:
+                    with st.spinner("Copilot is executing the engineering workflow..."):
+                        run = run_orchestration(
+                            workflow_prompt,
+                            routed_module,
+                            source_df,
+                            context={
+                                "customers": st.session_state.get("customers_list", []),
+                                "warehouses": st.session_state.get("warehouses_list", []),
+                                "milp_solver": cached_milp_optimization,
+                                "validate_network_inputs": validate_network_inputs,
+                                "knowledge_context": linked_knowledge,
+                                "knowledge_documents": linked_knowledge_count,
+                            },
+                        )
+                    run_id = run["run_id"]
+                    st.session_state["copilot_orchestrator_run"] = {
+                        key: value
+                        for key, value in run.items()
+                        if key not in {"export", "figure"}
+                    }
+                    if run.get("figure") is not None:
+                        st.session_state["copilot_orchestrator_figure_json"] = run["figure"].to_json()
+                    st.session_state["copilot_orchestrator_export"] = run["export"]
+
+                    evidence = {
+                        "intent": run["intent"],
+                        "method": run["method"],
+                        "source": source_name,
+                        "rows": run["inspection"].get("rows", 0),
+                        "result_rows": len(run["result"]),
+                        "analysis_type": run["analysis_meta"].get("type"),
+                    }
+                    for step in plan["steps"]:
+                        log_copilot_action(
+                            routed_module,
+                            step["step"],
+                            st.session_state.get("current_user", "unknown"),
+                            requires_approval=False,
+                            status="Completed" if step["status"] != "Conditional" else "Completed",
+                            evidence=evidence,
+                            run_id=run_id,
+                        )
+                    benchmark_duration(routed_module, started_ns, st.session_state.get("current_user", "unknown"), len(source_df), event="copilot_orchestration")
+                    st.success(f"Workflow completed · **{run_id}**")
+                except Exception as exc:
+                    st.error(f"Copilot workflow stopped safely before completion: {type(exc).__name__}: {exc}")
+
+        saved_run = st.session_state.get("copilot_orchestrator_run")
+        if isinstance(saved_run, dict):
+            st.markdown("---")
+            st.markdown("## 📊 Engineering Decision Package")
+            meta = saved_run.get("analysis_meta", {}) or {}
+            rr1, rr2, rr3 = st.columns(3)
+            rr1.metric("Workflow", saved_run.get("run_id", "—"))
+            rr2.metric("Module", saved_run.get("module", "—"))
+            rr3.metric("Analysis", str(meta.get("type", "analysis")).replace("_", " ").title())
+
+            result_df = saved_run.get("result", pd.DataFrame())
+            if isinstance(result_df, pd.DataFrame) and not result_df.empty:
+                st.dataframe(result_df.head(500), use_container_width=True, hide_index=True)
+            explanation = str(saved_run.get("explanation", ""))
+            if explanation:
+                st.markdown("### 🧩 Explanation")
+                st.markdown(explanation)
+
+            comparison = saved_run.get("comparison", pd.DataFrame())
+            comparison_meta = saved_run.get("comparison_meta", {}) or {}
+            if isinstance(comparison, pd.DataFrame) and not comparison.empty and comparison_meta.get("mode") != "unavailable":
+                st.markdown("### 🔄 Scenario comparison")
+                st.dataframe(comparison.head(500), use_container_width=True, hide_index=True)
+
+            figure_json = st.session_state.get("copilot_orchestrator_figure_json")
+            if isinstance(figure_json, str) and figure_json:
+                try:
+                    st.markdown("### 📈 Live graph")
+                    orchestrator_fig = go.Figure(json.loads(figure_json))
+                    st.plotly_chart(orchestrator_fig, use_container_width=True)
+                except Exception:
+                    st.info("The graph was generated but could not be reconstructed in this view.")
+
+            export_bytes = st.session_state.get("copilot_orchestrator_export")
+            if isinstance(export_bytes, (bytes, bytearray)):
+                st.download_button(
+                    "📦 Download Copilot Engineering Evidence Package",
+                    data=export_bytes,
+                    file_name=f"shoir_ie_copilot_{saved_run.get('run_id','workflow').lower()}.zip",
+                    mime="application/zip",
+                    type="primary",
+                    use_container_width=True,
+                    key="copilot_orchestrator_export_download",
+                )
+
+        st.markdown("---")
+        with st.expander("💬 Conversational Copilot & Excel Cleaning (secondary)", expanded=False):
+            cp1, cp2 = st.columns([2, 1], gap="large")
+            with cp1:
+                uploaded = st.file_uploader("📤 Upload Excel / CSV for Copilot", type=["xlsx", "csv"], key="copilot_workbook_upload")
+                if uploaded is not None:
+                    signature = hashlib.sha256(uploaded.getvalue()).hexdigest()
+                    if st.session_state.get("copilot_workbook_signature") != signature:
+                        try:
+                            st.session_state.copilot_workbook = read_uploaded_workbook(uploaded.getvalue(), uploaded.name)
+                            st.session_state.copilot_workbook_signature = signature
+                            st.session_state.copilot_workbook_name = uploaded.name
+                            st.session_state.copilot_workbook_original = {k:v.copy(deep=True) for k,v in st.session_state.copilot_workbook.items()}
+                            st.session_state.copilot_clean_audit = []
+                            st.success(f"Loaded {uploaded.name} with {len(st.session_state.copilot_workbook)} sheet(s).")
+                        except Exception as exc:
+                            st.error(f"Could not read the workbook safely: {exc}")
+    
+            workbook = st.session_state.get("copilot_workbook", {})
+            if workbook:
+                sheets=list(workbook.keys())
+                selected_sheet=st.selectbox("Workbook sheet", sheets, key="copilot_sheet")
+                df=workbook[selected_sheet]
+                st.markdown("### 🧹 Excel Data Cleaning Studio")
+                st.caption("These controls implement the 12 cleaning operations shown in your reference image.")
+                fn_names=[x[0] for x in EXCEL_FUNCTIONS]
+                function=st.selectbox("Choose an Excel cleaning function", fn_names, key="copilot_excel_function")
+                all_cols=list(df.columns)
+                cols=st.multiselect("Columns", all_cols, default=all_cols if function not in ("TEXTSPLIT","TEXTJOIN") else [], key="copilot_function_columns")
+                c1,c2,c3=st.columns(3)
+                with c1:
+                    delimiter=st.text_input("Delimiter", value=",", key="copilot_delimiter")
+                    find_text=st.text_input("Find", key="copilot_find")
+                with c2:
+                    replace_text=st.text_input("Replace with", key="copilot_replace")
+                    split_col=st.selectbox("TEXTSPLIT column", all_cols, key="copilot_split_col") if all_cols else None
+                with c3:
+                    output_col=st.text_input("TEXTJOIN output column", value="Joined", key="copilot_output_col")
+                    join_cols=st.multiselect("TEXTJOIN columns", all_cols, key="copilot_join_cols")
+    
+                a,b,d=st.columns(3)
+                with a:
+                    if st.button("✨ Auto Clean 12 checks", type="primary", use_container_width=True, key="copilot_auto_clean"):
+                        cleaned,audit=clean_dataframe(df)
+                        workbook[selected_sheet]=cleaned
+                        st.session_state.copilot_clean_audit.extend(audit)
+                        st.success("Automatic cleaning completed.")
                         st.rerun()
-                    except Exception as exc:
-                        st.error(f"{function} could not be applied: {exc}")
-            with d:
-                if st.button("↩️ Reset Workbook", use_container_width=True, key="copilot_reset_workbook"):
-                    st.session_state.copilot_workbook={k:v.copy(deep=True) for k,v in st.session_state.copilot_workbook_original.items()}
-                    st.session_state.copilot_clean_audit=[]
-                    st.rerun()
+                with b:
+                    if st.button("▶ Apply Function", use_container_width=True, key="copilot_apply_function"):
+                        try:
+                            kwargs={"columns":cols}
+                            if function=="TEXTSPLIT": kwargs.update(column=split_col,delimiter=delimiter)
+                            elif function=="TEXTJOIN": kwargs.update(columns=join_cols,delimiter=delimiter,output_column=output_col)
+                            elif function in ("SUBSTITUTE","FIND & REPLACE"):
+                                kwargs.update(old=find_text, new=replace_text, find_text=find_text, replace_text=replace_text)
+                            new_df,message=apply_excel_function(df,function,**kwargs)
+                            workbook[selected_sheet]=new_df
+                            st.session_state.copilot_clean_audit.append({"function":function,"details":message,"sheet":selected_sheet})
+                            st.success(message)
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(f"{function} could not be applied: {exc}")
+                with d:
+                    if st.button("↩️ Reset Workbook", use_container_width=True, key="copilot_reset_workbook"):
+                        st.session_state.copilot_workbook={k:v.copy(deep=True) for k,v in st.session_state.copilot_workbook_original.items()}
+                        st.session_state.copilot_clean_audit=[]
+                        st.rerun()
+    
+                st.dataframe(workbook[selected_sheet], use_container_width=True, hide_index=True)
+                numeric=[x for x in workbook[selected_sheet].columns if pd.api.types.is_numeric_dtype(workbook[selected_sheet][x])]
+                if numeric and len(workbook[selected_sheet])>0:
+                    chart_col=st.selectbox("📊 Preview chart",numeric,key="copilot_chart_column")
+                    chart_df=workbook[selected_sheet]
+                    x_col=next((x for x in chart_df.columns if x != chart_col and not pd.api.types.is_numeric_dtype(chart_df[x])), chart_df.columns[0])
+                    fig=px.bar(chart_df,x=x_col,y=chart_col,title=f"{selected_sheet}: {chart_col}")
+                    st.plotly_chart(fig,use_container_width=True)
+                else:
+                    fig=None
+    
+                export_tables=[(name,data) for name,data in workbook.items()]
+                excel_bytes=build_excel_report("Shoir-IE Copilot Cleaned Workbook",export_tables,audit=st.session_state.get("copilot_clean_audit",[]))
+                st.download_button("📥 Download Cleaned & Formatted Excel",excel_bytes,"shoir_ie_copilot_cleaned.xlsx","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",use_container_width=True)
+                bundle=build_workbook_bundle("Shoir-IE Copilot Cleaned Workbook",export_tables,figures=[(selected_sheet,fig)] if fig is not None else [],audit=st.session_state.get("copilot_clean_audit",[]))
+                st.download_button("📦 Download Workbook + Chart Package",bundle,"shoir_ie_copilot_package.zip","application/zip",use_container_width=True)
+    
+                with st.expander("🔎 Cleaning audit"):
+                    audit_df=pd.DataFrame(st.session_state.get("copilot_clean_audit",[]))
+                    st.dataframe(audit_df if not audit_df.empty else pd.DataFrame({"Status":["No transformations applied yet."]}),use_container_width=True,hide_index=True)
+    
+            with cp2:
+                st.markdown("### 🧭 Ask what to use")
+                recommendation_prompt=st.text_area("What result do you want?", placeholder="e.g. I need to forecast SKU demand using weather and promotions", key="copilot_recommendation_prompt")
+                if st.button("Recommend Module", use_container_width=True, key="copilot_recommend"):
+                    recommendation=copilot_module_recommendation(recommendation_prompt)
+                    st.info(recommendation)
+                    current_tier=str(st.session_state.get("user_tier","Starter Tier"))
+                    if "Required tier:" in recommendation:
+                        required_tier=recommendation.split("Required tier:",1)[1].strip().rstrip(".")
+                        if not platform_tier_allows(current_tier, required_tier):
+                            st.warning(f"🔒 This module requires **{required_tier}**. Your current tier is **{current_tier}**. Upgrade in Subscriptions to unlock it.")
+                st.markdown("### 💬 Copilot")
+                for msg in st.session_state.copilot_messages:
+                    with st.chat_message(msg["role"]):
+                        st.markdown(msg["content"])
+                if prompt := st.chat_input("Ask Copilot to clean, analyze, recommend a module, or run an available command"):
+                    st.session_state.copilot_messages.append({"role":"user","content":prompt})
+                    with st.chat_message("user"):
+                        st.markdown(prompt)
+                    with st.chat_message("assistant"):
+                        with st.spinner("Copilot is working..."):
+                            reply=get_copilot_response(prompt,st.session_state.copilot_messages)
+                        st.markdown(reply)
+                    st.session_state.copilot_messages.append({"role":"assistant","content":reply})
 
-            st.dataframe(workbook[selected_sheet], use_container_width=True, hide_index=True)
-            numeric=[x for x in workbook[selected_sheet].columns if pd.api.types.is_numeric_dtype(workbook[selected_sheet][x])]
-            if numeric and len(workbook[selected_sheet])>0:
-                chart_col=st.selectbox("📊 Preview chart",numeric,key="copilot_chart_column")
-                chart_df=workbook[selected_sheet]
-                x_col=next((x for x in chart_df.columns if x != chart_col and not pd.api.types.is_numeric_dtype(chart_df[x])), chart_df.columns[0])
-                fig=px.bar(chart_df,x=x_col,y=chart_col,title=f"{selected_sheet}: {chart_col}")
-                st.plotly_chart(fig,use_container_width=True)
-            else:
-                fig=None
 
-            export_tables=[(name,data) for name,data in workbook.items()]
-            excel_bytes=build_excel_report("Shoir-IE Copilot Cleaned Workbook",export_tables,audit=st.session_state.get("copilot_clean_audit",[]))
-            st.download_button("📥 Download Cleaned & Formatted Excel",excel_bytes,"shoir_ie_copilot_cleaned.xlsx","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",use_container_width=True)
-            bundle=build_workbook_bundle("Shoir-IE Copilot Cleaned Workbook",export_tables,figures=[(selected_sheet,fig)] if fig is not None else [],audit=st.session_state.get("copilot_clean_audit",[]))
-            st.download_button("📦 Download Workbook + Chart Package",bundle,"shoir_ie_copilot_package.zip","application/zip",use_container_width=True)
+    # Shared enterprise capability surfaces are integrated after native module rendering.
+    # They consume existing module state and never replace domain-specific engines.
+    try:
+        from shoir_enterprise_layer import render_enterprise_integration_surface
+        render_enterprise_integration_surface(str(mod), st.session_state.get("current_user", "unknown"), tier_val)
+    except Exception as exc:
+        st.warning("Shared enterprise integration surface is temporarily unavailable; native module results remain available.")
+        with st.expander("Enterprise integration diagnostic"):
+            st.code(f"{type(exc).__name__}: {exc}")
 
-            with st.expander("🔎 Cleaning audit"):
-                audit_df=pd.DataFrame(st.session_state.get("copilot_clean_audit",[]))
-                st.dataframe(audit_df if not audit_df.empty else pd.DataFrame({"Status":["No transformations applied yet."]}),use_container_width=True,hide_index=True)
-
-        with cp2:
-            st.markdown("### 🧭 Ask what to use")
-            recommendation_prompt=st.text_area("What result do you want?", placeholder="e.g. I need to forecast SKU demand using weather and promotions", key="copilot_recommendation_prompt")
-            if st.button("Recommend Module", use_container_width=True, key="copilot_recommend"):
-                recommendation=copilot_module_recommendation(recommendation_prompt)
-                st.info(recommendation)
-                current_tier=str(st.session_state.get("user_tier","Starter Tier"))
-                if "Required tier:" in recommendation and current_tier.lower().replace(" tier","") not in recommendation.lower():
-                    st.warning("This module may require a higher tier. Open Subscriptions to review available features.")
-            st.markdown("### 💬 Copilot")
-            for msg in st.session_state.copilot_messages:
-                with st.chat_message(msg["role"]):
-                    st.markdown(msg["content"])
-            if prompt := st.chat_input("Ask Copilot to clean, analyze, recommend a module, or run an available command"):
-                st.session_state.copilot_messages.append({"role":"user","content":prompt})
-                with st.chat_message("user"):
-                    st.markdown(prompt)
-                with st.chat_message("assistant"):
-                    with st.spinner("Copilot is working..."):
-                        reply=get_copilot_response(prompt,st.session_state.copilot_messages)
-                    st.markdown(reply)
-                st.session_state.copilot_messages.append({"role":"assistant","content":reply})
+    # New unified Industrial Operating System renders as a first-class platform workspace.
+    if mod == "Industrial Operating System":
+        if platform_tier_allows(tier_val, "Enterprise"):
+            try:
+                render_industrial_operating_system(tier_val, st.session_state.get("current_user", "unknown"))
+            except Exception as exc:
+                # Last-resort UI boundary: never expose a Streamlit traceback to an end user.
+                # The module itself uses defensive validation; this boundary protects the whole app
+                # from a future unexpected renderer failure and preserves a diagnostic for support.
+                st.error("The Industrial Operating System encountered a recoverable rendering issue. Your workspace data was not discarded.")
+                with st.expander("Technical diagnostic"):
+                    st.code(f"{type(exc).__name__}: {exc}")
+        else:
+            st.warning("Industrial Operating System requires the Enterprise tier.")
+    # Global Project + Digital Thread is cross-module and therefore uses its
+    # dedicated graph workspace rather than a single domain renderer.
+    elif mod == "Global Project & Digital Thread":
+        try:
+            render_global_project_digital_thread(mod, st.session_state.get("current_user", "unknown"))
+        except Exception as exc:
+            st.error("The Global Project & Digital Thread encountered a recoverable rendering issue.")
+            with st.expander("Technical diagnostic"):
+                st.code(f"{type(exc).__name__}: {exc}")
+    # New unified industrial platform modules render through the existing service layer.
+    elif mod in {x["name"] for x in PLATFORM_CATALOG}:
+        try:
+            render_industrial_module(mod, tier_val, st.session_state.get("current_user", "unknown"))
+        except Exception as exc:
+            st.error(f"{mod} encountered a recoverable rendering issue. The rest of Shoir-IE remains available.")
+            with st.expander("Technical diagnostic"):
+                st.code(f"{type(exc).__name__}: {exc}")
 
     # =========================================================
 # CARBON ACCOUNTING & NET-ZERO STUDIO (Astonishing & Stunning)
@@ -8408,6 +9569,7 @@ if mod == "Carbon Accounting":
                 "Emissions (MT CO2e)": [620.4, 210.0, 275.0, 129.7, 140.1, 45.3],
                 "Scope Tier": ["Scope 3", "Scope 3", "Scope 3", "Scope 2", "Scope 3", "Scope 3"]
             })
+            st.session_state["carbon_latest_df"] = carbon_data.copy(deep=True)
             fig_carbon = px.bar(
                 carbon_data, x="Category", y="Emissions (MT CO2e)", color="Scope Tier",
                 color_discrete_map={"Scope 1": "#EF4444", "Scope 2": "#F59E0B", "Scope 3": "#3B82F6"},
@@ -8606,7 +9768,16 @@ elif mod == "MILP Solvers":
                     st.markdown("---")
                     st.markdown("##### **Optimal Warehouse-to-Customer Allocation Matrix**")
                     raw_res_df = pd.DataFrame(hav_data)
-                    
+                    # Hand exact solver evidence to the universal visualization
+                    # layer instead of keeping it local to the MILP tab.
+                    st.session_state["milp_result_df"] = raw_res_df.copy(deep=True)
+                    st.session_state["milp_summary_df"] = pd.DataFrame([{
+                        "Status": status,
+                        "Total Cost": float(total_cost_val),
+                        "Total Carbon": float(total_carbon_val),
+                        "Allocation Rows": int(len(raw_res_df)),
+                    }])
+
                     if not raw_res_df.empty:
                         # --- BULLETPROOF DATA NORMALIZER FOR PLOTTING ---
                         res_df = raw_res_df.copy()
@@ -8628,7 +9799,8 @@ elif mod == "MILP Solvers":
                         # Clean numeric values
                         res_df["Quantity"] = pd.to_numeric(res_df["Quantity"], errors="coerce").fillna(0)
                         res_df = res_df[res_df["Quantity"] > 0]  # Filter out zero allocations for clean charts
-                        
+                        st.session_state["milp_allocation_flow_df"] = res_df.copy(deep=True)
+
                         st.dataframe(raw_res_df, use_container_width=True)
                         
                         st.markdown("---")
@@ -10234,6 +11406,41 @@ if mod == "Admin Panel":
         ''')
         conn.commit()
         
+        if _durable_accounts_ready and st.session_state.get("current_user","").lower() == "sho":
+            try:
+                remote_pending = edge_admin_list_requests(
+                    st.session_state.get("current_user",""),
+                    st.session_state.get("remote_session_token",""),
+                )
+                for rp in remote_pending:
+                    exists = cursor.execute(
+                        "SELECT 1 FROM pending_payments WHERE LOWER(username)=? AND COALESCE(transaction_id,'')=COALESCE(?, '') AND COALESCE(request_type,'New')=? AND status='Pending' LIMIT 1",
+                        (str(rp.get("username","")).lower(), rp.get("transaction_id"), rp.get("request_type","New")),
+                    ).fetchone()
+                    if not exists:
+                        cursor.execute(
+                            """
+                            INSERT INTO pending_payments
+                            (username,password,email,tier,payment_method,transaction_id,screenshot_path,status,timestamp,request_type)
+                            VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                            """,
+                            (
+                                rp.get("username",""),
+                                "",
+                                rp.get("email",""),
+                                rp.get("tier",""),
+                                rp.get("payment_method",""),
+                                rp.get("transaction_id"),
+                                rp.get("screenshot_path") or "",
+                                "Pending",
+                                str(rp.get("requested_at") or datetime.datetime.now().isoformat()),
+                                rp.get("request_type","New"),
+                            ),
+                        )
+                conn.commit()
+            except Exception as exc:
+                st.warning(f"Durable subscription queue could not be refreshed: {exc}")
+
         pending_df = pd.read_sql("SELECT * FROM pending_payments WHERE status = 'Pending'", conn)
         conn.close()
         
@@ -10275,30 +11482,98 @@ if mod == "Admin Panel":
                                 WHERE username = ?
                             """, (row['tier'], row['email'], row['username']))
                             
-                            # Create/refresh the actual login account (this is what Sign In checks)
-                            # FIX: this used to be "INSERT OR REPLACE INTO users (...)", but
-                            # username isn't the primary key on this table (id is), so REPLACE
-                            # never actually matched anything - it just kept adding a brand new
-                            # duplicate row every time the same person was approved. Delete any
-                            # existing row for this username first instead.
-                            # SECURITY FIX: the password is now hashed at the moment
-                            # someone submits the registration form (see the register
-                            # tab above), so it's never stored in plain text anywhere,
-                            # not even temporarily in the pending-requests queue while
-                            # it's waiting on your review. This just carries that hash
-                            # straight through into the real login table.
-                            login_password = row['password'] if 'password' in row.index and row['password'] else ''
-                            cursor.execute("DELETE FROM users WHERE LOWER(username) = ?", (row['username'].strip().lower(),))
-                            cursor.execute("""
-                                INSERT INTO users (username, password, role, tier, email, created_at)
-                                VALUES (?, ?, ?, ?, ?, ?)
-                            """, (row['username'], login_password, "User", row['tier'], row['email'], datetime.datetime.now().isoformat()))
-                            cursor.execute("UPDATE pending_payments SET status = 'Approved' WHERE id = ?", (row['id'],))
-                            cursor.execute("INSERT INTO audit_trail (timestamp, user, action) VALUES (datetime('now'), ?, ?)", 
-                                           ("sho", f"Approved payment & issued ticket code {t_code} for user {row['username']}"))
+                            # Create or renew the durable login account without deleting it.
+                            login_username = str(row["username"]).strip()
+                            request_type = str(row.get("request_type", "New") or "New")
+                            request_type = request_type if request_type in {"New", "Renewal"} else "New"
+                            login_password = str(row.get("password") or "")
+                            now_dt = datetime.datetime.now(datetime.timezone.utc)
+
+                            existing_local = cursor.execute(
+                                "SELECT username,password,role,tier,email,created_at,subscription_expires_at FROM users WHERE LOWER(username)=? LIMIT 1",
+                                (login_username.lower(),),
+                            ).fetchone()
+
+                            if request_type == "Renewal" and existing_local:
+                                new_expiry = renewed_expiry(existing_local[6], 30, now_dt).isoformat()
+                                if not login_password:
+                                    login_password = existing_local[1]
+                                cursor.execute(
+                                    """
+                                    UPDATE users
+                                    SET role='User', tier=?, email=?, subscription_expires_at=?
+                                    WHERE LOWER(username)=?
+                                    """,
+                                    (row["tier"], row["email"], new_expiry, login_username.lower()),
+                                )
+                            else:
+                                new_expiry = (now_dt + datetime.timedelta(days=30)).isoformat()
+                                if existing_local and not login_password:
+                                    login_password = existing_local[1]
+                                if existing_local:
+                                    cursor.execute(
+                                        """
+                                        UPDATE users
+                                        SET password=?, role='User', tier=?, email=?, subscription_expires_at=?
+                                        WHERE LOWER(username)=?
+                                        """,
+                                        (login_password, row["tier"], row["email"], new_expiry, login_username.lower()),
+                                    )
+                                else:
+                                    cursor.execute(
+                                        """
+                                        INSERT INTO users
+                                        (username,password,role,tier,email,created_at,subscription_expires_at)
+                                        VALUES (?,?,?,?,?,?,?)
+                                        """,
+                                        (login_username, login_password, "User", row["tier"], row["email"],
+                                         now_dt.isoformat(), new_expiry),
+                                    )
+
+                            # Preserve the existing enterprise profile/workspace.
+                            cursor.execute(
+                                "INSERT OR IGNORE INTO enterprise_users (username) VALUES (?)",
+                                (login_username,),
+                            )
+                            cursor.execute(
+                                """
+                                UPDATE enterprise_users
+                                SET role='User', tier=?, email=?, ticket_expiry=?
+                                WHERE LOWER(username)=?
+                                """,
+                                (row["tier"], new_expiry, new_expiry, login_username.lower()),
+                            )
+                            cursor.execute("UPDATE pending_payments SET status='Approved' WHERE id=?", (row["id"],))
+                            cursor.execute(
+                                "INSERT INTO audit_trail (timestamp,user,action) VALUES (datetime('now'),?,?)",
+                                ("sho", f"Approved {request_type.lower()} for {login_username}; subscription through {new_expiry}")
+                            )
                             conn.commit()
                             conn.close()
-                            
+
+                            if _durable_accounts_ready:
+                                try:
+                                    upsert_remote_account({
+                                        "username": login_username,
+                                        "password_hash": login_password,
+                                        "role": "User",
+                                        "tier": row["tier"],
+                                        "email": row["email"],
+                                        "created_at": (
+                                            existing_local[5]
+                                            if existing_local and request_type == "Renewal"
+                                            else now_dt.isoformat()
+                                        ),
+                                        "subscription_expires_at": new_expiry,
+                                        "active": True,
+                                        "admin_username": st.session_state.get("current_user",""),
+                                        "admin_session_token": st.session_state.get("remote_session_token",""),
+                                        "target_username": login_username,
+                                        "request_type": request_type,
+                                    })
+                                except Exception:
+                                    pass
+
                             email_success = send_tier_email(row['email'], row['username'], t_code, row['tier'])
                             if email_success:
                                 st.success(f"Payment approved! Code **{t_code}** generated and successfully emailed to **{row['email']}**.")
@@ -10322,6 +11597,22 @@ if mod == "Admin Panel":
                             conn.close()
                             st.warning(f"Request from **{row['username']}** has been declined.")
                             st.rerun()
+
+        st.markdown("---")
+        st.subheader("📈 Owner Usage & Module Trends")
+        conn = sqlite3.connect("enterprise_full_workspace.db")
+        usage_df = pd.read_sql("SELECT date(timestamp) AS Day, action AS Action, COUNT(*) AS Events FROM audit_trail GROUP BY date(timestamp), action ORDER BY Day", conn)
+        conn.close()
+        if usage_df.empty:
+            st.info("Usage trends will appear after real user actions are recorded.")
+        else:
+            u1,u2=st.columns(2)
+            with u1:
+                st.plotly_chart(px.line(usage_df.groupby("Day",as_index=False)["Events"].sum(),x="Day",y="Events",title="Activity Over Time"),use_container_width=True)
+            with u2:
+                top_actions=usage_df.groupby("Action",as_index=False)["Events"].sum().sort_values("Events",ascending=False).head(15)
+                st.plotly_chart(px.bar(top_actions,x="Action",y="Events",title="Most Used Actions"),use_container_width=True)
+            st.dataframe(usage_df,use_container_width=True,hide_index=True)
 
         st.markdown("---")
         # FIX: everything from here down through the license-codes table
@@ -10416,7 +11707,7 @@ if mod == "Admin Panel":
         with st.form("manual_code_form"):
             col_g1, col_g2, col_g3 = st.columns(3)
             with col_g1:
-                gen_tier = st.selectbox("Select Tier for Code", ["Free Trial", "Starter Tier ($29)", "Mid-Tier Pro ($79)", "Enterprise Tier ($199)"], key="gen_tier_box")
+                gen_tier = st.selectbox("Select Tier for Code", ["Free Trial", "Starter Tier ($29)", "Mid-Tier Pro ($79)", "Professional Tier ($129)", "Enterprise Tier ($199)", "Enterprise Plus Tier ($399)", "Research Pack ($30 add-on)"], key="gen_tier_box")
             with col_g2:
                 default_code = "TRIAL-" + "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
                 custom_code_input = st.text_input("Ticket / Promo Code", value=default_code, key="custom_code_box")
@@ -10501,6 +11792,12 @@ if mod == "Control Tower":
     if region_filter != "All Regions":
         disruption_df = disruption_df[disruption_df["Location"] == region_filter]
 
+    st.session_state["control_tower_disruption_df"] = disruption_df.copy(deep=True)
+    st.session_state["control_tower_metrics"] = pd.DataFrame({
+        "KPI": ["Active Shipments", "On-Time Delivery", "Disruption Alerts", "Weather Risk Index"],
+        "Value": [142, 98.4, 2, 1.2],
+        "Unit": ["shipments", "%", "alerts", "index"],
+    })
     st.dataframe(disruption_df, use_container_width=True)
 
     if st.button("Trigger Full Network Diagnostic Scan", type="primary"):
@@ -10597,3 +11894,46 @@ if mod == "Cryptographic Ledger":
         st.write("")
         if st.button("Unlock Enterprise Tier", type="primary", use_container_width=True):
             st.info("Redirecting to secure subscription portal...")
+
+# =====================================================================
+# UNIVERSAL MODULE PARITY — RESULTS / LIVE GRAPHS / EXPORT
+# ---------------------------------------------------------------------
+# This runs after the specialized module renderer so actual module result
+# tables are discoverable by the shared evidence and visualization layer.
+# =====================================================================
+if (
+    st.session_state.get("authenticated")
+    and st.session_state.get("current_user")
+    and "mod" in globals()
+    and "allowed_modules" in globals()
+    and st.session_state.get("selected_nav", "Dashboard") == "Dashboard"
+    and str(mod) in set(map(str, allowed_modules))
+):
+    try:
+        render_universal_module_parity(str(mod), phase="results")
+    except Exception as exc:
+        st.warning("Universal Module Studio could not render the results surface; the module's native results remain available.")
+        with st.expander("Module parity diagnostic"):
+            st.code(f"{type(exc).__name__}: {exc}")
+
+if (
+    st.session_state.get("authenticated")
+    and st.session_state.get("current_user")
+    and "mod" in globals()
+    and "allowed_modules" in globals()
+    and st.session_state.get("selected_nav", "Dashboard") == "Dashboard"
+    and str(mod) in set(map(str, allowed_modules))
+):
+    try:
+        render_enterprise_bridge(str(mod), tier_val, st.session_state.get("current_user", "unknown"))
+    except Exception as exc:
+        st.warning("Enterprise capability layer encountered a recoverable issue; the native module remains available.")
+        with st.expander("Enterprise layer diagnostic"):
+            st.code(f"{type(exc).__name__}: {exc}")
+
+# Capture module calculations and parity edits after the selected module has rendered.
+if st.session_state.get("authenticated") and st.session_state.get("current_user"):
+    try:
+        save_user_workspace(st.session_state["current_user"], st.session_state)
+    except Exception:
+        pass

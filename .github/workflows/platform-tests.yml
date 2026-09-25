@@ -1,0 +1,26 @@
+name: Shoir-IE Platform Tests
+
+on:
+  push:
+    branches: ["feature/**"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PYTHONPATH: .
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+      - name: Install dependencies
+        run: python -m pip install --upgrade pip && pip install -r requirements.txt
+      - name: Compile Python modules
+        run: python -m py_compile app.py industrial_platform.py shoir_upgrade.py aegis_opt.py aegis_sim.py enterprise_engine.py database.py
+      - name: Run regression tests
+        run: pytest -q tests

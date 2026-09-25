@@ -1,0 +1,30 @@
+name: Shoir-IE Engine Regression
+
+on:
+  push:
+    branches:
+      - main
+      - "feat/**"
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  engine-regression:
+    runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: .
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: python -m pip install --upgrade pip && pip install -r requirements.txt
+      - name: Compile changed Python modules
+        run: python -m py_compile shoir_experiment_engine.py shoir_forecasting.py shoir_optimization.py industrial_experience.py industrial_platform.py shoir_live_visuals.py app.py
+      - name: Run engine regression tests
+        run: pytest -q tests/test_shoir_experiment_engine.py tests/test_shoir_forecasting.py tests/test_shoir_optimization.py
