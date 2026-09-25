@@ -8,6 +8,8 @@ workspace and lets the user generate interactive Plotly views from them.
 from __future__ import annotations
 
 import io
+import hashlib
+import json
 import re
 from typing import Any
 
@@ -82,10 +84,21 @@ def _is_candidate_key(key: str) -> bool:
     return not k.startswith(("_", "signin_", "reg_"))
 
 
-def discover_visual_tables(module: str) -> list[tuple[str, str, pd.DataFrame]]:
-    """Discover safe, non-secret tables relevant to the active module."""
+def discover_visual_tables(module: str, preferred_key: str | None = None) -> list[tuple[str, str, pd.DataFrame]]:
+    """Discover safe, non-secret tables relevant to the active module.
+
+    preferred_key is placed first when it contains a usable DataFrame. This
+    lets Universal Module Parity focus the same chart studio on its canonical
+    module dataset while retaining the module-specific result tables.
+    """
     result: list[tuple[str, str, pd.DataFrame]] = []
     seen: set[str] = set()
+
+    if preferred_key and preferred_key in st.session_state:
+        preferred_df = _as_frame(st.session_state.get(preferred_key))
+        if not preferred_df.empty:
+            result.append((str(preferred_key).replace("_", " ").title(), preferred_key, preferred_df))
+            seen.add(preferred_key)
 
     for key in _MODULE_KEYS.get(module, []):
         if key in st.session_state:
@@ -250,9 +263,9 @@ def _make_figure(df: pd.DataFrame, chart: str, x: str | None, y: str | None, z: 
     return fig
 
 
-def render_live_visualization_studio(module: str, *, expanded: bool = False) -> None:
+def render_live_visualization_studio(module: str, *, expanded: bool = False, preferred_key: str | None = None) -> None:
     """Render the live chart studio beneath an active module."""
-    tables = discover_visual_tables(module)
+    tables = discover_visual_tables(module, preferred_key=preferred_key)
     with st.expander("📊 Live Engineering Visualization Studio", expanded=expanded):
         st.caption("Charts use the current module/workspace data. Edit a table, change the controls, and the visualization updates on the next Streamlit rerun.")
         if not tables:
@@ -260,7 +273,12 @@ def render_live_visualization_studio(module: str, *, expanded: bool = False) -> 
             return
 
         labels = [label for label, _, _ in tables]
-        table_label = st.selectbox("Data source", labels, key=f"liveviz_source_{hash(module) & 0xFFFF:04x}")
+        default_source_index = 0
+        if preferred_key:
+            preferred_labels = [i for i, (_, key, _) in enumerate(tables) if key == preferred_key]
+            if preferred_labels:
+                default_source_index = preferred_labels[0]
+        table_label = st.selectbox("Data source", labels, index=default_source_index, key=f"liveviz_source_{hash(module) & 0xFFFF:04x}")
         df = tables[labels.index(table_label)][2].copy()
 
         # Avoid accidentally visualizing secrets or enormous payloads.
@@ -327,6 +345,25 @@ def render_live_visualization_studio(module: str, *, expanded: bool = False) -> 
             "scrollZoom": True,
             "responsive": True,
         })
+
+        # Preserve the exact rendered chart in a JSON-safe form so the
+        # universal parity evidence exporter can package the same view.
+        try:
+            chart_token = hashlib.sha1(str(module).encode("utf-8")).hexdigest()[:12]
+            st.session_state[f"liveviz_last_figure_json_{chart_token}"] = fig.to_json()
+            st.session_state[f"liveviz_last_chart_config_{chart_token}"] = {
+                "source_key": tables[labels.index(table_label)][1],
+                "chart": actual_chart,
+                "x": x,
+                "y": y,
+                "z": z,
+                "aggregation": aggregation,
+                "filter_column": None if filter_col == "(none)" else filter_col,
+                "filter_value": filter_value,
+                "title": title,
+            }
+        except Exception:
+            pass
 
         left, right = st.columns(2)
         with left:

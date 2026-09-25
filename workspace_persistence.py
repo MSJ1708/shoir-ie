@@ -65,6 +65,20 @@ _PREFIX_EXCLUDE = (
     "sx_copilot_",
     "sx_export_",
     "sx_dl_",
+    # Universal Module Parity widget plumbing is intentionally transient;
+    # the canonical parity data/results keys below are persisted instead.
+    "module_parity_upload_",
+    "module_parity_workbook_",
+    "module_parity_editor_",
+    "module_parity_sheet_",
+    "module_parity_validate_",
+    "module_parity_clean_",
+    "module_parity_reset_",
+    "module_parity_apply_native_",
+    "module_parity_result_source_",
+    "module_parity_xlsx_",
+    "module_parity_csv_",
+    "module_parity_zip_",
 )
 
 _ACTION_KEYS = {
