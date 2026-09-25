@@ -27,55 +27,84 @@ _MODULE_KEYS = {
     "Advanced Planning & Scheduling": ["aps_demand", "aps_bom", "aps_orders", "aps_schedule_result"],
     "Manufacturing Execution System": ["mes_wo_df", "mes_events_df", "mes_oee_df", "mes_oee_result"],
     "Quality Engineering & Reliability": ["quality_df", "quality_spc_result", "quality_limits_result", "msa_df", "anova_df", "fmea_df", "fmea_result"],
-    "Industrial Simulation Lab": ["sim_des_result", "sim_agent_result", "sd", "job_history_df", "realtime_monitoring_df"],
-    "Digital Twin & Discrete-Event Simulation": [
-        "dt_workstations", "agv_fleet", "des_queues", "iot_sensors", "kanban_buffers",
-        "reliability_data", "event_logs", "digital_twin_state_snapshot", "digital_twin_replay_df",
-        "enterprise_artifact_ledger",
-    ],
+    "Industrial Simulation Lab": ["sim_des_result", "sim_agent_result", "sd"],
     "3D Factory Designer": ["factory3d_df", "factory3d_dist_result"],
-    "IoT Digital Twin": ["node_mesh_df", "sensor_stream", "dt_workstations", "twin_tel", "telemetry_events", "twin_whatif_result", "enterprise_twin_anomalies_df", "enterprise_artifact_ledger"],
-    "Industrial Connectivity Hub": ["conn_df", "connectivity_health_df", "connector_profiles", "erp_connectors", "enterprise_connector_health_df"],
-    "AI Copilot": ["copilot_messages", "knowledge_registry_df"],
-    "Enterprise Integration & Collaboration": ["erp_connectors", "workspace_users", "collaboration_roster_df", "connectivity_health_df", "enterprise_connector_health_df", "audit_report_history", "enterprise_security_posture_df", "collaboration_assignment_df", "enterprise_collaboration_assignments", "enterprise_artifact_ledger"],
     "Multi-Objective Optimization": ["multiobj_df", "multiobj_result", "pareto", "optimization_pareto_df", "optimization_result_df"],
     "Robust & Resilient Optimization": ["robust_df", "robust_result", "robust_result_df"],
-    "Engineering Model Registry": ["model_registry_df", "model_reproducibility_catalog", "model_registry_governance_df", "enterprise_artifact_ledger"],
-    "Experiment Lab": ["experiment_df", "experiment_results", "experiment_doe_design", "experiment_factorial_effects", "experiment_factorial_summary", "experiment_mc_results", "experiment_mc_result_summary", "experiment_bootstrap_results", "experiment_bootstrap_summary", "experiment_replication_summary", "experiment_sensitivity_results", "research_reproducibility_df"],
-    "Experiment Engine": [
-        "experiment_engine_design_df", "experiment_engine_effects_df", "experiment_engine_fitted_df",
-        "experiment_engine_mc_samples", "experiment_engine_bootstrap_df", "experiment_engine_sensitivity_df",
-        "experiment_engine_replication_df", "research_reproducibility_df",
-    ],
-    "Research Workspace": ["enterprise_research_runs_df", "enterprise_research_decisions_df", "forecast_universal_result"],
-    "Industrial Control Center": ["control_center_metrics", "control_tower_health_df", "enterprise_control_tower_health_df"],
-    "Engineering Control Tower": ["control_tower_unified_health_df"],
-    "Control Tower": ["control_tower_metrics", "control_tower_disruption_df", "control_tower_unified_health_df", "control_tower_health_df", "enterprise_artifact_ledger"],
+    "Experiment Lab": ["experiment_df", "experiment_results", "experiment_doe_design", "experiment_factorial_effects", "experiment_factorial_summary", "experiment_mc_results", "experiment_mc_result_summary", "experiment_bootstrap_results", "experiment_bootstrap_summary", "experiment_replication_summary", "experiment_sensitivity_results"],
     "Engineering Decision Center": ["decision_metrics_df", "decision_alternatives_df", "decision_kpi_df", "decision_verification_df"],
-    "Industrial Data Platform": ["data_platform_latest_df", "data_intelligence_profile_df", "cloud_persistence_health_df"],
-    "Capital Investment & Engineering Economics": ["capex_df", "capex_result", "fin_cash_flows", "mc_results", "engineering_economics_tco_df", "engineering_economics_cashflow_df"],
-    "Engineering Economics & Finance": ["fin_cash_flows", "cvp_products", "mc_results", "engineering_economics_tco_df", "engineering_economics_cashflow_df", "enterprise_artifact_ledger"],
-    "Workforce Engineering": ["work_elements", "balance_result", "skills_df", "human_factors_workforce_df"],
-    "Human Factors & Ergonomics (NIOSH)": ["ergonomic_tasks", "time_studies", "mtm_slots", "human_factors_metrics_df", "human_factors_workforce_df"],
-    "Industrial Sustainability & LCA": ["sustain_df", "sustain_result", "carbon_sources", "energy_units", "lca_materials", "sustainability_decision_bridge_df", "sustainability_decision_df"],
-    "Green IE & Sustainability": ["carbon_sources", "energy_units", "lca_materials", "sustainability_decision_bridge_df", "sustainability_decision_df", "enterprise_artifact_ledger"],
+    "Industrial Data Platform": ["data_platform_latest_df"],
+    "Capital Investment & Engineering Economics": ["capex_df", "capex_result"],
+    "Workforce Engineering": ["work_elements", "balance_result", "skills_df"],
+    "Industrial Sustainability & LCA": ["sustain_df", "sustain_result"],
     "Benchmarking & Engineering Standards": ["benchmark_actual", "benchmark_targets", "benchmark_result"],
-    "Live Industrial Digital Twin": ["twin_tel", "digital_twin_state_snapshot", "digital_twin_state_df", "digital_twin_scenarios_df", "digital_twin_replay_df", "digital_twin_replay_result_df", "twin_whatif_result", "enterprise_twin_anomalies_df", "enterprise_artifact_ledger"],
-    "Advanced ML Demand Forecasting": ["forecast_df", "forecast_result", "forecast_metrics", "forecast_universal_df", "forecast_universal_result"],
+    "Advanced ML Demand Forecasting": ["forecast_df", "forecast_result", "forecast_metrics"],
     "Scenario Versioning & Comparison": ["scenario_df"],
-    "Geospatial Network Designer": ["supply_nodes", "demand_markets", "geospatial_network_routes_df", "geospatial_intelligence_df"],
-    "Team Workspaces & RBAC": ["workspace_members_df", "workspace_users", "collaboration_assignment_df", "enterprise_collaboration_assignments", "enterprise_artifact_ledger"],
-    "Executive Report Center": ["exec_report_df", "report_provenance_df", "enterprise_artifact_ledger"],
+    "Predictive Maintenance Digital Twin": ["maint_df", "maint_result"],
+    "Localization & Multi-Currency": ["currency_df", "currency_result", "trade_rules_df"],
+    "IoT Digital Twin": ["node_mesh_df", "sensor_stream", "dt_workstations", "twin_tel", "twin_whatif_result", "enterprise_twin_anomalies_df", "enterprise_artifact_ledger"],
+    "Live Industrial Digital Twin": ["twin_tel", "twin_whatif_result", "enterprise_twin_anomalies_df", "enterprise_artifact_ledger"],
+    "Industrial Connectivity Hub": ["conn_df", "connector_profiles", "erp_connectors", "enterprise_connector_health_df"],
+    "Industrial Control Center": ["control_center_metrics", "enterprise_control_tower_health_df"],
+    "Enterprise Integration & Collaboration": ["erp_connectors", "workspace_users", "audit_report_history", "enterprise_connector_health_df", "enterprise_collaboration_assignments", "enterprise_artifact_ledger"],
+    "Persistence": ["enterprise_artifact_ledger"],
+    "Enterprise Security & Governance": ["security_roles", "audit_governance_ledger", "enterprise_artifact_ledger"],
+    "Team Workspaces & RBAC": ["workspace_members_df", "workspace_users", "enterprise_collaboration_assignments", "enterprise_artifact_ledger"],
+    "Engineering Model Registry": ["model_registry_df", "enterprise_artifact_ledger"],
+    "Research Workspace": ["enterprise_research_runs_df", "enterprise_research_decisions_df"],
+    "Experiment Engine": ["experiment_engine_design_df", "experiment_engine_effects_df", "experiment_engine_fitted_df", "experiment_engine_mc_samples", "experiment_engine_bootstrap_df", "experiment_engine_sensitivity_df", "experiment_engine_replication_df", "enterprise_artifact_ledger"],
+    "Executive Report Center": ["exec_report_df", "enterprise_artifact_ledger"],
     "Jobs System": ["enterprise_job_history_df"],
     "Knowledge Layer": ["knowledge_documents"],
-    "Predictive Maintenance Hub": ["maintenance_assets", "maintenance_telemetry", "enterprise_twin_anomalies_df", "enterprise_artifact_ledger"],
-    "Predictive Maintenance Digital Twin": ["maint_df", "maint_result", "digital_twin_state_df", "digital_twin_replay_result_df"],
-    "Localization & Multi-Currency": ["currency_df", "currency_result", "trade_rules_df"],
-    "Enterprise Security & Governance": ["security_roles", "enterprise_security_posture_df", "enterprise_security_roles_df", "security_scan_df", "security_file_scan_df", "audit_governance_ledger", "enterprise_artifact_ledger"],
-    "Persistence": ["enterprise_security_posture_df", "shoir_artifact_catalog", "enterprise_artifact_ledger", "job_history_df", "cloud_persistence_health_df"],
+    "Human Factors & Ergonomics (NIOSH)": ["ergonomic_tasks", "time_studies", "mtm_library"],
+    "Geospatial Network Designer": ["supply_nodes", "fleet_vehicles", "enterprise_artifact_ledger"],
+    "Digital Twin & Discrete-Event Simulation": ["dt_workstations","event_logs","sim_des_result","sim_agent_result","sd","enterprise_artifact_ledger"],
+    "Digital Twin & DES": ["dt_workstations","event_logs","sim_des_result","sim_agent_result","sd","enterprise_artifact_ledger"],
+    "Predictive Maintenance Hub": ["maintenance_assets","maintenance_telemetry","enterprise_twin_anomalies_df","enterprise_artifact_ledger"],
+    "Engineering Economics & Finance": ["economic_summary","df_economic_summary","df_amort","capex_result","enterprise_artifact_ledger"],
+    "Green IE & Sustainability": ["lca_materials","carbon_latest_df","sustain_result","enterprise_artifact_ledger"],
+    "Control Tower": ["control_tower_metrics", "control_tower_disruption_df", "enterprise_control_tower_health_df", "enterprise_artifact_ledger"],
     "Cryptographic Ledger": ["ledger_history"],
     "Carbon Accounting": ["carbon_latest_df"],
 }
+
+# PR57-specific result aliases are kept in one additive registry extension.
+# The canonical base mapping above matches current main, preventing duplicate
+# conflict hunks while retaining richer enterprise result discovery.
+def _extend_module_keys(module_name: str, *keys: str) -> None:
+    current = list(_MODULE_KEYS.get(module_name, []))
+    for key in keys:
+        if key not in current:
+            current.append(key)
+    _MODULE_KEYS[module_name] = current
+
+_extend_module_keys("Industrial Simulation Lab", "job_history_df", "realtime_monitoring_df")
+_extend_module_keys("Digital Twin & Discrete-Event Simulation", "agv_fleet", "des_queues", "iot_sensors", "kanban_buffers", "reliability_data", "digital_twin_state_snapshot", "digital_twin_replay_df")
+_extend_module_keys("IoT Digital Twin", "telemetry_events")
+_extend_module_keys("Industrial Connectivity Hub", "connectivity_health_df")
+_extend_module_keys("AI Copilot", "knowledge_registry_df")
+_extend_module_keys("Enterprise Integration & Collaboration", "collaboration_roster_df", "connectivity_health_df", "enterprise_security_posture_df", "collaboration_assignment_df")
+_extend_module_keys("Engineering Model Registry", "model_reproducibility_catalog", "model_registry_governance_df")
+_extend_module_keys("Experiment Lab", "research_reproducibility_df")
+_extend_module_keys("Experiment Engine", "research_reproducibility_df")
+_extend_module_keys("Research Workspace", "forecast_universal_result")
+_extend_module_keys("Industrial Control Center", "control_tower_health_df")
+_extend_module_keys("Engineering Control Tower", "control_tower_unified_health_df")
+_extend_module_keys("Capital Investment & Engineering Economics", "fin_cash_flows", "mc_results", "engineering_economics_tco_df", "engineering_economics_cashflow_df")
+_extend_module_keys("Workforce Engineering", "human_factors_workforce_df")
+_extend_module_keys("Human Factors & Ergonomics (NIOSH)", "mtm_slots", "human_factors_metrics_df", "human_factors_workforce_df")
+_extend_module_keys("Industrial Sustainability & LCA", "carbon_sources", "energy_units", "lca_materials", "sustainability_decision_bridge_df", "sustainability_decision_df")
+_extend_module_keys("Live Industrial Digital Twin", "digital_twin_state_snapshot", "digital_twin_state_df", "digital_twin_scenarios_df", "digital_twin_replay_df", "digital_twin_replay_result_df")
+_extend_module_keys("Advanced ML Demand Forecasting", "forecast_universal_df", "forecast_universal_result")
+_extend_module_keys("Geospatial Network Designer", "demand_markets", "geospatial_network_routes_df", "geospatial_intelligence_df")
+_extend_module_keys("Team Workspaces & RBAC", "collaboration_assignment_df", "enterprise_collaboration_assignments")
+_extend_module_keys("Executive Report Center", "report_provenance_df")
+_extend_module_keys("Predictive Maintenance Digital Twin", "digital_twin_state_df", "digital_twin_replay_result_df")
+_extend_module_keys("Enterprise Security & Governance", "enterprise_security_posture_df", "enterprise_security_roles_df", "security_scan_df", "security_file_scan_df")
+_extend_module_keys("Persistence", "enterprise_security_posture_df", "shoir_artifact_catalog", "job_history_df", "cloud_persistence_health_df")
+_extend_module_keys("Green IE & Sustainability", "lca_materials", "carbon_latest_df", "sustain_result")
+_extend_module_keys("Control Tower", "control_tower_unified_health_df")
+
 
 
 def _as_frame(value: Any) -> pd.DataFrame:
