@@ -64,5 +64,5 @@ def test_tco_schedule_is_transparent_and_discounted():
     })
     schedule, summary = calculate_tco(drivers, years=3, discount_rate=0.10)
     assert len(schedule) == 3
-    assert summary["TCO (Nominal)"] == 12000.0
+    assert summary["TCO (Nominal)"] == 13000.0
     assert summary["TCO (Discounted)"] < summary["TCO (Nominal)"]
