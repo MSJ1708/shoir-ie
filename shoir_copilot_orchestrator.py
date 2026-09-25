@@ -525,7 +525,6 @@ def run_orchestration(prompt: str, module: str, df: pd.DataFrame, context: Mappi
         explanation,
         figure,
         knowledge_context=knowledge_text,
-        knowledge_context_used=knowledge_used,
     )
     return {
         "run_id": run_id,
