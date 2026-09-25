@@ -35,6 +35,23 @@ from shoir_live_visuals import render_live_visualization_studio, discover_visual
 from shoir_module_parity import render_universal_module_parity
 from shoir_copilot_orchestrator import build_workflow_plan, recommend_module, run_orchestration
 from shoir_digital_thread import render_global_project_digital_thread
+from shoir_enterprise_ops import (
+    render_digital_twin_extension,
+    render_control_tower_extension,
+    render_connectivity_extension,
+    render_security_extension,
+    render_persistence_extension,
+    render_collaboration_extension,
+    render_reporting_extension,
+    render_data_intelligence_extension,
+    render_knowledge_extension,
+    render_realtime_monitoring_extension,
+    render_economics_extension,
+    render_sustainability_extension,
+    render_human_factors_extension,
+    render_geospatial_extension,
+    knowledge_context,
+)
 from durable_account_store import (durable_backend_configured, sync_durable_accounts, sync_remote_requests_to_local, edge_login, edge_admin_list_requests, edge_renew_request, upsert_remote_account, insert_remote_request, remote_account, account_is_expired, renewed_expiry)
 
 # =====================================================================
@@ -5955,6 +5972,11 @@ if selected_module == "AGV Fleet Dispatcher":
             st.metric("Performance Efficiency", "91.8%", "Optimized A*")
             st.metric("Quality Rate", "100%", "Collision-Free")
 
+    # Enterprise twin synchronization/replay + universal visualization.
+    render_digital_twin_extension(st.session_state.get("current_user","unknown"))
+    render_realtime_monitoring_extension(st.session_state.get("iot_sensors", []), "Digital Twin & DES")
+    render_live_visualization_studio("Digital Twin & DES", expanded=False, preferred_key="digital_twin_state_snapshot")
+
     # Stop execution so the rest of the page underneath doesn't overwrite
     st.stop()
 
@@ -6243,6 +6265,8 @@ if selected_module == "Geospatial Network Designer":
                 )
                 st.plotly_chart(bar_cap, use_container_width=True)
 
+    render_geospatial_extension(st.session_state.get("current_user","unknown"))
+    render_live_visualization_studio("Geospatial Network Designer", expanded=False, preferred_key="geospatial_network_routes_df")
     st.stop()
 
 # ==============================================================================
@@ -7675,6 +7699,8 @@ if selected_module in ["Human Factors & Ergonomics (NIOSH)", "Human Factors, Erg
             st.metric("Required Rest Time", f"{rest_mins_per_hour:.1f} mins / hour")
             st.metric("Total Shift Rest", f"{rest_mins_per_hour * shift_hours:.1f} minutes")
 
+    render_human_factors_extension(st.session_state.get("current_user","unknown"))
+    render_live_visualization_studio("Human Factors & Ergonomics (NIOSH)", expanded=False, preferred_key="human_factors_metrics_df")
     st.stop()
 
 # ==============================================================================
@@ -8000,6 +8026,16 @@ if selected_module in ["Engineering Economics & Finance", "Engineering Economics
                 "Interest Tax Shield": "${:,.2f}", "Ending Balance": "${:,.2f}"
             }), use_container_width=True, hide_index=True)
 
+    render_economics_extension(st.session_state.get("current_user","unknown"))
+    render_reporting_extension(
+        "Engineering Economics & Finance",
+        [
+            ("Cash Flows", pd.DataFrame(st.session_state.get("fin_cash_flows", []))),
+            ("TCO", st.session_state.get("engineering_economics_tco_df", pd.DataFrame())),
+        ],
+        st.session_state.get("current_user","unknown"),
+    )
+    render_live_visualization_studio("Engineering Economics & Finance", expanded=False, preferred_key="engineering_economics_tco_df")
     st.stop()
 
 # ==============================================================================
@@ -8933,6 +8969,10 @@ if selected_module in ["Enterprise Integration & Collaboration", "Enterprise Int
                 </div>
                 """, unsafe_allow_html=True)
 
+    render_collaboration_extension(st.session_state.get("current_user","unknown"))
+    render_connectivity_extension()
+    render_security_extension()
+    render_live_visualization_studio("Enterprise Integration & Collaboration", expanded=False)
     st.stop()
     
 def render_data_editor(df, key_name):
@@ -11157,6 +11197,9 @@ elif mod == "Persistence":
             key="download_audit_csv_btn"
         )
 
+    render_persistence_extension(st.session_state.get("current_user","unknown"))
+    render_live_visualization_studio("Persistence", expanded=False)
+
 # =========================================================
 # AUTONOMOUS AGENTIC WORKFLOWS SUITE (Astonishing & Stunning Edition)
 # =========================================================
@@ -11751,6 +11794,8 @@ if mod == "Control Tower":
             "latency_ms": 19,
             "encryption": "TLS 1.3 Secure"
         })
+
+    render_control_tower_extension()
 
 if mod == "Cryptographic Ledger":
     st.header("🔐 Cryptographic Product Provenance & ESG Ledger")
