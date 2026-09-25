@@ -74,7 +74,7 @@ def _json_default(value: Any) -> Any:
     return str(value)
 
 
-def validate_module_dataframe(df: pd.DataFrame) -> dict[str, Any]:
+def validate_module_dataframe(df: pd.DataFrame, previous: pd.DataFrame | None = None) -> dict[str, Any]:
     """Return deterministic, non-destructive data-quality diagnostics."""
     if not isinstance(df, pd.DataFrame):
         df = _as_frame(df)
@@ -177,6 +177,15 @@ def validate_module_dataframe(df: pd.DataFrame) -> dict[str, Any]:
     score = round(max(0.0, min(100.0, 100.0 - penalty)), 1)
     status = "PASS" if rows > 0 and duplicate_columns == 0 and score >= 90 else "REVIEW"
 
+    # Reuse the same Data Intelligence contract across modules so schema,
+    # units, date/ID detection, outliers and baseline drift are visible without
+    # changing the domain-specific validation rules above.
+    try:
+        from shoir_enterprise_ops import infer_data_intelligence
+        data_intelligence = infer_data_intelligence(df, previous)
+    except Exception:
+        data_intelligence = pd.DataFrame()
+
     return {
         "status": status,
         "score": score,
@@ -190,6 +199,7 @@ def validate_module_dataframe(df: pd.DataFrame) -> dict[str, Any]:
         "date_like_columns": date_like_columns,
         "constant_columns": constant_columns,
         "negative_numeric_cells": negative_numeric_cells,
+        "data_intelligence": data_intelligence,
         "checks": checks,
     }
 
@@ -293,7 +303,10 @@ def _apply_module_edit(module: str, edited: pd.DataFrame) -> None:
     keys = parity_keys(module)
     current = edited.copy(deep=True)
     st.session_state[keys["data"]] = current
-    st.session_state[keys["validation"]] = validate_module_dataframe(current)
+    original = st.session_state.get(keys["original"], pd.DataFrame())
+    st.session_state[keys["validation"]] = validate_module_dataframe(
+        current, original if isinstance(original, pd.DataFrame) and not original.empty else None
+    )
     st.session_state[keys["results"]] = summarize_module_dataframe(current)
 
 
@@ -369,6 +382,12 @@ def _render_validation_card(validation: dict[str, Any]) -> None:
         with st.expander("🔎 Validation checks", expanded=False):
             st.dataframe(checks, use_container_width=True, hide_index=True)
 
+    intelligence = validation.get("data_intelligence")
+    if isinstance(intelligence, pd.DataFrame) and not intelligence.empty:
+        with st.expander("🧠 Data Intelligence · schema / units / IDs / outliers / drift", expanded=False):
+            st.caption("Drift is measured against the imported/baseline snapshot when one exists. It is descriptive evidence, not a causal diagnosis.")
+            st.dataframe(intelligence, use_container_width=True, hide_index=True)
+
 
 def _render_prepare(module: str, keys: dict[str, str]) -> None:
     token = module_token(module)
@@ -412,7 +431,10 @@ def _render_prepare(module: str, keys: dict[str, str]) -> None:
         _apply_module_edit(module, edited)
         df = edited.copy(deep=True)
 
-    current_validation = validate_module_dataframe(df)
+    original_for_drift = st.session_state.get(keys["original"], pd.DataFrame())
+    current_validation = validate_module_dataframe(
+        df, original_for_drift if isinstance(original_for_drift, pd.DataFrame) and not original_for_drift.empty else None
+    )
     st.session_state[keys["validation"]] = current_validation
     st.session_state[keys["results"]] = summarize_module_dataframe(df)
     _render_validation_card(current_validation)
@@ -509,7 +531,11 @@ def _render_results(module: str, keys: dict[str, str]) -> None:
     result_df = result_options[labels.index(selected_label)][2]
 
     summary = summarize_module_dataframe(result_df)
-    validation = validate_module_dataframe(result_df)
+    baseline = st.session_state.get(keys["original"], pd.DataFrame())
+    validation = validate_module_dataframe(
+        result_df,
+        baseline if isinstance(baseline, pd.DataFrame) and not baseline.empty else None,
+    )
     st.session_state[keys["results"]] = summary
     st.session_state[keys["validation"]] = validation
 
