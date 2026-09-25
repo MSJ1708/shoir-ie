@@ -5975,6 +5975,12 @@ if selected_module == "AGV Fleet Dispatcher":
     # Enterprise twin synchronization/replay + universal visualization.
     render_digital_twin_extension(st.session_state.get("current_user","unknown"))
     render_realtime_monitoring_extension(st.session_state.get("iot_sensors", []), "Digital Twin & DES")
+    if isinstance(st.session_state.get("digital_twin_state_snapshot"), pd.DataFrame):
+        render_data_intelligence_extension(
+            "Digital Twin & DES",
+            st.session_state["digital_twin_state_snapshot"],
+            st.session_state.get("digital_twin_state_snapshot"),
+        )
     render_live_visualization_studio("Digital Twin & DES", expanded=False, preferred_key="digital_twin_state_snapshot")
 
     # Stop execution so the rest of the page underneath doesn't overwrite
@@ -6266,6 +6272,12 @@ if selected_module == "Geospatial Network Designer":
                 st.plotly_chart(bar_cap, use_container_width=True)
 
     render_geospatial_extension(st.session_state.get("current_user","unknown"))
+    if isinstance(st.session_state.get("geospatial_network_routes_df"), pd.DataFrame):
+        render_data_intelligence_extension(
+            "Geospatial Network Designer",
+            st.session_state["geospatial_network_routes_df"],
+            st.session_state.get("geospatial_network_routes_df"),
+        )
     render_live_visualization_studio("Geospatial Network Designer", expanded=False, preferred_key="geospatial_network_routes_df")
     st.stop()
 
@@ -7700,6 +7712,12 @@ if selected_module in ["Human Factors & Ergonomics (NIOSH)", "Human Factors, Erg
             st.metric("Total Shift Rest", f"{rest_mins_per_hour * shift_hours:.1f} minutes")
 
     render_human_factors_extension(st.session_state.get("current_user","unknown"))
+    if isinstance(st.session_state.get("human_factors_metrics_df"), pd.DataFrame):
+        render_data_intelligence_extension(
+            "Human Factors & Ergonomics (NIOSH)",
+            st.session_state["human_factors_metrics_df"],
+            st.session_state.get("human_factors_metrics_df"),
+        )
     render_live_visualization_studio("Human Factors & Ergonomics (NIOSH)", expanded=False, preferred_key="human_factors_metrics_df")
     st.stop()
 
@@ -11800,6 +11818,13 @@ if mod == "Control Tower":
         })
 
     render_control_tower_extension()
+    render_live_visualization_studio("Control Tower", expanded=False, preferred_key="control_tower_unified_health_df")
+    if isinstance(st.session_state.get("control_tower_unified_health_df"), pd.DataFrame):
+        render_data_intelligence_extension(
+            "Control Tower",
+            st.session_state["control_tower_unified_health_df"],
+            st.session_state.get("control_tower_unified_health_df"),
+        )
 
 if mod == "Cryptographic Ledger":
     st.header("🔐 Cryptographic Product Provenance & ESG Ledger")
