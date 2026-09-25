@@ -36,6 +36,16 @@ from shoir_module_parity import render_universal_module_parity
 from shoir_copilot_orchestrator import build_workflow_plan, recommend_module, run_orchestration
 from shoir_digital_thread import render_global_project_digital_thread
 from durable_account_store import (durable_backend_configured, sync_durable_accounts, sync_remote_requests_to_local, edge_login, edge_admin_list_requests, edge_renew_request, upsert_remote_account, insert_remote_request, remote_account, account_is_expired, renewed_expiry)
+from shoir_enterprise_layer import (
+    ensure_enterprise_schema, save_twin_snapshot, load_twin_state, save_twin_scenario,
+    list_twin_scenarios, twin_what_if, twin_replay, build_control_tower_health,
+    record_connector_health, connector_health_frame, validate_connector_profile,
+    check_rest_connector, add_collaboration_item, collaboration_frame,
+    add_knowledge_document, search_knowledge, profile_data_intelligence,
+    create_generic_audit_event, list_jobs, inspect_upload, security_policy,
+    upsert_security_policy, record_artifact, save_report_provenance,
+    build_research_paper_bundle,
+)
 
 # =====================================================================
 # PAGE CONFIGURATION & CUSTOM CSS (Professional Styling & Hover Zoom)
@@ -109,6 +119,10 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 apply_shoir_design_system()
+try:
+    ensure_enterprise_schema()
+except Exception:
+    pass
 
 os.makedirs("payment_proofs", exist_ok=True)
 
