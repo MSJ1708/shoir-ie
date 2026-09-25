@@ -9458,6 +9458,16 @@ else:
                     st.session_state.copilot_messages.append({"role":"assistant","content":reply})
 
 
+    # Shared enterprise capability surfaces are integrated after native module rendering.
+    # They consume existing module state and never replace domain-specific engines.
+    try:
+        from shoir_enterprise_layer import render_enterprise_integration_surface
+        render_enterprise_integration_surface(str(mod), st.session_state.get("current_user", "unknown"), tier_val)
+    except Exception as exc:
+        st.warning("Shared enterprise integration surface is temporarily unavailable; native module results remain available.")
+        with st.expander("Enterprise integration diagnostic"):
+            st.code(f"{type(exc).__name__}: {exc}")
+
     # New unified Industrial Operating System renders as a first-class platform workspace.
     if mod == "Industrial Operating System":
         if platform_tier_allows(tier_val, "Enterprise"):
