@@ -451,12 +451,14 @@ def render_enterprise_bridge(module: str, tier: str, username: str) -> None:
                         st.dataframe(st.session_state["twin_whatif_result"], use_container_width=True, hide_index=True)
             elif module in {"Control Tower","Industrial Control Center"}:
                 health = build_control_tower_health()
+                st.session_state["enterprise_control_tower_health_df"] = health.copy(deep=True)
                 st.dataframe(health, use_container_width=True, hide_index=True)
                 if not health.empty:
                     fig = px.imshow(health[["Records","Quality Score"]].fillna(0).T, text_auto=True, aspect="auto", title="Unified Operations Health Map")
                     st.plotly_chart(fig, use_container_width=True)
             elif module == "Industrial Connectivity Hub" or module == "Enterprise Integration & Collaboration":
                 health = connector_health_frame()
+                st.session_state["enterprise_connector_health_df"] = health.copy(deep=True)
                 st.dataframe(health, use_container_width=True, hide_index=True)
                 if not health.empty:
                     st.plotly_chart(px.bar(health, x="Protocol", color="Status", title="Connector Health & Coverage"), use_container_width=True)
@@ -465,6 +467,7 @@ def render_enterprise_bridge(module: str, tier: str, username: str) -> None:
                 if jobs.empty:
                     st.info("No queued/running job history is currently stored.")
                 else:
+                    st.session_state["enterprise_job_history_df"] = jobs.copy(deep=True)
                     st.dataframe(jobs, use_container_width=True, hide_index=True)
                     st.caption("Job controls change the persisted orchestration state; they do not falsely claim to interrupt a solver already executing outside this process.")
                     for _, row in jobs.head(10).iterrows():
