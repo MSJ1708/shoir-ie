@@ -35,6 +35,7 @@ from shoir_live_visuals import render_live_visualization_studio, discover_visual
 from shoir_module_parity import render_universal_module_parity
 from shoir_copilot_orchestrator import build_workflow_plan, recommend_module, run_orchestration
 from shoir_digital_thread import render_global_project_digital_thread
+from shoir_enterprise_services import render_enterprise_bridge
 from durable_account_store import (durable_backend_configured, sync_durable_accounts, sync_remote_requests_to_local, edge_login, edge_admin_list_requests, edge_renew_request, upsert_remote_account, insert_remote_request, remote_account, account_is_expired, renewed_expiry)
 
 # =====================================================================
@@ -11842,6 +11843,25 @@ if (
     except Exception as exc:
         st.warning("Universal Module Studio could not render the results surface; the module's native results remain available.")
         with st.expander("Module parity diagnostic"):
+            st.code(f"{type(exc).__name__}: {exc}")
+
+# Cross-cutting enterprise layer: augment existing specialist modules without replacing
+# their native workflows. This is also the handoff point for Control Tower,
+# Digital Twin, connectivity, security, collaboration, knowledge, jobs and
+# artifact provenance.
+if (
+    st.session_state.get("authenticated")
+    and st.session_state.get("current_user")
+    and "mod" in globals()
+    and "allowed_modules" in globals()
+    and st.session_state.get("selected_nav", "Dashboard") == "Dashboard"
+    and str(mod) in set(map(str, allowed_modules))
+):
+    try:
+        render_enterprise_bridge(str(mod), tier_val, st.session_state.get("current_user", "unknown"))
+    except Exception as exc:
+        st.warning("Enterprise capability layer encountered a recoverable issue; the native module remains available.")
+        with st.expander("Enterprise layer diagnostic"):
             st.code(f"{type(exc).__name__}: {exc}")
 
 # Capture module calculations and parity edits after the selected module has rendered.
