@@ -456,6 +456,26 @@ def security_posture() -> pd.DataFrame:
 def render_security_extension() -> None:
     posture = security_posture()
     st.session_state["enterprise_security_posture_df"] = posture
+    with st.expander("🔐 Secure File Handling", expanded=False):
+        uploaded = st.file_uploader(
+            "Security-scan an engineering file",
+            type=["csv", "xlsx", "txt", "md", "json", "pdf", "docx"],
+            key="enterprise_security_file_scan_upload",
+        )
+        if uploaded is not None:
+            raw = uploaded.getvalue()
+            name = str(uploaded.name)
+            unsafe_ext = bool(re.search(r"\\.(exe|dll|bat|cmd|ps1|sh|js|vbs)$", name.lower()))
+            scan = pd.DataFrame([
+                {"Check": "SHA-256", "Status": "PASS", "Evidence": hashlib.sha256(raw).hexdigest()},
+                {"Check": "File size", "Status": "PASS" if len(raw) <= 50_000_000 else "REVIEW", "Evidence": f"{len(raw):,} bytes"},
+                {"Check": "Extension", "Status": "FAIL" if unsafe_ext else "PASS", "Evidence": name},
+                {"Check": "Empty file", "Status": "FAIL" if not raw else "PASS", "Evidence": ""},
+            ])
+            st.session_state["security_file_scan_df"] = scan
+            st.dataframe(scan, use_container_width=True, hide_index=True)
+            if unsafe_ext:
+                st.error("Potentially executable file type rejected by the security scan.")
     st.markdown("### 🔐 Enterprise Security Posture")
     st.dataframe(posture, use_container_width=True, hide_index=True)
     configured = int((posture["Status"].isin(["Configured", "CI hook"])).sum()) if not posture.empty else 0
