@@ -30,7 +30,7 @@ from industrial_experience import COPILOT_TOOLS, ensure_experience_db, feature_s
 from research_experiment_engine import apply_evidence_conflict
 from industrial_excellence_hub import render_platform_excellence_hub
 from workspace_persistence import ensure_workspace_state_db, load_user_workspace, save_user_workspace
-from durable_account_store import (durable_backend_configured, sync_durable_accounts, sync_remote_requests_to_local, upsert_remote_account, insert_remote_request, update_latest_remote_request, remote_account, account_is_expired, renewed_expiry)
+from durable_account_store import (durable_backend_configured, ephemeral_local_storage_allowed, sync_durable_accounts, sync_remote_requests_to_local, upsert_remote_account, insert_remote_request, update_latest_remote_request, remote_account, account_is_expired, renewed_expiry)
 
 # =====================================================================
 # PAGE CONFIGURATION & CUSTOM CSS (Professional Styling & Hover Zoom)
@@ -1029,10 +1029,11 @@ if not st.session_state.get("current_user"):
     st.title("🔐 Welcome to Shoir-IE Workspace")
     st.markdown("Please sign in with your approved account or register and submit your payment ticket below.")
     if not _durable_accounts_ready:
-        st.warning(
-            "⚠️ Persistent cloud storage is not connected. Accounts and workspace history "
-            "cannot be guaranteed across a Streamlit restart until the Supabase/PostgreSQL "
-            "database secret is configured. Local development still uses SQLite."
+        st.error(
+            "🔒 Persistent cloud storage is not connected. Production account creation is disabled "
+            "until the Supabase/PostgreSQL database is configured. This prevents users from losing "
+            "their accounts or workspace history after a restart. For local-only development, explicitly "
+            "set allow_ephemeral_local_storage=true."
         )
 
     auth_tab1, auth_tab2, auth_tab3 = st.tabs(["🔑 Sign In", "📝 Get Ticket & Register", "🧭 Explore the Modules"])
@@ -1230,6 +1231,14 @@ if not st.session_state.get("current_user"):
 
             if confirmed_delivery:
                 if st.button("Send Verification Request", type="primary", key="btn_send_request"):
+                    if not _durable_accounts_ready and not ephemeral_local_storage_allowed():
+                        st.error(
+                            "Persistent account storage is not configured. Connect the Supabase/PostgreSQL "
+                            "database in Streamlit Cloud before creating production accounts. This safeguard "
+                            "prevents an account from being created in temporary storage and then disappearing "
+                            "after a restart."
+                        )
+                        st.stop()
                     # SECURITY: usernames get displayed elsewhere in the app
                     # with raw HTML rendering allowed. Restricting the
                     # character set here (letters, numbers, . _ -, 3-32
@@ -11245,6 +11254,12 @@ if mod == "Admin Panel":
                     with col_p2:
                         st.markdown("### Action Controls")
                         if st.button(f"✅ Approve & Send Code", key=f"approve_{row['id']}_{idx}"):
+                            if not _durable_accounts_ready and not ephemeral_local_storage_allowed():
+                                st.error(
+                                    "Persistent account storage is required before approving a production account. "
+                                    "Connect Supabase/PostgreSQL first so the account cannot disappear after a restart."
+                                )
+                                st.stop()
                             t_code = "SUB-" + "".join(random.choices(string.ascii_uppercase + string.digits, k=4)) + "-" + "".join(random.choices(string.ascii_uppercase + string.digits, k=4))
                             
                             conn = sqlite3.connect("enterprise_full_workspace.db")
