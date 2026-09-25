@@ -485,7 +485,7 @@ def record_artifact(kind: str, name: str, value: Any, source_module: str, owner:
     return entry
 
 
-def render_persistence_extension(username: str) -> None:
+def render_persistence_extension(username: str, show_controls: bool = True) -> None:
     from durable_account_store import durable_backend_configured
     from workspace_persistence import save_user_workspace, load_user_workspace
     st.markdown("### ☁️ Durable Workspace & Artifact Journal")
@@ -497,30 +497,31 @@ def render_persistence_extension(username: str) -> None:
     c2.metric("Artifact records", f"{len(catalog):,}")
     c3.metric("Owner", username or "unknown")
     c4.metric("Last workspace save", "OK" if last_save is True else ("Failed" if last_save is False else "Not recorded"))
-    save_col, restore_col = st.columns(2)
-    with save_col:
-        if st.button("💾 Save workspace now", type="primary", use_container_width=True, key="enterprise_persistence_save"):
-            try:
-                ok = bool(save_user_workspace(username, st.session_state))
-                st.session_state["enterprise_persistence_last_save"] = ok
-                st.session_state["workspace_last_save_ok"] = ok
-                if ok:
-                    st.success("Workspace saved through the active persistence backend.")
-                else:
-                    st.warning("Workspace save did not complete. No success message is shown unless the persistence call returned success.")
-            except Exception as exc:
-                st.error(f"Workspace save failed safely: {type(exc).__name__}: {exc}")
-    with restore_col:
-        if st.button("🔄 Restore saved workspace", use_container_width=True, key="enterprise_persistence_restore"):
-            try:
-                ok = bool(load_user_workspace(username, st.session_state))
-                if ok:
-                    st.success("Saved workspace state restored. The page will refresh with the recovered values.")
-                    st.rerun()
-                else:
-                    st.warning("No restorable workspace record was returned by the active persistence backend.")
-            except Exception as exc:
-                st.error(f"Workspace restore failed safely: {type(exc).__name__}: {exc}")
+    if show_controls:
+        save_col, restore_col = st.columns(2)
+        with save_col:
+            if st.button("💾 Save workspace now", type="primary", use_container_width=True, key="enterprise_persistence_save"):
+                try:
+                    ok = bool(save_user_workspace(username, st.session_state))
+                    st.session_state["enterprise_persistence_last_save"] = ok
+                    st.session_state["workspace_last_save_ok"] = ok
+                    if ok:
+                        st.success("Workspace saved through the active persistence backend.")
+                    else:
+                        st.warning("Workspace save did not complete. No success message is shown unless the persistence call returned success.")
+                except Exception as exc:
+                    st.error(f"Workspace save failed safely: {type(exc).__name__}: {exc}")
+        with restore_col:
+            if st.button("🔄 Restore saved workspace", use_container_width=True, key="enterprise_persistence_restore"):
+                try:
+                    ok = bool(load_user_workspace(username, st.session_state))
+                    if ok:
+                        st.success("Saved workspace state restored. The page will refresh with the recovered values.")
+                        st.rerun()
+                    else:
+                        st.warning("No restorable workspace record was returned by the active persistence backend.")
+                except Exception as exc:
+                    st.error(f"Workspace restore failed safely: {type(exc).__name__}: {exc}")
     if catalog:
         st.dataframe(pd.DataFrame(catalog), use_container_width=True, hide_index=True)
     st.caption("Workspace state, including module datasets/results and artifact metadata, follows the configured persistence path. Exported binary files are represented by provenance/hash metadata unless separately stored in a connected file/object store.")
