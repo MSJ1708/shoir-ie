@@ -320,7 +320,10 @@ def explain_results(prompt: str, inspection: Mapping[str, Any], method: Mapping[
             f"{float(metrics.get('R2', 0.0)):.3f} and MAE of {float(metrics.get('MAE', 0.0)):.3f} on the fitted historical data."
         )
     elif meta.get("type") == "optimization_readiness":
-        parts.append(str(meta.get("readiness", "Optimization readiness was assessed.")))
+        if meta.get("type") == "milp_optimization":
+            parts.append(f"Solver status: {meta.get("solver_status", "Unknown")}; total cost {float(meta.get("total_cost", 0.0)):,.2f} and total carbon {float(meta.get("total_carbon", 0.0)):,.2f}.")
+        else:
+            parts.append(str(meta.get("readiness", "Optimization readiness was assessed.")))
     elif meta.get("type") == "scenario_grouped" and not result.empty:
         parts.append(f"The result contains {len(result):,} scenario group(s) summarized across numeric measures.")
     elif meta.get("type") == "baseline_comparison" and not result.empty and "Delta %" in result.columns:
@@ -404,12 +407,39 @@ def build_workflow_plan(prompt: str, module: str, df: pd.DataFrame) -> dict[str,
     }
 
 
-def run_orchestration(prompt: str, module: str, df: pd.DataFrame) -> dict[str, Any]:
+def run_orchestration(prompt: str, module: str, df: pd.DataFrame, context: Mapping[str, Any] | None = None) -> dict[str, Any]:
     run_id = "COP-" + uuid.uuid4().hex[:12].upper()
     inspection = inspect_data(df)
     intent_info = classify_request(prompt)
     method = choose_method(intent_info["intent"], inspection)
-    result, analysis_meta = run_analysis(df, intent_info["intent"], method)
+    runtime = dict(context or {})
+    if intent_info["intent"] == "optimization" and callable(runtime.get("milp_solver")):
+        customers = runtime.get("customers") or []
+        warehouses = runtime.get("warehouses") or []
+        try:
+            validation_fn = runtime.get("validate_network_inputs")
+            valid, validation_message = validation_fn(customers, warehouses) if callable(validation_fn) else (True, "Validation not supplied.")
+            if valid and customers and warehouses:
+                customers_tuple = tuple(tuple(sorted(dict(row).items())) for row in customers)
+                warehouses_tuple = tuple(tuple(sorted(dict(row).items())) for row in warehouses)
+                status, cost_value, carbon_value, allocation = runtime["milp_solver"](customers_tuple, warehouses_tuple, 0.5, 0.3)
+                result = pd.DataFrame(allocation)
+                analysis_meta = {
+                    "status": "Completed" if status == "Optimal" else "Review",
+                    "type": "milp_optimization",
+                    "solver_status": status,
+                    "total_cost": float(cost_value),
+                    "total_carbon": float(carbon_value),
+                    "validation": validation_message,
+                }
+            else:
+                result, analysis_meta = run_analysis(df, intent_info["intent"], method)
+                analysis_meta = {**analysis_meta, "validation": validation_message}
+        except Exception as exc:
+            result, analysis_meta = run_analysis(df, intent_info["intent"], method)
+            analysis_meta = {**analysis_meta, "solver_fallback": f"{type(exc).__name__}: {exc}"}
+    else:
+        result, analysis_meta = run_analysis(df, intent_info["intent"], method)
     comparison, comparison_meta = compare_scenarios(df)
     if intent_info["intent"] == "compare" and comparison_meta["mode"] != "unavailable":
         result = comparison
