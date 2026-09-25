@@ -925,6 +925,7 @@ def render_module(module: str, tier: str, username: str):
         for key,label in [("customers_list","Demand / Customers"),("warehouses_list","Facilities / Warehouses"),("fleet_list","Fleet"),("meio_data","MEIO"),("slotting_data","Warehouse Slotting")]:
             val=st.session_state.get(key); entities[label]=len(val) if isinstance(val,(list,pd.DataFrame)) else 0
         metrics=pd.DataFrame({"Area":list(entities.keys()),"Records":list(entities.values())}); metrics["Health"]=np.where(metrics["Records"]>0,"Ready","Needs Data")
+        st.session_state["control_center_metrics"] = metrics.copy(deep=True)
         st.dataframe(metrics,use_container_width=True,hide_index=True)
         st.metric("Data quality score",f"{data_quality_report(metrics)['score']:.1f}%")
         render_export_bar(module,[("Control Center",metrics)],tier,username)
@@ -937,6 +938,9 @@ def render_module(module: str, tier: str, username: str):
                 card=create_decision_card(title,module,json.loads(metric_text),json.loads(ass_text),json.loads(unc_text),status); did=save_decision_card(card,username); st.success(f"Saved decision {did}")
             except Exception as exc: st.error(f"Decision card error: {exc}")
         with sqlite3.connect("enterprise_full_workspace.db") as c: dec=pd.read_sql("SELECT * FROM platform_decisions ORDER BY created_at DESC",c)
+        numeric_dec = [col for col in dec.columns if pd.api.types.is_numeric_dtype(dec[col])]
+        if numeric_dec:
+            st.session_state["decision_metrics_df"] = dec.copy(deep=True)
         st.dataframe(dec,use_container_width=True,hide_index=True)
         render_export_bar(module,[("Decision Cards",dec)],tier,username)
     elif module=="Industrial Data Platform":
@@ -947,7 +951,9 @@ def render_module(module: str, tier: str, username: str):
                 sheets={"CSV":pd.read_csv(io.BytesIO(raw))} if lower.endswith(".csv") else {s:pd.read_excel(io.BytesIO(raw),sheet_name=s) for s in pd.ExcelFile(io.BytesIO(raw)).sheet_names}
                 st.write({"file":up.name,"sheets":list(sheets),"bytes":len(raw),"sha256":hashlib.sha256(raw).hexdigest()})
                 for name,df in sheets.items():
-                    did=register_dataset(name,up.name,df); st.subheader(name); st.write(data_quality_report(df)); st.dataframe(df.head(25),use_container_width=True)
+                    did=register_dataset(name,up.name,df)
+                    st.session_state["data_platform_latest_df"] = df.copy(deep=True)
+                    st.subheader(name); st.write(data_quality_report(df)); st.dataframe(df.head(25),use_container_width=True)
                     st.success(f"Registered dataset {did}")
                 with sqlite3.connect("enterprise_full_workspace.db") as c: cat=pd.read_sql("SELECT * FROM platform_datasets ORDER BY created_at DESC",c)
                 st.dataframe(cat,use_container_width=True,hide_index=True)
