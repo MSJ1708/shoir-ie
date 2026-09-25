@@ -74,7 +74,7 @@ def _json_default(value: Any) -> Any:
     return str(value)
 
 
-def validate_module_dataframe(df: pd.DataFrame, previous: pd.DataFrame | None = None) -> dict[str, Any]:
+def validate_module_dataframe(df: pd.DataFrame) -> dict[str, Any]:
     """Return deterministic, non-destructive data-quality diagnostics."""
     if not isinstance(df, pd.DataFrame):
         df = _as_frame(df)
@@ -116,18 +116,15 @@ def validate_module_dataframe(df: pd.DataFrame, previous: pd.DataFrame | None = 
     id_like_columns: list[str] = []
     for col in numeric_columns:
         try:
-            series = pd.to_numeric(df[col], errors="coerce").dropna()
-            negative_numeric_cells += int(series.lt(0).sum())
-            if len(series) >= 8:
-                q1, q3 = series.quantile([0.25, 0.75])
+            s = pd.to_numeric(df[col], errors="coerce").dropna()
+            negative_numeric_cells += int(s.lt(0).sum())
+            if len(s) >= 8:
+                q1, q3 = s.quantile([0.25, 0.75])
                 iqr = q3 - q1
                 if iqr > 0:
-                    outlier_cells += int(
-                        ((series < q1 - 1.5 * iqr) | (series > q3 + 1.5 * iqr)).sum()
-                    )
+                    outlier_cells += int(((s < q1 - 1.5 * iqr) | (s > q3 + 1.5 * iqr)).sum())
         except Exception:
             continue
-
     for col in df.columns:
         name = str(col)
         low = name.lower()
@@ -138,18 +135,66 @@ def validate_module_dataframe(df: pd.DataFrame, previous: pd.DataFrame | None = 
             unit_hints.append({"Column": name, "Unit": next(x for x in match.groups() if x)})
 
     checks = [
-        {"Check": "Dataset contains rows", "Status": "PASS" if rows > 0 else "REVIEW", "Detail": f"{rows:,} rows"},
-        {"Check": "Column names are unique", "Status": "PASS" if duplicate_columns == 0 else "REVIEW", "Detail": "No duplicate columns" if duplicate_columns == 0 else f"{duplicate_columns} duplicate column name(s)"},
-        {"Check": "Duplicate rows", "Status": "PASS" if duplicate_rows == 0 else "REVIEW", "Detail": "None" if duplicate_rows == 0 else f"{duplicate_rows:,} duplicate row(s)"},
-        {"Check": "Missing cells", "Status": "PASS" if missing_cells == 0 else "REVIEW", "Detail": "None" if missing_cells == 0 else f"{missing_cells:,} missing cell(s)"},
-        {"Check": "Empty text cells", "Status": "PASS" if empty_strings == 0 else "REVIEW", "Detail": "None" if empty_strings == 0 else f"{empty_strings:,} empty text cell(s)"},
-        {"Check": "Numeric measures", "Status": "PASS" if numeric_columns else "INFO", "Detail": f"{len(numeric_columns):,} numeric column(s)"},
-        {"Check": "Date/time fields", "Status": "PASS" if date_like_columns else "INFO", "Detail": f"{len(date_like_columns):,} date-like column(s)"},
-        {"Check": "Constant columns", "Status": "PASS" if not constant_columns else "INFO", "Detail": "None" if not constant_columns else f"{len(constant_columns)} constant column(s)"},
-        {"Check": "Negative numeric cells", "Status": "INFO", "Detail": f"{negative_numeric_cells:,} negative numeric cell(s); review against domain rules."},
-        {"Check": "Likely ID fields", "Status": "INFO", "Detail": f"{len(id_like_columns):,} identifier-like field(s) detected"},
-        {"Check": "Unit hints", "Status": "INFO", "Detail": f"{len(unit_hints):,} unit annotation(s) detected from column names"},
-        {"Check": "Potential outlier cells", "Status": "INFO", "Detail": f"{outlier_cells:,} IQR-based outlier cell(s) detected"},
+        {
+            "Check": "Dataset contains rows",
+            "Status": "PASS" if rows > 0 else "REVIEW",
+            "Detail": f"{rows:,} rows",
+        },
+        {
+            "Check": "Column names are unique",
+            "Status": "PASS" if duplicate_columns == 0 else "REVIEW",
+            "Detail": "No duplicate columns" if duplicate_columns == 0 else f"{duplicate_columns} duplicate column name(s)",
+        },
+        {
+            "Check": "Duplicate rows",
+            "Status": "PASS" if duplicate_rows == 0 else "REVIEW",
+            "Detail": "None" if duplicate_rows == 0 else f"{duplicate_rows:,} duplicate row(s)",
+        },
+        {
+            "Check": "Missing cells",
+            "Status": "PASS" if missing_cells == 0 else "REVIEW",
+            "Detail": "None" if missing_cells == 0 else f"{missing_cells:,} missing cell(s)",
+        },
+        {
+            "Check": "Empty text cells",
+            "Status": "PASS" if empty_strings == 0 else "REVIEW",
+            "Detail": "None" if empty_strings == 0 else f"{empty_strings:,} empty text cell(s)",
+        },
+        {
+            "Check": "Numeric measures",
+            "Status": "PASS" if numeric_columns else "INFO",
+            "Detail": f"{len(numeric_columns):,} numeric column(s)",
+        },
+        {
+            "Check": "Date/time fields",
+            "Status": "PASS" if date_like_columns else "INFO",
+            "Detail": f"{len(date_like_columns):,} date-like column(s)",
+        },
+        {
+            "Check": "Constant columns",
+            "Status": "PASS" if not constant_columns else "INFO",
+            "Detail": "None" if not constant_columns else f"{len(constant_columns)} constant column(s)",
+        },
+        {
+            "Check": "Negative numeric cells",
+            "Status": "INFO",
+            "Detail": f"{negative_numeric_cells:,} negative numeric cell(s); review against domain rules.",
+        },
+        {
+            "Check": "Likely ID fields",
+            "Status": "INFO",
+            "Detail": f"{len(id_like_columns):,} identifier-like field(s) detected",
+        },
+        {
+            "Check": "Unit hints",
+            "Status": "INFO",
+            "Detail": f"{len(unit_hints):,} unit annotation(s) detected from column names",
+        },
+        {
+            "Check": "Potential outlier cells",
+            "Status": "INFO",
+            "Detail": f"{outlier_cells:,} IQR-based outlier cell(s) detected",
+        },
     ]
 
     penalty = 0.0
@@ -163,12 +208,6 @@ def validate_module_dataframe(df: pd.DataFrame, previous: pd.DataFrame | None = 
 
     score = round(max(0.0, min(100.0, 100.0 - penalty)), 1)
     status = "PASS" if rows > 0 and duplicate_columns == 0 and score >= 90 else "REVIEW"
-
-    try:
-        from shoir_enterprise_ops import infer_data_intelligence
-        data_intelligence = infer_data_intelligence(df, previous)
-    except Exception:
-        data_intelligence = pd.DataFrame()
 
     return {
         "status": status,
@@ -186,9 +225,23 @@ def validate_module_dataframe(df: pd.DataFrame, previous: pd.DataFrame | None = 
         "id_like_columns": id_like_columns,
         "unit_hints": unit_hints,
         "outlier_cells": outlier_cells,
-        "data_intelligence": data_intelligence,
         "checks": checks,
     }
+
+
+def validate_module_dataframe_with_reference(
+    df: pd.DataFrame,
+    previous: pd.DataFrame | None = None,
+) -> dict[str, Any]:
+    """Run the main validation contract plus enterprise reference intelligence."""
+    report = validate_module_dataframe(df)
+    try:
+        from shoir_enterprise_ops import infer_data_intelligence
+        report["data_intelligence"] = infer_data_intelligence(df, previous)
+    except Exception:
+        report["data_intelligence"] = pd.DataFrame()
+    return report
+
 
 def summarize_module_dataframe(df: pd.DataFrame) -> dict[str, Any]:
     if not isinstance(df, pd.DataFrame):
@@ -290,7 +343,7 @@ def _apply_module_edit(module: str, edited: pd.DataFrame) -> None:
     current = edited.copy(deep=True)
     st.session_state[keys["data"]] = current
     original = st.session_state.get(keys["original"], pd.DataFrame())
-    st.session_state[keys["validation"]] = validate_module_dataframe(
+    st.session_state[keys["validation"]] = validate_module_dataframe_with_reference(
         current, original if isinstance(original, pd.DataFrame) and not original.empty else None
     )
     st.session_state[keys["results"]] = summarize_module_dataframe(current)
