@@ -784,3 +784,247 @@ def render_knowledge_extension(username: str = "unknown") -> None:
         if query:
             ctx = knowledge_context(query, 3500)
             st.text_area("Copilot context preview", ctx, height=180, disabled=True)
+
+
+# ---------------------------------------------------------------------------
+# Model registry, jobs, real-time monitoring, economics, sustainability,
+# human factors and geospatial integration layers
+# ---------------------------------------------------------------------------
+
+def render_model_registry_extension(username: str = "unknown") -> None:
+    st.markdown("### 🧬 Model Reproducibility Layer")
+    st.caption("Adds solver-version and result-hash governance to the existing Model Registry without replacing its current records.")
+    registry = st.session_state.get("model_registry_df", pd.DataFrame())
+    reg = _df(registry)
+    c1, c2, c3 = st.columns(3)
+    model_version = c1.text_input("Model version", "1.1.0", key="model_ext_version")
+    solver_version = c2.text_input("Solver / runtime version", "CBC / HiGHS / SciPy", key="model_ext_solver")
+    result_ref = c3.text_input("Result reference", "current workspace result", key="model_ext_result_ref")
+    if st.button("🧬 Record reproducibility snapshot", use_container_width=True, key="model_ext_record"):
+        entry = {
+            "Model Version": model_version.strip(),
+            "Solver Version": solver_version.strip(),
+            "Result Reference": result_ref.strip(),
+            "Data Hash": artifact_fingerprint(reg) if not reg.empty else "",
+            "Recorded By": username,
+            "Recorded At": _now(),
+        }
+        catalog = st.session_state.setdefault("model_reproducibility_catalog", [])
+        catalog.insert(0, entry)
+        st.session_state["model_reproducibility_catalog"] = catalog[:200]
+        record_artifact("Model Snapshot", model_version, entry, "Engineering Model Registry", username, "model_reproducibility_catalog")
+        st.success("Reproducibility snapshot recorded.")
+    data = pd.DataFrame(st.session_state.get("model_reproducibility_catalog", []))
+    if not data.empty:
+        st.dataframe(data, use_container_width=True, hide_index=True)
+
+
+def render_jobs_extension(username: str = "unknown", module: str = "Industrial Simulation Lab") -> None:
+    st.markdown("### 🕐 Engineering Job Control")
+    st.caption("Uses the existing durable job registry for queue, progress, pause/resume, cancellation and retry state. Execution remains operator-controlled unless a worker backend is configured.")
+    try:
+        from industrial_experience import create_job, update_job, ensure_experience_db
+        ensure_experience_db()
+        with st.expander("Create / control job", expanded=False):
+            job_type = st.selectbox("Job type", ["Simulation", "Optimization", "Forecast", "Report", "Data profiling"], key=f"job_ext_type_{module}")
+            payload_text = st.text_area("Job payload JSON", '{"priority":"standard","requested_by":"operator"}', key=f"job_ext_payload_{module}")
+            if st.button("➕ Queue job", use_container_width=True, key=f"job_ext_queue_{module}"):
+                try:
+                    payload = json.loads(payload_text)
+                except Exception:
+                    payload = {"raw_payload": payload_text}
+                jid = create_job(module, job_type, username, payload)
+                st.session_state["job_ext_active"] = jid
+                st.success(f"Queued {jid}")
+            active = st.session_state.get("job_ext_active")
+            if active:
+                state = st.selectbox("State action", ["Running", "Paused", "Queued", "Cancelled", "Completed", "Failed"], key=f"job_ext_state_{module}")
+                progress = st.slider("Progress %", 0, 100, 50, key=f"job_ext_progress_{module}")
+                if st.button("🔄 Apply job state", use_container_width=True, key=f"job_ext_update_{module}"):
+                    update_job(active, state, progress, f"Operator set state to {state}.")
+                    st.success(f"{active} → {state}")
+        try:
+            import sqlite3
+            with sqlite3.connect("enterprise_full_workspace.db") as conn:
+                history = pd.read_sql(
+                    "SELECT job_id,module,job_type,status,progress,message,started_at,finished_at FROM experience_jobs ORDER BY COALESCE(started_at, finished_at) DESC LIMIT 200",
+                    conn,
+                )
+            if not history.empty:
+                st.dataframe(history, use_container_width=True, hide_index=True)
+                st.session_state["job_history_df"] = history
+        except Exception as exc:
+            st.warning(f"Job history unavailable: {type(exc).__name__}: {exc}")
+    except Exception as exc:
+        st.warning(f"Job controls unavailable: {type(exc).__name__}: {exc}")
+
+
+def build_realtime_monitoring(df: pd.DataFrame, threshold: float | None = None) -> pd.DataFrame:
+    d = _df(df)
+    if d.empty:
+        return pd.DataFrame()
+    d = d.copy()
+    time_col = next((c for c in d.columns if any(x in str(c).lower() for x in ("timestamp", "time", "date"))), None)
+    value_col = next((c for c in d.columns if pd.api.types.is_numeric_dtype(d[c]) and any(x in str(c).lower() for x in ("value", "reading", "measurement", "vibration", "temperature", "pressure"))), None)
+    if value_col is None:
+        nums = [c for c in d.columns if pd.api.types.is_numeric_dtype(d[c])]
+        value_col = nums[0] if nums else None
+    if value_col is None:
+        return d
+    values = _numeric(d[value_col])
+    mean = float(values.mean()) if values.notna().any() else np.nan
+    sd = float(values.std(ddof=1)) if values.notna().sum() > 1 else 0.0
+    d["Z-Score"] = (values - mean) / max(sd, 1e-9)
+    d["Anomaly"] = d["Z-Score"].abs() >= 3.0
+    if threshold is not None:
+        d["Threshold"] = float(threshold)
+        d["Threshold Breach"] = values > float(threshold)
+    if time_col:
+        d[time_col] = pd.to_datetime(d[time_col], errors="coerce")
+        d = d.sort_values(time_col)
+    return d
+
+
+def render_realtime_monitoring_extension(sensor_df: Any = None, module: str = "Digital Twin & DES") -> None:
+    source = _df(sensor_df if sensor_df is not None else st.session_state.get("iot_sensors", []))
+    monitor = build_realtime_monitoring(source)
+    st.session_state[f"realtime_monitoring_{hashlib.sha1(module.encode()).hexdigest()[:10]}"] = monitor
+    st.markdown("### 📡 Real-Time Monitoring & Anomaly Detection")
+    if monitor.empty:
+        st.info("No telemetry stream is available yet.")
+        return
+    numeric = [c for c in monitor.columns if pd.api.types.is_numeric_dtype(monitor[c])]
+    metric = st.selectbox("Telemetry measure", numeric, key=f"rt_metric_{module}")
+    threshold = st.number_input("Optional alert threshold", value=float(_numeric(monitor[metric]).median()) if monitor[metric].notna().any() else 0.0, key=f"rt_threshold_{module}")
+    updated = build_realtime_monitoring(source, threshold)
+    st.session_state[f"realtime_monitoring_{hashlib.sha1(module.encode()).hexdigest()[:10]}"] = updated
+    anomalies = int(updated.get("Anomaly", pd.Series(dtype=bool)).sum()) if "Anomaly" in updated.columns else 0
+    breaches = int(updated.get("Threshold Breach", pd.Series(dtype=bool)).sum()) if "Threshold Breach" in updated.columns else 0
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Samples", f"{len(updated):,}")
+    c2.metric("3σ anomalies", f"{anomalies:,}")
+    c3.metric("Threshold breaches", f"{breaches:,}")
+    st.dataframe(updated, use_container_width=True, hide_index=True)
+    if metric in updated.columns:
+        time_col = next((c for c in updated.columns if pd.api.types.is_datetime64_any_dtype(updated[c])), None)
+        fig = px.line(updated, x=time_col if time_col else updated.index, y=metric, title=f"{module} · Live Monitoring")
+        st.plotly_chart(fig, use_container_width=True)
+
+
+def render_economics_extension(username: str = "unknown") -> None:
+    st.markdown("### 💰 Total Cost of Ownership & Decision Economics")
+    st.caption("Extends the existing engineering-economics workflow with lifecycle TCO and scenario-ready economics evidence.")
+    base_capex = float(st.number_input("CAPEX", 0.0, 1e9, 150000.0, key="econ_ext_capex"))
+    annual_opex = float(st.number_input("Annual OPEX", 0.0, 1e9, 35000.0, key="econ_ext_opex"))
+    years = int(st.number_input("Lifecycle years", 1, 50, 10, key="econ_ext_years"))
+    salvage = float(st.number_input("End-of-life salvage", 0.0, 1e9, 10000.0, key="econ_ext_salvage"))
+    discount = float(st.number_input("Discount rate", 0.0, 1.0, 0.10, key="econ_ext_discount"))
+    rows = []
+    balance = base_capex
+    discounted_opex = 0.0
+    for year in range(1, years + 1):
+        discounted = annual_opex / ((1 + discount) ** year)
+        discounted_opex += discounted
+        rows.append({"Year": year, "OPEX": annual_opex, "Discounted OPEX": discounted})
+    tco_nominal = base_capex + annual_opex * years - salvage
+    tco_discounted = base_capex + discounted_opex - salvage / ((1 + discount) ** years)
+    out = pd.DataFrame(rows)
+    out["Cumulative Nominal OPEX"] = out["OPEX"].cumsum()
+    st.session_state["engineering_economics_tco_df"] = out
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Nominal TCO", f"{tco_nominal:,.2f}")
+    c2.metric("Discounted TCO", f"{tco_discounted:,.2f}")
+    c3.metric("Lifecycle", f"{years} yr")
+    st.dataframe(out, use_container_width=True, hide_index=True)
+    st.plotly_chart(px.line(out, x="Year", y=["OPEX", "Discounted OPEX"], title="Lifecycle OPEX Profile"), use_container_width=True)
+    record_artifact("Economics", "TCO", out, "Engineering Economics", username, "engineering_economics_tco_df")
+
+
+def render_sustainability_extension(username: str = "unknown") -> None:
+    st.markdown("### 🌱 Sustainability-to-Decision Bridge")
+    carbon = _df(st.session_state.get("carbon_sources", []))
+    energy = _df(st.session_state.get("energy_units", []))
+    lca = _df(st.session_state.get("lca_materials", []))
+    rows = []
+    if not carbon.empty:
+        col = next((c for c in carbon.columns if any(x in str(c).lower() for x in ("co2", "emission", "carbon"))), None)
+        val = float(_numeric(carbon[col]).sum()) if col else np.nan
+        rows.append({"Metric": "Carbon", "Value": val, "Unit": "Configured source unit"})
+    if not energy.empty:
+        col = next((c for c in energy.columns if any(x in str(c).lower() for x in ("kwh", "energy", "consumption"))), None)
+        val = float(_numeric(energy[col]).sum()) if col else np.nan
+        rows.append({"Metric": "Energy", "Value": val, "Unit": "Configured source unit"})
+    if not lca.empty:
+        numeric = lca.select_dtypes(include=np.number)
+        for col in list(numeric.columns)[:3]:
+            rows.append({"Metric": f"LCA · {col}", "Value": float(_numeric(lca[col]).sum()), "Unit": "Source unit"})
+    summary = pd.DataFrame(rows)
+    st.session_state["sustainability_decision_bridge_df"] = summary
+    if summary.empty:
+        st.info("No sustainability source data is currently available.")
+        return
+    st.dataframe(summary, use_container_width=True, hide_index=True)
+    st.plotly_chart(px.bar(summary, x="Metric", y="Value", title="Sustainability KPI Bridge"), use_container_width=True)
+
+
+def render_human_factors_extension(username: str = "unknown") -> None:
+    st.markdown("### 🧑‍🏭 Workforce & Human-Factors Decision Layer")
+    tasks = _df(st.session_state.get("ergonomic_tasks", []))
+    studies = _df(st.session_state.get("time_studies", []))
+    source = tasks if not tasks.empty else studies
+    if source.empty:
+        st.info("No ergonomic or time-study records are available.")
+        return
+    numeric = list(source.select_dtypes(include=np.number).columns)
+    if not numeric:
+        st.dataframe(source, use_container_width=True, hide_index=True)
+        return
+    metrics = []
+    for col in numeric[:6]:
+        values = _numeric(source[col]).dropna()
+        metrics.append({
+            "Measure": col,
+            "Mean": float(values.mean()) if len(values) else np.nan,
+            "P95": float(values.quantile(0.95)) if len(values) else np.nan,
+            "CV %": float(values.std(ddof=1) / values.mean() * 100) if len(values) > 1 and values.mean() else np.nan,
+        })
+    result = pd.DataFrame(metrics)
+    st.session_state["human_factors_metrics_df"] = result
+    st.dataframe(result, use_container_width=True, hide_index=True)
+    st.plotly_chart(px.bar(result, x="Measure", y="Mean", error_y="P95", title="Human Factors / Workload Measures"), use_container_width=True)
+    st.caption("These outputs are engineering workload measures, not medical or clinical assessments.")
+
+
+def render_geospatial_extension(username: str = "unknown") -> None:
+    st.markdown("### 🗺️ Geospatial Network Intelligence")
+    nodes = _df(st.session_state.get("supply_nodes", []))
+    markets = _df(st.session_state.get("demand_markets", []))
+    if nodes.empty or markets.empty:
+        st.info("Provide both facility and demand-market coordinates to build the network intelligence view.")
+        return
+    rows = []
+    rate = float(st.number_input("Scenario freight-rate multiplier", 0.5, 2.0, 1.0, 0.05, key="geo_ext_rate"))
+    for _, n in nodes.iterrows():
+        for _, m in markets.iterrows():
+            if not {"lat", "lon"} <= set(n.index) or not {"lat", "lon"} <= set(m.index):
+                continue
+            dist = float(np.hypot(float(n["lat"]) - float(m["lat"]), float(n["lon"]) - float(m["lon"])) * 111.0)
+            demand = float(_numeric([m.get("demand_tons_yr", 0)]).fillna(0).iloc[0])
+            rows.append({
+                "Origin": str(n.get("name", n.get("id", "Facility"))),
+                "Destination": str(m.get("market", "Market")),
+                "Distance km": dist,
+                "Demand tons/yr": demand,
+                "Scenario Freight Cost": dist * demand * rate,
+            })
+    routes = pd.DataFrame(rows)
+    st.session_state["geospatial_network_routes_df"] = routes
+    st.dataframe(routes.head(100), use_container_width=True, hide_index=True)
+    if not routes.empty:
+        st.plotly_chart(px.scatter(routes, x="Distance km", y="Scenario Freight Cost", size="Demand tons/yr", hover_data=["Origin","Destination"], title="Geospatial Route / Cost Surface"), use_container_width=True)
+
+
+def render_artifact_journal_for_tables(module: str, tables: Sequence[tuple[str, pd.DataFrame]], username: str) -> None:
+    for name, frame in tables:
+        if isinstance(frame, pd.DataFrame) and not frame.empty:
+            record_artifact("Table", name, frame, module, username, "workspace-state")
