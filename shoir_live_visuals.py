@@ -236,7 +236,7 @@ def _make_figure(df: pd.DataFrame, chart: str, x: str | None, y: str | None, z: 
     elif chart == "Area":
         fig = px.area(df, x=x, y=y, title=title or f"{y} over {x}")
     elif chart == "Scatter":
-        fig = px.scatter(df, x=x, y=y, title=title or f"{y} vs {x}", trendline="ols" if len(df) >= 8 and pd.api.types.is_numeric_dtype(df[x]) else None)
+        fig = px.scatter(df, x=x, y=y, title=title or f"{y} vs {x}")
     else:
         fig = px.bar(df, x=x, y=y, title=title or f"{y} by {x}")
 
