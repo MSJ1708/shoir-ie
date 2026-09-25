@@ -21,6 +21,12 @@ from scipy import stats
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from industrial_experience import render_experience_shell, render_blank_module_studio
+from shoir_engine_studio import (
+    render_experiment_engine,
+    render_forecasting_studio,
+    render_optimization_studio,
+    render_decision_center_studio,
+)
 
 PLATFORM_CATALOG = [
     {"tier":"Enterprise","category":"Platform","name":"Industrial Operating System","when":"Unified KPI, method, scenario, process, model-health, improvement and decision-verification workspace.","example":"Connect engineering analysis outputs through one governed decision layer with reusable templates and exports."},
@@ -41,6 +47,7 @@ PLATFORM_CATALOG = [
     {"tier":"Enterprise","category":"Optimization","name":"Robust & Resilient Optimization","when":"Evaluate decisions against demand, lead-time, supplier, energy and capacity uncertainty.","example":"Compare nominal capacity with the probability of meeting demand across thousands of shocks."},
     {"tier":"Enterprise","category":"Governance","name":"Engineering Model Registry","when":"Version models, parameters, data hashes, assumptions, solvers and results for reproducibility.","example":"Reproduce a planning study six months later from its registered snapshot."},
     {"tier":"Enterprise","category":"Experimentation","name":"Experiment Lab","when":"Run many controlled scenarios and compare cost, service, risk, inventory, carbon and capacity.","example":"Batch-test baseline, demand surge, supplier outage and capacity-expansion cases."},
+    {"tier":"Enterprise","category":"Research & Experimentation","name":"Experiment Engine","when":"Design randomized DOE, factorial experiments, replications, bootstrap studies, Monte Carlo uncertainty propagation, effect sizes and sensitivity analyses.","example":"Generate a reproducible factorial study, quantify effects, propagate uncertainty and export statistical evidence."},
     {"tier":"Enterprise","category":"Control","name":"Industrial Control Center","when":"See demand, inventory, production, supplier, transport, machine, quality, carbon, risk and finance health together.","example":"Click a red issue and jump into the module responsible for the underlying KPI."},
     {"tier":"Enterprise","category":"Decisions","name":"Engineering Decision Center","when":"Turn model results into auditable decisions with assumptions, deltas, uncertainty and approvals.","example":"Create an approval-ready decision card from a network optimization run."},
     {"tier":"Enterprise","category":"Data Platform","name":"Industrial Data Platform","when":"Ingest, profile, hash, catalog and prepare operational datasets for downstream modules.","example":"Upload a multi-sheet workbook, validate schema and register a reusable dataset."},
@@ -73,7 +80,7 @@ TIER_FEATURES = {
         "Industrial Operating System",
         "Manufacturing Execution System","Industrial Simulation Lab","3D Factory Designer",
         "Industrial Connectivity Hub","Multi-Objective Optimization","Robust & Resilient Optimization",
-        "Engineering Model Registry","Experiment Lab","Industrial Control Center","Engineering Decision Center",
+        "Engineering Model Registry","Experiment Lab","Experiment Engine","Industrial Control Center","Engineering Decision Center",
         "Industrial Data Platform","Advanced Planning & Scheduling","Quality Engineering & Reliability",
         "Capital Investment & Engineering Economics","Workforce Engineering","Industrial Sustainability & LCA",
         "Benchmarking & Engineering Standards","Industrial Data Model & Digital Thread",
@@ -83,7 +90,7 @@ TIER_FEATURES = {
         "Advanced Engineering Copilot","Live Industrial Digital Twin","Enterprise Security & Governance",
         "Manufacturing Execution System","Industrial Simulation Lab","3D Factory Designer",
         "Industrial Connectivity Hub","Multi-Objective Optimization","Robust & Resilient Optimization",
-        "Engineering Model Registry","Experiment Lab","Industrial Control Center","Engineering Decision Center",
+        "Engineering Model Registry","Experiment Lab","Experiment Engine","Industrial Control Center","Engineering Decision Center",
         "Industrial Data Platform","Advanced Planning & Scheduling","Quality Engineering & Reliability",
         "Capital Investment & Engineering Economics","Workforce Engineering","Industrial Sustainability & LCA",
         "Benchmarking & Engineering Standards","Industrial Data Model & Digital Thread",
@@ -116,7 +123,7 @@ def init_platform_db(db_path: str="enterprise_full_workspace.db") -> bool:
             ("platform_models","CREATE TABLE IF NOT EXISTS platform_models(model_id TEXT PRIMARY KEY, name TEXT, version TEXT, model_type TEXT, parameters_json TEXT, data_hash TEXT, assumptions_json TEXT, created_by TEXT, created_at TEXT, status TEXT)"),
             ("platform_experiments","CREATE TABLE IF NOT EXISTS platform_experiments(experiment_id TEXT PRIMARY KEY, name TEXT, module TEXT, scenarios_json TEXT, results_json TEXT, created_by TEXT, created_at TEXT)"),
             ("platform_benchmarks","CREATE TABLE IF NOT EXISTS platform_benchmarks(id INTEGER PRIMARY KEY AUTOINCREMENT, metric TEXT, value REAL, unit TEXT, source TEXT, source_date TEXT, created_at TEXT)"),
-            ("platform_decisions","CREATE TABLE IF NOT EXISTS platform_decisions(decision_id TEXT PRIMARY KEY, title TEXT, module TEXT, metrics_json TEXT, assumptions_json TEXT, uncertainty_json TEXT, created_by TEXT, created_at TEXT, status TEXT)"),
+            ("platform_decisions","CREATE TABLE IF NOT EXISTS platform_decisions(decision_id TEXT PRIMARY KEY, title TEXT, module TEXT, metrics_json TEXT, assumptions_json TEXT, uncertainty_json TEXT, created_by TEXT, created_at TEXT, status TEXT, baseline_json TEXT, alternatives_json TEXT, constraints_json TEXT, evidence_json TEXT, approvals_json TEXT, verification_json TEXT, selected_alternative TEXT)"),
             ("mes_work_orders","CREATE TABLE IF NOT EXISTS mes_work_orders(work_order TEXT PRIMARY KEY, product TEXT, quantity REAL, due_date TEXT, status TEXT, machine TEXT, operator TEXT, updated_at TEXT)"),
             ("mes_events","CREATE TABLE IF NOT EXISTS mes_events(id INTEGER PRIMARY KEY AUTOINCREMENT, work_order TEXT, event_type TEXT, event_time TEXT, quantity REAL, reason TEXT, operator TEXT)"),
             ("quality_runs","CREATE TABLE IF NOT EXISTS quality_runs(id INTEGER PRIMARY KEY AUTOINCREMENT, study_name TEXT, metric TEXT, result_json TEXT, created_by TEXT, created_at TEXT)"),
@@ -129,6 +136,20 @@ def init_platform_db(db_path: str="enterprise_full_workspace.db") -> bool:
             ("trade_rules","CREATE TABLE IF NOT EXISTS trade_rules(id INTEGER PRIMARY KEY AUTOINCREMENT, region_from TEXT, region_to TEXT, product_class TEXT, rule TEXT, active INTEGER, updated_at TEXT)"),
         ]
         for _,sql in ddl: conn.execute(sql)
+        decision_columns = [
+            ("baseline_json", "TEXT"),
+            ("alternatives_json", "TEXT"),
+            ("constraints_json", "TEXT"),
+            ("evidence_json", "TEXT"),
+            ("approvals_json", "TEXT"),
+            ("verification_json", "TEXT"),
+            ("selected_alternative", "TEXT"),
+        ]
+        for column, definition in decision_columns:
+            try:
+                conn.execute(f"ALTER TABLE platform_decisions ADD COLUMN {column} {definition}")
+            except sqlite3.OperationalError:
+                pass
         conn.commit()
         if conn.execute("PRAGMA quick_check").fetchone()[0] != "ok": raise RuntimeError("SQLite quick_check failed")
     return True
@@ -422,13 +443,70 @@ def lca_summary(df: pd.DataFrame) -> pd.DataFrame:
 def benchmark_compare(actual: pd.DataFrame, benchmarks: pd.DataFrame, metric_col="Metric", actual_col="Actual", benchmark_col="Benchmark") -> pd.DataFrame:
     x=actual.merge(benchmarks,on=metric_col,how="left",suffixes=("","_bench")); x["Delta"]=pd.to_numeric(x[actual_col],errors="coerce")-pd.to_numeric(x[benchmark_col],errors="coerce"); x["Gap %"]=x["Delta"]/pd.to_numeric(x[benchmark_col],errors="coerce").replace(0,np.nan)*100; return x
 
-def create_decision_card(title: str, module: str, metrics: dict, assumptions: dict, uncertainty: dict, status="Proposed") -> dict:
-    return {"title":title,"module":module,"metrics":metrics,"assumptions":assumptions,"uncertainty":uncertainty,"status":status,"created_at":_now()}
+def create_decision_card(
+    title: str,
+    module: str,
+    metrics: dict,
+    assumptions: dict,
+    uncertainty: dict,
+    status="Proposed",
+    *,
+    baseline: Optional[dict] = None,
+    alternatives: Optional[Sequence[dict]] = None,
+    constraints: Optional[Sequence[dict]] = None,
+    evidence: Optional[Sequence[dict]] = None,
+    approvals: Optional[Sequence[dict]] = None,
+    verification: Optional[Sequence[dict]] = None,
+    selected_alternative: str = "",
+) -> dict:
+    return {
+        "title": str(title).strip() or "Engineering Decision",
+        "module": str(module).strip() or "Engineering Decision Center",
+        "metrics": metrics or {},
+        "assumptions": assumptions or {},
+        "uncertainty": uncertainty or {},
+        "status": status,
+        "baseline": baseline or {},
+        "alternatives": list(alternatives or []),
+        "constraints": list(constraints or []),
+        "evidence": list(evidence or []),
+        "approvals": list(approvals or []),
+        "verification": list(verification or []),
+        "selected_alternative": str(selected_alternative or ""),
+        "created_at": _now(),
+    }
 
 def save_decision_card(card: dict, username: str, db_path="enterprise_full_workspace.db") -> str:
-    did="DEC-"+hashlib.sha256(json.dumps(card,sort_keys=True,default=str).encode()).hexdigest()[:12].upper()
+    payload = json.dumps(card, sort_keys=True, default=str)
+    did = "DEC-" + hashlib.sha256(payload.encode("utf-8")).hexdigest()[:12].upper()
     with sqlite3.connect(db_path) as c:
-        c.execute("INSERT OR REPLACE INTO platform_decisions VALUES(?,?,?,?,?,?,?,?,?)",(did,card["title"],card["module"],json.dumps(card["metrics"],default=str),json.dumps(card["assumptions"],default=str),json.dumps(card["uncertainty"],default=str),username,card["created_at"],card["status"])); c.commit()
+        c.execute(
+            """
+            INSERT OR REPLACE INTO platform_decisions
+            (decision_id,title,module,metrics_json,assumptions_json,uncertainty_json,created_by,created_at,status,
+             baseline_json,alternatives_json,constraints_json,evidence_json,approvals_json,verification_json,selected_alternative)
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                did,
+                card["title"],
+                card["module"],
+                json.dumps(card.get("metrics", {}), default=str),
+                json.dumps(card.get("assumptions", {}), default=str),
+                json.dumps(card.get("uncertainty", {}), default=str),
+                username,
+                card["created_at"],
+                card.get("status", "Proposed"),
+                json.dumps(card.get("baseline", {}), default=str),
+                json.dumps(card.get("alternatives", []), default=str),
+                json.dumps(card.get("constraints", []), default=str),
+                json.dumps(card.get("evidence", []), default=str),
+                json.dumps(card.get("approvals", []), default=str),
+                json.dumps(card.get("verification", []), default=str),
+                card.get("selected_alternative", ""),
+            ),
+        )
+        c.commit()
     return did
 
 def save_model_snapshot(name: str, model_type: str, parameters: dict, data_hash: str, username: str, assumptions: dict, status="Draft", db_path="enterprise_full_workspace.db") -> str:
@@ -888,21 +966,9 @@ def render_module(module: str, tier: str, username: str):
             if st.button("🧪 Validate Connector Settings",use_container_width=True,key="conn_validate"): st.write({"MQTT":mqtt_topic,"OPC-UA":opc_url,"Status":"Configuration accepted; no live connection attempted."})
         render_export_bar(module,[("Connector Profiles",conn_df)],tier,username)
     elif module=="Multi-Objective Optimization":
-        df=st.data_editor(st.session_state.setdefault("multiobj_df",pd.DataFrame({"Scenario":["A","B","C","D"],"Cost":[100,90,130,110],"Carbon":[80,120,60,75],"Service":[94,97,99,96],"Risk":[12,20,8,15]})),num_rows="dynamic",use_container_width=True,key="multiobj_editor")
-        weights={c:st.number_input(c+" weight",0.0,1.0,0.25,key="mo_w_"+c) for c in ["Cost","Carbon","Service","Risk"]}
-        if st.button("⚖️ Calculate Composite Trade-off",type="primary",use_container_width=True,key="multiobj_run"):
-            st.session_state["multiobj_result"]=multiobjective_score(df,weights,{"Service":False,"Cost":True,"Carbon":True,"Risk":True})
-            st.session_state["pareto"]=pareto_frontier(df,["Cost","Carbon","Risk"],[True,True,True])
-        st.dataframe(st.session_state.get("multiobj_result",df),use_container_width=True)
-        if "pareto" in st.session_state: st.write("Pareto Frontier"); st.dataframe(st.session_state["pareto"],use_container_width=True)
-        render_export_bar(module,[("Scenarios",df),("Scored Scenarios",st.session_state.get("multiobj_result",pd.DataFrame())),("Pareto",st.session_state.get("pareto",pd.DataFrame()))],tier,username)
+        render_optimization_studio(tier, username)
     elif module=="Robust & Resilient Optimization":
-        d=st.data_editor(st.session_state.setdefault("robust_df",pd.DataFrame({"Metric":["Demand Mean","Demand Std","Capacity","Lead Time Mean","Lead Time Std","Disruption Probability","Disruption Capacity Multiplier"],"Value":[1000,150,1100,7,1.5,.05,.6]})),num_rows="dynamic",use_container_width=True,key="robust_editor")
-        sims=st.number_input("Simulations",500,100000,5000,500,key="robust_sims")
-        if st.button("🎲 Run Robust Risk Analysis",type="primary",use_container_width=True,key="robust_run"):
-            vals=d.set_index("Metric")["Value"].to_dict(); st.session_state["robust_result"]=robust_risk_analysis(float(vals["Demand Mean"]),float(vals["Demand Std"]),float(vals["Capacity"]),float(vals["Lead Time Mean"]),float(vals["Lead Time Std"]),float(vals["Disruption Probability"]),float(vals["Disruption Capacity Multiplier"]),int(sims))
-        if "robust_result" in st.session_state: st.json(st.session_state["robust_result"])
-        render_export_bar(module,[("Risk Inputs",d),("Robust Result",pd.DataFrame([st.session_state.get("robust_result",{})]))],tier,username)
+        render_optimization_studio(tier, username)
     elif module=="Engineering Model Registry":
         df=st.data_editor(st.session_state.setdefault("model_registry_df",pd.DataFrame({"Model Name":["Network Baseline"],"Type":["MILP"],"Version":["1.0.0"],"Status":["Draft"],"Data Hash":[""]})),num_rows="dynamic",use_container_width=True,key="model_registry_editor")
         name=st.text_input("Model name","My Industrial Model",key="registry_name"); model_type=st.text_input("Model type","Optimization",key="registry_type"); params=st.text_area("Parameters JSON",'{"objective":"cost"}',key="registry_params")
@@ -913,6 +979,8 @@ def render_module(module: str, tier: str, username: str):
         with sqlite3.connect("enterprise_full_workspace.db") as c: reg=pd.read_sql("SELECT * FROM platform_models ORDER BY created_at DESC",c)
         st.dataframe(reg,use_container_width=True,hide_index=True)
         render_export_bar(module,[("Registry",df),("Persisted Models",reg)],tier,username)
+    elif module=="Experiment Engine":
+        render_experiment_engine(tier, username)
     elif module=="Experiment Lab":
         scenarios=st.data_editor(st.session_state.setdefault("experiment_df",pd.DataFrame({"Scenario":["Baseline","High Demand","Supplier Shock","Capacity Expansion"],"Cost":[100000,125000,142000,115000],"Service":[95,90,82,98],"Risk":[10,18,35,8],"Inventory":[5000,6200,7000,4700],"Carbon":[1000,1100,1300,850]})),num_rows="dynamic",use_container_width=True,key="experiment_editor")
         if st.button("🧪 Analyze Scenario Set",type="primary",use_container_width=True,key="experiment_run"):
@@ -931,19 +999,7 @@ def render_module(module: str, tier: str, username: str):
         st.metric("Data quality score",f"{data_quality_report(metrics)['score']:.1f}%")
         render_export_bar(module,[("Control Center",metrics)],tier,username)
     elif module=="Engineering Decision Center":
-        st.subheader("Decision Card Builder")
-        title=st.text_input("Decision title","Network redesign decision",key="decision_title"); metric_text=st.text_area("Metrics JSON",'{"Cost Delta %":-8.2,"Service Delta %":2.1,"Carbon Delta %":-4.5}',key="decision_metrics"); ass_text=st.text_area("Assumptions JSON",'{"Demand horizon":"12 weeks","Lead time":"7 days"}',key="decision_assumptions"); unc_text=st.text_area("Uncertainty JSON",'{"P95 cost exposure":"12%"}',key="decision_unc")
-        status=st.selectbox("Status",["Proposed","Under Review","Approved","Rejected"],key="decision_status")
-        if st.button("📝 Save Decision Card",type="primary",use_container_width=True,key="decision_save"):
-            try:
-                card=create_decision_card(title,module,json.loads(metric_text),json.loads(ass_text),json.loads(unc_text),status); did=save_decision_card(card,username); st.success(f"Saved decision {did}")
-            except Exception as exc: st.error(f"Decision card error: {exc}")
-        with sqlite3.connect("enterprise_full_workspace.db") as c: dec=pd.read_sql("SELECT * FROM platform_decisions ORDER BY created_at DESC",c)
-        numeric_dec = [col for col in dec.columns if pd.api.types.is_numeric_dtype(dec[col])]
-        if numeric_dec:
-            st.session_state["decision_metrics_df"] = dec.copy(deep=True)
-        st.dataframe(dec,use_container_width=True,hide_index=True)
-        render_export_bar(module,[("Decision Cards",dec)],tier,username)
+        render_decision_center_studio(tier, username)
     elif module=="Industrial Data Platform":
         up=st.file_uploader("📥 Ingest CSV / XLSX",type=["csv","xlsx"],key="data_platform_upload")
         if up is not None:
@@ -1009,16 +1065,7 @@ def render_module(module: str, tier: str, username: str):
         st.success("Twin state synchronized from persisted telemetry.")
         render_export_bar(module,[("Telemetry Input",tel),("Stored Telemetry",stored)],tier,username)
     elif module=="Advanced ML Demand Forecasting":
-        st.subheader("📈 ML Demand Forecasting")
-        df=st.data_editor(st.session_state.setdefault("forecast_df",pd.DataFrame({"Date":pd.date_range("2026-01-01",periods=24,freq="MS"),"Demand":np.maximum(100,np.linspace(500,700,24)+np.sin(np.arange(24))*60),"Promotion":[0,0,1,0]*6,"WeatherIndex":[20,21,22,19]*6,"MacroIndex":[100,101,102,103]*6})),num_rows="dynamic",use_container_width=True,key="forecast_editor")
-        date_col=st.selectbox("Date column",list(df.columns),index=0,key="forecast_date"); target_col=st.selectbox("Demand/SKU target",list(df.columns),index=1,key="forecast_target"); ext=st.multiselect("External drivers", [c for c in df.columns if c not in [date_col,target_col]],key="forecast_ext"); horizon=st.number_input("Forecast periods",1,104,12,key="forecast_horizon")
-        if st.button("🧠 Train & Forecast",type="primary",use_container_width=True,key="forecast_run"):
-            try: st.session_state["forecast_result"],st.session_state["forecast_metrics"]=ml_demand_forecast(df,date_col,target_col,ext,int(horizon))
-            except Exception as exc: st.error(f"Forecast failed safely: {exc}")
-        if "forecast_result" in st.session_state:
-            fr=st.session_state["forecast_result"]; st.dataframe(fr,use_container_width=True); st.json(st.session_state["forecast_metrics"])
-            fig=px.line(fr,x="Date",y=["Forecast","Lower 95%","Upper 95%"],title="Demand Forecast with 95% uncertainty band"); st.plotly_chart(fig,use_container_width=True)
-            render_export_bar(module,[("History",df),("Forecast",fr)],[("Demand Forecast",fig)],tier,username)
+        render_forecasting_studio(tier, username)
     elif module=="Scenario Versioning & Comparison":
         st.subheader("🧪 Scenario Versioning")
         base=st.data_editor(st.session_state.setdefault("scenario_df",pd.DataFrame({"Scenario":["Baseline Q3 Logistics","High-Tariff Expansion","Supplier Shock"],"Cost":[100000,125000,140000],"Service":[95,91,84],"Capacity":[10000,9500,8200],"Carbon":[1000,1100,1250]})),num_rows="dynamic",use_container_width=True,key="scenario_editor")
