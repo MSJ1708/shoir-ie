@@ -420,7 +420,7 @@ def render_enterprise_bridge(module: str, tier: str, username: str) -> None:
     frames = current_module_frames(module)
     with st.expander("🧩 Enterprise Capability Layer", expanded=False):
         st.caption("Existing module logic remains authoritative. This layer adds cross-module governance, persistence, operational controls and visualization context.")
-        tabs = st.tabs(["Governance","Data Intelligence","Operations","Collaboration","Knowledge"])
+        tabs = st.tabs(["Governance","Data Intelligence","Operations","Collaboration","Research","Knowledge"])
         with tabs[0]:
             profile = data_intelligence_profile(frames[0][1]) if frames else {"rows":0,"columns":0,"quality_score":0,"missing_pct":100,"duplicate_pct":100,"numeric_columns":[],"date_like_columns":[],"id_like_columns":[],"unit_hints":[],"outlier_counts":{},"drift":{"available":False}}
             cols = st.columns(4)
@@ -574,6 +574,54 @@ def render_enterprise_bridge(module: str, tier: str, username: str) -> None:
             else:
                 st.info("Use the Collaboration or Security module for team/governance controls.")
         with tabs[4]:
+            if module in {"Experiment Lab","Experiment Engine","Industrial Simulation Lab"}:
+                st.markdown("##### 📝 Research & Reproducibility")
+                try:
+                    from industrial_experience import load_research_protocol, research_runs_frame, research_decisions_frame, _safe_key
+                    study_id = st.session_state.get("sx_research_study_id")
+                    protocol = load_research_protocol(study_id, owner=username) if study_id else None
+                    runs = research_runs_frame(study_id, owner=username) if study_id else pd.DataFrame()
+                    decisions = research_decisions_frame(username)
+                except Exception:
+                    protocol, runs, decisions = None, pd.DataFrame(), pd.DataFrame()
+                if protocol:
+                    st.dataframe(pd.DataFrame([
+                        {"Field":"Research ID","Value":protocol.get("research_id")},
+                        {"Field":"Protocol hash","Value":protocol.get("protocol_hash")},
+                        {"Field":"Methodology","Value":protocol.get("methodology")},
+                        {"Field":"Primary endpoint","Value":protocol.get("primary_endpoint")},
+                        {"Field":"Runs captured","Value":len(runs)},
+                    ]), use_container_width=True, hide_index=True)
+                    if st.button("📝 Generate manuscript draft", use_container_width=True, key=f"research_manuscript_{hash(module)&0xffff:04x}"):
+                        summary = protocol.get("protocol_notes", "")
+                        manuscript = (
+                            f"# {protocol.get('title','Research Study')}\n\n"
+                            f"## Research question\n{protocol.get('research_question','')}\n\n"
+                            f"## Objective\n{protocol.get('objective','')}\n\n"
+                            f"## Hypotheses\n**H1:** {protocol.get('hypothesis','')}\n\n"
+                            f"**H0:** {protocol.get('null_hypothesis','')}\n\n"
+                            f"## Method\n{protocol.get('methodology','')} with {protocol.get('sample_size',0)} planned scenarios and {protocol.get('replications',0)} replications per scenario.\n\n"
+                            f"## Primary endpoint\n{protocol.get('primary_endpoint','')}\n\n"
+                            f"## Reproducibility\nProtocol hash: {protocol.get('protocol_hash','')}\nRandom seed: {protocol.get('random_seed','')}\n\n"
+                            f"## Results status\n{len(runs)} persisted run(s) are currently linked to this study. This draft intentionally does not invent scientific findings.\n\n"
+                            f"## Limitations\n{summary}\n"
+                        )
+                        st.session_state["research_manuscript_draft"] = manuscript
+                        record_workspace_artifact("research_manuscript", protocol.get("title","Research Study"), username, {"protocol_hash": protocol.get("protocol_hash"), "runs": len(runs)})
+                    if st.session_state.get("research_manuscript_draft"):
+                        st.text_area("Manuscript draft", st.session_state["research_manuscript_draft"], height=320)
+                        st.download_button("📥 Download manuscript Markdown", data=st.session_state["research_manuscript_draft"].encode("utf-8"), file_name=f"{_safe_key(protocol.get('study_id','study'))}_manuscript.md", mime="text/markdown", use_container_width=True)
+                else:
+                    st.info("Open or create a research study in Experiment Lab to enable manuscript drafting and reproducibility evidence.")
+                supplemental = st.file_uploader("Add supplementary research file metadata", type=["csv","xlsx","pdf","zip"], key=f"research_supp_{hash(module)&0xffff:04x}")
+                if supplemental is not None:
+                    meta = safe_file_metadata(supplemental.name, supplemental.getvalue(), [".csv",".xlsx",".pdf",".zip"])
+                    record_workspace_artifact("supplementary_file", supplemental.name, username, meta)
+                    st.success(f"Supplementary file fingerprint recorded: {meta['sha256'][:16]}…")
+            else:
+                st.caption("Research controls are available from Experiment Lab / Experiment Engine.")
+
+        with tabs[5]:
             if module in {"AI Copilot","Advanced Engineering Copilot","Engineering Decision Center","Experiment Engine"}:
                 render_knowledge_layer(username)
             else:
