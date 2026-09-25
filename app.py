@@ -9706,7 +9706,16 @@ elif mod == "MILP Solvers":
                     st.markdown("---")
                     st.markdown("##### **Optimal Warehouse-to-Customer Allocation Matrix**")
                     raw_res_df = pd.DataFrame(hav_data)
-                    
+                    # Hand exact solver evidence to the universal visualization
+                    # layer instead of keeping it local to the MILP tab.
+                    st.session_state["milp_result_df"] = raw_res_df.copy(deep=True)
+                    st.session_state["milp_summary_df"] = pd.DataFrame([{
+                        "Status": status,
+                        "Total Cost": float(total_cost_val),
+                        "Total Carbon": float(total_carbon_val),
+                        "Allocation Rows": int(len(raw_res_df)),
+                    }])
+
                     if not raw_res_df.empty:
                         # --- BULLETPROOF DATA NORMALIZER FOR PLOTTING ---
                         res_df = raw_res_df.copy()
@@ -9728,7 +9737,8 @@ elif mod == "MILP Solvers":
                         # Clean numeric values
                         res_df["Quantity"] = pd.to_numeric(res_df["Quantity"], errors="coerce").fillna(0)
                         res_df = res_df[res_df["Quantity"] > 0]  # Filter out zero allocations for clean charts
-                        
+                        st.session_state["milp_allocation_flow_df"] = res_df.copy(deep=True)
+
                         st.dataframe(raw_res_df, use_container_width=True)
                         
                         st.markdown("---")
