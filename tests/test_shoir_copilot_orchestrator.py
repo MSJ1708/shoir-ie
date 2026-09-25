@@ -93,3 +93,36 @@ def test_export_bundle_contains_auditable_artifacts():
         assert "explanation.md" in names
         assert "copilot_analysis.xlsx" in names
         assert "manifest.json" in names
+
+
+def test_optimization_can_use_existing_solver_hook():
+    df = pd.DataFrame({"Signal": ["network"], "Cost": [10], "Capacity": [100]})
+    calls = {}
+
+    def fake_validate(customers, warehouses):
+        return True, "Validated"
+
+    def fake_solver(customers_tuple, warehouses_tuple, w_cost, w_carbon):
+        calls["called"] = True
+        return "Optimal", 1234.0, 56.0, [
+            {"Customer": "C1", "Assigned Warehouse": "W1", "Haversine Cost ($)": 12.5}
+        ]
+
+    from shoir_copilot_orchestrator import run_orchestration
+
+    run = run_orchestration(
+        "optimize my network",
+        "MILP Solvers",
+        df,
+        context={
+            "customers": [{"Customer": "C1", "lat": 1.0, "lon": 1.0, "Demand": 10}],
+            "warehouses": [{"name": "W1", "lat": 1.1, "lon": 1.1, "capacity": 100, "fixed_cost": 500}],
+            "milp_solver": fake_solver,
+            "validate_network_inputs": fake_validate,
+        },
+    )
+    assert calls["called"] is True
+    assert run["analysis_meta"]["type"] == "milp_optimization"
+    assert run["analysis_meta"]["solver_status"] == "Optimal"
+    assert float(run["analysis_meta"]["total_cost"]) == 1234.0
+    assert not run["result"].empty
