@@ -9191,6 +9191,9 @@ else:
         st.markdown("## 🧠 Engineering Copilot Orchestrator")
         st.caption("Give Shoir-IE an engineering goal. Copilot will inspect the selected module data, route the request, choose a compatible method, execute read-only analysis, generate evidence-backed visuals, compare scenarios when available, explain the result, and prepare an export.")
 
+        with st.expander("📚 Knowledge Layer · SOPs / manuals / standards / company guidance", expanded=False):
+            render_knowledge_extension(st.session_state.get("current_user", "unknown"))
+
         available_modules = [str(m) for m in allowed_modules if str(m) != "AI Copilot"]
         o1, o2 = st.columns([1.6, 1], gap="large")
         with o1:
@@ -9288,6 +9291,7 @@ else:
                                 "warehouses": st.session_state.get("warehouses_list", []),
                                 "milp_solver": cached_milp_optimization,
                                 "validate_network_inputs": validate_network_inputs,
+                                "knowledge_context": knowledge_context(workflow_prompt, 6000),
                             },
                         )
                     run_id = run["run_id"]
@@ -11902,6 +11906,8 @@ if (
 # Capture module calculations and parity edits after the selected module has rendered.
 if st.session_state.get("authenticated") and st.session_state.get("current_user"):
     try:
-        save_user_workspace(st.session_state["current_user"], st.session_state)
+        st.session_state["workspace_last_save_ok"] = bool(
+            save_user_workspace(st.session_state["current_user"], st.session_state)
+        )
     except Exception:
-        pass
+        st.session_state["workspace_last_save_ok"] = False
