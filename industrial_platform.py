@@ -920,7 +920,7 @@ def render_module(module: str, tier: str, username: str):
         with tabs_mo[1]:
             method=st.selectbox("Optimization method",["LP","Nonlinear (Quadratic)","Robust LP","Stochastic LP"],key="optimization_method")
             obj=st.data_editor(st.session_state.setdefault("optimization_objective_df",pd.DataFrame({"Variable":["X1","X2","X3"],"Coefficient":[10.0,12.0,8.0],"Quadratic":[0.0,0.0,0.0]})),num_rows="fixed",use_container_width=True,key="optimization_objective_editor")
-            cons=st.data_editor(st.session_state.setdefault("optimization_constraints_df",pd.DataFrame({"Constraint":["Capacity","Minimum Mix"],"X1":[1.0,-1.0],"X2":[1.0,0.0],"X3":[1.0,0.0],"RHS":[100.0,0.0]})),num_rows="dynamic",use_container_width=True,key="optimization_constraint_editor")
+            cons=st.data_editor(st.session_state.setdefault("optimization_constraints_df",pd.DataFrame({"Constraint":["Capacity","Required Output"],"X1":[1.0,-1.0],"X2":[1.0,-1.0],"X3":[1.0,-1.0],"RHS":[100.0,-100.0]})),num_rows="dynamic",use_container_width=True,key="optimization_constraint_editor")
             vars_=[str(v) for v in obj["Variable"].tolist()]
             scen_df=st.session_state.setdefault("optimization_scenarios_df",pd.DataFrame({"Scenario":["Base","Demand Surge","Supply Shock"],"Probability":[0.6,0.25,0.15],"X1":[10,13,15],"X2":[12,15,18],"X3":[8,10,14]}))
             if method in {"Robust LP","Stochastic LP"}:
@@ -940,7 +940,7 @@ def render_module(module: str, tier: str, username: str):
                     else:
                         scen_mat=scen_df[vars_].apply(pd.to_numeric,errors="coerce").to_numpy(float)
                         probs=pd.to_numeric(scen_df["Probability"],errors="coerce").to_numpy(float) if "Probability" in scen_df.columns else None
-                        sol=(solve_robust_linear_program(scen_mat,A_ub=A_ub,b_ub=b_ub,bounds=bounds) if method=="Robust LP" else solve_stochastic_linear_program(scen_mat,probabilities=probs,risk_aversion=float(risk),bounds=bounds))
+                        sol=(solve_robust_linear_program(scen_mat,A_ub=A_ub,b_ub=b_ub,bounds=bounds) if method=="Robust LP" else solve_stochastic_linear_program(scen_mat,probabilities=probs,risk_aversion=float(risk),A_ub=A_ub,b_ub=b_ub,bounds=bounds))
                     out={v:float(sol["variables"][i]) for i,v in enumerate(vars_)}
                     out.update({"Objective":float(sol.get("objective",sol.get("worst_case_objective",np.nan))),"Status":str(sol.get("status")),"Iterations":int(sol.get("iterations",0) or 0)})
                     st.session_state["optimization_result_df"]=pd.DataFrame([out])
