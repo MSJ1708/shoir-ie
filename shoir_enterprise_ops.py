@@ -44,6 +44,15 @@ def _numeric(series: Any) -> pd.Series:
     return pd.to_numeric(pd.Series(series), errors="coerce")
 
 
+def _render_universal_viz(module: str, preferred_key: str | None = None) -> None:
+    """Attach the shared visualization studio without inventing data."""
+    try:
+        from shoir_live_visuals import render_live_visualization_studio
+        render_live_visualization_studio(module, expanded=False, preferred_key=preferred_key)
+    except Exception as exc:
+        st.info(f"Universal visualization is temporarily unavailable for this module: {type(exc).__name__}.")
+    
+
 def _status_health(status: str) -> float | None:
     s = str(status or "").strip().lower()
     if not s:
@@ -236,6 +245,7 @@ def render_digital_twin_extension(username: str = "unknown") -> None:
             fig = px.line(result, x="Tick", y=["WIP", "Utilization %"], title="Digital Twin Scenario Replay")
             st.plotly_chart(fig, use_container_width=True)
             st.download_button("📥 Download replay evidence", result.to_csv(index=False).encode(), "shoir_ie_twin_replay.csv", "text/csv", use_container_width=True)
+    _render_universal_viz("Digital Twin & Discrete-Event Simulation", "digital_twin_replay_df")
 
 
 # ---------------------------------------------------------------------------
@@ -356,6 +366,7 @@ def render_control_tower_extension() -> None:
     if not plot_df.empty:
         fig = px.bar(plot_df, x="Area", y="Health %", color="Status", hover_data=["Signal"], range_y=[0, 100], title="Production · Supply · Inventory · Quality · Maintenance · Transport · Workforce · Energy · Carbon")
         st.plotly_chart(fig, use_container_width=True)
+    _render_universal_viz("Control Tower", "control_tower_unified_health_df")
 
 
 # ---------------------------------------------------------------------------
@@ -404,6 +415,7 @@ def render_connectivity_extension() -> None:
     st.dataframe(health, use_container_width=True, hide_index=True)
     fig = px.bar(health, x="Name", y="Health %", color="Protocol", range_y=[0, 100], title="Enterprise Connector Health")
     st.plotly_chart(fig, use_container_width=True)
+    _render_universal_viz("Industrial Connectivity Hub", "connectivity_health_df")
 
 
 # ---------------------------------------------------------------------------
@@ -453,6 +465,7 @@ def render_security_extension() -> None:
     c1.metric("Governance controls configured", f"{configured}/{len(posture)}")
     c2.metric("Sensitive keys detected", f"{sum(1 for key in st.session_state.keys() if re.search(r'password|token|secret|otp|payment', str(key), re.I)):,}")
     st.caption("SSO/OIDC and MFA are reported as configured only when their configuration sections are actually present; no secret contents are inspected or printed.")
+    _render_universal_viz("Enterprise Security & Governance", "enterprise_security_posture_df")
 
 
 # ---------------------------------------------------------------------------
@@ -538,6 +551,7 @@ def render_persistence_extension(username: str, show_controls: bool = True) -> N
     if catalog:
         st.dataframe(pd.DataFrame(catalog), use_container_width=True, hide_index=True)
     st.caption("Workspace state, including module datasets/results and artifact metadata, follows the configured persistence path. Exported binary files are represented by provenance/hash metadata unless separately stored in a connected file/object store.")
+    _render_universal_viz("Persistence", "enterprise_security_posture_df")
 
 
 def render_collaboration_extension(username: str) -> None:
@@ -588,6 +602,10 @@ def render_collaboration_extension(username: str) -> None:
                 st.markdown(f"**{label}**")
                 st.dataframe(data, use_container_width=True, hide_index=True)
     st.session_state["shoir_collaboration_board"] = board
+    board_frame = pd.DataFrame([x for key in ("assignments", "reviewers") for x in board.get(key, [])])
+    if not board_frame.empty:
+        st.session_state["collaboration_assignment_df"] = board_frame
+    _render_universal_viz("Team Workspaces & RBAC", "collaboration_assignment_df")
 
 
 # ---------------------------------------------------------------------------
@@ -873,6 +891,7 @@ def render_data_intelligence_extension(module: str, df: pd.DataFrame, previous: 
     c3.metric("Date-like fields", f"{int(intel['Date-like'].sum()):,}")
     c4.metric("Total outliers", f"{int(intel['Outliers'].sum()):,}")
     st.dataframe(intel, use_container_width=True, hide_index=True)
+    _render_universal_viz(module, f"data_intelligence_{hashlib.sha1(str(module).encode()).hexdigest()[:10]}")
 
 
 # ---------------------------------------------------------------------------
@@ -973,6 +992,7 @@ def render_knowledge_extension(username: str = "unknown") -> None:
         if query:
             ctx = knowledge_context(query, 3500)
             st.text_area("Copilot context preview", ctx, height=180, disabled=True)
+    _render_universal_viz("AI Copilot", None)
 
 
 # ---------------------------------------------------------------------------
@@ -1006,6 +1026,7 @@ def render_model_registry_extension(username: str = "unknown") -> None:
     data = pd.DataFrame(st.session_state.get("model_reproducibility_catalog", []))
     if not data.empty:
         st.dataframe(data, use_container_width=True, hide_index=True)
+    _render_universal_viz("Engineering Model Registry", "model_registry_governance_df")
 
 
 def render_jobs_extension(username: str = "unknown", module: str = "Industrial Simulation Lab") -> None:
@@ -1042,6 +1063,7 @@ def render_jobs_extension(username: str = "unknown", module: str = "Industrial S
             if not history.empty:
                 st.dataframe(history, use_container_width=True, hide_index=True)
                 st.session_state["job_history_df"] = history
+                _render_universal_viz(module, "job_history_df")
         except Exception as exc:
             st.warning(f"Job history unavailable: {type(exc).__name__}: {exc}")
     except Exception as exc:
@@ -1149,6 +1171,7 @@ def render_economics_extension(username: str = "unknown") -> None:
     st.dataframe(out, use_container_width=True, hide_index=True)
     st.plotly_chart(px.line(out, x="Year", y=["OPEX", "Discounted OPEX"], title="Lifecycle OPEX Profile"), use_container_width=True)
     record_artifact("Economics", "TCO", out, "Engineering Economics", username, "engineering_economics_tco_df")
+    _render_universal_viz("Capital Investment & Engineering Economics", "engineering_economics_tco_df")
 
 
 def render_sustainability_extension(username: str = "unknown") -> None:
@@ -1176,6 +1199,7 @@ def render_sustainability_extension(username: str = "unknown") -> None:
         return
     st.dataframe(summary, use_container_width=True, hide_index=True)
     st.plotly_chart(px.bar(summary, x="Metric", y="Value", title="Sustainability KPI Bridge"), use_container_width=True)
+    _render_universal_viz("Industrial Sustainability & LCA", "sustainability_decision_bridge_df")
 
 
 def render_human_factors_extension(username: str = "unknown") -> None:
@@ -1213,6 +1237,7 @@ def render_human_factors_extension(username: str = "unknown") -> None:
         title="Human Factors / Workload Measures",
     ), use_container_width=True)
     st.caption("These outputs are engineering workload measures, not medical or clinical assessments.")
+    _render_universal_viz("Human Factors & Ergonomics (NIOSH)", "human_factors_metrics_df")
 
 
 def render_geospatial_extension(username: str = "unknown") -> None:
@@ -1242,6 +1267,7 @@ def render_geospatial_extension(username: str = "unknown") -> None:
     st.dataframe(routes.head(100), use_container_width=True, hide_index=True)
     if not routes.empty:
         st.plotly_chart(px.scatter(routes, x="Distance km", y="Scenario Freight Cost", size="Demand tons/yr", hover_data=["Origin","Destination"], title="Geospatial Route / Cost Surface"), use_container_width=True)
+    _render_universal_viz("Geospatial Network Designer", "geospatial_network_routes_df")
 
 
 def render_artifact_journal_for_tables(module: str, tables: Sequence[tuple[str, pd.DataFrame]], username: str) -> None:
