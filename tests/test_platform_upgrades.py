@@ -12,7 +12,7 @@ def test_clean_dataframe_preserves_leading_zero_ids_and_removes_duplicates():
     out,audit=clean_dataframe(df)
     assert list(out["SKU"])==["001","002"]
     assert float(out["Sales"].iloc[0])==1200
-    assert out["SKU"].dtype.name in ("string","object")
+    # Pandas 3 may expose Python-string columns as dtype name "str"; all\n    # three representations preserve the required leading-zero identifier values.\n    assert out["SKU"].dtype.name in ("str", "string", "object")
     assert "Blank" not in out.columns
 
 def test_migration_is_additive_and_idempotent():
