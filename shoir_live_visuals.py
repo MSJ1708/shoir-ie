@@ -561,7 +561,7 @@ def render_live_visualization_studio(module: str, *, expanded: bool = False, pre
 
         c4, c5, c6 = st.columns([1.2, 1.2, 1.4])
         with c4:
-            suggestions = ["Auto", "Line", "Bar", "Area", "Scatter", "Distribution", "Histogram", "Box", "Pie", "Pareto", "Waterfall", "Sankey", "Heatmap", "Correlation Heatmap", "Control Chart", "SPC", "Sensitivity Plot", "Gantt", "Network Map", "3D Scatter"]
+            suggestions = ["Auto", "Line", "Bar", "Area", "Scatter", "Distribution", "Histogram", "Box", "Pie", "Pareto", "Waterfall", "Sankey", "Heatmap", "Correlation Heatmap", "Health Heatmap", "Control Chart", "SPC", "Anomaly Timeline", "Metric Trend", "Sensitivity Plot", "Gantt", "Network Map", "3D Scatter"]
             chart_choice = st.selectbox("Visualization", suggestions, key=f"liveviz_chart_{hash(module) & 0xFFFF:04x}")
         with c5:
             aggregation = st.selectbox("Aggregation", ["Raw", "Mean", "Median", "Sum", "Count"], key=f"liveviz_agg_{hash(module) & 0xFFFF:04x}")
@@ -822,3 +822,69 @@ def build_visualization_suite(
 def figure_fingerprint(fig: go.Figure) -> str:
     """Stable SHA-256 fingerprint of the exact Plotly figure JSON."""
     return hashlib.sha256(fig.to_json().encode("utf-8")).hexdigest()
+
+
+_BASE_AUTO_KPI_DASHBOARD = _render_auto_kpi_dashboard
+
+
+def _render_auto_kpi_dashboard(module: str, df: pd.DataFrame, chart_token: str) -> None:
+    """Render KPI cards plus a complementary evidence graph set."""
+    if not isinstance(df, pd.DataFrame) or df.empty:
+        return
+
+    st.markdown("### ⚡ Auto-Generated KPI Dashboard")
+    numeric = _numeric_columns(df)
+    missing_pct = float(df.isna().mean().mean() * 100) if len(df.columns) else 100.0
+    cards = [
+        ("Rows", f"{len(df):,}", "dataset"),
+        ("Columns", f"{len(df.columns):,}", "schema"),
+        ("Missing", f"{missing_pct:.1f}%", "data quality"),
+        ("Numeric KPIs", f"{len(numeric):,}", "measures"),
+    ]
+    cols = st.columns(4)
+    for col, (label, value, detail) in zip(cols, cards):
+        col.metric(label, value, detail)
+
+    if numeric:
+        kpi_cols = st.columns(min(4, len(numeric)))
+        for idx, metric_name in enumerate(numeric[:4]):
+            values = pd.to_numeric(df[metric_name], errors="coerce").dropna()
+            if not values.empty:
+                kpi_cols[idx].metric(
+                    f"Avg · {metric_name}",
+                    f"{values.mean():,.3g}",
+                    f"n={len(values):,}",
+                )
+
+    suite = build_visualization_suite(df, context=str(module), max_figures=4)
+    if not suite:
+        st.info("No compatible automatic engineering visualization could be inferred from the current table.")
+        return
+
+    st.caption(
+        "Universal Visualization selected complementary views from the actual module data: "
+        + ", ".join(title.split(" · ")[-1] for title, _ in suite)
+        + "."
+    )
+    for idx, (title, fig) in enumerate(suite):
+        st.plotly_chart(
+            fig,
+            use_container_width=True,
+            config={
+                "displayModeBar": True,
+                "displaylogo": False,
+                "scrollZoom": True,
+                "responsive": True,
+            },
+        )
+        if idx == 0:
+            try:
+                st.session_state[f"liveviz_last_figure_json_{chart_token}"] = fig.to_json()
+                st.session_state[f"liveviz_last_chart_config_{chart_token}"] = {
+                    "source_key": "auto-suite",
+                    "chart": "suite",
+                    "title": title,
+                    "mode": "auto-suite",
+                }
+            except Exception:
+                pass
