@@ -387,7 +387,7 @@ def normalize_connector_health(df: pd.DataFrame) -> pd.DataFrame:
     latency_penalty = d["Latency ms"].fillna(0).clip(lower=0) * 0.2
     error_penalty = d["Errors"].clip(lower=0) * 5.0
     freshness_penalty = d["Freshness min"].fillna(0).clip(lower=0) * 0.5
-    d["Health %"] = (base.fillna(80.0) - latency_penalty - error_penalty - freshness_penalty).clip(lower=0, upper=100)
+    d["Health %"] = (base - latency_penalty - error_penalty - freshness_penalty).clip(lower=0, upper=100)
     return d
 
 
@@ -450,7 +450,7 @@ def render_security_extension() -> None:
     configured = int((posture["Status"].isin(["Configured", "CI hook"])).sum()) if not posture.empty else 0
     c1, c2 = st.columns(2)
     c1.metric("Governance controls configured", f"{configured}/{len(posture)}")
-    c2.metric("Sensitive values exposed in UI", "0")
+    c2.metric("Sensitive keys detected", f"{sum(1 for key in st.session_state.keys() if re.search(r'password|token|secret|otp|payment', str(key), re.I)):,}")
     st.caption("SSO/OIDC and MFA are reported as configured only when their configuration sections are actually present; no secret contents are inspected or printed.")
 
 
