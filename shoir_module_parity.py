@@ -458,6 +458,36 @@ def _render_results(module: str, keys: dict[str, str]) -> None:
     if not isinstance(df, pd.DataFrame):
         df = _as_frame(df)
 
+    # Optional native-input bridge: after the specialized module has rendered,
+    # its schema-specific DataFrames exist and can safely receive the canonical
+    # parity dataset. This preserves domain mappings without hiding the native
+    # engine controls.
+    try:
+        from industrial_platform import MODULE_TABLE_KEYS
+        native_targets = [k for k in MODULE_TABLE_KEYS.get(module, []) if isinstance(st.session_state.get(k), pd.DataFrame)]
+    except Exception:
+        native_targets = []
+    if native_targets and not df.empty:
+        st.markdown("### 🔄 Native Module Input Bridge")
+        st.caption("Apply the validated parity dataset to compatible native module inputs. This is schema-aware and never overwrites unrelated tables.")
+        if st.button("🔗 Apply parity data to compatible native inputs", use_container_width=True, key=f"module_parity_apply_native_{token}"):
+            try:
+                from shoir_upgrade import align_imported_table
+                applied = 0
+                for target_key in native_targets:
+                    target = st.session_state.get(target_key)
+                    overlap = len(set(map(str, df.columns)) & set(map(str, target.columns)))
+                    if overlap >= 1:
+                        st.session_state[target_key] = align_imported_table(df, target)
+                        st.session_state.pop(target_key.replace("_df", "_editor"), None)
+                        applied += 1
+                if applied:
+                    st.success(f"Parity data applied to {applied} native input table(s). Re-run the module calculation to use the updated inputs.")
+                else:
+                    st.info("No compatible native input table was found for this dataset.")
+            except Exception as exc:
+                st.error(f"Native input bridge failed safely: {exc}")
+
     result_options: list[tuple[str, str, pd.DataFrame]] = [("Universal Module Dataset", keys["data"], df)]
     try:
         from shoir_live_visuals import discover_visual_tables
