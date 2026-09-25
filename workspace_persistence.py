@@ -184,7 +184,10 @@ def save_user_workspace(
         return False
     try:
         payload = json.dumps(_snapshot(session_state), ensure_ascii=False, separators=(",", ":"))
-        if durable_backend_configured():
+        # A custom db_path is used by local/regression tests and intentionally
+        # bypasses the remote backend. The deployed application uses the default
+        # enterprise_full_workspace.db path and therefore uses Supabase.
+        if durable_backend_configured() and db_path == "enterprise_full_workspace.db":
             return save_remote_workspace(username, payload)
 
         # Local development fallback only. A deployed Streamlit instance should
@@ -216,7 +219,11 @@ def load_user_workspace(
     if not username or username == "Guest Visitor":
         return False
     try:
-        remote_payload = load_remote_workspace(username) if durable_backend_configured() else None
+        remote_payload = (
+            load_remote_workspace(username)
+            if durable_backend_configured() and db_path == "enterprise_full_workspace.db"
+            else None
+        )
         if remote_payload:
             payload = json.loads(remote_payload)
         else:
