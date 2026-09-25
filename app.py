@@ -25,7 +25,6 @@ from PIL import Image
 from scipy import stats
 from shoir_upgrade import (align_imported_table, clean_dataframe, build_excel_report, build_workbook_bundle, read_uploaded_workbook, apply_excel_function, EXCEL_FUNCTIONS, copilot_module_recommendation)
 from industrial_platform import PLATFORM_CATALOG, render_module as render_industrial_module, ml_demand_forecast, tier_allows as platform_tier_allows
-from shoir_enterprise_capabilities import render_universal_enterprise_capabilities
 from industrial_operating_system import render_industrial_operating_system
 from industrial_experience import COPILOT_TOOLS, ensure_experience_db, feature_stats, load_research_protocol, list_research_studies, register_research_run, log_copilot_action, benchmark_duration
 from research_experiment_engine import apply_evidence_conflict
@@ -9546,9 +9545,6 @@ else:
     elif mod in {x["name"] for x in PLATFORM_CATALOG}:
         try:
             render_industrial_module(mod, tier_val, st.session_state.get("current_user", "unknown"))
-            # Additive enterprise capability layer: existing module output remains intact,
-            # while governance/operations state is attached to the correct module flow.
-            render_universal_enterprise_capabilities(mod, st.session_state.get("current_user", "unknown"))
         except Exception as exc:
             st.error(f"{mod} encountered a recoverable rendering issue. The rest of Shoir-IE remains available.")
             with st.expander("Technical diagnostic"):
