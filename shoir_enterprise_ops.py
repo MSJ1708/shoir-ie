@@ -465,7 +465,7 @@ def render_security_extension() -> None:
         if uploaded is not None:
             raw = uploaded.getvalue()
             name = str(uploaded.name)
-            unsafe_ext = bool(re.search(r"\\.(exe|dll|bat|cmd|ps1|sh|js|vbs)$", name.lower()))
+            unsafe_ext = bool(re.search(r"\.(exe|dll|bat|cmd|ps1|sh|js|vbs)$", name.lower()))
             scan = pd.DataFrame([
                 {"Check": "SHA-256", "Status": "PASS", "Evidence": hashlib.sha256(raw).hexdigest()},
                 {"Check": "File size", "Status": "PASS" if len(raw) <= 50_000_000 else "REVIEW", "Evidence": f"{len(raw):,} bytes"},
