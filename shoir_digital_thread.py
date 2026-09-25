@@ -235,7 +235,8 @@ def sync_workspace_to_thread(owner: str, active_module: str | None = None) -> di
         module_result_keys = [k for k in result_keys if module.lower().split()[0] in str(k).lower()]
         if module_result_keys or numeric_cols:
             source = module_result_keys[0] if module_result_keys else f"module:{module}"
-            model_id = _upsert_node("Model", f"{module} analytical model", source, module)
+            model_status = "Observed" if module_result_keys else "Inferred"
+            model_id = _upsert_node("Model", f"{module} analytical model", source, module, status=model_status)
             model_count += 1
             for col in numeric_cols[:4]:
                 _upsert_edge(_stable_kpi_for(module, col), model_id, "supports model")
@@ -295,6 +296,9 @@ def sync_workspace_to_thread(owner: str, active_module: str | None = None) -> di
                 _upsert_edge(model["node_id"], experiment["node_id"], "tested by experiment")
             for decision in module_decisions[:3]:
                 _upsert_edge(model["node_id"], decision["node_id"], "supports decision")
+        for experiment in module_experiments[:3]:
+            for decision in module_decisions[:3]:
+                _upsert_edge(experiment["node_id"], decision["node_id"], "informs decision")
 
     st.session_state[_keys()["sync"]] = _now()
     st.session_state[_keys()["version"]] = int(st.session_state.get(_keys()["version"], 1)) + 1
