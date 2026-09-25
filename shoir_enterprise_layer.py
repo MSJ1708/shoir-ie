@@ -1504,45 +1504,80 @@ def monitoring_events_frame(username: str, workspace: str = "default", limit: in
         return pd.read_sql_query(sql, conn, params=[wid])
 
 
-def analyze_telemetry(df: pd.DataFrame, timestamp_col: str = "", value_col: str = "", group_col: str = "", window: int = 20, z_threshold: float = 3.0) -> pd.DataFrame:
-    """Detect deterministic rolling anomalies without inventing or dropping observations."""
+def analyze_telemetry(
+    df: pd.DataFrame,
+    timestamp_col: str = "",
+    value_col: str = "",
+    group_col: str = "",
+    window: int = 20,
+    z_threshold: float = 3.0,
+) -> pd.DataFrame:
+    """Detect deterministic rolling anomalies without dropping observations.
+
+    A stable/zero-variance baseline is handled explicitly: a material change
+    from that baseline is still an anomaly instead of becoming NaN and then
+    being silently converted to zero.
+    """
     if not isinstance(df, pd.DataFrame) or df.empty:
         return pd.DataFrame()
+
     work = df.copy()
-    timestamp_col = timestamp_col if timestamp_col in work.columns else next(iter(_find_columns_like(work, ("timestamp", "time", "date"))), "")
-    value_col = value_col if value_col in work.columns else next(iter(_find_columns_like(work, ("value", "reading", "measurement", "metric"))), "")
-    if not timestamp_col or not value_col:
+    timestamp_col = (
+        timestamp_col
+        if timestamp_col in work.columns
+        else next(iter(_find_columns_like(work, ("timestamp", "time", "date"))), "")
+    )
+    value_col = (
+        value_col
+        if value_col in work.columns
+        else next(iter(_find_columns_like(work, ("value", "reading", "measurement", "metric"))), "")
+    )
+    if not value_col:
         numeric = [c for c in work.columns if pd.api.types.is_numeric_dtype(work[c])]
         value_col = numeric[0] if numeric else ""
     if not value_col:
         return pd.DataFrame()
+
     if timestamp_col:
         work[timestamp_col] = pd.to_datetime(work[timestamp_col], errors="coerce")
         work = work.dropna(subset=[timestamp_col]).sort_values(timestamp_col)
     work[value_col] = pd.to_numeric(work[value_col], errors="coerce")
     work = work.dropna(subset=[value_col])
+
+    def score_frame(frame: pd.DataFrame) -> pd.DataFrame:
+        out = frame.copy()
+        prior = out[value_col].shift(1)
+        size = max(3, int(window))
+        roll_mean = prior.rolling(size, min_periods=3).mean()
+        roll_std = prior.rolling(size, min_periods=3).std(ddof=1)
+
+        out["Rolling Mean"] = roll_mean
+        out["Rolling Std"] = roll_std
+
+        eps = 1e-12
+        std_ok = roll_std > eps
+        raw_z = (out[value_col] - roll_mean) / roll_std.where(std_ok)
+        raw_z = raw_z.replace([np.inf, -np.inf], np.nan)
+
+        stable_baseline = (
+            roll_mean.notna()
+            & (~std_ok | roll_std.isna())
+            & ((out[value_col] - roll_mean).abs() > np.maximum(eps, roll_mean.abs() * 1e-9))
+        )
+        z = raw_z.fillna(0.0)
+        z = z.mask(stable_baseline, np.sign(out[value_col] - roll_mean) * (float(z_threshold) + 1.0))
+
+        out["Z Score"] = z
+        out["Anomaly"] = out["Z Score"].abs() >= float(z_threshold)
+        return out
+
     group_key = group_col if group_col in work.columns else None
     if group_key:
-        pieces=[]
-        for _, g in work.groupby(group_key, dropna=False):
-            g=g.copy()
-            prior = g[value_col].shift(1)
-            roll_mean=prior.rolling(max(3,int(window)),min_periods=3).mean()
-            roll_std=prior.rolling(max(3,int(window)),min_periods=3).std(ddof=1)
-            g["Rolling Mean"]=roll_mean
-            g["Rolling Std"]=roll_std
-            g["Z Score"]=((g[value_col]-roll_mean)/roll_std.replace(0,np.nan)).fillna(0.0)
-            g["Anomaly"]=g["Z Score"].abs()>=float(z_threshold)
-            pieces.append(g)
-        return pd.concat(pieces,ignore_index=True) if pieces else pd.DataFrame()
-    prior = work[value_col].shift(1)
-    roll_mean=prior.rolling(max(3,int(window)),min_periods=3).mean()
-    roll_std=prior.rolling(max(3,int(window)),min_periods=3).std(ddof=1)
-    work["Rolling Mean"]=roll_mean
-    work["Rolling Std"]=roll_std
-    work["Z Score"]=((work[value_col]-roll_mean)/roll_std.replace(0,np.nan)).fillna(0.0)
-    work["Anomaly"]=work["Z Score"].abs()>=float(z_threshold)
-    return work
+        pieces = [score_frame(g) for _, g in work.groupby(group_key, dropna=False)]
+        return pd.concat(pieces, ignore_index=True) if pieces else pd.DataFrame()
+    return score_frame(work)
+
+
 
 
 def _find_columns_like(df: pd.DataFrame, tokens: Sequence[str]) -> list[str]:
