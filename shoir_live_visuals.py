@@ -215,12 +215,27 @@ def _auto_chart_choice(df: pd.DataFrame) -> str:
     finish = _find_col(df, ("finish", "end", "completion", "planned finish"))
     delta = _find_col(df, ("delta", "change", "impact", "variance"))
     baseline = _find_col(df, ("baseline", "base"))
+    effect = _find_col(df, ("effect", "coefficient"))
+    term = _find_col(df, ("term", "factor", "driver"))
+    target_metric = _find_col(df, ("target", "goal"))
+    actual_metric = _find_col(df, ("actual", "observed"))
+    propagated = _find_col(df, ("propagated kpi", "bootstrap statistic", "bootstrap effect"))
+    ci_low = _find_col(df, ("ci low", "lower 95", "lower ci"))
+    ci_high = _find_col(df, ("ci high", "upper 95", "upper ci"))
     if source and target and value:
         return "Sankey"
     if start and finish:
         return "Gantt"
     if delta and baseline:
         return "Waterfall"
+    if propagated:
+        return "Distribution"
+    if target_metric and actual_metric:
+        return "Bar"
+    if effect and term:
+        return "Bar"
+    if ci_low and ci_high and term:
+        return "Bar"
     if len(nums) >= 3:
         return "3D Scatter"
     if len(nums) >= 2 and dates:
