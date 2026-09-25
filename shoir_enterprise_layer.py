@@ -1108,3 +1108,153 @@ def build_research_paper_bundle(
 
 def create_generic_audit_event(username: str, event_type: str, detail: str, workspace: str = "default") -> str:
     return record_artifact(username, "audit_event", event_type, {"detail": detail, "timestamp": now_iso()}, workspace)
+
+
+def render_enterprise_integration_surface(module: str, username: str, tier: str) -> None:
+    """Render shared enterprise capabilities inside the relevant existing module flow."""
+    import streamlit as st
+    import plotly.express as px
+
+    workspace = "default"
+    module = str(module)
+
+    # Digital Twin: augment the existing twin with durable state, replay and what-if.
+    if module in {"Live Industrial Digital Twin", "Digital Twin & Discrete-Event Simulation", "Predictive Maintenance Digital Twin", "Industrial Simulation Lab"}:
+        st.markdown("### 🌐 Connected Digital Twin")
+        twin = load_twin_state(username, workspace)
+        if twin.empty:
+            twin = pd.DataFrame({"Asset":["CNC-01","Packing-01"],"Status":["Running","Running"],"Temperature":[65.0,72.0],"Vibration":[2.4,1.8]})
+        t1,t2,t3,t4 = st.tabs(["Live State","What-if","Scenario Replay","Scenarios"])
+        with t1:
+            st.dataframe(twin, use_container_width=True, hide_index=True)
+            if st.button("🔄 Synchronize current state", key="ent_twin_sync"):
+                sid=save_twin_snapshot(username,twin.to_dict("records"),source="module_state",scenario_name="Live",workspace=workspace)
+                st.success(f"Twin snapshot synchronized: {sid}")
+        with t2:
+            numeric=[c for c in twin.columns if pd.api.types.is_numeric_dtype(twin[c])]
+            if numeric:
+                changes={}
+                cols=st.columns(min(3,max(1,len(numeric))))
+                for i,c in enumerate(numeric[:6]):
+                    with cols[i%len(cols)]:
+                        changes[c]=st.number_input(f"Δ {c}",value=0.0,key=f"ent_twin_delta_{i}")
+                if st.button("🧪 Run what-if",key="ent_twin_whatif"):
+                    scenario,audit=twin_what_if(twin,changes)
+                    st.dataframe(scenario,use_container_width=True,hide_index=True)
+                    if not audit.empty: st.dataframe(audit,use_container_width=True,hide_index=True)
+                    record_artifact(username,"digital_twin_what_if",module,{"changes":changes,"audit":audit.to_dict("records")},workspace)
+        with t3:
+            replay=twin_replay(username,workspace=workspace)
+            st.dataframe(replay,use_container_width=True,hide_index=True)
+        with t4:
+            scenario_name=st.text_input("Scenario name","Capacity Shock",key="ent_twin_scenario_name")
+            params=st.text_area("Scenario parameters JSON",'{"capacity_delta":-10}',key="ent_twin_scenario_params")
+            if st.button("💾 Save twin scenario",key="ent_twin_save_scenario"):
+                try:
+                    save_twin_scenario(username,scenario_name,json.loads(params),parent_name="Live",workspace=workspace)
+                    st.success("Scenario saved.")
+                except Exception as exc: st.error(f"Scenario could not be saved: {exc}")
+            st.dataframe(list_twin_scenarios(username,workspace),use_container_width=True,hide_index=True)
+
+    # Control Tower: consume existing module/session state instead of duplicating it.
+    if module in {"Industrial Control Center","Control Tower","Industrial Operating System"}:
+        st.markdown("### 🛰️ Unified Industrial Control Tower")
+        state={
+            "Production":{"records":len(st.session_state.get("mes_wo_df",[])),"status":"Ready","kpi":"Production"},
+            "Supply":{"records":len(st.session_state.get("customers_list",[])),"status":"Ready","kpi":"Demand nodes"},
+            "Inventory":{"records=len(st.session_state.get("meio_data",[])) if isinstance(st.session_state.get("meio_data"),list) else 0,"status":"Ready","kpi":"MEIO"},
+            "Quality":{"records":len(st.session_state.get("quality_df",[])) if isinstance(st.session_state.get("quality_df"),pd.DataFrame) else 0,"status":"Ready","kpi":"Quality"},
+            "Maintenance":{"records":len(st.session_state.get("maint_df",[])) if isinstance(st.session_state.get("maint_df"),pd.DataFrame) else 0,"status":"Ready","kpi":"Maintenance"},
+            "Transport":{"records":len(st.session_state.get("fleet_list",[])),"status":"Ready","kpi":"Fleet"},
+            "Workforce":{"records":len(st.session_state.get("work_elements",[])) if isinstance(st.session_state.get("work_elements"),pd.DataFrame) else 0,"status":"Ready","kpi":"Work elements"},
+            "Energy":{"records":len(st.session_state.get("energy_units",[])) if isinstance(st.session_state.get("energy_units"),pd.DataFrame) else 0,"status":"Ready","kpi":"Energy"},
+            "Carbon":{"records":len(st.session_state.get("sustain_df",[])) if isinstance(st.session_state.get("sustain_df"),pd.DataFrame) else 0,"status":"Ready","kpi":"Carbon"},
+        }
+        health=build_control_tower_health(state)
+        st.dataframe(health,use_container_width=True,hide_index=True)
+        st.plotly_chart(px.bar(health,x="Area",y="Records",color="Health",title="Unified industrial health map"),use_container_width=True)
+
+    # Connectivity: replace simulated success with explicit health state.
+    if module == "Industrial Connectivity Hub":
+        st.markdown("### 🔌 Connector Health & Governance")
+        ch=connector_health_frame(username,workspace)
+        st.dataframe(ch,use_container_width=True,hide_index=True)
+        st.caption("Credentials are never persisted by this surface.")
+        record_artifact(username,"connector_catalog",module,{"supported_systems":["SAP","Oracle","WMS","MES","ERP","SQL","REST","MQTT","OPC-UA"]},workspace)
+
+    # Security: show real configuration state rather than claiming SSO/MFA is already active.
+    if module == "Enterprise Security & Governance":
+        st.markdown("### 🔐 Workspace Security Policy")
+        policy=security_policy(username,workspace)
+        st.json(policy)
+        require=st.checkbox("Require MFA for this workspace",value=bool(policy.get("require_mfa")),key="ent_security_mfa")
+        oidc=st.checkbox("Enable OIDC configuration",value=bool(policy.get("oidc_enabled")),key="ent_security_oidc")
+        provider=st.text_input("OIDC provider identifier",value=str(policy.get("oidc_provider") or ""),key="ent_security_provider")
+        if st.button("💾 Save security policy",key="ent_security_save"):
+            upsert_security_policy(username,require,provider,oidc,int(policy.get("retention_days",365)),workspace)
+            create_generic_audit_event(username,"security_policy_update","Enterprise security policy changed.",workspace)
+            st.success("Security policy saved.")
+
+    # Collaboration: shared comments, assignments and reviewer records.
+    if module in {"Team Workspaces & RBAC","Enterprise Integration & Collaboration","Enterprise Integration","Collaboration Suite"}:
+        st.markdown("### 👥 Collaboration & Review")
+        c1,c2=st.columns(2)
+        with c1:
+            subject=st.text_input("Subject",key="ent_collab_subject")
+            body=st.text_area("Comment / assignment",key="ent_collab_body")
+            assignee=st.text_input("Assignee",key="ent_collab_assignee")
+            reviewer=st.text_input("Reviewer",key="ent_collab_reviewer")
+            if st.button("💬 Add collaboration item",key="ent_collab_add"):
+                if body.strip():
+                    add_collaboration_item(username,"comment",body,subject,assignee,reviewer,workspace=workspace)
+                    st.success("Collaboration item saved.")
+        with c2:
+            st.dataframe(collaboration_frame(username,workspace),use_container_width=True,hide_index=True)
+
+    # Knowledge layer: organizational context for Copilot and engineering modules.
+    if module in {"AI Copilot","Advanced Engineering Copilot","Engineering Decision Center","Global Project & Digital Thread"}:
+        st.markdown("### 📚 Engineering Knowledge Layer")
+        query=st.text_input("Search SOPs, standards, manuals and engineering notes",key="ent_knowledge_query")
+        if query.strip():
+            st.dataframe(search_knowledge(username,query,workspace),use_container_width=True,hide_index=True)
+        with st.expander("Add knowledge source"):
+            name=st.text_input("Document name",key="ent_knowledge_name")
+            content=st.text_area("Text / extracted content",key="ent_knowledge_content")
+            tags=st.text_input("Tags",key="ent_knowledge_tags")
+            if st.button("📚 Register knowledge",key="ent_knowledge_add"):
+                if name.strip() and content.strip():
+                    add_knowledge_document(username,name,content,"text",[x.strip() for x in tags.split(",") if x.strip()],workspace)
+                    st.success("Knowledge source registered.")
+
+    # Data intelligence is shared with Excel-first and data-platform workflows.
+    if module in {"Industrial Data Platform","Engineering Validation Center","AI Copilot","Industrial Data Model & Digital Thread"}:
+        df=st.session_state.get("data_platform_latest_df")
+        if isinstance(df,pd.DataFrame) and not df.empty:
+            st.markdown("### 🔍 Data Intelligence")
+            reference=st.session_state.get("data_intelligence_reference")
+            report=profile_data_intelligence(df,reference if isinstance(reference,pd.DataFrame) else None)
+            a,b,c,d=st.columns(4)
+            a.metric("Quality score",f'{report["data_quality_score"]:.1f}')
+            b.metric("Missing cells",f'{report["missing_cells"]:,}')
+            c.metric("Duplicates",f'{report["duplicate_rows"]:,}')
+            d.metric("Outlier cells",f'{sum(report["outlier_counts"].values()):,}')
+            st.json({"IDs":report["id_columns"],"Dates":report["date_like_columns"],"Units":report["units"],"Drift PSI":report["drift_psi"]})
+
+    # Jobs: expose durable job history wherever long-running engineering work is managed.
+    if module in {"Industrial Simulation Lab","Experiment Lab","Engineering Model Registry","Advanced Planning & Scheduling","AI Copilot"}:
+        jobs=list_jobs(username,workspace)
+        if not jobs.empty:
+            with st.expander("🕐 Background Jobs & History",expanded=False):
+                st.dataframe(jobs,use_container_width=True,hide_index=True)
+
+    # Research Studio: preserve the existing Research Workspace and add reproducible paper packaging.
+    if module in {"Experiment Lab","Statistical Hypothesis Testing","Literature & Citation Matrix","LaTeX Document Formatter"}:
+        with st.expander("📝 Reproducible Research Package",expanded=False):
+            st.caption("Uses the existing research protocol/run records; this adds a single provenance-aware package surface.")
+            tables=[]
+            for key,label in [("experiment_results","Experiment Results"),("experiment_df","Experiment Inputs"),("stats_result_df","Statistics")]:
+                value=st.session_state.get(key)
+                if isinstance(value,pd.DataFrame) and not value.empty: tables.append((label,value))
+            if tables and st.button("📦 Build research-paper bundle",key="ent_research_bundle"):
+                bundle=build_research_paper_bundle("Shoir-IE Research Export",module,tables,provenance=[str(st.session_state.get("sx_research_study_id","active-study"))])
+                st.download_button("Download reproducible research bundle",bundle,"shoir_ie_research_bundle.zip","application/zip",key="ent_research_bundle_download")
