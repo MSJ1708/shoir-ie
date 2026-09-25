@@ -30,6 +30,17 @@ from shoir_optimization import (
     solve_linear_program, solve_quadratic_program, solve_robust_linear_program,
     solve_stochastic_linear_program, pareto_weight_sweep,
 )
+from shoir_enterprise_ops import (
+    render_connectivity_extension,
+    render_model_registry_extension,
+    render_jobs_extension,
+    render_research_extension,
+    render_reporting_extension,
+    render_security_extension,
+    render_economics_extension,
+    render_sustainability_extension,
+    render_realtime_monitoring_extension,
+)
 
 PLATFORM_CATALOG = [
     {"tier":"Enterprise","category":"Platform","name":"Industrial Operating System","when":"Unified KPI, method, scenario, process, model-health, improvement and decision-verification workspace.","example":"Connect engineering analysis outputs through one governed decision layer with reusable templates and exports."},
@@ -848,6 +859,8 @@ def render_module(module: str, tier: str, username: str):
         if "sim_des_result" in st.session_state: tables.append(("DES Replications",st.session_state["sim_des_result"]))
         if "sim_agent_result" in st.session_state: tables.append(("Agent Summary",st.session_state["sim_agent_result"]))
         if "sd" in st.session_state: tables.append(("System Dynamics",st.session_state["sd"]))
+        render_jobs_extension(username, module)
+        render_realtime_monitoring_extension(st.session_state.get("iot_sensors", []), module)
         render_export_bar(module,tables,[],tier,username)
     elif module=="3D Factory Designer":
         df=st.data_editor(st.session_state.setdefault("factory3d_df",pd.DataFrame({"Asset":["CNC-01","Assembly","Packing","WIP Buffer"],"Type":["Machine","Station","Station","Storage"],"X":[0,6,12,3],"Y":[0,2,2,5],"Z":[0,0,0,0],"Length":[2,4,4,3],"Width":[2,2,2,3],"Height":[2,3,3,2]})),num_rows="dynamic",use_container_width=True,key="factory3d_editor")
@@ -890,7 +903,8 @@ def render_module(module: str, tier: str, username: str):
             st.info("MQTT and OPC-UA connectors are configuration-ready. Live sessions require the site broker/server and protocol libraries.")
             mqtt_topic=st.text_input("MQTT topic","factory/telemetry/#"); opc_url=st.text_input("OPC-UA endpoint","opc.tcp://localhost:4840")
             if st.button("🧪 Validate Connector Settings",use_container_width=True,key="conn_validate"): st.write({"MQTT":mqtt_topic,"OPC-UA":opc_url,"Status":"Configuration accepted; no live connection attempted."})
-        render_export_bar(module,[("Connector Profiles",conn_df)],tier,username)
+        render_connectivity_extension()
+        render_export_bar(module,[("Connector Profiles",conn_df),("Connector Health",st.session_state.get("connectivity_health_df",pd.DataFrame()))],tier,username)
     elif module=="Multi-Objective Optimization":
         st.subheader("⚖️ Multi-Objective Optimization & Pareto Studio")
         tabs_mo=st.tabs(["📈 Pareto Explorer","🧮 LP / Nonlinear / Robust / Stochastic"])
@@ -982,6 +996,7 @@ def render_module(module: str, tier: str, username: str):
             except Exception as exc: st.error(f"Could not register model: {exc}")
         with sqlite3.connect("enterprise_full_workspace.db") as c: reg=pd.read_sql("SELECT * FROM platform_models ORDER BY created_at DESC",c)
         st.dataframe(reg,use_container_width=True,hide_index=True)
+        render_model_registry_extension(username)
         render_export_bar(module,[("Registry",df),("Persisted Models",reg)],tier,username)
     elif module=="Experiment Lab":
         scenarios=st.data_editor(st.session_state.setdefault("experiment_df",pd.DataFrame({"Scenario":["Baseline","High Demand","Supplier Shock","Capacity Expansion"],"Cost":[100000,125000,142000,115000],"Service":[95,90,82,98],"Risk":[10,18,35,8],"Inventory":[5000,6200,7000,4700],"Carbon":[1000,1100,1300,850]})),num_rows="dynamic",use_container_width=True,key="experiment_editor")
@@ -989,6 +1004,7 @@ def render_module(module: str, tier: str, username: str):
             st.session_state["experiment_results"]=scenarios.assign(CostDelta=scenarios["Cost"]-scenarios["Cost"].iloc[0],ServiceDelta=scenarios["Service"]-scenarios["Service"].iloc[0],RiskDelta=scenarios["Risk"]-scenarios["Risk"].iloc[0])
             expid=save_experiment("Scenario Matrix",module,scenarios.to_dict("records"),st.session_state["experiment_results"].to_dict("records"),username); st.success(f"Experiment saved: {expid}")
         st.dataframe(st.session_state.get("experiment_results",scenarios),use_container_width=True)
+        render_research_extension(username)
         render_export_bar(module,[("Scenarios",scenarios),("Experiment Results",st.session_state.get("experiment_results",pd.DataFrame()))],tier,username)
     elif module=="Industrial Control Center":
         st.subheader("Unified Operations Health")
@@ -1108,7 +1124,9 @@ def render_module(module: str, tier: str, username: str):
         salvage=st.number_input("Salvage value",0.0,100000000.0,0.0,key="capex_salvage")
         if st.button("💰 Calculate NPV / IRR / Payback",type="primary",use_container_width=True,key="capex_run"): st.session_state["capex_result"]=capital_metrics(initial,cf["Cash Flow"].tolist(),rate,salvage)
         if "capex_result" in st.session_state: st.json(st.session_state["capex_result"])
-        render_export_bar(module,[("Cash Flows",cf),("Capital Metrics",pd.DataFrame([st.session_state.get("capex_result",{})]))],tier,username)
+        render_economics_extension(username)
+        render_reporting_extension(module,[("Cash Flows",cf),("Capital Metrics",pd.DataFrame([st.session_state.get("capex_result",{})])),("TCO",st.session_state.get("engineering_economics_tco_df",pd.DataFrame()))],username)
+        render_export_bar(module,[("Cash Flows",cf),("Capital Metrics",pd.DataFrame([st.session_state.get("capex_result",{})])),("TCO",st.session_state.get("engineering_economics_tco_df",pd.DataFrame()))],tier,username)
     elif module=="Workforce Engineering":
         tabs=st.tabs(["Balance & Takt","Staffing","Skills / Ergonomics"])
         with tabs[0]:
@@ -1129,7 +1147,8 @@ def render_module(module: str, tier: str, username: str):
         if "sustain_result" in st.session_state:
             res=st.session_state["sustain_result"]; st.metric("Total tCO2e",f'{res["tCO2e"].sum():,.2f}'); st.dataframe(lca_summary(res),use_container_width=True); fig=px.bar(res,x="Activity",y="tCO2e",color="Scope",title="Lifecycle Footprint")
             st.plotly_chart(fig,use_container_width=True)
-        render_export_bar(module,[("Sustainability Inputs",df),("Footprint",st.session_state.get("sustain_result",pd.DataFrame()))],[("Footprint",fig)] if "fig" in locals() else [],tier,username)
+        render_sustainability_extension(username)
+        render_export_bar(module,[("Sustainability Inputs",df),("Footprint",st.session_state.get("sustain_result",pd.DataFrame())),("Decision Bridge",st.session_state.get("sustainability_decision_bridge_df",pd.DataFrame()))],[("Footprint",fig)] if "fig" in locals() else [],tier,username)
     elif module=="Benchmarking & Engineering Standards":
         actual=st.data_editor(st.session_state.setdefault("benchmark_actual",pd.DataFrame({"Metric":["OEE","OTIF","Inventory Turns","Energy per Unit"],"Actual":[82,96,5.2,1.8]})),num_rows="dynamic",use_container_width=True,key="benchmark_actual_editor")
         bench=st.data_editor(st.session_state.setdefault("benchmark_targets",pd.DataFrame({"Metric":["OEE","OTIF","Inventory Turns","Energy per Unit"],"Benchmark":[85,98,6.0,1.5],"Unit":["%","%","x","kWh/unit"],"Source":["Company Target"]*4,"Source Date":["2026-01"]*4})),num_rows="dynamic",use_container_width=True,key="benchmark_targets_editor")
@@ -1220,6 +1239,7 @@ def render_module(module: str, tier: str, username: str):
         report=st.data_editor(st.session_state.setdefault("exec_report_df",pd.DataFrame({"KPI":["Cost","Service Level","Carbon","Risk"],"Baseline":[100,95,100,10],"Scenario":[92,97,84,8],"Unit":["index","%","index","index"]})),num_rows="dynamic",use_container_width=True,key="exec_report_editor")
         fig=px.bar(report,x="KPI",y=["Baseline","Scenario"],barmode="group",title="Executive KPI Comparison")
         st.plotly_chart(fig,use_container_width=True)
+        render_reporting_extension(module,[("Executive KPIs",report)],username)
         render_export_bar(module,[("Executive KPIs",report)],[("Executive KPI Chart",fig)],tier,username)
     elif module=="Predictive Maintenance Digital Twin":
         st.subheader("🛠️ Predictive Maintenance")
@@ -1250,6 +1270,7 @@ def render_module(module: str, tier: str, username: str):
         with tabs[2]:
             with sqlite3.connect("enterprise_full_workspace.db") as c: audit=pd.read_sql("SELECT * FROM security_events ORDER BY id DESC LIMIT 200",c)
             st.dataframe(audit,use_container_width=True,hide_index=True)
-            render_export_bar(module,[("Roles",role),("Security Events",audit)],tier,username)
+            render_security_extension()
+            render_export_bar(module,[("Roles",role),("Security Events",audit),("Security Posture",st.session_state.get("enterprise_security_posture_df",pd.DataFrame()))],tier,username)
     else:
         render_blank_module_studio(module, tier, username)
