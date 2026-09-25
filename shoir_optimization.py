@@ -129,6 +129,10 @@ def solve_stochastic_linear_program(
     probabilities: Sequence[float] | None = None,
     risk_aversion: float = 0.0,
     *,
+    A_ub: Sequence[Sequence[float]] | None = None,
+    b_ub: Sequence[float] | None = None,
+    A_eq: Sequence[Sequence[float]] | None = None,
+    b_eq: Sequence[float] | None = None,
     bounds: Sequence[tuple[float | None, float | None]] | None = None,
 ) -> dict[str, Any]:
     """Sample-average stochastic objective with a risk penalty proxy."""
@@ -140,7 +144,7 @@ def solve_stochastic_linear_program(
     expected=np.sum(scenarios*probs[:,None],axis=0)
     sd=np.sqrt(np.sum(((scenarios-expected)**2)*probs[:,None],axis=0))
     effective=expected+float(max(0.0,risk_aversion))*sd
-    result=solve_linear_program(effective,bounds=bounds)
+    result=solve_linear_program(effective,A_ub=A_ub,b_ub=b_ub,A_eq=A_eq,b_eq=b_eq,bounds=bounds)
     result.update({"expected_coefficients":expected,"scenario_std":sd,"risk_aversion":float(risk_aversion),"probabilities":probs})
     return result
 
