@@ -37,3 +37,27 @@ def test_auto_chart_detects_flow_and_gantt():
         "Finish": pd.to_datetime(["2026-01-02"]),
     })
     assert _auto_chart_choice(gantt) == "Gantt"
+
+
+def test_enterprise_operations_visualizations_render():
+    twin = pd.DataFrame({
+        "Tick": [1, 2, 3],
+        "WIP": [10, 12, 9],
+        "Utilization %": [80, 90, 70],
+    })
+    assert _make_figure(twin, "Line", "Tick", "WIP", None, "Twin Replay") is not None
+
+    health = pd.DataFrame({
+        "Area": ["Production", "Supply"],
+        "Health %": [90, 70],
+        "Status": ["Observed", "Review"],
+    })
+    assert _auto_chart_choice(health) == "Bar"
+
+    network = pd.DataFrame({
+        "Origin": ["Plant A", "Plant B"],
+        "Destination": ["Market 1", "Market 2"],
+        "Distance km": [100, 150],
+        "Scenario Freight Cost": [5000, 9000],
+    })
+    assert _auto_chart_choice(network) == "Sankey"
