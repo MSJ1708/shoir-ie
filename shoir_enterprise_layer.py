@@ -1162,7 +1162,7 @@ def render_enterprise_integration_surface(module: str, username: str, tier: str)
         state={
             "Production":{"records":len(st.session_state.get("mes_wo_df",[])),"status":"Ready","kpi":"Production"},
             "Supply":{"records":len(st.session_state.get("customers_list",[])),"status":"Ready","kpi":"Demand nodes"},
-            "Inventory":{"records=len(st.session_state.get("meio_data",[])) if isinstance(st.session_state.get("meio_data"),list) else 0,"status":"Ready","kpi":"MEIO"},
+            "Inventory":{"records":len(st.session_state.get("meio_data",[])) if isinstance(st.session_state.get("meio_data"),list) else 0,"status":"Ready","kpi":"MEIO"},
             "Quality":{"records":len(st.session_state.get("quality_df",[])) if isinstance(st.session_state.get("quality_df"),pd.DataFrame) else 0,"status":"Ready","kpi":"Quality"},
             "Maintenance":{"records":len(st.session_state.get("maint_df",[])) if isinstance(st.session_state.get("maint_df"),pd.DataFrame) else 0,"status":"Ready","kpi":"Maintenance"},
             "Transport":{"records":len(st.session_state.get("fleet_list",[])),"status":"Ready","kpi":"Fleet"},
