@@ -8989,7 +8989,19 @@ if selected_module in ["Enterprise Integration & Collaboration", "Enterprise Int
 
     render_collaboration_extension(st.session_state.get("current_user","unknown"))
     render_connectivity_extension()
+    if isinstance(st.session_state.get("connectivity_health_df"), pd.DataFrame):
+        render_data_intelligence_extension(
+            "Enterprise Integration & Collaboration",
+            st.session_state["connectivity_health_df"],
+            st.session_state.get("connectivity_health_df"),
+        )
     render_security_extension()
+    if isinstance(st.session_state.get("enterprise_security_posture_df"), pd.DataFrame):
+        render_data_intelligence_extension(
+            "Enterprise Security & Governance",
+            st.session_state["enterprise_security_posture_df"],
+            st.session_state.get("enterprise_security_posture_df"),
+        )
     render_live_visualization_studio("Enterprise Integration & Collaboration", expanded=False)
     st.stop()
     
