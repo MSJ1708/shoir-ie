@@ -385,7 +385,7 @@ def _experiment_source_df(module: str) -> pd.DataFrame:
             return candidate.copy(deep=True)
     except Exception:
         pass
-    candidate = st.session_state.get("experiment_df", pd.DataFrame())
+    candidate = st.session_state.get("experiment_engine_data", _experiment_source_df(module))
     return candidate.copy(deep=True) if isinstance(candidate, pd.DataFrame) else pd.DataFrame()
 
 
@@ -415,7 +415,7 @@ def render_experiment_engine(module: str, username: str, protocol: Mapping[str, 
         factors_df = st.data_editor(defaults, num_rows="dynamic", use_container_width=True, key="experiment_factor_editor")
         c1,c2,c3 = st.columns(3)
         with c1:
-            response_col = st.selectbox("Response column (after measurements)", ["(none)"] + [str(c) for c in st.session_state.get("experiment_df", pd.DataFrame()).columns], key="experiment_doe_response")
+            response_col = st.selectbox("Response column (after measurements)", ["(none)"] + [str(c) for c in st.session_state.get("experiment_engine_data", _experiment_source_df(module)).columns], key="experiment_doe_response")
         with c2:
             boot = st.number_input("Effect bootstrap", 200, 10000, 2000, 200, key="experiment_doe_boot")
         with c3:
@@ -440,7 +440,7 @@ def render_experiment_engine(module: str, username: str, protocol: Mapping[str, 
             st.markdown("#### Editable run sheet")
             design = st.data_editor(st.session_state["experiment_doe_design"], num_rows="dynamic", use_container_width=True, key="experiment_doe_results_editor")
             st.session_state["experiment_doe_design"] = design.copy(deep=True)
-            if response_col != "(none)" and response_col in st.session_state.get("experiment_df", pd.DataFrame()).columns:
+            if response_col != "(none)" and response_col in st.session_state.get("experiment_engine_data", _experiment_source_df(module)).columns:
                 st.caption("The selected response column is reference data only; the generated DOE run sheet remains editable so you can paste measured results.")
             if st.button("📐 Analyze Factor Effects", use_container_width=True, key="experiment_factorial_analyze"):
                 try:
@@ -488,7 +488,7 @@ def render_experiment_engine(module: str, username: str, protocol: Mapping[str, 
                 st.plotly_chart(px.histogram(st.session_state["experiment_mc_results"],x="Propagated KPI",nbins=50,title="Monte Carlo Propagated KPI Distribution"),use_container_width=True)
 
     with tabs[2]:
-        source = st.session_state.get("experiment_df", pd.DataFrame())
+        source = st.session_state.get("experiment_engine_data", _experiment_source_df(module))
         nums = [str(c) for c in source.columns if pd.api.types.is_numeric_dtype(source[c])]
         if not nums:
             st.info("Load experiment data first.")
@@ -519,7 +519,7 @@ def render_experiment_engine(module: str, username: str, protocol: Mapping[str, 
                 st.plotly_chart(px.histogram(st.session_state["experiment_bootstrap_results"],x=st.session_state["experiment_bootstrap_results"].columns[0],nbins=50,title="Bootstrap Distribution"),use_container_width=True)
 
     with tabs[3]:
-        source = st.session_state.get("experiment_df", pd.DataFrame())
+        source = st.session_state.get("experiment_engine_data", _experiment_source_df(module))
         if source.empty:
             st.info("Load experiment data first.")
         else:
