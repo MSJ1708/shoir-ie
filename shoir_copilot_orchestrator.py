@@ -394,7 +394,7 @@ def build_export_bundle(
 
 
 
-def build_workflow_plan(prompt: str, module: str, df: pd.DataFrame) -> dict[str, Any]:
+def build_workflow_plan(prompt: str, module: str, df: pd.DataFrame, knowledge_documents: int = 0) -> dict[str, Any]:
     """Create the visible, reviewable execution plan before any analysis runs."""
     inspection = inspect_data(df)
     intent = classify_request(prompt)
@@ -405,7 +405,7 @@ def build_workflow_plan(prompt: str, module: str, df: pd.DataFrame) -> dict[str,
         {"step": "Run analysis", "status": "Ready", "detail": "Read-only, deterministic analysis on the selected dataset."},
         {"step": "Generate graph", "status": "Ready", "detail": "Create a Plotly view from the actual analysis output."},
         {"step": "Compare scenarios", "status": "Conditional", "detail": "Runs when baseline/scenario structure exists in the selected data."},
-        {"step": "Explain", "status": "Ready", "detail": "Translate observed evidence, assumptions and limitations into operator language."},
+        {"step": "Explain", "status": "Ready", "detail": f"Translate observed evidence, assumptions and limitations into operator language; {int(knowledge_documents)} linked knowledge document(s) are available as context."},
         {"step": "Export", "status": "Ready", "detail": "Package results, method, data profile and the generated graph."},
     ]
     return {
@@ -424,6 +424,8 @@ def run_orchestration(prompt: str, module: str, df: pd.DataFrame, context: Mappi
     intent_info = classify_request(prompt)
     method = choose_method(intent_info["intent"], inspection)
     runtime = dict(context or {})
+    knowledge_text = str(runtime.get("knowledge_context") or "").strip()
+    knowledge_docs = int(runtime.get("knowledge_documents", 0) or 0)
     if intent_info["intent"] == "optimization" and callable(runtime.get("milp_solver")):
         customers = runtime.get("customers") or []
         warehouses = runtime.get("warehouses") or []
@@ -472,5 +474,7 @@ def run_orchestration(prompt: str, module: str, df: pd.DataFrame, context: Mappi
         "export": export,
         "module": module,
         "prompt": prompt,
+        "knowledge_context": knowledge_text[:12000] if knowledge_text else "",
+        "knowledge_documents": knowledge_docs,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
