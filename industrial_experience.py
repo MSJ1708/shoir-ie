@@ -19,6 +19,8 @@ import numpy as np
 import pandas as pd
 import plotly.express as px
 
+from shoir_experiment_engine import render_experiment_engine
+
 try:
     from durable_account_store import (
         durable_backend_configured,
@@ -131,6 +133,7 @@ def ensure_experience_db(path: str = "enterprise_full_workspace.db") -> None:
             "CREATE TABLE IF NOT EXISTS experience_project_snapshots(id INTEGER PRIMARY KEY AUTOINCREMENT,project_id TEXT,snapshot_no INTEGER,payload_json TEXT,created_at TEXT)",
             "CREATE TABLE IF NOT EXISTS experience_lineage(id INTEGER PRIMARY KEY AUTOINCREMENT,source_type TEXT,source_id TEXT,target_type TEXT,target_id TEXT,relation TEXT,actor TEXT,created_at TEXT)",
             "CREATE TABLE IF NOT EXISTS experience_decisions(decision_id TEXT PRIMARY KEY,title TEXT,module TEXT,status TEXT,metrics_json TEXT,assumptions_json TEXT,uncertainty_json TEXT,owner TEXT,created_at TEXT,updated_at TEXT)",
+            "CREATE TABLE IF NOT EXISTS experience_decision_specs(decision_id TEXT PRIMARY KEY,baseline_json TEXT,alternatives_json TEXT,constraints_json TEXT,kpis_json TEXT,uncertainty_json TEXT,evidence_json TEXT,verification_json TEXT,owner TEXT,created_at TEXT,updated_at TEXT)",
             "CREATE TABLE IF NOT EXISTS experience_decision_approvals(id INTEGER PRIMARY KEY AUTOINCREMENT,decision_id TEXT,from_status TEXT,to_status TEXT,actor TEXT,comment TEXT,created_at TEXT)",
             "CREATE TABLE IF NOT EXISTS experience_comments(id INTEGER PRIMARY KEY AUTOINCREMENT,project_id TEXT,decision_id TEXT,actor TEXT,comment TEXT,created_at TEXT)",
             "CREATE TABLE IF NOT EXISTS experience_jobs(job_id TEXT PRIMARY KEY,module TEXT,job_type TEXT,status TEXT,progress REAL,message TEXT,payload_json TEXT,started_at TEXT,finished_at TEXT)",
@@ -244,6 +247,100 @@ def create_decision(
         )
         conn.commit()
     return did
+
+
+def save_decision_spec(
+    decision_id: str,
+    owner: str,
+    baseline: Mapping[str, Any],
+    alternatives: Any,
+    constraints: Mapping[str, Any],
+    kpis: Any,
+    uncertainty: Mapping[str, Any],
+    evidence: Any,
+    verification: Any,
+) -> None:
+    """Persist the richer decision card specification beside the governed status record."""
+    ensure_experience_db()
+    now = _now()
+    with _db() as conn:
+        conn.execute(
+            """
+            INSERT INTO experience_decision_specs(
+                decision_id,baseline_json,alternatives_json,constraints_json,
+                kpis_json,uncertainty_json,evidence_json,verification_json,
+                owner,created_at,updated_at
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(decision_id) DO UPDATE SET
+                baseline_json=excluded.baseline_json,
+                alternatives_json=excluded.alternatives_json,
+                constraints_json=excluded.constraints_json,
+                kpis_json=excluded.kpis_json,
+                uncertainty_json=excluded.uncertainty_json,
+                evidence_json=excluded.evidence_json,
+                verification_json=excluded.verification_json,
+                updated_at=excluded.updated_at
+            """,
+            (
+                str(decision_id),
+                json.dumps(dict(baseline or {}), default=str),
+                json.dumps(alternatives if isinstance(alternatives, list) else list(alternatives or []), default=str),
+                json.dumps(dict(constraints or {}), default=str),
+                json.dumps(kpis if isinstance(kpis, list) else list(kpis or []), default=str),
+                json.dumps(dict(uncertainty or {}), default=str),
+                json.dumps(evidence if isinstance(evidence, list) else list(evidence or []), default=str),
+                json.dumps(verification if isinstance(verification, list) else list(verification or []), default=str),
+                str(owner),
+                now,
+                now,
+            ),
+        )
+        conn.commit()
+
+
+def load_decision_spec(decision_id: str, owner: str | None = None) -> dict[str, Any] | None:
+    ensure_experience_db()
+    query = (
+        "SELECT baseline_json,alternatives_json,constraints_json,kpis_json,"
+        "uncertainty_json,evidence_json,verification_json,owner,updated_at "
+        "FROM experience_decision_specs WHERE decision_id=?"
+    )
+    params: list[Any] = [str(decision_id)]
+    if owner is not None:
+        query += " AND owner=?"
+        params.append(str(owner))
+    with _db() as conn:
+        row = conn.execute(query, params).fetchone()
+    if not row:
+        return None
+    keys = ["baseline","alternatives","constraints","kpis","uncertainty","evidence","verification","owner","updated_at"]
+    out: dict[str, Any] = {}
+    for key, raw in zip(keys, row):
+        if key in {"owner","updated_at"}:
+            out[key] = raw
+            continue
+        try:
+            out[key] = json.loads(raw or ("{}" if key in {"baseline","constraints","uncertainty"} else "[]"))
+        except Exception:
+            out[key] = {} if key in {"baseline","constraints","uncertainty"} else []
+    return out
+
+
+def decision_approval_history(decision_id: str) -> pd.DataFrame:
+    ensure_experience_db()
+    with _db() as conn:
+        rows = conn.execute(
+            """
+            SELECT from_status,to_status,actor,comment,created_at
+            FROM experience_decision_approvals
+            WHERE decision_id=?
+            ORDER BY id ASC
+            """,
+            (str(decision_id),),
+        ).fetchall()
+    return pd.DataFrame(rows, columns=["From","To","Actor","Comment","Timestamp"]) if rows else pd.DataFrame(
+        columns=["From","To","Actor","Comment","Timestamp"]
+    )
 
 
 def transition_decision(decision_id: str, actor: str, to_status: str, comment: str = "") -> None:
@@ -1180,7 +1277,7 @@ def render_research_workspace(module: str, tier: str, username: str) -> None:
     c3.metric("Runs for active study", len(runs))
     c4.metric("Decision records", len(decisions))
 
-    tabs = st.tabs(["📚 Studies & Recovery","📋 Protocol","🧪 Runs & Results","📝 Decisions","📦 Evidence & Export"])
+    tabs = st.tabs(["📚 Studies & Recovery","📋 Protocol","🧪 Experiment Engine","🧪 Runs & Results","📝 Decisions","📦 Evidence & Export"])
 
     with tabs[0]:
         st.markdown("### Saved research studies")
@@ -1338,6 +1435,13 @@ def render_research_workspace(module: str, tier: str, username: str) -> None:
                 st.rerun()
 
     with tabs[2]:
+        render_experiment_engine(
+            module="Experiment Lab",
+            username=username,
+            protocol=active_protocol,
+        )
+
+    with tabs[3]:
         st.markdown("### Run history")
         if not active_protocol:
             st.info("Select a saved study first.")
@@ -1398,14 +1502,14 @@ def render_research_workspace(module: str, tier: str, username: str) -> None:
                 except Exception as exc:
                     st.error("Run recovery failed: " + str(exc))
 
-    with tabs[3]:
+    with tabs[4]:
         st.markdown("### Decision records")
         if decisions.empty:
             st.info("No persisted decision records exist for this workspace.")
         else:
             st.dataframe(decisions, use_container_width=True, hide_index=True)
 
-    with tabs[4]:
+    with tabs[5]:
         st.markdown("### Evidence & export")
         if not active_protocol:
             st.info("Select a saved study first.")

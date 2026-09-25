@@ -20,7 +20,16 @@ import pandas as pd
 from scipy import stats
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
-from industrial_experience import render_experience_shell, render_blank_module_studio
+from industrial_experience import (
+    render_experience_shell, render_blank_module_studio, create_decision,
+    transition_decision, save_decision_spec, load_decision_spec,
+    decision_approval_history,
+)
+from shoir_forecasting import engineering_forecast, infer_forecast_target, FORECAST_TARGETS
+from shoir_optimization import (
+    solve_linear_program, solve_quadratic_program, solve_robust_linear_program,
+    solve_stochastic_linear_program, pareto_weight_sweep,
+)
 
 PLATFORM_CATALOG = [
     {"tier":"Enterprise","category":"Platform","name":"Industrial Operating System","when":"Unified KPI, method, scenario, process, model-health, improvement and decision-verification workspace.","example":"Connect engineering analysis outputs through one governed decision layer with reusable templates and exports."},
@@ -521,10 +530,10 @@ MODULE_TABLE_KEYS = {
     "Industrial Simulation Lab":[],
     "3D Factory Designer":["factory3d_df"],
     "Industrial Connectivity Hub":["conn_df"],
-    "Multi-Objective Optimization":["multiobj_df"],
-    "Robust & Resilient Optimization":["robust_df"],
+    "Multi-Objective Optimization":["multiobj_df","multiobj_result","pareto","optimization_pareto_df","optimization_result_df"],
+    "Robust & Resilient Optimization":["robust_df","robust_result_df"],
     "Engineering Model Registry":["model_registry_df"],
-    "Experiment Lab":["experiment_df"],
+    "Experiment Lab":["experiment_df","experiment_doe_design","experiment_factorial_effects","experiment_factorial_summary","experiment_mc_results","experiment_mc_result_summary","experiment_bootstrap_results","experiment_bootstrap_summary","experiment_replication_summary","experiment_sensitivity_results"],
     "Industrial Data Platform":[],
     "Capital Investment & Engineering Economics":["capex_df"],
     "Workforce Engineering":["work_elements","skills_df"],
@@ -582,25 +591,20 @@ def render_module_data_exchange(module: str, st, tier: str, username: str) -> No
         module_reset(module,st)
         st.rerun()
 
-def ml_demand_forecast(df: pd.DataFrame, date_col: str, target_col: str, external_cols: Sequence[str]=(), horizon: int=12) -> tuple[pd.DataFrame,dict]:
-    if date_col not in df.columns or target_col not in df.columns: raise ValueError("Forecast requires date and target columns.")
-    d=df.copy(); d[date_col]=pd.to_datetime(d[date_col],errors="coerce"); d[target_col]=pd.to_numeric(d[target_col],errors="coerce")
-    d=d.dropna(subset=[date_col,target_col]).sort_values(date_col).reset_index(drop=True)
-    if len(d)<8: raise ValueError("At least 8 historical observations are required.")
-    x=pd.DataFrame(index=d.index); x["trend"]=np.arange(len(d)); x["sin_month"]=np.sin(2*np.pi*d[date_col].dt.month/12); x["cos_month"]=np.cos(2*np.pi*d[date_col].dt.month/12)
-    used=[]
-    for col in external_cols:
-        if col in d.columns:
-            vals=pd.to_numeric(d[col],errors="coerce")
-            if vals.notna().sum()>=max(5,len(d)//2):
-                x[col]=vals.fillna(vals.median()); used.append(col)
-    model=LinearRegression().fit(x,d[target_col]); pred=model.predict(x); residual=d[target_col]-pred
-    freq=pd.infer_freq(d[date_col]) or "D"; future_dates=pd.date_range(d[date_col].iloc[-1],periods=horizon+1,freq=freq)[1:]
-    fx=pd.DataFrame(index=range(horizon)); fx["trend"]=np.arange(len(d),len(d)+horizon); fx["sin_month"]=np.sin(2*np.pi*future_dates.month/12); fx["cos_month"]=np.cos(2*np.pi*future_dates.month/12)
-    for col in used: fx[col]=float(x[col].iloc[-1])
-    forecast=np.maximum(0,model.predict(fx)); sigma=float(np.std(residual,ddof=max(1,min(1,len(residual)-1))))
-    out=pd.DataFrame({"Date":future_dates,"Forecast":forecast,"Lower 95%":np.maximum(0,forecast-1.96*sigma),"Upper 95%":forecast+1.96*sigma})
-    return out,{"R2":float(r2_score(d[target_col],pred)),"MAE":float(mean_absolute_error(d[target_col],pred)),"RMSE":float(math.sqrt(mean_squared_error(d[target_col],pred))),"Residual Std":sigma,"External Drivers":used}
+def ml_demand_forecast(
+    df: pd.DataFrame,
+    date_col: str,
+    target_col: str,
+    external_cols: Sequence[str] = (),
+    horizon: int = 12,
+) -> tuple[pd.DataFrame, dict]:
+    """Backward-compatible wrapper around the generalized forecasting engine."""
+    forecast, metrics = engineering_forecast(
+        df, date_col, target_col, external_cols, horizon=int(horizon)
+    )
+    out = forecast.loc[forecast["Series"].astype(str).eq("Forecast")].copy()
+    return out.drop(columns=["Series"], errors="ignore"), metrics
+
 
 def save_scenario(name: str, parent_name: str, parameters: dict, kpis: dict, username: str, db_path="enterprise_full_workspace.db") -> str:
     sid="SCN-"+hashlib.sha256((name+username).encode()).hexdigest()[:12].upper()
@@ -888,21 +892,87 @@ def render_module(module: str, tier: str, username: str):
             if st.button("🧪 Validate Connector Settings",use_container_width=True,key="conn_validate"): st.write({"MQTT":mqtt_topic,"OPC-UA":opc_url,"Status":"Configuration accepted; no live connection attempted."})
         render_export_bar(module,[("Connector Profiles",conn_df)],tier,username)
     elif module=="Multi-Objective Optimization":
-        df=st.data_editor(st.session_state.setdefault("multiobj_df",pd.DataFrame({"Scenario":["A","B","C","D"],"Cost":[100,90,130,110],"Carbon":[80,120,60,75],"Service":[94,97,99,96],"Risk":[12,20,8,15]})),num_rows="dynamic",use_container_width=True,key="multiobj_editor")
-        weights={c:st.number_input(c+" weight",0.0,1.0,0.25,key="mo_w_"+c) for c in ["Cost","Carbon","Service","Risk"]}
-        if st.button("⚖️ Calculate Composite Trade-off",type="primary",use_container_width=True,key="multiobj_run"):
-            st.session_state["multiobj_result"]=multiobjective_score(df,weights,{"Service":False,"Cost":True,"Carbon":True,"Risk":True})
-            st.session_state["pareto"]=pareto_frontier(df,["Cost","Carbon","Risk"],[True,True,True])
-        st.dataframe(st.session_state.get("multiobj_result",df),use_container_width=True)
-        if "pareto" in st.session_state: st.write("Pareto Frontier"); st.dataframe(st.session_state["pareto"],use_container_width=True)
-        render_export_bar(module,[("Scenarios",df),("Scored Scenarios",st.session_state.get("multiobj_result",pd.DataFrame())),("Pareto",st.session_state.get("pareto",pd.DataFrame()))],tier,username)
+        st.subheader("⚖️ Multi-Objective Optimization & Pareto Studio")
+        tabs_mo=st.tabs(["📈 Pareto Explorer","🧮 LP / Nonlinear / Robust / Stochastic"])
+        with tabs_mo[0]:
+            df=st.data_editor(
+                st.session_state.setdefault("multiobj_df",pd.DataFrame({
+                    "Scenario":["A","B","C","D"],"Cost":[100,90,130,110],"Carbon":[80,120,60,75],
+                    "Service":[94,97,99,96],"Risk":[12,20,8,15]
+                })),num_rows="dynamic",use_container_width=True,key="multiobj_editor"
+            )
+            st.session_state["multiobj_df"]=df.copy(deep=True)
+            weights={x:st.number_input(x+" weight",0.0,1.0,0.25,key="mo_w_"+x) for x in ["Cost","Carbon","Service","Risk"]}
+            if st.button("⚖️ Calculate Trade-offs & Pareto Frontier",type="primary",use_container_width=True,key="multiobj_run"):
+                try:
+                    st.session_state["multiobj_result"]=multiobjective_score(df,weights,{"Service":False,"Cost":True,"Carbon":True,"Risk":True})
+                    st.session_state["pareto"]=pareto_frontier(df,["Cost","Carbon","Risk"],[True,True,True])
+                    st.session_state["optimization_pareto_df"]=pareto_weight_sweep(df,["Cost","Carbon","Risk"],weights=[weights["Cost"],weights["Carbon"],weights["Risk"]],minimize=[True,True,True])
+                except Exception as exc: st.error(f"Multi-objective analysis failed safely: {exc}")
+            result=st.session_state.get("multiobj_result",df); st.dataframe(result,use_container_width=True,hide_index=True)
+            pareto=st.session_state.get("pareto",pd.DataFrame())
+            if not pareto.empty:
+                st.dataframe(pareto,use_container_width=True,hide_index=True)
+                if {"Cost","Carbon"}<=set(pareto.columns):
+                    fig=px.scatter(pareto,x="Cost",y="Carbon",hover_data=["Scenario"] if "Scenario" in pareto.columns else None,title="Pareto Exploration · Cost vs Carbon")
+                    st.plotly_chart(fig,use_container_width=True)
+            render_export_bar(module,[("Scenarios",df),("Scored Scenarios",result),("Pareto",pareto)],tier,username)
+        with tabs_mo[1]:
+            method=st.selectbox("Optimization method",["LP","Nonlinear (Quadratic)","Robust LP","Stochastic LP"],key="optimization_method")
+            obj=st.data_editor(st.session_state.setdefault("optimization_objective_df",pd.DataFrame({"Variable":["X1","X2","X3"],"Coefficient":[10.0,12.0,8.0],"Quadratic":[0.0,0.0,0.0]})),num_rows="fixed",use_container_width=True,key="optimization_objective_editor")
+            cons=st.data_editor(st.session_state.setdefault("optimization_constraints_df",pd.DataFrame({"Constraint":["Capacity","Required Output"],"X1":[1.0,-1.0],"X2":[1.0,-1.0],"X3":[1.0,-1.0],"RHS":[100.0,-100.0]})),num_rows="dynamic",use_container_width=True,key="optimization_constraint_editor")
+            vars_=[str(v) for v in obj["Variable"].tolist()]
+            scen_df=st.session_state.setdefault("optimization_scenarios_df",pd.DataFrame({"Scenario":["Base","Demand Surge","Supply Shock"],"Probability":[0.6,0.25,0.15],"X1":[10,13,15],"X2":[12,15,18],"X3":[8,10,14]}))
+            if method in {"Robust LP","Stochastic LP"}:
+                scen_df=st.data_editor(scen_df,num_rows="dynamic",use_container_width=True,key="optimization_scenario_editor")
+                st.session_state["optimization_scenarios_df"]=scen_df.copy(deep=True)
+            risk=st.slider("Risk aversion (stochastic only)",0.0,3.0,0.5,0.1,key="optimization_risk_aversion")
+            if st.button("🚀 Solve Optimization Model",type="primary",use_container_width=True,key="optimization_engine_run"):
+                try:
+                    cvec=pd.to_numeric(obj["Coefficient"],errors="raise").to_numpy(float)
+                    A_ub=[[float(row.get(v,0.0)) for v in vars_] for row in cons.to_dict("records")]
+                    b_ub=[float(row.get("RHS",0.0)) for row in cons.to_dict("records")]
+                    bounds=[(0.0,None)]*len(cvec)
+                    if method=="LP": sol=solve_linear_program(cvec,A_ub=A_ub,b_ub=b_ub,bounds=bounds)
+                    elif method=="Nonlinear (Quadratic)":
+                        q=np.diag(pd.to_numeric(obj["Quadratic"],errors="coerce").fillna(0.0).to_numpy(float))
+                        sol=solve_quadratic_program(cvec,q,A_ub=A_ub,b_ub=b_ub,bounds=bounds)
+                    else:
+                        scen_mat=scen_df[vars_].apply(pd.to_numeric,errors="coerce").to_numpy(float)
+                        probs=pd.to_numeric(scen_df["Probability"],errors="coerce").to_numpy(float) if "Probability" in scen_df.columns else None
+                        sol=(solve_robust_linear_program(scen_mat,A_ub=A_ub,b_ub=b_ub,bounds=bounds) if method=="Robust LP" else solve_stochastic_linear_program(scen_mat,probabilities=probs,risk_aversion=float(risk),A_ub=A_ub,b_ub=b_ub,bounds=bounds))
+                    out={v:float(sol["variables"][i]) for i,v in enumerate(vars_)}
+                    out.update({"Objective":float(sol.get("objective",sol.get("worst_case_objective",np.nan))),"Status":str(sol.get("status")),"Iterations":int(sol.get("iterations",0) or 0)})
+                    st.session_state["optimization_result_df"]=pd.DataFrame([out])
+                    st.session_state["optimization_summary"]={k:v for k,v in sol.items() if k not in {"variables","scenario_objectives","probabilities","expected_coefficients","scenario_std"}}
+                    st.success(f"{method} solve completed: {sol.get('status')}")
+                except Exception as exc: st.error(f"{method} optimization failed safely: {exc}")
+            if "optimization_result_df" in st.session_state:
+                st.dataframe(st.session_state["optimization_result_df"],use_container_width=True,hide_index=True)
+                st.json(st.session_state.get("optimization_summary",{}))
+            st.caption("MILP remains the production facility-location/allocation solver; this studio adds LP, nonlinear, robust and stochastic method families.")
     elif module=="Robust & Resilient Optimization":
-        d=st.data_editor(st.session_state.setdefault("robust_df",pd.DataFrame({"Metric":["Demand Mean","Demand Std","Capacity","Lead Time Mean","Lead Time Std","Disruption Probability","Disruption Capacity Multiplier"],"Value":[1000,150,1100,7,1.5,.05,.6]})),num_rows="dynamic",use_container_width=True,key="robust_editor")
-        sims=st.number_input("Simulations",500,100000,5000,500,key="robust_sims")
-        if st.button("🎲 Run Robust Risk Analysis",type="primary",use_container_width=True,key="robust_run"):
-            vals=d.set_index("Metric")["Value"].to_dict(); st.session_state["robust_result"]=robust_risk_analysis(float(vals["Demand Mean"]),float(vals["Demand Std"]),float(vals["Capacity"]),float(vals["Lead Time Mean"]),float(vals["Lead Time Std"]),float(vals["Disruption Probability"]),float(vals["Disruption Capacity Multiplier"]),int(sims))
-        if "robust_result" in st.session_state: st.json(st.session_state["robust_result"])
-        render_export_bar(module,[("Risk Inputs",d),("Robust Result",pd.DataFrame([st.session_state.get("robust_result",{})]))],tier,username)
+        st.subheader("🛡️ Robust & Resilient Optimization Studio")
+        tabs_r=st.tabs(["🎲 Monte Carlo Risk","🧮 Robust / Stochastic Optimization"])
+        with tabs_r[0]:
+            d=st.data_editor(st.session_state.setdefault("robust_df",pd.DataFrame({
+                "Metric":["Demand Mean","Demand Std","Capacity","Lead Time Mean","Lead Time Std","Disruption Probability","Disruption Capacity Multiplier"],
+                "Value":[1000,150,1100,7,1.5,.05,.6]
+            })),num_rows="dynamic",use_container_width=True,key="robust_editor")
+            sims=st.number_input("Risk simulations",500,100000,5000,500,key="robust_sims")
+            if st.button("🎲 Run Robust Risk Analysis",type="primary",use_container_width=True,key="robust_run"):
+                try:
+                    vals=d.set_index("Metric")["Value"].to_dict()
+                    res=robust_risk_analysis(float(vals["Demand Mean"]),float(vals["Demand Std"]),float(vals["Capacity"]),float(vals["Lead Time Mean"]),float(vals["Lead Time Std"]),float(vals["Disruption Probability"]),float(vals["Disruption Capacity Multiplier"]),int(sims))
+                    st.session_state["robust_result"]=res; st.session_state["robust_result_df"]=pd.DataFrame([res])
+                except Exception as exc: st.error(f"Robust risk analysis failed safely: {exc}")
+            if "robust_result_df" in st.session_state:
+                st.dataframe(st.session_state["robust_result_df"],use_container_width=True,hide_index=True)
+                st.metric("Service probability",f'{float(st.session_state["robust_result"]["Service Probability"])*100:.1f}%')
+            render_export_bar(module,[("Risk Inputs",d),("Risk Result",st.session_state.get("robust_result_df",pd.DataFrame()))],tier,username)
+        with tabs_r[1]:
+            st.info("Use Multi-Objective Optimization → Robust / Stochastic Optimization for explicit mathematical models. Results are shared with Universal Visualization and workspace evidence.")
+
     elif module=="Engineering Model Registry":
         df=st.data_editor(st.session_state.setdefault("model_registry_df",pd.DataFrame({"Model Name":["Network Baseline"],"Type":["MILP"],"Version":["1.0.0"],"Status":["Draft"],"Data Hash":[""]})),num_rows="dynamic",use_container_width=True,key="model_registry_editor")
         name=st.text_input("Model name","My Industrial Model",key="registry_name"); model_type=st.text_input("Model type","Optimization",key="registry_type"); params=st.text_area("Parameters JSON",'{"objective":"cost"}',key="registry_params")
@@ -931,19 +1001,92 @@ def render_module(module: str, tier: str, username: str):
         st.metric("Data quality score",f"{data_quality_report(metrics)['score']:.1f}%")
         render_export_bar(module,[("Control Center",metrics)],tier,username)
     elif module=="Engineering Decision Center":
-        st.subheader("Decision Card Builder")
-        title=st.text_input("Decision title","Network redesign decision",key="decision_title"); metric_text=st.text_area("Metrics JSON",'{"Cost Delta %":-8.2,"Service Delta %":2.1,"Carbon Delta %":-4.5}',key="decision_metrics"); ass_text=st.text_area("Assumptions JSON",'{"Demand horizon":"12 weeks","Lead time":"7 days"}',key="decision_assumptions"); unc_text=st.text_area("Uncertainty JSON",'{"P95 cost exposure":"12%"}',key="decision_unc")
-        status=st.selectbox("Status",["Proposed","Under Review","Approved","Rejected"],key="decision_status")
-        if st.button("📝 Save Decision Card",type="primary",use_container_width=True,key="decision_save"):
+        st.subheader("🎯 Governed Engineering Decision Center")
+        st.caption("Baseline → alternatives → constraints → KPIs → uncertainty → evidence → approval → verification.")
+        title=st.text_input("Decision title","Network redesign decision",key="decision_title")
+        baseline=st.text_area("Baseline definition","Current operating policy and documented KPI baseline.",height=70,key="decision_baseline")
+        alternatives=st.data_editor(
+            st.session_state.setdefault("decision_alternatives_df",pd.DataFrame({
+                "Alternative":["Baseline","Alternative A","Alternative B"],"Cost":[100000,92000,96000],
+                "Service":[95,97,96],"Carbon":[1000,840,780],"Risk":[10,12,8]
+            })),
+            num_rows="dynamic",use_container_width=True,key="decision_alternatives_editor"
+        )
+        constraints=st.text_area("Constraints","Budget <= 100000; Service >= 95%; capacity and regulatory requirements must be respected.",height=65,key="decision_constraints")
+        kpis=st.data_editor(
+            st.session_state.setdefault("decision_kpi_df",pd.DataFrame({
+                "KPI":["Cost","Service","Carbon","Risk"],"Target":[100000,95,800,10],"Unit":["USD","%","kg CO2e","index"]
+            })),
+            num_rows="dynamic",use_container_width=True,key="decision_kpi_editor"
+        )
+        uncertainty_text=st.text_area("Uncertainty / confidence","Record confidence intervals, scenario ranges, model validation metrics and limitations.",height=65,key="decision_uncertainty")
+        evidence_text=st.text_area("Evidence references","Dataset IDs, model IDs, experiment/run IDs, result hashes, validation records or chart/evidence paths (one per line).",height=70,key="decision_evidence")
+        verification=st.data_editor(
+            st.session_state.setdefault("decision_verification_df",pd.DataFrame({
+                "KPI":["Cost","Service","Carbon"],"Target":[100000,95,800],"Actual":[np.nan,np.nan,np.nan],
+                "Tolerance":[5000,1,50],"Status":["Pending"]*3
+            })),
+            num_rows="dynamic",use_container_width=True,key="decision_verification_editor"
+        )
+        reviewer=st.text_input("Reviewer / approver","Engineering Manager",key="decision_reviewer")
+        ver=verification.copy(deep=True)
+        if not ver.empty and {"Target","Actual","Tolerance"}<=set(ver.columns):
+            tgt=pd.to_numeric(ver["Target"],errors="coerce"); act=pd.to_numeric(ver["Actual"],errors="coerce")
+            tol=pd.to_numeric(ver["Tolerance"],errors="coerce").fillna(0).abs()
+            ver["Status"]=np.where(act.isna(),"Pending",np.where((act-tgt).abs()<=tol,"Pass","Review"))
+            st.session_state["decision_verification_df"]=ver
+
+        did=st.session_state.get("decision_active_id")
+        if st.button("💾 Save / Update Decision Card",type="primary",use_container_width=True,key="decision_save"):
             try:
-                card=create_decision_card(title,module,json.loads(metric_text),json.loads(ass_text),json.loads(unc_text),status); did=save_decision_card(card,username); st.success(f"Saved decision {did}")
-            except Exception as exc: st.error(f"Decision card error: {exc}")
-        with sqlite3.connect("enterprise_full_workspace.db") as c: dec=pd.read_sql("SELECT * FROM platform_decisions ORDER BY created_at DESC",c)
-        numeric_dec = [col for col in dec.columns if pd.api.types.is_numeric_dtype(dec[col])]
-        if numeric_dec:
-            st.session_state["decision_metrics_df"] = dec.copy(deep=True)
-        st.dataframe(dec,use_container_width=True,hide_index=True)
-        render_export_bar(module,[("Decision Cards",dec)],tier,username)
+                metrics={"Baseline":baseline,"Alternatives":alternatives.to_dict("records"),"KPIs":kpis.to_dict("records")}
+                assumptions={"Constraints":constraints,"Reviewer":reviewer}
+                uncertainty={"Statement":uncertainty_text}
+                did=did or create_decision(title,module,metrics,assumptions,uncertainty,username,"Draft")
+                save_decision_spec(
+                    did,username,{"definition":baseline},alternatives.to_dict("records"),
+                    {"definition":constraints},kpis.to_dict("records"),uncertainty,
+                    [x.strip() for x in evidence_text.splitlines() if x.strip()],ver.to_dict("records")
+                )
+                st.session_state["decision_active_id"]=did
+                st.success(f"Decision card saved: {did}")
+            except Exception as exc:
+                st.error(f"Decision card save failed safely: {exc}")
+
+        did=st.session_state.get("decision_active_id")
+        if did:
+            spec=load_decision_spec(did,username) or {}
+            with sqlite3.connect("enterprise_full_workspace.db") as conn:
+                row=conn.execute("SELECT decision_id,title,status,owner,created_at,updated_at FROM experience_decisions WHERE decision_id=? AND owner=?",(did,username)).fetchone()
+            if row:
+                status=str(row[2])
+                c1,c2,c3,c4=st.columns(4)
+                c1.metric("Status",status); c2.metric("Alternatives",len(spec.get("alternatives",[])))
+                c3.metric("Evidence items",len(spec.get("evidence",[]))); c4.metric("Verification KPIs",len(spec.get("verification",[])))
+                st.dataframe(pd.DataFrame([dict(zip(["ID","Title","Status","Owner","Created","Updated"],row))]),use_container_width=True,hide_index=True)
+                transitions={"Draft":"Validated","Validated":"Proposed","Proposed":"Review","Review":"Approved","Approved":"Implemented","Implemented":"Verified"}
+                next_status=transitions.get(status)
+                comment=st.text_input("Transition comment",f"{next_status or 'No next state'} — reviewed by {reviewer}",key="decision_transition_comment")
+                if next_status and st.button(f"➡️ Move to {next_status}",use_container_width=True,key="decision_transition"):
+                    try:
+                        if next_status in {"Validated","Proposed","Review","Approved"} and (not spec.get("alternatives") or not spec.get("kpis") or not spec.get("evidence")):
+                            raise ValueError("Complete alternatives, KPI definitions and evidence before governance progression.")
+                        if next_status=="Verified":
+                            rows=spec.get("verification",[])
+                            if not rows: raise ValueError("At least one verification KPI is required.")
+                            pending=[x for x in rows if str(x.get("Status","")).strip().lower() not in {"pass","verified","complete"}]
+                            if pending: raise ValueError("Verification contains pending/review KPI rows.")
+                        transition_decision(did,username,next_status,comment)
+                        st.success(f"Decision moved to {next_status}."); st.rerun()
+                    except Exception as exc:
+                        st.error(f"Decision transition blocked safely: {exc}")
+                hist=decision_approval_history(did)
+                if not hist.empty:
+                    st.markdown("#### Approval history"); st.dataframe(hist,use_container_width=True,hide_index=True)
+        st.session_state["decision_alternatives_df"]=alternatives.copy(deep=True)
+        st.session_state["decision_kpi_df"]=kpis.copy(deep=True)
+        st.session_state["decision_verification_df"]=ver.copy(deep=True)
+        render_export_bar(module,[("Decision Alternatives",alternatives),("Decision KPIs",kpis),("Decision Verification",ver)],tier,username)
     elif module=="Industrial Data Platform":
         up=st.file_uploader("📥 Ingest CSV / XLSX",type=["csv","xlsx"],key="data_platform_upload")
         if up is not None:
@@ -1009,16 +1152,47 @@ def render_module(module: str, tier: str, username: str):
         st.success("Twin state synchronized from persisted telemetry.")
         render_export_bar(module,[("Telemetry Input",tel),("Stored Telemetry",stored)],tier,username)
     elif module=="Advanced ML Demand Forecasting":
-        st.subheader("📈 ML Demand Forecasting")
-        df=st.data_editor(st.session_state.setdefault("forecast_df",pd.DataFrame({"Date":pd.date_range("2026-01-01",periods=24,freq="MS"),"Demand":np.maximum(100,np.linspace(500,700,24)+np.sin(np.arange(24))*60),"Promotion":[0,0,1,0]*6,"WeatherIndex":[20,21,22,19]*6,"MacroIndex":[100,101,102,103]*6})),num_rows="dynamic",use_container_width=True,key="forecast_editor")
-        date_col=st.selectbox("Date column",list(df.columns),index=0,key="forecast_date"); target_col=st.selectbox("Demand/SKU target",list(df.columns),index=1,key="forecast_target"); ext=st.multiselect("External drivers", [c for c in df.columns if c not in [date_col,target_col]],key="forecast_ext"); horizon=st.number_input("Forecast periods",1,104,12,key="forecast_horizon")
-        if st.button("🧠 Train & Forecast",type="primary",use_container_width=True,key="forecast_run"):
-            try: st.session_state["forecast_result"],st.session_state["forecast_metrics"]=ml_demand_forecast(df,date_col,target_col,ext,int(horizon))
+        st.subheader("📈 Advanced Engineering Forecasting Studio")
+        st.caption("Forecast demand, capacity, downtime, inventory, lead time, quality and energy with one transparent validated engine.")
+        df=st.data_editor(
+            st.session_state.setdefault("forecast_df",pd.DataFrame({
+                "Date":pd.date_range("2026-01-01",periods=36,freq="MS"),
+                "Demand":np.maximum(100,np.linspace(500,760,36)+np.sin(np.arange(36))*60),
+                "Capacity":[720]*36,
+                "Downtime":18+3*np.sin(np.arange(36)/2),
+                "Inventory":850+20*np.cos(np.arange(36)/2),
+                "Lead Time":6+0.4*np.sin(np.arange(36)/3),
+                "Quality":98.0-0.2*np.sin(np.arange(36)/2),
+                "Energy":1200+70*np.sin(np.arange(36)/4),
+                "Promotion":[0,0,1,0,0,1]*6,
+            })),num_rows="dynamic",use_container_width=True,key="forecast_editor"
+        )
+        subject=st.selectbox("Forecast subject",list(FORECAST_TARGETS.keys()),key="forecast_subject")
+        cols=list(df.columns); suggested=infer_forecast_target(cols,subject)
+        default_target=cols.index(suggested) if suggested in cols else (1 if len(cols)>1 else 0)
+        c1,c2,c3=st.columns(3)
+        with c1: date_col=st.selectbox("Time column",cols,index=0,key="forecast_date")
+        with c2: target_col=st.selectbox("Target KPI",cols,index=default_target,key="forecast_target")
+        with c3: horizon=st.number_input("Forecast periods",1,104,12,key="forecast_horizon")
+        ext=st.multiselect("Optional external drivers",[x for x in cols if x not in {date_col,target_col}],key="forecast_ext")
+        holdout=st.number_input("Holdout periods",0,24,6,key="forecast_holdout")
+        if st.button("🧠 Train, Validate & Forecast",type="primary",use_container_width=True,key="forecast_run"):
+            try:
+                result,metrics=engineering_forecast(df,date_col,target_col,ext,int(horizon),holdout=int(holdout))
+                st.session_state["forecast_result"]=result; st.session_state["forecast_metrics"]=metrics
             except Exception as exc: st.error(f"Forecast failed safely: {exc}")
         if "forecast_result" in st.session_state:
-            fr=st.session_state["forecast_result"]; st.dataframe(fr,use_container_width=True); st.json(st.session_state["forecast_metrics"])
-            fig=px.line(fr,x="Date",y=["Forecast","Lower 95%","Upper 95%"],title="Demand Forecast with 95% uncertainty band"); st.plotly_chart(fig,use_container_width=True)
-            render_export_bar(module,[("History",df),("Forecast",fr)],[("Demand Forecast",fig)],tier,username)
+            fr=st.session_state["forecast_result"]; met=st.session_state.get("forecast_metrics",{})
+            future=fr[fr["Series"].astype(str).eq("Forecast")].copy() if "Series" in fr.columns else fr
+            k1,k2,k3,k4=st.columns(4)
+            k1.metric("Holdout MAE",f'{float(met.get("Holdout MAE",float("nan"))):.3g}')
+            k2.metric("Holdout R²",f'{float(met.get("Holdout R2",float("nan"))):.3f}')
+            k3.metric("Residual σ",f'{float(met.get("Residual Std",0.0)):.3g}')
+            k4.metric("Forecast rows",f'{len(future):,}')
+            st.dataframe(fr,use_container_width=True,hide_index=True); st.json(met)
+            fig=px.line(future,x="Date",y=["Forecast","Lower 95%","Upper 95%"],title=f"{subject} Forecast · 95% uncertainty band")
+            st.plotly_chart(fig,use_container_width=True)
+            render_export_bar(module,[("History + Forecast",fr),("Forecast Metrics",pd.DataFrame([met]))],[("Engineering Forecast",fig)],tier,username)
     elif module=="Scenario Versioning & Comparison":
         st.subheader("🧪 Scenario Versioning")
         base=st.data_editor(st.session_state.setdefault("scenario_df",pd.DataFrame({"Scenario":["Baseline Q3 Logistics","High-Tariff Expansion","Supplier Shock"],"Cost":[100000,125000,140000],"Service":[95,91,84],"Capacity":[10000,9500,8200],"Carbon":[1000,1100,1250]})),num_rows="dynamic",use_container_width=True,key="scenario_editor")
