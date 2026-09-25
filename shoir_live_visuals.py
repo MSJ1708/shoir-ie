@@ -49,6 +49,28 @@ _MODULE_KEYS = {
     "Predictive Maintenance Digital Twin": ["maint_df", "maint_result"],
     "Localization & Multi-Currency": ["currency_df", "currency_result", "trade_rules_df"],
     "Enterprise Security & Governance": ["security_roles"],
+    "IoT Digital Twin": ["node_mesh_df", "sensor_stream", "dt_workstations", "twin_tel", "twin_whatif_result", "enterprise_twin_anomalies_df", "enterprise_artifact_ledger"],
+    "Live Industrial Digital Twin": ["twin_tel", "twin_whatif_result", "enterprise_twin_anomalies_df", "enterprise_artifact_ledger"],
+    "Control Tower": ["control_tower_metrics", "control_tower_disruption_df", "enterprise_control_tower_health_df", "enterprise_artifact_ledger"],
+    "Industrial Connectivity Hub": ["conn_df", "connector_profiles", "erp_connectors", "enterprise_connector_health_df"],
+    "Industrial Control Center": ["control_center_metrics", "enterprise_control_tower_health_df"],
+    "Enterprise Integration & Collaboration": ["erp_connectors", "workspace_users", "audit_report_history", "enterprise_connector_health_df", "enterprise_collaboration_assignments", "enterprise_artifact_ledger"],
+    "Persistence": ["enterprise_artifact_ledger"],
+    "Enterprise Security & Governance": ["security_roles", "audit_governance_ledger", "enterprise_artifact_ledger"],
+    "Team Workspaces & RBAC": ["workspace_members_df", "workspace_users", "enterprise_collaboration_assignments", "enterprise_artifact_ledger"],
+    "Engineering Model Registry": ["model_registry_df", "enterprise_artifact_ledger"],
+    "Research Workspace": ["enterprise_research_runs_df", "enterprise_research_decisions_df"],
+    "Experiment Engine": ["experiment_engine_design_df", "experiment_engine_effects_df", "experiment_engine_fitted_df", "experiment_engine_mc_samples", "experiment_engine_bootstrap_df", "experiment_engine_sensitivity_df", "experiment_engine_replication_df", "enterprise_artifact_ledger"],
+    "Executive Report Center": ["exec_report_df", "enterprise_artifact_ledger"],
+    "Jobs System": ["enterprise_job_history_df"],
+    "Knowledge Layer": ["knowledge_documents"],
+    "Human Factors & Ergonomics (NIOSH)": ["ergonomic_tasks", "time_studies", "mtm_library"],
+    "Geospatial Network Designer": ["supply_nodes", "fleet_vehicles", "enterprise_artifact_ledger"],
+    "Digital Twin & Discrete-Event Simulation": ["dt_workstations","event_logs","sim_des_result","sim_agent_result","sd","enterprise_artifact_ledger"],
+    "Digital Twin & DES": ["dt_workstations","event_logs","sim_des_result","sim_agent_result","sd","enterprise_artifact_ledger"],
+    "Predictive Maintenance Hub": ["maintenance_assets","maintenance_telemetry","enterprise_twin_anomalies_df","enterprise_artifact_ledger"],
+    "Engineering Economics & Finance": ["economic_summary","df_economic_summary","df_amort","capex_result","enterprise_artifact_ledger"],
+    "Green IE & Sustainability": ["lca_materials","carbon_latest_df","sustain_result","enterprise_artifact_ledger"],
     "Control Tower": ["control_tower_metrics", "control_tower_disruption_df"],
     "Cryptographic Ledger": ["ledger_history"],
     "Carbon Accounting": ["carbon_latest_df"],
@@ -294,14 +316,17 @@ def _make_figure(df: pd.DataFrame, chart: str, x: str | None, y: str | None, z: 
             return None
         work = df.copy()
         if x and x in work.columns:
-            work = work[[x, metric]].dropna()
-            x_values = work[x]
+            work = work[[x, metric]].copy()
         else:
-            work = work[[metric]].dropna()
-            x_values = list(range(1, len(work) + 1))
-        values = pd.to_numeric(work[metric], errors="coerce").dropna()
-        if values.empty:
+            work = work[[metric]].copy()
+            work["__observation"] = np.arange(1, len(work) + 1)
+            x = "__observation"
+        work[metric] = pd.to_numeric(work[metric], errors="coerce")
+        work = work.dropna(subset=[metric])
+        if work.empty:
             return None
+        x_values = work[x]
+        values = work[metric]
         mean = float(values.mean())
         sigma = float(values.std(ddof=1)) if len(values) > 1 else 0.0
         ucl, lcl = mean + 3 * sigma, mean - 3 * sigma
