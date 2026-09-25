@@ -319,6 +319,15 @@ def build_control_tower_health(state: Mapping[str, Any]) -> pd.DataFrame:
             score = None if vals.empty else float(max(0.0, min(100.0, 100.0 - (vals.mean() / max(vals.max(), 1e-9)) * 50.0)))
             add("Carbon", score, "Observed", "Relative emissions signal")
 
+    expected_areas = [
+        "Production", "Supply", "Inventory", "Quality", "Maintenance",
+        "Transport", "Workforce", "Energy", "Carbon",
+    ]
+    present = {row["Area"] for row in frames}
+    for area in expected_areas:
+        if area not in present:
+            add(area, None, "No data", "No source dataset or measurable KPI signal is currently mapped.")
+
     return pd.DataFrame(frames)
 
 
