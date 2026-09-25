@@ -378,6 +378,64 @@ def job_history_frame() -> pd.DataFrame:
         return pd.DataFrame()
 
 
+def calculate_tco(cost_drivers: pd.DataFrame, years: int = 5, discount_rate: float = 0.08) -> tuple[pd.DataFrame, dict[str, float]]:
+    """Calculate a transparent discounted total-cost-of-ownership schedule."""
+    required = {"Driver", "Annual Cost", "Year 1 Cost"}
+    if not required <= set(cost_drivers.columns):
+        raise ValueError("TCO table requires Driver, Annual Cost and Year 1 Cost.")
+    d = cost_drivers.copy()
+    d["Annual Cost"] = pd.to_numeric(d["Annual Cost"], errors="coerce").fillna(0.0)
+    d["Year 1 Cost"] = pd.to_numeric(d["Year 1 Cost"], errors="coerce").fillna(0.0)
+    years = int(max(1, min(30, years)))
+    rate = float(discount_rate)
+    if rate <= -1.0:
+        raise ValueError("Discount rate must be greater than -100%.")
+    recurring = float(d["Annual Cost"].sum())
+    one_time = float(d["Year 1 Cost"].sum())
+    rows = []
+    for year in range(1, years + 1):
+        nominal = recurring + (one_time if year == 1 else 0.0)
+        rows.append({"Year": year, "Nominal Cost": nominal, "Present Value": nominal / ((1.0 + rate) ** year)})
+    schedule = pd.DataFrame(rows)
+    return schedule, {
+        "TCO (Nominal)": float(schedule["Nominal Cost"].sum()),
+        "TCO (Discounted)": float(schedule["Present Value"].sum()),
+        "Annual Recurring Cost": recurring,
+        "Year 1 One-Time Cost": one_time,
+        "Years": float(years),
+        "Discount Rate": rate,
+    }
+
+
+def add_research_citation(
+    title: str,
+    authors: str,
+    year: int | str,
+    source: str,
+    identifier: str,
+    owner: str,
+    research_id: str = "",
+) -> dict[str, Any]:
+    citations = st.session_state.setdefault("research_citations", [])
+    citation = {
+        "citation_id": "CIT-" + hashlib.sha1(
+            f"{title}|{authors}|{year}|{identifier}|{owner}".encode("utf-8")
+        ).hexdigest()[:12].upper(),
+        "title": str(title).strip(),
+        "authors": str(authors).strip(),
+        "year": str(year).strip(),
+        "source": str(source).strip(),
+        "identifier": str(identifier).strip(),
+        "research_id": str(research_id or ""),
+        "owner": str(owner),
+        "created_at": utc_now(),
+    }
+    citations[:] = [x for x in citations if x.get("citation_id") != citation["citation_id"]]
+    citations.append(citation)
+    record_workspace_artifact("citation", citation["title"], owner, citation)
+    return citation
+
+
 def knowledge_context() -> str:
     docs = st.session_state.get("knowledge_documents", [])
     parts = []
@@ -542,6 +600,18 @@ def render_enterprise_bridge(module: str, tier: str, username: str) -> None:
             else:
                 st.info("Operational overlay is available when the selected module exposes a live table, telemetry, connector profile or job registry.")
         with tabs[3]:
+            if module == "Engineering Decision Center":
+                linked = []
+                for key in ("carbon_latest_df", "sustain_result", "enterprise_tco_schedule_df"):
+                    frame = _safe_frame(st.session_state.get(key))
+                    if not frame.empty:
+                        linked.append((key, frame))
+                if linked:
+                    st.markdown("##### 🌱 Sustainability / economics evidence linked to decision")
+                    for key, frame in linked:
+                        st.caption(f"Source: {key}")
+                        st.dataframe(frame.head(100), use_container_width=True, hide_index=True)
+
             if module in {"Team Workspaces & RBAC","Enterprise Integration & Collaboration","Engineering Decision Center"}:
                 st.markdown("##### 👥 Comments, mentions and assignments")
                 comment = st.text_area("Comment", key=f"enterprise_comment_{hash(module)&0xffff:04x}")
@@ -633,6 +703,28 @@ def render_enterprise_bridge(module: str, tier: str, username: str) -> None:
                         )
                         st.session_state["research_manuscript_draft"] = manuscript
                         record_workspace_artifact("research_manuscript", protocol.get("title","Research Study"), username, {"protocol_hash": protocol.get("protocol_hash"), "runs": len(runs)})
+                    citations = st.session_state.setdefault("research_citations", [])
+                    st.markdown("##### 📚 Citation matrix")
+                    with st.form(f"citation_form_{hash(module)&0xffff:04x}"):
+                        cc1, cc2 = st.columns(2)
+                        with cc1:
+                            cit_title = st.text_input("Citation title")
+                            cit_authors = st.text_input("Authors")
+                            cit_source = st.text_input("Journal / source")
+                        with cc2:
+                            cit_year = st.text_input("Year")
+                            cit_identifier = st.text_input("DOI / URL / identifier")
+                            cit_submit = st.form_submit_button("➕ Add citation", use_container_width=True)
+                        if cit_submit:
+                            if cit_title.strip() and cit_authors.strip():
+                                add_research_citation(cit_title, cit_authors, cit_year, cit_source, cit_identifier, username, protocol.get("research_id",""))
+                                st.success("Citation added to the research workspace.")
+                            else:
+                                st.warning("Citation title and authors are required.")
+                    visible_citations = [x for x in citations if not x.get("research_id") or x.get("research_id") == protocol.get("research_id")]
+                    if visible_citations:
+                        st.dataframe(pd.DataFrame(visible_citations), use_container_width=True, hide_index=True)
+
                     if st.session_state.get("research_manuscript_draft"):
                         st.text_area("Manuscript draft", st.session_state["research_manuscript_draft"], height=320)
                         st.download_button("📥 Download manuscript Markdown", data=st.session_state["research_manuscript_draft"].encode("utf-8"), file_name=f"{_safe_key(protocol.get('study_id','study'))}_manuscript.md", mime="text/markdown", use_container_width=True)
@@ -645,6 +737,44 @@ def render_enterprise_bridge(module: str, tier: str, username: str) -> None:
                     st.success(f"Supplementary file fingerprint recorded: {meta['sha256'][:16]}…")
             else:
                 st.caption("Research controls are available from Experiment Lab / Experiment Engine.")
+
+        if module in {"Engineering Economics & Finance", "Capital Investment & Engineering Economics"}:
+            st.markdown("##### 💰 Lifecycle Cost / TCO View")
+            drivers = st.data_editor(
+                st.session_state.setdefault(
+                    "enterprise_tco_drivers",
+                    pd.DataFrame({
+                        "Driver": ["Initial CAPEX", "Maintenance", "Energy", "Labor", "Software / Support"],
+                        "Annual Cost": [0.0, 12000.0, 18000.0, 25000.0, 5000.0],
+                        "Year 1 Cost": [150000.0, 0.0, 0.0, 0.0, 0.0],
+                    }),
+                ),
+                num_rows="dynamic", use_container_width=True, key=f"enterprise_tco_editor_{hash(module)&0xffff:04x}",
+            )
+            tc1, tc2 = st.columns(2)
+            years = tc1.number_input("TCO horizon (years)", 1, 30, 5, key=f"enterprise_tco_years_{hash(module)&0xffff:04x}")
+            rate = tc2.number_input("TCO discount rate", -0.5, 0.5, 0.08, 0.01, key=f"enterprise_tco_rate_{hash(module)&0xffff:04x}")
+            if st.button("💰 Calculate TCO", use_container_width=True, key=f"enterprise_tco_run_{hash(module)&0xffff:04x}"):
+                try:
+                    schedule, summary = calculate_tco(drivers, years, rate)
+                    st.session_state["enterprise_tco_schedule_df"] = schedule
+                    st.session_state["enterprise_tco_summary"] = summary
+                    record_workspace_artifact("economics", "Total Cost of Ownership", username, summary)
+                except Exception as exc:
+                    st.error(f"TCO calculation failed safely: {exc}")
+            if st.session_state.get("enterprise_tco_summary"):
+                ts = st.session_state["enterprise_tco_summary"]
+                a1, a2, a3 = st.columns(3)
+                a1.metric("Discounted TCO", f"{ts['TCO (Discounted)']:,.2f}")
+                a2.metric("Nominal TCO", f"{ts['TCO (Nominal)']:,.2f}")
+                a3.metric("Recurring / year", f"{ts['Annual Recurring Cost']:,.2f}")
+                tco_df = st.session_state.get("enterprise_tco_schedule_df", pd.DataFrame())
+                if isinstance(tco_df, pd.DataFrame) and not tco_df.empty:
+                    st.dataframe(tco_df, use_container_width=True, hide_index=True)
+                    st.plotly_chart(
+                        px.line(tco_df, x="Year", y=["Nominal Cost", "Present Value"], markers=True, title="TCO Lifecycle Curve"),
+                        use_container_width=True,
+                    )
 
         with tabs[5]:
             if module in {"AI Copilot","Advanced Engineering Copilot","Engineering Decision Center","Experiment Engine"}:
