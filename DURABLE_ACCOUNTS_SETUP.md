@@ -16,3 +16,15 @@ The application then migrates local-only accounts, hydrates durable accounts aft
 The master admin sho is exempt from the paid subscription expiry rule.
 
 Accounts that were already lost from a previous non-persistent deployment cannot be reconstructed by code alone unless a backup exists.
+
+## Important production safeguard
+
+The application no longer silently accepts production account creation when the managed database is missing. Without PostgreSQL/Supabase, production account creation and approval are blocked so users cannot create accounts that later disappear after a platform restart.
+
+For local-only development, you may explicitly enable the SQLite fallback with:
+
+```toml
+allow_ephemeral_local_storage = true
+```
+
+Do not enable that setting for the production deployment.
