@@ -58,6 +58,18 @@ def classify_request(prompt: str) -> dict[str, str]:
         return {"intent": "inventory", "label": "Inventory analysis", "reason": "The request references inventory or service-risk measures."}
     if any(k in p for k in ("optimize", "optimization", "milp", "allocation", "schedule", "routing")):
         return {"intent": "optimization", "label": "Optimization readiness", "reason": "The request asks for an optimization, allocation, scheduling or routing workflow."}
+    if any(k in p for k in ("experiment", "doe", "factorial", "monte carlo", "bootstrap", "replication", "effect size")):
+        return {"intent": "experiment", "label": "Experiment / uncertainty analysis", "reason": "The request asks for controlled experimentation or uncertainty evidence."}
+    if any(k in p for k in ("digital twin", "what-if replay", "asset state", "telemetry replay")):
+        return {"intent": "digital_twin", "label": "Digital twin scenario analysis", "reason": "The request asks for synchronized asset/process state or scenario replay."}
+    if any(k in p for k in ("control tower", "health map", "operations health")):
+        return {"intent": "control_tower", "label": "Industrial control tower", "reason": "The request asks for cross-domain operational health visibility."}
+    if any(k in p for k in ("connect", "sap", "oracle", "opc-ua", "mqtt", "wms", "mes", "erp")):
+        return {"intent": "connectivity", "label": "Industrial connectivity", "reason": "The request refers to enterprise/industrial data integration."}
+    if any(k in p for k in ("research", "hypothesis", "manuscript", "citation", "reproducibility")):
+        return {"intent": "research", "label": "Research workflow", "reason": "The request asks for a governed research study or evidence package."}
+    if any(k in p for k in ("report", "pdf", "powerpoint", "excel export", "provenance")):
+        return {"intent": "reporting", "label": "Engineering reporting", "reason": "The request asks for a presentation or provenance package."}
     return {"intent": "descriptive", "label": "Engineering data profile", "reason": "No more specific analytical intent was detected, so Copilot starts with a descriptive evidence profile."}
 
 
@@ -78,6 +90,10 @@ def recommend_module(prompt: str, modules: list[str], current_module: str | None
         "sustainability": ("carbon", "energy", "sustainability", "emissions"),
         "economics": ("npv", "irr", "payback", "capex", "cost benefit"),
         "research": ("research", "hypothesis", "experiment", "statistical"),
+        "digital_twin": ("digital twin", "telemetry", "asset state", "what-if"),
+        "control_tower": ("control tower", "health map", "operations health"),
+        "connectivity": ("sap", "oracle", "opc-ua", "mqtt", "wms", "mes", "erp", "connector"),
+        "reporting": ("report", "pdf", "powerpoint", "excel", "provenance"),
     }
     scored: list[tuple[int, str]] = []
     for module in modules:
@@ -139,6 +155,18 @@ def choose_method(intent: str, inspection: Mapping[str, Any]) -> dict[str, Any]:
         return {"method": "Inventory variability profile" if targets else "Descriptive profile", "target_columns": targets}
     if intent == "optimization":
         return {"method": "Optimization readiness assessment", "required_signals": ["objective/cost", "decision variables", "constraints"]}
+    if intent == "experiment":
+        return {"method": "Experiment / uncertainty workflow", "required_signals": ["response or KPI", "factor/scenario definition", "replication or uncertainty definition"]}
+    if intent == "digital_twin":
+        return {"method": "Digital twin state + what-if replay"}
+    if intent == "control_tower":
+        return {"method": "Cross-domain operational health profile"}
+    if intent == "connectivity":
+        return {"method": "Connector inventory + health profile"}
+    if intent == "research":
+        return {"method": "Research evidence profile + reproducibility check"}
+    if intent == "reporting":
+        return {"method": "Evidence / provenance report package"}
     if intent == "compare":
         return {"method": "Scenario delta comparison"}
     return {"method": "Descriptive engineering profile"}
@@ -358,6 +386,7 @@ def build_export_bundle(
     result: pd.DataFrame,
     explanation: str,
     figure: go.Figure | None,
+    knowledge_context_used: bool = False,
 ) -> bytes:
     from shoir_upgrade import build_excel_report
     tables = [("Analysis Result", result)]
@@ -389,6 +418,7 @@ def build_export_bundle(
             "run_id": run_id,
             "module": module,
             "generated_at": datetime.now(timezone.utc).isoformat(),
+            "knowledge_context_used": bool(knowledge_context_used),
         }, indent=2).encode("utf-8"))
     return buf.getvalue()
 
@@ -424,6 +454,7 @@ def run_orchestration(prompt: str, module: str, df: pd.DataFrame, context: Mappi
     intent_info = classify_request(prompt)
     method = choose_method(intent_info["intent"], inspection)
     runtime = dict(context or {})
+    knowledge_used = bool(str(runtime.get("knowledge_context", "")).strip())
     if intent_info["intent"] == "optimization" and callable(runtime.get("milp_solver")):
         customers = runtime.get("customers") or []
         warehouses = runtime.get("warehouses") or []
@@ -456,8 +487,15 @@ def run_orchestration(prompt: str, module: str, df: pd.DataFrame, context: Mappi
         result = comparison
         analysis_meta = {**analysis_meta, **comparison_meta, "type": "scenario_grouped" if comparison_meta["mode"] == "grouped" else "baseline_comparison"}
     figure = build_graph(result, analysis_meta.get("type", "auto"))
+    if knowledge_used:
+        analysis_meta = {**analysis_meta, "knowledge_context_used": True}
     explanation = explain_results(prompt, inspection, method, analysis_meta, result)
-    export = build_export_bundle(prompt, module, run_id, inspection, method, result, explanation, figure)
+    if knowledge_used:
+        explanation += " A workspace knowledge source was supplied to the orchestration context; its content was not treated as measured operational data."
+    export = build_export_bundle(
+        prompt, module, run_id, inspection, method, result, explanation, figure,
+        knowledge_context_used=knowledge_used,
+    )
     return {
         "run_id": run_id,
         "intent": intent_info,
@@ -472,5 +510,6 @@ def run_orchestration(prompt: str, module: str, df: pd.DataFrame, context: Mappi
         "export": export,
         "module": module,
         "prompt": prompt,
+        "knowledge_context_used": knowledge_used,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
