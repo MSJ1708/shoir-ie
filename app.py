@@ -35,6 +35,7 @@ from shoir_live_visuals import render_live_visualization_studio, discover_visual
 from shoir_module_parity import render_universal_module_parity
 from shoir_copilot_orchestrator import build_workflow_plan, recommend_module, run_orchestration
 from shoir_digital_thread import render_global_project_digital_thread
+from shoir_enterprise_services import render_enterprise_bridge
 from durable_account_store import (durable_backend_configured, sync_durable_accounts, sync_remote_requests_to_local, edge_login, edge_admin_list_requests, edge_renew_request, upsert_remote_account, insert_remote_request, remote_account, account_is_expired, renewed_expiry)
 
 # =====================================================================
@@ -1420,6 +1421,27 @@ research_pack_features = tier3_features + [
 ]
 if is_admin:
     tier3_features.append("Admin Panel")
+
+def _render_post_module_layers(module_name: str) -> None:
+    """Run cross-cutting enterprise/visualization layers before legacy st.stop()."""
+    try:
+        render_enterprise_bridge(str(module_name), tier_val, st.session_state.get("current_user", "unknown"))
+    except Exception as exc:
+        st.warning("Enterprise capability layer could not render for this legacy module; native results remain available.")
+        with st.expander("Enterprise layer diagnostic"):
+            st.code(f"{type(exc).__name__}: {exc}")
+    try:
+        render_universal_module_parity(str(module_name), phase="results")
+    except Exception as exc:
+        st.warning("Universal Module Studio could not render for this legacy module; native results remain available.")
+        with st.expander("Visualization layer diagnostic"):
+            st.code(f"{type(exc).__name__}: {exc}")
+    finally:
+        # Persistence is deliberately independent from cross-cutting rendering.
+        # A visualization failure must never prevent recovery of module state.
+        if st.session_state.get("current_user"):
+            save_user_workspace(st.session_state["current_user"], st.session_state)
+
 
 st.sidebar.markdown("### 🧭 Navigation Menu")
 menu_choice = st.sidebar.radio("Go to Section", ["Dashboard", "✨ Excellence Hub", "Become an affiliate", "Feedback", "Edit Account"], label_visibility="collapsed")
@@ -6243,6 +6265,7 @@ if selected_module == "Geospatial Network Designer":
                 )
                 st.plotly_chart(bar_cap, use_container_width=True)
 
+    _render_post_module_layers("Geospatial Network Designer")
     st.stop()
 
 # ==============================================================================
@@ -6457,6 +6480,7 @@ if selected_module == "Predictive Maintenance Hub":
                 st.success(f"Asset **{selected_to_remove}** successfully decommissioned.")
                 st.rerun()
 
+    _render_post_module_layers("Predictive Maintenance Hub")
     st.stop()
 # ==============================================================================
 # SHOIR-IE: ELITE PRODUCTION PLANNING, SCHEDULING & CONTROL (PPC) SUITE (V2.2)
@@ -7675,6 +7699,7 @@ if selected_module in ["Human Factors & Ergonomics (NIOSH)", "Human Factors, Erg
             st.metric("Required Rest Time", f"{rest_mins_per_hour:.1f} mins / hour")
             st.metric("Total Shift Rest", f"{rest_mins_per_hour * shift_hours:.1f} minutes")
 
+    _render_post_module_layers("Human Factors & Ergonomics (NIOSH)")
     st.stop()
 
 # ==============================================================================
@@ -8000,6 +8025,7 @@ if selected_module in ["Engineering Economics & Finance", "Engineering Economics
                 "Interest Tax Shield": "${:,.2f}", "Ending Balance": "${:,.2f}"
             }), use_container_width=True, hide_index=True)
 
+    _render_post_module_layers("Engineering Economics & Finance")
     st.stop()
 
 # ==============================================================================
@@ -8366,6 +8392,7 @@ if selected_module in ["Digital Twin & Discrete-Event Simulation", "Digital Twin
             st.session_state.event_logs = []
             st.rerun()
 
+    _render_post_module_layers("Digital Twin & Discrete-Event Simulation")
     st.stop()
 
 # ==============================================================================
@@ -8561,6 +8588,7 @@ if selected_module in ["Green IE & Sustainability", "Sustainability & Circular E
                 fig_lca.update_layout(plot_bgcolor="#0b0f19", paper_bgcolor="#0b0f19", font=dict(color="#f3f4f6"), height=290)
                 st.plotly_chart(fig_lca, use_container_width=True)
 
+    _render_post_module_layers("Green IE & Sustainability")
     st.stop()
 
 # ==============================================================================
@@ -8933,6 +8961,7 @@ if selected_module in ["Enterprise Integration & Collaboration", "Enterprise Int
                 </div>
                 """, unsafe_allow_html=True)
 
+    _render_post_module_layers("Enterprise Integration & Collaboration")
     st.stop()
     
 def render_data_editor(df, key_name):
@@ -9208,7 +9237,14 @@ else:
                     source_name = routed_source
 
         if workflow_prompt and not source_df.empty:
-            plan = build_workflow_plan(workflow_prompt, routed_module, source_df)
+            try:
+                from shoir_enterprise_services import knowledge_context
+                linked_knowledge = knowledge_context()
+                linked_knowledge_count = len(st.session_state.get("knowledge_documents", []))
+            except Exception:
+                linked_knowledge = ""
+                linked_knowledge_count = 0
+            plan = build_workflow_plan(workflow_prompt, routed_module, source_df, linked_knowledge_count)
             st.markdown("### 🗺️ Proposed engineering workflow")
             st.caption(f"Source: **{source_name}** · Module: **{routed_module}**")
             plan_df = pd.DataFrame([
@@ -9248,6 +9284,8 @@ else:
                                 "warehouses": st.session_state.get("warehouses_list", []),
                                 "milp_solver": cached_milp_optimization,
                                 "validate_network_inputs": validate_network_inputs,
+                                "knowledge_context": linked_knowledge,
+                                "knowledge_documents": linked_knowledge_count,
                             },
                         )
                     run_id = run["run_id"]
@@ -11852,6 +11890,21 @@ if (
     except Exception as exc:
         st.warning("Universal Module Studio could not render the results surface; the module's native results remain available.")
         with st.expander("Module parity diagnostic"):
+            st.code(f"{type(exc).__name__}: {exc}")
+
+if (
+    st.session_state.get("authenticated")
+    and st.session_state.get("current_user")
+    and "mod" in globals()
+    and "allowed_modules" in globals()
+    and st.session_state.get("selected_nav", "Dashboard") == "Dashboard"
+    and str(mod) in set(map(str, allowed_modules))
+):
+    try:
+        render_enterprise_bridge(str(mod), tier_val, st.session_state.get("current_user", "unknown"))
+    except Exception as exc:
+        st.warning("Enterprise capability layer encountered a recoverable issue; the native module remains available.")
+        with st.expander("Enterprise layer diagnostic"):
             st.code(f"{type(exc).__name__}: {exc}")
 
 # Capture module calculations and parity edits after the selected module has rendered.
