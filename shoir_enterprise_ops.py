@@ -962,6 +962,7 @@ def render_knowledge_extension(username: str = "unknown") -> None:
     st.caption("Upload SOPs, manuals, standards notes and company guidance. Sources are hashed, stored in workspace state, and made available as evidence context to Copilot.")
     up = st.file_uploader("Upload knowledge source", type=["txt", "md", "csv", "xlsx", "pdf", "docx"], key="knowledge_layer_upload")
     sources = st.session_state.setdefault("shoir_knowledge_sources", [])
+    st.session_state.setdefault("knowledge_registry_df", pd.DataFrame(columns=["Source","SHA-256","Owner","Uploaded","Characters"]))
     if up is not None:
         signature = hashlib.sha256(up.getvalue()).hexdigest()
         if not any(x.get("sha256") == signature for x in sources):
@@ -986,6 +987,7 @@ def render_knowledge_extension(username: str = "unknown") -> None:
             "Uploaded": x.get("uploaded_at"),
             "Characters": len(str(x.get("text", ""))),
         } for x in sources])
+        st.session_state["knowledge_registry_df"] = table.copy(deep=True)
         st.dataframe(table, use_container_width=True, hide_index=True)
         query = st.text_input("Knowledge search", key="knowledge_layer_query")
         if query:
