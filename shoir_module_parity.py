@@ -422,7 +422,11 @@ def _render_prepare(module: str, keys: dict[str, str]) -> None:
         if st.button("✅ Validate & Record", type="primary", use_container_width=True, key=f"module_parity_validate_{token}"):
             st.session_state[keys["validation"]] = validate_module_dataframe(df)
             st.session_state[keys["results"]] = summarize_module_dataframe(df)
-            st.session_state[keys["meta"]]["validated_at"] = datetime.now(timezone.utc).isoformat()
+            meta = st.session_state.get(keys["meta"], {})
+            if not isinstance(meta, dict):
+                meta = {}
+            meta["validated_at"] = datetime.now(timezone.utc).isoformat()
+            st.session_state[keys["meta"]] = meta
             st.success("Validation snapshot recorded in the workspace.")
     with c2:
         if st.button("✨ Auto Clean & Revalidate", use_container_width=True, key=f"module_parity_clean_{token}"):
