@@ -1526,16 +1526,18 @@ def analyze_telemetry(df: pd.DataFrame, timestamp_col: str = "", value_col: str 
         pieces=[]
         for _, g in work.groupby(group_key, dropna=False):
             g=g.copy()
-            roll_mean=g[value_col].rolling(max(3,int(window)),min_periods=3).mean()
-            roll_std=g[value_col].rolling(max(3,int(window)),min_periods=3).std(ddof=1)
+            prior = g[value_col].shift(1)
+            roll_mean=prior.rolling(max(3,int(window)),min_periods=3).mean()
+            roll_std=prior.rolling(max(3,int(window)),min_periods=3).std(ddof=1)
             g["Rolling Mean"]=roll_mean
             g["Rolling Std"]=roll_std
             g["Z Score"]=((g[value_col]-roll_mean)/roll_std.replace(0,np.nan)).fillna(0.0)
             g["Anomaly"]=g["Z Score"].abs()>=float(z_threshold)
             pieces.append(g)
         return pd.concat(pieces,ignore_index=True) if pieces else pd.DataFrame()
-    roll_mean=work[value_col].rolling(max(3,int(window)),min_periods=3).mean()
-    roll_std=work[value_col].rolling(max(3,int(window)),min_periods=3).std(ddof=1)
+    prior = work[value_col].shift(1)
+    roll_mean=prior.rolling(max(3,int(window)),min_periods=3).mean()
+    roll_std=prior.rolling(max(3,int(window)),min_periods=3).std(ddof=1)
     work["Rolling Mean"]=roll_mean
     work["Rolling Std"]=roll_std
     work["Z Score"]=((work[value_col]-roll_mean)/roll_std.replace(0,np.nan)).fillna(0.0)
