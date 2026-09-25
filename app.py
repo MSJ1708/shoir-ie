@@ -1427,6 +1427,8 @@ def _render_post_module_layers(module_name: str) -> None:
     try:
         render_enterprise_bridge(str(module_name), tier_val, st.session_state.get("current_user", "unknown"))
         render_universal_module_parity(str(module_name), phase="results")
+        if st.session_state.get("current_user"):
+            save_user_workspace(st.session_state["current_user"], st.session_state)
     except Exception as exc:
         st.warning("Shared enterprise/visualization layer could not render for this legacy module; native results remain available.")
         with st.expander("Layer diagnostic"):
