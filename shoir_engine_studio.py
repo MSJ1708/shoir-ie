@@ -211,8 +211,15 @@ def summarize_replications(
     grouped = d.groupby(replication_col)[metric_col].agg(["count", "mean", "std"]).reset_index()
     grouped = grouped.rename(columns={"count": "N", "mean": "Mean", "std": "Std Dev"})
     grouped["SEM"] = grouped["Std Dev"] / np.sqrt(grouped["N"].clip(lower=1))
-    grouped["CI Lower"] = grouped["Mean"] - stats.t.ppf((1 + confidence) / 2, grouped["N"].clip(lower=1) - 1).fillna(0) * grouped["SEM"].fillna(0)
-    grouped["CI Upper"] = grouped["Mean"] + stats.t.ppf((1 + confidence) / 2, grouped["N"].clip(lower=1) - 1).fillna(0) * grouped["SEM"].fillna(0)
+    critical = pd.Series(
+        stats.t.ppf(
+            (1 + confidence) / 2,
+            grouped["N"].clip(lower=1).to_numpy(dtype=float) - 1,
+        ),
+        index=grouped.index,
+    ).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    grouped["CI Lower"] = grouped["Mean"] - critical * grouped["SEM"].fillna(0)
+    grouped["CI Upper"] = grouped["Mean"] + critical * grouped["SEM"].fillna(0)
     values = d[metric_col].to_numpy(dtype=float)
     overall = {
         "Replications": int(d[replication_col].nunique()),
@@ -375,7 +382,7 @@ def _forecast_features(dates: pd.Series, start_index: int, external: Mapping[str
     dates = pd.to_datetime(dates)
     x = pd.DataFrame(index=np.arange(len(dates)))
     x["trend"] = np.arange(start_index, start_index + len(dates), dtype=float)
-    month = dates.dt.month.to_numpy()
+    month = pd.Series(pd.DatetimeIndex(dates).month, index=np.arange(len(dates))).to_numpy()
     x["sin_month"] = np.sin(2 * np.pi * month / 12)
     x["cos_month"] = np.cos(2 * np.pi * month / 12)
     for name, values in (external or {}).items():

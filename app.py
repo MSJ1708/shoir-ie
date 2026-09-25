@@ -331,21 +331,37 @@ def init_db():
         # private repo) or shared anywhere, treat it as compromised and
         # change it via secrets.toml.
         try:
-            admin_password = st.secrets["admin"]["password"]
+            admin_password = str(st.secrets["admin"]["password"])
         except Exception:
-            admin_password = "mohammedsuhail172008chennai!"
-        admin_pass_hash = hash_password(admin_password)
-        cursor.execute("""
-            INSERT OR IGNORE INTO enterprise_users
-            (username, password_hash, role, tier, email, trial_expires, affiliate_code, ticket_expiry)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """, ("sho", admin_pass_hash, "Enterprise Admin", "Enterprise Tier",
-              "mohsuhailji@gmail.com", "2030-01-01T00:00:00", "AFF-SHO-15", "2030-01-01T00:00:00"))
-        cursor.execute("""
-            UPDATE enterprise_users
-            SET password_hash=?, role=?, tier=?, email=?
-            WHERE LOWER(username)='sho'
-        """, (admin_pass_hash, "Enterprise Admin", "Enterprise Tier", "mohsuhailji@gmail.com"))
+            admin_password = os.environ.get("SHOIR_ADMIN_PASSWORD", "").strip()
+
+        if admin_password:
+            admin_pass_hash = hash_password(admin_password)
+            cursor.execute("""
+                INSERT OR IGNORE INTO enterprise_users
+                (username, password_hash, role, tier, email, trial_expires, affiliate_code, ticket_expiry)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, ("sho", admin_pass_hash, "Enterprise Admin", "Enterprise Tier",
+                  "mohsuhailji@gmail.com", "2030-01-01T00:00:00", "AFF-SHO-15", "2030-01-01T00:00:00"))
+            cursor.execute("""
+                UPDATE enterprise_users
+                SET password_hash=?, role=?, tier=?, email=?
+                WHERE LOWER(username)='sho'
+            """, (admin_pass_hash, "Enterprise Admin", "Enterprise Tier", "mohsuhailji@gmail.com"))
+        else:
+            # Preserve an existing admin credential; only seed metadata for a
+            # first-run account when one does not already exist.
+            cursor.execute("""
+                INSERT OR IGNORE INTO enterprise_users
+                (username, role, tier, email, trial_expires, affiliate_code, ticket_expiry)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, ("sho", "Enterprise Admin", "Enterprise Tier",
+                  "mohsuhailji@gmail.com", "2030-01-01T00:00:00", "AFF-SHO-15", "2030-01-01T00:00:00"))
+            cursor.execute("""
+                UPDATE enterprise_users
+                SET role=?, tier=?, email=?
+                WHERE LOWER(username)='sho'
+            """, ("Enterprise Admin", "Enterprise Tier", "mohsuhailji@gmail.com"))
 
         # Never recreate/delete accounts on app startup.
         cursor.execute("SELECT 1 FROM users WHERE LOWER(username)='sho' LIMIT 1")

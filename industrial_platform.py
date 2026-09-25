@@ -145,7 +145,12 @@ def init_platform_db(db_path: str="enterprise_full_workspace.db") -> bool:
             ("trade_rules","CREATE TABLE IF NOT EXISTS trade_rules(id INTEGER PRIMARY KEY AUTOINCREMENT, region_from TEXT, region_to TEXT, product_class TEXT, rule TEXT, active INTEGER, updated_at TEXT)"),
         ]
         for _,sql in ddl: conn.execute(sql)
-        for column, definition in [("solver_version", "TEXT"), ("result_hash", "TEXT")]:
+        for column, definition in [
+            ("solver_version", "TEXT"),
+            ("result_hash", "TEXT"),
+            ("dataset_id", "TEXT"),
+            ("run_id", "TEXT"),
+        ]:
             try:
                 conn.execute(f"ALTER TABLE platform_models ADD COLUMN {column} {definition}")
             except sqlite3.OperationalError:
@@ -463,18 +468,21 @@ def save_model_snapshot(
     db_path="enterprise_full_workspace.db",
     solver_version: str = "",
     result_hash: str = "",
+    version: str = "1.0.0",
+    dataset_id: str = "",
+    run_id: str = "",
 ) -> str:
-    base = f"{name}|{json.dumps(parameters,sort_keys=True,default=str)}|{data_hash}|{solver_version}|{result_hash}"
+    base = f"{name}|{json.dumps(parameters,sort_keys=True,default=str)}|{data_hash}|{version}|{solver_version}|{result_hash}|{dataset_id}|{run_id}"
     mid = "MOD-" + hashlib.sha256(base.encode()).hexdigest()[:12].upper()
     with sqlite3.connect(db_path) as c:
         c.execute(
             """
             INSERT OR REPLACE INTO platform_models
-            (model_id,name,version,model_type,parameters_json,data_hash,assumptions_json,created_by,created_at,status,solver_version,result_hash)
-            VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
+            (model_id,name,version,model_type,parameters_json,data_hash,assumptions_json,created_by,created_at,status,solver_version,result_hash,dataset_id,run_id)
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
-                mid, name, "1.0.0", model_type,
+                mid, name, str(version or "1.0.0"), model_type,
                 json.dumps(parameters, default=str), data_hash,
                 json.dumps(assumptions, default=str), username, _now(), status,
                 solver_version, result_hash,

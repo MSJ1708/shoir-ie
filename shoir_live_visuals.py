@@ -270,6 +270,9 @@ def _auto_chart_choice(df: pd.DataFrame) -> str:
     target_metric = _find_col(df, ("target", "goal"))
     actual_metric = _find_col(df, ("actual", "observed"))
     propagated = _find_col(df, ("propagated kpi", "bootstrap statistic", "bootstrap effect"))
+    sensitivity = _find_col(df, ("sensitivity", "elasticity", "importance"))
+    defect_metric = _find_col(df, ("defect", "failure", "rpn", "risk priority"))
+
     ci_low = _find_col(df, ("ci low", "lower 95", "lower ci"))
     ci_high = _find_col(df, ("ci high", "upper 95", "upper ci"))
     if source and target and value:
@@ -282,18 +285,22 @@ def _auto_chart_choice(df: pd.DataFrame) -> str:
         return "Distribution"
     if target_metric and actual_metric:
         return "Bar"
+    if sensitivity:
+        return "Sensitivity Plot"
     if effect and term:
         return "Bar"
     if ci_low and ci_high and term:
         return "Bar"
+    if defect_metric:
+        return "Pareto"
     if len(nums) >= 3:
         return "3D Scatter"
     if len(nums) >= 2 and dates:
         return "Line"
     if len(nums) >= 2:
         return "Sensitivity Plot"
-    if nums and any("defect" in str(c).lower() or "failure" in str(c).lower() for c in cols):
-        return "Pareto"
+    if nums and categorical:
+        return "Bar"
     if nums:
         return "Distribution"
     return "Network Map" if len([c for c in df.columns if not pd.api.types.is_numeric_dtype(df[c])]) >= 2 else "Bar"
