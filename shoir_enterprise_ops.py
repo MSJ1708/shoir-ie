@@ -695,6 +695,14 @@ def render_research_extension(username: str) -> None:
     st.markdown("### 📝 Research Studio Integration")
     st.caption("Protocol → hypothesis → run tracking → citations → results → manuscript/supplementary evidence.")
     proto = st.session_state.get("research_protocol") or st.session_state.get("current_research_protocol") or {}
+    if not proto:
+        try:
+            from industrial_experience import load_research_protocol
+            study_id = st.session_state.get("sx_research_study_id") or st.session_state.get("active_research_study_id")
+            if study_id:
+                proto = load_research_protocol(str(study_id), username) or {}
+        except Exception:
+            proto = {}
     if isinstance(proto, dict) and proto:
         pcols = st.columns(4)
         pcols[0].metric("Hypothesis", "Defined" if proto.get("hypothesis") else "Missing")
