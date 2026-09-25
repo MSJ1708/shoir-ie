@@ -31,6 +31,10 @@ from shoir_optimization import (
     solve_linear_program, solve_quadratic_program, solve_robust_linear_program,
     solve_stochastic_linear_program, pareto_weight_sweep,
 )
+from shoir_engine_studio import (
+    render_experiment_engine, render_forecasting_studio,
+    render_optimization_studio, render_decision_center_studio,
+)
 
 PLATFORM_CATALOG = [
     {"tier":"Enterprise","category":"Platform","name":"Industrial Operating System","when":"Unified KPI, method, scenario, process, model-health, improvement and decision-verification workspace.","example":"Connect engineering analysis outputs through one governed decision layer with reusable templates and exports."},
@@ -51,6 +55,7 @@ PLATFORM_CATALOG = [
     {"tier":"Enterprise","category":"Optimization","name":"Robust & Resilient Optimization","when":"Evaluate decisions against demand, lead-time, supplier, energy and capacity uncertainty.","example":"Compare nominal capacity with the probability of meeting demand across thousands of shocks."},
     {"tier":"Enterprise","category":"Governance","name":"Engineering Model Registry","when":"Version models, parameters, data hashes, assumptions, solvers and results for reproducibility.","example":"Reproduce a planning study six months later from its registered snapshot."},
     {"tier":"Enterprise","category":"Experimentation","name":"Experiment Lab","when":"Run many controlled scenarios and compare cost, service, risk, inventory, carbon and capacity.","example":"Batch-test baseline, demand surge, supplier outage and capacity-expansion cases."},
+    {"tier":"Enterprise","category":"Research & Experimentation","name":"Experiment Engine","when":"Design randomized DOE, factorial experiments, replications, bootstrap studies, Monte Carlo uncertainty propagation, effect sizes and sensitivity analyses.","example":"Generate a reproducible factorial study, quantify effects, propagate uncertainty and export statistical evidence."},
     {"tier":"Enterprise","category":"Control","name":"Industrial Control Center","when":"See demand, inventory, production, supplier, transport, machine, quality, carbon, risk and finance health together.","example":"Click a red issue and jump into the module responsible for the underlying KPI."},
     {"tier":"Enterprise","category":"Decisions","name":"Engineering Decision Center","when":"Turn model results into auditable decisions with assumptions, deltas, uncertainty and approvals.","example":"Create an approval-ready decision card from a network optimization run."},
     {"tier":"Enterprise","category":"Data Platform","name":"Industrial Data Platform","when":"Ingest, profile, hash, catalog and prepare operational datasets for downstream modules.","example":"Upload a multi-sheet workbook, validate schema and register a reusable dataset."},
@@ -83,7 +88,7 @@ TIER_FEATURES = {
         "Industrial Operating System",
         "Manufacturing Execution System","Industrial Simulation Lab","3D Factory Designer",
         "Industrial Connectivity Hub","Multi-Objective Optimization","Robust & Resilient Optimization",
-        "Engineering Model Registry","Experiment Lab","Industrial Control Center","Engineering Decision Center",
+        "Engineering Model Registry","Experiment Lab","Experiment Engine","Industrial Control Center","Engineering Decision Center",
         "Industrial Data Platform","Advanced Planning & Scheduling","Quality Engineering & Reliability",
         "Capital Investment & Engineering Economics","Workforce Engineering","Industrial Sustainability & LCA",
         "Benchmarking & Engineering Standards","Industrial Data Model & Digital Thread",
@@ -93,7 +98,7 @@ TIER_FEATURES = {
         "Advanced Engineering Copilot","Live Industrial Digital Twin","Enterprise Security & Governance",
         "Manufacturing Execution System","Industrial Simulation Lab","3D Factory Designer",
         "Industrial Connectivity Hub","Multi-Objective Optimization","Robust & Resilient Optimization",
-        "Engineering Model Registry","Experiment Lab","Industrial Control Center","Engineering Decision Center",
+        "Engineering Model Registry","Experiment Lab","Experiment Engine","Industrial Control Center","Engineering Decision Center",
         "Industrial Data Platform","Advanced Planning & Scheduling","Quality Engineering & Reliability",
         "Capital Investment & Engineering Economics","Workforce Engineering","Industrial Sustainability & LCA",
         "Benchmarking & Engineering Standards","Industrial Data Model & Digital Thread",
@@ -133,6 +138,7 @@ def init_platform_db(db_path: str="enterprise_full_workspace.db") -> bool:
             ("connector_profiles","CREATE TABLE IF NOT EXISTS connector_profiles(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, system_type TEXT, endpoint TEXT, status TEXT, last_test TEXT, notes TEXT, created_by TEXT)"),
             ("telemetry_events","CREATE TABLE IF NOT EXISTS telemetry_events(id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id TEXT, ts TEXT, metric TEXT, value REAL, source TEXT)"),
             ("security_events","CREATE TABLE IF NOT EXISTS security_events(id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT, event_type TEXT, details TEXT, created_at TEXT)"),
+            ("platform_usage_events","CREATE TABLE IF NOT EXISTS platform_usage_events(id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT, module TEXT, event_time TEXT)"),
             ("platform_scenarios","CREATE TABLE IF NOT EXISTS platform_scenarios(scenario_id TEXT PRIMARY KEY, name TEXT UNIQUE, parent_name TEXT, parameters_json TEXT, kpis_json TEXT, created_by TEXT, created_at TEXT)"),
             ("workspace_members","CREATE TABLE IF NOT EXISTS workspace_members(workspace TEXT, username TEXT, role TEXT, updated_at TEXT, PRIMARY KEY(workspace,username))"),
             ("fx_rates","CREATE TABLE IF NOT EXISTS fx_rates(currency TEXT PRIMARY KEY, rate_to_base REAL, updated_at TEXT)"),
@@ -737,6 +743,12 @@ def render_module(module: str, tier: str, username: str):
     import plotly.express as px
     init_platform_db()
     sanitize_module_session_state(st)
+    with sqlite3.connect("enterprise_full_workspace.db") as _usage_conn:
+        _usage_conn.execute(
+            "INSERT INTO platform_usage_events(username,module,event_time) VALUES(?,?,?)",
+            (username,module,_now()),
+        )
+        _usage_conn.commit()
     render_module_data_exchange(module, st, tier, username)
     required=next((x["tier"] for x in PLATFORM_CATALOG if x["name"]==module),None)
     if required and not tier_allows(tier,required):
@@ -749,6 +761,18 @@ def render_module(module: str, tier: str, username: str):
         # append the old generic scenario screen underneath it.
         return
     st.caption("Workflow: Prepare → Validate → Run → Inspect → Explain → Export")
+    if module=="Experiment Engine":
+        render_experiment_engine(tier, username)
+        return
+    if module=="Advanced ML Demand Forecasting":
+        render_forecasting_studio(tier, username)
+        return
+    if module=="Multi-Objective Optimization":
+        render_optimization_studio(tier, username)
+        return
+    if module=="Engineering Decision Center":
+        render_decision_center_studio(tier, username)
+        return
     if module=="Engineering Validation Center":
         df=st.session_state.setdefault("validation_df",pd.DataFrame({"Metric":["Cost","Service Level","Capacity"],"Value":[100000,95,12000],"Unit":["USD","%","units"]}))
         edited=st.data_editor(df,num_rows="dynamic",use_container_width=True,key="validation_editor")
