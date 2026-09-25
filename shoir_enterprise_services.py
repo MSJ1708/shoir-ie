@@ -428,7 +428,20 @@ def render_enterprise_bridge(module: str, tier: str, username: str) -> None:
             cols[1].metric("Rows", f"{profile['rows']:,}")
             cols[2].metric("Numeric fields", f"{len(profile['numeric_columns']):,}")
             cols[3].metric("Outlier cells", f"{sum(profile['outlier_counts'].values()):,}")
-            artifact_id = record_workspace_artifact("module_state", module, username, {"rows": profile["rows"], "columns": profile["columns"], "quality_score": profile["quality_score"]})
+            artifact_type = (
+                "report" if module == "Executive Report Center" else
+                "decision" if module == "Engineering Decision Center" else
+                "experiment" if module in {"Experiment Engine","Experiment Lab"} else
+                "model" if module == "Engineering Model Registry" else
+                "project" if module == "Persistence" else
+                "module_state"
+            )
+            artifact_id = record_workspace_artifact(
+                artifact_type,
+                module,
+                username,
+                {"rows": profile["rows"], "columns": profile["columns"], "quality_score": profile["quality_score"]},
+            )
             st.caption(f"Workspace artifact fingerprint: {artifact_id}")
             if frames:
                 st.dataframe(pd.DataFrame([{
