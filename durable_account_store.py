@@ -387,12 +387,16 @@ def edge_register_request(request: Mapping[str, Any]) -> dict[str, Any]:
     })
 
 
-def edge_admin_approve(username: str, token: str, request_id: int | None = None) -> dict[str, Any]:
-    payload = {"username": username, "token": token}
+def edge_admin_approve(username: str, token: str, request_id: int | None = None, target_username: str | None = None, request_type: str | None = None) -> dict[str, Any]:
+    payload: dict[str, Any] = {"username": username, "token": token}
     action = "admin_approve_latest_session"
     if request_id is not None:
         action = "admin_approve_session"
         payload["request_id"] = int(request_id)
+    elif target_username:
+        action = "admin_approve_target_session"
+        payload["target_username"] = target_username
+        payload["request_type"] = request_type or "New"
     return _edge_call(action, payload)
 
 
@@ -458,9 +462,17 @@ def upsert_remote_account(account: Mapping[str, Any]) -> None:
         token = str(account.get("admin_session_token") or "")
         admin_username = str(account.get("admin_username") or "")
         request_id = account.get("request_id")
+        target_username = account.get("target_username") or account.get("username")
+        request_type = account.get("request_type") or "New"
         if not token or not admin_username:
             raise RuntimeError("Admin session token is required for remote account approval.")
-        edge_admin_approve(admin_username, token, int(request_id) if request_id is not None else None)
+        edge_admin_approve(
+            admin_username,
+            token,
+            int(request_id) if request_id is not None else None,
+            str(target_username) if target_username else None,
+            str(request_type),
+        )
         return
     ensure_remote_schema()
     now = dt.datetime.now(dt.timezone.utc)
