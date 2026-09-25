@@ -29,19 +29,34 @@ _MODULE_KEYS = {
     "Industrial Simulation Lab": ["sim_des_result", "sim_agent_result", "sd"],
     "3D Factory Designer": ["factory3d_df", "factory3d_dist_result"],
     "Industrial Connectivity Hub": ["conn_df"],
-    "Multi-Objective Optimization": ["multiobj_df", "multiobj_result", "pareto"],
-    "Robust & Resilient Optimization": ["robust_df", "robust_result"],
+    "Multi-Objective Optimization": [
+        "multiobj_df", "multiobj_result", "pareto", "optimization_solution_df",
+        "optimization_pareto_df", "optimization_stochastic_summary_df", "optimization_robust_scored_df",
+        "optimization_scenario_states_df", "optimization_candidates_df",
+    ],
+    "Robust & Resilient Optimization": [
+        "robust_df", "robust_result", "optimization_solution_df",
+        "optimization_nonlinear_solution_df", "optimization_stochastic_summary_df", "optimization_robust_scored_df",
+    ],
     "Engineering Model Registry": ["model_registry_df"],
     "Experiment Lab": ["experiment_df", "experiment_results"],
+    "Experiment Engine": [
+        "experiment_engine_design_df", "experiment_engine_effects_df", "experiment_engine_fitted_df",
+        "experiment_engine_mc_samples", "experiment_engine_bootstrap_df", "experiment_engine_sensitivity_df",
+        "experiment_engine_replication_df",
+    ],
     "Industrial Control Center": ["control_center_metrics"],
-    "Engineering Decision Center": ["decision_metrics_df"],
+    "Engineering Decision Center": [
+        "decision_metrics_df", "decision_governed_card", "decision_alternatives_df",
+        "decision_constraints_df", "decision_evidence_df", "decision_approvals_df", "decision_verification_df",
+    ],
     "Industrial Data Platform": ["data_platform_latest_df"],
     "Capital Investment & Engineering Economics": ["capex_df", "capex_result"],
     "Workforce Engineering": ["work_elements", "balance_result", "skills_df"],
     "Industrial Sustainability & LCA": ["sustain_df", "sustain_result"],
     "Benchmarking & Engineering Standards": ["benchmark_actual", "benchmark_targets", "benchmark_result"],
     "Live Industrial Digital Twin": ["twin_tel"],
-    "Advanced ML Demand Forecasting": ["forecast_df", "forecast_result"],
+    "Advanced ML Demand Forecasting": ["forecast_df", "forecast_result", "forecast_universal_df", "forecast_universal_result"],
     "Scenario Versioning & Comparison": ["scenario_df"],
     "Team Workspaces & RBAC": ["workspace_members_df"],
     "Executive Report Center": ["exec_report_df"],
@@ -212,18 +227,25 @@ def _auto_chart_choice(df: pd.DataFrame) -> str:
     value = _find_col(df, ("value", "volume", "flow", "quantity", "qty"))
     start = _find_col(df, ("start", "begin", "planned start"))
     finish = _find_col(df, ("finish", "end", "completion", "planned finish"))
+    lower_cols = [str(c).lower() for c in df.columns]
     if source and target and value:
         return "Sankey"
     if start and finish:
         return "Gantt"
+    if any("defect" in c or "failure" in c or "rpn" in c for c in lower_cols) and nums:
+        return "Pareto"
+    if any("sensitivity" in c for c in lower_cols) and nums:
+        return "Sensitivity Plot"
+    if any("effect" in c or "cohen" in c or "hedges" in c for c in lower_cols) and nums:
+        return "Bar"
+    if any("ucl" in c or "lcl" in c or "control" in c for c in lower_cols) and nums:
+        return "Control Chart"
     if len(nums) >= 3:
         return "3D Scatter"
     if len(nums) >= 2 and dates:
         return "Line"
     if len(nums) >= 2:
         return "Sensitivity Plot"
-    if nums and any("defect" in str(c).lower() or "failure" in str(c).lower() for c in cols):
-        return "Pareto"
     if nums:
         return "Distribution"
     return "Network Map" if len([c for c in df.columns if not pd.api.types.is_numeric_dtype(df[c])]) >= 2 else "Bar"
@@ -285,8 +307,10 @@ def _make_figure(df: pd.DataFrame, chart: str, x: str | None, y: str | None, z: 
         mean = float(values.mean())
         sigma = float(values.std(ddof=1)) if len(values) > 1 else 0.0
         ucl, lcl = mean + 3 * sigma, mean - 3 * sigma
+        status = np.where((values > ucl) | (values < lcl), "Out of control", "Within limits")
+        hover = [f"{metric}: {v:.4g}<br>{s}" for v, s in zip(values, status)]
         fig = go.Figure()
-        fig.add_scatter(x=x_values, y=values, mode="lines+markers", name=metric)
+        fig.add_scatter(x=x_values, y=values, mode="lines+markers", name=metric, hovertext=hover, hoverinfo="text")
         fig.add_scatter(x=x_values, y=[mean] * len(values), mode="lines", name="Center line")
         fig.add_scatter(x=x_values, y=[ucl] * len(values), mode="lines", name="UCL")
         fig.add_scatter(x=x_values, y=[lcl] * len(values), mode="lines", name="LCL")
@@ -321,11 +345,15 @@ def _make_figure(df: pd.DataFrame, chart: str, x: str | None, y: str | None, z: 
         d = df.copy()
         if category:
             d = d[[category, metric]].dropna().head(40)
-            return go.Figure(go.Waterfall(
-                x=d[category].astype(str).tolist(),
-                y=pd.to_numeric(d[metric], errors="coerce").tolist(),
-                measure=["relative"] * len(d),
-            )).update_layout(title=title or f"Waterfall · {metric}")
+            labels = d[category].astype(str).tolist()
+            values = pd.to_numeric(d[metric], errors="coerce").tolist()
+            measures = ["relative"] * len(values)
+            if values:
+                measures[0] = "absolute"
+                if len(values) > 1 and any(token in labels[-1].lower() for token in ("end", "total", "result", "final")):
+                    measures[-1] = "total"
+            fig = go.Figure(go.Waterfall(x=labels, y=values, measure=measures))
+            return fig.update_layout(title=title or f"Waterfall · {metric}")
         return None
 
     if chart == "Sensitivity Plot":
