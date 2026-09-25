@@ -39,7 +39,7 @@ def test_control_tower_health_and_telemetry_anomaly():
     assert "Health Score" in health.columns
     assert health.loc[health["Area"].eq("Quality"), "Health Score"].iloc[0] == 35
 
-    values = [10.0] * 20 + [100.0]
+    values = [10.0] * 20 + [1000.0]
     telemetry = pd.DataFrame({
         "Timestamp": pd.date_range("2026-01-01", periods=len(values), freq="h"),
         "Asset": ["M-01"] * len(values),
