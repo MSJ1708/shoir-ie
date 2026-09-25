@@ -52,6 +52,11 @@ from shoir_enterprise_ops import (
     render_geospatial_extension,
     knowledge_context,
 )
+try:
+    from shoir_enterprise_services import render_enterprise_bridge
+except Exception:
+    render_enterprise_bridge = None
+
 from durable_account_store import (durable_backend_configured, sync_durable_accounts, sync_remote_requests_to_local, edge_login, edge_admin_list_requests, edge_renew_request, upsert_remote_account, insert_remote_request, remote_account, account_is_expired, renewed_expiry)
 
 # =====================================================================
@@ -1437,6 +1442,88 @@ research_pack_features = tier3_features + [
 ]
 if is_admin:
     tier3_features.append("Admin Panel")
+
+def _render_post_module_layers(module_name: str) -> None:
+    """Run the single shared post-module integration surface.
+
+    PR57's enterprise-operations layer remains authoritative for specialized
+    modules. The mainline bridge is used only where no richer native
+    enterprise extension is already attached.
+    """
+    module_name = str(module_name)
+    username = st.session_state.get("current_user", "unknown")
+    specialized = {
+        "Geospatial Network Designer",
+        "Human Factors & Ergonomics (NIOSH)",
+        "Engineering Economics & Finance",
+        "Enterprise Integration & Collaboration",
+    }
+
+    try:
+        if module_name not in specialized and callable(render_enterprise_bridge):
+            render_enterprise_bridge(module_name, tier_val, username)
+    except Exception as exc:
+        st.warning("Enterprise capability layer could not render; the native module remains available.")
+        with st.expander("Enterprise layer diagnostic"):
+            st.code(f"{type(exc).__name__}: {exc}")
+
+    try:
+        if module_name == "Geospatial Network Designer":
+            render_geospatial_extension(username)
+            frame = st.session_state.get("geospatial_network_routes_df")
+            if isinstance(frame, pd.DataFrame) and not frame.empty:
+                render_data_intelligence_extension(module_name, frame, frame)
+            render_live_visualization_studio(
+                module_name, expanded=False, preferred_key="geospatial_network_routes_df"
+            )
+        elif module_name == "Human Factors & Ergonomics (NIOSH)":
+            render_human_factors_extension(username)
+            frame = st.session_state.get("human_factors_metrics_df")
+            if isinstance(frame, pd.DataFrame) and not frame.empty:
+                render_data_intelligence_extension(module_name, frame, frame)
+            render_live_visualization_studio(
+                module_name, expanded=False, preferred_key="human_factors_metrics_df"
+            )
+        elif module_name == "Engineering Economics & Finance":
+            render_economics_extension(username)
+            render_reporting_extension(
+                module_name,
+                [
+                    ("Cash Flows", pd.DataFrame(st.session_state.get("fin_cash_flows", []))),
+                    ("TCO", st.session_state.get("engineering_economics_tco_df", pd.DataFrame())),
+                ],
+                username,
+            )
+            render_live_visualization_studio(
+                module_name, expanded=False, preferred_key="engineering_economics_tco_df"
+            )
+        elif module_name == "Enterprise Integration & Collaboration":
+            render_collaboration_extension(username)
+            render_connectivity_extension()
+            frame = st.session_state.get("connectivity_health_df")
+            if isinstance(frame, pd.DataFrame) and not frame.empty:
+                render_data_intelligence_extension(module_name, frame, frame)
+            render_security_extension()
+            security = st.session_state.get("enterprise_security_posture_df")
+            if isinstance(security, pd.DataFrame) and not security.empty:
+                render_data_intelligence_extension(
+                    "Enterprise Security & Governance", security, security
+                )
+            render_live_visualization_studio(module_name, expanded=False)
+
+        try:
+            render_universal_module_parity(module_name, phase="results")
+        except Exception as exc:
+            st.warning("Universal Module Studio could not render the shared result surface; native results remain available.")
+            with st.expander("Visualization layer diagnostic"):
+                st.code(f"{type(exc).__name__}: {exc}")
+    finally:
+        if username != "unknown":
+            try:
+                save_user_workspace(username, st.session_state)
+            except Exception:
+                pass
+
 
 st.sidebar.markdown("### 🧭 Navigation Menu")
 menu_choice = st.sidebar.radio("Go to Section", ["Dashboard", "✨ Excellence Hub", "Become an affiliate", "Feedback", "Edit Account"], label_visibility="collapsed")
@@ -6271,14 +6358,7 @@ if selected_module == "Geospatial Network Designer":
                 )
                 st.plotly_chart(bar_cap, use_container_width=True)
 
-    render_geospatial_extension(st.session_state.get("current_user","unknown"))
-    if isinstance(st.session_state.get("geospatial_network_routes_df"), pd.DataFrame):
-        render_data_intelligence_extension(
-            "Geospatial Network Designer",
-            st.session_state["geospatial_network_routes_df"],
-            st.session_state.get("geospatial_network_routes_df"),
-        )
-    render_live_visualization_studio("Geospatial Network Designer", expanded=False, preferred_key="geospatial_network_routes_df")
+    _render_post_module_layers("Geospatial Network Designer")
     st.stop()
 
 # ==============================================================================
@@ -7711,14 +7791,7 @@ if selected_module in ["Human Factors & Ergonomics (NIOSH)", "Human Factors, Erg
             st.metric("Required Rest Time", f"{rest_mins_per_hour:.1f} mins / hour")
             st.metric("Total Shift Rest", f"{rest_mins_per_hour * shift_hours:.1f} minutes")
 
-    render_human_factors_extension(st.session_state.get("current_user","unknown"))
-    if isinstance(st.session_state.get("human_factors_metrics_df"), pd.DataFrame):
-        render_data_intelligence_extension(
-            "Human Factors & Ergonomics (NIOSH)",
-            st.session_state["human_factors_metrics_df"],
-            st.session_state.get("human_factors_metrics_df"),
-        )
-    render_live_visualization_studio("Human Factors & Ergonomics (NIOSH)", expanded=False, preferred_key="human_factors_metrics_df")
+    _render_post_module_layers("Human Factors & Ergonomics (NIOSH)")
     st.stop()
 
 # ==============================================================================
@@ -8044,16 +8117,7 @@ if selected_module in ["Engineering Economics & Finance", "Engineering Economics
                 "Interest Tax Shield": "${:,.2f}", "Ending Balance": "${:,.2f}"
             }), use_container_width=True, hide_index=True)
 
-    render_economics_extension(st.session_state.get("current_user","unknown"))
-    render_reporting_extension(
-        "Engineering Economics & Finance",
-        [
-            ("Cash Flows", pd.DataFrame(st.session_state.get("fin_cash_flows", []))),
-            ("TCO", st.session_state.get("engineering_economics_tco_df", pd.DataFrame())),
-        ],
-        st.session_state.get("current_user","unknown"),
-    )
-    render_live_visualization_studio("Engineering Economics & Finance", expanded=False, preferred_key="engineering_economics_tco_df")
+    _render_post_module_layers("Engineering Economics & Finance")
     st.stop()
 
 # ==============================================================================
@@ -8987,22 +9051,7 @@ if selected_module in ["Enterprise Integration & Collaboration", "Enterprise Int
                 </div>
                 """, unsafe_allow_html=True)
 
-    render_collaboration_extension(st.session_state.get("current_user","unknown"))
-    render_connectivity_extension()
-    if isinstance(st.session_state.get("connectivity_health_df"), pd.DataFrame):
-        render_data_intelligence_extension(
-            "Enterprise Integration & Collaboration",
-            st.session_state["connectivity_health_df"],
-            st.session_state.get("connectivity_health_df"),
-        )
-    render_security_extension()
-    if isinstance(st.session_state.get("enterprise_security_posture_df"), pd.DataFrame):
-        render_data_intelligence_extension(
-            "Enterprise Security & Governance",
-            st.session_state["enterprise_security_posture_df"],
-            st.session_state.get("enterprise_security_posture_df"),
-        )
-    render_live_visualization_studio("Enterprise Integration & Collaboration", expanded=False)
+    _render_post_module_layers("Enterprise Integration & Collaboration")
     st.stop()
     
 def render_data_editor(df, key_name):
