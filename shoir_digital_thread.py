@@ -489,6 +489,14 @@ def render_global_project_digital_thread(module: str, username: str) -> None:
         st.metric("Project ID", project.get("project_id", "—"))
     project["updated_at"] = _now()
 
+    # First-open experience: automatically harvest the current workspace once
+    # so the user lands on an evidence-backed graph rather than an empty canvas.
+    if not st.session_state.get(keys["sync"]):
+        try:
+            sync_workspace_to_thread(username, active_module=None)
+        except Exception:
+            pass
+
     c1, c2, c3, c4 = st.columns(4)
     nodes = node_frame()
     raw_nodes = st.session_state[keys["nodes"]]
