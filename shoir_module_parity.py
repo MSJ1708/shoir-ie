@@ -222,34 +222,46 @@ def summarize_module_dataframe(df: pd.DataFrame) -> dict[str, Any]:
     }
 
 
-def _init_state(module: str) -> dict[str, str]:
-    keys = parity_keys(module)
-    if keys["data"] not in st.session_state:
-        seed = pd.DataFrame()
-        try:
-            from shoir_live_visuals import discover_visual_tables
-            tables = discover_visual_tables(module)
-            if tables:
-                seed = tables[0][2].copy(deep=True)
+def _seed_from_known_module_table(module: str, keys: dict[str, str]) -> None:
+    if isinstance(st.session_state.get(keys["data"]), pd.DataFrame) and not st.session_state[keys["data"]].empty:
+        return
+    try:
+        from shoir_live_visuals import _MODULE_KEYS
+        for state_key in _MODULE_KEYS.get(module, []):
+            candidate = st.session_state.get(state_key)
+            if isinstance(candidate, pd.DataFrame) and not candidate.empty:
+                seed = candidate.copy(deep=True)
+                st.session_state[keys["data"]] = seed
+                st.session_state[keys["original"]] = seed.copy(deep=True)
+                st.session_state[keys["validation"]] = validate_module_dataframe(seed)
+                st.session_state[keys["results"]] = summarize_module_dataframe(seed)
                 st.session_state[keys["meta"]] = {
-                    "source": f"Existing module state · {tables[0][1]}",
+                    "source": f"Existing module state · {state_key}",
                     "source_sheet": "",
                     "imported_at": datetime.now(timezone.utc).isoformat(),
                 }
-        except Exception:
-            pass
+                return
+    except Exception:
+        pass
 
-        st.session_state[keys["data"]] = seed
-        st.session_state[keys["original"]] = seed.copy(deep=True)
-        st.session_state[keys["validation"]] = validate_module_dataframe(seed)
+
+def _init_state(module: str) -> dict[str, str]:
+    keys = parity_keys(module)
+    if keys["data"] not in st.session_state:
+        st.session_state[keys["data"]] = pd.DataFrame()
+        st.session_state[keys["original"]] = pd.DataFrame()
+        st.session_state[keys["validation"]] = validate_module_dataframe(pd.DataFrame())
         st.session_state[keys["clean_audit"]] = []
-        st.session_state[keys["results"]] = summarize_module_dataframe(seed)
-        st.session_state.setdefault(keys["meta"], {
+        st.session_state[keys["results"]] = summarize_module_dataframe(pd.DataFrame())
+        st.session_state[keys["meta"]] = {
             "source": "No dataset imported yet",
             "source_sheet": "",
             "imported_at": "",
-        })
-
+        }
+    # Re-seed from a known module table on later runs when the module renderer
+    # has already initialized its domain-specific state. We never seed from
+    # unrelated global workspace tables.
+    _seed_from_known_module_table(module, keys)
     return keys
 
 
