@@ -177,8 +177,9 @@ def run_twin_what_if(
     base_arrival = float(_numeric(q.get("arrival_rate", [])).fillna(0).sum()) if "arrival_rate" in q.columns else 0.0
     base_service = float(_numeric(q.get("service_rate", [])).fillna(0).sum()) if "service_rate" in q.columns else 0.0
 
+    rng = np.random.default_rng(1708)
     for tick in range(1, ticks + 1):
-        disruptions = 1.0 if np.random.default_rng(17 + tick).random() < downtime_rate else 0.0
+        disruptions = 1.0 if rng.random() < downtime_rate else 0.0
         effective_service = base_service * service_multiplier * (1.0 - disruptions)
         arrivals = base_arrival * arrival_multiplier
         flow_delta = arrivals - effective_service
@@ -259,7 +260,7 @@ def build_control_tower_health(state: Mapping[str, Any]) -> pd.DataFrame:
             util = float(_numeric(supply[util_col]).mean())
             add("Supply", max(0.0, min(100.0, 100.0 - max(0.0, util - 80.0) * 3.0)), "Observed", f"Mean utilization {util:.1f}%")
         else:
-            add("Supply", 95.0 if len(supply) else None, "Observed", f"{len(supply):,} facility record(s)")
+            add("Supply", None, "Review", f"{len(supply):,} facility record(s); no measurable health/utilization signal mapped.")
 
     inv = _df(state.get("inventory"))
     if not inv.empty:
@@ -294,7 +295,7 @@ def build_control_tower_health(state: Mapping[str, Any]) -> pd.DataFrame:
         if battery:
             add("Transport", float(_numeric(transport[battery]).mean()), "Observed", "Fleet battery signal")
         else:
-            add("Transport", 95.0, "Observed", f"{len(transport):,} transport record(s)")
+            add("Transport", None, "Review", f"{len(transport):,} transport record(s); no measurable health/battery signal mapped.")
 
     workforce = _df(state.get("workforce"))
     if not workforce.empty:
@@ -477,30 +478,43 @@ def record_artifact(kind: str, name: str, value: Any, source_module: str, owner:
 
 def render_persistence_extension(username: str) -> None:
     from durable_account_store import durable_backend_configured
+    from workspace_persistence import save_user_workspace, load_user_workspace
     st.markdown("### ☁️ Durable Workspace & Artifact Journal")
     cloud_ready = bool(durable_backend_configured())
     catalog = st.session_state.get("shoir_artifact_catalog", [])
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Managed persistence", "Configured" if cloud_ready else "Local-only")
-    c2.metric("Durable artifact records", f"{len(catalog):,}")
-    c3.metric("Workspace owner", username or "unknown")
-    if st.button("💾 Save workspace now", type="primary", use_container_width=True, key="enterprise_persistence_save"):
-        try:
-            from workspace_persistence import save_user_workspace
-            ok = bool(save_user_workspace(username, st.session_state))
-            st.session_state["enterprise_persistence_last_save"] = ok
-            if ok:
-                st.success("Workspace state saved through the configured persistence path.")
-            else:
-                st.warning("Workspace save did not complete. Check the managed persistence configuration.")
-        except Exception as exc:
-            st.error(f"Workspace save failed safely: {type(exc).__name__}: {exc}")
-    last = st.session_state.get("enterprise_persistence_last_save")
-    if last is not None:
-        st.caption(f"Last explicit save: {'successful' if last else 'not completed'}.")
+    last_save = st.session_state.get("workspace_last_save_ok", st.session_state.get("enterprise_persistence_last_save"))
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Managed persistence", "Configured" if cloud_ready else "Not configured")
+    c2.metric("Artifact records", f"{len(catalog):,}")
+    c3.metric("Owner", username or "unknown")
+    c4.metric("Last workspace save", "OK" if last_save is True else ("Failed" if last_save is False else "Not recorded"))
+    save_col, restore_col = st.columns(2)
+    with save_col:
+        if st.button("💾 Save workspace now", type="primary", use_container_width=True, key="enterprise_persistence_save"):
+            try:
+                ok = bool(save_user_workspace(username, st.session_state))
+                st.session_state["enterprise_persistence_last_save"] = ok
+                st.session_state["workspace_last_save_ok"] = ok
+                if ok:
+                    st.success("Workspace saved through the active persistence backend.")
+                else:
+                    st.warning("Workspace save did not complete. No success message is shown unless the persistence call returned success.")
+            except Exception as exc:
+                st.error(f"Workspace save failed safely: {type(exc).__name__}: {exc}")
+    with restore_col:
+        if st.button("🔄 Restore saved workspace", use_container_width=True, key="enterprise_persistence_restore"):
+            try:
+                ok = bool(load_user_workspace(username, st.session_state))
+                if ok:
+                    st.success("Saved workspace state restored. The page will refresh with the recovered values.")
+                    st.rerun()
+                else:
+                    st.warning("No restorable workspace record was returned by the active persistence backend.")
+            except Exception as exc:
+                st.error(f"Workspace restore failed safely: {type(exc).__name__}: {exc}")
     if catalog:
         st.dataframe(pd.DataFrame(catalog), use_container_width=True, hide_index=True)
-    st.caption("The journal keeps hashes, ownership, source modules and reconstruction references in workspace state; module datasets/results themselves remain governed by the same workspace persistence mechanism.")
+    st.caption("Workspace state, including module datasets/results and artifact metadata, follows the configured persistence path. Exported binary files are represented by provenance/hash metadata unless separately stored in a connected file/object store.")
 
 
 def render_collaboration_extension(username: str) -> None:
@@ -518,21 +532,33 @@ def render_collaboration_extension(username: str) -> None:
     with st.expander("Comments · Mentions · Assignments · Reviewers", expanded=False):
         comment = st.text_area("Comment", key="collab_comment_text")
         mention = st.text_input("Mention", placeholder="@Engineer or @Manager", key="collab_mention_text")
-        c1, c2, c3 = st.columns(3)
+        c1, c2, c3, c4 = st.columns(4)
         with c1:
             if st.button("💬 Add comment", use_container_width=True, key="collab_add_comment"):
                 if comment.strip():
                     board["comments"].append({"Actor": username, "Comment": comment.strip(), "Timestamp": _now()})
+                    try:
+                        from industrial_experience import add_comment
+                        add_comment(
+                            st.session_state.get("active_project_id") or st.session_state.get("project_id"),
+                            st.session_state.get("decision_active_id"),
+                            username,
+                            comment.strip(),
+                        )
+                    except Exception:
+                        pass
         with c2:
+            if st.button("🔔 Add mention", use_container_width=True, key="collab_add_mention"):
+                if mention.strip():
+                    board["mentions"].append({"Actor": username, "Mention": mention.strip(), "Timestamp": _now()})
+        with c3:
             assignee = st.selectbox("Assignee", users_df.iloc[:, 0].astype(str).tolist(), key="collab_assignee")
             if st.button("📌 Assign review", use_container_width=True, key="collab_assign"):
                 board["assignments"].append({"Assignee": assignee, "Assigned By": username, "Status": "Pending", "Timestamp": _now()})
-        with c3:
+        with c4:
             reviewer = st.text_input("Reviewer role", "Engineering Manager", key="collab_reviewer_role")
             if st.button("🧑‍⚖️ Add reviewer", use_container_width=True, key="collab_reviewer"):
                 board["reviewers"].append({"Role": reviewer, "Added By": username, "Status": "Pending", "Timestamp": _now()})
-        if mention.strip():
-            board["mentions"].append({"Actor": username, "Mention": mention.strip(), "Timestamp": _now()})
         for label, key in [("Comments", "comments"), ("Assignments", "assignments"), ("Reviewers", "reviewers"), ("Mentions", "mentions")]:
             data = pd.DataFrame(board[key])
             if not data.empty:
@@ -982,16 +1008,25 @@ def render_human_factors_extension(username: str = "unknown") -> None:
     metrics = []
     for col in numeric[:6]:
         values = _numeric(source[col]).dropna()
+        mean_value = float(values.mean()) if len(values) else np.nan
+        p95_value = float(values.quantile(0.95)) if len(values) else np.nan
         metrics.append({
             "Measure": col,
-            "Mean": float(values.mean()) if len(values) else np.nan,
-            "P95": float(values.quantile(0.95)) if len(values) else np.nan,
+            "Mean": mean_value,
+            "P95": p95_value,
+            "Spread (P95-Mean)": p95_value - mean_value if np.isfinite(mean_value) and np.isfinite(p95_value) else np.nan,
             "CV %": float(values.std(ddof=1) / values.mean() * 100) if len(values) > 1 and values.mean() else np.nan,
         })
     result = pd.DataFrame(metrics)
     st.session_state["human_factors_metrics_df"] = result
     st.dataframe(result, use_container_width=True, hide_index=True)
-    st.plotly_chart(px.bar(result, x="Measure", y="Mean", error_y="P95", title="Human Factors / Workload Measures"), use_container_width=True)
+    st.plotly_chart(px.bar(
+        result,
+        x="Measure",
+        y="Mean",
+        hover_data=["P95", "Spread (P95-Mean)", "CV %"],
+        title="Human Factors / Workload Measures",
+    ), use_container_width=True)
     st.caption("These outputs are engineering workload measures, not medical or clinical assessments.")
 
 
