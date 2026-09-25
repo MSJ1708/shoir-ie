@@ -191,7 +191,7 @@ def run_analysis(
                         "Baseline": row[baseline],
                         "Comparison": row[comparison],
                         "Delta": row[comparison] - row[baseline],
-                        "Delta %": ((row[comparison] - row[baseline]) / row[baseline] * 100) if row[baseline] not in (0, np.nan) else np.nan,
+                        "Delta %": ((row[comparison] - row[baseline]) / row[baseline] * 100) if pd.notna(row[baseline]) and row[baseline] != 0 else np.nan,
                     })
                 if deltas:
                     result = pd.DataFrame(deltas)
@@ -377,6 +377,31 @@ def build_export_bundle(
             "generated_at": datetime.now(timezone.utc).isoformat(),
         }, indent=2).encode("utf-8"))
     return buf.getvalue()
+
+
+
+def build_workflow_plan(prompt: str, module: str, df: pd.DataFrame) -> dict[str, Any]:
+    """Create the visible, reviewable execution plan before any analysis runs."""
+    inspection = inspect_data(df)
+    intent = classify_request(prompt)
+    method = choose_method(intent["intent"], inspection)
+    steps = [
+        {"step": "Inspect data", "status": "Ready", "detail": f"{inspection['rows']:,} rows × {inspection['columns']:,} columns; {inspection['missing_cells']:,} missing cells."},
+        {"step": "Choose method", "status": "Ready", "detail": method.get("method", "Engineering profile")},
+        {"step": "Run analysis", "status": "Ready", "detail": "Read-only, deterministic analysis on the selected dataset."},
+        {"step": "Generate graph", "status": "Ready", "detail": "Create a Plotly view from the actual analysis output."},
+        {"step": "Compare scenarios", "status": "Conditional", "detail": "Runs when baseline/scenario structure exists in the selected data."},
+        {"step": "Explain", "status": "Ready", "detail": "Translate observed evidence, assumptions and limitations into operator language."},
+        {"step": "Export", "status": "Ready", "detail": "Package results, method, data profile and the generated graph."},
+    ]
+    return {
+        "intent": intent,
+        "method": method,
+        "inspection": inspection,
+        "steps": steps,
+        "module": module,
+        "requires_approval": True,
+    }
 
 
 def run_orchestration(prompt: str, module: str, df: pd.DataFrame) -> dict[str, Any]:
