@@ -25,11 +25,27 @@ from industrial_experience import (
     transition_decision, save_decision_spec, load_decision_spec,
     decision_approval_history,
 )
-from shoir_enterprise_services import record_workspace_artifact
 from shoir_forecasting import engineering_forecast, infer_forecast_target, FORECAST_TARGETS
 from shoir_optimization import (
     solve_linear_program, solve_quadratic_program, solve_robust_linear_program,
     solve_stochastic_linear_program, pareto_weight_sweep,
+)
+# Optional compatibility bridge for mainline workspace-artifact provenance.
+try:
+    from shoir_enterprise_services import record_workspace_artifact
+except Exception:
+    record_workspace_artifact = None
+
+from shoir_enterprise_ops import (
+    render_connectivity_extension,
+    render_model_registry_extension,
+    render_jobs_extension,
+    render_research_extension,
+    render_reporting_extension,
+    render_security_extension,
+    render_economics_extension,
+    render_sustainability_extension,
+    render_realtime_monitoring_extension,
 )
 
 PLATFORM_CATALOG = [
@@ -123,7 +139,7 @@ def init_platform_db(db_path: str="enterprise_full_workspace.db") -> bool:
         ddl = [
             ("industrial_entities","CREATE TABLE IF NOT EXISTS industrial_entities(entity_id TEXT PRIMARY KEY, entity_type TEXT, name TEXT, attributes_json TEXT, updated_at TEXT)"),
             ("platform_datasets","CREATE TABLE IF NOT EXISTS platform_datasets(dataset_id TEXT PRIMARY KEY, name TEXT, source_name TEXT, row_count INTEGER, column_count INTEGER, sha256 TEXT, created_at TEXT, schema_json TEXT)"),
-            ("platform_models","CREATE TABLE IF NOT EXISTS platform_models(model_id TEXT PRIMARY KEY, name TEXT, version TEXT, model_type TEXT, parameters_json TEXT, data_hash TEXT, assumptions_json TEXT, created_by TEXT, created_at TEXT, status TEXT, solver_version TEXT, result_hash TEXT)"),
+            ("platform_models","CREATE TABLE IF NOT EXISTS platform_models(model_id TEXT PRIMARY KEY, name TEXT, version TEXT, model_type TEXT, parameters_json TEXT, data_hash TEXT, assumptions_json TEXT, created_by TEXT, created_at TEXT, status TEXT, solver_version TEXT, result_hash TEXT, dataset_id TEXT, run_id TEXT)"),
             ("platform_experiments","CREATE TABLE IF NOT EXISTS platform_experiments(experiment_id TEXT PRIMARY KEY, name TEXT, module TEXT, scenarios_json TEXT, results_json TEXT, created_by TEXT, created_at TEXT)"),
             ("platform_benchmarks","CREATE TABLE IF NOT EXISTS platform_benchmarks(id INTEGER PRIMARY KEY AUTOINCREMENT, metric TEXT, value REAL, unit TEXT, source TEXT, source_date TEXT, created_at TEXT)"),
             ("platform_decisions","CREATE TABLE IF NOT EXISTS platform_decisions(decision_id TEXT PRIMARY KEY, title TEXT, module TEXT, metrics_json TEXT, assumptions_json TEXT, uncertainty_json TEXT, created_by TEXT, created_at TEXT, status TEXT)"),
@@ -139,7 +155,13 @@ def init_platform_db(db_path: str="enterprise_full_workspace.db") -> bool:
             ("trade_rules","CREATE TABLE IF NOT EXISTS trade_rules(id INTEGER PRIMARY KEY AUTOINCREMENT, region_from TEXT, region_to TEXT, product_class TEXT, rule TEXT, active INTEGER, updated_at TEXT)"),
         ]
         for _,sql in ddl: conn.execute(sql)
-        for column, definition in [("solver_version", "TEXT"), ("result_hash", "TEXT")]:
+        model_columns = [
+            ("solver_version", "TEXT"),
+            ("result_hash", "TEXT"),
+            ("dataset_id", "TEXT"),
+            ("run_id", "TEXT"),
+        ]
+        for column, definition in model_columns:
             try:
                 conn.execute(f"ALTER TABLE platform_models ADD COLUMN {column} {definition}")
             except sqlite3.OperationalError:
@@ -455,23 +477,35 @@ def save_model_snapshot(
     assumptions: dict,
     status="Draft",
     db_path="enterprise_full_workspace.db",
+    *,
+    version: str = "1.0.0",
     solver_version: str = "",
     result_hash: str = "",
+    dataset_id: str = "",
+    run_id: str = "",
 ) -> str:
-    base = f"{name}|{json.dumps(parameters,sort_keys=True,default=str)}|{data_hash}|{solver_version}|{result_hash}"
-    mid = "MOD-" + hashlib.sha256(base.encode()).hexdigest()[:12].upper()
+    base = f"{name}|{version}|{json.dumps(parameters,sort_keys=True,default=str)}|{data_hash}|{result_hash}|{run_id}"
+    mid = "MOD-" + hashlib.sha256(base.encode("utf-8")).hexdigest()[:12].upper()
     with sqlite3.connect(db_path) as c:
         c.execute(
             """
             INSERT OR REPLACE INTO platform_models
-            (model_id,name,version,model_type,parameters_json,data_hash,assumptions_json,created_by,created_at,status,solver_version,result_hash)
-            VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
+            (model_id,name,version,model_type,parameters_json,data_hash,assumptions_json,
+             created_by,created_at,status,solver_version,result_hash,dataset_id,run_id)
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
-                mid, name, "1.0.0", model_type,
-                json.dumps(parameters, default=str), data_hash,
-                json.dumps(assumptions, default=str), username, _now(), status,
-                solver_version, result_hash,
+                mid, name, version, model_type,
+                json.dumps(parameters, default=str),
+                data_hash,
+                json.dumps(assumptions, default=str),
+                username,
+                _now(),
+                status,
+                solver_version,
+                result_hash,
+                dataset_id,
+                run_id,
             ),
         )
         c.commit()
@@ -521,36 +555,93 @@ def export_pptx(title: str, tables: Sequence[Tuple[str,pd.DataFrame]], figures: 
 def render_export_bar(module: str, tables: Sequence[Tuple[str,pd.DataFrame]], figures: Sequence[Tuple[str,Any]]=(), tier: str="Starter", username: str="unknown"):
     import streamlit as st
     from shoir_upgrade import build_excel_report
-    if not tables: return
+    if not tables:
+        return
     st.markdown("---")
-    st.subheader("📤 Results & Executive Exports")
-    st.caption("Download the current analysis in the format that fits your workflow. Export errors are isolated so they never interrupt the results view.")
-    a,b,c=st.columns(3)
-    with a:
-        x=None
-        try:
-            x=build_excel_report("Shoir-IE | "+module,tables,figures)
-        except Exception as exc:
-            st.warning("Excel export is temporarily unavailable for this result set. The analysis itself is still available.")
-        if x is not None and st.download_button("📊 Download Excel",x,"shoir_ie_"+re.sub(r"[^A-Za-z0-9]+","_",module).lower()+".xlsx","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",use_container_width=True):
-            log_security_event(username,"report_export",module+"|xlsx")
-    with b:
-        if tier_allows(tier,"Enterprise"):
-            try:
-                y=export_pdf("Shoir-IE | "+module,tables,figures)
-                if st.download_button("📄 Download PDF",y,"shoir_ie_"+re.sub(r"[^A-Za-z0-9]+","_",module).lower()+".pdf","application/pdf",use_container_width=True): log_security_event(username,"report_export",module+"|pdf")
-            except Exception:
-                st.warning("PDF export could not be generated for this result set.")
-        else: st.info("PDF export: Enterprise")
-    with c:
-        if tier_allows(tier,"Enterprise"):
-            try:
-                z=export_pptx("Shoir-IE | "+module,tables,figures)
-                if st.download_button("📽️ Download PowerPoint",z,"shoir_ie_"+re.sub(r"[^A-Za-z0-9]+","_",module).lower()+".pptx","application/vnd.openxmlformats-officedocument.presentationml.presentation",use_container_width=True): log_security_event(username,"report_export",module+"|pptx")
-            except Exception:
-                st.warning("PowerPoint export could not be generated for this result set.")
-        else: st.info("PowerPoint: Enterprise")
+    st.subheader("📤 Results & Evidence Exports")
+    st.caption("Excel/PDF/PowerPoint use the current result tables and the exact figure objects supplied by the module. The evidence bundle also records hashes and chart reconstruction metadata.")
 
+    excel_bytes = None
+    pdf_bytes = None
+    pptx_bytes = None
+
+    try:
+        excel_bytes = build_excel_report("Shoir-IE | " + module, tables, figures)
+    except Exception:
+        st.warning("Excel export is temporarily unavailable for this result set; the analysis remains available.")
+
+    if tier_allows(tier, "Enterprise"):
+        try:
+            pdf_bytes = export_pdf("Shoir-IE | " + module, tables, figures)
+        except Exception:
+            st.warning("PDF export could not be generated for this result set.")
+        try:
+            pptx_bytes = export_pptx("Shoir-IE | " + module, tables, figures)
+        except Exception:
+            st.warning("PowerPoint export could not be generated for this result set.")
+
+    col1, col2, col3, col4 = st.columns(4)
+    slug = re.sub(r"[^A-Za-z0-9]+", "_", module).lower()
+
+    with col1:
+        if excel_bytes is not None and st.download_button(
+            "📊 Download Excel", excel_bytes, f"shoir_ie_{slug}.xlsx",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True, key=f"export_excel_{slug}",
+        ):
+            log_security_event(username, "report_export", module + "|xlsx")
+
+    with col2:
+        if tier_allows(tier, "Enterprise") and pdf_bytes is not None and st.download_button(
+            "📄 Download PDF", pdf_bytes, f"shoir_ie_{slug}.pdf",
+            "application/pdf", use_container_width=True, key=f"export_pdf_{slug}",
+        ):
+            log_security_event(username, "report_export", module + "|pdf")
+        elif not tier_allows(tier, "Enterprise"):
+            st.info("PDF export: Enterprise")
+
+    with col3:
+        if tier_allows(tier, "Enterprise") and pptx_bytes is not None and st.download_button(
+            "📽️ Download PowerPoint", pptx_bytes, f"shoir_ie_{slug}.pptx",
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            use_container_width=True, key=f"export_pptx_{slug}",
+        ):
+            log_security_event(username, "report_export", module + "|pptx")
+        elif not tier_allows(tier, "Enterprise"):
+            st.info("PowerPoint: Enterprise")
+
+    with col4:
+        try:
+            from shoir_enterprise_ops import build_provenance_manifest
+            import zipfile
+            import io
+            manifest = build_provenance_manifest(module, tables, username)
+            buf = io.BytesIO()
+            with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as archive:
+                archive.writestr("provenance_manifest.json", json.dumps(manifest, indent=2, default=str).encode("utf-8"))
+                for label, frame in tables:
+                    if isinstance(frame, pd.DataFrame):
+                        safe_name = re.sub(r"[^A-Za-z0-9]+", "_", label).strip("_").lower() or "table"
+                        archive.writestr(f"tables/{safe_name}.csv", frame.to_csv(index=False).encode("utf-8"))
+                for idx, (_, fig) in enumerate(figures):
+                    try:
+                        archive.writestr(f"charts/chart_{idx+1}.html", fig.to_html(full_html=True, include_plotlyjs="cdn").encode("utf-8"))
+                        archive.writestr(f"charts/chart_{idx+1}.json", fig.to_json().encode("utf-8"))
+                    except Exception:
+                        pass
+                if excel_bytes is not None:
+                    archive.writestr("reports/report.xlsx", excel_bytes)
+                if pdf_bytes is not None:
+                    archive.writestr("reports/report.pdf", pdf_bytes)
+                if pptx_bytes is not None:
+                    archive.writestr("reports/report.pptx", pptx_bytes)
+            if st.download_button(
+                "🗂️ Evidence bundle", buf.getvalue(), f"shoir_ie_{slug}_evidence.zip",
+                "application/zip", use_container_width=True, key=f"export_evidence_{slug}",
+            ):
+                log_security_event(username, "report_export", module + "|evidence_bundle")
+        except Exception as exc:
+            st.caption(f"Evidence bundle unavailable: {type(exc).__name__}")
 MODULE_TABLE_KEYS = {
     "Engineering Validation Center":["validation_df"],
     "Industrial Data Model & Digital Thread":["thread_df","thread_rel"],
@@ -632,10 +723,13 @@ def ml_demand_forecast(
     forecast, metrics = engineering_forecast(
         df, date_col, target_col, external_cols, horizon=int(horizon)
     )
+    # Preserve the legacy metric aliases used by existing platform consumers
+    # while retaining the richer validation metrics from the generalized engine.
+    metrics = dict(metrics)
+    metrics.setdefault("R2", metrics.get("R2 (in-sample)"))
+    metrics.setdefault("MAE", metrics.get("MAE (in-sample)"))
+    metrics.setdefault("RMSE", metrics.get("RMSE (in-sample)"))
     out = forecast.loc[forecast["Series"].astype(str).eq("Forecast")].copy()
-    # Preserve the legacy R2 key while exposing the richer in-sample/holdout metrics.
-    if "R2" not in metrics and "R2 (in-sample)" in metrics:
-        metrics["R2"] = metrics["R2 (in-sample)"]
     return out.drop(columns=["Series"], errors="ignore"), metrics
 
 
@@ -881,6 +975,8 @@ def render_module(module: str, tier: str, username: str):
         if "sim_des_result" in st.session_state: tables.append(("DES Replications",st.session_state["sim_des_result"]))
         if "sim_agent_result" in st.session_state: tables.append(("Agent Summary",st.session_state["sim_agent_result"]))
         if "sd" in st.session_state: tables.append(("System Dynamics",st.session_state["sd"]))
+        render_jobs_extension(username, module)
+        render_realtime_monitoring_extension(st.session_state.get("iot_sensors", []), module)
         render_export_bar(module,tables,[],tier,username)
     elif module=="3D Factory Designer":
         df=st.data_editor(st.session_state.setdefault("factory3d_df",pd.DataFrame({"Asset":["CNC-01","Assembly","Packing","WIP Buffer"],"Type":["Machine","Station","Station","Storage"],"X":[0,6,12,3],"Y":[0,2,2,5],"Z":[0,0,0,0],"Length":[2,4,4,3],"Width":[2,2,2,3],"Height":[2,3,3,2]})),num_rows="dynamic",use_container_width=True,key="factory3d_editor")
@@ -923,7 +1019,8 @@ def render_module(module: str, tier: str, username: str):
             st.info("MQTT and OPC-UA connectors are configuration-ready. Live sessions require the site broker/server and protocol libraries.")
             mqtt_topic=st.text_input("MQTT topic","factory/telemetry/#"); opc_url=st.text_input("OPC-UA endpoint","opc.tcp://localhost:4840")
             if st.button("🧪 Validate Connector Settings",use_container_width=True,key="conn_validate"): st.write({"MQTT":mqtt_topic,"OPC-UA":opc_url,"Status":"Configuration accepted; no live connection attempted."})
-        render_export_bar(module,[("Connector Profiles",conn_df)],tier,username)
+        render_connectivity_extension()
+        render_export_bar(module,[("Connector Profiles",conn_df),("Connector Health",st.session_state.get("connectivity_health_df",pd.DataFrame()))],tier,username)
     elif module=="Multi-Objective Optimization":
         st.subheader("⚖️ Multi-Objective Optimization & Pareto Studio")
         tabs_mo=st.tabs(["📈 Pareto Explorer","🧮 LP / Nonlinear / Robust / Stochastic"])
@@ -1008,21 +1105,56 @@ def render_module(module: str, tier: str, username: str):
 
     elif module=="Engineering Model Registry":
         df=st.data_editor(st.session_state.setdefault("model_registry_df",pd.DataFrame({"Model Name":["Network Baseline"],"Type":["MILP"],"Version":["1.0.0"],"Status":["Draft"],"Data Hash":[""]})),num_rows="dynamic",use_container_width=True,key="model_registry_editor")
-        name=st.text_input("Model name","My Industrial Model",key="registry_name"); model_type=st.text_input("Model type","Optimization",key="registry_type"); params=st.text_area("Parameters JSON",'{"objective":"cost"}',key="registry_params")
-        solver_version=st.text_input("Solver / runtime version","Record the exact solver, library and runtime version",key="registry_solver_version")
-        result_hash=st.text_input("Result hash (optional)",value=hashlib.sha256(df.to_csv(index=False).encode()).hexdigest(),key="registry_result_hash")
+        r1, r2, r3 = st.columns(3)
+        with r1:
+            name=st.text_input("Model name","My Industrial Model",key="registry_name")
+            model_type=st.text_input("Model type","Optimization",key="registry_type")
+            version=st.text_input("Model version","1.0.0",key="registry_version")
+        with r2:
+            solver_version=st.text_input("Solver / runtime version","CBC / HiGHS / SciPy",key="registry_solver_version")
+            dataset_id=st.text_input("Dataset ID (optional)","",key="registry_dataset_id")
+            run_id=st.text_input("Run / experiment ID (optional)","",key="registry_run_id")
+        with r3:
+            params=st.text_area("Parameters JSON",'{"objective":"cost"}',key="registry_params")
+            result_ref=st.text_input("Result reference key (optional)","optimization_result_df",key="registry_result_ref")
+
         if st.button("💾 Register Model Snapshot",type="primary",use_container_width=True,key="registry_save"):
             try:
-                data_hash=hashlib.sha256(df.to_csv(index=False).encode()).hexdigest()
+                source_hash=hashlib.sha256(df.to_csv(index=False).encode("utf-8")).hexdigest()
+                result_value=st.session_state.get(result_ref) if result_ref else None
+                result_hash=hashlib.sha256(
+                    result_value.to_csv(index=False).encode("utf-8")
+                ).hexdigest() if isinstance(result_value,pd.DataFrame) else ""
                 mid=save_model_snapshot(
-                    name,model_type,json.loads(params),data_hash,username,{"user_entered":"true"},
-                    solver_version=solver_version,result_hash=result_hash,
+                    name, model_type, json.loads(params), source_hash, username,
+                    {"user_entered":"true"},
+                    version=version.strip() or "1.0.0",
+                    solver_version=solver_version.strip(),
+                    result_hash=result_hash,
+                    dataset_id=dataset_id.strip(),
+                    run_id=run_id.strip(),
                 )
-                record_workspace_artifact("model",name,username,{"data_hash":data_hash,"solver_version":solver_version,"result_hash":result_hash})
+                if callable(record_workspace_artifact):
+                    try:
+                        record_workspace_artifact(
+                            "model",
+                            name,
+                            username,
+                            {
+                                "data_hash": source_hash,
+                                "solver_version": solver_version.strip(),
+                                "result_hash": result_hash,
+                                "dataset_id": dataset_id.strip(),
+                                "run_id": run_id.strip(),
+                            },
+                        )
+                    except Exception:
+                        pass
                 st.success(f"Registered {mid}")
             except Exception as exc: st.error(f"Could not register model: {exc}")
         with sqlite3.connect("enterprise_full_workspace.db") as c: reg=pd.read_sql("SELECT * FROM platform_models ORDER BY created_at DESC",c)
         st.dataframe(reg,use_container_width=True,hide_index=True)
+        render_model_registry_extension(username)
         render_export_bar(module,[("Registry",df),("Persisted Models",reg)],tier,username)
     elif module=="Experiment Lab":
         scenarios=st.data_editor(st.session_state.setdefault("experiment_df",pd.DataFrame({"Scenario":["Baseline","High Demand","Supplier Shock","Capacity Expansion"],"Cost":[100000,125000,142000,115000],"Service":[95,90,82,98],"Risk":[10,18,35,8],"Inventory":[5000,6200,7000,4700],"Carbon":[1000,1100,1300,850]})),num_rows="dynamic",use_container_width=True,key="experiment_editor")
@@ -1030,6 +1162,7 @@ def render_module(module: str, tier: str, username: str):
             st.session_state["experiment_results"]=scenarios.assign(CostDelta=scenarios["Cost"]-scenarios["Cost"].iloc[0],ServiceDelta=scenarios["Service"]-scenarios["Service"].iloc[0],RiskDelta=scenarios["Risk"]-scenarios["Risk"].iloc[0])
             expid=save_experiment("Scenario Matrix",module,scenarios.to_dict("records"),st.session_state["experiment_results"].to_dict("records"),username); st.success(f"Experiment saved: {expid}")
         st.dataframe(st.session_state.get("experiment_results",scenarios),use_container_width=True)
+        render_research_extension(username)
         render_export_bar(module,[("Scenarios",scenarios),("Experiment Results",st.session_state.get("experiment_results",pd.DataFrame()))],tier,username)
     elif module=="Industrial Control Center":
         st.subheader("Unified Operations Health")
@@ -1149,7 +1282,9 @@ def render_module(module: str, tier: str, username: str):
         salvage=st.number_input("Salvage value",0.0,100000000.0,0.0,key="capex_salvage")
         if st.button("💰 Calculate NPV / IRR / Payback",type="primary",use_container_width=True,key="capex_run"): st.session_state["capex_result"]=capital_metrics(initial,cf["Cash Flow"].tolist(),rate,salvage)
         if "capex_result" in st.session_state: st.json(st.session_state["capex_result"])
-        render_export_bar(module,[("Cash Flows",cf),("Capital Metrics",pd.DataFrame([st.session_state.get("capex_result",{})]))],tier,username)
+        render_economics_extension(username)
+        render_reporting_extension(module,[("Cash Flows",cf),("Capital Metrics",pd.DataFrame([st.session_state.get("capex_result",{})])),("TCO",st.session_state.get("engineering_economics_tco_df",pd.DataFrame()))],username)
+        render_export_bar(module,[("Cash Flows",cf),("Capital Metrics",pd.DataFrame([st.session_state.get("capex_result",{})])),("TCO",st.session_state.get("engineering_economics_tco_df",pd.DataFrame()))],tier,username)
     elif module=="Workforce Engineering":
         tabs=st.tabs(["Balance & Takt","Staffing","Skills / Ergonomics"])
         with tabs[0]:
@@ -1170,7 +1305,8 @@ def render_module(module: str, tier: str, username: str):
         if "sustain_result" in st.session_state:
             res=st.session_state["sustain_result"]; st.metric("Total tCO2e",f'{res["tCO2e"].sum():,.2f}'); st.dataframe(lca_summary(res),use_container_width=True); fig=px.bar(res,x="Activity",y="tCO2e",color="Scope",title="Lifecycle Footprint")
             st.plotly_chart(fig,use_container_width=True)
-        render_export_bar(module,[("Sustainability Inputs",df),("Footprint",st.session_state.get("sustain_result",pd.DataFrame()))],[("Footprint",fig)] if "fig" in locals() else [],tier,username)
+        render_sustainability_extension(username)
+        render_export_bar(module,[("Sustainability Inputs",df),("Footprint",st.session_state.get("sustain_result",pd.DataFrame())),("Decision Bridge",st.session_state.get("sustainability_decision_bridge_df",pd.DataFrame()))],[("Footprint",fig)] if "fig" in locals() else [],tier,username)
     elif module=="Benchmarking & Engineering Standards":
         actual=st.data_editor(st.session_state.setdefault("benchmark_actual",pd.DataFrame({"Metric":["OEE","OTIF","Inventory Turns","Energy per Unit"],"Actual":[82,96,5.2,1.8]})),num_rows="dynamic",use_container_width=True,key="benchmark_actual_editor")
         bench=st.data_editor(st.session_state.setdefault("benchmark_targets",pd.DataFrame({"Metric":["OEE","OTIF","Inventory Turns","Energy per Unit"],"Benchmark":[85,98,6.0,1.5],"Unit":["%","%","x","kWh/unit"],"Source":["Company Target"]*4,"Source Date":["2026-01"]*4})),num_rows="dynamic",use_container_width=True,key="benchmark_targets_editor")
@@ -1261,6 +1397,7 @@ def render_module(module: str, tier: str, username: str):
         report=st.data_editor(st.session_state.setdefault("exec_report_df",pd.DataFrame({"KPI":["Cost","Service Level","Carbon","Risk"],"Baseline":[100,95,100,10],"Scenario":[92,97,84,8],"Unit":["index","%","index","index"]})),num_rows="dynamic",use_container_width=True,key="exec_report_editor")
         fig=px.bar(report,x="KPI",y=["Baseline","Scenario"],barmode="group",title="Executive KPI Comparison")
         st.plotly_chart(fig,use_container_width=True)
+        render_reporting_extension(module,[("Executive KPIs",report)],username)
         render_export_bar(module,[("Executive KPIs",report)],[("Executive KPI Chart",fig)],tier,username)
     elif module=="Predictive Maintenance Digital Twin":
         st.subheader("🛠️ Predictive Maintenance")
@@ -1291,6 +1428,7 @@ def render_module(module: str, tier: str, username: str):
         with tabs[2]:
             with sqlite3.connect("enterprise_full_workspace.db") as c: audit=pd.read_sql("SELECT * FROM security_events ORDER BY id DESC LIMIT 200",c)
             st.dataframe(audit,use_container_width=True,hide_index=True)
-            render_export_bar(module,[("Roles",role),("Security Events",audit)],tier,username)
+            render_security_extension()
+            render_export_bar(module,[("Roles",role),("Security Events",audit),("Security Posture",st.session_state.get("enterprise_security_posture_df",pd.DataFrame()))],tier,username)
     else:
         render_blank_module_studio(module, tier, username)
