@@ -363,7 +363,7 @@ def load_twin_state(username: str, workspace: str = "default", limit: int = 500)
     wid = workspace_key(username, workspace)
     table = "shoir_internal.twin_assets" if _remote() else "shoir_ent_twin_assets"
     sql = "SELECT asset_id,state_json,source,updated_at FROM " + table + (
-        " WHERE workspace_id=%s ORDER BY updated_at DESC LIMIT " % "%" if _remote() else
+        " WHERE workspace_id=%s ORDER BY updated_at DESC LIMIT " if _remote() else
         " WHERE workspace_id=? ORDER BY updated_at DESC LIMIT "
     ) + str(max(1, min(2000, int(limit))))
     with (_pg_connect() if _remote() else _local_connect()) as conn:
@@ -1258,3 +1258,507 @@ def render_enterprise_integration_surface(module: str, username: str, tier: str)
             if tables and st.button("📦 Build research-paper bundle",key="ent_research_bundle"):
                 bundle=build_research_paper_bundle("Shoir-IE Research Export",module,tables,provenance=[str(st.session_state.get("sx_research_study_id","active-study"))])
                 st.download_button("Download reproducible research bundle",bundle,"shoir_ie_research_bundle.zip","application/zip",key="ent_research_bundle_download")
+
+
+
+
+_BASE_CONTROL_TOWER_HEALTH = build_control_tower_health
+
+
+def build_control_tower_health(state: Mapping[str, Mapping[str, Any]]) -> pd.DataFrame:
+    df = _BASE_CONTROL_TOWER_HEALTH(state)
+    score_map = {"Healthy": 100, "Ready": 85, "Review": 65, "Attention": 35, "No Data": 0}
+    df.insert(len(df.columns), "Health Score", df["Health"].map(score_map).fillna(50).astype(float))
+    return df
+
+# ---------------------------------------------------------------------------
+# Enterprise Platform v2: orchestration, monitoring, evidence and integration
+# ---------------------------------------------------------------------------
+import inspect as _inspect
+import time as _time
+
+
+class JobCancelled(Exception):
+    """Raised by cooperative background jobs when cancellation is requested."""
+
+
+class JobContext:
+    """Cooperative control channel for long-running Shoir-IE work."""
+
+    def __init__(self, username: str, job_id: str, workspace: str = "default") -> None:
+        self.username = username
+        self.job_id = job_id
+        self.workspace = workspace
+
+    def _state(self) -> dict[str, Any]:
+        frame = list_jobs(self.username, self.workspace, limit=20)
+        if frame.empty or "job_id" not in frame.columns:
+            return {}
+        hit = frame.loc[frame["job_id"].astype(str).eq(self.job_id)]
+        return hit.iloc[0].to_dict() if not hit.empty else {}
+
+    @property
+    def cancelled(self) -> bool:
+        state = self._state()
+        return bool(state.get("cancel_requested"))
+
+    @property
+    def paused(self) -> bool:
+        state = self._state()
+        return bool(state.get("pause_requested"))
+
+    def checkpoint(self, message: str = "") -> None:
+        state = self._state()
+        if bool(state.get("cancel_requested")):
+            raise JobCancelled("Cancellation requested by the workspace operator.")
+        while bool(state.get("pause_requested")) and not bool(state.get("cancel_requested")):
+            update_job_record(self.username, self.job_id, status="Paused", message=message or "Paused by operator.", workspace=self.workspace)
+            _time.sleep(0.5)
+            state = self._state()
+        if bool(state.get("cancel_requested")):
+            raise JobCancelled("Cancellation requested while the job was paused.")
+
+    def progress(self, value: float, message: str = "") -> None:
+        self.checkpoint(message)
+        update_job_record(self.username, self.job_id, progress=float(value), message=message or None, workspace=self.workspace)
+
+
+_BASE_RUN_JOB_WORKER = _run_job_worker
+_JOB_TASKS: dict[str, Callable[..., Any]] = {}
+
+
+def _run_job_worker_v2(username: str, job_id: str, task: Callable[..., Any], workspace: str) -> None:
+    context = JobContext(username, job_id, workspace)
+    try:
+        context.checkpoint("Worker accepted.")
+        update_job_record(username, job_id, status="Running", progress=5, message="Worker started.", workspace=workspace)
+        with _FUTURES_LOCK:
+            _FUTURES[job_id] = _FUTURES.get(job_id)
+        try:
+            signature = _inspect.signature(task)
+            accepts_context = len([
+                p for p in signature.parameters.values()
+                if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)
+            ]) >= 1
+        except (TypeError, ValueError):
+            accepts_context = False
+        result = task(context) if accepts_context else task()
+        context.checkpoint("Finalizing.")
+        update_job_record(
+            username,
+            job_id,
+            status="Completed",
+            progress=100,
+            message="Worker completed." if result is not None else "Worker completed with no result.",
+            result=_serialize_job_result(result),
+            workspace=workspace,
+        )
+    except JobCancelled as exc:
+        update_job_record(username, job_id, status="Cancelled", progress=0, message=str(exc), workspace=workspace)
+    except Exception as exc:
+        update_job_record(
+            username, job_id, status="Failed", progress=100,
+            message=type(exc).__name__ + ": " + str(exc)[:500],
+            workspace=workspace,
+        )
+    finally:
+        with _FUTURES_LOCK:
+            _FUTURES.pop(job_id, None)
+            _JOB_TASKS.pop(job_id, None)
+
+
+def submit_background_job(
+    username: str,
+    module: str,
+    job_type: str,
+    payload: Mapping[str, Any],
+    task: Callable[..., Any],
+    workspace: str = "default",
+) -> str:
+    jid = create_job_record(username, module, job_type, payload, workspace)
+    with _FUTURES_LOCK:
+        _JOB_TASKS[jid] = task
+        _FUTURES[jid] = _EXECUTOR.submit(_run_job_worker_v2, username, jid, task, workspace)
+    return jid
+
+
+def request_job_action(
+    username: str,
+    job_id: str,
+    action: str,
+    workspace: str = "default",
+) -> bool:
+    """Perform a real cooperative job action and preserve the audit state."""
+    normalized = str(action or "").strip().lower()
+    if normalized not in {"cancel", "pause", "resume", "retry"}:
+        return False
+
+    frame = list_jobs(username, workspace, limit=1000)
+    if frame.empty:
+        return False
+    hit = frame.loc[frame["job_id"].astype(str).eq(str(job_id))]
+    if hit.empty:
+        return False
+    row = hit.iloc[0].to_dict()
+    table = "shoir_internal.jobs" if _remote() else "shoir_ent_jobs"
+    wid = workspace_key(username, workspace)
+
+    def execute(sql: str, vals: list[Any]) -> None:
+        with (_pg_connect() if _remote() else _local_connect()) as conn:
+            if _remote():
+                with conn.cursor() as cur:
+                    cur.execute(sql, vals)
+                conn.commit()
+            else:
+                conn.execute(sql, vals)
+                conn.commit()
+
+    placeholder = "%s" if _remote() else "?"
+    where = f"job_id={placeholder} AND workspace_id={placeholder}"
+
+    if normalized == "cancel":
+        if str(row.get("status")) == "Queued":
+            sql = f"UPDATE {table} SET status={placeholder},progress={placeholder},message={placeholder},cancel_requested={placeholder},updated_at={placeholder} WHERE {where}"
+            vals = ["Cancelled", 0.0, "Cancelled before execution.", True, now_iso(), job_id, wid]
+        else:
+            sql = f"UPDATE {table} SET cancel_requested={placeholder},updated_at={placeholder} WHERE {where}"
+            vals = [True, now_iso(), job_id, wid]
+        execute(sql, vals)
+        return True
+
+    if normalized == "pause":
+        sql = f"UPDATE {table} SET pause_requested={placeholder},status={placeholder},message={placeholder},updated_at={placeholder} WHERE {where}"
+        vals = [True, "Paused", "Pause requested by operator.", now_iso(), job_id, wid]
+        execute(sql, vals)
+        return True
+
+    if normalized == "resume":
+        sql = f"UPDATE {table} SET pause_requested={placeholder},status={placeholder},message={placeholder},updated_at={placeholder} WHERE {where}"
+        vals = [False, "Running", "Resume requested by operator.", now_iso(), job_id, wid]
+        execute(sql, vals)
+        return True
+
+    task = _JOB_TASKS.get(str(job_id))
+    if task is None:
+        # The job may have survived a process restart; preserve the retry state
+        # without pretending that an in-memory callable still exists.
+        sql = f"UPDATE {table} SET status={placeholder},progress=0,message={placeholder},attempts=attempts+1,cancel_requested={placeholder},pause_requested={placeholder},updated_at={placeholder} WHERE {where}"
+        execute(sql, vals=["Queued", "Retry queued; task will be re-submitted by the owning worker.", False, False, job_id, wid])
+        return True
+
+    sql = f"UPDATE {table} SET status={placeholder},progress=0,message={placeholder},attempts=attempts+1,cancel_requested={placeholder},pause_requested={placeholder},updated_at={placeholder} WHERE {where}"
+    execute(sql, ["Queued", "Retry requested.", False, False, job_id, wid])
+    with _FUTURES_LOCK:
+        _FUTURES[job_id] = _EXECUTOR.submit(_run_job_worker_v2, username, job_id, task, workspace)
+    return True
+
+
+# Monitoring / streaming-style ingestion ------------------------------------------------
+
+def record_monitoring_event(
+    username: str,
+    metric: str,
+    value: float,
+    status: str = "Normal",
+    asset_id: str = "",
+    rule_id: str = "",
+    message: str = "",
+    workspace: str = "default",
+) -> str:
+    ensure_enterprise_schema()
+    wid = workspace_key(username, workspace)
+    eid = "MON-" + uuid.uuid4().hex[:12].upper()
+    stamp = now_iso()
+    vals = (eid, wid, rule_id or None, asset_id or None, str(metric), float(value), str(status), str(message), stamp)
+    table = "shoir_internal.monitoring_events" if _remote() else "shoir_ent_monitoring_events"
+    if _remote():
+        with _pg_connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""INSERT INTO {table}
+                    (event_id,workspace_id,rule_id,asset_id,metric,value,status,message,created_at)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)""", vals)
+            conn.commit()
+    else:
+        with _local_connect() as conn:
+            conn.execute(
+                f"""INSERT INTO {table}
+                (event_id,workspace_id,rule_id,asset_id,metric,value,status,message,created_at)
+                VALUES (?,?,?,?,?,?,?,?,?)""", vals)
+            conn.commit()
+    return eid
+
+
+def monitoring_events_frame(username: str, workspace: str = "default", limit: int = 2000) -> pd.DataFrame:
+    ensure_enterprise_schema()
+    wid = workspace_key(username, workspace)
+    table = "shoir_internal.monitoring_events" if _remote() else "shoir_ent_monitoring_events"
+    placeholder = "%s" if _remote() else "?"
+    sql = f"SELECT * FROM {table} WHERE workspace_id={placeholder} ORDER BY created_at DESC LIMIT " + str(max(1, min(5000, int(limit))))
+    with (_pg_connect() if _remote() else _local_connect()) as conn:
+        return pd.read_sql_query(sql, conn, params=[wid])
+
+
+def analyze_telemetry(df: pd.DataFrame, timestamp_col: str = "", value_col: str = "", group_col: str = "", window: int = 20, z_threshold: float = 3.0) -> pd.DataFrame:
+    """Detect deterministic rolling anomalies without inventing or dropping observations."""
+    if not isinstance(df, pd.DataFrame) or df.empty:
+        return pd.DataFrame()
+    work = df.copy()
+    timestamp_col = timestamp_col if timestamp_col in work.columns else next(iter(_find_columns_like(work, ("timestamp", "time", "date"))), "")
+    value_col = value_col if value_col in work.columns else next(iter(_find_columns_like(work, ("value", "reading", "measurement", "metric"))), "")
+    if not timestamp_col or not value_col:
+        numeric = [c for c in work.columns if pd.api.types.is_numeric_dtype(work[c])]
+        value_col = numeric[0] if numeric else ""
+    if not value_col:
+        return pd.DataFrame()
+    if timestamp_col:
+        work[timestamp_col] = pd.to_datetime(work[timestamp_col], errors="coerce")
+        work = work.dropna(subset=[timestamp_col]).sort_values(timestamp_col)
+    work[value_col] = pd.to_numeric(work[value_col], errors="coerce")
+    work = work.dropna(subset=[value_col])
+    group_key = group_col if group_col in work.columns else None
+    if group_key:
+        pieces=[]
+        for _, g in work.groupby(group_key, dropna=False):
+            g=g.copy()
+            roll_mean=g[value_col].rolling(max(3,int(window)),min_periods=3).mean()
+            roll_std=g[value_col].rolling(max(3,int(window)),min_periods=3).std(ddof=1)
+            g["Rolling Mean"]=roll_mean
+            g["Rolling Std"]=roll_std
+            g["Z Score"]=((g[value_col]-roll_mean)/roll_std.replace(0,np.nan)).fillna(0.0)
+            g["Anomaly"]=g["Z Score"].abs()>=float(z_threshold)
+            pieces.append(g)
+        return pd.concat(pieces,ignore_index=True) if pieces else pd.DataFrame()
+    roll_mean=work[value_col].rolling(max(3,int(window)),min_periods=3).mean()
+    roll_std=work[value_col].rolling(max(3,int(window)),min_periods=3).std(ddof=1)
+    work["Rolling Mean"]=roll_mean
+    work["Rolling Std"]=roll_std
+    work["Z Score"]=((work[value_col]-roll_mean)/roll_std.replace(0,np.nan)).fillna(0.0)
+    work["Anomaly"]=work["Z Score"].abs()>=float(z_threshold)
+    return work
+
+
+def _find_columns_like(df: pd.DataFrame, tokens: Sequence[str]) -> list[str]:
+    out=[]
+    for col in df.columns:
+        lowered=str(col).lower().replace("_"," ")
+        if any(t in lowered for t in tokens):
+            out.append(str(col))
+    return out
+
+
+def evaluate_monitoring_rule(df: pd.DataFrame, metric_col: str, operator: str, threshold: float) -> pd.DataFrame:
+    """Evaluate an explicit threshold rule and append a stable alert status."""
+    if metric_col not in df.columns:
+        raise ValueError(f"Metric column '{metric_col}' was not found.")
+    out=df.copy()
+    values=pd.to_numeric(out[metric_col],errors="coerce")
+    op=str(operator).strip()
+    if op==">": mask=values>float(threshold)
+    elif op==">=": mask=values>=float(threshold)
+    elif op=="<": mask=values<float(threshold)
+    elif op=="<=": mask=values<=float(threshold)
+    elif op=="==": mask=values==float(threshold)
+    else: raise ValueError("Unsupported monitoring operator.")
+    out["Alert"]=mask.fillna(False)
+    out["Threshold"]=float(threshold)
+    out["Rule Status"]=np.where(out["Alert"],"Attention","Normal")
+    return out
+
+
+def build_enterprise_visual_frames(module: str, username: str, workspace: str = "default") -> list[tuple[str, pd.DataFrame]]:
+    """Collect enterprise-facing frames while reusing native module datasets."""
+    frames: list[tuple[str, pd.DataFrame]] = []
+    m = str(module)
+
+    try:
+        if m in {"Live Industrial Digital Twin", "Digital Twin & Discrete-Event Simulation", "Predictive Maintenance Digital Twin", "Industrial Simulation Lab"}:
+            twin = load_twin_state(username, workspace)
+            if not twin.empty:
+                frames.append(("Digital Twin Live State", twin))
+            replay = twin_replay(username, workspace=workspace, limit=200)
+            if not replay.empty:
+                frames.append(("Digital Twin Replay", replay))
+
+        if m in {"Industrial Control Center", "Control Tower", "Industrial Operating System"}:
+            health_state = {
+                "Production":{"records":len(st.session_state.get("mes_wo_df",[])),"status":"Ready","kpi":"Production"},
+                "Supply":{"records":len(st.session_state.get("customers_list",[])),"status":"Ready","kpi":"Supply"},
+                "Inventory":{"records":len(st.session_state.get("meio_data",[])) if isinstance(st.session_state.get("meio_data"),list) else 0,"status":"Ready","kpi":"Inventory"},
+                "Quality":{"records":len(st.session_state.get("quality_df",[])) if isinstance(st.session_state.get("quality_df"),pd.DataFrame) else 0,"status":"Ready","kpi":"Quality"},
+                "Maintenance":{"records":len(st.session_state.get("maint_df",[])) if isinstance(st.session_state.get("maint_df"),pd.DataFrame) else 0,"status":"Ready","kpi":"Maintenance"},
+                "Transport":{"records":len(st.session_state.get("fleet_list",[])),"status":"Ready","kpi":"Transport"},
+                "Workforce":{"records":len(st.session_state.get("work_elements",[])) if isinstance(st.session_state.get("work_elements"),pd.DataFrame) else 0,"status":"Ready","kpi":"Workforce"},
+                "Energy":{"records":len(st.session_state.get("energy_units",[])) if isinstance(st.session_state.get("energy_units"),pd.DataFrame) else 0,"status":"Ready","kpi":"Energy"},
+                "Carbon":{"records":len(st.session_state.get("sustain_df",[])) if isinstance(st.session_state.get("sustain_df"),pd.DataFrame) else 0,"status":"Ready","kpi":"Carbon"},
+            }
+            frames.append(("Control Tower Health", build_control_tower_health(health_state)))
+
+        if m == "Industrial Connectivity Hub":
+            frame = connector_health_frame(username, workspace)
+            if not frame.empty:
+                frames.append(("Connector Health", frame))
+
+        if m in {"Team Workspaces & RBAC","Enterprise Integration & Collaboration","Enterprise Integration","Collaboration Suite"}:
+            frame = collaboration_frame(username, workspace)
+            if not frame.empty:
+                frames.append(("Collaboration Activity", frame))
+
+        if m in {"Enterprise Security & Governance"}:
+            policy = security_policy(username, workspace)
+            frames.append(("Security Policy", pd.DataFrame([policy])))
+
+        if m in {"Industrial Data Platform","Engineering Validation Center","AI Copilot","Industrial Data Model & Digital Thread"}:
+            df = st.session_state.get("data_platform_latest_df")
+            if isinstance(df, pd.DataFrame) and not df.empty:
+                report=profile_data_intelligence(df, st.session_state.get("data_intelligence_reference") if isinstance(st.session_state.get("data_intelligence_reference"),pd.DataFrame) else None)
+                quality=pd.DataFrame([
+                    {"Metric":"Data Quality Score","Value":report["data_quality_score"]},
+                    {"Metric":"Missing %","Value":report["missing_pct"]},
+                    {"Metric":"Duplicate Rows","Value":report["duplicate_rows"]},
+                    {"Metric":"Outlier Cells","Value":sum(report["outlier_counts"].values())},
+                    {"Metric":"Duplicate Columns","Value":report["duplicate_columns"]},
+                ])
+                frames.append(("Data Intelligence Profile", quality))
+
+        if m in {"Industrial Simulation Lab","Experiment Lab","Engineering Model Registry","Advanced Planning & Scheduling","AI Copilot"}:
+            jobs=list_jobs(username,workspace)
+            if not jobs.empty:
+                frames.append(("Background Jobs", jobs))
+
+        if m in {"Experiment Lab","Statistical Hypothesis Testing","Literature & Citation Matrix","LaTeX Document Formatter"}:
+            for key,label in [("experiment_results","Research Results"),("experiment_factorial_effects","Factor Effects"),("experiment_mc_results","Monte Carlo Results"),("stats_result_df","Statistics")]:
+                value=st.session_state.get(key)
+                if isinstance(value,pd.DataFrame) and not value.empty:
+                    frames.append((label,value))
+
+        if m in {"Capital Investment & Engineering Economics","Engineering Economics & Finance","Engineering Economics & Financial Analysis"}:
+            for key,label in [("fin_cash_flows","Cash Flows"),("df_cf","Cash Flow Result"),("df_eua","Economic Life"),("df_dep","Depreciation")]:
+                value=st.session_state.get(key)
+                if isinstance(value,pd.DataFrame) and not value.empty:
+                    frames.append((label,value))
+
+        if m in {"Industrial Sustainability & LCA","Carbon Accounting"}:
+            for key,label in [("sustain_df","Sustainability Inputs"),("sustain_result","Sustainability Result"),("carbon_latest_df","Carbon Metrics")]:
+                value=st.session_state.get(key)
+                if isinstance(value,pd.DataFrame) and not value.empty:
+                    frames.append((label,value))
+
+        if m in {"Workforce Engineering","Human Factors & Ergonomics","Human Factors"}:
+            value=st.session_state.get("work_elements")
+            if isinstance(value,pd.DataFrame) and not value.empty:
+                frames.append(("Workforce / Human Factors", value))
+            tasks=st.session_state.get("ergonomic_tasks")
+            if isinstance(tasks,list) and tasks:
+                frames.append(("Ergonomic Risk Register", pd.DataFrame(tasks)))
+
+        if m == "Engineering Model Registry":
+            registry=st.session_state.get("model_registry_df")
+            if isinstance(registry,pd.DataFrame) and not registry.empty:
+                frames.append(("Model Registry",registry))
+
+        if m in {"Industrial Data Platform","Global Project & Digital Thread"}:
+            artifacts=list_artifacts(username,workspace=workspace,limit=200)
+            if not artifacts.empty:
+                frames.append(("Persistent Artifacts",artifacts))
+    except Exception:
+        # Visualization is observational infrastructure; a visualization error
+        # must never prevent the underlying engineering module from rendering.
+        return frames
+    return frames
+
+
+def _render_enterprise_visual_evidence(module: str, username: str, workspace: str = "default") -> None:
+    import streamlit as st
+    try:
+        from shoir_live_visuals import build_visualization_suite
+    except Exception as exc:
+        st.caption(f"Universal visualization engine unavailable: {type(exc).__name__}")
+        return
+
+    frames = build_enterprise_visual_frames(module, username, workspace)
+    if not frames:
+        return
+
+    rendered = 0
+    with st.expander("📈 Enterprise Evidence Graphs", expanded=False):
+        st.caption("These views are generated from the existing module/enterprise datasets. No presentation-only observations are created.")
+        for label, frame in frames:
+            suite = build_visualization_suite(frame, context=label, max_figures=3)
+            if not suite:
+                continue
+            st.markdown(f"#### {label}")
+            for title, fig in suite:
+                st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": True, "displaylogo": False, "responsive": True})
+                try:
+                    st.download_button(
+                        "📥 Download exact figure · PNG",
+                        data=fig.to_image(format="png", width=1600, height=900, scale=2),
+                        file_name=re.sub(r"[^A-Za-z0-9]+","_",title).strip("_").lower()+".png",
+                        mime="image/png",
+                        key="ent_fig_png_"+hashlib.sha1((module+"|"+label+"|"+title).encode()).hexdigest()[:12],
+                    )
+                except Exception:
+                    pass
+                rendered += 1
+                if rendered >= 15:
+                    break
+            if rendered >= 15:
+                break
+
+
+_BASE_ENTERPRISE_RENDER = render_enterprise_integration_surface
+
+
+def render_enterprise_integration_surface(module: str, username: str, tier: str) -> None:
+    """Keep the established enterprise surface and layer its evidence suite on top."""
+    workspace = str(
+        st.session_state.get("shoir_workspace_name")
+        or st.session_state.get("workspace")
+        or st.session_state.get("active_workspace_name")
+        or "default"
+    )
+    _BASE_ENTERPRISE_RENDER(module, username, tier)
+    _render_enterprise_visual_evidence(str(module), username, workspace)
+
+
+def persist_dataframe_artifact(
+    username: str,
+    module: str,
+    name: str,
+    frame: pd.DataFrame,
+    workspace: str = "default",
+    max_rows: int = 10000,
+) -> str:
+    """Persist a bounded dataframe snapshot as a governed artifact."""
+    if not isinstance(frame, pd.DataFrame):
+        raise TypeError("frame must be a pandas DataFrame")
+    bounded = frame.head(max(1, min(10000, int(max_rows)))).copy()
+    payload = {
+        "module": str(module),
+        "columns": [str(c) for c in bounded.columns],
+        "rows": bounded.to_dict("records"),
+        "row_count": int(len(bounded)),
+    }
+    return record_artifact(username, "dataset_snapshot", name, payload, workspace)
+
+
+def data_intelligence_frame(report: Mapping[str, Any]) -> pd.DataFrame:
+    """Convert the deterministic data-quality profile into chart-ready rows."""
+    rows = [
+        {"Metric": "Data Quality Score", "Value": float(report.get("data_quality_score", 0.0))},
+        {"Metric": "Missing %", "Value": float(report.get("missing_pct", 0.0))},
+        {"Metric": "Duplicate Row %", "Value": float(report.get("duplicate_row_pct", 0.0))},
+        {"Metric": "Duplicate Columns", "Value": float(report.get("duplicate_columns", 0))},
+        {"Metric": "Outlier Cells", "Value": float(sum(report.get("outlier_counts", {}).values()))},
+    ]
+    for col, drift in dict(report.get("drift_psi", {})).items():
+        rows.append({"Metric": f"Drift PSI · {col}", "Value": float(drift)})
+    return pd.DataFrame(rows)
+
+
+def figure_hash(fig: Any) -> str:
+    try:
+        return hashlib.sha256(fig.to_json().encode("utf-8")).hexdigest()
+    except Exception:
+        return hashlib.sha256(str(fig).encode("utf-8")).hexdigest()
