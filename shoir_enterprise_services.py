@@ -582,6 +582,8 @@ def render_enterprise_bridge(module: str, tier: str, username: str) -> None:
                     protocol = load_research_protocol(study_id, owner=username) if study_id else None
                     runs = research_runs_frame(study_id, owner=username) if study_id else pd.DataFrame()
                     decisions = research_decisions_frame(username)
+                    st.session_state["enterprise_research_runs_df"] = runs.copy(deep=True)
+                    st.session_state["enterprise_research_decisions_df"] = decisions.copy(deep=True)
                 except Exception:
                     protocol, runs, decisions = None, pd.DataFrame(), pd.DataFrame()
                 if protocol:
