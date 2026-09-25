@@ -37,6 +37,16 @@ from shoir_copilot_orchestrator import build_workflow_plan, recommend_module, ru
 from shoir_digital_thread import render_global_project_digital_thread
 from shoir_enterprise_services import render_enterprise_bridge
 from durable_account_store import (durable_backend_configured, sync_durable_accounts, sync_remote_requests_to_local, edge_login, edge_admin_list_requests, edge_renew_request, upsert_remote_account, insert_remote_request, remote_account, account_is_expired, renewed_expiry)
+from shoir_enterprise_layer import (
+    ensure_enterprise_schema, save_twin_snapshot, load_twin_state, save_twin_scenario,
+    list_twin_scenarios, twin_what_if, twin_replay, build_control_tower_health,
+    record_connector_health, connector_health_frame, validate_connector_profile,
+    check_rest_connector, add_collaboration_item, collaboration_frame,
+    add_knowledge_document, search_knowledge, profile_data_intelligence,
+    create_generic_audit_event, list_jobs, inspect_upload, security_policy,
+    upsert_security_policy, record_artifact, save_report_provenance,
+    build_research_paper_bundle,
+)
 
 # =====================================================================
 # PAGE CONFIGURATION & CUSTOM CSS (Professional Styling & Hover Zoom)
@@ -110,6 +120,10 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 apply_shoir_design_system()
+try:
+    ensure_enterprise_schema()
+except Exception:
+    pass
 
 os.makedirs("payment_proofs", exist_ok=True)
 
@@ -9481,6 +9495,16 @@ else:
                         st.markdown(reply)
                     st.session_state.copilot_messages.append({"role":"assistant","content":reply})
 
+
+    # Shared enterprise capability surfaces are integrated after native module rendering.
+    # They consume existing module state and never replace domain-specific engines.
+    try:
+        from shoir_enterprise_layer import render_enterprise_integration_surface
+        render_enterprise_integration_surface(str(mod), st.session_state.get("current_user", "unknown"), tier_val)
+    except Exception as exc:
+        st.warning("Shared enterprise integration surface is temporarily unavailable; native module results remain available.")
+        with st.expander("Enterprise integration diagnostic"):
+            st.code(f"{type(exc).__name__}: {exc}")
 
     # New unified Industrial Operating System renders as a first-class platform workspace.
     if mod == "Industrial Operating System":

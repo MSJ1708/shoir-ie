@@ -24,6 +24,8 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 
+from shoir_live_visuals import build_visualization_suite, figure_fingerprint
+
 
 WORKFLOW_STEPS = [
     "Inspect data",
@@ -461,6 +463,10 @@ def run_orchestration(prompt: str, module: str, df: pd.DataFrame, context: Mappi
         result = comparison
         analysis_meta = {**analysis_meta, **comparison_meta, "type": "scenario_grouped" if comparison_meta["mode"] == "grouped" else "baseline_comparison"}
     figure = build_graph(result, analysis_meta.get("type", "auto"))
+    visual_suite = build_visualization_suite(result, context=module, max_figures=4)
+    if figure is not None and not any(figure_fingerprint(figure) == figure_fingerprint(existing) for _, existing in visual_suite):
+        visual_suite = [(f"{module} · Primary analysis", figure)] + visual_suite
+        visual_suite = visual_suite[:4]
     explanation = explain_results(prompt, inspection, method, analysis_meta, result)
     if knowledge_text:
         explanation += f" Linked knowledge context was available from {knowledge_count} document(s) and is included in the evidence bundle; it was not treated as independently validated evidence."
@@ -475,6 +481,8 @@ def run_orchestration(prompt: str, module: str, df: pd.DataFrame, context: Mappi
         "comparison_meta": comparison_meta,
         "result": result,
         "figure": figure,
+        "visual_suite": visual_suite,
+        "figure_hashes": [figure_fingerprint(fig) for _, fig in visual_suite],
         "explanation": explanation,
         "export": export,
         "module": module,
