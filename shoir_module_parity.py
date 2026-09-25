@@ -111,11 +111,28 @@ def validate_module_dataframe(df: pd.DataFrame) -> dict[str, Any]:
     ]
 
     negative_numeric_cells = 0
+    outlier_cells = 0
+    unit_hints: list[dict[str, str]] = []
+    id_like_columns: list[str] = []
     for col in numeric_columns:
         try:
-            negative_numeric_cells += int(pd.to_numeric(df[col], errors="coerce").lt(0).sum())
+            s = pd.to_numeric(df[col], errors="coerce").dropna()
+            negative_numeric_cells += int(s.lt(0).sum())
+            if len(s) >= 8:
+                q1, q3 = s.quantile([0.25, 0.75])
+                iqr = q3 - q1
+                if iqr > 0:
+                    outlier_cells += int(((s < q1 - 1.5 * iqr) | (s > q3 + 1.5 * iqr)).sum())
         except Exception:
             continue
+    for col in df.columns:
+        name = str(col)
+        low = name.lower()
+        if any(token in low for token in ("id", "code", "sku", "asset", "order", "serial", "part")):
+            id_like_columns.append(name)
+        match = re.search(r"(?:\(([^)]+)\)|\[([^\]]+)\]|_([a-zA-Z%]+))$", name)
+        if match:
+            unit_hints.append({"Column": name, "Unit": next(x for x in match.groups() if x)})
 
     checks = [
         {
@@ -163,6 +180,21 @@ def validate_module_dataframe(df: pd.DataFrame) -> dict[str, Any]:
             "Status": "INFO",
             "Detail": f"{negative_numeric_cells:,} negative numeric cell(s); review against domain rules.",
         },
+        {
+            "Check": "Likely ID fields",
+            "Status": "INFO",
+            "Detail": f"{len(id_like_columns):,} identifier-like field(s) detected",
+        },
+        {
+            "Check": "Unit hints",
+            "Status": "INFO",
+            "Detail": f"{len(unit_hints):,} unit annotation(s) detected from column names",
+        },
+        {
+            "Check": "Potential outlier cells",
+            "Status": "INFO",
+            "Detail": f"{outlier_cells:,} IQR-based outlier cell(s) detected",
+        },
     ]
 
     penalty = 0.0
@@ -190,6 +222,9 @@ def validate_module_dataframe(df: pd.DataFrame) -> dict[str, Any]:
         "date_like_columns": date_like_columns,
         "constant_columns": constant_columns,
         "negative_numeric_cells": negative_numeric_cells,
+        "id_like_columns": id_like_columns,
+        "unit_hints": unit_hints,
+        "outlier_cells": outlier_cells,
         "checks": checks,
     }
 
@@ -216,6 +251,9 @@ def summarize_module_dataframe(df: pd.DataFrame) -> dict[str, Any]:
         "Numeric Measures": int(len(validation["numeric_columns"])),
         "Missing Cells": int(validation["missing_cells"]),
         "Duplicate Rows": int(validation["duplicate_rows"]),
+        "Outlier Cells": int(validation.get("outlier_cells", 0)),
+        "ID-like Fields": int(len(validation.get("id_like_columns", []))),
+        "Unit Hints": int(len(validation.get("unit_hints", []))),
         "Data Quality Score": float(validation["score"]),
         "Readiness": validation["status"],
         "numeric_summary": numeric_summary,
@@ -533,7 +571,7 @@ def _render_results(module: str, keys: dict[str, str]) -> None:
 
     try:
         from shoir_live_visuals import render_live_visualization_studio
-        render_live_visualization_studio(module, expanded=False, preferred_key=keys["data"])
+        render_live_visualization_studio(module, expanded=True, preferred_key=keys["data"])
     except Exception as exc:
         st.warning("Live Visualization Studio is temporarily unavailable; tabular results remain available.")
         with st.expander("Visualization diagnostic"):
