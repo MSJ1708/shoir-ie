@@ -68,6 +68,42 @@ _MODULE_KEYS = {
     "Carbon Accounting": ["carbon_latest_df"],
 }
 
+# Conflict-resolution registry: richer enterprise result aliases are additive.
+def _extend_module_keys(module_name: str, *keys: str) -> None:
+    current = list(_MODULE_KEYS.get(module_name, []))
+    for key in keys:
+        if key not in current:
+            current.append(key)
+    _MODULE_KEYS[module_name] = current
+
+_extend_module_keys("Industrial Simulation Lab", "job_history_df", "realtime_monitoring_df")
+_extend_module_keys("Digital Twin & Discrete-Event Simulation", "agv_fleet", "des_queues", "iot_sensors", "kanban_buffers", "reliability_data", "digital_twin_state_snapshot", "digital_twin_replay_df")
+_extend_module_keys("IoT Digital Twin", "telemetry_events")
+_extend_module_keys("Industrial Connectivity Hub", "connectivity_health_df")
+_extend_module_keys("AI Copilot", "knowledge_registry_df")
+_extend_module_keys("Enterprise Integration & Collaboration", "collaboration_roster_df", "connectivity_health_df", "enterprise_security_posture_df", "collaboration_assignment_df")
+_extend_module_keys("Engineering Model Registry", "model_reproducibility_catalog", "model_registry_governance_df")
+_extend_module_keys("Experiment Lab", "research_reproducibility_df")
+_extend_module_keys("Experiment Engine", "research_reproducibility_df")
+_extend_module_keys("Research Workspace", "forecast_universal_result")
+_extend_module_keys("Industrial Control Center", "control_tower_health_df")
+_extend_module_keys("Engineering Control Tower", "control_tower_unified_health_df")
+_extend_module_keys("Capital Investment & Engineering Economics", "fin_cash_flows", "mc_results", "engineering_economics_tco_df", "engineering_economics_cashflow_df")
+_extend_module_keys("Workforce Engineering", "human_factors_workforce_df")
+_extend_module_keys("Human Factors & Ergonomics (NIOSH)", "mtm_slots", "human_factors_metrics_df", "human_factors_workforce_df")
+_extend_module_keys("Industrial Sustainability & LCA", "carbon_sources", "energy_units", "lca_materials", "sustainability_decision_bridge_df", "sustainability_decision_df")
+_extend_module_keys("Live Industrial Digital Twin", "digital_twin_state_snapshot", "digital_twin_state_df", "digital_twin_scenarios_df", "digital_twin_replay_df", "digital_twin_replay_result_df")
+_extend_module_keys("Advanced ML Demand Forecasting", "forecast_universal_df", "forecast_universal_result")
+_extend_module_keys("Geospatial Network Designer", "demand_markets", "geospatial_network_routes_df", "geospatial_intelligence_df")
+_extend_module_keys("Team Workspaces & RBAC", "collaboration_assignment_df", "enterprise_collaboration_assignments")
+_extend_module_keys("Executive Report Center", "report_provenance_df")
+_extend_module_keys("Predictive Maintenance Digital Twin", "digital_twin_state_df", "digital_twin_replay_result_df")
+_extend_module_keys("Enterprise Security & Governance", "enterprise_security_posture_df", "enterprise_security_roles_df", "security_scan_df", "security_file_scan_df")
+_extend_module_keys("Persistence", "enterprise_security_posture_df", "shoir_artifact_catalog", "job_history_df", "cloud_persistence_health_df")
+_extend_module_keys("Green IE & Sustainability", "lca_materials", "carbon_latest_df", "sustain_result")
+_extend_module_keys("Control Tower", "control_tower_unified_health_df")
+
+
 
 def _as_frame(value: Any) -> pd.DataFrame:
     if isinstance(value, pd.DataFrame):
@@ -234,6 +270,9 @@ def _auto_chart_choice(df: pd.DataFrame) -> str:
     target_metric = _find_col(df, ("target", "goal"))
     actual_metric = _find_col(df, ("actual", "observed"))
     propagated = _find_col(df, ("propagated kpi", "bootstrap statistic", "bootstrap effect"))
+    sensitivity = _find_col(df, ("sensitivity", "elasticity", "importance"))
+    defect_metric = _find_col(df, ("defect", "failure", "rpn", "risk priority"))
+
     ci_low = _find_col(df, ("ci low", "lower 95", "lower ci"))
     ci_high = _find_col(df, ("ci high", "upper 95", "upper ci"))
     if source and target and value:
@@ -246,18 +285,22 @@ def _auto_chart_choice(df: pd.DataFrame) -> str:
         return "Distribution"
     if target_metric and actual_metric:
         return "Bar"
+    if sensitivity:
+        return "Sensitivity Plot"
     if effect and term:
         return "Bar"
     if ci_low and ci_high and term:
         return "Bar"
+    if defect_metric:
+        return "Pareto"
     if len(nums) >= 3:
         return "3D Scatter"
     if len(nums) >= 2 and dates:
         return "Line"
     if len(nums) >= 2:
         return "Sensitivity Plot"
-    if nums and any("defect" in str(c).lower() or "failure" in str(c).lower() for c in cols):
-        return "Pareto"
+    if nums and categorical:
+        return "Bar"
     if nums:
         return "Distribution"
     return "Network Map" if len([c for c in df.columns if not pd.api.types.is_numeric_dtype(df[c])]) >= 2 else "Bar"

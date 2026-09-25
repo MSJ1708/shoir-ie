@@ -53,3 +53,11 @@ def test_streamlit_application_starts_without_runtime_exception():
     at = AppTest.from_file(Path(__file__).resolve().parents[1] / "app.py", default_timeout=30)
     at.run(timeout=30)
     assert not at.exception, "\n".join(str(e.value) for e in at.exception)
+
+
+
+def test_160_operating_system_route_is_wired():
+    app_source = Path("app.py").read_text(encoding="utf-8")
+    assert '"🚀 160 Operating System"' in app_source
+    assert "render_160_command_center" in app_source
+    assert 'if st.session_state.get("selected_nav") == "🚀 160 Operating System"' in app_source

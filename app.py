@@ -47,7 +47,19 @@ from shoir_enterprise_layer import (
     upsert_security_policy, record_artifact, save_report_provenance,
     build_research_paper_bundle,
 )
-
+from shoir_unified_product import render_unified_workspace, render_global_product_dock, copilot_context
+from shoir_commercial import render_module_enrichment
+from shoir_160 import init_160_platform, render_160_command_center
+from shoir_enterprise_ops import (
+    render_digital_twin_extension, render_control_tower_extension,
+    render_connectivity_extension, render_security_extension,
+    render_persistence_extension, render_collaboration_extension,
+    render_reporting_extension, render_data_intelligence_extension,
+    render_knowledge_extension, render_realtime_monitoring_extension,
+    render_economics_extension, render_sustainability_extension,
+    render_human_factors_extension, render_geospatial_extension,
+    knowledge_context,
+)
 # =====================================================================
 # PAGE CONFIGURATION & CUSTOM CSS (Professional Styling & Hover Zoom)
 # =====================================================================
@@ -122,6 +134,10 @@ st.markdown("""
 apply_shoir_design_system()
 try:
     ensure_enterprise_schema()
+except Exception:
+    pass
+try:
+    init_160_platform()
 except Exception:
     pass
 
@@ -315,21 +331,37 @@ def init_db():
         # private repo) or shared anywhere, treat it as compromised and
         # change it via secrets.toml.
         try:
-            admin_password = st.secrets["admin"]["password"]
+            admin_password = str(st.secrets["admin"]["password"])
         except Exception:
-            admin_password = "mohammedsuhail172008chennai!"
-        admin_pass_hash = hash_password(admin_password)
-        cursor.execute("""
-            INSERT OR IGNORE INTO enterprise_users
-            (username, password_hash, role, tier, email, trial_expires, affiliate_code, ticket_expiry)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """, ("sho", admin_pass_hash, "Enterprise Admin", "Enterprise Tier",
-              "mohsuhailji@gmail.com", "2030-01-01T00:00:00", "AFF-SHO-15", "2030-01-01T00:00:00"))
-        cursor.execute("""
-            UPDATE enterprise_users
-            SET password_hash=?, role=?, tier=?, email=?
-            WHERE LOWER(username)='sho'
-        """, (admin_pass_hash, "Enterprise Admin", "Enterprise Tier", "mohsuhailji@gmail.com"))
+            admin_password = os.environ.get("SHOIR_ADMIN_PASSWORD", "").strip()
+
+        if admin_password:
+            admin_pass_hash = hash_password(admin_password)
+            cursor.execute("""
+                INSERT OR IGNORE INTO enterprise_users
+                (username, password_hash, role, tier, email, trial_expires, affiliate_code, ticket_expiry)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, ("sho", admin_pass_hash, "Enterprise Admin", "Enterprise Tier",
+                  "mohsuhailji@gmail.com", "2030-01-01T00:00:00", "AFF-SHO-15", "2030-01-01T00:00:00"))
+            cursor.execute("""
+                UPDATE enterprise_users
+                SET password_hash=?, role=?, tier=?, email=?
+                WHERE LOWER(username)='sho'
+            """, (admin_pass_hash, "Enterprise Admin", "Enterprise Tier", "mohsuhailji@gmail.com"))
+        else:
+            # Preserve an existing admin credential; only seed metadata for a
+            # first-run account when one does not already exist.
+            cursor.execute("""
+                INSERT OR IGNORE INTO enterprise_users
+                (username, role, tier, email, trial_expires, affiliate_code, ticket_expiry)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, ("sho", "Enterprise Admin", "Enterprise Tier",
+                  "mohsuhailji@gmail.com", "2030-01-01T00:00:00", "AFF-SHO-15", "2030-01-01T00:00:00"))
+            cursor.execute("""
+                UPDATE enterprise_users
+                SET role=?, tier=?, email=?
+                WHERE LOWER(username)='sho'
+            """, ("Enterprise Admin", "Enterprise Tier", "mohsuhailji@gmail.com"))
 
         # Never recreate/delete accounts on app startup.
         cursor.execute("SELECT 1 FROM users WHERE LOWER(username)='sho' LIMIT 1")
@@ -750,7 +782,7 @@ def get_copilot_response(prompt, history):
             "facility layout, quality/reliability, simulation, digital twins, sustainability, economics, "
             "workforce, KPI Studio, engineering methods/equations, scenario versioning, process mining, "
             "drift monitoring, decision verification, DMAIC/A3, templates and platform diagnostics. "
-            "Use the shared Platform Excellence layer as part of your operating context. The platform now provides 60 cross-cutting capabilities including projects, autosave, lineage, verification, decision cards, approval workflow, evidence exports, governed Copilot actions, jobs, observability, decision memory, accessibility, RTL readiness and a searchable capability map. Available governed Copilot tools are: " + ", ".join(t[0] for t in COPILOT_TOOLS) + ". " 
+            "Use the shared Platform Excellence layer as part of your operating context. " + copilot_context() + " Available governed Copilot tools are: " + ", ".join(t[0] for t in COPILOT_TOOLS) + ". " 
             "Recommend the most relevant existing module or workflow from the live platform catalog. "
             "Prefer validation, explainability, scenario analysis and auditable exports before action. "
             "Be concise and concrete. If asked to run something you can't execute directly, name the exact "
@@ -1405,7 +1437,7 @@ is_admin = (st.session_state.current_user == "sho")
 tier1_features = ["MILP Solvers", "Inventory Playback", "Core IE Tools", "Subscriptions", "Persistence", "Facility Layout & Warehousing", "Enterprise Integration & Collaboration", "Engineering Validation Center", "Excel Data Cleaning & Import"]
 tier2_features = tier1_features + ["Carbon Accounting", "IoT Digital Twin", "MEIO Matrix", "Slotting & Gantt", "Fleet Routing", "Warehouse Heatmap", "Supplier Risk Matrix", "Scenarios", "AGV Fleet Dispatcher", "Geospatial Network Designer", "Production Planning & Control (PPC)", "Lean Manufacturing & Shop Floor Operations", "Quality Control, Six Sigma & Reliability", "Engineering Economics & Finance", "Industrial Data Model & Digital Thread"]
 professional_features = tier2_features + ["Advanced Planning & Scheduling", "Quality Engineering & Reliability", "Capital Investment & Engineering Economics", "Workforce Engineering", "Industrial Sustainability & LCA", "Benchmarking & Engineering Standards", "Scenario Versioning & Comparison", "Localization & Multi-Currency"]
-tier3_features = professional_features + ["AI Copilot", "FastAPI Gateway", "Monte Carlo Sim", "Sensitivity Analysis", "Webhook Alerts", "Agentic Workflows", "Control Tower", "Cryptographic Ledger", "Predictive Maintenance Hub", "Human Factors & Ergonomics (NIOSH)", "Digital Twin & Discrete-Event Simulation", "Green IE & Sustainability", "Manufacturing Execution System", "Industrial Simulation Lab", "3D Factory Designer", "Industrial Connectivity Hub", "Multi-Objective Optimization", "Robust & Resilient Optimization", "Engineering Model Registry", "Experiment Lab", "Industrial Control Center", "Engineering Decision Center", "Advanced ML Demand Forecasting", "Team Workspaces & RBAC", "Executive Report Center", "Global Project & Digital Thread"]
+tier3_features = professional_features + ["AI Copilot", "FastAPI Gateway", "Monte Carlo Sim", "Sensitivity Analysis", "Webhook Alerts", "Agentic Workflows", "Control Tower", "Cryptographic Ledger", "Predictive Maintenance Hub", "Human Factors & Ergonomics (NIOSH)", "Digital Twin & Discrete-Event Simulation", "Green IE & Sustainability", "Manufacturing Execution System", "Industrial Simulation Lab", "3D Factory Designer", "Industrial Connectivity Hub", "Multi-Objective Optimization", "Robust & Resilient Optimization", "Engineering Model Registry", "Experiment Lab", "Experiment Engine", "Industrial Control Center", "Engineering Decision Center", "Advanced ML Demand Forecasting", "Team Workspaces & RBAC", "Executive Report Center", "Global Project & Digital Thread"]
 tier4_features = tier3_features + ["Industrial Data Platform", "Advanced Engineering Copilot", "Live Industrial Digital Twin", "Enterprise Security & Governance", "Predictive Maintenance Digital Twin"]
 # FIX (recurring from an earlier upload of this file - reapplied): this list
 # was missing commas between most entries, which in Python silently
@@ -1438,6 +1470,55 @@ if is_admin:
 
 def _render_post_module_layers(module_name: str) -> None:
     """Run cross-cutting enterprise/visualization layers before legacy st.stop()."""
+    _ops_user = st.session_state.get("current_user", "unknown")
+    try:
+        _ops_name = str(module_name)
+        if _ops_name in {"Digital Twin & Discrete-Event Simulation", "Live Industrial Digital Twin"}:
+            render_digital_twin_extension(_ops_user)
+            render_realtime_monitoring_extension(st.session_state.get("iot_sensors", []), _ops_name)
+            _ops_frame = st.session_state.get("digital_twin_state_snapshot")
+            if isinstance(_ops_frame, pd.DataFrame) and not _ops_frame.empty:
+                render_data_intelligence_extension(_ops_name, _ops_frame, _ops_frame)
+        elif _ops_name == "Industrial Control Center":
+            render_control_tower_extension()
+        elif _ops_name == "Industrial Connectivity Hub":
+            render_connectivity_extension()
+        elif _ops_name in {"Enterprise Integration & Collaboration", "Enterprise Security & Governance"}:
+            render_collaboration_extension(_ops_user)
+            render_security_extension()
+        elif _ops_name == "Persistence":
+            render_persistence_extension(_ops_user)
+        elif _ops_name in {"Engineering Economics & Finance", "Capital Investment & Engineering Economics"}:
+            render_economics_extension(_ops_user)
+        elif _ops_name in {"Green IE & Sustainability", "Industrial Sustainability & LCA"}:
+            render_sustainability_extension(_ops_user)
+        elif _ops_name == "Human Factors & Ergonomics (NIOSH)":
+            render_human_factors_extension(_ops_user)
+        elif _ops_name == "Geospatial Network Designer":
+            render_geospatial_extension(_ops_user)
+        elif _ops_name == "AI Copilot":
+            render_knowledge_extension(_ops_user)
+    except Exception as _ops_error:
+        st.warning("Additional enterprise governance surfaces remain non-blocking; native module results are preserved.")
+        with st.expander("Enterprise governance diagnostic", expanded=False):
+            st.code(f"{type(_ops_error).__name__}: {_ops_error}")
+
+    try:
+        render_enterprise_bridge(str(module_name), tier_val, st.session_state.get("current_user", "unknown"))
+    except Exception as exc:
+        st.warning("Enterprise capability layer could not render for this legacy module; native results remain available.")
+        with st.expander("Enterprise layer diagnostic"):
+            st.code(f"{type(exc).__name__}: {exc}")
+    try:
+        render_universal_module_parity(str(module_name), phase="results")
+    except Exception as exc:
+        st.warning("Universal Module Studio could not render for this legacy module; native results remain available.")
+        with st.expander("Visualization layer diagnostic"):
+            st.code(f"{type(exc).__name__}: {exc}")
+    finally:
+        if st.session_state.get("current_user"):
+            save_user_workspace(st.session_state["current_user"], st.session_state)
+
     try:
         render_enterprise_bridge(str(module_name), tier_val, st.session_state.get("current_user", "unknown"))
     except Exception as exc:
@@ -1458,7 +1539,7 @@ def _render_post_module_layers(module_name: str) -> None:
 
 
 st.sidebar.markdown("### 🧭 Navigation Menu")
-menu_choice = st.sidebar.radio("Go to Section", ["Dashboard", "✨ Excellence Hub", "Become an affiliate", "Feedback", "Edit Account"], label_visibility="collapsed")
+menu_choice = st.sidebar.radio("Go to Section", ["Dashboard", "🚀 160 Operating System", "✨ Excellence Hub", "Become an affiliate", "Feedback", "Edit Account"], label_visibility="collapsed")
 if menu_choice != "Dashboard":
     st.session_state.selected_nav = menu_choice
 else:
@@ -1497,6 +1578,18 @@ if st.session_state.pop("open_research_lab_requested", False):
 
 _selected_label=st.sidebar.selectbox("Select Module",_module_labels,key="enterprise_module_selector")
 selected_module=_module_label_map[_selected_label]
+render_global_product_dock(
+    selected_module,
+    str(st.session_state.get("user_tier", "Starter Tier")),
+    st.session_state.get("current_user", "unknown"),
+)
+if st.session_state.pop("force_unified_workspace", False):
+    render_unified_workspace(
+        selected_module,
+        str(st.session_state.get("user_tier", "Starter Tier")),
+        st.session_state.get("current_user", "unknown"),
+    )
+    st.stop()
 _meta=_module_catalog_by_name.get(str(selected_module))
 if _meta:
     st.sidebar.markdown(
@@ -1572,6 +1665,24 @@ if (
             st.code(f"{type(exc).__name__}: {exc}")
 
 # =====================================================================
+# COMMERCIAL ENGINEERING EXPERIENCE LAYER
+# ---------------------------------------------------------------------
+try:
+    _commercial_frames = [
+        value for value in st.session_state.values()
+        if isinstance(value, pd.DataFrame) and not value.empty
+    ]
+    _commercial_df = _commercial_frames[0] if _commercial_frames else pd.DataFrame()
+    render_module_enrichment(
+        str(selected_module),
+        str(st.session_state.get("user_tier", "Starter Tier")),
+        st.session_state.get("current_user", "unknown"),
+        _commercial_df,
+    )
+except Exception as _commercial_error:
+    st.caption(f"Integrated workspace enrichment unavailable: {_commercial_error}")
+
+# =====================================================================
 # AUTOSAVE LAST KNOWN USER WORKSPACE STATE
 # =====================================================================
 if st.session_state.get("authenticated") and st.session_state.get("current_user"):
@@ -1580,6 +1691,13 @@ if st.session_state.get("authenticated") and st.session_state.get("current_user"
 # =====================================================================
 # PLATFORM EXCELLENCE HUB — unified cross-cutting command center
 # =====================================================================
+if st.session_state.get("selected_nav") == "🚀 160 Operating System":
+    render_160_command_center(
+        st.session_state.get("current_user", "unknown"),
+        st.session_state.get("user_tier", "Starter Tier"),
+    )
+    st.stop()
+
 if st.session_state.get("selected_nav") == "✨ Excellence Hub":
     render_platform_excellence_hub(
         st.session_state.get("current_user", "unknown"),
