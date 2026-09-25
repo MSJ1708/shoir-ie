@@ -12,3 +12,9 @@ def test_bar_and_heatmap_can_render():
     df = pd.DataFrame({"Scenario": ["A","B","C"], "Cost": [10,20,15], "Risk": [2,4,3]})
     assert _make_figure(df, "Bar", "Scenario", "Cost", None, "Cost").data
     assert _make_figure(df, "Heatmap", None, None, None, "Corr").data
+
+
+def test_3d_scatter_can_render():
+    import pandas as pd
+    df = pd.DataFrame({"X":[1,2,3], "Y":[2,3,4], "Z":[3,4,5]})
+    assert _make_figure(df, "3D Scatter", "X", "Y", "Z", "3D").data
