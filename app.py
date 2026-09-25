@@ -30,7 +30,7 @@ from industrial_experience import COPILOT_TOOLS, ensure_experience_db, feature_s
 from research_experiment_engine import apply_evidence_conflict
 from industrial_excellence_hub import render_platform_excellence_hub
 from workspace_persistence import ensure_workspace_state_db, load_user_workspace, save_user_workspace
-from durable_account_store import (durable_backend_configured, sync_durable_accounts, sync_remote_requests_to_local, upsert_remote_account, insert_remote_request, update_latest_remote_request, remote_account, account_is_expired, renewed_expiry)
+from durable_account_store import (durable_backend_configured, sync_durable_accounts, sync_remote_requests_to_local, edge_login, edge_admin_list_requests, edge_renew_request, upsert_remote_account, insert_remote_request, remote_account, account_is_expired, renewed_expiry)
 
 # =====================================================================
 # PAGE CONFIGURATION & CUSTOM CSS (Professional Styling & Hover Zoom)
@@ -1046,136 +1046,78 @@ if not st.session_state.get("current_user"):
         signin_pass = st.text_input("Password", type="password", key="signin_password_input")
 
         if st.button("Sign In", type="primary", key="btn_sign_action"):
-            # SECURITY: brute-force throttle. Checked before touching the
-            # database at all - this is what "rate limiting" on the login
-            # form actually means for an app with no separate API layer.
             if signin_user and is_login_rate_limited(signin_user):
                 st.error("Too many failed sign-in attempts. Please wait 10 minutes and try again.")
                 st.stop()
 
-            conn = sqlite3.connect("enterprise_full_workspace.db")
-            cursor = conn.cursor()
+            try:
+                # Supabase Edge is the authoritative authentication service.
+                auth = edge_login(signin_user, signin_pass)
+                record_login_attempt(signin_user, True)
+            except Exception:
+                record_login_attempt(signin_user, False)
+                st.error("Invalid username or password. Note: Access requires admin approval and ticket delivery.")
+                st.stop()
 
-            # SECURITY FIX: this used to be "... AND password = ?", comparing
-            # the typed password directly against a plain-text column in
-            # SQL. Passwords are now hashed, so the row is fetched by
-            # username only and the password is checked in Python via
-            # verify_password() below (which also transparently upgrades
-            # any old plain-text row - including sho's - to a proper hash
-            # the first time it's used, with zero change to the password
-            # itself).
-            cursor.execute(
-                """
-                SELECT id,username,password,role,tier,email,created_at,subscription_expires_at
-                FROM users WHERE LOWER(username)=? LIMIT 1
-                """,
-                (signin_user.strip().lower(),)
-            )
-            user_row = cursor.fetchone()
-            remote_row = None
-            if _durable_accounts_ready:
-                try:
-                    remote_row = remote_account(signin_user)
-                except Exception:
-                    remote_row = None
+            username = str(auth.get("username") or signin_user).strip()
+            role = str(auth.get("role") or "User")
+            tier = str(auth.get("tier") or "Starter Tier")
+            email = str(auth.get("email") or "")
+            expiry = auth.get("expires_at")
+            token = str(auth.get("token") or "")
 
-            is_valid = False
-            effective_account = remote_row
-            if effective_account:
-                is_valid, _ = verify_password(effective_account.get("password_hash",""), signin_pass)
-            elif user_row:
-                is_valid, needs_upgrade = verify_password(user_row[2], signin_pass)
-                if is_valid and needs_upgrade:
-                    upgraded = hash_password(signin_pass)
-                    cursor.execute("UPDATE users SET password=? WHERE id=?", (upgraded, user_row[0]))
-                    conn.commit()
-
-            record_login_attempt(signin_user, is_valid)
-            conn.close()
-
-            if is_valid:
-                account = effective_account or {
-                    "username": user_row[1],
-                    "role": user_row[3],
-                    "tier": user_row[4],
-                    "email": user_row[5],
-                    "created_at": user_row[6],
-                    "subscription_expires_at": user_row[7],
-                    "password_hash": user_row[2],
-                }
-                username = str(account.get("username") or user_row[1])
-                role = account.get("role") or "User"
-                tier = account.get("tier") or "Starter Tier"
-                email = account.get("email") or ""
-                created = account.get("created_at")
-                expiry = account.get("subscription_expires_at")
-                if username.lower() != "sho" and not expiry and created:
-                    try:
-                        expiry = (datetime.datetime.fromisoformat(str(created).replace("Z","+00:00")) + datetime.timedelta(days=30)).isoformat()
-                    except Exception:
-                        expiry = None
-
-                if username.lower() != "sho" and expiry and account_is_expired(expiry):
-                    st.error("⏰ Your Shoir-IE subscription expired after 30 days.")
-                    st.info("Your account and saved workspace are preserved. Submit a renewal request to regain access after administrator approval.")
-                    renew_options = ["Starter Tier ($29)", "Mid-Tier Pro ($79)", "Professional Tier ($129)", "Enterprise Tier ($199)", "Enterprise Plus Tier ($399)", "Research Pack ($30 add-on)"]
-                    current_tier = tier if tier in renew_options else renew_options[0]
-                    renewal_tier = st.selectbox("Renewal tier", renew_options, index=renew_options.index(current_tier), key="renewal_tier_login")
-                    renewal_tx = st.text_input("Renewal transaction/reference", key="renewal_transaction_login")
-                    renewal_proof = st.file_uploader("Renewal payment screenshot", type=["png","jpg","jpeg"], key="renewal_proof_login")
-                    renewal_accept = st.checkbox("I confirm the renewal is for my account and I accept the 30-day subscription term.", key="renewal_accept_login")
-                    if renewal_accept and st.button("🔄 Submit Renewal Request", type="primary", key="renewal_submit_login"):
-                        if renewal_proof is None:
-                            st.warning("Please upload the renewal payment screenshot.")
-                        else:
-                            os.makedirs("payment_proofs", exist_ok=True)
-                            safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", renewal_proof.name)
-                            proof_path = os.path.join("payment_proofs", f"{username}_{safe_name}")
-                            with open(proof_path, "wb") as fh:
-                                fh.write(renewal_proof.getbuffer())
-                            conn_r = sqlite3.connect("enterprise_full_workspace.db")
-                            conn_r.execute(
-                                """INSERT INTO pending_payments
-                                   (username,password,email,tier,payment_method,transaction_id,screenshot_path,status,timestamp,request_type)
-                                   VALUES (?,?,?,?,?,?,?,?,?,?)""",
-                                (username, "", email, renewal_tier, "STC Pay (QR)", renewal_tx or None,
-                                 proof_path, "Pending", datetime.datetime.now().isoformat(), "Renewal")
-                            )
-                            conn_r.commit()
-                            conn_r.close()
-                            if _durable_accounts_ready:
-                                try:
-                                    insert_remote_request({
-                                        "username": username, "email": email, "tier": renewal_tier,
-                                        "request_type": "Renewal", "payment_method": "STC Pay (QR)",
-                                        "transaction_id": renewal_tx or None, "screenshot_path": proof_path, "status": "Pending"
-                                    })
-                                except Exception:
-                                    pass
-                            st.success("Renewal request submitted for administrator approval.")
-                    st.stop()
-
-                if _durable_accounts_ready:
-                    try:
-                        upsert_remote_account({
-                            **account,
-                            "subscription_expires_at": expiry,
-                            "password_hash": account.get("password_hash") or user_row[2],
-                        })
-                    except Exception:
-                        pass
-
+            # Expiry is enforced by the durable authentication service.
+            if auth.get("error") == "SUBSCRIPTION_EXPIRED":
+                st.error("⏰ Your Shoir-IE subscription expired after 30 days.")
+                st.info("Your account, profile, research data and workspace are preserved. Submit a renewal request to regain access after administrator approval.")
+            elif token:
+                st.session_state["remote_session_token"] = token
                 st.session_state["current_user"] = username
                 st.session_state["user_role"] = role
                 st.session_state["user_tier"] = tier
                 st.session_state["user_email"] = email
                 st.session_state["subscription_expires_at"] = expiry
                 st.session_state["authenticated"] = True
+
+                # Populate the ephemeral local cache for modules that still
+                # read user metadata from SQLite. This cache is never the
+                # source of truth for authentication or workspace persistence.
+                try:
+                    conn_local = sqlite3.connect("enterprise_full_workspace.db")
+                    conn_local.execute(
+                        """
+                        INSERT INTO users
+                        (username,password,role,tier,email,created_at,subscription_expires_at)
+                        VALUES (?,?,?,?,?,?,?)
+                        ON CONFLICT(username) DO UPDATE SET
+                            role=excluded.role,tier=excluded.tier,email=excluded.email,
+                            subscription_expires_at=excluded.subscription_expires_at
+                        """,
+                        (
+                            username,
+                            "REMOTE_MANAGED",
+                            role,
+                            tier,
+                            email,
+                            datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                            expiry,
+                        ),
+                    )
+                    conn_local.execute(
+                        "INSERT OR IGNORE INTO enterprise_users (username) VALUES (?)",
+                        (username,),
+                    )
+                    conn_local.execute(
+                        "UPDATE enterprise_users SET role=?,tier=?,email=?,ticket_expiry=? WHERE LOWER(username)=?",
+                        (role,tier,email,expiry,username.lower()),
+                    )
+                    conn_local.commit()
+                    conn_local.close()
+                except Exception:
+                    pass
+
                 st.success(f"Welcome back, {username}!")
                 st.rerun()
-            else:
-                st.error("Invalid username or password. Note: Access requires admin approval and ticket delivery.")
-
     # ------------------------------------------
     # TAB 2: GET TICKET & REGISTER
     # ------------------------------------------
@@ -1277,13 +1219,15 @@ if not st.session_state.get("current_user"):
                         if _durable_accounts_ready:
                             try:
                                 insert_remote_request({
-                                    "username": reg_name, "email": reg_email, "tier": reg_tier,
+                                    "username": reg_name, "password": reg_pass,
+                                    "email": reg_email, "tier": reg_tier,
                                     "request_type": "New", "payment_method": "STC Pay (QR)",
                                     "transaction_id": reg_ticket_code if reg_ticket_code else None,
                                     "screenshot_path": file_path, "status": "Pending"
                                 })
-                            except Exception:
-                                pass
+                            except Exception as exc:
+                                st.error(f"Could not create the durable account request: {exc}")
+                                st.stop()
 
                         st.success("Request sent successfully! Your code will be emailed to you from shoirtheagent@gmail.com")
                         st.session_state.show_qr = False
@@ -11220,6 +11164,41 @@ if mod == "Admin Panel":
         ''')
         conn.commit()
         
+        if _durable_accounts_ready and st.session_state.get("current_user","").lower() == "sho":
+            try:
+                remote_pending = edge_admin_list_requests(
+                    st.session_state.get("current_user",""),
+                    st.session_state.get("remote_session_token",""),
+                )
+                for rp in remote_pending:
+                    exists = cursor.execute(
+                        "SELECT 1 FROM pending_payments WHERE LOWER(username)=? AND COALESCE(transaction_id,'')=COALESCE(?, '') AND COALESCE(request_type,'New')=? AND status='Pending' LIMIT 1",
+                        (str(rp.get("username","")).lower(), rp.get("transaction_id"), rp.get("request_type","New")),
+                    ).fetchone()
+                    if not exists:
+                        cursor.execute(
+                            """
+                            INSERT INTO pending_payments
+                            (username,password,email,tier,payment_method,transaction_id,screenshot_path,status,timestamp,request_type)
+                            VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                            """,
+                            (
+                                rp.get("username",""),
+                                "",
+                                rp.get("email",""),
+                                rp.get("tier",""),
+                                rp.get("payment_method",""),
+                                rp.get("transaction_id"),
+                                rp.get("screenshot_path") or "",
+                                "Pending",
+                                str(rp.get("requested_at") or datetime.datetime.now().isoformat()),
+                                rp.get("request_type","New"),
+                            ),
+                        )
+                conn.commit()
+            except Exception as exc:
+                st.warning(f"Durable subscription queue could not be refreshed: {exc}")
+
         pending_df = pd.read_sql("SELECT * FROM pending_payments WHERE status = 'Pending'", conn)
         conn.close()
         
@@ -11345,8 +11324,11 @@ if mod == "Admin Panel":
                                         ),
                                         "subscription_expires_at": new_expiry,
                                         "active": True,
+                                        "admin_username": st.session_state.get("current_user",""),
+                                        "admin_session_token": st.session_state.get("remote_session_token",""),
+                                        "target_username": login_username,
+                                        "request_type": request_type,
                                     })
-                                    update_latest_remote_request(login_username, request_type, "Approved")
                                 except Exception:
                                     pass
 
