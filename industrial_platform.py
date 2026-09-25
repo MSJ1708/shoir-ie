@@ -717,6 +717,12 @@ def ml_demand_forecast(
     forecast, metrics = engineering_forecast(
         df, date_col, target_col, external_cols, horizon=int(horizon)
     )
+    # Preserve the legacy metric aliases used by existing platform consumers
+    # while retaining the richer validation metrics from the generalized engine.
+    metrics = dict(metrics)
+    metrics.setdefault("R2", metrics.get("R2 (in-sample)"))
+    metrics.setdefault("MAE", metrics.get("MAE (in-sample)"))
+    metrics.setdefault("RMSE", metrics.get("RMSE (in-sample)"))
     out = forecast.loc[forecast["Series"].astype(str).eq("Forecast")].copy()
     return out.drop(columns=["Series"], errors="ignore"), metrics
 
