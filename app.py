@@ -32,6 +32,7 @@ from industrial_excellence_hub import render_platform_excellence_hub
 from workspace_persistence import ensure_workspace_state_db, load_user_workspace, save_user_workspace
 from shoir_visual_system import apply_shoir_design_system, render_workspace_status
 from shoir_live_visuals import render_live_visualization_studio
+from shoir_module_parity import render_universal_module_parity
 from durable_account_store import (durable_backend_configured, sync_durable_accounts, sync_remote_requests_to_local, edge_login, edge_admin_list_requests, edge_renew_request, upsert_remote_account, insert_remote_request, remote_account, account_is_expired, renewed_expiry)
 
 # =====================================================================
@@ -1513,68 +1514,24 @@ def _render_result_chart(df,title,key_prefix):
     fig.update_layout(height=340,margin=dict(l=10,r=10,t=55,b=10))
     st.plotly_chart(fig,use_container_width=True)
 
-# Universal data workspace controls: available before every module renderer.
-def _upgrade_tables_for_module(module_name):
-    candidates=[]
-    explicit={"MILP Solvers":[("Customer Demands","customers_list"),("Candidate Warehouses","warehouses_list")]}
-    for label,key in explicit.get(module_name,[]):
-        if key in st.session_state: candidates.append((label,key))
-    seen={k for _,k in candidates}
-    for key,val in list(st.session_state.items()):
-        if key in seen or str(key).startswith(("_","upgrade_","copilot_")): continue
-        if isinstance(val,pd.DataFrame) and len(val.columns): candidates.append((str(key).replace("_"," ").title(),key))
-        elif isinstance(val,list) and val and isinstance(val[0],dict): candidates.append((str(key).replace("_"," ").title(),key))
-    return candidates
-
-def _upgrade_df(key):
-    val=st.session_state.get(key)
-    if isinstance(val,pd.DataFrame): return val.copy(deep=True)
-    if isinstance(val,list): return pd.DataFrame(val)
-    return pd.DataFrame()
-
-def _upgrade_write(key,df):
-    old=st.session_state.get(key)
-    if isinstance(old,list): st.session_state[key]=df.where(pd.notna(df),None).to_dict("records")
-    else: st.session_state[key]=df.copy(deep=True)
-
-_upgrade_candidates=_upgrade_tables_for_module(selected_module)
-with st.container(border=True):
-    st.subheader("📁 Import, Clean, Reset & Export")
-    st.caption("Load Excel/CSV data into an editable module table, clean it safely, restore the original data, or export a formatted workbook.")
-    if _upgrade_candidates:
-        labels=[x[0] for x in _upgrade_candidates]
-        keys=[x[1] for x in _upgrade_candidates]
-        sel=st.selectbox("Table",labels,key="upgrade_table_selector_"+hashlib.sha1(selected_module.encode()).hexdigest()[:8])
-        key=keys[labels.index(sel)]
-        current=_upgrade_df(key)
-        snap_key="upgrade_snapshot_"+key
-        if snap_key not in st.session_state: st.session_state[snap_key]=current.copy(deep=True)
-        up=st.file_uploader("📤 Import Excel / CSV",type=["xlsx","csv"],key="upgrade_uploader_"+hashlib.sha1(selected_module.encode()).hexdigest()[:8])
-        a,b,d=st.columns(3)
-        with a:
-            if up is not None:
-                signature=hashlib.sha256(up.getvalue()).hexdigest()
-                if st.session_state.get("upgrade_import_signature")!=signature:
-                    try:
-                        raw=up.getvalue()
-                        imported=pd.read_excel(io.BytesIO(raw)) if up.name.lower().endswith(("xlsx","xls")) else pd.read_csv(io.BytesIO(raw))
-                        _upgrade_write(key,align_imported_table(imported,current))
-                        st.session_state["upgrade_import_signature"]=signature
-                        st.success(f"Imported {len(imported):,} rows into {sel}.")
-                        st.rerun()
-                    except Exception as exc: st.error(f"Import failed safely: {exc}")
-        with b:
-            if st.button("✨ Auto Clean",key="upgrade_clean_"+hashlib.sha1((selected_module+key).encode()).hexdigest()[:8],use_container_width=True,type="primary"):
-                cleaned,audit=clean_dataframe(_upgrade_df(key)); _upgrade_write(key,cleaned)
-                st.session_state["upgrade_audit"]=pd.DataFrame(audit); st.success("Table cleaned."); st.rerun()
-            if st.button("↩️ Reset Table",key="upgrade_reset_"+hashlib.sha1((selected_module+key+"reset").encode()).hexdigest()[:8],use_container_width=True):
-                _upgrade_write(key,st.session_state[snap_key].copy(deep=True)); st.session_state.pop("upgrade_audit",None); st.rerun()
-        with d:
-            data=build_excel_report("Shoir-IE | "+selected_module,[(sel,_upgrade_df(key))])
-            st.download_button("📥 Download XLSX",data=data,file_name="shoir_ie_"+re.sub(r"[^A-Za-z0-9]+","_",selected_module).lower()+".xlsx",mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",use_container_width=True)
-    else:
-        st.info("Open a module with an editable data table to enable import/export controls.")
-
+# =====================================================================
+# UNIVERSAL MODULE PARITY — PREPARE
+# ---------------------------------------------------------------------
+# Every module receives the same import / validation / editable-data entry
+# point. The specialized module renderer remains untouched and can consume
+# its own canonical tables/results as before.
+# =====================================================================
+if (
+    st.session_state.get("authenticated")
+    and st.session_state.get("current_user")
+    and st.session_state.get("selected_nav", "Dashboard") == "Dashboard"
+):
+    try:
+        render_universal_module_parity(str(selected_module), phase="prepare")
+    except Exception as exc:
+        st.warning("Universal Module Studio could not render the preparation surface; the selected module remains available.")
+        with st.expander("Module parity diagnostic"):
+            st.code(f"{type(exc).__name__}: {exc}")
 
 # =====================================================================
 # AUTOSAVE LAST KNOWN USER WORKSPACE STATE
@@ -11673,21 +11630,29 @@ if mod == "Cryptographic Ledger":
             st.info("Redirecting to secure subscription portal...")
 
 # =====================================================================
-# UNIVERSAL LIVE ENGINEERING VISUALIZATION STUDIO
+# UNIVERSAL MODULE PARITY — RESULTS / LIVE GRAPHS / EXPORT
 # ---------------------------------------------------------------------
-# Runs after the active module UI so every allowed module can expose the
-# same interactive visualization workflow without duplicating chart code.
+# This runs after the specialized module renderer so actual module result
+# tables are discoverable by the shared evidence and visualization layer.
 # =====================================================================
 if (
     st.session_state.get("authenticated")
     and st.session_state.get("current_user")
     and "mod" in globals()
     and "allowed_modules" in globals()
+    and st.session_state.get("selected_nav", "Dashboard") == "Dashboard"
     and str(mod) in set(map(str, allowed_modules))
 ):
     try:
-        render_live_visualization_studio(str(mod), expanded=False)
+        render_universal_module_parity(str(mod), phase="results")
     except Exception as exc:
-        st.warning("Live Visualization Studio could not render this cycle; your engineering results remain available.")
-        with st.expander("Visualization diagnostic"):
+        st.warning("Universal Module Studio could not render the results surface; the module's native results remain available.")
+        with st.expander("Module parity diagnostic"):
             st.code(f"{type(exc).__name__}: {exc}")
+
+# Capture module calculations and parity edits after the selected module has rendered.
+if st.session_state.get("authenticated") and st.session_state.get("current_user"):
+    try:
+        save_user_workspace(st.session_state["current_user"], st.session_state)
+    except Exception:
+        pass
