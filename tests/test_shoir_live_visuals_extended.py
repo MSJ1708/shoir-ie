@@ -37,3 +37,49 @@ def test_auto_chart_detects_flow_and_gantt():
         "Finish": pd.to_datetime(["2026-01-02"]),
     })
     assert _auto_chart_choice(gantt) == "Gantt"
+
+
+def test_enterprise_operations_visualizations_render():
+    twin = pd.DataFrame({
+        "Tick": [1, 2, 3],
+        "WIP": [10, 12, 9],
+        "Utilization %": [80, 90, 70],
+    })
+    assert _make_figure(twin, "Line", "Tick", "WIP", None, "Twin Replay") is not None
+
+    health = pd.DataFrame({
+        "Area": ["Production", "Supply"],
+        "Health %": [90, 70],
+        "Status": ["Observed", "Review"],
+    })
+    assert _auto_chart_choice(health) == "Bar"
+
+    network = pd.DataFrame({
+        "Source": ["Plant A", "Plant B"],
+        "Target": ["Market 1", "Market 2"],
+        "Value": [100, 150],
+    })
+    assert _auto_chart_choice(network) == "Sankey"
+
+
+def test_enterprise_capability_visualization_registry_covers_requested_outputs():
+    from shoir_live_visuals import _MODULE_KEYS
+    required = {
+        "Digital Twin & Discrete-Event Simulation": {"digital_twin_replay_df", "digital_twin_state_snapshot"},
+        "Control Tower": {"control_tower_unified_health_df"},
+        "Industrial Connectivity Hub": {"connectivity_health_df"},
+        "Enterprise Security & Governance": {"enterprise_security_posture_df"},
+        "Engineering Model Registry": {"model_reproducibility_catalog"},
+        "Industrial Data Platform": {"data_platform_latest_df"},
+        "Capital Investment & Engineering Economics": {"engineering_economics_tco_df"},
+        "Industrial Sustainability & LCA": {"sustainability_decision_bridge_df"},
+        "Human Factors & Ergonomics (NIOSH)": {"human_factors_metrics_df"},
+        "Geospatial Network Designer": {"geospatial_network_routes_df"},
+        "Team Workspaces & RBAC": {"workspace_members_df"},
+        "Executive Report Center": {"exec_report_df"},
+        "Experiment Engine": {"experiment_engine_effects_df", "experiment_engine_mc_samples", "experiment_engine_sensitivity_df"},
+        "Advanced ML Demand Forecasting": {"forecast_result", "forecast_metrics"},
+    }
+    for module, keys in required.items():
+        assert module in _MODULE_KEYS, module
+        assert keys.intersection(set(_MODULE_KEYS[module])), module

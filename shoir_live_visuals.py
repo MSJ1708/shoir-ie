@@ -27,29 +27,49 @@ _MODULE_KEYS = {
     "Advanced Planning & Scheduling": ["aps_demand", "aps_bom", "aps_orders", "aps_schedule_result"],
     "Manufacturing Execution System": ["mes_wo_df", "mes_events_df", "mes_oee_df", "mes_oee_result"],
     "Quality Engineering & Reliability": ["quality_df", "quality_spc_result", "quality_limits_result", "msa_df", "anova_df", "fmea_df", "fmea_result"],
-    "Industrial Simulation Lab": ["sim_des_result", "sim_agent_result", "sd"],
+    "Industrial Simulation Lab": ["sim_des_result", "sim_agent_result", "sd", "job_history_df", "realtime_monitoring_df"],
+    "Digital Twin & Discrete-Event Simulation": [
+        "dt_workstations", "agv_fleet", "des_queues", "iot_sensors", "kanban_buffers",
+        "reliability_data", "event_logs", "digital_twin_state_snapshot", "digital_twin_replay_df",
+    ],
+    "Live Industrial Digital Twin": [
+        "twin_tel", "digital_twin_state_snapshot", "digital_twin_replay_df",
+    ],
     "3D Factory Designer": ["factory3d_df", "factory3d_dist_result"],
-    "Industrial Connectivity Hub": ["conn_df"],
+    "Industrial Connectivity Hub": ["conn_df", "connectivity_health_df"],
+    "AI Copilot": ["copilot_messages", "knowledge_registry_df"],
+    "Enterprise Integration & Collaboration": ["erp_connectors", "workspace_users", "collaboration_roster_df", "connectivity_health_df", "enterprise_security_posture_df", "collaboration_assignment_df"],
     "Multi-Objective Optimization": ["multiobj_df", "multiobj_result", "pareto", "optimization_pareto_df", "optimization_result_df"],
     "Robust & Resilient Optimization": ["robust_df", "robust_result", "robust_result_df"],
-    "Engineering Model Registry": ["model_registry_df"],
-    "Experiment Lab": ["experiment_df", "experiment_results", "experiment_doe_design", "experiment_factorial_effects", "experiment_factorial_summary", "experiment_mc_results", "experiment_mc_result_summary", "experiment_bootstrap_results", "experiment_bootstrap_summary", "experiment_replication_summary", "experiment_sensitivity_results"],
-    "Industrial Control Center": ["control_center_metrics"],
+    "Engineering Model Registry": ["model_registry_df", "model_reproducibility_catalog", "model_registry_governance_df"],
+    "Experiment Lab": ["experiment_df", "experiment_results", "experiment_doe_design", "experiment_factorial_effects", "experiment_factorial_summary", "experiment_mc_results", "experiment_mc_result_summary", "experiment_bootstrap_results", "experiment_bootstrap_summary", "experiment_replication_summary", "experiment_sensitivity_results", "research_reproducibility_df"],
+    "Experiment Engine": [
+        "experiment_engine_design_df", "experiment_engine_effects_df", "experiment_engine_fitted_df",
+        "experiment_engine_mc_samples", "experiment_engine_bootstrap_df", "experiment_engine_sensitivity_df",
+        "experiment_engine_replication_df", "research_reproducibility_df",
+    ],
+    "Industrial Control Center": ["control_center_metrics", "control_tower_health_df"],
+    "Engineering Control Tower": ["control_tower_unified_health_df"],
+    "Control Tower": ["control_tower_metrics", "control_tower_disruption_df", "control_tower_unified_health_df", "control_tower_health_df"],
     "Engineering Decision Center": ["decision_metrics_df", "decision_alternatives_df", "decision_kpi_df", "decision_verification_df"],
-    "Industrial Data Platform": ["data_platform_latest_df"],
-    "Capital Investment & Engineering Economics": ["capex_df", "capex_result"],
-    "Workforce Engineering": ["work_elements", "balance_result", "skills_df"],
-    "Industrial Sustainability & LCA": ["sustain_df", "sustain_result"],
+    "Industrial Data Platform": ["data_platform_latest_df", "data_intelligence_profile_df", "cloud_persistence_health_df"],
+    "Capital Investment & Engineering Economics": ["capex_df", "capex_result", "fin_cash_flows", "mc_results", "engineering_economics_tco_df", "engineering_economics_cashflow_df"],
+    "Engineering Economics & Finance": ["fin_cash_flows", "cvp_products", "mc_results", "engineering_economics_tco_df", "engineering_economics_cashflow_df"],
+    "Workforce Engineering": ["work_elements", "balance_result", "skills_df", "human_factors_workforce_df"],
+    "Human Factors & Ergonomics (NIOSH)": ["ergonomic_tasks", "time_studies", "mtm_slots", "human_factors_metrics_df", "human_factors_workforce_df"],
+    "Industrial Sustainability & LCA": ["sustain_df", "sustain_result", "carbon_sources", "energy_units", "lca_materials", "sustainability_decision_bridge_df", "sustainability_decision_df"],
+    "Green IE & Sustainability": ["carbon_sources", "energy_units", "lca_materials", "sustainability_decision_bridge_df", "sustainability_decision_df"],
     "Benchmarking & Engineering Standards": ["benchmark_actual", "benchmark_targets", "benchmark_result"],
-    "Live Industrial Digital Twin": ["twin_tel"],
-    "Advanced ML Demand Forecasting": ["forecast_df", "forecast_result", "forecast_metrics"],
+    "Live Industrial Digital Twin": ["twin_tel", "digital_twin_state_df", "digital_twin_scenarios_df", "digital_twin_replay_result_df"],
+    "Advanced ML Demand Forecasting": ["forecast_df", "forecast_result", "forecast_metrics", "forecast_universal_df", "forecast_universal_result"],
     "Scenario Versioning & Comparison": ["scenario_df"],
-    "Team Workspaces & RBAC": ["workspace_members_df"],
-    "Executive Report Center": ["exec_report_df"],
-    "Predictive Maintenance Digital Twin": ["maint_df", "maint_result"],
+    "Geospatial Network Designer": ["supply_nodes", "demand_markets", "geospatial_network_routes_df", "geospatial_intelligence_df"],
+    "Team Workspaces & RBAC": ["workspace_members_df", "collaboration_assignment_df"],
+    "Executive Report Center": ["exec_report_df", "report_provenance_df"],
+    "Predictive Maintenance Digital Twin": ["maint_df", "maint_result", "digital_twin_state_df", "digital_twin_replay_result_df"],
     "Localization & Multi-Currency": ["currency_df", "currency_result", "trade_rules_df"],
-    "Enterprise Security & Governance": ["security_roles"],
-    "Control Tower": ["control_tower_metrics", "control_tower_disruption_df"],
+    "Enterprise Security & Governance": ["security_roles", "enterprise_security_posture_df", "enterprise_security_roles_df", "security_scan_df", "security_file_scan_df"],
+    "Persistence": ["enterprise_security_posture_df", "shoir_artifact_catalog", "job_history_df", "cloud_persistence_health_df"],
     "Cryptographic Ledger": ["ledger_history"],
     "Carbon Accounting": ["carbon_latest_df"],
 }
@@ -222,6 +242,7 @@ def _auto_chart_choice(df: pd.DataFrame) -> str:
     propagated = _find_col(df, ("propagated kpi", "bootstrap statistic", "bootstrap effect"))
     ci_low = _find_col(df, ("ci low", "lower 95", "lower ci"))
     ci_high = _find_col(df, ("ci high", "upper 95", "upper ci"))
+    lower_cols = [str(c).lower() for c in df.columns]
     if source and target and value:
         return "Sankey"
     if start and finish:
@@ -236,14 +257,20 @@ def _auto_chart_choice(df: pd.DataFrame) -> str:
         return "Bar"
     if ci_low and ci_high and term:
         return "Bar"
+    if any("anomaly" in c or "z-score" in c or "ucl" in c or "lcl" in c for c in lower_cols) and nums:
+        return "Control Chart"
+    if any("health %" in c or c == "health" for c in lower_cols) and nums:
+        return "Bar"
+    if any("outlier" in c or "failure" in c or "defect" in c or "rpn" in c for c in lower_cols) and nums:
+        return "Pareto"
+    if any("sensitivity" in c or "standardized slope" in c for c in lower_cols) and nums:
+        return "Sensitivity Plot"
     if len(nums) >= 3:
         return "3D Scatter"
     if len(nums) >= 2 and dates:
         return "Line"
     if len(nums) >= 2:
         return "Sensitivity Plot"
-    if nums and any("defect" in str(c).lower() or "failure" in str(c).lower() for c in cols):
-        return "Pareto"
     if nums:
         return "Distribution"
     return "Network Map" if len([c for c in df.columns if not pd.api.types.is_numeric_dtype(df[c])]) >= 2 else "Bar"

@@ -35,6 +35,23 @@ from shoir_live_visuals import render_live_visualization_studio, discover_visual
 from shoir_module_parity import render_universal_module_parity
 from shoir_copilot_orchestrator import build_workflow_plan, recommend_module, run_orchestration
 from shoir_digital_thread import render_global_project_digital_thread
+from shoir_enterprise_ops import (
+    render_digital_twin_extension,
+    render_control_tower_extension,
+    render_connectivity_extension,
+    render_security_extension,
+    render_persistence_extension,
+    render_collaboration_extension,
+    render_reporting_extension,
+    render_data_intelligence_extension,
+    render_knowledge_extension,
+    render_realtime_monitoring_extension,
+    render_economics_extension,
+    render_sustainability_extension,
+    render_human_factors_extension,
+    render_geospatial_extension,
+    knowledge_context,
+)
 from durable_account_store import (durable_backend_configured, sync_durable_accounts, sync_remote_requests_to_local, edge_login, edge_admin_list_requests, edge_renew_request, upsert_remote_account, insert_remote_request, remote_account, account_is_expired, renewed_expiry)
 
 # =====================================================================
@@ -5955,6 +5972,17 @@ if selected_module == "AGV Fleet Dispatcher":
             st.metric("Performance Efficiency", "91.8%", "Optimized A*")
             st.metric("Quality Rate", "100%", "Collision-Free")
 
+    # Enterprise twin synchronization/replay + universal visualization.
+    render_digital_twin_extension(st.session_state.get("current_user","unknown"))
+    render_realtime_monitoring_extension(st.session_state.get("iot_sensors", []), "Digital Twin & DES")
+    if isinstance(st.session_state.get("digital_twin_state_snapshot"), pd.DataFrame):
+        render_data_intelligence_extension(
+            "Digital Twin & DES",
+            st.session_state["digital_twin_state_snapshot"],
+            st.session_state.get("digital_twin_state_snapshot"),
+        )
+    render_live_visualization_studio("Digital Twin & DES", expanded=False, preferred_key="digital_twin_state_snapshot")
+
     # Stop execution so the rest of the page underneath doesn't overwrite
     st.stop()
 
@@ -6243,6 +6271,14 @@ if selected_module == "Geospatial Network Designer":
                 )
                 st.plotly_chart(bar_cap, use_container_width=True)
 
+    render_geospatial_extension(st.session_state.get("current_user","unknown"))
+    if isinstance(st.session_state.get("geospatial_network_routes_df"), pd.DataFrame):
+        render_data_intelligence_extension(
+            "Geospatial Network Designer",
+            st.session_state["geospatial_network_routes_df"],
+            st.session_state.get("geospatial_network_routes_df"),
+        )
+    render_live_visualization_studio("Geospatial Network Designer", expanded=False, preferred_key="geospatial_network_routes_df")
     st.stop()
 
 # ==============================================================================
@@ -7675,6 +7711,14 @@ if selected_module in ["Human Factors & Ergonomics (NIOSH)", "Human Factors, Erg
             st.metric("Required Rest Time", f"{rest_mins_per_hour:.1f} mins / hour")
             st.metric("Total Shift Rest", f"{rest_mins_per_hour * shift_hours:.1f} minutes")
 
+    render_human_factors_extension(st.session_state.get("current_user","unknown"))
+    if isinstance(st.session_state.get("human_factors_metrics_df"), pd.DataFrame):
+        render_data_intelligence_extension(
+            "Human Factors & Ergonomics (NIOSH)",
+            st.session_state["human_factors_metrics_df"],
+            st.session_state.get("human_factors_metrics_df"),
+        )
+    render_live_visualization_studio("Human Factors & Ergonomics (NIOSH)", expanded=False, preferred_key="human_factors_metrics_df")
     st.stop()
 
 # ==============================================================================
@@ -8000,6 +8044,16 @@ if selected_module in ["Engineering Economics & Finance", "Engineering Economics
                 "Interest Tax Shield": "${:,.2f}", "Ending Balance": "${:,.2f}"
             }), use_container_width=True, hide_index=True)
 
+    render_economics_extension(st.session_state.get("current_user","unknown"))
+    render_reporting_extension(
+        "Engineering Economics & Finance",
+        [
+            ("Cash Flows", pd.DataFrame(st.session_state.get("fin_cash_flows", []))),
+            ("TCO", st.session_state.get("engineering_economics_tco_df", pd.DataFrame())),
+        ],
+        st.session_state.get("current_user","unknown"),
+    )
+    render_live_visualization_studio("Engineering Economics & Finance", expanded=False, preferred_key="engineering_economics_tco_df")
     st.stop()
 
 # ==============================================================================
@@ -8933,6 +8987,22 @@ if selected_module in ["Enterprise Integration & Collaboration", "Enterprise Int
                 </div>
                 """, unsafe_allow_html=True)
 
+    render_collaboration_extension(st.session_state.get("current_user","unknown"))
+    render_connectivity_extension()
+    if isinstance(st.session_state.get("connectivity_health_df"), pd.DataFrame):
+        render_data_intelligence_extension(
+            "Enterprise Integration & Collaboration",
+            st.session_state["connectivity_health_df"],
+            st.session_state.get("connectivity_health_df"),
+        )
+    render_security_extension()
+    if isinstance(st.session_state.get("enterprise_security_posture_df"), pd.DataFrame):
+        render_data_intelligence_extension(
+            "Enterprise Security & Governance",
+            st.session_state["enterprise_security_posture_df"],
+            st.session_state.get("enterprise_security_posture_df"),
+        )
+    render_live_visualization_studio("Enterprise Integration & Collaboration", expanded=False)
     st.stop()
     
 def render_data_editor(df, key_name):
@@ -9151,6 +9221,9 @@ else:
         st.markdown("## 🧠 Engineering Copilot Orchestrator")
         st.caption("Give Shoir-IE an engineering goal. Copilot will inspect the selected module data, route the request, choose a compatible method, execute read-only analysis, generate evidence-backed visuals, compare scenarios when available, explain the result, and prepare an export.")
 
+        with st.expander("📚 Knowledge Layer · SOPs / manuals / standards / company guidance", expanded=False):
+            render_knowledge_extension(st.session_state.get("current_user", "unknown"))
+
         available_modules = [str(m) for m in allowed_modules if str(m) != "AI Copilot"]
         o1, o2 = st.columns([1.6, 1], gap="large")
         with o1:
@@ -9248,6 +9321,7 @@ else:
                                 "warehouses": st.session_state.get("warehouses_list", []),
                                 "milp_solver": cached_milp_optimization,
                                 "validate_network_inputs": validate_network_inputs,
+                                "knowledge_context": knowledge_context(workflow_prompt, 6000),
                             },
                         )
                     run_id = run["run_id"]
@@ -11070,93 +11144,119 @@ if mod == "Core IE Tools":
 # =========================================================
 elif mod == "Persistence":
     st.markdown("<h1 style='text-align: center; color: #1E3A8A;'>💾 Enterprise State & Data Persistence Suite</h1>", unsafe_allow_html=True)
-    st.markdown("<p style='text-align: center; color: #64748B;'>Robust SQLite storage architecture, session checkpointing, and real-time audit governance.</p>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align: center; color: #64748B;'>Real workspace persistence, database inspection, checkpoint labels and audit history. No synthetic storage statistics are shown.</p>", unsafe_allow_html=True)
     st.markdown("---")
 
     p_tab1, p_tab2, p_tab3 = st.tabs([
         "🗄️ Database & Schema Explorer",
-        "💾 State Checkpoints & Snapshots",
+        "💾 Workspace Checkpoints",
         "📜 Audit Governance Ledger"
     ])
 
-    with p_tab1:
-        st.subheader("📊 SQLite Database Architecture & Performance Metrics")
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Database Engine", "SQLite v3.42", delta="Embedded / Fast")
-        c2.metric("Storage Size", "4.2 MB", delta="Optimal Limit")
-        c3.metric("Active Tables", "8 Tables", delta="Fully Indexed")
-        c4.metric("Connection Pool", "Healthy (0.4ms)", delta="Low Latency")
+    db_path = "enterprise_full_workspace.db"
+    with sqlite3.connect(db_path, timeout=10) as conn:
+        tables = pd.read_sql_query(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
+            conn,
+        )["name"].tolist()
+    try:
+        db_size_mb = os.path.getsize(db_path) / (1024 * 1024)
+    except OSError:
+        db_size_mb = 0.0
 
-        st.markdown("---")
-        st.markdown("##### **Quick Table Inspector & Live Data View**")
-        table_select = st.selectbox(
-            "Select Table to Inspect", 
-            ["meio_configurations", "sku_slotting_data", "gantt_tasks", "system_audit_logs"]
-        )
-        
-        if table_select == "meio_configurations":
-            inspect_df = pd.DataFrame(st.session_state.get("meio_data", []))
-        elif table_select == "sku_slotting_data":
-            inspect_df = pd.DataFrame(st.session_state.get("slotting_data", []))
+    with p_tab1:
+        from durable_account_store import durable_backend_configured
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Local database", "SQLite")
+        c2.metric("SQLite version", sqlite3.sqlite_version)
+        c3.metric("Local DB size", f"{db_size_mb:.2f} MB")
+        c4.metric("Managed backend", "Configured" if durable_backend_configured() else "Not configured")
+
+        st.markdown("##### Live table inspector")
+        if tables:
+            table_select = st.selectbox("Select a real application table", tables, key="persistence_table_select")
+            try:
+                with sqlite3.connect(db_path, timeout=10) as conn:
+                    inspect_df = pd.read_sql_query(f'SELECT * FROM "{table_select}" LIMIT 200', conn)
+                st.dataframe(inspect_df, use_container_width=True, hide_index=True)
+            except Exception as exc:
+                st.error(f"Could not inspect the selected table safely: {type(exc).__name__}: {exc}")
         else:
-            inspect_df = pd.DataFrame({
-                "Record_ID": [101, 102, 103],
-                "Entity": ["Node_Alpha", "Node_Beta", "Node_Gamma"],
-                "Status": ["Synchronized", "Synchronized", "Pending Sync"],
-                "Last_Modified": ["2026-08-13 14:00", "2026-08-13 14:15", "2026-08-13 15:20"]
-            })
-        st.dataframe(inspect_df, use_container_width=True)
+            st.info("No application tables are available yet.")
 
     with p_tab2:
-        st.subheader("📦 Session Checkpoint & Backup Management")
-        col_a, col_b = st.columns([1, 1], gap="large")
-        
-        with col_a:
-            st.markdown("##### **Create Workspace Snapshot**")
-            snapshot_name = st.text_input("Snapshot Label", value="AEGIS_Production_State_v1.2")
-            include_logs = st.checkbox("Include Historical Audit Logs", value=True)
-            if st.button("🚀 Generate & Save Checkpoint", type="primary", use_container_width=True):
-                st.success(f"✨ Checkpoint **{snapshot_name}** successfully committed to storage!")
-                
-        with col_b:
-            st.markdown("##### **Restore from Checkpoint**")
-            restore_file = st.selectbox(
-                "Available Checkpoint Snapshots", 
-                ["Snapshot_20260813_1500.json", "Snapshot_20260812_0930.json", "Baseline_Config_v1.json"]
-            )
-            if st.button("🔄 Restore Selected State", use_container_width=True):
-                st.warning(f"⚠️ Workspace state restored from **{restore_file}**.")
+        username = st.session_state.get("current_user", "unknown")
+        st.subheader("Workspace checkpoint controls")
+        st.caption("A checkpoint is a durable workspace-state save. Restore loads the most recently saved workspace record from the active persistence backend.")
+        snapshot_name = st.text_input("Checkpoint label", value="Shoir-IE Workspace Checkpoint", key="persistence_snapshot_name")
+        include_logs = st.checkbox("Include current audit/history state in workspace snapshot", value=True, key="persistence_include_logs")
 
-        st.markdown("---")
-        st.markdown("##### **Storage Capacity Utilization**")
-        st.progress(42, text="SQLite Storage Usage: 4.2 MB / 100 MB Allocated")
+        c_a, c_b, c_c = st.columns(3)
+        with c_a:
+            if st.button("💾 Save durable checkpoint", type="primary", use_container_width=True, key="persistence_real_save"):
+                try:
+                    payload = dict(st.session_state)
+                    payload["persistence_checkpoint_label"] = snapshot_name.strip() or "Shoir-IE Workspace Checkpoint"
+                    payload["persistence_checkpoint_created_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+                    if include_logs:
+                        payload["persistence_checkpoint_includes_logs"] = True
+                    ok = bool(save_user_workspace(username, payload))
+                    st.session_state["workspace_last_save_ok"] = ok
+                    if ok:
+                        st.session_state["persistence_snapshot_log"] = (
+                            [{"Label": payload["persistence_checkpoint_label"], "Created": payload["persistence_checkpoint_created_at"]}]
+                            + list(st.session_state.get("persistence_snapshot_log", []))
+                        )[:50]
+                        st.success("Durable workspace checkpoint saved successfully.")
+                    else:
+                        st.warning("The persistence backend did not confirm the save.")
+                except Exception as exc:
+                    st.error(f"Checkpoint save failed safely: {type(exc).__name__}: {exc}")
+        with c_b:
+            if st.button("🔄 Restore saved workspace", use_container_width=True, key="persistence_real_restore"):
+                try:
+                    ok = bool(load_user_workspace(username, st.session_state))
+                    if ok:
+                        st.session_state["workspace_last_save_ok"] = True
+                        st.success("Saved workspace restored. Refreshing the application with recovered state.")
+                        st.rerun()
+                    else:
+                        st.warning("No restorable workspace state was returned by the active persistence backend.")
+                except Exception as exc:
+                    st.error(f"Workspace restore failed safely: {type(exc).__name__}: {exc}")
+        with c_c:
+            st.metric("Last save", "OK" if st.session_state.get("workspace_last_save_ok") is True else ("Failed" if st.session_state.get("workspace_last_save_ok") is False else "Not recorded"))
+
+        snapshot_log = pd.DataFrame(st.session_state.get("persistence_snapshot_log", []))
+        if not snapshot_log.empty:
+            st.dataframe(snapshot_log, use_container_width=True, hide_index=True)
 
     with p_tab3:
-        st.subheader("📜 Comprehensive Audit Governance Trail")
-        audit_filter = st.selectbox("Filter by Severity Level", ["All Levels", "INFO", "SUCCESS", "WARNING"])
-        
-        audit_df = pd.DataFrame({
-            "Timestamp": ["2026-08-13 15:20:10", "2026-08-13 14:10:45", "2026-08-13 12:05:30", "2026-08-13 10:00:12"],
-            "Actor": ["Mohammed Suhail", "System Admin", "Automation Bot", "Scheduler Service"],
-            "Event Category": ["MEIO Optimization", "Slotting Update", "Database Backup", "Health Ping"],
-            "Severity": ["SUCCESS", "SUCCESS", "INFO", "INFO"],
-            "Details": ["Recalculated safety stock matrices", "Modified Zone A pallet allocations", "Automated checkpoint created", "Node responsiveness verified"]
-        })
-        
-        if audit_filter != "All Levels":
-            audit_df = audit_df[audit_df["Severity"] == audit_filter]
-            
-        st.dataframe(audit_df, use_container_width=True)
-        
-        csv_data = audit_df.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            label="📥 Export Full Audit Ledger (CSV)",
-            data=csv_data,
-            file_name="aegis_audit_governance_report.csv",
-            mime="text/csv",
-            key="download_audit_csv_btn"
-        )
+        st.subheader("Live audit governance trail")
+        audit_filter = st.selectbox("Severity", ["All", "INFO", "SUCCESS", "WARNING", "ERROR"], key="persistence_audit_filter")
+        try:
+            with sqlite3.connect(db_path, timeout=10) as conn:
+                audit_df = pd.read_sql_query(
+                    "SELECT timestamp AS Timestamp, user AS Actor, action AS Action FROM audit_trail ORDER BY id DESC LIMIT 500",
+                    conn,
+                )
+            if audit_filter != "All" and "Action" in audit_df.columns:
+                audit_df["Severity"] = audit_df["Action"].astype(str).str.extract(r"\\b(INFO|SUCCESS|WARNING|ERROR)\\b", expand=False).fillna("INFO")
+                audit_df = audit_df[audit_df["Severity"] == audit_filter]
+            st.dataframe(audit_df, use_container_width=True, hide_index=True)
+            st.download_button(
+                "📥 Export live audit history",
+                audit_df.to_csv(index=False).encode("utf-8"),
+                "shoir_ie_audit_history.csv",
+                "text/csv",
+                use_container_width=True,
+                key="download_live_audit_history",
+            )
+        except Exception as exc:
+            st.warning(f"Audit history is not available: {type(exc).__name__}: {exc}")
 
+    render_persistence_extension(st.session_state.get("current_user","unknown"), show_controls=False)
+    render_live_visualization_studio("Persistence", expanded=False)
 # =========================================================
 # AUTONOMOUS AGENTIC WORKFLOWS SUITE (Astonishing & Stunning Edition)
 # =========================================================
@@ -11731,26 +11831,37 @@ if mod == "Control Tower":
         disruption_df = disruption_df[disruption_df["Location"] == region_filter]
 
     st.session_state["control_tower_disruption_df"] = disruption_df.copy(deep=True)
+    # Demo telemetry is explicitly labelled until a live connector supplies measured values.
     st.session_state["control_tower_metrics"] = pd.DataFrame({
         "KPI": ["Active Shipments", "On-Time Delivery", "Disruption Alerts", "Weather Risk Index"],
         "Value": [142, 98.4, 2, 1.2],
         "Unit": ["shipments", "%", "alerts", "index"],
+        "Evidence": ["DEMO", "DEMO", "DEMO", "DEMO"],
     })
     st.dataframe(disruption_df, use_container_width=True)
 
     if st.button("Trigger Full Network Diagnostic Scan", type="primary"):
         if "current_user" in st.session_state and "log_audit" in globals():
             log_audit(st.session_state.current_user, "Executed Control Tower Diagnostic Scan")
-        st.toast("Diagnostic scan completed successfully!", icon="🗼")
-        st.success("Network health verified. All primary hubs operating within optimal tolerances.")
+        st.toast("Control Tower diagnostic scan completed.", icon="🗼")
+        st.info("The diagnostic scan evaluated the currently loaded control-tower dataset. It does not claim live network verification unless connected telemetry is present.")
 
     with st.expander("🔍 View Raw Telemetry Stream"):
         st.json({
-            "control_tower_status": "ONLINE",
-            "active_nodes": 24,
-            "latency_ms": 19,
-            "encryption": "TLS 1.3 Secure"
+            "control_tower_status": "DEMO / DATA-DEPENDENT",
+            "active_nodes": "Unavailable without live connector telemetry",
+            "latency_ms": "Unavailable without live connector telemetry",
+            "encryption": "Configured at connector layer when deployed"
         })
+
+    render_control_tower_extension()
+    render_live_visualization_studio("Control Tower", expanded=False, preferred_key="control_tower_unified_health_df")
+    if isinstance(st.session_state.get("control_tower_unified_health_df"), pd.DataFrame):
+        render_data_intelligence_extension(
+            "Control Tower",
+            st.session_state["control_tower_unified_health_df"],
+            st.session_state.get("control_tower_unified_health_df"),
+        )
 
 if mod == "Cryptographic Ledger":
     st.header("🔐 Cryptographic Product Provenance & ESG Ledger")
@@ -11857,6 +11968,8 @@ if (
 # Capture module calculations and parity edits after the selected module has rendered.
 if st.session_state.get("authenticated") and st.session_state.get("current_user"):
     try:
-        save_user_workspace(st.session_state["current_user"], st.session_state)
+        st.session_state["workspace_last_save_ok"] = bool(
+            save_user_workspace(st.session_state["current_user"], st.session_state)
+        )
     except Exception:
-        pass
+        st.session_state["workspace_last_save_ok"] = False
