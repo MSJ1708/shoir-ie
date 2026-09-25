@@ -64,7 +64,15 @@ _MODULE_KEYS = {
     "Persistence": ["enterprise_artifact_ledger"],
     "Human Factors & Ergonomics (NIOSH)": ["ergonomic_tasks", "time_studies", "mtm_library"],
     "Geospatial Network Designer": ["supply_nodes", "fleet_vehicles", "enterprise_artifact_ledger"],
+    "Enterprise Integration & Collaboration": ["erp_connectors", "workspace_users", "audit_report_history", "enterprise_connector_health_df", "enterprise_collaboration_assignments", "enterprise_artifact_ledger"],
+    "Persistence": ["enterprise_artifact_ledger"],
+    "Human Factors & Ergonomics (NIOSH)": ["ergonomic_tasks", "time_studies", "mtm_library"],
+    "Geospatial Network Designer": ["supply_nodes", "fleet_vehicles", "enterprise_artifact_ledger"],
+    "Research Workspace": ["enterprise_research_runs_df", "enterprise_research_decisions_df"],
     "Executive Report Center": ["exec_report_df", "enterprise_artifact_ledger"],
+    "Jobs System": ["enterprise_job_history_df"],
+    "Knowledge Layer": ["knowledge_documents"],
+
 
     "Predictive Maintenance Digital Twin": ["maint_df", "maint_result"],
     "Localization & Multi-Currency": ["currency_df", "currency_result", "trade_rules_df"],
