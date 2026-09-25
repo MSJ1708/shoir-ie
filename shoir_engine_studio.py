@@ -450,6 +450,17 @@ def forecast_series(
 # Optimization engines
 # ---------------------------------------------------------------------------
 
+def _as_bool(value: Any) -> bool:
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
+    text = str(value).strip().lower()
+    if text in {"true", "1", "yes", "y", "on"}:
+        return True
+    if text in {"false", "0", "no", "n", "off", "", "nan"}:
+        return False
+    raise ValueError(f"Cannot interpret '{value}' as a boolean flag.")
+
+
 def _clean_variable_specs(specs: pd.DataFrame) -> pd.DataFrame:
     required = {"Variable", "Objective Coef", "Lower", "Upper", "Integer", "Binary"}
     if not required <= set(specs.columns):
@@ -459,6 +470,8 @@ def _clean_variable_specs(specs: pd.DataFrame) -> pd.DataFrame:
     d = d[d["Variable"] != ""].drop_duplicates("Variable").reset_index(drop=True)
     for c in ["Objective Coef", "Lower", "Upper"]:
         d[c] = pd.to_numeric(d[c], errors="coerce")
+    d["Integer"] = d["Integer"].map(_as_bool)
+    d["Binary"] = d["Binary"].map(_as_bool)
     if d[["Objective Coef", "Lower", "Upper"]].isna().any().any():
         raise ValueError("Objective and bounds must be numeric.")
     if (d["Upper"] < d["Lower"]).any():
@@ -466,7 +479,7 @@ def _clean_variable_specs(specs: pd.DataFrame) -> pd.DataFrame:
     return d
 
 
-def _constraint_system(constraints: pd.DataFrame, variables: Sequence[str]) -> list[tuple[str, float, dict[str, float]]]:
+def _constraint_system(constraints: pd.DataFrame, variables: Sequence[str]) -> list[tuple[str, str, float, dict[str, float]]]:
     if constraints is None or constraints.empty:
         return []
     needed = {"Constraint", "Sense", "RHS"}
@@ -742,14 +755,16 @@ def render_experiment_engine(tier: str, username: str) -> None:
         design = st.session_state.get("experiment_engine_design_df", pd.DataFrame())
         if isinstance(design, pd.DataFrame) and not design.empty:
             factor_names = factors["Factor"].astype(str).str.strip().replace("", np.nan).dropna().drop_duplicates().tolist()
-            visible = [c for c in design.columns if not c.startswith("__code__")]
-            edited = st.data_editor(design[visible], num_rows="dynamic", use_container_width=True, key="experiment_engine_design_editor")
-            for f in factor_names:
-                if f in edited.columns:
-                    design.loc[edited.index, f] = edited[f]
             if "Response" not in design.columns:
                 design["Response"] = np.nan
-            response = st.data_editor(design[[*factor_names, "Replication", "Run", "Response"]].copy(), num_rows="dynamic", use_container_width=True, key="experiment_engine_response_editor")
+            response_view = design[[*factor_names, "Replication", "Run", "Response"]].copy()
+            response = st.data_editor(
+                response_view,
+                num_rows="dynamic",
+                use_container_width=True,
+                disabled=factor_names + ["Replication", "Run"],
+                key="experiment_engine_response_editor",
+            )
             design.loc[response.index, "Response"] = pd.to_numeric(response["Response"], errors="coerce")
             st.session_state["experiment_engine_design_df"] = design
             if st.button("📐 Analyze factorial effects", type="primary", use_container_width=True, key="experiment_engine_analyze"):
