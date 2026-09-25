@@ -633,6 +633,9 @@ def ml_demand_forecast(
         df, date_col, target_col, external_cols, horizon=int(horizon)
     )
     out = forecast.loc[forecast["Series"].astype(str).eq("Forecast")].copy()
+    # Preserve the legacy R2 key while exposing the richer in-sample/holdout metrics.
+    if "R2" not in metrics and "R2 (in-sample)" in metrics:
+        metrics["R2"] = metrics["R2 (in-sample)"]
     return out.drop(columns=["Series"], errors="ignore"), metrics
 
 
