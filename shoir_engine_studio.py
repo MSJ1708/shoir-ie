@@ -680,6 +680,15 @@ def pareto_candidates(df: pd.DataFrame, objectives: Mapping[str, bool]) -> pd.Da
 # UI helpers
 # ---------------------------------------------------------------------------
 
+def _save_experiment_evidence(name: str, scenarios: Any, results: Any, username: str) -> str:
+    """Persist an engineering/research run without creating a module import cycle at load time."""
+    try:
+        from industrial_platform import save_experiment
+        return save_experiment(name, "Experiment Engine", scenarios, results, username)
+    except Exception:
+        return ""
+
+
 def _df_download(df: pd.DataFrame, filename: str) -> None:
     st.download_button(
         "📥 Download CSV evidence",
@@ -744,6 +753,13 @@ def render_experiment_engine(tier: str, username: str) -> None:
                     st.session_state["experiment_engine_effects_df"] = effects
                     st.session_state["experiment_engine_fitted_df"] = fitted
                     st.session_state["experiment_engine_summary"] = summary
+                    run_id = _save_experiment_evidence(
+                        "Factorial DOE",
+                        design.to_dict("records"),
+                        {"effects": effects.to_dict("records"), "model_summary": summary},
+                        username,
+                    )
+                    st.session_state["experiment_engine_run_id"] = run_id
                     st.success("Factorial model fitted; coefficients, effects, p-values and confidence intervals are ready.")
                 except Exception as exc:
                     st.error(f"Factorial analysis failed safely: {exc}")
@@ -776,6 +792,13 @@ def render_experiment_engine(tier: str, username: str) -> None:
                 samples, summary = monte_carlo_uncertainty(specs, int(sims), 42, float(intercept))
                 st.session_state["experiment_engine_mc_samples"] = samples
                 st.session_state["experiment_engine_mc_summary"] = summary
+                run_id = _save_experiment_evidence(
+                    "Monte Carlo Uncertainty Propagation",
+                    specs.to_dict("records"),
+                    {"summary": summary},
+                    username,
+                )
+                st.session_state["experiment_engine_run_id"] = run_id
                 st.success("Monte Carlo uncertainty propagation completed.")
             except Exception as exc:
                 st.error(f"Monte Carlo failed safely: {exc}")
@@ -795,6 +818,13 @@ def render_experiment_engine(tier: str, username: str) -> None:
                 boot_summary.update(effect_size(a.iloc[:, 0], b.iloc[:, 0]))
                 st.session_state["experiment_engine_bootstrap_df"] = boot
                 st.session_state["experiment_engine_bootstrap_summary"] = boot_summary
+                run_id = _save_experiment_evidence(
+                    "Bootstrap Difference + Effect Size",
+                    {"Group A": a.iloc[:, 0].dropna().tolist(), "Group B": b.iloc[:, 0].dropna().tolist()},
+                    boot_summary,
+                    username,
+                )
+                st.session_state["experiment_engine_run_id"] = run_id
                 st.success("Bootstrap confidence interval and effect-size evidence calculated.")
             except Exception as exc:
                 st.error(f"Bootstrap/effect-size analysis failed safely: {exc}")
@@ -817,6 +847,13 @@ def render_experiment_engine(tier: str, username: str) -> None:
                     try:
                         sens = sensitivity_screen(source, outcome, drivers)
                         st.session_state["experiment_engine_sensitivity_df"] = sens
+                        run_id = _save_experiment_evidence(
+                            "Sensitivity Screening",
+                            source.to_dict("records"),
+                            {"sensitivity": sens.to_dict("records"), "outcome": outcome, "drivers": drivers},
+                            username,
+                        )
+                        st.session_state["experiment_engine_run_id"] = run_id
                         st.dataframe(sens, use_container_width=True, hide_index=True)
                     except Exception as exc:
                         st.error(f"Sensitivity screening failed safely: {exc}")
@@ -1032,6 +1069,7 @@ def render_optimization_studio(tier: str, username: str) -> None:
 def render_decision_center_studio(tier: str, username: str) -> None:
     st.markdown("#### 🎯 Decision Governance Studio")
     st.caption("Decision cards now capture baseline, alternatives, constraints, KPIs, uncertainty, evidence, approvals and verification.")
+    title = st.text_input("Decision title", value="Engineering Decision", key="decision_governance_title")
     baseline = st.text_area("Baseline JSON", value='{"description":"Current network","Cost":100000,"Service":95}', key="decision_baseline_json")
     metrics = st.text_area("KPI / metrics JSON", value='{"Cost Delta %":-8.2,"Service Delta %":2.1,"Carbon Delta %":-4.5}', key="decision_kpi_json")
     uncertainty = st.text_area("Uncertainty JSON", value='{"P95 cost exposure":"12%","Service CI":"±1.8 pp"}', key="decision_unc_json")
@@ -1076,7 +1114,7 @@ def render_decision_center_studio(tier: str, username: str) -> None:
         try:
             from industrial_platform import create_decision_card, save_decision_card
             card = create_decision_card(
-                st.session_state.get("decision_title", "Engineering Decision"),
+                title,
                 "Engineering Decision Center",
                 json.loads(metrics),
                 {"baseline": json.loads(baseline)},
@@ -1092,10 +1130,31 @@ def render_decision_center_studio(tier: str, username: str) -> None:
             )
             decision_id = save_decision_card(card, username)
             card["decision_id"] = decision_id
+            completeness = {
+                "Baseline": bool(card.get("baseline")),
+                "Alternatives": bool(card.get("alternatives")),
+                "Constraints": bool(card.get("constraints")),
+                "KPIs": bool(card.get("metrics")),
+                "Uncertainty": bool(card.get("uncertainty")),
+                "Evidence": bool(card.get("evidence")),
+                "Approvals": bool(card.get("approvals")),
+                "Verification": bool(card.get("verification")),
+            }
+            card["package_completeness_pct"] = round(100 * sum(completeness.values()) / len(completeness), 1)
+            card["readiness_checks"] = completeness
             st.session_state["decision_governed_card"] = card
             st.success(f"Governed decision card saved: {decision_id}")
         except Exception as exc:
             st.error(f"Decision package is not valid JSON: {exc}")
     if isinstance(st.session_state.get("decision_governed_card"), dict):
-        st.json(st.session_state["decision_governed_card"])
+        card = st.session_state["decision_governed_card"]
+        st.metric("Decision package completeness", f"{card.get('package_completeness_pct', 0):.0f}%")
+        st.dataframe(
+            pd.DataFrame(
+                [{"Section": k, "Complete": "✅" if v else "⚠️"} for k, v in card.get("readiness_checks", {}).items()]
+            ),
+            use_container_width=True,
+            hide_index=True,
+        )
+        st.json(card)
         _json_download(st.session_state["decision_governed_card"], "shoir_ie_decision_package.json")
