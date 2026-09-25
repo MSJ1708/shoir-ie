@@ -1422,6 +1422,17 @@ research_pack_features = tier3_features + [
 if is_admin:
     tier3_features.append("Admin Panel")
 
+def _render_post_module_layers(module_name: str) -> None:
+    """Run cross-cutting enterprise and visualization layers before legacy st.stop()."""
+    try:
+        render_enterprise_bridge(str(module_name), tier_val, st.session_state.get("current_user", "unknown"))
+        render_universal_module_parity(str(module_name), phase="results")
+    except Exception as exc:
+        st.warning("Shared enterprise/visualization layer could not render for this legacy module; native results remain available.")
+        with st.expander("Layer diagnostic"):
+            st.code(f"{type(exc).__name__}: {exc}")
+
+
 st.sidebar.markdown("### 🧭 Navigation Menu")
 menu_choice = st.sidebar.radio("Go to Section", ["Dashboard", "✨ Excellence Hub", "Become an affiliate", "Feedback", "Edit Account"], label_visibility="collapsed")
 if menu_choice != "Dashboard":
@@ -5957,6 +5968,7 @@ if selected_module == "AGV Fleet Dispatcher":
             st.metric("Quality Rate", "100%", "Collision-Free")
 
     # Stop execution so the rest of the page underneath doesn't overwrite
+    _render_post_module_layers("Geospatial Network Designer")
     st.stop()
 
 # ==============================================================================
@@ -6244,6 +6256,7 @@ if selected_module == "Geospatial Network Designer":
                 )
                 st.plotly_chart(bar_cap, use_container_width=True)
 
+    _render_post_module_layers("Predictive Maintenance Hub")
     st.stop()
 
 # ==============================================================================
@@ -7403,6 +7416,7 @@ if selected_module in ["Facility Layout & Warehousing", "Facility Layout, Materi
         })
         st.dataframe(slot_data, use_container_width=True, hide_index=True)
 
+    _render_post_module_layers("Human Factors & Ergonomics (NIOSH)")
     st.stop()
     
 # ==============================================================================
@@ -7676,6 +7690,7 @@ if selected_module in ["Human Factors & Ergonomics (NIOSH)", "Human Factors, Erg
             st.metric("Required Rest Time", f"{rest_mins_per_hour:.1f} mins / hour")
             st.metric("Total Shift Rest", f"{rest_mins_per_hour * shift_hours:.1f} minutes")
 
+    _render_post_module_layers("Engineering Economics & Finance")
     st.stop()
 
 # ==============================================================================
@@ -8001,6 +8016,7 @@ if selected_module in ["Engineering Economics & Finance", "Engineering Economics
                 "Interest Tax Shield": "${:,.2f}", "Ending Balance": "${:,.2f}"
             }), use_container_width=True, hide_index=True)
 
+    _render_post_module_layers("Digital Twin & Discrete-Event Simulation")
     st.stop()
 
 # ==============================================================================
@@ -8367,6 +8383,7 @@ if selected_module in ["Digital Twin & Discrete-Event Simulation", "Digital Twin
             st.session_state.event_logs = []
             st.rerun()
 
+    _render_post_module_layers("Green IE & Sustainability")
     st.stop()
 
 # ==============================================================================
@@ -8562,6 +8579,7 @@ if selected_module in ["Green IE & Sustainability", "Sustainability & Circular E
                 fig_lca.update_layout(plot_bgcolor="#0b0f19", paper_bgcolor="#0b0f19", font=dict(color="#f3f4f6"), height=290)
                 st.plotly_chart(fig_lca, use_container_width=True)
 
+    _render_post_module_layers("Enterprise Integration & Collaboration")
     st.stop()
 
 # ==============================================================================
