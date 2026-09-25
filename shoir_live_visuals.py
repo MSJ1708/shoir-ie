@@ -22,6 +22,7 @@ import streamlit as st
 
 _MODULE_KEYS = {
     "Engineering Validation Center": ["validation_df", "validation_result"],
+    "MILP Solvers": ["milp_result_df", "milp_summary_df", "milp_allocation_flow_df"],
     "Industrial Data Model & Digital Thread": ["thread_df", "thread_rel"],
     "Advanced Planning & Scheduling": ["aps_demand", "aps_bom", "aps_orders", "aps_schedule_result"],
     "Manufacturing Execution System": ["mes_wo_df", "mes_events_df", "mes_oee_df", "mes_oee_result"],
@@ -29,19 +30,19 @@ _MODULE_KEYS = {
     "Industrial Simulation Lab": ["sim_des_result", "sim_agent_result", "sd"],
     "3D Factory Designer": ["factory3d_df", "factory3d_dist_result"],
     "Industrial Connectivity Hub": ["conn_df"],
-    "Multi-Objective Optimization": ["multiobj_df", "multiobj_result", "pareto"],
-    "Robust & Resilient Optimization": ["robust_df", "robust_result"],
+    "Multi-Objective Optimization": ["multiobj_df", "multiobj_result", "pareto", "optimization_pareto_df", "optimization_result_df"],
+    "Robust & Resilient Optimization": ["robust_df", "robust_result", "robust_result_df"],
     "Engineering Model Registry": ["model_registry_df"],
-    "Experiment Lab": ["experiment_df", "experiment_results"],
+    "Experiment Lab": ["experiment_df", "experiment_results", "experiment_doe_design", "experiment_factorial_effects", "experiment_factorial_summary", "experiment_mc_results", "experiment_mc_result_summary", "experiment_bootstrap_results", "experiment_bootstrap_summary", "experiment_replication_summary", "experiment_sensitivity_results"],
     "Industrial Control Center": ["control_center_metrics"],
-    "Engineering Decision Center": ["decision_metrics_df"],
+    "Engineering Decision Center": ["decision_metrics_df", "decision_alternatives_df", "decision_kpi_df", "decision_verification_df"],
     "Industrial Data Platform": ["data_platform_latest_df"],
     "Capital Investment & Engineering Economics": ["capex_df", "capex_result"],
     "Workforce Engineering": ["work_elements", "balance_result", "skills_df"],
     "Industrial Sustainability & LCA": ["sustain_df", "sustain_result"],
     "Benchmarking & Engineering Standards": ["benchmark_actual", "benchmark_targets", "benchmark_result"],
     "Live Industrial Digital Twin": ["twin_tel"],
-    "Advanced ML Demand Forecasting": ["forecast_df", "forecast_result"],
+    "Advanced ML Demand Forecasting": ["forecast_df", "forecast_result", "forecast_metrics"],
     "Scenario Versioning & Comparison": ["scenario_df"],
     "Team Workspaces & RBAC": ["workspace_members_df"],
     "Executive Report Center": ["exec_report_df"],
@@ -207,15 +208,19 @@ def _auto_chart_choice(df: pd.DataFrame) -> str:
     cols = [str(c) for c in df.columns]
     nums = _numeric_columns(df)
     dates = _coerce_datetime_columns(df)
-    source = _find_col(df, ("source", "from", "origin"))
-    target = _find_col(df, ("target", "to", "destination"))
+    source = _find_col(df, ("source", "from", "origin", "customer", "facility", "warehouse"))
+    target = _find_col(df, ("target", "to", "destination", "warehouse", "facility", "customer"))
     value = _find_col(df, ("value", "volume", "flow", "quantity", "qty"))
     start = _find_col(df, ("start", "begin", "planned start"))
     finish = _find_col(df, ("finish", "end", "completion", "planned finish"))
+    delta = _find_col(df, ("delta", "change", "impact", "variance"))
+    baseline = _find_col(df, ("baseline", "base"))
     if source and target and value:
         return "Sankey"
     if start and finish:
         return "Gantt"
+    if delta and baseline:
+        return "Waterfall"
     if len(nums) >= 3:
         return "3D Scatter"
     if len(nums) >= 2 and dates:
@@ -502,6 +507,9 @@ def _render_auto_kpi_dashboard(module: str, df: pd.DataFrame, chart_token: str) 
     elif auto_chart == "Sensitivity Plot":
         x = None
         y = nums[0] if nums else None
+    elif auto_chart == "Waterfall":
+        x = cats[0] if cats else None
+        y = _find_col(df, ("delta", "change", "impact", "variance")) or (nums[0] if nums else None)
 
     fig = _make_figure(df, auto_chart, x, y, z, f"{module} · Auto view")
     if fig is not None:
