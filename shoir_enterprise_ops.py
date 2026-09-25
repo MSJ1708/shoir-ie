@@ -245,7 +245,6 @@ def render_digital_twin_extension(username: str = "unknown") -> None:
             fig = px.line(result, x="Tick", y=["WIP", "Utilization %"], title="Digital Twin Scenario Replay")
             st.plotly_chart(fig, use_container_width=True)
             st.download_button("📥 Download replay evidence", result.to_csv(index=False).encode(), "shoir_ie_twin_replay.csv", "text/csv", use_container_width=True)
-    _render_universal_viz("Digital Twin & Discrete-Event Simulation", "digital_twin_replay_df")
 
 
 # ---------------------------------------------------------------------------
@@ -366,7 +365,6 @@ def render_control_tower_extension() -> None:
     if not plot_df.empty:
         fig = px.bar(plot_df, x="Area", y="Health %", color="Status", hover_data=["Signal"], range_y=[0, 100], title="Production · Supply · Inventory · Quality · Maintenance · Transport · Workforce · Energy · Carbon")
         st.plotly_chart(fig, use_container_width=True)
-    _render_universal_viz("Control Tower", "control_tower_unified_health_df")
 
 
 # ---------------------------------------------------------------------------
@@ -551,7 +549,6 @@ def render_persistence_extension(username: str, show_controls: bool = True) -> N
     if catalog:
         st.dataframe(pd.DataFrame(catalog), use_container_width=True, hide_index=True)
     st.caption("Workspace state, including module datasets/results and artifact metadata, follows the configured persistence path. Exported binary files are represented by provenance/hash metadata unless separately stored in a connected file/object store.")
-    _render_universal_viz("Persistence", "enterprise_security_posture_df")
 
 
 def render_collaboration_extension(username: str) -> None:
@@ -793,6 +790,7 @@ def render_research_extension(username: str) -> None:
             st.download_button("📄 Download manuscript (Markdown)", md.encode("utf-8"), "shoir_ie_manuscript.md", "text/markdown", use_container_width=True, key="research_md_download")
         if isinstance(tex, str) and tex:
             st.download_button("📐 Download manuscript scaffold (LaTeX)", tex.encode("utf-8"), "shoir_ie_manuscript.tex", "text/x-tex", use_container_width=True, key="research_tex_download")
+    _render_universal_viz("Experiment Lab", None)
 
 
 def build_provenance_manifest(module: str, tables: Sequence[tuple[str, pd.DataFrame]], owner: str) -> dict[str, Any]:
@@ -822,6 +820,7 @@ def render_reporting_extension(module: str, tables: Sequence[tuple[str, pd.DataF
         st.json(manifest)
         st.caption("The existing Excel/PDF/PowerPoint export actions should receive the same figure object used by the module. This manifest records the source hashes and the exact chart configuration used for reconstruction.")
         st.download_button("📥 Download provenance manifest", json.dumps(manifest, indent=2, default=str).encode(), f"shoir_ie_{re.sub(r'[^A-Za-z0-9]+','_',module).lower()}_provenance.json", "application/json", use_container_width=True)
+    _render_universal_viz(module, None)
 
 
 # ---------------------------------------------------------------------------
@@ -1142,6 +1141,7 @@ def render_realtime_monitoring_extension(sensor_df: Any = None, module: str = "D
         time_col = next((c for c in updated.columns if pd.api.types.is_datetime64_any_dtype(updated[c])), None)
         fig = px.line(updated, x=time_col if time_col else updated.index, y=metric, title=f"{module} · Live Monitoring")
         st.plotly_chart(fig, use_container_width=True)
+    _render_universal_viz(module, f"realtime_monitoring_{hashlib.sha1(module.encode()).hexdigest()[:10]}")
 
 
 def render_economics_extension(username: str = "unknown") -> None:
@@ -1171,7 +1171,6 @@ def render_economics_extension(username: str = "unknown") -> None:
     st.dataframe(out, use_container_width=True, hide_index=True)
     st.plotly_chart(px.line(out, x="Year", y=["OPEX", "Discounted OPEX"], title="Lifecycle OPEX Profile"), use_container_width=True)
     record_artifact("Economics", "TCO", out, "Engineering Economics", username, "engineering_economics_tco_df")
-    _render_universal_viz("Capital Investment & Engineering Economics", "engineering_economics_tco_df")
 
 
 def render_sustainability_extension(username: str = "unknown") -> None:
@@ -1237,7 +1236,6 @@ def render_human_factors_extension(username: str = "unknown") -> None:
         title="Human Factors / Workload Measures",
     ), use_container_width=True)
     st.caption("These outputs are engineering workload measures, not medical or clinical assessments.")
-    _render_universal_viz("Human Factors & Ergonomics (NIOSH)", "human_factors_metrics_df")
 
 
 def render_geospatial_extension(username: str = "unknown") -> None:
@@ -1267,7 +1265,6 @@ def render_geospatial_extension(username: str = "unknown") -> None:
     st.dataframe(routes.head(100), use_container_width=True, hide_index=True)
     if not routes.empty:
         st.plotly_chart(px.scatter(routes, x="Distance km", y="Scenario Freight Cost", size="Demand tons/yr", hover_data=["Origin","Destination"], title="Geospatial Route / Cost Surface"), use_container_width=True)
-    _render_universal_viz("Geospatial Network Designer", "geospatial_network_routes_df")
 
 
 def render_artifact_journal_for_tables(module: str, tables: Sequence[tuple[str, pd.DataFrame]], username: str) -> None:
