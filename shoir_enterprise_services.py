@@ -331,7 +331,15 @@ def detect_twin_anomalies(df: pd.DataFrame, z_threshold: float = 3.0) -> pd.Data
     out["Mean"] = out.groupby("Metric")["Value"].transform("mean")
     out["Std Dev"] = out.groupby("Metric")["Value"].transform("std").fillna(0.0)
     out["Z-Score"] = (out["Value"] - out["Mean"]) / out["Std Dev"].replace(0, np.nan)
-    out["Alert"] = np.where(out["Z-Score"].abs() >= float(z_threshold), "Investigate", "Normal")
+    out["Median"] = out.groupby("Metric")["Value"].transform("median")
+    out["MAD"] = (out["Value"] - out["Median"]).abs().groupby(out["Metric"]).transform("median")
+    out["Robust Z-Score"] = 0.6745 * (out["Value"] - out["Median"]) / out["MAD"].replace(0, np.nan)
+    threshold = float(z_threshold)
+    out["Alert"] = np.where(
+        (out["Z-Score"].abs() >= threshold) | (out["Robust Z-Score"].abs() >= threshold),
+        "Investigate",
+        "Normal",
+    )
     return out
 
 
