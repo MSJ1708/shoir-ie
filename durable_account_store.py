@@ -58,6 +58,9 @@ def _edge_call(action: str, payload: Optional[dict[str, Any]] = None) -> dict[st
         data = resp.json()
     except Exception:
         data = {"error": resp.text[:500]}
+    # Expiry is an expected authentication state, not a transport failure.
+    if data.get("error") == "SUBSCRIPTION_EXPIRED":
+        return data
     if resp.status_code >= 400 or data.get("error"):
         raise RuntimeError(str(data.get("error") or f"Supabase persistence request failed ({resp.status_code})"))
     return data
