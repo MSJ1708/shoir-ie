@@ -170,7 +170,8 @@ def run_twin_what_if(
     rows: list[dict[str, Any]] = []
     total_wip0 = float(_numeric(b.get("current_wip", [])).fillna(0).sum()) if "current_wip" in b.columns else 0.0
     active_agv0 = int((agv.get("status", pd.Series(dtype=object)).astype(str).str.lower().isin(["moving", "active", "navigating", "picking"])).sum()) if not agv.empty else 0
-    battery0 = float(_numeric(agv.get("battery", [])).fillna(0).mean()) if "battery" in agv.columns and not agv.empty else np.nan
+    battery_values = _numeric(agv.get("battery", [])).dropna() if "battery" in agv.columns and not agv.empty else pd.Series(dtype=float)
+    battery0 = float(battery_values.mean()) if not battery_values.empty else np.nan
 
     wip = total_wip0
     battery = battery0
@@ -480,6 +481,18 @@ def record_artifact(kind: str, name: str, value: Any, source_module: str, owner:
         "owner": owner,
     }
     catalog = st.session_state.setdefault("shoir_artifact_catalog", [])
+    same = next(
+        (
+            item for item in catalog
+            if item.get("kind") == entry["kind"]
+            and item.get("name") == entry["name"]
+            and item.get("source_module") == entry["source_module"]
+            and item.get("sha256") == entry["sha256"]
+        ),
+        None,
+    )
+    if same is not None:
+        return same
     catalog.insert(0, entry)
     st.session_state["shoir_artifact_catalog"] = catalog[:500]
     return entry
