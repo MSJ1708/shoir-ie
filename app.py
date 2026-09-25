@@ -11831,25 +11831,27 @@ if mod == "Control Tower":
         disruption_df = disruption_df[disruption_df["Location"] == region_filter]
 
     st.session_state["control_tower_disruption_df"] = disruption_df.copy(deep=True)
+    # Demo telemetry is explicitly labelled until a live connector supplies measured values.
     st.session_state["control_tower_metrics"] = pd.DataFrame({
         "KPI": ["Active Shipments", "On-Time Delivery", "Disruption Alerts", "Weather Risk Index"],
         "Value": [142, 98.4, 2, 1.2],
         "Unit": ["shipments", "%", "alerts", "index"],
+        "Evidence": ["DEMO", "DEMO", "DEMO", "DEMO"],
     })
     st.dataframe(disruption_df, use_container_width=True)
 
     if st.button("Trigger Full Network Diagnostic Scan", type="primary"):
         if "current_user" in st.session_state and "log_audit" in globals():
             log_audit(st.session_state.current_user, "Executed Control Tower Diagnostic Scan")
-        st.toast("Diagnostic scan completed successfully!", icon="🗼")
-        st.success("Network health verified. All primary hubs operating within optimal tolerances.")
+        st.toast("Control Tower diagnostic scan completed.", icon="🗼")
+        st.info("The diagnostic scan evaluated the currently loaded control-tower dataset. It does not claim live network verification unless connected telemetry is present.")
 
     with st.expander("🔍 View Raw Telemetry Stream"):
         st.json({
-            "control_tower_status": "ONLINE",
-            "active_nodes": 24,
-            "latency_ms": 19,
-            "encryption": "TLS 1.3 Secure"
+            "control_tower_status": "DEMO / DATA-DEPENDENT",
+            "active_nodes": "Unavailable without live connector telemetry",
+            "latency_ms": "Unavailable without live connector telemetry",
+            "encryption": "Configured at connector layer when deployed"
         })
 
     render_control_tower_extension()
