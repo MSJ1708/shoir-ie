@@ -37,3 +37,32 @@ def test_auto_chart_detects_flow_and_gantt():
         "Finish": pd.to_datetime(["2026-01-02"]),
     })
     assert _auto_chart_choice(gantt) == "Gantt"
+
+
+def test_auto_visualization_routes_specialized_engine_outputs():
+    effects = pd.DataFrame({
+        "Term": ["A", "B"],
+        "Effect (2×coef)": [4.2, -1.7],
+        "p_value": [0.01, 0.20],
+    })
+    assert _auto_chart_choice(effects) == "Bar"
+
+    sensitivity = pd.DataFrame({
+        "Driver": ["Demand", "Lead Time"],
+        "Sensitivity": [0.82, 0.44],
+        "Direction": ["Positive", "Negative"],
+    })
+    assert _auto_chart_choice(sensitivity) == "Sensitivity Plot"
+
+    control = pd.DataFrame({
+        "Measurement": [10, 11, 10, 12, 9],
+        "UCL": [13, 13, 13, 13, 13],
+        "LCL": [7, 7, 7, 7, 7],
+    })
+    assert _auto_chart_choice(control) == "Control Chart"
+
+    pareto = pd.DataFrame({
+        "Failure Mode": ["Leak", "Crack", "Wear"],
+        "RPN": [120, 80, 30],
+    })
+    assert _auto_chart_choice(pareto) == "Pareto"
