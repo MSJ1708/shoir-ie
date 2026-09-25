@@ -628,7 +628,15 @@ def render_enterprise_bridge(module: str, tier: str, username: str) -> None:
                     combined = comment.strip()
                     if mention_targets.strip():
                         combined = (combined + " " + mention_targets.strip()).strip()
-                    add_comment(None, st.session_state.get("decision_governed_card", {}).get("decision_id"), username, combined)
+                    decision_id = st.session_state.get("decision_active_id") or st.session_state.get("decision_governed_card", {}).get("decision_id")
+                    add_comment(None, decision_id, username, combined)
+                    if decision_id:
+                        try:
+                            from industrial_experience import decision_approval_history
+                            approval_history = decision_approval_history(decision_id)
+                            st.session_state["enterprise_decision_approval_history_df"] = approval_history.copy(deep=True)
+                        except Exception:
+                            pass
                     assignments = st.session_state.setdefault("enterprise_collaboration_assignments", [])
                     if assignment.strip():
                         assignments.append({
@@ -644,6 +652,10 @@ def render_enterprise_bridge(module: str, tier: str, username: str) -> None:
                 assignments = st.session_state.get("enterprise_collaboration_assignments", [])
                 if assignments:
                     st.dataframe(pd.DataFrame(assignments), use_container_width=True, hide_index=True)
+                approval_history = st.session_state.get("enterprise_decision_approval_history_df")
+                if module == "Engineering Decision Center" and isinstance(approval_history, pd.DataFrame) and not approval_history.empty:
+                    st.markdown("##### ✅ Approval history")
+                    st.dataframe(approval_history, use_container_width=True, hide_index=True)
             elif module in {"Enterprise Security & Governance","Enterprise Integration & Collaboration","Persistence"}:
                 roles = st.session_state.get("workspace_users", st.session_state.get("workspace_members_df", []))
                 st.dataframe(_safe_frame(roles), use_container_width=True, hide_index=True)
