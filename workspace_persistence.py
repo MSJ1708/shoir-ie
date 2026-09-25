@@ -187,7 +187,10 @@ def save_user_workspace(
         # A custom db_path is used by local/regression tests and intentionally
         # bypasses the remote backend. The deployed application uses the default
         # enterprise_full_workspace.db path and therefore uses Supabase.
-        if durable_backend_configured() and db_path == "enterprise_full_workspace.db":
+        remote_mode = durable_backend_configured() and db_path == "enterprise_full_workspace.db"
+        if remote_mode:
+            # In durable mode, never silently persist to shared/ephemeral SQLite.
+            # A failed cloud write must stay a failed cloud write.
             return save_remote_workspace(username, payload)
 
         # Local development fallback only. A deployed Streamlit instance should
@@ -219,12 +222,14 @@ def load_user_workspace(
     if not username or username == "Guest Visitor":
         return False
     try:
-        remote_payload = (
-            load_remote_workspace(username)
-            if durable_backend_configured() and db_path == "enterprise_full_workspace.db"
-            else None
-        )
-        if remote_payload:
+        remote_mode = durable_backend_configured() and db_path == "enterprise_full_workspace.db"
+        if remote_mode:
+            # A configured managed backend is authoritative. Do not fall back
+            # to SQLite when the remote record is missing or temporarily empty;
+            # doing so can resurrect stale cross-user/local state after a restart.
+            remote_payload = load_remote_workspace(username)
+            if not remote_payload:
+                return False
             payload = json.loads(remote_payload)
         else:
             ensure_workspace_state_db(db_path)

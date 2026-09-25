@@ -30,6 +30,7 @@ from industrial_experience import COPILOT_TOOLS, ensure_experience_db, feature_s
 from research_experiment_engine import apply_evidence_conflict
 from industrial_excellence_hub import render_platform_excellence_hub
 from workspace_persistence import ensure_workspace_state_db, load_user_workspace, save_user_workspace
+from shoir_visual_system import apply_shoir_design_system, render_workspace_status
 from durable_account_store import (durable_backend_configured, sync_durable_accounts, sync_remote_requests_to_local, edge_login, edge_admin_list_requests, edge_renew_request, upsert_remote_account, insert_remote_request, remote_account, account_is_expired, renewed_expiry)
 
 # =====================================================================
@@ -42,10 +43,10 @@ st.set_page_config(
 )
 
 st.markdown("""
-<div class="hero-card">
-  <div class="kicker">Industrial Decision Platform</div>
+<div class="hero-card shoir-live-pulse">
+  <div class="kicker">Industrial Decision Platform • Engineering Intelligence</div>
   <div class="hero-title">🏭 Shoir-IE Industrial Engineering Command Center</div>
-  <div class="hero-copy">Analyze → visualize → understand → decide → export. Results stay front and center; technical details remain available when needed.</div>
+  <div class="hero-copy">Turn industrial data into defensible decisions — analyze, simulate, optimize, compare, explain, and export from one workspace.</div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -102,6 +103,8 @@ st.markdown("""
     }
 </style>
 """, unsafe_allow_html=True)
+
+apply_shoir_design_system()
 
 os.makedirs("payment_proofs", exist_ok=True)
 
@@ -1301,6 +1304,16 @@ if st.session_state.get("current_user") and st.session_state.get("authenticated"
         ensure_workspace_state_db()
         load_user_workspace(_workspace_user, st.session_state)
         st.session_state["_workspace_loaded_for_user"] = _workspace_user
+
+# =====================================================================
+# WORKSPACE STATUS RIBBON — durable state + autosave visibility
+# =====================================================================
+render_workspace_status(
+    user=st.session_state.get("current_user", "Workspace"),
+    tier=st.session_state.get("user_tier", "Starter Tier"),
+    durable=bool(durable_backend_configured() and st.session_state.get("remote_session_token")),
+    autosave=bool(st.session_state.get("authenticated") and st.session_state.get("current_user")),
+)
 
 # =====================================================================
 # ENSURE AFFILIATE CODE IS LOADED IN SESSION STATE
