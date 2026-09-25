@@ -108,6 +108,8 @@ def engineering_forecast(
     })
     metrics = {
         "R2 (in-sample)": float(r2_score(train[target_col], fitted)),
+        # Backward-compatible aggregate metric expected by existing platform consumers.
+        "R2": float(r2_score(train[target_col], fitted)),
         "MAE (in-sample)": float(mean_absolute_error(train[target_col], fitted)),
         "RMSE (in-sample)": float(math.sqrt(mean_squared_error(train[target_col], fitted))),
         "Residual Std": residual_sd,
