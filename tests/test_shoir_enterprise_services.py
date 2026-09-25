@@ -66,3 +66,28 @@ def test_tco_schedule_is_transparent_and_discounted():
     assert len(schedule) == 3
     assert summary["TCO (Nominal)"] == 13000.0
     assert summary["TCO (Discounted)"] < summary["TCO (Nominal)"]
+
+
+def test_model_registry_provenance_schema_is_additive(tmp_path):
+    from industrial_platform import init_platform_db, save_model_snapshot
+
+    db = tmp_path / "registry.db"
+    init_platform_db(str(db))
+    model_id = save_model_snapshot(
+        "Test Model",
+        "MILP",
+        {"objective": "cost"},
+        "DATAHASH",
+        "tester",
+        {"assumption": "test"},
+        db_path=str(db),
+        solver_version="CBC-test",
+        result_hash="RESHASH",
+    )
+    import sqlite3
+    with sqlite3.connect(db) as conn:
+        row = conn.execute(
+            "SELECT solver_version,result_hash FROM platform_models WHERE model_id=?",
+            (model_id,),
+        ).fetchone()
+    assert row == ("CBC-test", "RESHASH")
