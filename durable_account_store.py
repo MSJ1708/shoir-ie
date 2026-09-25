@@ -28,6 +28,44 @@ except Exception:  # pragma: no cover
     psycopg2 = None
     RealDictCursor = None
 
+# Supabase publishable keys are explicitly designed for application-side use.
+# The Edge Function performs the privileged database work with Supabase's
+# server-side service-role credentials, so the Streamlit app never needs the
+# database password or a service-role key.
+SUPABASE_EDGE_URL = "https://gcsamrdaeraxieaagsta.supabase.co/functions/v1/shoir-persistence"
+SUPABASE_PUBLISHABLE_KEY = "sb_publishable_ccMYEvPjf1AXbx_VhewNUQ_jWPnSwEc"
+
+
+def _edge_headers() -> dict[str, str]:
+    return {
+        "apikey": SUPABASE_PUBLISHABLE_KEY,
+        "Authorization": f"Bearer {SUPABASE_PUBLISHABLE_KEY}",
+        "Content-Type": "application/json",
+    }
+
+
+def _edge_call(action: str, payload: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+    import requests
+    body = dict(payload or {})
+    body["action"] = action
+    resp = requests.post(
+        SUPABASE_EDGE_URL,
+        json=body,
+        headers=_edge_headers(),
+        timeout=15,
+    )
+    try:
+        data = resp.json()
+    except Exception:
+        data = {"error": resp.text[:500]}
+    if resp.status_code >= 400 or data.get("error"):
+        raise RuntimeError(str(data.get("error") or f"Supabase persistence request failed ({resp.status_code})"))
+    return data
+
+
+def edge_backend_configured() -> bool:
+    return bool(SUPABASE_EDGE_URL and SUPABASE_PUBLISHABLE_KEY)
+
 
 def database_url() -> str:
     """Read the managed database URL from secrets/environment."""
@@ -48,7 +86,7 @@ def database_url() -> str:
 
 
 def durable_backend_configured() -> bool:
-    return bool(database_url()) and psycopg2 is not None
+    return edge_backend_configured() or (bool(database_url()) and psycopg2 is not None)
 
 def ephemeral_local_storage_allowed() -> bool:
     """Explicit opt-in for SQLite-only local development.
@@ -333,6 +371,53 @@ def remote_research_studies(owner: str) -> list[dict[str, Any]]:
             row["protocol"] = {}
     return rows
 
+def edge_login(username: str, password: str) -> dict[str, Any]:
+    return _edge_call("login", {"username": username, "password": password})
+
+
+def edge_register_request(request: Mapping[str, Any]) -> dict[str, Any]:
+    return _edge_call("register_request", {
+        "username": request["username"],
+        "password": request.get("password") or "",
+        "email": request.get("email") or "",
+        "tier": request.get("tier") or "Starter Tier ($29)",
+        "payment_method": request.get("payment_method") or "",
+        "transaction_id": request.get("transaction_id"),
+        "screenshot_path": request.get("screenshot_path"),
+    })
+
+
+def edge_admin_approve(username: str, token: str, request_id: int | None = None) -> dict[str, Any]:
+    payload = {"username": username, "token": token}
+    action = "admin_approve_latest_session"
+    if request_id is not None:
+        action = "admin_approve_session"
+        payload["request_id"] = int(request_id)
+    return _edge_call(action, payload)
+
+
+def edge_admin_decline(username: str, token: str, request_id: int) -> dict[str, Any]:
+    return _edge_call("admin_decline_session", {
+        "username": username, "token": token, "request_id": int(request_id)
+    })
+
+
+def edge_admin_list_requests(username: str, token: str) -> list[dict[str, Any]]:
+    result = _edge_call("admin_list_requests_session", {"username": username, "token": token})
+    return list(result.get("requests") or [])
+
+
+def edge_renew_request(username: str, token: str, request: Mapping[str, Any]) -> dict[str, Any]:
+    return _edge_call("renew_request", {
+        "username": username,
+        "token": token,
+        "tier": request.get("tier"),
+        "payment_method": request.get("payment_method") or "",
+        "transaction_id": request.get("transaction_id"),
+        "screenshot_path": request.get("screenshot_path"),
+    })
+
+
 def _iso(value: Any) -> Optional[str]:
     if value is None or value == "":
         return None
@@ -342,6 +427,11 @@ def _iso(value: Any) -> Optional[str]:
 
 
 def remote_account(username: str) -> Optional[dict[str, Any]]:
+    if edge_backend_configured():
+        result = _edge_call("account_exists", {"username": username})
+        if result.get("exists"):
+            return {"username": result.get("username") or username, "username_lc": str(username).strip().lower()}
+        return None
     ensure_remote_schema()
     with _pg_connect() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
@@ -362,6 +452,14 @@ def remote_accounts() -> list[dict[str, Any]]:
 
 
 def upsert_remote_account(account: Mapping[str, Any]) -> None:
+    if edge_backend_configured():
+        token = str(account.get("admin_session_token") or "")
+        admin_username = str(account.get("admin_username") or "")
+        request_id = account.get("request_id")
+        if not token or not admin_username:
+            raise RuntimeError("Admin session token is required for remote account approval.")
+        edge_admin_approve(admin_username, token, int(request_id) if request_id is not None else None)
+        return
     ensure_remote_schema()
     now = dt.datetime.now(dt.timezone.utc)
     created = account.get("created_at") or now
@@ -412,6 +510,9 @@ def upsert_remote_account(account: Mapping[str, Any]) -> None:
 
 
 def insert_remote_request(request: Mapping[str, Any]) -> None:
+    if edge_backend_configured():
+        edge_register_request(request)
+        return
     ensure_remote_schema()
     with _pg_connect() as conn:
         with conn.cursor() as cur:
@@ -642,7 +743,17 @@ def sync_durable_accounts(db_path: str = "enterprise_full_workspace.db") -> bool
 
 
 def save_remote_workspace(username: str, state_json: str) -> bool:
-    """Persist serialized Streamlit workspace state in the managed database."""
+    """Persist serialized Streamlit workspace state in managed Supabase."""
+    if edge_backend_configured():
+        if st is None:
+            return False
+        token = str(st.session_state.get("remote_session_token") or "")
+        if not token:
+            return False
+        _edge_call("workspace_save", {
+            "username": username, "token": token, "state_json": state_json,
+        })
+        return True
     if not durable_backend_configured():
         return False
     ensure_remote_schema()
@@ -673,7 +784,15 @@ def save_remote_workspace(username: str, state_json: str) -> bool:
 
 
 def load_remote_workspace(username: str) -> Optional[str]:
-    """Return a user's durable workspace JSON, if available."""
+    """Return a user's durable workspace JSON from Supabase."""
+    if edge_backend_configured():
+        if st is None:
+            return None
+        token = str(st.session_state.get("remote_session_token") or "")
+        if not token:
+            return None
+        result = _edge_call("workspace_load", {"username": username, "token": token})
+        return result.get("state_json")
     if not durable_backend_configured():
         return None
     ensure_remote_schema()
