@@ -1444,12 +1444,48 @@ if is_admin:
     tier3_features.append("Admin Panel")
 
 def _render_post_module_layers(module_name: str) -> None:
-    """Run the single shared post-module integration surface.
+    """Run cross-cutting enterprise/visualization layers before legacy st.stop()."""
+    try:
+        render_enterprise_bridge(str(module_name), tier_val, st.session_state.get("current_user", "unknown"))
+    except Exception as exc:
+        st.warning("Enterprise capability layer could not render for this legacy module; native results remain available.")
+        with st.expander("Enterprise layer diagnostic"):
+            st.code(f"{type(exc).__name__}: {exc}")
+    try:
+        render_universal_module_parity(str(module_name), phase="results")
+    except Exception as exc:
+        st.warning("Universal Module Studio could not render for this legacy module; native results remain available.")
+        with st.expander("Visualization layer diagnostic"):
+            st.code(f"{type(exc).__name__}: {exc}")
+    finally:
+        # Persistence is deliberately independent from cross-cutting rendering.
+        # A visualization failure must never prevent recovery of module state.
+        if st.session_state.get("current_user"):
+            save_user_workspace(st.session_state["current_user"], st.session_state)
 
-    PR57's enterprise-operations layer remains authoritative for specialized
-    modules. The mainline bridge is used only where no richer native
-    enterprise extension is already attached.
-    """
+
+_MAIN_POST_MODULE_LAYERS = _render_post_module_layers
+
+from shoir_enterprise_ops import (
+    render_digital_twin_extension,
+    render_control_tower_extension,
+    render_connectivity_extension,
+    render_security_extension,
+    render_persistence_extension,
+    render_collaboration_extension,
+    render_reporting_extension,
+    render_data_intelligence_extension,
+    render_knowledge_extension,
+    render_realtime_monitoring_extension,
+    render_economics_extension,
+    render_sustainability_extension,
+    render_human_factors_extension,
+    render_geospatial_extension,
+    knowledge_context,
+)
+
+def _render_post_module_layers(module_name: str) -> None:
+    """Use one post-module dispatcher while retaining PR57's specialized integrations."""
     module_name = str(module_name)
     username = st.session_state.get("current_user", "unknown")
     specialized = {
@@ -1459,13 +1495,9 @@ def _render_post_module_layers(module_name: str) -> None:
         "Enterprise Integration & Collaboration",
     }
 
-    try:
-        if module_name not in specialized and callable(render_enterprise_bridge):
-            render_enterprise_bridge(module_name, tier_val, username)
-    except Exception as exc:
-        st.warning("Enterprise capability layer could not render; the native module remains available.")
-        with st.expander("Enterprise layer diagnostic"):
-            st.code(f"{type(exc).__name__}: {exc}")
+    if module_name not in specialized:
+        _MAIN_POST_MODULE_LAYERS(module_name)
+        return
 
     try:
         if module_name == "Geospatial Network Designer":
@@ -1511,14 +1543,13 @@ def _render_post_module_layers(module_name: str) -> None:
                 )
             render_live_visualization_studio(module_name, expanded=False)
 
-        try:
-            render_universal_module_parity(module_name, phase="results")
-        except Exception as exc:
-            st.warning("Universal Module Studio could not render the shared result surface; native results remain available.")
-            with st.expander("Visualization layer diagnostic"):
-                st.code(f"{type(exc).__name__}: {exc}")
+        render_universal_module_parity(module_name, phase="results")
+    except Exception as exc:
+        st.warning("Enterprise extension could not render for this module; the native results remain available.")
+        with st.expander("Enterprise extension diagnostic"):
+            st.code(f"{type(exc).__name__}: {exc}")
     finally:
-        if username != "unknown":
+        if username and username != "unknown":
             try:
                 save_user_workspace(username, st.session_state)
             except Exception:
