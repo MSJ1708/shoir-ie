@@ -50,6 +50,20 @@ def database_url() -> str:
 def durable_backend_configured() -> bool:
     return bool(database_url()) and psycopg2 is not None
 
+def ephemeral_local_storage_allowed() -> bool:
+    """Explicit opt-in for SQLite-only local development.
+    Production/deployed instances must use managed storage by default."""
+    raw = os.getenv("SHOIR_ALLOW_EPHEMERAL_LOCAL_STORAGE", "").strip().lower()
+    if raw in {"1", "true", "yes", "on"}:
+        return True
+    if st is not None:
+        try:
+            value = st.secrets.get("allow_ephemeral_local_storage", False)
+            return str(value).strip().lower() in {"1", "true", "yes", "on"}
+        except Exception:
+            pass
+    return False
+
 
 def _pg_connect():
     if not durable_backend_configured():
