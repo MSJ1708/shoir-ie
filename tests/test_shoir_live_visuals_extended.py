@@ -55,9 +55,8 @@ def test_enterprise_operations_visualizations_render():
     assert _auto_chart_choice(health) == "Bar"
 
     network = pd.DataFrame({
-        "Origin": ["Plant A", "Plant B"],
-        "Destination": ["Market 1", "Market 2"],
-        "Distance km": [100, 150],
-        "Scenario Freight Cost": [5000, 9000],
+        "Source": ["Plant A", "Plant B"],
+        "Target": ["Market 1", "Market 2"],
+        "Value": [100, 150],
     })
     assert _auto_chart_choice(network) == "Sankey"
