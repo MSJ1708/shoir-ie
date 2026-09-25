@@ -120,7 +120,7 @@ def init_platform_db(db_path: str="enterprise_full_workspace.db") -> bool:
         ddl = [
             ("industrial_entities","CREATE TABLE IF NOT EXISTS industrial_entities(entity_id TEXT PRIMARY KEY, entity_type TEXT, name TEXT, attributes_json TEXT, updated_at TEXT)"),
             ("platform_datasets","CREATE TABLE IF NOT EXISTS platform_datasets(dataset_id TEXT PRIMARY KEY, name TEXT, source_name TEXT, row_count INTEGER, column_count INTEGER, sha256 TEXT, created_at TEXT, schema_json TEXT)"),
-            ("platform_models","CREATE TABLE IF NOT EXISTS platform_models(model_id TEXT PRIMARY KEY, name TEXT, version TEXT, model_type TEXT, parameters_json TEXT, data_hash TEXT, assumptions_json TEXT, created_by TEXT, created_at TEXT, status TEXT)"),
+            ("platform_models","CREATE TABLE IF NOT EXISTS platform_models(model_id TEXT PRIMARY KEY, name TEXT, version TEXT, model_type TEXT, parameters_json TEXT, data_hash TEXT, assumptions_json TEXT, created_by TEXT, created_at TEXT, status TEXT, solver_version TEXT, result_hash TEXT)"),
             ("platform_experiments","CREATE TABLE IF NOT EXISTS platform_experiments(experiment_id TEXT PRIMARY KEY, name TEXT, module TEXT, scenarios_json TEXT, results_json TEXT, created_by TEXT, created_at TEXT)"),
             ("platform_benchmarks","CREATE TABLE IF NOT EXISTS platform_benchmarks(id INTEGER PRIMARY KEY AUTOINCREMENT, metric TEXT, value REAL, unit TEXT, source TEXT, source_date TEXT, created_at TEXT)"),
             ("platform_decisions","CREATE TABLE IF NOT EXISTS platform_decisions(decision_id TEXT PRIMARY KEY, title TEXT, module TEXT, metrics_json TEXT, assumptions_json TEXT, uncertainty_json TEXT, created_by TEXT, created_at TEXT, status TEXT, baseline_json TEXT, alternatives_json TEXT, constraints_json TEXT, evidence_json TEXT, approvals_json TEXT, verification_json TEXT, selected_alternative TEXT)"),
@@ -136,6 +136,12 @@ def init_platform_db(db_path: str="enterprise_full_workspace.db") -> bool:
             ("trade_rules","CREATE TABLE IF NOT EXISTS trade_rules(id INTEGER PRIMARY KEY AUTOINCREMENT, region_from TEXT, region_to TEXT, product_class TEXT, rule TEXT, active INTEGER, updated_at TEXT)"),
         ]
         for _,sql in ddl: conn.execute(sql)
+        model_columns = [("solver_version", "TEXT"), ("result_hash", "TEXT")]
+        for column, definition in model_columns:
+            try:
+                conn.execute(f"ALTER TABLE platform_models ADD COLUMN {column} {definition}")
+            except sqlite3.OperationalError:
+                pass
         decision_columns = [
             ("baseline_json", "TEXT"),
             ("alternatives_json", "TEXT"),
@@ -509,11 +515,31 @@ def save_decision_card(card: dict, username: str, db_path="enterprise_full_works
         c.commit()
     return did
 
-def save_model_snapshot(name: str, model_type: str, parameters: dict, data_hash: str, username: str, assumptions: dict, status="Draft", db_path="enterprise_full_workspace.db") -> str:
-    base=f"{name}|{json.dumps(parameters,sort_keys=True,default=str)}|{data_hash}"
+def save_model_snapshot(
+    name: str,
+    model_type: str,
+    parameters: dict,
+    data_hash: str,
+    username: str,
+    assumptions: dict,
+    status="Draft",
+    db_path="enterprise_full_workspace.db",
+    solver_version: str = "",
+    result_hash: str = "",
+) -> str:
+    base=f"{name}|{json.dumps(parameters,sort_keys=True,default=str)}|{data_hash}|{solver_version}|{result_hash}"
     mid="MOD-"+hashlib.sha256(base.encode()).hexdigest()[:12].upper()
     with sqlite3.connect(db_path) as c:
-        c.execute("INSERT OR REPLACE INTO platform_models VALUES(?,?,?,?,?,?,?,?,?,?)",(mid,name,"1.0.0",model_type,json.dumps(parameters,default=str),data_hash,json.dumps(assumptions,default=str),username,_now(),status)); c.commit()
+        c.execute(
+            """
+            INSERT OR REPLACE INTO platform_models
+            (model_id,name,version,model_type,parameters_json,data_hash,assumptions_json,created_by,created_at,status,solver_version,result_hash)
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (mid,name,"1.0.0",model_type,json.dumps(parameters,default=str),data_hash,
+             json.dumps(assumptions,default=str),username,_now(),status,solver_version,result_hash),
+        )
+        c.commit()
     return mid
 
 def save_experiment(name: str, module: str, scenarios: list, results: dict, username: str, db_path="enterprise_full_workspace.db") -> str:
@@ -972,9 +998,18 @@ def render_module(module: str, tier: str, username: str):
     elif module=="Engineering Model Registry":
         df=st.data_editor(st.session_state.setdefault("model_registry_df",pd.DataFrame({"Model Name":["Network Baseline"],"Type":["MILP"],"Version":["1.0.0"],"Status":["Draft"],"Data Hash":[""]})),num_rows="dynamic",use_container_width=True,key="model_registry_editor")
         name=st.text_input("Model name","My Industrial Model",key="registry_name"); model_type=st.text_input("Model type","Optimization",key="registry_type"); params=st.text_area("Parameters JSON",'{"objective":"cost"}',key="registry_params")
+        solver_version=st.text_input("Solver / runtime version","Record exact solver + runtime version",key="registry_solver_version")
+        result_hash=st.text_input("Result hash (optional)",value=hashlib.sha256(df.to_csv(index=False).encode()).hexdigest(),key="registry_result_hash")
         if st.button("💾 Register Model Snapshot",type="primary",use_container_width=True,key="registry_save"):
             try:
-                mid=save_model_snapshot(name,model_type,json.loads(params),hashlib.sha256(df.to_csv(index=False).encode()).hexdigest(),username,{"user_entered":"true"}); st.success(f"Registered {mid}")
+                mid=save_model_snapshot(
+                    name,model_type,json.loads(params),
+                    hashlib.sha256(df.to_csv(index=False).encode()).hexdigest(),
+                    username,{"user_entered":"true"},
+                    solver_version=solver_version,result_hash=result_hash,
+                )
+                record_workspace_artifact("model", name, username, {"solver_version": solver_version, "result_hash": result_hash})
+                st.success(f"Registered {mid}")
             except Exception as exc: st.error(f"Could not register model: {exc}")
         with sqlite3.connect("enterprise_full_workspace.db") as c: reg=pd.read_sql("SELECT * FROM platform_models ORDER BY created_at DESC",c)
         st.dataframe(reg,use_container_width=True,hide_index=True)
