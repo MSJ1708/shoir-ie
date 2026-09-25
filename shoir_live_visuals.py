@@ -77,7 +77,7 @@ _MODULE_KEYS = {
     "Predictive Maintenance Digital Twin": ["maint_df", "maint_result"],
     "Localization & Multi-Currency": ["currency_df", "currency_result", "trade_rules_df"],
     "Enterprise Security & Governance": ["security_roles", "audit_governance_ledger", "enterprise_artifact_ledger"],
-    "IoT Digital Twin": ["node_mesh_df", "sensor_stream", "dt_workstations", "twin_tel", "twin_whatif_result", "enterprise_artifact_ledger"],
+    "IoT Digital Twin": ["node_mesh_df", "sensor_stream", "dt_workstations", "twin_tel", "twin_whatif_result", "enterprise_twin_anomalies_df", "enterprise_artifact_ledger"],
     "Control Tower": ["control_tower_metrics", "control_tower_disruption_df", "enterprise_control_tower_health_df", "enterprise_artifact_ledger"],
     "Cryptographic Ledger": ["ledger_history"],
     "Carbon Accounting": ["carbon_latest_df"],
