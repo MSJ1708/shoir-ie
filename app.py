@@ -1423,16 +1423,24 @@ if is_admin:
     tier3_features.append("Admin Panel")
 
 def _render_post_module_layers(module_name: str) -> None:
-    """Run cross-cutting enterprise and visualization layers before legacy st.stop()."""
+    """Run cross-cutting enterprise/visualization layers before legacy st.stop()."""
     try:
         render_enterprise_bridge(str(module_name), tier_val, st.session_state.get("current_user", "unknown"))
+    except Exception as exc:
+        st.warning("Enterprise capability layer could not render for this legacy module; native results remain available.")
+        with st.expander("Enterprise layer diagnostic"):
+            st.code(f"{type(exc).__name__}: {exc}")
+    try:
         render_universal_module_parity(str(module_name), phase="results")
+    except Exception as exc:
+        st.warning("Universal Module Studio could not render for this legacy module; native results remain available.")
+        with st.expander("Visualization layer diagnostic"):
+            st.code(f"{type(exc).__name__}: {exc}")
+    finally:
+        # Persistence is deliberately independent from cross-cutting rendering.
+        # A visualization failure must never prevent recovery of module state.
         if st.session_state.get("current_user"):
             save_user_workspace(st.session_state["current_user"], st.session_state)
-    except Exception as exc:
-        st.warning("Shared enterprise/visualization layer could not render for this legacy module; native results remain available.")
-        with st.expander("Layer diagnostic"):
-            st.code(f"{type(exc).__name__}: {exc}")
 
 
 st.sidebar.markdown("### 🧭 Navigation Menu")
