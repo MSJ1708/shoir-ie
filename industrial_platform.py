@@ -549,36 +549,93 @@ def export_pptx(title: str, tables: Sequence[Tuple[str,pd.DataFrame]], figures: 
 def render_export_bar(module: str, tables: Sequence[Tuple[str,pd.DataFrame]], figures: Sequence[Tuple[str,Any]]=(), tier: str="Starter", username: str="unknown"):
     import streamlit as st
     from shoir_upgrade import build_excel_report
-    if not tables: return
+    if not tables:
+        return
     st.markdown("---")
-    st.subheader("📤 Results & Executive Exports")
-    st.caption("Download the current analysis in the format that fits your workflow. Export errors are isolated so they never interrupt the results view.")
-    a,b,c=st.columns(3)
-    with a:
-        x=None
-        try:
-            x=build_excel_report("Shoir-IE | "+module,tables,figures)
-        except Exception as exc:
-            st.warning("Excel export is temporarily unavailable for this result set. The analysis itself is still available.")
-        if x is not None and st.download_button("📊 Download Excel",x,"shoir_ie_"+re.sub(r"[^A-Za-z0-9]+","_",module).lower()+".xlsx","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",use_container_width=True):
-            log_security_event(username,"report_export",module+"|xlsx")
-    with b:
-        if tier_allows(tier,"Enterprise"):
-            try:
-                y=export_pdf("Shoir-IE | "+module,tables,figures)
-                if st.download_button("📄 Download PDF",y,"shoir_ie_"+re.sub(r"[^A-Za-z0-9]+","_",module).lower()+".pdf","application/pdf",use_container_width=True): log_security_event(username,"report_export",module+"|pdf")
-            except Exception:
-                st.warning("PDF export could not be generated for this result set.")
-        else: st.info("PDF export: Enterprise")
-    with c:
-        if tier_allows(tier,"Enterprise"):
-            try:
-                z=export_pptx("Shoir-IE | "+module,tables,figures)
-                if st.download_button("📽️ Download PowerPoint",z,"shoir_ie_"+re.sub(r"[^A-Za-z0-9]+","_",module).lower()+".pptx","application/vnd.openxmlformats-officedocument.presentationml.presentation",use_container_width=True): log_security_event(username,"report_export",module+"|pptx")
-            except Exception:
-                st.warning("PowerPoint export could not be generated for this result set.")
-        else: st.info("PowerPoint: Enterprise")
+    st.subheader("📤 Results & Evidence Exports")
+    st.caption("Excel/PDF/PowerPoint use the current result tables and the exact figure objects supplied by the module. The evidence bundle also records hashes and chart reconstruction metadata.")
 
+    excel_bytes = None
+    pdf_bytes = None
+    pptx_bytes = None
+
+    try:
+        excel_bytes = build_excel_report("Shoir-IE | " + module, tables, figures)
+    except Exception:
+        st.warning("Excel export is temporarily unavailable for this result set; the analysis remains available.")
+
+    if tier_allows(tier, "Enterprise"):
+        try:
+            pdf_bytes = export_pdf("Shoir-IE | " + module, tables, figures)
+        except Exception:
+            st.warning("PDF export could not be generated for this result set.")
+        try:
+            pptx_bytes = export_pptx("Shoir-IE | " + module, tables, figures)
+        except Exception:
+            st.warning("PowerPoint export could not be generated for this result set.")
+
+    col1, col2, col3, col4 = st.columns(4)
+    slug = re.sub(r"[^A-Za-z0-9]+", "_", module).lower()
+
+    with col1:
+        if excel_bytes is not None and st.download_button(
+            "📊 Download Excel", excel_bytes, f"shoir_ie_{slug}.xlsx",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True, key=f"export_excel_{slug}",
+        ):
+            log_security_event(username, "report_export", module + "|xlsx")
+
+    with col2:
+        if tier_allows(tier, "Enterprise") and pdf_bytes is not None and st.download_button(
+            "📄 Download PDF", pdf_bytes, f"shoir_ie_{slug}.pdf",
+            "application/pdf", use_container_width=True, key=f"export_pdf_{slug}",
+        ):
+            log_security_event(username, "report_export", module + "|pdf")
+        elif not tier_allows(tier, "Enterprise"):
+            st.info("PDF export: Enterprise")
+
+    with col3:
+        if tier_allows(tier, "Enterprise") and pptx_bytes is not None and st.download_button(
+            "📽️ Download PowerPoint", pptx_bytes, f"shoir_ie_{slug}.pptx",
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            use_container_width=True, key=f"export_pptx_{slug}",
+        ):
+            log_security_event(username, "report_export", module + "|pptx")
+        elif not tier_allows(tier, "Enterprise"):
+            st.info("PowerPoint: Enterprise")
+
+    with col4:
+        try:
+            from shoir_enterprise_ops import build_provenance_manifest
+            import zipfile
+            import io
+            manifest = build_provenance_manifest(module, tables, username)
+            buf = io.BytesIO()
+            with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as archive:
+                archive.writestr("provenance_manifest.json", json.dumps(manifest, indent=2, default=str).encode("utf-8"))
+                for label, frame in tables:
+                    if isinstance(frame, pd.DataFrame):
+                        safe_name = re.sub(r"[^A-Za-z0-9]+", "_", label).strip("_").lower() or "table"
+                        archive.writestr(f"tables/{safe_name}.csv", frame.to_csv(index=False).encode("utf-8"))
+                for idx, (_, fig) in enumerate(figures):
+                    try:
+                        archive.writestr(f"charts/chart_{idx+1}.html", fig.to_html(full_html=True, include_plotlyjs="cdn").encode("utf-8"))
+                        archive.writestr(f"charts/chart_{idx+1}.json", fig.to_json().encode("utf-8"))
+                    except Exception:
+                        pass
+                if excel_bytes is not None:
+                    archive.writestr("reports/report.xlsx", excel_bytes)
+                if pdf_bytes is not None:
+                    archive.writestr("reports/report.pdf", pdf_bytes)
+                if pptx_bytes is not None:
+                    archive.writestr("reports/report.pptx", pptx_bytes)
+            if st.download_button(
+                "🗂️ Evidence bundle", buf.getvalue(), f"shoir_ie_{slug}_evidence.zip",
+                "application/zip", use_container_width=True, key=f"export_evidence_{slug}",
+            ):
+                log_security_event(username, "report_export", module + "|evidence_bundle")
+        except Exception as exc:
+            st.caption(f"Evidence bundle unavailable: {type(exc).__name__}")
 MODULE_TABLE_KEYS = {
     "Engineering Validation Center":["validation_df"],
     "Industrial Data Model & Digital Thread":["thread_df","thread_rel"],
