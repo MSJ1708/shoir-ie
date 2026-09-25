@@ -376,10 +376,27 @@ def sensitivity_table(df: pd.DataFrame, outcome: str, inputs: Sequence[str]) -> 
     return pd.DataFrame(rows).sort_values("Sensitivity", ascending=False).reset_index(drop=True) if rows else pd.DataFrame(columns=["Driver","Pearson","Spearman","Sensitivity","Direction"])
 
 
+def _experiment_source_df(module: str) -> pd.DataFrame:
+    """Use the same canonical imported/validated dataset as Module Parity when available."""
+    try:
+        from shoir_module_parity import parity_keys
+        candidate = st.session_state.get(parity_keys(module)["data"])
+        if isinstance(candidate, pd.DataFrame) and not candidate.empty:
+            return candidate.copy(deep=True)
+    except Exception:
+        pass
+    candidate = st.session_state.get("experiment_df", pd.DataFrame())
+    return candidate.copy(deep=True) if isinstance(candidate, pd.DataFrame) else pd.DataFrame()
+
+
 def render_experiment_engine(module: str, username: str, protocol: Mapping[str, Any] | None = None) -> None:
     """Interactive Experiment Engine embedded in the Research Workspace."""
     import streamlit as st
     import plotly.express as px
+
+    source_df = _experiment_source_df(module)
+    if not source_df.empty:
+        st.session_state["experiment_engine_data"] = source_df.copy(deep=True)
 
     st.markdown("### 🧪 Experiment Engine")
     st.caption("DOE, factorial effects, Monte Carlo uncertainty propagation, bootstrap confidence intervals, sensitivity and replication diagnostics share one reproducible workspace.")
@@ -440,7 +457,7 @@ def render_experiment_engine(module: str, username: str, protocol: Mapping[str, 
                 st.json(st.session_state.get("experiment_factorial_summary", {}))
 
     with tabs[1]:
-        source = st.session_state.get("experiment_df", pd.DataFrame())
+        source = st.session_state.get("experiment_engine_data", _experiment_source_df(module))
         nums = [str(c) for c in source.columns if pd.api.types.is_numeric_dtype(source[c])]
         if not nums:
             st.info("Load numeric experiment or workspace data first.")
