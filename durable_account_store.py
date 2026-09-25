@@ -159,6 +159,21 @@ def ensure_remote_schema() -> None:
         ON shoir_subscription_requests(status, requested_at DESC);
     CREATE INDEX IF NOT EXISTS idx_shoir_requests_user
         ON shoir_subscription_requests(username_lc, requested_at DESC);
+
+    CREATE TABLE IF NOT EXISTS shoir_artifacts (
+        artifact_id TEXT PRIMARY KEY,
+        owner_lc TEXT NOT NULL,
+        artifact_type TEXT NOT NULL,
+        title TEXT NOT NULL,
+        payload_json TEXT NOT NULL DEFAULT '{}',
+        content_base64 TEXT,
+        content_name TEXT,
+        content_mime TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_shoir_artifacts_owner_type
+        ON shoir_artifacts(owner_lc, artifact_type, updated_at DESC);
     """
     with _pg_connect() as conn:
         with conn.cursor() as cur:
@@ -373,6 +388,141 @@ def remote_research_studies(owner: str) -> list[dict[str, Any]]:
         except Exception:
             row["protocol"] = {}
     return rows
+
+def cloud_artifact_upsert(
+    username: str,
+    artifact_type: str,
+    artifact_id: str,
+    title: str,
+    payload: Mapping[str, Any] | None = None,
+    content: bytes | None = None,
+    content_name: str | None = None,
+    content_mime: str | None = None,
+) -> bool:
+    """Persist a governed artifact through the same authenticated cloud path as workspaces."""
+    import base64
+    import json
+    allowed = {
+        "project", "dataset", "experiment", "decision", "report", "model",
+        "scenario", "history", "knowledge", "collaboration", "job", "telemetry",
+    }
+    kind = str(artifact_type or "").strip().lower()
+    if kind not in allowed:
+        raise ValueError(f"Unsupported artifact type: {artifact_type}")
+    raw_content = bytes(content or b"")
+    if len(raw_content) > 5_000_000:
+        raise ValueError("Artifact content exceeds the 5 MB cloud artifact limit.")
+    payload_json = json.dumps(dict(payload or {}), ensure_ascii=False, sort_keys=True, default=str)
+    content_base64 = base64.b64encode(raw_content).decode("ascii") if raw_content else None
+
+    if edge_backend_configured():
+        token = str(st.session_state.get("remote_session_token") or "") if st is not None else ""
+        if not token:
+            return False
+        _edge_call("artifact_upsert", {
+            "username": username,
+            "token": token,
+            "artifact_type": kind,
+            "artifact_id": str(artifact_id),
+            "title": str(title)[:240],
+            "payload_json": payload_json,
+            "content_base64": content_base64,
+            "content_name": content_name,
+            "content_mime": content_mime,
+        })
+        return True
+
+    if not durable_backend_configured():
+        return False
+    ensure_remote_schema()
+    now = dt.datetime.now(dt.timezone.utc)
+    with _pg_connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO shoir_artifacts(
+                    artifact_id,owner_lc,artifact_type,title,payload_json,
+                    content_base64,content_name,content_mime,created_at,updated_at
+                ) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                ON CONFLICT(artifact_id) DO UPDATE SET
+                    owner_lc=EXCLUDED.owner_lc,
+                    artifact_type=EXCLUDED.artifact_type,
+                    title=EXCLUDED.title,
+                    payload_json=EXCLUDED.payload_json,
+                    content_base64=EXCLUDED.content_base64,
+                    content_name=EXCLUDED.content_name,
+                    content_mime=EXCLUDED.content_mime,
+                    updated_at=EXCLUDED.updated_at
+                """,
+                (
+                    str(artifact_id),
+                    str(username).strip().lower(),
+                    kind,
+                    str(title)[:240],
+                    payload_json,
+                    content_base64,
+                    content_name,
+                    content_mime,
+                    now,
+                    now,
+                ),
+            )
+        conn.commit()
+    return True
+
+
+def cloud_artifact_list(username: str, artifact_type: str | None = None) -> list[dict[str, Any]]:
+    if not durable_backend_configured():
+        return []
+    if edge_backend_configured():
+        token = str(st.session_state.get("remote_session_token") or "") if st is not None else ""
+        if not token:
+            return []
+        result = _edge_call("artifact_list", {
+            "username": username,
+            "token": token,
+            "artifact_type": artifact_type,
+        })
+        return list(result.get("artifacts") or [])
+    ensure_remote_schema()
+    with _pg_connect() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            if artifact_type:
+                cur.execute(
+                    "SELECT artifact_id,artifact_type,title,content_name,content_mime,created_at,updated_at FROM shoir_artifacts WHERE owner_lc=%s AND artifact_type=%s ORDER BY updated_at DESC",
+                    (str(username).strip().lower(), str(artifact_type).strip().lower()),
+                )
+            else:
+                cur.execute(
+                    "SELECT artifact_id,artifact_type,title,content_name,content_mime,created_at,updated_at FROM shoir_artifacts WHERE owner_lc=%s ORDER BY updated_at DESC",
+                    (str(username).strip().lower(),),
+                )
+            return [dict(row) for row in cur.fetchall()]
+
+
+def cloud_artifact_get(username: str, artifact_id: str) -> dict[str, Any] | None:
+    if not durable_backend_configured():
+        return None
+    if edge_backend_configured():
+        token = str(st.session_state.get("remote_session_token") or "") if st is not None else ""
+        if not token:
+            return None
+        result = _edge_call("artifact_get", {
+            "username": username,
+            "token": token,
+            "artifact_id": str(artifact_id),
+        })
+        return result.get("artifact")
+    ensure_remote_schema()
+    with _pg_connect() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                "SELECT * FROM shoir_artifacts WHERE owner_lc=%s AND artifact_id=%s LIMIT 1",
+                (str(username).strip().lower(), str(artifact_id)),
+            )
+            row = cur.fetchone()
+    return dict(row) if row else None
+
 
 def edge_login(username: str, password: str) -> dict[str, Any]:
     return _edge_call("login", {"username": username, "password": password})
