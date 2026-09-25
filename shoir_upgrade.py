@@ -175,6 +175,19 @@ def auto_clean_dataframe(df: pd.DataFrame) -> Tuple[pd.DataFrame,list]:
     if len(out)!=before_n: audit.append({"function":"REMOVE DUPLICATES","details":f"Removed {before_n-len(out)} duplicate rows"})
     before_cols=out.copy(deep=True); out=excel_value(out)
     if not out.equals(before_cols): audit.append({"function":"VALUE","details":"Converted consistently numeric text columns"})
+
+    # Remove columns that contain no usable information after the cleaning pass.
+    blank_columns = [
+        col for col in out.columns
+        if out[col].isna().all()
+        or out[col].astype("string").str.strip().fillna("").eq("").all()
+    ]
+    if blank_columns:
+        out = out.drop(columns=blank_columns)
+        audit.append({
+            "function": "REMOVE BLANK COLUMNS",
+            "details": f"Removed {len(blank_columns)} entirely blank column(s): {', '.join(map(str, blank_columns))}",
+        })
     return out,audit
 
 def clean_dataframe(df: pd.DataFrame):
