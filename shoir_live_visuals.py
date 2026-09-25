@@ -194,6 +194,41 @@ def _prepare(df: pd.DataFrame, x: str | None, y: str | None, aggregation: str, f
     return work
 
 
+def _find_col(df: pd.DataFrame, tokens: tuple[str, ...]) -> str | None:
+    for col in df.columns:
+        name = str(col).lower().replace("_", " ").replace("-", " ")
+        if any(token in name for token in tokens):
+            return str(col)
+    return None
+
+
+def _auto_chart_choice(df: pd.DataFrame) -> str:
+    """Choose a useful chart from structural signals, not invented semantics."""
+    cols = [str(c) for c in df.columns]
+    nums = _numeric_columns(df)
+    dates = _coerce_datetime_columns(df)
+    source = _find_col(df, ("source", "from", "origin"))
+    target = _find_col(df, ("target", "to", "destination"))
+    value = _find_col(df, ("value", "volume", "flow", "quantity", "qty"))
+    start = _find_col(df, ("start", "begin", "planned start"))
+    finish = _find_col(df, ("finish", "end", "completion", "planned finish"))
+    if source and target and value:
+        return "Sankey"
+    if start and finish:
+        return "Gantt"
+    if len(nums) >= 3:
+        return "3D Scatter"
+    if len(nums) >= 2 and dates:
+        return "Line"
+    if len(nums) >= 2:
+        return "Sensitivity Plot"
+    if nums and any("defect" in str(c).lower() or "failure" in str(c).lower() for c in cols):
+        return "Pareto"
+    if nums:
+        return "Distribution"
+    return "Network Map" if len([c for c in df.columns if not pd.api.types.is_numeric_dtype(df[c])]) >= 2 else "Bar"
+
+
 def _suggest_chart(df: pd.DataFrame, x: str | None, y: str | None) -> str:
     if y and x:
         if x in _coerce_datetime_columns(df):
@@ -205,35 +240,194 @@ def _suggest_chart(df: pd.DataFrame, x: str | None, y: str | None) -> str:
         return "Histogram"
     if x:
         return "Bar"
-    return "Heatmap"
+    return _auto_chart_choice(df)
 
 
 def _make_figure(df: pd.DataFrame, chart: str, x: str | None, y: str | None, z: str | None, title: str) -> go.Figure | None:
     if df.empty:
         return None
 
-    if chart == "Heatmap":
-        nums = _numeric_columns(df)
-        if len(nums) < 2:
+    numeric = _numeric_columns(df)
+    categorical = _categorical_columns(df)
+
+    if chart in {"Heatmap", "Correlation Heatmap"}:
+        if len(numeric) < 2:
             return None
-        corr = df[nums].corr(numeric_only=True)
-        fig = px.imshow(corr, text_auto=".2f", aspect="auto", title=title or "Correlation Heatmap")
-    elif chart == "Histogram" and y:
-        fig = px.histogram(df, x=y, nbins=30, title=title or f"Distribution · {y}")
-    elif chart == "Box" and y:
-        fig = px.box(df, y=y, points="outliers", title=title or f"Distribution · {y}")
-    elif chart == "Pie" and x and y:
-        fig = px.pie(df, names=x, values=y, title=title or f"Share of {y}")
-    elif chart == "Pareto" and y:
-        d = df[[y]].dropna().copy()
-        if x and x in df.columns:
-            d[x] = df.loc[d.index, x]
-            d = d.groupby(x, as_index=False)[y].sum().sort_values(y, ascending=False)
-            d["Cumulative %"] = d[y].cumsum() / d[y].sum() * 100
+        corr = df[numeric].corr(numeric_only=True)
+        return px.imshow(corr, text_auto=".2f", aspect="auto", title=title or "Correlation Heatmap")
+
+    if chart in {"Distribution", "Histogram"}:
+        metric = y or (numeric[0] if numeric else None)
+        if metric is None:
+            return None
+        return px.histogram(df, x=metric, nbins=30, marginal="box", title=title or f"Distribution · {metric}")
+
+    if chart == "Box":
+        metric = y or (numeric[0] if numeric else None)
+        if metric is None:
+            return None
+        return px.box(df, y=metric, points="outliers", title=title or f"Distribution · {metric}")
+
+    if chart == "Control Chart" or chart == "SPC":
+        metric = y or (numeric[0] if numeric else None)
+        if metric is None:
+            return None
+        work = df.copy()
+        if x and x in work.columns:
+            work = work[[x, metric]].dropna()
+            x_values = work[x]
+        else:
+            work = work[[metric]].dropna()
+            x_values = list(range(1, len(work) + 1))
+        values = pd.to_numeric(work[metric], errors="coerce").dropna()
+        if values.empty:
+            return None
+        mean = float(values.mean())
+        sigma = float(values.std(ddof=1)) if len(values) > 1 else 0.0
+        ucl, lcl = mean + 3 * sigma, mean - 3 * sigma
+        fig = go.Figure()
+        fig.add_scatter(x=x_values, y=values, mode="lines+markers", name=metric)
+        fig.add_scatter(x=x_values, y=[mean] * len(values), mode="lines", name="Center line")
+        fig.add_scatter(x=x_values, y=[ucl] * len(values), mode="lines", name="UCL")
+        fig.add_scatter(x=x_values, y=[lcl] * len(values), mode="lines", name="LCL")
+        fig.update_layout(title=title or f"SPC Control Chart · {metric}", xaxis_title=x or "Observation", yaxis_title=metric)
+        return fig
+
+    if chart == "Pareto":
+        metric = y or (numeric[0] if numeric else None)
+        if metric is None:
+            return None
+        category = x or (categorical[0] if categorical else None)
+        d = df.copy()
+        if category and category in d.columns:
+            d[metric] = pd.to_numeric(d[metric], errors="coerce")
+            d = d.dropna(subset=[metric]).groupby(category, as_index=False)[metric].sum().sort_values(metric, ascending=False)
+            d["Cumulative %"] = d[metric].cumsum() / max(d[metric].sum(), 1e-12) * 100
             fig = go.Figure()
-            fig.add_bar(x=d[x].astype(str), y=d[y], name=y)
-            fig.add_scatter(x=d[x].astype(str), y=d["Cumulative %"], name="Cumulative %", yaxis="y2", mode="lines+markers")
-            fig.update_layout(title=title or f"Pareto · {y}", yaxis2=dict(title="Cumulative %", overlaying="y", side="right", range=[0,100]))
+            fig.add_bar(x=d[category].astype(str), y=d[metric], name=metric)
+            fig.add_scatter(x=d[category].astype(str), y=d["Cumulative %"], name="Cumulative %", yaxis="y2", mode="lines+markers")
+            fig.update_layout(
+                title=title or f"Pareto · {metric}",
+                yaxis_title=metric,
+                yaxis2=dict(title="Cumulative %", overlaying="y", side="right", range=[0, 100]),
+            )
+            return fig
+
+    if chart == "Waterfall":
+        metric = y or (numeric[0] if numeric else None)
+        category = x or (categorical[0] if categorical else None)
+        if metric is None:
+            return None
+        d = df.copy()
+        if category:
+            d = d[[category, metric]].dropna().head(40)
+            return go.Figure(go.Waterfall(
+                x=d[category].astype(str).tolist(),
+                y=pd.to_numeric(d[metric], errors="coerce").tolist(),
+                measure=["relative"] * len(d),
+            )).update_layout(title=title or f"Waterfall · {metric}")
+        return None
+
+    if chart == "Sensitivity Plot":
+        outcome = y or (numeric[0] if numeric else None)
+        inputs = [col for col in numeric if col != outcome]
+        if outcome is None or not inputs:
+            return None
+        strengths = []
+        for col in inputs:
+            pair = df[[col, outcome]].apply(pd.to_numeric, errors="coerce").dropna()
+            corr = pair[col].corr(pair[outcome]) if len(pair) >= 3 else np.nan
+            strengths.append({"Driver": col, "Sensitivity": abs(float(corr)) if pd.notna(corr) else 0.0, "Direction": float(corr) if pd.notna(corr) else 0.0})
+        d = pd.DataFrame(strengths).sort_values("Sensitivity", ascending=True)
+        return px.bar(d, x="Sensitivity", y="Driver", orientation="h", hover_data=["Direction"], title=title or f"Sensitivity · {outcome}")
+
+    if chart == "Sankey":
+        source = _find_col(df, ("source", "from", "origin")) or (x if x in df.columns else None)
+        target = _find_col(df, ("target", "to", "destination")) or (z if z in df.columns else None)
+        value = _find_col(df, ("value", "volume", "flow", "quantity", "qty"))
+        if source and target and value:
+            d = df[[source, target, value]].dropna().copy()
+            d[value] = pd.to_numeric(d[value], errors="coerce")
+            d = d.dropna(subset=[value]).groupby([source, target], as_index=False)[value].sum()
+            labels = pd.Index(pd.concat([d[source].astype(str), d[target].astype(str)]).unique())
+            index = {label: i for i, label in enumerate(labels)}
+            return go.Figure(go.Sankey(
+                arrangement="snap",
+                node=dict(label=labels.tolist(), pad=15, thickness=16),
+                link=dict(
+                    source=d[source].astype(str).map(index),
+                    target=d[target].astype(str).map(index),
+                    value=d[value].tolist(),
+                ),
+            )).update_layout(title=title or "Flow / Sankey Map", height=520)
+        return None
+
+    if chart == "Gantt":
+        start = _find_col(df, ("start", "begin", "planned start"))
+        finish = _find_col(df, ("finish", "end", "completion", "planned finish"))
+        task = _find_col(df, ("task", "order", "job", "activity", "machine", "project"))
+        if not start or not finish:
+            dates = _coerce_datetime_columns(df)
+            if len(dates) >= 2:
+                start, finish = dates[:2]
+        if not start or not finish:
+            return None
+        work = df.copy()
+        work[start] = pd.to_datetime(work[start], errors="coerce")
+        work[finish] = pd.to_datetime(work[finish], errors="coerce")
+        work = work.dropna(subset=[start, finish])
+        if work.empty:
+            return None
+        task = task or "Task"
+        if task not in work.columns:
+            work[task] = [f"Task {i+1}" for i in range(len(work))]
+        return px.timeline(work, x_start=start, x_end=finish, y=task, title=title or "Engineering Gantt")
+
+    if chart == "Network Map":
+        source = _find_col(df, ("source", "from", "origin")) or (categorical[0] if categorical else None)
+        target = _find_col(df, ("target", "to", "destination")) or (categorical[1] if len(categorical) > 1 else None)
+        if not source or not target:
+            return None
+        edges = df[[source, target]].dropna().astype(str)
+        nodes = sorted(set(edges[source]) | set(edges[target]))
+        if not nodes:
+            return None
+        pos = {node: (float(i % 8), float(-(i // 8))) for i, node in enumerate(nodes)}
+        fig = go.Figure()
+        for _, row in edges.head(500).iterrows():
+            x0, y0 = pos[row[source]]
+            x1, y1 = pos[row[target]]
+            fig.add_scatter(x=[x0, x1, None], y=[y0, y1, None], mode="lines", hoverinfo="none", showlegend=False)
+        fig.add_scatter(
+            x=[pos[n][0] for n in nodes], y=[pos[n][1] for n in nodes],
+            mode="markers+text", text=nodes, textposition="top center",
+            hovertext=nodes, hoverinfo="text", name="Nodes",
+            marker=dict(size=16),
+        )
+        fig.update_layout(title=title or "Engineering Network Map", xaxis=dict(showgrid=False, showticklabels=False), yaxis=dict(showgrid=False, showticklabels=False))
+        return fig
+
+    if chart == "3D Scatter" and len(numeric) >= 3:
+        x3 = x if x in numeric else numeric[0]
+        y3 = y if y in numeric else numeric[1]
+        z3 = z if z in numeric else numeric[2]
+        return px.scatter_3d(df, x=x3, y=y3, z=z3, title=title or "3D Engineering View")
+
+    if chart == "Pie" and x and y:
+        return px.pie(df, names=x, values=y, title=title or f"Share of {y}")
+
+    if not x and y:
+        return px.bar(df, y=y, title=title or y)
+    if chart == "Line" and x and y:
+        return px.line(df, x=x, y=y, markers=True, title=title or f"{y} over {x}")
+    if chart == "Area" and x and y:
+        return px.area(df, x=x, y=y, title=title or f"{y} over {x}")
+    if chart == "Scatter" and x and y:
+        return px.scatter(df, x=x, y=y, title=title or f"{y} vs {x}")
+    return px.bar(df, x=x, y=y, title=title or f"{y} by {x}" if y else title or "Engineering Data")
+
+
+    fig.update_layout(title=title or f"Pareto · {y}", yaxis2=dict(title="Cumulative %", overlaying="y", side="right", range=[0,100]))
         else:
             d["Cumulative %"] = d[y].cumsum() / d[y].sum() * 100
             fig = go.Figure()
@@ -263,6 +457,66 @@ def _make_figure(df: pd.DataFrame, chart: str, x: str | None, y: str | None, z: 
     return fig
 
 
+def _render_auto_kpi_dashboard(module: str, df: pd.DataFrame, chart_token: str) -> None:
+    """Generate a compact KPI dashboard and one automatically selected engineering view."""
+    if not isinstance(df, pd.DataFrame) or df.empty:
+        return
+    st.markdown("### ⚡ Auto-Generated KPI Dashboard")
+    numeric = _numeric_columns(df)
+    missing_pct = float(df.isna().mean().mean() * 100) if len(df.columns) else 100.0
+    cards = [
+        ("Rows", f"{len(df):,}", "dataset"),
+        ("Columns", f"{len(df.columns):,}", "schema"),
+        ("Missing", f"{missing_pct:.1f}%", "data quality"),
+        ("Numeric KPIs", f"{len(numeric):,}", "measures"),
+    ]
+    cols = st.columns(4)
+    for col, (label, value, detail) in zip(cols, cards):
+        col.metric(label, value, detail)
+
+    if numeric:
+        kpi_cols = st.columns(min(4, len(numeric)))
+        for idx, metric_name in enumerate(numeric[:4]):
+            values = pd.to_numeric(df[metric_name], errors="coerce").dropna()
+            if not values.empty:
+                kpi_cols[idx].metric(f"Avg · {metric_name}", f"{values.mean():,.3g}", f"n={len(values):,}")
+
+    auto_chart = _auto_chart_choice(df)
+    # Select compatible fields for the automatic view.
+    nums = _numeric_columns(df)
+    cats = _categorical_columns(df)
+    dates = _coerce_datetime_columns(df)
+    x = dates[0] if dates else (cats[0] if cats else None)
+    y = nums[0] if nums else None
+    z = nums[2] if len(nums) >= 3 else None
+    if auto_chart == "Gantt":
+        x = y = z = None
+    elif auto_chart in {"Sankey", "Network Map"}:
+        x = y = z = None
+    elif auto_chart == "Heatmap":
+        x = y = z = None
+    elif auto_chart == "3D Scatter":
+        x = nums[0] if nums else None
+        y = nums[1] if len(nums) > 1 else None
+        z = nums[2] if len(nums) > 2 else None
+    elif auto_chart == "Sensitivity Plot":
+        x = None
+        y = nums[0] if nums else None
+
+    fig = _make_figure(df, auto_chart, x, y, z, f"{module} · Auto view")
+    if fig is not None:
+        st.caption(f"Auto-selected visualization: **{auto_chart}**")
+        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": True, "displaylogo": False, "responsive": True})
+        try:
+            token = hashlib.sha1(str(module).encode("utf-8")).hexdigest()[:12]
+            st.session_state[f"liveviz_last_figure_json_{token}"] = fig.to_json()
+            st.session_state[f"liveviz_last_chart_config_{token}"] = {"chart": auto_chart, "x": x, "y": y, "z": z, "mode": "auto-dashboard"}
+        except Exception:
+            pass
+    else:
+        st.info("No compatible automatic visualization could be inferred from the current table. Use Custom Engineering Views below.")
+
+
 def render_live_visualization_studio(module: str, *, expanded: bool = False, preferred_key: str | None = None) -> None:
     """Render the live chart studio beneath an active module."""
     tables = discover_visual_tables(module, preferred_key=preferred_key)
@@ -280,6 +534,8 @@ def render_live_visualization_studio(module: str, *, expanded: bool = False, pre
                 default_source_index = preferred_labels[0]
         table_label = st.selectbox("Data source", labels, index=default_source_index, key=f"liveviz_source_{hash(module) & 0xFFFF:04x}")
         df = tables[labels.index(table_label)][2].copy()
+        _render_auto_kpi_dashboard(module, df, f"{hash(module) & 0xFFFF:04x}")
+
 
         # Avoid accidentally visualizing secrets or enormous payloads.
         if len(df) > 10000:
@@ -312,7 +568,7 @@ def render_live_visualization_studio(module: str, *, expanded: bool = False, pre
 
         c4, c5, c6 = st.columns([1.2, 1.2, 1.4])
         with c4:
-            suggestions = ["Auto", "Line", "Bar", "Area", "Scatter", "Histogram", "Box", "Pie", "Pareto", "Heatmap", "3D Scatter"]
+            suggestions = ["Auto", "Line", "Bar", "Area", "Scatter", "Distribution", "Histogram", "Box", "Pie", "Pareto", "Waterfall", "Sankey", "Heatmap", "Correlation Heatmap", "Control Chart", "SPC", "Sensitivity Plot", "Gantt", "Network Map", "3D Scatter"]
             chart_choice = st.selectbox("Visualization", suggestions, key=f"liveviz_chart_{hash(module) & 0xFFFF:04x}")
         with c5:
             aggregation = st.selectbox("Aggregation", ["Raw", "Mean", "Median", "Sum", "Count"], key=f"liveviz_agg_{hash(module) & 0xFFFF:04x}")

@@ -34,6 +34,7 @@ from shoir_visual_system import apply_shoir_design_system, render_workspace_stat
 from shoir_live_visuals import render_live_visualization_studio, discover_visual_tables
 from shoir_module_parity import render_universal_module_parity
 from shoir_copilot_orchestrator import build_workflow_plan, recommend_module, run_orchestration
+from shoir_digital_thread import render_global_project_digital_thread
 from durable_account_store import (durable_backend_configured, sync_durable_accounts, sync_remote_requests_to_local, edge_login, edge_admin_list_requests, edge_renew_request, upsert_remote_account, insert_remote_request, remote_account, account_is_expired, renewed_expiry)
 
 # =====================================================================
@@ -1389,7 +1390,7 @@ is_admin = (st.session_state.current_user == "sho")
 tier1_features = ["MILP Solvers", "Inventory Playback", "Core IE Tools", "Subscriptions", "Persistence", "Facility Layout & Warehousing", "Enterprise Integration & Collaboration", "Engineering Validation Center", "Excel Data Cleaning & Import"]
 tier2_features = tier1_features + ["Carbon Accounting", "IoT Digital Twin", "MEIO Matrix", "Slotting & Gantt", "Fleet Routing", "Warehouse Heatmap", "Supplier Risk Matrix", "Scenarios", "AGV Fleet Dispatcher", "Geospatial Network Designer", "Production Planning & Control (PPC)", "Lean Manufacturing & Shop Floor Operations", "Quality Control, Six Sigma & Reliability", "Engineering Economics & Finance", "Industrial Data Model & Digital Thread"]
 professional_features = tier2_features + ["Advanced Planning & Scheduling", "Quality Engineering & Reliability", "Capital Investment & Engineering Economics", "Workforce Engineering", "Industrial Sustainability & LCA", "Benchmarking & Engineering Standards", "Scenario Versioning & Comparison", "Localization & Multi-Currency"]
-tier3_features = professional_features + ["AI Copilot", "FastAPI Gateway", "Monte Carlo Sim", "Sensitivity Analysis", "Webhook Alerts", "Agentic Workflows", "Control Tower", "Cryptographic Ledger", "Predictive Maintenance Hub", "Human Factors & Ergonomics (NIOSH)", "Digital Twin & Discrete-Event Simulation", "Green IE & Sustainability", "Manufacturing Execution System", "Industrial Simulation Lab", "3D Factory Designer", "Industrial Connectivity Hub", "Multi-Objective Optimization", "Robust & Resilient Optimization", "Engineering Model Registry", "Experiment Lab", "Industrial Control Center", "Engineering Decision Center", "Advanced ML Demand Forecasting", "Team Workspaces & RBAC", "Executive Report Center"]
+tier3_features = professional_features + ["AI Copilot", "FastAPI Gateway", "Monte Carlo Sim", "Sensitivity Analysis", "Webhook Alerts", "Agentic Workflows", "Control Tower", "Cryptographic Ledger", "Predictive Maintenance Hub", "Human Factors & Ergonomics (NIOSH)", "Digital Twin & Discrete-Event Simulation", "Green IE & Sustainability", "Manufacturing Execution System", "Industrial Simulation Lab", "3D Factory Designer", "Industrial Connectivity Hub", "Multi-Objective Optimization", "Robust & Resilient Optimization", "Engineering Model Registry", "Experiment Lab", "Industrial Control Center", "Engineering Decision Center", "Advanced ML Demand Forecasting", "Team Workspaces & RBAC", "Executive Report Center", "Global Project & Digital Thread"]
 tier4_features = tier3_features + ["Industrial Data Platform", "Advanced Engineering Copilot", "Live Industrial Digital Twin", "Enterprise Security & Governance", "Predictive Maintenance Digital Twin"]
 # FIX (recurring from an earlier upload of this file - reapplied): this list
 # was missing commas between most entries, which in Python silently
@@ -9457,6 +9458,15 @@ else:
                     st.code(f"{type(exc).__name__}: {exc}")
         else:
             st.warning("Industrial Operating System requires the Enterprise tier.")
+    # Global Project + Digital Thread is cross-module and therefore uses its
+    # dedicated graph workspace rather than a single domain renderer.
+    elif mod == "Global Project & Digital Thread":
+        try:
+            render_global_project_digital_thread(mod, st.session_state.get("current_user", "unknown"))
+        except Exception as exc:
+            st.error("The Global Project & Digital Thread encountered a recoverable rendering issue.")
+            with st.expander("Technical diagnostic"):
+                st.code(f"{type(exc).__name__}: {exc}")
     # New unified industrial platform modules render through the existing service layer.
     elif mod in {x["name"] for x in PLATFORM_CATALOG}:
         try:
