@@ -243,7 +243,7 @@ def connector_health_frame() -> pd.DataFrame:
 
 def build_control_tower_health() -> pd.DataFrame:
     domains = {
-        "Production": ("production", "manufacturing", "oee"),
+        "Production": ("production", "manufacturing", "oee", "throughput"),
         "Supply": ("supply", "supplier", "procurement"),
         "Inventory": ("inventory", "stock", "safety"),
         "Quality": ("quality", "defect", "spc"),
@@ -253,23 +253,40 @@ def build_control_tower_health() -> pd.DataFrame:
         "Energy": ("energy", "power", "kwh"),
         "Carbon": ("carbon", "emission", "tco2"),
     }
+
+    explicit = _safe_frame(st.session_state.get("control_tower_metrics"))
+    explicit_lookup: dict[str, dict[str, Any]] = {}
+    if not explicit.empty:
+        domain_col = next((c for c in explicit.columns if str(c).lower() in {"domain","area","category","kpi"}), None)
+        value_col = next((c for c in explicit.columns if str(c).lower() in {"value","score","health","status"}), None)
+        if domain_col:
+            for row in explicit.to_dict("records"):
+                key = str(row.get(domain_col, "")).lower()
+                explicit_lookup[key] = row
+
     rows = []
     for domain, tokens in domains.items():
-        candidates = []
+        candidate = None
         for key, value in st.session_state.items():
             if str(key).startswith(("_", "password", "token", "secret", "otp")):
                 continue
             if isinstance(value, (pd.DataFrame, list, dict)) and any(tok in str(key).lower() for tok in tokens):
                 frame = _safe_frame(value)
                 if not frame.empty:
-                    candidates.append((str(key), frame))
-        if candidates:
-            key, frame = max(candidates, key=lambda item: len(item[1]))
+                    candidate = (str(key), frame)
+                    break
+        exact = explicit_lookup.get(domain.lower())
+        if candidate:
+            key, frame = candidate
             profile = data_intelligence_profile(frame)
-            status = "Ready" if profile["quality_score"] >= 85 else "Review"
-            rows.append({"Domain": domain, "Status": status, "Records": len(frame), "Quality Score": profile["quality_score"], "Source": key})
+            rows.append({"Domain": domain, "Status": "Ready" if profile["quality_score"] >= 85 else "Review", "Records": len(frame), "Quality Score": profile["quality_score"], "Source": key})
+        elif exact:
+            raw_status = exact.get("Status", exact.get("Health", "Observed KPI"))
+            numeric = exact.get("Value", exact.get("Health", np.nan))
+            rows.append({"Domain": domain, "Status": str(raw_status), "Records": 1, "Quality Score": np.nan, "Source": "control_tower_metrics", "KPI Value": numeric})
         else:
-            rows.append({"Domain": domain, "Status": "No data", "Records": 0, "Quality Score": np.nan, "Source": "—"})
+            rows.append({"Domain": domain, "Status": "No linked KPI", "Records": 0, "Quality Score": np.nan, "Source": "Not linked"})
+
     return pd.DataFrame(rows)
 
 
@@ -482,6 +499,10 @@ def render_enterprise_bridge(module: str, tier: str, username: str) -> None:
                         if c4.button("Cancel", key=f"job_cancel_{row['job_id']}"):
                             try: control_job(row["job_id"], "cancel"); st.rerun()
                             except Exception as exc: st.error(str(exc))
+                    if str(row["status"]) in {"Failed", "Cancelled"}:
+                        if st.button("Retry", key=f"job_retry_{row['job_id']}"):
+                            try: control_job(row["job_id"], "retry"); st.rerun()
+                            except Exception as exc: st.error(str(exc))
             else:
                 st.info("Operational overlay is available when the selected module exposes a live table, telemetry, connector profile or job registry.")
         with tabs[3]:
@@ -489,16 +510,34 @@ def render_enterprise_bridge(module: str, tier: str, username: str) -> None:
                 st.markdown("##### 👥 Comments, mentions and assignments")
                 comment = st.text_area("Comment", key=f"enterprise_comment_{hash(module)&0xffff:04x}")
                 mention_targets = st.text_input("Mention users", placeholder="@engineering @manager", key=f"enterprise_mentions_{hash(module)&0xffff:04x}")
-                assignment = st.text_input("Assignment", placeholder="e.g. Verify Service KPI by Friday", key=f"enterprise_assignment_{hash(module)&0xffff:04x}")
-                if st.button("💬 Add collaboration update", use_container_width=True, key=f"enterprise_collab_save_{hash(module)&0xffff:04x}"):
+                ac1, ac2, ac3 = st.columns(3)
+                with ac1:
+                    assignee = st.text_input("Assignee", value="", key=f"enterprise_assignee_{hash(module)&0xffff:04x}")
+                with ac2:
+                    reviewer_role = st.selectbox("Reviewer role", ["Engineer","Manager","Approver","Viewer"], key=f"enterprise_reviewer_{hash(module)&0xffff:04x}")
+                with ac3:
+                    assignment = st.text_input("Assignment", placeholder="Verify Service KPI by Friday", key=f"enterprise_assignment_{hash(module)&0xffff:04x}")
+                if st.button("💬 Save collaboration update", use_container_width=True, key=f"enterprise_collab_save_{hash(module)&0xffff:04x}"):
                     from industrial_experience import add_comment
                     combined = comment.strip()
                     if mention_targets.strip():
                         combined = (combined + " " + mention_targets.strip()).strip()
-                    if assignment.strip():
-                        combined = (combined + " [Assignment: " + assignment.strip() + "]").strip()
                     add_comment(None, st.session_state.get("decision_governed_card", {}).get("decision_id"), username, combined)
+                    assignments = st.session_state.setdefault("enterprise_collaboration_assignments", [])
+                    if assignment.strip():
+                        assignments.append({
+                            "Assignment": assignment.strip(),
+                            "Assignee": assignee.strip() or "Unassigned",
+                            "Reviewer Role": reviewer_role,
+                            "Status": "Open",
+                            "Created By": username,
+                            "Created At": utc_now(),
+                        })
+                        record_workspace_artifact("assignment", assignment.strip(), username, {"assignee": assignee.strip(), "reviewer_role": reviewer_role})
                     st.success("Collaboration update saved.")
+                assignments = st.session_state.get("enterprise_collaboration_assignments", [])
+                if assignments:
+                    st.dataframe(pd.DataFrame(assignments), use_container_width=True, hide_index=True)
             elif module in {"Enterprise Security & Governance","Enterprise Integration & Collaboration","Persistence"}:
                 roles = st.session_state.get("workspace_users", st.session_state.get("workspace_members_df", []))
                 st.dataframe(_safe_frame(roles), use_container_width=True, hide_index=True)
@@ -507,11 +546,18 @@ def render_enterprise_bridge(module: str, tier: str, username: str) -> None:
                     "RBAC": bool(roles is not None),
                     "Workspace isolation": True,
                     "Audit trail": True,
-                    "SSO/OIDC": "Configuration surface",
-                    "MFA": "Configuration surface",
-                    "Secrets management": "Use Streamlit secrets / environment variables",
+                    "SSO/OIDC": "Configured" if st.secrets.get("oidc", {}) else "Configuration surface",
+                    "MFA": "Configured" if st.secrets.get("mfa", {}) else "Configuration surface",
+                    "Secrets management": "Streamlit secrets / environment variables",
                     "Security scanning": "CI hook available",
                 })
+                audit_note = st.text_input("Audit event note", key=f"enterprise_audit_note_{hash(module)&0xffff:04x}")
+                if st.button("🔐 Record audit event", use_container_width=True, key=f"enterprise_audit_save_{hash(module)&0xffff:04x}"):
+                    with sqlite3.connect("enterprise_full_workspace.db") as conn:
+                        conn.execute("INSERT INTO security_events(username,event_type,details,created_at) VALUES(?,?,?,?)",
+                                     (username, "Enterprise Capability Audit", audit_note[:500], utc_now()))
+                        conn.commit()
+                    st.success("Audit event recorded.")
             else:
                 st.info("Use the Collaboration or Security module for team/governance controls.")
         with tabs[4]:
