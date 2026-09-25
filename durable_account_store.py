@@ -627,6 +627,61 @@ def sync_durable_accounts(db_path: str = "enterprise_full_workspace.db") -> bool
     return True
 
 
+def save_remote_workspace(username: str, state_json: str) -> bool:
+    """Persist serialized Streamlit workspace state in the managed database."""
+    if not durable_backend_configured():
+        return False
+    ensure_remote_schema()
+    now = dt.datetime.now(dt.timezone.utc)
+    with _pg_connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS shoir_workspace_states (
+                    username_lc TEXT PRIMARY KEY,
+                    state_json TEXT NOT NULL,
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+                """
+            )
+            cur.execute(
+                """
+                INSERT INTO shoir_workspace_states (username_lc,state_json,updated_at)
+                VALUES (%s,%s,%s)
+                ON CONFLICT (username_lc) DO UPDATE SET
+                    state_json=EXCLUDED.state_json,
+                    updated_at=EXCLUDED.updated_at
+                """,
+                (str(username).strip().lower(), state_json, now),
+            )
+        conn.commit()
+    return True
+
+
+def load_remote_workspace(username: str) -> Optional[str]:
+    """Return a user's durable workspace JSON, if available."""
+    if not durable_backend_configured():
+        return None
+    ensure_remote_schema()
+    with _pg_connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS shoir_workspace_states (
+                    username_lc TEXT PRIMARY KEY,
+                    state_json TEXT NOT NULL,
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+                """
+            )
+            cur.execute(
+                "SELECT state_json FROM shoir_workspace_states WHERE username_lc=%s LIMIT 1",
+                (str(username).strip().lower(),),
+            )
+            row = cur.fetchone()
+    return row[0] if row else None
+
+
 def account_is_expired(expires_at: Any, now: Optional[dt.datetime] = None) -> bool:
     if not expires_at:
         return False
