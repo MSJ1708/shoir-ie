@@ -31,6 +31,7 @@ from research_experiment_engine import apply_evidence_conflict
 from industrial_excellence_hub import render_platform_excellence_hub
 from workspace_persistence import ensure_workspace_state_db, load_user_workspace, save_user_workspace
 from shoir_visual_system import apply_shoir_design_system, render_workspace_status
+from shoir_live_visuals import render_live_visualization_studio
 from durable_account_store import (durable_backend_configured, sync_durable_accounts, sync_remote_requests_to_local, edge_login, edge_admin_list_requests, edge_renew_request, upsert_remote_account, insert_remote_request, remote_account, account_is_expired, renewed_expiry)
 
 # =====================================================================
@@ -9355,6 +9356,7 @@ if mod == "Carbon Accounting":
                 "Emissions (MT CO2e)": [620.4, 210.0, 275.0, 129.7, 140.1, 45.3],
                 "Scope Tier": ["Scope 3", "Scope 3", "Scope 3", "Scope 2", "Scope 3", "Scope 3"]
             })
+            st.session_state["carbon_latest_df"] = carbon_data.copy(deep=True)
             fig_carbon = px.bar(
                 carbon_data, x="Category", y="Emissions (MT CO2e)", color="Scope Tier",
                 color_discrete_map={"Scope 1": "#EF4444", "Scope 2": "#F59E0B", "Scope 3": "#3B82F6"},
@@ -11567,6 +11569,12 @@ if mod == "Control Tower":
     if region_filter != "All Regions":
         disruption_df = disruption_df[disruption_df["Location"] == region_filter]
 
+    st.session_state["control_tower_disruption_df"] = disruption_df.copy(deep=True)
+    st.session_state["control_tower_metrics"] = pd.DataFrame({
+        "KPI": ["Active Shipments", "On-Time Delivery", "Disruption Alerts", "Weather Risk Index"],
+        "Value": [142, 98.4, 2, 1.2],
+        "Unit": ["shipments", "%", "alerts", "index"],
+    })
     st.dataframe(disruption_df, use_container_width=True)
 
     if st.button("Trigger Full Network Diagnostic Scan", type="primary"):
@@ -11663,3 +11671,23 @@ if mod == "Cryptographic Ledger":
         st.write("")
         if st.button("Unlock Enterprise Tier", type="primary", use_container_width=True):
             st.info("Redirecting to secure subscription portal...")
+
+# =====================================================================
+# UNIVERSAL LIVE ENGINEERING VISUALIZATION STUDIO
+# ---------------------------------------------------------------------
+# Runs after the active module UI so every allowed module can expose the
+# same interactive visualization workflow without duplicating chart code.
+# =====================================================================
+if (
+    st.session_state.get("authenticated")
+    and st.session_state.get("current_user")
+    and "mod" in globals()
+    and "allowed_modules" in globals()
+    and str(mod) in set(map(str, allowed_modules))
+):
+    try:
+        render_live_visualization_studio(str(mod), expanded=False)
+    except Exception as exc:
+        st.warning("Live Visualization Studio could not render this cycle; your engineering results remain available.")
+        with st.expander("Visualization diagnostic"):
+            st.code(f"{type(exc).__name__}: {exc}")
