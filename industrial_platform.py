@@ -21,6 +21,7 @@ from scipy import stats
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from industrial_experience import render_experience_shell, render_blank_module_studio
+from shoir_enterprise_services import record_workspace_artifact
 from shoir_engine_studio import (
     render_experiment_engine,
     render_forecasting_studio,
