@@ -20,11 +20,12 @@ import pandas as pd
 import streamlit as st
 
 from durable_account_store import durable_backend_configured
-from industrial_experience import add_comment, create_job
+from industrial_experience import add_comment, create_job, update_job
 from workspace_persistence import save_user_workspace
 
 
 CAPABILITY_MODULES = {
+    "Persistence",
     "Digital Twin & Discrete-Event Simulation",
     "Live Industrial Digital Twin",
     "Predictive Maintenance Digital Twin",
@@ -45,6 +46,7 @@ CAPABILITY_MODULES = {
     "Fleet Routing",
     "Executive Report Center",
     "Research Studio",
+    "Executive Report Center",
     "Experiment Lab",
     "Experiment Engine",
     "Advanced ML Demand Forecasting",
@@ -376,7 +378,7 @@ def render_data_intelligence(module: str, username: str) -> None:
             "Missing %": round(float(s.isna().mean()*100), 2),
             "Unique": int(s.nunique(dropna=True)),
             "Duplicates": int(s.duplicated().sum()),
-            "Outliers": int(((s < s.quantile(.01)) | (s > s.quantile(.99))).sum()) if numeric and s.notna().sum() > 4 else 0,
+            "Outliers": int(((s < (s.quantile(.25) - 1.5 * (s.quantile(.75) - s.quantile(.25)))) | (s > (s.quantile(.75) + 1.5 * (s.quantile(.75) - s.quantile(.25))))).sum()) if numeric and s.notna().sum() > 4 else 0,
         })
     profile = pd.DataFrame(rows)
     quality = max(0.0, 100.0 - min(100.0, float(profile["Missing %"].mean()) + float(profile["Outliers"].sum()/max(1,len(source))*5)))
@@ -446,10 +448,50 @@ def render_jobs_and_monitoring(module: str, username: str) -> None:
     if not jobs.empty:
         st.dataframe(jobs, use_container_width=True, hide_index=True)
         _chart_state(module, jobs, "jobs_monitoring_df")
+        selected_job = st.selectbox("Job", jobs["Job"].astype(str).tolist(), key="jobs_selected_job")
+        j1, j2, j3 = st.columns(3)
+        with j1:
+            if st.button("▶️ Run / Resume", key="jobs_resume"):
+                update_job(selected_job, "Running", 50.0, "Operator requested run/resume")
+                st.rerun()
+        with j2:
+            if st.button("⏸️ Pause", key="jobs_pause"):
+                update_job(selected_job, "Queued", 0.0, "Paused by operator; safe checkpoint requested")
+                st.rerun()
+        with j3:
+            if st.button("🔁 Retry", key="jobs_retry"):
+                update_job(selected_job, "Queued", 0.0, "Retry queued by operator")
+                st.rerun()
     telemetry = st.session_state.get("twin_tel")
     if isinstance(telemetry, pd.DataFrame):
         _chart_state(module, telemetry, "realtime_monitoring_df")
         st.dataframe(telemetry.tail(50), use_container_width=True, hide_index=True)
+
+
+def render_reporting_provenance(module: str, username: str) -> None:
+    st.markdown("### 📑 Reporting & Provenance")
+    frames = []
+    for key in ["exec_report_df", "decision_alternatives_df", "decision_kpi_df", "forecast_result", "sustain_result"]:
+        value = st.session_state.get(key)
+        if isinstance(value, pd.DataFrame) and not value.empty:
+            frames.append(value)
+    if not frames:
+        st.info("Generate a result in this module to create a provenance manifest.")
+        return
+    raw = "|".join(x.to_csv(index=False) for x in frames).encode("utf-8")
+    manifest = pd.DataFrame([{
+        "Module": module,
+        "Generated": _now(),
+        "Tables": len(frames),
+        "Evidence SHA-256": hashlib.sha256(raw).hexdigest(),
+        "Excel": "Supported",
+        "PDF": "Enterprise export surface",
+        "PowerPoint": "Enterprise export surface",
+        "Exact graphs": "Included when passed to export bar",
+    }])
+    st.session_state["report_provenance_df"] = manifest
+    _chart_state(module, manifest, "report_provenance_df")
+    st.dataframe(manifest, use_container_width=True, hide_index=True)
 
 
 def render_economics(module: str, username: str) -> None:
@@ -528,6 +570,8 @@ def render_universal_enterprise_capabilities(module: str, username: str) -> None
         render_jobs_and_monitoring(module, username)
     if module in {"Capital Investment & Engineering Economics", "Engineering Economics & Finance"}:
         render_economics(module, username)
+    if module in {"Executive Report Center", "Research Studio"}:
+        render_reporting_provenance(module, username)
     if module in {"Industrial Sustainability & LCA", "Green IE & Sustainability"}:
         render_sustainability(module, username)
     if module in {"Workforce Engineering", "Human Factors & Ergonomics (NIOSH)"}:
