@@ -1115,7 +1115,12 @@ def render_enterprise_integration_surface(module: str, username: str, tier: str)
     import streamlit as st
     import plotly.express as px
 
-    workspace = "default"
+    workspace = str(
+        st.session_state.get("shoir_workspace_name")
+        or st.session_state.get("workspace")
+        or st.session_state.get("active_workspace_name")
+        or "default"
+    )
     module = str(module)
 
     # Digital Twin: augment the existing twin with durable state, replay and what-if.
@@ -1568,6 +1573,7 @@ def evaluate_monitoring_rule(df: pd.DataFrame, metric_col: str, operator: str, t
 
 def build_enterprise_visual_frames(module: str, username: str, workspace: str = "default") -> list[tuple[str, pd.DataFrame]]:
     """Collect enterprise-facing frames while reusing native module datasets."""
+    import streamlit as st
     frames: list[tuple[str, pd.DataFrame]] = []
     m = str(module)
 
@@ -1690,6 +1696,17 @@ def _render_enterprise_visual_evidence(module: str, username: str, workspace: st
             st.markdown(f"#### {label}")
             for title, fig in suite:
                 st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": True, "displaylogo": False, "responsive": True})
+                try:
+                    fp = figure_hash(fig)
+                    record_artifact(
+                        username,
+                        "figure_provenance",
+                        title,
+                        {"module": module, "dataset": label, "figure_hash": fp, "figure_json_sha256": fp},
+                        workspace,
+                    )
+                except Exception:
+                    pass
                 try:
                     st.download_button(
                         "📥 Download exact figure · PNG",
