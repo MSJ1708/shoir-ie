@@ -286,9 +286,16 @@ def build_graph(df: pd.DataFrame, analysis_type: str = "auto") -> go.Figure | No
         return None
     numeric = [str(c) for c in df.columns if pd.api.types.is_numeric_dtype(df[c])]
     categorical = [str(c) for c in df.columns if str(c) not in numeric]
-    if analysis_type == "correlation" and len(numeric) >= 2:
-        corr = df[numeric].corr(numeric_only=True)
-        return px.imshow(corr, text_auto=".2f", aspect="auto", title="Correlation map")
+    if analysis_type == "correlation":
+        matrix = df.copy()
+        if "Measure" in matrix.columns:
+            matrix = matrix.set_index("Measure")
+            numeric_matrix = matrix.apply(pd.to_numeric, errors="coerce")
+        else:
+            numeric_matrix = _numeric_frame(matrix)
+        if numeric_matrix.shape[0] >= 2 and numeric_matrix.shape[1] >= 2:
+            return px.imshow(numeric_matrix, text_auto=".2f", aspect="auto", title="Correlation map")
+
     if "Date" in df.columns and "Forecast" in df.columns:
         fig = px.line(df, x="Date", y="Forecast", markers=True, title="Forecast trajectory")
         if "Lower 95%" in df.columns and "Upper 95%" in df.columns:
