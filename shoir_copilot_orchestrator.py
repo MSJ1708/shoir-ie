@@ -386,9 +386,18 @@ def build_export_bundle(
     result: pd.DataFrame,
     explanation: str,
     figure: go.Figure | None,
-    knowledge_context_used: bool = False,
+    knowledge_context: str | bool = "",
+    knowledge_context_used: bool | None = None,
 ) -> bytes:
+    """Package evidence while preserving backward compatibility for older callers."""
     from shoir_upgrade import build_excel_report
+    if isinstance(knowledge_context, bool) and knowledge_context_used is None:
+        knowledge_context_used = bool(knowledge_context)
+        knowledge_text = ""
+    else:
+        knowledge_text = str(knowledge_context or "").strip()
+    knowledge_context_used = bool(knowledge_text) if knowledge_context_used is None else bool(knowledge_context_used)
+
     tables = [("Analysis Result", result)]
     if "numeric_columns" in inspection:
         tables.append(("Data Profile", pd.DataFrame([{
@@ -399,7 +408,11 @@ def build_export_bundle(
             "Numeric Fields": len(inspection.get("numeric_columns", [])),
             "Date Fields": len(inspection.get("date_like_columns", [])),
         }])))
-    xlsx = build_excel_report("Shoir-IE Engineering Copilot", tables, [(module, figure)] if figure is not None else [])
+    xlsx = build_excel_report(
+        "Shoir-IE Engineering Copilot",
+        tables,
+        [(module, figure)] if figure is not None else [],
+    )
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("request.txt", str(prompt).encode("utf-8"))
@@ -409,22 +422,33 @@ def build_export_bundle(
         zf.writestr("method.json", json.dumps(dict(method), indent=2, default=str).encode("utf-8"))
         zf.writestr("results.csv", result.to_csv(index=False).encode("utf-8"))
         zf.writestr("explanation.md", explanation.encode("utf-8"))
+        if knowledge_text:
+            zf.writestr("knowledge_context.txt", knowledge_text[:12000].encode("utf-8"))
         zf.writestr("copilot_analysis.xlsx", xlsx)
         if figure is not None:
             zf.writestr("chart.html", figure.to_html(full_html=True, include_plotlyjs="cdn").encode("utf-8"))
             zf.writestr("chart.json", figure.to_json().encode("utf-8"))
-        zf.writestr("manifest.json", json.dumps({
-            "contract": WORKFLOW_STEPS,
-            "run_id": run_id,
-            "module": module,
-            "generated_at": datetime.now(timezone.utc).isoformat(),
-            "knowledge_context_used": bool(knowledge_context_used),
-        }, indent=2).encode("utf-8"))
+        zf.writestr(
+            "manifest.json",
+            json.dumps(
+                {
+                    "contract": WORKFLOW_STEPS,
+                    "run_id": run_id,
+                    "module": module,
+                    "generated_at": datetime.now(timezone.utc).isoformat(),
+                    "knowledge_context_used": knowledge_context_used,
+                },
+                indent=2,
+            ).encode("utf-8"),
+        )
     return buf.getvalue()
 
-
-
-def build_workflow_plan(prompt: str, module: str, df: pd.DataFrame) -> dict[str, Any]:
+def build_workflow_plan(
+    prompt: str,
+    module: str,
+    df: pd.DataFrame,
+    knowledge_documents: int = 0,
+) -> dict[str, Any]:
     """Create the visible, reviewable execution plan before any analysis runs."""
     inspection = inspect_data(df)
     intent = classify_request(prompt)
@@ -435,7 +459,11 @@ def build_workflow_plan(prompt: str, module: str, df: pd.DataFrame) -> dict[str,
         {"step": "Run analysis", "status": "Ready", "detail": "Read-only, deterministic analysis on the selected dataset."},
         {"step": "Generate graph", "status": "Ready", "detail": "Create a Plotly view from the actual analysis output."},
         {"step": "Compare scenarios", "status": "Conditional", "detail": "Runs when baseline/scenario structure exists in the selected data."},
-        {"step": "Explain", "status": "Ready", "detail": "Translate observed evidence, assumptions and limitations into operator language."},
+        {
+            "step": "Explain",
+            "status": "Ready",
+            "detail": f"Translate observed evidence, assumptions and limitations into operator language; {int(knowledge_documents)} linked knowledge document(s) are available as context.",
+        },
         {"step": "Export", "status": "Ready", "detail": "Package results, method, data profile and the generated graph."},
     ]
     return {
@@ -447,14 +475,16 @@ def build_workflow_plan(prompt: str, module: str, df: pd.DataFrame) -> dict[str,
         "requires_approval": True,
     }
 
-
 def run_orchestration(prompt: str, module: str, df: pd.DataFrame, context: Mapping[str, Any] | None = None) -> dict[str, Any]:
     run_id = "COP-" + uuid.uuid4().hex[:12].upper()
     inspection = inspect_data(df)
     intent_info = classify_request(prompt)
     method = choose_method(intent_info["intent"], inspection)
     runtime = dict(context or {})
-    knowledge_used = bool(str(runtime.get("knowledge_context", "")).strip())
+    knowledge_text = str(runtime.get("knowledge_context") or "").strip()
+    knowledge_count = int(runtime.get("knowledge_documents", 0) or 0)
+    knowledge_used = bool(knowledge_text)
+
     if intent_info["intent"] == "optimization" and callable(runtime.get("milp_solver")):
         customers = runtime.get("customers") or []
         warehouses = runtime.get("warehouses") or []
@@ -482,18 +512,37 @@ def run_orchestration(prompt: str, module: str, df: pd.DataFrame, context: Mappi
             analysis_meta = {**analysis_meta, "solver_fallback": f"{type(exc).__name__}: {exc}"}
     else:
         result, analysis_meta = run_analysis(df, intent_info["intent"], method)
+
     comparison, comparison_meta = compare_scenarios(df)
     if intent_info["intent"] == "compare" and comparison_meta["mode"] != "unavailable":
         result = comparison
-        analysis_meta = {**analysis_meta, **comparison_meta, "type": "scenario_grouped" if comparison_meta["mode"] == "grouped" else "baseline_comparison"}
+        analysis_meta = {
+            **analysis_meta,
+            **comparison_meta,
+            "type": "scenario_grouped" if comparison_meta["mode"] == "grouped" else "baseline_comparison",
+        }
+
     figure = build_graph(result, analysis_meta.get("type", "auto"))
     if knowledge_used:
-        analysis_meta = {**analysis_meta, "knowledge_context_used": True}
+        analysis_meta = {**analysis_meta, "knowledge_context_used": True, "knowledge_documents": knowledge_count}
+
     explanation = explain_results(prompt, inspection, method, analysis_meta, result)
-    if knowledge_used:
-        explanation += " A workspace knowledge source was supplied to the orchestration context; its content was not treated as measured operational data."
+    if knowledge_text:
+        explanation += (
+            f" Linked knowledge context was available from {knowledge_count} document(s) and is included "
+            "in the evidence bundle; it was not treated as independently validated evidence."
+        )
+
     export = build_export_bundle(
-        prompt, module, run_id, inspection, method, result, explanation, figure,
+        prompt,
+        module,
+        run_id,
+        inspection,
+        method,
+        result,
+        explanation,
+        figure,
+        knowledge_context=knowledge_text,
         knowledge_context_used=knowledge_used,
     )
     return {
@@ -510,6 +559,8 @@ def run_orchestration(prompt: str, module: str, df: pd.DataFrame, context: Mappi
         "export": export,
         "module": module,
         "prompt": prompt,
+        "knowledge_context": knowledge_text[:12000],
+        "knowledge_documents": knowledge_count,
         "knowledge_context_used": knowledge_used,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
