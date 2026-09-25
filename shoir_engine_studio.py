@@ -420,7 +420,7 @@ def forecast_series(
     residuals = y_test - test_pred
     sigma = float(np.std(residuals, ddof=1)) if len(residuals) > 1 else float(np.std(train[target_col] - model.predict(x_train)))
     future_dates = pd.date_range(d[date_col].iloc[-1], periods=int(horizon) + 1, freq=pd.infer_freq(d[date_col]) or "D")[1:]
-    future_external = {c: np.repeat(float(train[c].iloc[-1]), int(horizon)) for c in ext}
+    future_external = {c: np.repeat(float(d[c].iloc[-1]), int(horizon)) for c in ext}
     x_future = _forecast_features(future_dates, len(d), future_external)
     forecast = np.maximum(0, model.predict(x_future))
     z = 1.96
@@ -474,7 +474,10 @@ def _constraint_system(constraints: pd.DataFrame, variables: Sequence[str]) -> l
         raise ValueError("Constraint table requires Constraint, Sense and RHS columns.")
     rows = []
     for _, r in constraints.iterrows():
-        coeffs = {v: float(pd.to_numeric(r.get(v, 0), errors="coerce") or 0) for v in variables}
+        coeffs = {}
+        for v in variables:
+            raw = pd.to_numeric(r.get(v, 0), errors="coerce")
+            coeffs[v] = float(raw) if pd.notna(raw) else 0.0
         sense = str(r["Sense"]).strip()
         if sense not in {"<=", ">=", "="}:
             raise ValueError("Constraint Sense must be <=, >= or =.")
@@ -504,6 +507,8 @@ def solve_lp_or_milp(
         for _, r in d.iterrows():
             low = float(r["Lower"])
             up = float(r["Upper"])
+            if bool(r["Binary"]):
+                low, up = 0.0, 1.0
             cat = pulp.LpBinary if bool(r["Binary"]) else (pulp.LpInteger if bool(r["Integer"]) else pulp.LpContinuous)
             vars_[r["Variable"]] = pulp.LpVariable(r["Variable"], lowBound=low, upBound=up, cat=cat)
         objective = pulp.lpSum(float(r["Objective Coef"]) * vars_[r["Variable"]] for _, r in d.iterrows())
@@ -614,7 +619,7 @@ def robust_stochastic_scenario_analysis(
         for metric in metrics:
             vals = g[metric].to_numpy(float)
             row[f"Expected {metric}"] = float(np.dot(weights, vals))
-            row[f"Worst {metric}"] = float(np.min(vals) if minimize.get(metric, True) else np.max(vals))
+            row[f"Worst {metric}"] = float(np.max(vals) if minimize.get(metric, True) else np.min(vals))
             row[f"P95 {metric}"] = float(np.quantile(vals, 0.95))
         groups.append(row)
     summary = pd.DataFrame(groups)
