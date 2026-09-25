@@ -132,3 +132,27 @@ def test_plan_can_expose_linked_knowledge_context_count():
     df = pd.DataFrame({"Date": pd.date_range("2026-01-01", periods=8), "Demand": range(10, 18)})
     plan = build_workflow_plan("forecast demand using the SOP context", "Advanced ML Demand Forecasting", df, knowledge_documents=3)
     assert "3 linked knowledge document(s)" in plan["steps"][5]["detail"]
+
+
+def test_export_bundle_carries_linked_knowledge():
+    from shoir_copilot_orchestrator import build_export_bundle
+
+    df = pd.DataFrame({"Line": ["A", "B"], "Throughput": [10, 20]})
+    inspection = inspect_data(df)
+    method = {"method": "Descriptive engineering profile"}
+    result, _ = run_analysis(df, "descriptive", method)
+    fig = build_graph(result)
+    bundle = build_export_bundle(
+        "use linked SOP context",
+        "Engineering Validation Center",
+        "COP-KNOWLEDGE",
+        inspection,
+        method,
+        result,
+        "Evidence summary",
+        fig,
+        "SOP: verify data units before analysis.",
+    )
+    with zipfile.ZipFile(io.BytesIO(bundle), "r") as zf:
+        assert "knowledge_context.txt" in zf.namelist()
+        assert b"verify data units" in zf.read("knowledge_context.txt")
