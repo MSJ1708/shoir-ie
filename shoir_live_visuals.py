@@ -637,3 +637,188 @@ def render_live_visualization_studio(module: str, *, expanded: bool = False, pre
                 use_container_width=True,
                 key=f"liveviz_csv_{hash(module) & 0xFFFF:04x}",
             )
+
+
+# ---------------------------------------------------------------------------
+# Enterprise Visualization Extension
+# ---------------------------------------------------------------------------
+# These additions deliberately reuse the existing Universal Visualization
+# engine. They provide module-aware evidence suites without creating a second
+# charting stack.
+
+_BASE_AUTO_CHART_CHOICE = _auto_chart_choice
+_BASE_MAKE_FIGURE = _make_figure
+
+
+def _auto_chart_choice(df: pd.DataFrame) -> str:
+    """Choose a visualization using explicit industrial semantics first."""
+    if not isinstance(df, pd.DataFrame) or df.empty:
+        return "Bar"
+    names = [str(c).lower().replace("_", " ") for c in df.columns]
+    numeric = _numeric_columns(df)
+    dates = _coerce_datetime_columns(df)
+
+    has_health = any("health" in n or "status" in n for n in names)
+    has_area = any(any(k in n for k in ("area", "domain", "function", "system")) for n in names)
+    has_anomaly = any("anomaly" in n or "outlier" in n for n in names)
+    has_scenario = any("scenario" in n or "case" in n for n in names)
+    has_timestamp = bool(dates)
+
+    if has_health and has_area and numeric:
+        return "Health Heatmap"
+    if has_anomaly and has_timestamp and numeric:
+        return "Anomaly Timeline"
+    if has_scenario and len(numeric) >= 2:
+        return "Sensitivity Plot"
+    return _BASE_AUTO_CHART_CHOICE(df)
+
+
+def _make_figure(
+    df: pd.DataFrame,
+    chart: str,
+    x: str | None,
+    y: str | None,
+    z: str | None,
+    title: str,
+) -> go.Figure | None:
+    if df.empty:
+        return None
+
+    numeric = _numeric_columns(df)
+    categorical = _categorical_columns(df)
+
+    if chart == "Health Heatmap":
+        area = _find_col(df, ("area", "domain", "function", "system", "category"))
+        score = _find_col(df, ("health score", "score", "health"))
+        if area and score:
+            work = df[[area, score]].copy()
+            work[score] = pd.to_numeric(work[score], errors="coerce")
+            work = work.dropna(subset=[score]).drop_duplicates(subset=[area], keep="last")
+            if not work.empty:
+                work["__score"] = work[score].clip(0, 100)
+                matrix = work.set_index(area)[["__score"]].T
+                return px.imshow(
+                    matrix,
+                    text_auto=".0f",
+                    aspect="auto",
+                    zmin=0,
+                    zmax=100,
+                    title=title or "Industrial Health Heatmap",
+                )
+        return None
+
+    if chart == "Anomaly Timeline":
+        date_col = x if x in df.columns else (_coerce_datetime_columns(df) or [None])[0]
+        metric = y if y in df.columns else (numeric[0] if numeric else None)
+        if date_col and metric:
+            work = df.copy()
+            work[date_col] = pd.to_datetime(work[date_col], errors="coerce")
+            work[metric] = pd.to_numeric(work[metric], errors="coerce")
+            work = work.dropna(subset=[date_col, metric])
+            if work.empty:
+                return None
+            fig = px.line(work, x=date_col, y=metric, markers=True, title=title or f"Anomaly Timeline · {metric}")
+            anomaly_col = _find_col(work, ("anomaly", "outlier", "alert"))
+            if anomaly_col:
+                mask = work[anomaly_col].astype(str).str.lower().isin({"true", "1", "yes", "anomaly", "alert", "critical"})
+                flagged = work.loc[mask]
+                if not flagged.empty:
+                    fig.add_scatter(
+                        x=flagged[date_col],
+                        y=flagged[metric],
+                        mode="markers",
+                        marker={"size": 11, "symbol": "x"},
+                        name="Anomaly / Alert",
+                    )
+            return fig
+        return None
+
+    if chart == "Metric Trend":
+        date_col = x if x in df.columns else (_coerce_datetime_columns(df) or [None])[0]
+        metric = y if y in df.columns else (numeric[0] if numeric else None)
+        if date_col and metric:
+            work = df.copy()
+            work[date_col] = pd.to_datetime(work[date_col], errors="coerce")
+            work[metric] = pd.to_numeric(work[metric], errors="coerce")
+            work = work.dropna(subset=[date_col, metric]).sort_values(date_col)
+            return px.line(work, x=date_col, y=metric, markers=True, title=title or f"Metric Trend · {metric}")
+        return None
+
+    return _BASE_MAKE_FIGURE(df, chart, x, y, z, title)
+
+
+def build_visualization_suite(
+    df: pd.DataFrame,
+    context: str = "",
+    max_figures: int = 5,
+) -> list[tuple[str, go.Figure]]:
+    """Create a small, deterministic set of complementary engineering views.
+
+    The suite uses only columns present in the supplied data. No values are
+    generated solely for presentation. Existing chart primitives are reused.
+    """
+    if not isinstance(df, pd.DataFrame) or df.empty:
+        return []
+
+    numeric = _numeric_columns(df)
+    dates = _coerce_datetime_columns(df)
+    categorical = _categorical_columns(df)
+    plan: list[tuple[str, str, str | None, str | None, str | None]] = []
+    seen: set[str] = set()
+
+    def add(chart: str, title: str, x: str | None = None, y: str | None = None, z: str | None = None) -> None:
+        if len(plan) >= max_figures or chart in seen:
+            return
+        fig = _make_figure(df, chart, x, y, z, title)
+        if fig is not None:
+            plan.append((title, chart, x, y, z))
+            seen.add(chart)
+
+    area = _find_col(df, ("area", "domain", "function", "system", "category"))
+    health = _find_col(df, ("health score", "score", "health"))
+    if area and health and numeric:
+        add("Health Heatmap", f"{context} · Health map" if context else "Health map", area, health)
+
+    source = _find_col(df, ("source", "from", "origin"))
+    target = _find_col(df, ("target", "to", "destination"))
+    flow = _find_col(df, ("value", "volume", "flow", "quantity", "qty"))
+    if source and target and flow:
+        add("Sankey", f"{context} · Flow map" if context else "Flow map")
+
+    start = _find_col(df, ("start", "begin", "planned start"))
+    finish = _find_col(df, ("finish", "end", "completion", "planned finish"))
+    if start and finish:
+        add("Gantt", f"{context} · Execution timeline" if context else "Execution timeline")
+
+    if dates and numeric:
+        add("Metric Trend", f"{context} · Operational trend" if context else "Operational trend", dates[0], numeric[0])
+
+    anomaly = _find_col(df, ("anomaly", "outlier", "alert"))
+    if anomaly and dates and numeric:
+        add("Anomaly Timeline", f"{context} · Anomalies" if context else "Anomalies", dates[0], numeric[0])
+
+    defectish = next((c for c in numeric if any(k in str(c).lower() for k in ("defect", "failure", "scrap", "downtime"))), None)
+    if defectish and categorical:
+        add("Pareto", f"{context} · Failure / defect Pareto" if context else "Failure / defect Pareto", categorical[0], defectish)
+
+    if len(numeric) >= 2:
+        add("Scatter", f"{context} · Variable relationship" if context else "Variable relationship", numeric[0], numeric[1])
+        add("Sensitivity Plot", f"{context} · Sensitivity" if context else "Sensitivity")
+
+    if numeric:
+        add("Distribution", f"{context} · Distribution" if context else "Distribution", None, numeric[0])
+
+    if not plan and categorical and numeric:
+        add("Bar", f"{context} · KPI by category" if context else "KPI by category", categorical[0], numeric[0])
+
+    suite: list[tuple[str, go.Figure]] = []
+    for title, chart, x, y, z in plan:
+        fig = _make_figure(df, chart, x, y, z, title)
+        if fig is not None:
+            suite.append((title, fig))
+    return suite[:max(1, int(max_figures))]
+
+
+def figure_fingerprint(fig: go.Figure) -> str:
+    """Stable SHA-256 fingerprint of the exact Plotly figure JSON."""
+    return hashlib.sha256(fig.to_json().encode("utf-8")).hexdigest()
