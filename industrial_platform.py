@@ -481,6 +481,10 @@ def save_model_snapshot(
     db_path="enterprise_full_workspace.db",
     solver_version: str = "",
     result_hash: str = "",
+    *,
+    version: str = "1.0.0",
+    dataset_id: str = "",
+    run_id: str = "",
 ) -> str:
     base = f"{name}|{json.dumps(parameters,sort_keys=True,default=str)}|{data_hash}|{solver_version}|{result_hash}"
     mid = "MOD-" + hashlib.sha256(base.encode()).hexdigest()[:12].upper()
@@ -499,6 +503,14 @@ def save_model_snapshot(
             ),
         )
         c.commit()
+    save_model_extended_lineage(
+        mid,
+        username,
+        version=version,
+        dataset_id=dataset_id,
+        run_id=run_id,
+        db_path=db_path,
+    )
     return mid
 
 def save_model_extended_lineage(
