@@ -326,34 +326,39 @@ def replication_summary(
     replication_col: str | None = None,
     confidence: float = 0.95,
 ) -> pd.DataFrame:
+    """Summarize response variation at the scenario level.
+
+    When a replication ID is supplied, the output also reports unique
+    replication counts without splitting each replication into a separate row.
+    """
     if response_col not in df.columns:
         raise ValueError(f"Response column '{response_col}' not found.")
     d = df.copy()
     d[response_col] = pd.to_numeric(d[response_col], errors="coerce")
     d = d.dropna(subset=[response_col])
-    group_cols = [c for c in [scenario_col] if c and c in d.columns]
-    if replication_col and replication_col in d.columns and replication_col not in group_cols:
-        group_cols.append(replication_col)
-    grouped = d.groupby(group_cols, dropna=False)[response_col] if group_cols else [((), d[response_col])]
+    if d.empty:
+        return pd.DataFrame(columns=["n","Replications","Mean","Std","CI Low","CI High"])
+
+    group_cols = [scenario_col] if scenario_col and scenario_col in d.columns else []
+    groups = d.groupby(group_cols, dropna=False) if group_cols else [((), d)]
+    alpha_tail = max(0.0, min(0.49, (1.0-confidence) / 2.0))
     rows = []
-    alpha = max(0.0, min(0.49, (1.0-confidence)/2.0))
-    if group_cols:
-        iterator = grouped
-    else:
-        iterator = [((), d)]
-    for keys, part in iterator:
-        if group_cols:
-            part_values = pd.to_numeric(part[response_col], errors="coerce").dropna()
-            labels = keys if isinstance(keys, tuple) else (keys,)
-            row = {col: val for col, val in zip(group_cols, labels)}
-        else:
-            part_values = part[response_col]
-            row = {}
-        n = len(part_values)
-        mean = float(part_values.mean()) if n else float("nan")
-        sd = float(part_values.std(ddof=1)) if n > 1 else float("nan")
-        margin = float(stats.t.ppf(1-alpha, max(1,n-1)) * sd / math.sqrt(n)) if n > 1 else float("nan")
-        row.update({"n": n, "Mean": mean, "Std": sd, "CI Low": mean-margin if np.isfinite(margin) else float("nan"), "CI High": mean+margin if np.isfinite(margin) else float("nan")})
+    for keys, part in groups:
+        values = pd.to_numeric(part[response_col], errors="coerce").dropna()
+        labels = keys if isinstance(keys, tuple) else (keys,)
+        row = {col: val for col, val in zip(group_cols, labels)} if group_cols else {}
+        n = len(values)
+        mean = float(values.mean()) if n else float("nan")
+        sd = float(values.std(ddof=1)) if n > 1 else float("nan")
+        margin = float(stats.t.ppf(1-alpha_tail, max(1,n-1)) * sd / math.sqrt(n)) if n > 1 else float("nan")
+        row.update({
+            "n": int(n),
+            "Replications": int(part[replication_col].nunique(dropna=True)) if replication_col and replication_col in part.columns else int(n),
+            "Mean": mean,
+            "Std": sd,
+            "CI Low": mean-margin if np.isfinite(margin) else float("nan"),
+            "CI High": mean+margin if np.isfinite(margin) else float("nan"),
+        })
         rows.append(row)
     return pd.DataFrame(rows)
 
