@@ -7415,7 +7415,6 @@ if selected_module in ["Facility Layout & Warehousing", "Facility Layout, Materi
         })
         st.dataframe(slot_data, use_container_width=True, hide_index=True)
 
-    _render_post_module_layers("Human Factors & Ergonomics (NIOSH)")
     st.stop()
     
 # ==============================================================================
