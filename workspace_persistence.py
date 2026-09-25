@@ -16,6 +16,8 @@ from typing import Any, MutableMapping
 import numpy as np
 import pandas as pd
 
+from durable_account_store import durable_backend_configured, save_remote_workspace, load_remote_workspace
+
 _STATE_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS workspace_states (
     username TEXT PRIMARY KEY,
@@ -181,8 +183,13 @@ def save_user_workspace(
     if not username or username == "Guest Visitor":
         return False
     try:
-        ensure_workspace_state_db(db_path)
         payload = json.dumps(_snapshot(session_state), ensure_ascii=False, separators=(",", ":"))
+        if durable_backend_configured():
+            return save_remote_workspace(username, payload)
+
+        # Local development fallback only. A deployed Streamlit instance should
+        # configure a managed database because local files are ephemeral.
+        ensure_workspace_state_db(db_path)
         now = _dt.datetime.now(_dt.timezone.utc).isoformat()
         with sqlite3.connect(db_path, timeout=15) as conn:
             conn.execute(
@@ -209,15 +216,19 @@ def load_user_workspace(
     if not username or username == "Guest Visitor":
         return False
     try:
-        ensure_workspace_state_db(db_path)
-        with sqlite3.connect(db_path, timeout=15) as conn:
-            row = conn.execute(
-                "SELECT state_json FROM workspace_states WHERE username = ?",
-                (username.strip().lower(),),
-            ).fetchone()
-        if not row or not row[0]:
-            return False
-        payload = json.loads(row[0])
+        remote_payload = load_remote_workspace(username) if durable_backend_configured() else None
+        if remote_payload:
+            payload = json.loads(remote_payload)
+        else:
+            ensure_workspace_state_db(db_path)
+            with sqlite3.connect(db_path, timeout=15) as conn:
+                row = conn.execute(
+                    "SELECT state_json FROM workspace_states WHERE username = ?",
+                    (username.strip().lower(),),
+                ).fetchone()
+            if not row or not row[0]:
+                return False
+            payload = json.loads(row[0])
         for key, value in payload.items():
             if _excluded(str(key)):
                 continue
