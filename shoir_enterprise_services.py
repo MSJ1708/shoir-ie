@@ -320,6 +320,21 @@ def replay_twin_frame() -> pd.DataFrame:
     return pd.concat(frames, ignore_index=True)
 
 
+def detect_twin_anomalies(df: pd.DataFrame, z_threshold: float = 3.0) -> pd.DataFrame:
+    """Flag statistical anomalies without claiming machine-failure diagnosis."""
+    if not isinstance(df, pd.DataFrame) or df.empty or "Value" not in df.columns:
+        return pd.DataFrame()
+    out = df.copy()
+    out["Value"] = pd.to_numeric(out["Value"], errors="coerce")
+    if "Metric" not in out.columns:
+        out["Metric"] = "Value"
+    out["Mean"] = out.groupby("Metric")["Value"].transform("mean")
+    out["Std Dev"] = out.groupby("Metric")["Value"].transform("std").fillna(0.0)
+    out["Z-Score"] = (out["Value"] - out["Mean"]) / out["Std Dev"].replace(0, np.nan)
+    out["Alert"] = np.where(out["Z-Score"].abs() >= float(z_threshold), "Investigate", "Normal")
+    return out
+
+
 def replay_twin_what_if(df: pd.DataFrame, metric: str, delta_pct: float) -> pd.DataFrame:
     if df.empty or "Value" not in df.columns:
         return pd.DataFrame()
@@ -464,6 +479,14 @@ def render_enterprise_bridge(module: str, tier: str, username: str) -> None:
                     st.info("No telemetry state is currently available for replay.")
                 else:
                     st.dataframe(twin.head(100), use_container_width=True, hide_index=True)
+                    z_threshold = st.number_input("Anomaly alert z-score threshold", 1.0, 6.0, 3.0, 0.1, key=f"twin_z_threshold_{hash(module)&0xffff:04x}")
+                    anomalies = detect_twin_anomalies(twin, z_threshold)
+                    st.session_state["enterprise_twin_anomalies_df"] = anomalies.copy(deep=True)
+                    if not anomalies.empty:
+                        flagged = anomalies[anomalies["Alert"] == "Investigate"]
+                        st.metric("Telemetry observations flagged", f"{len(flagged):,}")
+                        if not flagged.empty:
+                            st.dataframe(flagged.head(100), use_container_width=True, hide_index=True)
                     metrics = sorted(twin["Metric"].dropna().astype(str).unique()) if "Metric" in twin.columns else []
                     if metrics:
                         metric = st.selectbox("Replay metric", metrics, key=f"twin_replay_metric_{hash(module)&0xffff:04x}")
