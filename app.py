@@ -1028,6 +1028,12 @@ if st.session_state.get("authenticated") and st.session_state.get("current_user"
 if not st.session_state.get("current_user"):
     st.title("🔐 Welcome to Shoir-IE Workspace")
     st.markdown("Please sign in with your approved account or register and submit your payment ticket below.")
+    if not _durable_accounts_ready:
+        st.warning(
+            "⚠️ Persistent cloud storage is not connected. Accounts and workspace history "
+            "cannot be guaranteed across a Streamlit restart until the Supabase/PostgreSQL "
+            "database secret is configured. Local development still uses SQLite."
+        )
 
     auth_tab1, auth_tab2, auth_tab3 = st.tabs(["🔑 Sign In", "📝 Get Ticket & Register", "🧭 Explore the Modules"])
 
