@@ -27,7 +27,7 @@ _MODULE_KEYS = {
     "Advanced Planning & Scheduling": ["aps_demand", "aps_bom", "aps_orders", "aps_schedule_result"],
     "Manufacturing Execution System": ["mes_wo_df", "mes_events_df", "mes_oee_df", "mes_oee_result"],
     "Quality Engineering & Reliability": ["quality_df", "quality_spc_result", "quality_limits_result", "msa_df", "anova_df", "fmea_df", "fmea_result"],
-    "Industrial Simulation Lab": ["sim_des_result", "sim_agent_result", "sd", "job_history_df"],
+    "Industrial Simulation Lab": ["sim_des_result", "sim_agent_result", "sd", "job_history_df", "realtime_monitoring_df"],
     "Digital Twin & Discrete-Event Simulation": [
         "dt_workstations", "agv_fleet", "des_queues", "iot_sensors", "kanban_buffers",
         "reliability_data", "event_logs", "digital_twin_state_snapshot", "digital_twin_replay_df",
@@ -37,7 +37,8 @@ _MODULE_KEYS = {
     ],
     "3D Factory Designer": ["factory3d_df", "factory3d_dist_result"],
     "Industrial Connectivity Hub": ["conn_df", "connectivity_health_df"],
-    "Enterprise Integration & Collaboration": ["erp_connectors", "workspace_users", "collaboration_roster_df", "connectivity_health_df", "enterprise_security_posture_df"],
+    "AI Copilot": ["copilot_messages", "knowledge_registry_df"],
+    "Enterprise Integration & Collaboration": ["erp_connectors", "workspace_users", "collaboration_roster_df", "connectivity_health_df", "enterprise_security_posture_df", "collaboration_assignment_df"],
     "Multi-Objective Optimization": ["multiobj_df", "multiobj_result", "pareto", "optimization_pareto_df", "optimization_result_df"],
     "Robust & Resilient Optimization": ["robust_df", "robust_result", "robust_result_df"],
     "Engineering Model Registry": ["model_registry_df", "model_reproducibility_catalog", "model_registry_governance_df"],
