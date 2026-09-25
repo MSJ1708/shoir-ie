@@ -296,14 +296,17 @@ def _make_figure(df: pd.DataFrame, chart: str, x: str | None, y: str | None, z: 
             return None
         work = df.copy()
         if x and x in work.columns:
-            work = work[[x, metric]].dropna()
-            x_values = work[x]
+            work = work[[x, metric]].copy()
         else:
-            work = work[[metric]].dropna()
-            x_values = list(range(1, len(work) + 1))
-        values = pd.to_numeric(work[metric], errors="coerce").dropna()
-        if values.empty:
+            work = work[[metric]].copy()
+            work["__observation"] = np.arange(1, len(work) + 1)
+            x = "__observation"
+        work[metric] = pd.to_numeric(work[metric], errors="coerce")
+        work = work.dropna(subset=[metric])
+        if work.empty:
             return None
+        x_values = work[x]
+        values = work[metric]
         mean = float(values.mean())
         sigma = float(values.std(ddof=1)) if len(values) > 1 else 0.0
         ucl, lcl = mean + 3 * sigma, mean - 3 * sigma
