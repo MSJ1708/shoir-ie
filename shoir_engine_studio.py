@@ -1074,23 +1074,26 @@ def render_decision_center_studio(tier: str, username: str) -> None:
     selected = st.text_input("Selected alternative", "Network Redesign", key="decision_selected_alt")
     if st.button("🎯 Save governed decision card", type="primary", use_container_width=True, key="decision_governance_save"):
         try:
-            card = {
-                "title": st.session_state.get("decision_title", "Engineering Decision"),
-                "module": "Engineering Decision Center",
-                "metrics": json.loads(metrics),
-                "assumptions": {"baseline": json.loads(baseline)},
-                "uncertainty": json.loads(uncertainty),
-                "status": status,
-                "baseline": json.loads(baseline),
-                "alternatives": alternatives.to_dict("records"),
-                "constraints": constraints.to_dict("records"),
-                "evidence": evidence.to_dict("records"),
-                "approvals": approvals.to_dict("records"),
-                "verification": verification.to_dict("records"),
-                "selected_alternative": selected,
-            }
+            from industrial_platform import create_decision_card, save_decision_card
+            card = create_decision_card(
+                st.session_state.get("decision_title", "Engineering Decision"),
+                "Engineering Decision Center",
+                json.loads(metrics),
+                {"baseline": json.loads(baseline)},
+                json.loads(uncertainty),
+                status,
+                baseline=json.loads(baseline),
+                alternatives=alternatives.to_dict("records"),
+                constraints=constraints.to_dict("records"),
+                evidence=evidence.to_dict("records"),
+                approvals=approvals.to_dict("records"),
+                verification=verification.to_dict("records"),
+                selected_alternative=selected,
+            )
+            decision_id = save_decision_card(card, username)
+            card["decision_id"] = decision_id
             st.session_state["decision_governed_card"] = card
-            st.success("Governed decision package staged in the workspace; the native Decision Center persistence hook can save it.")
+            st.success(f"Governed decision card saved: {decision_id}")
         except Exception as exc:
             st.error(f"Decision package is not valid JSON: {exc}")
     if isinstance(st.session_state.get("decision_governed_card"), dict):
