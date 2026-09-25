@@ -9238,7 +9238,17 @@ else:
                 started_ns = time.perf_counter_ns()
                 try:
                     with st.spinner("Copilot is executing the engineering workflow..."):
-                        run = run_orchestration(workflow_prompt, routed_module, source_df)
+                        run = run_orchestration(
+                            workflow_prompt,
+                            routed_module,
+                            source_df,
+                            context={
+                                "customers": st.session_state.get("customers_list", []),
+                                "warehouses": st.session_state.get("warehouses_list", []),
+                                "milp_solver": cached_milp_optimization,
+                                "validate_network_inputs": validate_network_inputs,
+                            },
+                        )
                     run_id = run["run_id"]
                     st.session_state["copilot_orchestrator_run"] = {
                         key: value
