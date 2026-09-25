@@ -582,11 +582,16 @@ def render_collaboration_extension(username: str) -> None:
 # ---------------------------------------------------------------------------
 
 def _latex_escape(text: str) -> str:
-    value = str(text or "")
-    for old, new in [("\\", "\\textbackslash{}"), ("&", "\\&"), ("%", "\\%"),
-                     ("_", "\\_"), ("#", "\\#"), ("{", "\\{"), ("}", "\\}")]:
-        value = value.replace(old, new)
-    return value
+    replacements = {
+        "\\": "\\textbackslash{}",
+        "&": "\\&",
+        "%": "\\%",
+        "_": "\\_",
+        "#": "\\#",
+        "{": "\\{",
+        "}": "\\}",
+    }
+    return "".join(replacements.get(char, char) for char in str(text or ""))
 
 
 def build_research_manuscript(
@@ -679,7 +684,11 @@ def build_research_manuscript(
         "\\end{document}",
     ]
 
-    return "\\n".join(md_lines) + "\\n", "\\n".join(latex_lines) + "\\n"
+    return "
+".join(md_lines) + "
+", "
+".join(latex_lines) + "
+"
 
 
 def render_research_extension(username: str) -> None:
