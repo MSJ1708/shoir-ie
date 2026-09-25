@@ -5968,7 +5968,6 @@ if selected_module == "AGV Fleet Dispatcher":
             st.metric("Quality Rate", "100%", "Collision-Free")
 
     # Stop execution so the rest of the page underneath doesn't overwrite
-    _render_post_module_layers("Geospatial Network Designer")
     st.stop()
 
 # ==============================================================================
@@ -6255,8 +6254,7 @@ if selected_module == "Geospatial Network Designer":
                     margin=dict(l=10, r=10, t=35, b=10)
                 )
                 st.plotly_chart(bar_cap, use_container_width=True)
-
-    _render_post_module_layers("Predictive Maintenance Hub")
+    _render_post_module_layers("Geospatial Network Designer")
     st.stop()
 
 # ==============================================================================
@@ -6471,6 +6469,7 @@ if selected_module == "Predictive Maintenance Hub":
                 st.success(f"Asset **{selected_to_remove}** successfully decommissioned.")
                 st.rerun()
 
+    _render_post_module_layers("Predictive Maintenance Hub")
     st.stop()
 # ==============================================================================
 # SHOIR-IE: ELITE PRODUCTION PLANNING, SCHEDULING & CONTROL (PPC) SUITE (V2.2)
@@ -7689,8 +7688,7 @@ if selected_module in ["Human Factors & Ergonomics (NIOSH)", "Human Factors, Erg
             rest_mins_per_hour = max(0.0, 60.0 * (energy_exp - 4.0) / (energy_exp - 1.5))
             st.metric("Required Rest Time", f"{rest_mins_per_hour:.1f} mins / hour")
             st.metric("Total Shift Rest", f"{rest_mins_per_hour * shift_hours:.1f} minutes")
-
-    _render_post_module_layers("Engineering Economics & Finance")
+    _render_post_module_layers("Human Factors & Ergonomics (NIOSH)")
     st.stop()
 
 # ==============================================================================
@@ -8015,8 +8013,7 @@ if selected_module in ["Engineering Economics & Finance", "Engineering Economics
                 "Payment": "${:,.2f}", "Principal": "${:,.2f}", "Interest": "${:,.2f}",
                 "Interest Tax Shield": "${:,.2f}", "Ending Balance": "${:,.2f}"
             }), use_container_width=True, hide_index=True)
-
-    _render_post_module_layers("Digital Twin & Discrete-Event Simulation")
+    _render_post_module_layers("Engineering Economics & Finance")
     st.stop()
 
 # ==============================================================================
@@ -8382,8 +8379,7 @@ if selected_module in ["Digital Twin & Discrete-Event Simulation", "Digital Twin
         if st.button("🗑️ Clear Event Log"):
             st.session_state.event_logs = []
             st.rerun()
-
-    _render_post_module_layers("Green IE & Sustainability")
+    _render_post_module_layers("Digital Twin & Discrete-Event Simulation")
     st.stop()
 
 # ==============================================================================
@@ -8578,8 +8574,7 @@ if selected_module in ["Green IE & Sustainability", "Sustainability & Circular E
                 fig_lca.update_traces(textposition='top center')
                 fig_lca.update_layout(plot_bgcolor="#0b0f19", paper_bgcolor="#0b0f19", font=dict(color="#f3f4f6"), height=290)
                 st.plotly_chart(fig_lca, use_container_width=True)
-
-    _render_post_module_layers("Enterprise Integration & Collaboration")
+    _render_post_module_layers("Green IE & Sustainability")
     st.stop()
 
 # ==============================================================================
@@ -8952,6 +8947,7 @@ if selected_module in ["Enterprise Integration & Collaboration", "Enterprise Int
                 </div>
                 """, unsafe_allow_html=True)
 
+    _render_post_module_layers("Enterprise Integration & Collaboration")
     st.stop()
     
 def render_data_editor(df, key_name):
