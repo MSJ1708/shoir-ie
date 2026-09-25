@@ -697,11 +697,7 @@ def build_research_manuscript(
         "\\end{document}",
     ]
 
-    return "
-".join(md_lines) + "
-", "
-".join(latex_lines) + "
-"
+    return "\n".join(md_lines) + "\n", "\n".join(latex_lines) + "\n"
 
 
 def render_research_extension(username: str) -> None:
