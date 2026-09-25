@@ -26,13 +26,14 @@ from scipy import stats
 from shoir_upgrade import (align_imported_table, clean_dataframe, build_excel_report, build_workbook_bundle, read_uploaded_workbook, apply_excel_function, EXCEL_FUNCTIONS, copilot_module_recommendation)
 from industrial_platform import PLATFORM_CATALOG, render_module as render_industrial_module, ml_demand_forecast, tier_allows as platform_tier_allows
 from industrial_operating_system import render_industrial_operating_system
-from industrial_experience import COPILOT_TOOLS, ensure_experience_db, feature_stats, load_research_protocol, list_research_studies, register_research_run
+from industrial_experience import COPILOT_TOOLS, ensure_experience_db, feature_stats, load_research_protocol, list_research_studies, register_research_run, log_copilot_action, benchmark_duration
 from research_experiment_engine import apply_evidence_conflict
 from industrial_excellence_hub import render_platform_excellence_hub
 from workspace_persistence import ensure_workspace_state_db, load_user_workspace, save_user_workspace
 from shoir_visual_system import apply_shoir_design_system, render_workspace_status
-from shoir_live_visuals import render_live_visualization_studio
+from shoir_live_visuals import render_live_visualization_studio, discover_visual_tables
 from shoir_module_parity import render_universal_module_parity
+from shoir_copilot_orchestrator import build_workflow_plan, recommend_module, run_orchestration
 from durable_account_store import (durable_backend_configured, sync_durable_accounts, sync_remote_requests_to_local, edge_login, edge_admin_list_requests, edge_renew_request, upsert_remote_account, insert_remote_request, remote_account, account_is_expired, renewed_expiry)
 
 # =====================================================================
@@ -9146,118 +9147,301 @@ else:
         st.header("🤖 Natural Language AI Copilot")
         st.caption("Upload a workbook, ask Copilot to clean or analyze it, apply Excel-style transformations, and download the improved workbook. Recommendations are grounded in the available modules and your current tier.")
 
-        cp1, cp2 = st.columns([2, 1], gap="large")
-        with cp1:
-            uploaded = st.file_uploader("📤 Upload Excel / CSV for Copilot", type=["xlsx", "csv"], key="copilot_workbook_upload")
-            if uploaded is not None:
-                signature = hashlib.sha256(uploaded.getvalue()).hexdigest()
-                if st.session_state.get("copilot_workbook_signature") != signature:
-                    try:
-                        st.session_state.copilot_workbook = read_uploaded_workbook(uploaded.getvalue(), uploaded.name)
-                        st.session_state.copilot_workbook_signature = signature
-                        st.session_state.copilot_workbook_name = uploaded.name
-                        st.session_state.copilot_workbook_original = {k:v.copy(deep=True) for k,v in st.session_state.copilot_workbook.items()}
-                        st.session_state.copilot_clean_audit = []
-                        st.success(f"Loaded {uploaded.name} with {len(st.session_state.copilot_workbook)} sheet(s).")
-                    except Exception as exc:
-                        st.error(f"Could not read the workbook safely: {exc}")
+        st.markdown("## 🧠 Engineering Copilot Orchestrator")
+        st.caption("Give Shoir-IE an engineering goal. Copilot will inspect the selected module data, route the request, choose a compatible method, execute read-only analysis, generate evidence-backed visuals, compare scenarios when available, explain the result, and prepare an export.")
 
-        workbook = st.session_state.get("copilot_workbook", {})
-        if workbook:
-            sheets=list(workbook.keys())
-            selected_sheet=st.selectbox("Workbook sheet", sheets, key="copilot_sheet")
-            df=workbook[selected_sheet]
-            st.markdown("### 🧹 Excel Data Cleaning Studio")
-            st.caption("These controls implement the 12 cleaning operations shown in your reference image.")
-            fn_names=[x[0] for x in EXCEL_FUNCTIONS]
-            function=st.selectbox("Choose an Excel cleaning function", fn_names, key="copilot_excel_function")
-            all_cols=list(df.columns)
-            cols=st.multiselect("Columns", all_cols, default=all_cols if function not in ("TEXTSPLIT","TEXTJOIN") else [], key="copilot_function_columns")
-            c1,c2,c3=st.columns(3)
-            with c1:
-                delimiter=st.text_input("Delimiter", value=",", key="copilot_delimiter")
-                find_text=st.text_input("Find", key="copilot_find")
-            with c2:
-                replace_text=st.text_input("Replace with", key="copilot_replace")
-                split_col=st.selectbox("TEXTSPLIT column", all_cols, key="copilot_split_col") if all_cols else None
-            with c3:
-                output_col=st.text_input("TEXTJOIN output column", value="Joined", key="copilot_output_col")
-                join_cols=st.multiselect("TEXTJOIN columns", all_cols, key="copilot_join_cols")
+        available_modules = [str(m) for m in allowed_modules if str(m) != "AI Copilot"]
+        o1, o2 = st.columns([1.6, 1], gap="large")
+        with o1:
+            workflow_prompt = st.text_area(
+                "🎯 Engineering goal",
+                placeholder="Example: Forecast SKU demand, show the uncertainty, and compare the current plan with the scenario in my data.",
+                height=95,
+                key="copilot_orchestrator_goal",
+            )
+        with o2:
+            route_choices = ["🤖 Auto-route from goal"] + available_modules
+            route_label = st.selectbox("🧭 Target module", route_choices, key="copilot_orchestrator_target")
+            requested_module = None if route_label.startswith("🤖") else route_label
 
-            a,b,d=st.columns(3)
-            with a:
-                if st.button("✨ Auto Clean 12 checks", type="primary", use_container_width=True, key="copilot_auto_clean"):
-                    cleaned,audit=clean_dataframe(df)
-                    workbook[selected_sheet]=cleaned
-                    st.session_state.copilot_clean_audit.extend(audit)
-                    st.success("Automatic cleaning completed.")
-                    st.rerun()
-            with b:
-                if st.button("▶ Apply Function", use_container_width=True, key="copilot_apply_function"):
-                    try:
-                        kwargs={"columns":cols}
-                        if function=="TEXTSPLIT": kwargs.update(column=split_col,delimiter=delimiter)
-                        elif function=="TEXTJOIN": kwargs.update(columns=join_cols,delimiter=delimiter,output_column=output_col)
-                        elif function in ("SUBSTITUTE","FIND & REPLACE"):
-                            kwargs.update(old=find_text, new=replace_text, find_text=find_text, replace_text=replace_text)
-                        new_df,message=apply_excel_function(df,function,**kwargs)
-                        workbook[selected_sheet]=new_df
-                        st.session_state.copilot_clean_audit.append({"function":function,"details":message,"sheet":selected_sheet})
-                        st.success(message)
+        candidate_module = requested_module or (available_modules[0] if available_modules else "")
+        source_tables = discover_visual_tables(candidate_module) if candidate_module else []
+
+        upload_override = st.file_uploader(
+            "📤 Optional data override (Excel / CSV)",
+            type=["xlsx", "csv"],
+            key="copilot_orchestrator_upload",
+            help="Leave empty to let Copilot inspect the selected module's existing workspace data.",
+        )
+
+        source_df = pd.DataFrame()
+        source_name = "No dataset"
+        if upload_override is not None:
+            try:
+                imported_books = read_uploaded_workbook(upload_override.getvalue(), upload_override.name)
+                imported_sheets = list(imported_books.keys())
+                selected_import_sheet = st.selectbox("Imported sheet", imported_sheets, key="copilot_orchestrator_import_sheet")
+                source_df = imported_books[selected_import_sheet].copy(deep=True)
+                source_name = f"{upload_override.name} · {selected_import_sheet}"
+            except Exception as exc:
+                st.error(f"Copilot could not read the uploaded dataset safely: {exc}")
+        elif source_tables:
+            source_labels = [label for label, _, _ in source_tables]
+            selected_source = st.selectbox("📚 Workspace data source", source_labels, key="copilot_orchestrator_source")
+            source_df = source_tables[source_labels.index(selected_source)][2].copy(deep=True)
+            source_name = selected_source
+        else:
+            st.info("No existing table was found for this target module. Upload a dataset above to activate orchestration.")
+
+        routed_module = candidate_module
+        route_reason = "Manual module selection."
+        if workflow_prompt and available_modules:
+            routed_module, route_reason = recommend_module(workflow_prompt, available_modules, requested_module)
+            if routed_module != candidate_module and requested_module is None:
+                st.info(f"🤖 Auto-routing: **{routed_module}** · {route_reason}")
+                routed_tables = discover_visual_tables(routed_module)
+                if routed_tables and not upload_override:
+                    source_labels = [label for label, _, _ in routed_tables]
+                    routed_source = st.selectbox("Routed module data source", source_labels, key="copilot_orchestrator_routed_source")
+                    source_df = routed_tables[source_labels.index(routed_source)][2].copy(deep=True)
+                    source_name = routed_source
+
+        if workflow_prompt and not source_df.empty:
+            plan = build_workflow_plan(workflow_prompt, routed_module, source_df)
+            st.markdown("### 🗺️ Proposed engineering workflow")
+            st.caption(f"Source: **{source_name}** · Module: **{routed_module}**")
+            plan_df = pd.DataFrame([
+                {"Step": item["step"], "Status": item["status"], "What Copilot will do": item["detail"]}
+                for item in plan["steps"]
+            ])
+            st.dataframe(plan_df, use_container_width=True, hide_index=True)
+
+            p1, p2, p3, p4 = st.columns(4)
+            p1.metric("Rows inspected", f'{plan["inspection"]["rows"]:,}')
+            p2.metric("Columns", f'{plan["inspection"]["columns"]:,}')
+            p3.metric("Missing cells", f'{plan["inspection"]["missing_cells"]:,}')
+            p4.metric("Selected method", plan["method"].get("method", "Profile"))
+
+            approve = st.checkbox(
+                "I approve this read-only workflow to execute against the selected dataset.",
+                key="copilot_orchestrator_approval",
+            )
+            run_workflow = st.button(
+                "🚀 Execute Engineering Workflow",
+                type="primary",
+                use_container_width=True,
+                disabled=not approve,
+                key="copilot_orchestrator_run",
+            )
+
+            if run_workflow:
+                started_ns = time.perf_counter_ns()
+                try:
+                    with st.spinner("Copilot is executing the engineering workflow..."):
+                        run = run_orchestration(
+                            workflow_prompt,
+                            routed_module,
+                            source_df,
+                            context={
+                                "customers": st.session_state.get("customers_list", []),
+                                "warehouses": st.session_state.get("warehouses_list", []),
+                                "milp_solver": cached_milp_optimization,
+                                "validate_network_inputs": validate_network_inputs,
+                            },
+                        )
+                    run_id = run["run_id"]
+                    st.session_state["copilot_orchestrator_run"] = {
+                        key: value
+                        for key, value in run.items()
+                        if key not in {"export", "figure"}
+                    }
+                    if run.get("figure") is not None:
+                        st.session_state["copilot_orchestrator_figure_json"] = run["figure"].to_json()
+                    st.session_state["copilot_orchestrator_export"] = run["export"]
+
+                    evidence = {
+                        "intent": run["intent"],
+                        "method": run["method"],
+                        "source": source_name,
+                        "rows": run["inspection"].get("rows", 0),
+                        "result_rows": len(run["result"]),
+                        "analysis_type": run["analysis_meta"].get("type"),
+                    }
+                    for step in plan["steps"]:
+                        log_copilot_action(
+                            routed_module,
+                            step["step"],
+                            st.session_state.get("current_user", "unknown"),
+                            requires_approval=False,
+                            status="Completed" if step["status"] != "Conditional" else "Completed",
+                            evidence=evidence,
+                            run_id=run_id,
+                        )
+                    benchmark_duration(routed_module, started_ns, st.session_state.get("current_user", "unknown"), len(source_df), event="copilot_orchestration")
+                    st.success(f"Workflow completed · **{run_id}**")
+                except Exception as exc:
+                    st.error(f"Copilot workflow stopped safely before completion: {type(exc).__name__}: {exc}")
+
+        saved_run = st.session_state.get("copilot_orchestrator_run")
+        if isinstance(saved_run, dict):
+            st.markdown("---")
+            st.markdown("## 📊 Engineering Decision Package")
+            meta = saved_run.get("analysis_meta", {}) or {}
+            rr1, rr2, rr3 = st.columns(3)
+            rr1.metric("Workflow", saved_run.get("run_id", "—"))
+            rr2.metric("Module", saved_run.get("module", "—"))
+            rr3.metric("Analysis", str(meta.get("type", "analysis")).replace("_", " ").title())
+
+            result_df = saved_run.get("result", pd.DataFrame())
+            if isinstance(result_df, pd.DataFrame) and not result_df.empty:
+                st.dataframe(result_df.head(500), use_container_width=True, hide_index=True)
+            explanation = str(saved_run.get("explanation", ""))
+            if explanation:
+                st.markdown("### 🧩 Explanation")
+                st.markdown(explanation)
+
+            comparison = saved_run.get("comparison", pd.DataFrame())
+            comparison_meta = saved_run.get("comparison_meta", {}) or {}
+            if isinstance(comparison, pd.DataFrame) and not comparison.empty and comparison_meta.get("mode") != "unavailable":
+                st.markdown("### 🔄 Scenario comparison")
+                st.dataframe(comparison.head(500), use_container_width=True, hide_index=True)
+
+            figure_json = st.session_state.get("copilot_orchestrator_figure_json")
+            if isinstance(figure_json, str) and figure_json:
+                try:
+                    st.markdown("### 📈 Live graph")
+                    orchestrator_fig = go.Figure(json.loads(figure_json))
+                    st.plotly_chart(orchestrator_fig, use_container_width=True)
+                except Exception:
+                    st.info("The graph was generated but could not be reconstructed in this view.")
+
+            export_bytes = st.session_state.get("copilot_orchestrator_export")
+            if isinstance(export_bytes, (bytes, bytearray)):
+                st.download_button(
+                    "📦 Download Copilot Engineering Evidence Package",
+                    data=export_bytes,
+                    file_name=f"shoir_ie_copilot_{saved_run.get('run_id','workflow').lower()}.zip",
+                    mime="application/zip",
+                    type="primary",
+                    use_container_width=True,
+                    key="copilot_orchestrator_export_download",
+                )
+
+        st.markdown("---")
+        with st.expander("💬 Conversational Copilot & Excel Cleaning (secondary)", expanded=False):
+            cp1, cp2 = st.columns([2, 1], gap="large")
+            with cp1:
+                uploaded = st.file_uploader("📤 Upload Excel / CSV for Copilot", type=["xlsx", "csv"], key="copilot_workbook_upload")
+                if uploaded is not None:
+                    signature = hashlib.sha256(uploaded.getvalue()).hexdigest()
+                    if st.session_state.get("copilot_workbook_signature") != signature:
+                        try:
+                            st.session_state.copilot_workbook = read_uploaded_workbook(uploaded.getvalue(), uploaded.name)
+                            st.session_state.copilot_workbook_signature = signature
+                            st.session_state.copilot_workbook_name = uploaded.name
+                            st.session_state.copilot_workbook_original = {k:v.copy(deep=True) for k,v in st.session_state.copilot_workbook.items()}
+                            st.session_state.copilot_clean_audit = []
+                            st.success(f"Loaded {uploaded.name} with {len(st.session_state.copilot_workbook)} sheet(s).")
+                        except Exception as exc:
+                            st.error(f"Could not read the workbook safely: {exc}")
+    
+            workbook = st.session_state.get("copilot_workbook", {})
+            if workbook:
+                sheets=list(workbook.keys())
+                selected_sheet=st.selectbox("Workbook sheet", sheets, key="copilot_sheet")
+                df=workbook[selected_sheet]
+                st.markdown("### 🧹 Excel Data Cleaning Studio")
+                st.caption("These controls implement the 12 cleaning operations shown in your reference image.")
+                fn_names=[x[0] for x in EXCEL_FUNCTIONS]
+                function=st.selectbox("Choose an Excel cleaning function", fn_names, key="copilot_excel_function")
+                all_cols=list(df.columns)
+                cols=st.multiselect("Columns", all_cols, default=all_cols if function not in ("TEXTSPLIT","TEXTJOIN") else [], key="copilot_function_columns")
+                c1,c2,c3=st.columns(3)
+                with c1:
+                    delimiter=st.text_input("Delimiter", value=",", key="copilot_delimiter")
+                    find_text=st.text_input("Find", key="copilot_find")
+                with c2:
+                    replace_text=st.text_input("Replace with", key="copilot_replace")
+                    split_col=st.selectbox("TEXTSPLIT column", all_cols, key="copilot_split_col") if all_cols else None
+                with c3:
+                    output_col=st.text_input("TEXTJOIN output column", value="Joined", key="copilot_output_col")
+                    join_cols=st.multiselect("TEXTJOIN columns", all_cols, key="copilot_join_cols")
+    
+                a,b,d=st.columns(3)
+                with a:
+                    if st.button("✨ Auto Clean 12 checks", type="primary", use_container_width=True, key="copilot_auto_clean"):
+                        cleaned,audit=clean_dataframe(df)
+                        workbook[selected_sheet]=cleaned
+                        st.session_state.copilot_clean_audit.extend(audit)
+                        st.success("Automatic cleaning completed.")
                         st.rerun()
-                    except Exception as exc:
-                        st.error(f"{function} could not be applied: {exc}")
-            with d:
-                if st.button("↩️ Reset Workbook", use_container_width=True, key="copilot_reset_workbook"):
-                    st.session_state.copilot_workbook={k:v.copy(deep=True) for k,v in st.session_state.copilot_workbook_original.items()}
-                    st.session_state.copilot_clean_audit=[]
-                    st.rerun()
+                with b:
+                    if st.button("▶ Apply Function", use_container_width=True, key="copilot_apply_function"):
+                        try:
+                            kwargs={"columns":cols}
+                            if function=="TEXTSPLIT": kwargs.update(column=split_col,delimiter=delimiter)
+                            elif function=="TEXTJOIN": kwargs.update(columns=join_cols,delimiter=delimiter,output_column=output_col)
+                            elif function in ("SUBSTITUTE","FIND & REPLACE"):
+                                kwargs.update(old=find_text, new=replace_text, find_text=find_text, replace_text=replace_text)
+                            new_df,message=apply_excel_function(df,function,**kwargs)
+                            workbook[selected_sheet]=new_df
+                            st.session_state.copilot_clean_audit.append({"function":function,"details":message,"sheet":selected_sheet})
+                            st.success(message)
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(f"{function} could not be applied: {exc}")
+                with d:
+                    if st.button("↩️ Reset Workbook", use_container_width=True, key="copilot_reset_workbook"):
+                        st.session_state.copilot_workbook={k:v.copy(deep=True) for k,v in st.session_state.copilot_workbook_original.items()}
+                        st.session_state.copilot_clean_audit=[]
+                        st.rerun()
+    
+                st.dataframe(workbook[selected_sheet], use_container_width=True, hide_index=True)
+                numeric=[x for x in workbook[selected_sheet].columns if pd.api.types.is_numeric_dtype(workbook[selected_sheet][x])]
+                if numeric and len(workbook[selected_sheet])>0:
+                    chart_col=st.selectbox("📊 Preview chart",numeric,key="copilot_chart_column")
+                    chart_df=workbook[selected_sheet]
+                    x_col=next((x for x in chart_df.columns if x != chart_col and not pd.api.types.is_numeric_dtype(chart_df[x])), chart_df.columns[0])
+                    fig=px.bar(chart_df,x=x_col,y=chart_col,title=f"{selected_sheet}: {chart_col}")
+                    st.plotly_chart(fig,use_container_width=True)
+                else:
+                    fig=None
+    
+                export_tables=[(name,data) for name,data in workbook.items()]
+                excel_bytes=build_excel_report("Shoir-IE Copilot Cleaned Workbook",export_tables,audit=st.session_state.get("copilot_clean_audit",[]))
+                st.download_button("📥 Download Cleaned & Formatted Excel",excel_bytes,"shoir_ie_copilot_cleaned.xlsx","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",use_container_width=True)
+                bundle=build_workbook_bundle("Shoir-IE Copilot Cleaned Workbook",export_tables,figures=[(selected_sheet,fig)] if fig is not None else [],audit=st.session_state.get("copilot_clean_audit",[]))
+                st.download_button("📦 Download Workbook + Chart Package",bundle,"shoir_ie_copilot_package.zip","application/zip",use_container_width=True)
+    
+                with st.expander("🔎 Cleaning audit"):
+                    audit_df=pd.DataFrame(st.session_state.get("copilot_clean_audit",[]))
+                    st.dataframe(audit_df if not audit_df.empty else pd.DataFrame({"Status":["No transformations applied yet."]}),use_container_width=True,hide_index=True)
+    
+            with cp2:
+                st.markdown("### 🧭 Ask what to use")
+                recommendation_prompt=st.text_area("What result do you want?", placeholder="e.g. I need to forecast SKU demand using weather and promotions", key="copilot_recommendation_prompt")
+                if st.button("Recommend Module", use_container_width=True, key="copilot_recommend"):
+                    recommendation=copilot_module_recommendation(recommendation_prompt)
+                    st.info(recommendation)
+                    current_tier=str(st.session_state.get("user_tier","Starter Tier"))
+                    if "Required tier:" in recommendation:
+                        required_tier=recommendation.split("Required tier:",1)[1].strip().rstrip(".")
+                        if not platform_tier_allows(current_tier, required_tier):
+                            st.warning(f"🔒 This module requires **{required_tier}**. Your current tier is **{current_tier}**. Upgrade in Subscriptions to unlock it.")
+                st.markdown("### 💬 Copilot")
+                for msg in st.session_state.copilot_messages:
+                    with st.chat_message(msg["role"]):
+                        st.markdown(msg["content"])
+                if prompt := st.chat_input("Ask Copilot to clean, analyze, recommend a module, or run an available command"):
+                    st.session_state.copilot_messages.append({"role":"user","content":prompt})
+                    with st.chat_message("user"):
+                        st.markdown(prompt)
+                    with st.chat_message("assistant"):
+                        with st.spinner("Copilot is working..."):
+                            reply=get_copilot_response(prompt,st.session_state.copilot_messages)
+                        st.markdown(reply)
+                    st.session_state.copilot_messages.append({"role":"assistant","content":reply})
 
-            st.dataframe(workbook[selected_sheet], use_container_width=True, hide_index=True)
-            numeric=[x for x in workbook[selected_sheet].columns if pd.api.types.is_numeric_dtype(workbook[selected_sheet][x])]
-            if numeric and len(workbook[selected_sheet])>0:
-                chart_col=st.selectbox("📊 Preview chart",numeric,key="copilot_chart_column")
-                chart_df=workbook[selected_sheet]
-                x_col=next((x for x in chart_df.columns if x != chart_col and not pd.api.types.is_numeric_dtype(chart_df[x])), chart_df.columns[0])
-                fig=px.bar(chart_df,x=x_col,y=chart_col,title=f"{selected_sheet}: {chart_col}")
-                st.plotly_chart(fig,use_container_width=True)
-            else:
-                fig=None
-
-            export_tables=[(name,data) for name,data in workbook.items()]
-            excel_bytes=build_excel_report("Shoir-IE Copilot Cleaned Workbook",export_tables,audit=st.session_state.get("copilot_clean_audit",[]))
-            st.download_button("📥 Download Cleaned & Formatted Excel",excel_bytes,"shoir_ie_copilot_cleaned.xlsx","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",use_container_width=True)
-            bundle=build_workbook_bundle("Shoir-IE Copilot Cleaned Workbook",export_tables,figures=[(selected_sheet,fig)] if fig is not None else [],audit=st.session_state.get("copilot_clean_audit",[]))
-            st.download_button("📦 Download Workbook + Chart Package",bundle,"shoir_ie_copilot_package.zip","application/zip",use_container_width=True)
-
-            with st.expander("🔎 Cleaning audit"):
-                audit_df=pd.DataFrame(st.session_state.get("copilot_clean_audit",[]))
-                st.dataframe(audit_df if not audit_df.empty else pd.DataFrame({"Status":["No transformations applied yet."]}),use_container_width=True,hide_index=True)
-
-        with cp2:
-            st.markdown("### 🧭 Ask what to use")
-            recommendation_prompt=st.text_area("What result do you want?", placeholder="e.g. I need to forecast SKU demand using weather and promotions", key="copilot_recommendation_prompt")
-            if st.button("Recommend Module", use_container_width=True, key="copilot_recommend"):
-                recommendation=copilot_module_recommendation(recommendation_prompt)
-                st.info(recommendation)
-                current_tier=str(st.session_state.get("user_tier","Starter Tier"))
-                if "Required tier:" in recommendation:
-                    required_tier=recommendation.split("Required tier:",1)[1].strip().rstrip(".")
-                    if not platform_tier_allows(current_tier, required_tier):
-                        st.warning(f"🔒 This module requires **{required_tier}**. Your current tier is **{current_tier}**. Upgrade in Subscriptions to unlock it.")
-            st.markdown("### 💬 Copilot")
-            for msg in st.session_state.copilot_messages:
-                with st.chat_message(msg["role"]):
-                    st.markdown(msg["content"])
-            if prompt := st.chat_input("Ask Copilot to clean, analyze, recommend a module, or run an available command"):
-                st.session_state.copilot_messages.append({"role":"user","content":prompt})
-                with st.chat_message("user"):
-                    st.markdown(prompt)
-                with st.chat_message("assistant"):
-                    with st.spinner("Copilot is working..."):
-                        reply=get_copilot_response(prompt,st.session_state.copilot_messages)
-                    st.markdown(reply)
-                st.session_state.copilot_messages.append({"role":"assistant","content":reply})
 
     # New unified Industrial Operating System renders as a first-class platform workspace.
     if mod == "Industrial Operating System":
