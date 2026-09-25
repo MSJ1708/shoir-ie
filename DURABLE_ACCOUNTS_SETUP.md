@@ -1,0 +1,22 @@
+# Durable Shoir-IE accounts
+
+Shoir-IE now uses the provisioned Supabase project **shoir-ie-production** through its managed Edge Function. The Streamlit app does not require a database password or a Streamlit Cloud PostgreSQL secret for account/workspace persistence.
+
+The Edge Function is the authoritative backend for authentication, account approval, 30-day subscriptions, renewal requests, and per-user workspace snapshots.
+The application then migrates local-only accounts, hydrates durable accounts after restarts, preserves passwords/profiles/workspaces, records an explicit subscription expiry timestamp, blocks paid accounts after 30 days, preserves expired accounts rather than deleting them, and supports renewal requests that add another 30 days after administrator approval.
+
+The master admin sho is exempt from the paid subscription expiry rule.
+
+Accounts that were already lost from a previous non-persistent deployment cannot be reconstructed by code alone unless a backup exists.
+
+## Important production safeguard
+
+The application no longer silently accepts production account creation when the managed database is missing. Without PostgreSQL/Supabase, production account creation and approval are blocked so users cannot create accounts that later disappear after a platform restart.
+
+For local-only development, you may explicitly enable the SQLite fallback with:
+
+```toml
+allow_ephemeral_local_storage = true
+```
+
+Do not enable that setting for the production deployment.
