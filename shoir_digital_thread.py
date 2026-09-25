@@ -172,6 +172,50 @@ def _discover_experience_records(owner: str) -> tuple[list[dict[str, Any]], list
                     "created_at": row[4],
                     "updated_at": row[5],
                 })
+
+            # Include the governed Decision Center records stored by the platform layer.
+            try:
+                platform_rows = conn.execute(
+                    "SELECT decision_id,title,module,status,created_at,created_at FROM platform_decisions WHERE created_by=? ORDER BY created_at DESC LIMIT 100",
+                    (owner,),
+                ).fetchall()
+                for row in platform_rows:
+                    decisions.append({
+                        "decision_id": row[0],
+                        "title": row[1],
+                        "module": row[2],
+                        "status": row[3],
+                        "created_at": row[4],
+                        "updated_at": row[5],
+                    })
+            except Exception:
+                pass
+
+            # Include Experiment Engine / platform experiment runs so the thread
+            # can trace Model -> Experiment -> Decision without relying only on
+            # the legacy research-experience tables.
+            try:
+                experiment_rows = conn.execute(
+                    "SELECT experiment_id,name,module,created_by,created_at FROM platform_experiments WHERE created_by=? ORDER BY created_at DESC LIMIT 100",
+                    (owner,),
+                ).fetchall()
+                for row in experiment_rows:
+                    studies.append({
+                        "study_id": row[0],
+                        "research_id": row[0],
+                        "title": row[1],
+                        "methodology": "Platform experiment run",
+                        "module": row[2],
+                        "updated_at": row[4],
+                    })
+            except Exception:
+                pass
+
+            # Stable de-duplication across the two persistence layers.
+            unique_studies = {str(s["study_id"]): s for s in studies}
+            studies = list(unique_studies.values())
+            unique_decisions = {str(d["decision_id"]): d for d in decisions}
+            decisions = list(unique_decisions.values())
     except Exception:
         pass
     return studies, decisions
