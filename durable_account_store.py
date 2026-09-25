@@ -444,6 +444,8 @@ def remote_account(username: str) -> Optional[dict[str, Any]]:
 
 
 def remote_accounts() -> list[dict[str, Any]]:
+    if edge_backend_configured():
+        raise RuntimeError("Bulk account listing is admin-only in Edge mode.")
     ensure_remote_schema()
     with _pg_connect() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
@@ -578,7 +580,10 @@ def update_latest_remote_request(username: str, request_type: str, status: str) 
 
 
 def sync_remote_requests_to_local(db_path: str = "enterprise_full_workspace.db") -> int:
-    """Hydrate pending subscription requests from PostgreSQL into SQLite cache."""
+    """Hydrate pending requests locally when direct PostgreSQL mode is used.
+    Edge mode retrieves requests only after an authenticated admin session."""
+    if edge_backend_configured():
+        return 0
     if not durable_backend_configured():
         return 0
     ensure_remote_schema()
@@ -634,7 +639,9 @@ def sync_remote_requests_to_local(db_path: str = "enterprise_full_workspace.db")
 
 
 def sync_remote_accounts_to_local(db_path: str = "enterprise_full_workspace.db") -> int:
-    """Hydrate local SQLite from remote accounts; never delete remote/local rows."""
+    """Hydrate local SQLite from remote accounts in direct PostgreSQL mode."""
+    if edge_backend_configured():
+        return 0
     if not durable_backend_configured():
         return 0
     ensure_remote_schema()
@@ -690,9 +697,9 @@ def sync_remote_accounts_to_local(db_path: str = "enterprise_full_workspace.db")
 
 
 def migrate_local_accounts_to_remote(db_path: str = "enterprise_full_workspace.db") -> int:
-    """Upload local accounts that are not already present remotely.
-    Existing remote accounts are authoritative and are never overwritten by this migration.
-    """
+    """Upload local accounts in direct PostgreSQL mode only."""
+    if edge_backend_configured():
+        return 0
     if not durable_backend_configured():
         return 0
     ensure_remote_schema()
@@ -733,7 +740,9 @@ def migrate_local_accounts_to_remote(db_path: str = "enterprise_full_workspace.d
 
 
 def sync_durable_accounts(db_path: str = "enterprise_full_workspace.db") -> bool:
-    """Use remote PostgreSQL as authority and migrate local-only accounts once."""
+    """Report durable backend readiness without touching ephemeral local SQLite."""
+    if edge_backend_configured():
+        return True
     if not durable_backend_configured():
         return False
     ensure_remote_schema()
