@@ -42,8 +42,8 @@ def test_twin_what_if_and_anomaly_detection():
         "Value": [50.0, 51.0, 49.0, 50.5, 90.0],
     })
     result = replay_twin_what_if(twin, "Temperature", 10)
-    assert result.loc[0, "Baseline Value"] == 50.0
-    assert result.loc[0, "Scenario Value"] == 55.0
+    assert np.isclose(result.loc[0, "Baseline Value"], 50.0)
+    assert np.isclose(result.loc[0, "Scenario Value"], 55.0)
     anomalies = detect_twin_anomalies(twin, 2.0)
     assert "Alert" in anomalies.columns
     assert (anomalies["Alert"] == "Investigate").any()
