@@ -126,3 +126,9 @@ def test_optimization_can_use_existing_solver_hook():
     assert run["analysis_meta"]["solver_status"] == "Optimal"
     assert float(run["analysis_meta"]["total_cost"]) == 1234.0
     assert not run["result"].empty
+
+
+def test_plan_can_expose_linked_knowledge_context_count():
+    df = pd.DataFrame({"Date": pd.date_range("2026-01-01", periods=8), "Demand": range(10, 18)})
+    plan = build_workflow_plan("forecast demand using the SOP context", "Advanced ML Demand Forecasting", df, knowledge_documents=3)
+    assert "3 linked knowledge document(s)" in plan["steps"][5]["detail"]
