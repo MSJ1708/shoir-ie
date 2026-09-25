@@ -139,7 +139,7 @@ def init_platform_db(db_path: str="enterprise_full_workspace.db") -> bool:
         ddl = [
             ("industrial_entities","CREATE TABLE IF NOT EXISTS industrial_entities(entity_id TEXT PRIMARY KEY, entity_type TEXT, name TEXT, attributes_json TEXT, updated_at TEXT)"),
             ("platform_datasets","CREATE TABLE IF NOT EXISTS platform_datasets(dataset_id TEXT PRIMARY KEY, name TEXT, source_name TEXT, row_count INTEGER, column_count INTEGER, sha256 TEXT, created_at TEXT, schema_json TEXT)"),
-            ("platform_models","CREATE TABLE IF NOT EXISTS platform_models(model_id TEXT PRIMARY KEY, name TEXT, version TEXT, model_type TEXT, parameters_json TEXT, data_hash TEXT, assumptions_json TEXT, created_by TEXT, created_at TEXT, status TEXT, solver_version TEXT, result_hash TEXT, dataset_id TEXT, run_id TEXT)"),
+            ("platform_models","CREATE TABLE IF NOT EXISTS platform_models(model_id TEXT PRIMARY KEY, name TEXT, version TEXT, model_type TEXT, parameters_json TEXT, data_hash TEXT, assumptions_json TEXT, created_by TEXT, created_at TEXT, status TEXT, solver_version TEXT, result_hash TEXT)"),
             ("platform_experiments","CREATE TABLE IF NOT EXISTS platform_experiments(experiment_id TEXT PRIMARY KEY, name TEXT, module TEXT, scenarios_json TEXT, results_json TEXT, created_by TEXT, created_at TEXT)"),
             ("platform_benchmarks","CREATE TABLE IF NOT EXISTS platform_benchmarks(id INTEGER PRIMARY KEY AUTOINCREMENT, metric TEXT, value REAL, unit TEXT, source TEXT, source_date TEXT, created_at TEXT)"),
             ("platform_decisions","CREATE TABLE IF NOT EXISTS platform_decisions(decision_id TEXT PRIMARY KEY, title TEXT, module TEXT, metrics_json TEXT, assumptions_json TEXT, uncertainty_json TEXT, created_by TEXT, created_at TEXT, status TEXT)"),
@@ -155,13 +155,15 @@ def init_platform_db(db_path: str="enterprise_full_workspace.db") -> bool:
             ("trade_rules","CREATE TABLE IF NOT EXISTS trade_rules(id INTEGER PRIMARY KEY AUTOINCREMENT, region_from TEXT, region_to TEXT, product_class TEXT, rule TEXT, active INTEGER, updated_at TEXT)"),
         ]
         for _,sql in ddl: conn.execute(sql)
-        model_columns = [
-            ("solver_version", "TEXT"),
-            ("result_hash", "TEXT"),
-            ("dataset_id", "TEXT"),
-            ("run_id", "TEXT"),
-        ]
-        for column, definition in model_columns:
+        for column, definition in [("solver_version", "TEXT"), ("result_hash", "TEXT")]:
+            try:
+                conn.execute(f"ALTER TABLE platform_models ADD COLUMN {column} {definition}")
+            except sqlite3.OperationalError:
+                pass
+        # Extended PR57 lineage fields are additive and intentionally kept in
+        # their own migration block so the shared mainline schema hunk remains
+        # identical across branches.
+        for column, definition in [("dataset_id", "TEXT"), ("run_id", "TEXT")]:
             try:
                 conn.execute(f"ALTER TABLE platform_models ADD COLUMN {column} {definition}")
             except sqlite3.OperationalError:
@@ -477,39 +479,51 @@ def save_model_snapshot(
     assumptions: dict,
     status="Draft",
     db_path="enterprise_full_workspace.db",
-    *,
-    version: str = "1.0.0",
     solver_version: str = "",
     result_hash: str = "",
-    dataset_id: str = "",
-    run_id: str = "",
 ) -> str:
-    base = f"{name}|{version}|{json.dumps(parameters,sort_keys=True,default=str)}|{data_hash}|{result_hash}|{run_id}"
-    mid = "MOD-" + hashlib.sha256(base.encode("utf-8")).hexdigest()[:12].upper()
+    base = f"{name}|{json.dumps(parameters,sort_keys=True,default=str)}|{data_hash}|{solver_version}|{result_hash}"
+    mid = "MOD-" + hashlib.sha256(base.encode()).hexdigest()[:12].upper()
     with sqlite3.connect(db_path) as c:
         c.execute(
             """
             INSERT OR REPLACE INTO platform_models
-            (model_id,name,version,model_type,parameters_json,data_hash,assumptions_json,
-             created_by,created_at,status,solver_version,result_hash,dataset_id,run_id)
-            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            (model_id,name,version,model_type,parameters_json,data_hash,assumptions_json,created_by,created_at,status,solver_version,result_hash)
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
-                mid, name, version, model_type,
-                json.dumps(parameters, default=str),
-                data_hash,
-                json.dumps(assumptions, default=str),
-                username,
-                _now(),
-                status,
-                solver_version,
-                result_hash,
-                dataset_id,
-                run_id,
+                mid, name, "1.0.0", model_type,
+                json.dumps(parameters, default=str), data_hash,
+                json.dumps(assumptions, default=str), username, _now(), status,
+                solver_version, result_hash,
             ),
         )
         c.commit()
     return mid
+
+def save_model_extended_lineage(
+    model_id: str,
+    username: str,
+    *,
+    version: str = "1.0.0",
+    dataset_id: str = "",
+    run_id: str = "",
+    db_path: str = "enterprise_full_workspace.db",
+) -> None:
+    """Persist PR57-only model lineage without changing the shared registry contract."""
+    try:
+        with sqlite3.connect(db_path) as c:
+            c.execute(
+                "UPDATE platform_models SET version=?, dataset_id=?, run_id=? WHERE model_id=?",
+                (str(version or "1.0.0"), str(dataset_id or ""), str(run_id or ""), str(model_id)),
+            )
+            c.commit()
+    except Exception:
+        # Older databases may not have the optional lineage columns yet; the
+        # enterprise artifact bridge still retains the supplied lineage.
+        pass
+
+
 
 def save_experiment(name: str, module: str, scenarios: list, results: dict, username: str, db_path="enterprise_full_workspace.db") -> str:
     eid="EXP-"+hashlib.sha256((name+module+_now()).encode()).hexdigest()[:12].upper()
@@ -1125,12 +1139,17 @@ def render_module(module: str, tier: str, username: str):
                 result_hash=hashlib.sha256(
                     result_value.to_csv(index=False).encode("utf-8")
                 ).hexdigest() if isinstance(result_value,pd.DataFrame) else ""
+                model_version = version.strip() or "1.0.0"
                 mid=save_model_snapshot(
                     name, model_type, json.loads(params), source_hash, username,
                     {"user_entered":"true"},
-                    version=version.strip() or "1.0.0",
                     solver_version=solver_version.strip(),
                     result_hash=result_hash,
+                )
+                save_model_extended_lineage(
+                    mid,
+                    username,
+                    version=model_version,
                     dataset_id=dataset_id.strip(),
                     run_id=run_id.strip(),
                 )
@@ -1142,6 +1161,7 @@ def render_module(module: str, tier: str, username: str):
                             username,
                             {
                                 "data_hash": source_hash,
+                                "version": model_version,
                                 "solver_version": solver_version.strip(),
                                 "result_hash": result_hash,
                                 "dataset_id": dataset_id.strip(),
