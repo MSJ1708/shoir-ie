@@ -9227,7 +9227,14 @@ else:
                     source_name = routed_source
 
         if workflow_prompt and not source_df.empty:
-            plan = build_workflow_plan(workflow_prompt, routed_module, source_df)
+            try:
+                from shoir_enterprise_services import knowledge_context
+                linked_knowledge = knowledge_context()
+                linked_knowledge_count = len(st.session_state.get("knowledge_documents", []))
+            except Exception:
+                linked_knowledge = ""
+                linked_knowledge_count = 0
+            plan = build_workflow_plan(workflow_prompt, routed_module, source_df, linked_knowledge_count)
             st.markdown("### 🗺️ Proposed engineering workflow")
             st.caption(f"Source: **{source_name}** · Module: **{routed_module}**")
             plan_df = pd.DataFrame([
@@ -9267,6 +9274,8 @@ else:
                                 "warehouses": st.session_state.get("warehouses_list", []),
                                 "milp_solver": cached_milp_optimization,
                                 "validate_network_inputs": validate_network_inputs,
+                                "knowledge_context": linked_knowledge,
+                                "knowledge_documents": linked_knowledge_count,
                             },
                         )
                     run_id = run["run_id"]
