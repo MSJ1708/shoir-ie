@@ -30,10 +30,11 @@ import pandas as pd
 import requests
 
 try:
-    from durable_account_store import _pg_connect, durable_backend_configured
+    from durable_account_store import _pg_connect, durable_backend_configured, database_url
 except Exception:  # local/unit-test safety
     _pg_connect = None
     durable_backend_configured = lambda: False
+    database_url = lambda: ""
 
 
 DEFAULT_DB = "enterprise_full_workspace.db"
@@ -60,7 +61,15 @@ def workspace_key(username: str, workspace: str = "default") -> str:
 
 def _remote() -> bool:
     try:
-        return bool(durable_backend_configured and durable_backend_configured() and _pg_connect)
+        # The account/workspace layer may use a Supabase Edge Function without
+        # exposing a direct PostgreSQL URL. The enterprise SQL layer must only
+        # enter direct PostgreSQL mode when a real DSN is available.
+        return bool(
+            _pg_connect
+            and durable_backend_configured
+            and durable_backend_configured()
+            and database_url()
+        )
     except Exception:
         return False
 
