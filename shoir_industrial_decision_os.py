@@ -1123,13 +1123,13 @@ def render_visualization_contract(module: str, *, expanded: bool = False) -> dic
             pass
 
     suite: list[tuple[str, Any]] = []
-    if chartable:
+    if frames:
         try:
             source = max((df for _, _, df in frames), key=len)
             suite = build_visualization_suite(source, context=module, max_figures=6)
         except Exception:
             suite = []
-    elif not chartable:
+    if not suite:
         suite = [("Engineering Workflow", structural_workflow_figure(module))]
 
     # Display the fallback when the native Live Visualization Studio has not
