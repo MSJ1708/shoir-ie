@@ -61,6 +61,23 @@ def test_decision_outcome_persistence_and_variance(tmp_path, monkeypatch):
     assert float(variance.loc[variance["KPI"].eq("Throughput"), "Delta"].iloc[0]) == -10.0
     assert float(variance.loc[variance["KPI"].eq("Cost"), "Delta %"].iloc[0]) == 10.0
 
+def test_connector_system_transport_boundaries_are_explicit():
+    from shoir_enterprise_layer import validate_connector_profile
+
+    assert validate_connector_profile("SAP", "ODATA", "https://example.test")["valid"]
+    assert validate_connector_profile("ORACLE", "REST", "https://example.test")["valid"]
+    assert validate_connector_profile("WMS", "REST", "https://example.test")["valid"]
+    assert validate_connector_profile("MES", "MQTT", "mqtt://example.test:1883")["valid"]
+    assert validate_connector_profile("ERP", "REST", "https://example.test")["valid"]
+
+    oracle_opc = validate_connector_profile("ORACLE", "OPC-UA", "opc.tcp://example.test:4840")
+    sql_rest = validate_connector_profile("SQL", "REST", "https://example.test")
+    assert not oracle_opc["valid"]
+    assert not sql_rest["valid"]
+    assert "not executable" in " ".join(oracle_opc["errors"])
+    assert "not executable" in " ".join(sql_rest["errors"])
+
+
 def test_connector_sql_adapter_and_endpoint_redaction(tmp_path, monkeypatch):
     import shoir_enterprise_layer as ent
     db = tmp_path / "source.db"
