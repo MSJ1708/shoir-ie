@@ -726,6 +726,9 @@ def _auto_chart_choice(df: pd.DataFrame) -> str:
     has_anomaly = any("anomaly" in n or "outlier" in n for n in names)
     has_scenario = any("scenario" in n or "case" in n for n in names)
     has_timestamp = bool(dates)
+    control_ucl = _find_col(df, ("ucl", "upper control limit", "upper control"))
+    control_lcl = _find_col(df, ("lcl", "lower control limit", "lower control"))
+    control_measurement = _find_col(df, ("measurement", "measure", "observation", "sample"))
 
     # Explicit control-limit columns always beat generic 3D heuristics.
     if control_ucl and control_lcl and (control_measurement or numeric):
