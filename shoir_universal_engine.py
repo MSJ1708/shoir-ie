@@ -488,6 +488,8 @@ def _render_ui(module: str, tier: str, username: str) -> None:
                             st.session_state["universal_pivot_result_df"] = pvt.copy(deep=True)
                             record_action("pivot_saved", {"module": module, "rows": list(rows), "values": list(vals), "aggregation": agg}, username)
                             st.success("Industrial Pivot result saved to the workspace.")
+                    except Exception as exc:
+                        st.error(f"Pivot generation failed safely: {exc}")
 
         with tabs[2]:
             if not tables:
