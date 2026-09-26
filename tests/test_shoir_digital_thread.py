@@ -24,3 +24,13 @@ def test_digital_thread_graphs_render():
 
 def test_thread_export_frames_are_tabular():
     assert isinstance(pd.DataFrame({"node_id": ["DAT-1"]}), pd.DataFrame)
+
+
+def test_thread_vocabulary_covers_full_decision_spine():
+    expected = {
+        "Dataset", "Asset", "Process", "Product", "Material", "Order",
+        "Workforce", "Quality", "Maintenance", "Energy", "Cost", "Scenario",
+        "KPI", "Model", "Experiment", "Decision", "Outcome",
+    }
+    from shoir_digital_thread import THREAD_TYPES
+    assert set(THREAD_TYPES) == expected
