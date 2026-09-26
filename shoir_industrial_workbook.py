@@ -1002,6 +1002,25 @@ def render_industrial_workbook(tier:str="Starter",username:str="unknown")->None:
                 if not versions.empty:
                     st.markdown("#### Version history")
                     st.dataframe(versions,use_container_width=True,hide_index=True)
+                    version_options=[int(v) for v in versions["Version"].tolist()]
+                    selected_version=st.selectbox("Version to restore",version_options,key="iw_version_restore_select")
+                    if st.button("↩ Restore selected version as new current version",key="iw_restore_version"):
+                        try:
+                            restored_wb,restored_formulas,restored_semantic=load_workbook_version(wid,selected_version)
+                            st.session_state[WORKBOOK_STATE_KEY]=restored_wb
+                            st.session_state[FORMULA_STATE_KEY]=restored_formulas
+                            st.session_state["industrial_workbook_semantic_map"]=restored_semantic
+                            save_workbook(
+                                restored_wb,
+                                restored_formulas,
+                                restored_semantic,
+                                f"Shoir-IE Workbook · restored v{selected_version}",
+                                wid,
+                            )
+                            st.success(f"Version {selected_version} restored as the new current workbook state.")
+                            st.rerun()
+                        except Exception as exc:
+                            st.warning(f"Version restore failed safely: {exc}")
         u1,u2,u3,u4=st.columns(4); value=u1.number_input("Convert value",value=1.0,key="iw_unit_value"); fr=u2.text_input("From unit",value="min",key="iw_unit_from"); to=u3.text_input("To unit",value="h",key="iw_unit_to")
         if u4.button("Convert",key="iw_convert_unit"):
             try: st.metric("Converted",f"{convert_units(value,fr,to):,.6g} {to}")
