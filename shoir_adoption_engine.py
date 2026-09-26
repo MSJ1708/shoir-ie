@@ -378,6 +378,7 @@ def run_shoir_script(
     workbook: Mapping[str, pd.DataFrame],
     active_sheet: str | None = None,
     formulas: Mapping[str, Mapping[str, str]] | None = None,
+    variables: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Execute compiled Shoir Script commands against a workbook safely."""
     from shoir_industrial_workbook import apply_query_pipeline, evaluate_workbook_formulas
@@ -421,7 +422,7 @@ def run_shoir_script(
             if not cell or not expression:
                 raise ValueError("formula requires cell and expression.")
             formula_map.setdefault(sheet, {})[cell.upper()] = expression
-            state, audit = evaluate_workbook_formulas(state, formula_map)
+            state, audit = evaluate_workbook_formulas(state, formula_map, variables=variables)
             outputs.append({"command": name, "sheet": sheet, "cell": cell.upper(), "status": "Completed", "audit": audit})
             continue
 
@@ -463,6 +464,7 @@ def run_shoir_script(
     return {
         "workbook": state,
         "formulas": formula_map,
+        "variables": dict(variables or {}),
         "outputs": outputs,
         "script_hash": hashlib.sha256(str(script).encode("utf-8")).hexdigest(),
     }
