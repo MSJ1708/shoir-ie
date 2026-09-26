@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import ast
 import hashlib
+import io
 import json
 import math
 import re
@@ -666,7 +667,7 @@ def render_adoption_center(username: str, tier: str, initial_tab: str = "Home") 
                     choice = st.selectbox("Sheet", list(book), key="adoption_analyze_sheet")
                     source = book[choice]
                 else:
-                    source = pd.read_csv(pd.io.common.BytesIO(raw))
+                    source = pd.read_csv(io.BytesIO(raw))
                 st.session_state["adoption_quick_analyze_source"] = source
             except Exception as exc:
                 st.error(f"Import failed safely: {type(exc).__name__}: {exc}")
