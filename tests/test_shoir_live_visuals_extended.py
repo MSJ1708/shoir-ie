@@ -81,7 +81,7 @@ def test_enterprise_operations_visualizations_render():
         "Health %": [90, 70],
         "Status": ["Observed", "Review"],
     })
-    assert _auto_chart_choice(health) == "Bar"
+    assert _auto_chart_choice(health) == "Health Heatmap"
 
     network = pd.DataFrame({
         "Source": ["Plant A", "Plant B"],
