@@ -1,7 +1,8 @@
 """Global Project + Digital Thread for Shoir-IE.
 
-Creates a persistent, workspace-scoped traceability graph:
-Dataset -> Asset -> Process -> KPI -> Model -> Experiment -> Decision -> Outcome
+Creates a persistent, workspace-scoped industrial traceability graph:
+Dataset -> Asset -> Process -> Product/Material/Order/Workforce -> Quality/Maintenance/Energy/Cost
+-> KPI/Model/Experiment -> Scenario -> Decision -> Outcome
 
 The canonical graph is stored in Streamlit session state, which is already
 captured by the Shoir-IE workspace autosave/durable persistence path.
@@ -30,6 +31,15 @@ THREAD_TYPES = [
     "Dataset",
     "Asset",
     "Process",
+    "Product",
+    "Material",
+    "Order",
+    "Workforce",
+    "Quality",
+    "Maintenance",
+    "Energy",
+    "Cost",
+    "Scenario",
     "KPI",
     "Model",
     "Experiment",
