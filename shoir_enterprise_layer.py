@@ -532,6 +532,28 @@ def build_control_tower_health(state: Mapping[str, Mapping[str, Any]]) -> pd.Dat
     return pd.DataFrame(rows)
 
 
+def redact_connector_endpoint(endpoint: str) -> str:
+    """Remove embedded credentials/tokens from persisted connector endpoints."""
+    value = str(endpoint or "").strip()
+    if not value:
+        return ""
+    try:
+        from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+        parts = urlsplit(value)
+        userinfo = ""
+        if parts.username:
+            userinfo = parts.username
+        host = parts.hostname or ""
+        if parts.port:
+            host += ":" + str(parts.port)
+        if userinfo:
+            host = userinfo + "@"+host
+        blocked = {"token","access_token","api_key","apikey","key","password","passwd","secret","client_secret"}
+        query = [(k, "***" if k.lower() in blocked else v) for k, v in parse_qsl(parts.query, keep_blank_values=True)]
+        return urlunsplit((parts.scheme, host, parts.path, urlencode(query), ""))
+    except Exception:
+        return re.sub(r"(?i)(password|token|api[_-]?key|secret)=([^&\s]+)", r"\1=***", value)
+
 def record_connector_health(
     username: str,
     name: str,
@@ -547,7 +569,8 @@ def record_connector_health(
     wid = workspace_key(username, workspace)
     cid = "CONN-" + hashlib.sha256((wid + "|" + name + "|" + system_type + "|" + protocol).encode()).hexdigest()[:14].upper()
     stamp = now_iso()
-    params = (cid, wid, name, system_type, protocol, endpoint, status, latency_ms, detail, stamp, username)
+    safe_endpoint = redact_connector_endpoint(endpoint)
+    params = (cid, wid, name, system_type, protocol, safe_endpoint, status, latency_ms, detail, stamp, username)
     if _remote():
         with _pg_connect() as conn:
             with conn.cursor() as cur:
