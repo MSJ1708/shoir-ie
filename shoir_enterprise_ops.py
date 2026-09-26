@@ -402,19 +402,93 @@ def normalize_connector_health(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def render_connectivity_extension() -> None:
+    from shoir_enterprise_layer import (
+        connector_health_frame, connector_run_frame, test_connector_profile,
+        schedule_connector_sync, validate_connector_profile,
+    )
+
+    username = st.session_state.get("current_user", "unknown")
+    workspace = str(
+        st.session_state.get("shoir_workspace_name")
+        or st.session_state.get("workspace")
+        or st.session_state.get("active_workspace_name")
+        or "default"
+    )
     raw = st.session_state.get("conn_df", st.session_state.get("erp_connectors", []))
     health = normalize_connector_health(_df(raw))
+    persisted = connector_health_frame(username, workspace)
+    if not persisted.empty:
+        persisted = persisted.rename(columns={
+            "name": "Name", "system_type": "System Type", "protocol": "Protocol",
+            "status": "Status", "latency_ms": "Latency ms", "detail": "Errors",
+            "checked_at": "Last Sync",
+        })
+        health = pd.concat([health, persisted], ignore_index=True)
+        if "Name" in health.columns and "Protocol" in health.columns:
+            health = health.drop_duplicates(subset=["Name", "Protocol"], keep="last")
     st.session_state["connectivity_health_df"] = health
-    st.markdown("### 🔌 Connector Health & Deployment Readiness")
-    st.caption("SAP · Oracle · SQL · REST · MQTT · OPC-UA · WMS/MES/ERP profiles share one health surface. Live tests remain opt-in per connector.")
-    if health.empty:
-        st.info("Register a connector to begin health monitoring.")
-        return
-    st.dataframe(health, use_container_width=True, hide_index=True)
-    fig = px.bar(health, x="Name", y="Health %", color="Protocol", range_y=[0, 100], title="Enterprise Connector Health")
-    st.plotly_chart(fig, use_container_width=True)
-    _render_universal_viz("Industrial Connectivity Hub", "connectivity_health_df")
 
+    st.markdown("### 🔌 Connector Health & Deployment Readiness")
+    st.caption("One governed adapter surface for SAP · Oracle · WMS · MES · ERP · REST · SQL · MQTT · OPC-UA. Live tests are opt-in; secret values are never stored in connector records.")
+
+    with st.expander("🧭 Live Connection Wizard", expanded=False):
+        left, right = st.columns(2)
+        with left:
+            system_type = st.selectbox("System", ["SAP","ORACLE","WMS","MES","ERP","REST","SQL","MQTT","OPC-UA"], key="conn_wizard_system")
+            defaults = {"SAP":"ODATA","ORACLE":"SQL","WMS":"REST","MES":"REST","ERP":"REST","REST":"REST","SQL":"SQL","MQTT":"MQTT","OPC-UA":"OPC-UA"}
+            protocols = ["REST","ODATA","HTTPS","SQL","JDBC","MQTT","OPC-UA"]
+            default_protocol = defaults.get(system_type, "REST")
+            protocol = st.selectbox("Protocol / adapter", protocols, index=protocols.index(default_protocol), key="conn_wizard_protocol")
+            name = st.text_input("Connection name", value=f"{system_type} connection", key="conn_wizard_name")
+        with right:
+            endpoint = st.text_input("Endpoint / DSN", placeholder="https://… | postgresql://… | sqlite:///… | mqtt://… | opc.tcp://…", key="conn_wizard_endpoint")
+            secret_ref = st.text_input("Secret reference (optional)", placeholder="env:SAP_API_TOKEN", type="password", key="conn_wizard_secret_ref", help="Reference only. The secret value is never persisted.")
+            timeout = st.number_input("Timeout (seconds)", 1.0, 60.0, 8.0, 1.0, key="conn_wizard_timeout")
+
+        profile = validate_connector_profile(system_type, protocol, endpoint)
+        if profile["valid"]:
+            st.success(f"Adapter ready · {profile.get("adapter", protocol)}")
+        else:
+            st.warning("Configuration needs attention: " + " ".join(profile["errors"]))
+
+        c1, c2 = st.columns(2)
+        with c1:
+            if st.button("🧪 Test connection", type="primary", use_container_width=True, key="conn_wizard_test"):
+                if not endpoint.strip():
+                    st.warning("Enter an endpoint before testing.")
+                else:
+                    result = test_connector_profile(username, name, system_type, protocol, endpoint, secret_ref, workspace, float(timeout))
+                    st.session_state["connector_last_test"] = result
+                    st.rerun()
+        with c2:
+            interval = st.number_input("Sync interval (minutes)", 1, 10080, 60, 5, key="conn_wizard_interval")
+            enabled = st.checkbox("Enable schedule", value=True, key="conn_wizard_enabled")
+            if st.button("⏱️ Save synchronization schedule", use_container_width=True, key="conn_wizard_schedule"):
+                last = st.session_state.get("connector_last_test") or {}
+                connector_id = str(last.get("connector_id") or "")
+                if not connector_id:
+                    st.warning("Test the connection first so a connector ID exists.")
+                else:
+                    sid = schedule_connector_sync(username, connector_id, int(interval), workspace, bool(enabled))
+                    st.success(f"Synchronization schedule saved · {sid}")
+
+    last = st.session_state.get("connector_last_test")
+    if isinstance(last, dict):
+        st.markdown(f"**Last connector test:** {last.get("status","Unknown")} · {float(last.get("latency_ms",0.0)):.1f} ms · {last.get("detail","")}")
+
+    if health.empty:
+        st.info("Register or test a connector above to begin health monitoring.")
+    else:
+        st.dataframe(health, use_container_width=True, hide_index=True)
+        if "Health %" in health.columns:
+            fig = px.bar(health, x="Name", y="Health %", color="Protocol", range_y=[0,100], title="Enterprise Connector Health")
+            st.plotly_chart(fig, use_container_width=True)
+        runs = connector_run_frame(username, workspace, 100)
+        if not runs.empty:
+            st.markdown("#### Connector Test / Sync History")
+            st.dataframe(runs, use_container_width=True, hide_index=True)
+
+    _render_universal_viz("Industrial Connectivity Hub", "connectivity_health_df")
 
 # ---------------------------------------------------------------------------
 # Enterprise Security
