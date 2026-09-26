@@ -159,7 +159,8 @@ def _excel_aggregate(name: str, values: Any) -> float:
 
 _ALLOWED_FUNCS = {"ABS","AVERAGE","COUNT","COUNTA","IF","IFERROR","MAX","MIN",
                   "MOD","NOT","OR","AND","POWER","ROUND","SQRT","SUM",
-                  "OEE","TAKTTIME","LITTLELAW","CPK","PPK","EOQ","SAFETYSTOCK","NPV","CO2E","CONVERT"}
+                  "OEE","TAKTTIME","LITTLELAW","CPK","PPK","EOQ","SAFETYSTOCK","NPV","CO2E","CONVERT",
+                  "MTBF","MTTR","UTILIZATION","FPY","DPMO","PERCENTCHANGE","CAPACITY","YIELD"}
 
 class SafeFormulaEngine:
     def __init__(
@@ -323,7 +324,7 @@ class SafeFormulaEngine:
             if name == "NOT": return not bool(args[0])
             if name == "AND": return all(bool(x) for x in args)
             if name == "OR": return any(bool(x) for x in args)
-            if name in {"OEE","TAKTTIME","LITTLELAW","CPK","PPK","EOQ","SAFETYSTOCK","NPV","CO2E","CONVERT"}:
+            if name in {"OEE","TAKTTIME","LITTLELAW","CPK","PPK","EOQ","SAFETYSTOCK","NPV","CO2E","CONVERT","MTBF","MTTR","UTILIZATION","FPY","DPMO","PERCENTCHANGE","CAPACITY","YIELD"}:
                 from shoir_adoption_engine import evaluate_engineering_function
                 return evaluate_engineering_function(name, args)
         raise ValueError(f"Unsupported formula expression: {ast.dump(node, include_attributes=False)}")
