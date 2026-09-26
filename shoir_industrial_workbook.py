@@ -248,13 +248,24 @@ def _engineering_formula(name: str, args: list[Any]) -> Any:
 
 _ALLOWED_FUNCS = {"ABS","AVERAGE","COUNT","COUNTA","IF","IFERROR","MAX","MIN",
                   "MOD","NOT","OR","AND","POWER","ROUND","SQRT","SUM",
-                  "OEE","TAKT_TIME","LITTLE_LAW","CPK","EOQ","SERVICE_LEVEL",
-                  "CO2E","CONVERT","NPV","CAPEX_NPV","FORECAST_DEMAND","CAPACITY_GAP"}
+                  "OEE","TAKT_TIME","LITTLE_LAW","TAKTTIME","LITTLELAW","CPK","PPK","EOQ","SAFETYSTOCK","SERVICE_LEVEL",
+                  "CO2E","CONVERT","NPV","CAPEX_NPV","FORECAST_DEMAND","CAPACITY_GAP","MTBF","MTTR","UTILIZATION","FPY",
+                  "DPMO","PERCENTCHANGE","CAPACITY","YIELD"}
 
 class SafeFormulaEngine:
-    def __init__(self, workbook: Mapping[str, pd.DataFrame], formulas: Mapping[str, Mapping[str, str]] | None = None):
+    def __init__(
+        self,
+        workbook: Mapping[str, pd.DataFrame],
+        formulas: Mapping[str, Mapping[str, str]] | None = None,
+        variables: Mapping[str, Any] | None = None,
+    ):
         self.workbook = workbook
         self.formulas = formulas or {}
+        self.variables = {
+            str(k).strip(): (v.get("value") if isinstance(v, Mapping) and "value" in v else v)
+            for k, v in (variables or {}).items()
+            if str(k).strip()
+        }
         self._stack: set[tuple[str, str]] = set()
         self._current_sheet = ""
 
