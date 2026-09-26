@@ -1200,7 +1200,11 @@ def security_access_check(username: str, action: str, workspace: str = "default"
         mfa_verified = False
     reasons = []
     allowed = True
-    if not role and str(username) == str((locals().get("username") or "")):
+    try:
+        current_user = str(st.session_state.get("current_user") or "")
+    except Exception:
+        current_user = ""
+    if not role and current_user and current_user == str(username):
         role = "Owner"
     if not role:
         allowed = False
