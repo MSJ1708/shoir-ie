@@ -189,6 +189,9 @@ def init_db():
             )
         """)
 
+        # Password hash is optional on first boot. Never synthesize a default credential.
+        admin_pass_hash = None
+
         # Auto-migrate missing columns safely if updating an existing database
         migrations = [
             ("tier", "TEXT DEFAULT 'Starter Tier'"),
@@ -351,6 +354,11 @@ def init_db():
         else:
             # Preserve an existing admin credential; only seed metadata for a
             # first-run account when one does not already exist.
+            existing_admin = cursor.execute(
+                "SELECT password_hash FROM enterprise_users WHERE LOWER(username)='sho' LIMIT 1"
+            ).fetchone()
+            if existing_admin and existing_admin[0]:
+                admin_pass_hash = existing_admin[0]
             cursor.execute("""
                 INSERT OR IGNORE INTO enterprise_users
                 (username, role, tier, email, trial_expires, affiliate_code, ticket_expiry)
@@ -365,7 +373,7 @@ def init_db():
 
         # Never recreate/delete accounts on app startup.
         cursor.execute("SELECT 1 FROM users WHERE LOWER(username)='sho' LIMIT 1")
-        if cursor.fetchone() is None:
+        if cursor.fetchone() is None and admin_pass_hash:
             cursor.execute("""
                 INSERT INTO users
                 (username,password,role,tier,email,created_at,subscription_expires_at)
