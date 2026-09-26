@@ -394,7 +394,7 @@ class SafeFormulaEngine:
                 s = self._eval_node(node.args[0], sheet); ref = str(self._eval_node(node.args[1], sheet))
                 return self._range(None if s is None or s == "None" else str(s), ref)
             if name not in _ALLOWED_FUNCS: raise ValueError(f"Function is not allowed: {name}")
-            shared_names = {"OEE","TAKTTIME","LITTLELAW","PPK","EOQ","SAFETYSTOCK","CO2E","CONVERT","NPV","MTBF","MTTR","UTILIZATION","FPY","DPMO","PERCENTCHANGE","CAPACITY","YIELD"}
+            shared_names = {"OEE","TAKTTIME","LITTLELAW","PPK","EOQ","SAFETYSTOCK","CO2E","CONVERT","MTBF","MTTR","UTILIZATION","FPY","DPMO","PERCENTCHANGE","CAPACITY","YIELD"}
             if name == "CPK" and len(node.args) == 3:
                 shared_names.add("CPK")
             if name in shared_names:
