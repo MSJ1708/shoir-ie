@@ -458,9 +458,14 @@ def apply_query_pipeline(df:pd.DataFrame, steps:Sequence[Mapping[str,Any]])->pd.
             s_num=pd.to_numeric(work[col],errors="coerce")
             try: rhs=float(raw); left=s_num
             except (TypeError,ValueError): rhs=str(raw); left=work[col].astype("string")
-            mask={"==":left==rhs,"!=":left!=rhs,">":left>rhs,">=":left>=rhs,"<":left<rhs,"<=":left<=rhs,
-                  "contains":left.astype("string").str.contains(str(rhs),case=False,na=False)}.get(op)
-            if mask is None: raise ValueError(f"Unsupported filter operator: {op}")
+            if op=="==": mask=left==rhs
+            elif op=="!=": mask=left!=rhs
+            elif op==">": mask=left>rhs
+            elif op==">=": mask=left>=rhs
+            elif op=="<": mask=left<rhs
+            elif op=="<=": mask=left<=rhs
+            elif op=="contains": mask=left.astype("string").str.contains(str(rhs),case=False,na=False)
+            else: raise ValueError(f"Unsupported filter operator: {op}")
             work=work.loc[mask].copy()
         elif kind=="groupby":
             groups=[c for c in step.get("columns",[]) if c in work.columns]; value_col=str(step.get("value_column",""))
