@@ -452,21 +452,21 @@ def record_decision_outcome(
     if persist_artifact:
         try:
             from shoir_enterprise_layer import record_artifact
-        record_artifact(
-            owner,
-            "decision_outcome",
-            outcome_id,
-            {
-                "decision_id": decision_id,
-                "implementation_status": status,
-                "predicted": predicted_payload,
-                "actual": actual_payload,
-                "variance": variance_payload,
-                "lesson": str(lesson or "")[:2000],
-            },
-            workspace,
-        )
-    except Exception:
+            record_artifact(
+                owner,
+                "decision_outcome",
+                outcome_id,
+                {
+                    "decision_id": decision_id,
+                    "implementation_status": status,
+                    "predicted": predicted_payload,
+                    "actual": actual_payload,
+                    "variance": variance_payload,
+                    "lesson": str(lesson or "")[:2000],
+                },
+                workspace,
+            )
+        except Exception:
             pass
     return outcome_id
 
