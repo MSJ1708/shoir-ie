@@ -326,7 +326,7 @@ def init_db():
         # .streamlit/secrets.toml (same file your email credentials already
         # live in):
         #   [admin]
-        #   password = "your-password-here"
+        #   password value should come from the configured secret provider.
         # Until you do, it falls back to the exact same password that was
         # already hardcoded here, so sho's login does not change today.
         # IMPORTANT: since that password has been sitting in plain text in
@@ -772,7 +772,7 @@ if not any(x.get("name") == _IOS_CATALOG_ENTRY["name"] for x in MODULE_CATALOG):
 #      To turn this on: add `anthropic` to requirements.txt, then add to
 #      .streamlit/secrets.toml:
 #        [anthropic]
-#        api_key = "your-key-here"
+#        API-key value should come from the configured secret provider.
 #      That's a real per-request cost billed to your account, so it's
 #      opt-in, not switched on for you automatically.
 #   2. Without a key, it falls back to real commands grounded in your
