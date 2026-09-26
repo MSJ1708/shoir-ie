@@ -8684,9 +8684,9 @@ if selected_module in ["Enterprise Integration & Collaboration", "Enterprise Int
     # 1. Initialize Enterprise Session States across all modules
     if "erp_connectors" not in st.session_state:
         st.session_state.erp_connectors = [
-            {"connector_id": "ERP-01", "system_name": "SAP S/4HANA Manufacturing", "protocol": "REST API / OData", "status": "Connected", "last_sync": "10 min ago"},
-            {"connector_id": "ERP-02", "system_name": "Oracle MES Cloud", "protocol": "Kafka Event Stream", "status": "Active", "last_sync": "Real-time"},
-            {"connector_id": "ERP-03", "system_name": "Wonderware Historian SCADA", "protocol": "OPC-UA Gateway", "status": "Standby", "last_sync": "1 hr ago"},
+            {"connector_id": "ERP-01", "name": "SAP S/4HANA Manufacturing", "system_name": "SAP S/4HANA Manufacturing", "system_type": "SAP", "protocol": "REST / OData", "endpoint": "", "status": "Demo · Not tested", "last_sync": "Not synchronized", "environment": "Demo"},
+            {"connector_id": "ERP-02", "name": "Oracle MES Cloud", "system_name": "Oracle MES Cloud", "system_type": "Oracle", "protocol": "SQL", "endpoint": "", "status": "Demo · Not tested", "last_sync": "Not synchronized", "environment": "Demo"},
+            {"connector_id": "ERP-03", "name": "Wonderware Historian SCADA", "system_name": "Wonderware Historian SCADA", "system_type": "SCADA", "protocol": "OPC-UA", "endpoint": "", "status": "Demo · Not tested", "last_sync": "Not synchronized", "environment": "Demo"},
         ]
 
     if "workspace_users" not in st.session_state:
