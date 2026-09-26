@@ -588,7 +588,34 @@ def render_live_visualization_studio(module: str, *, expanded: bool = False, pre
     with st.expander("📊 Live Engineering Visualization Studio", expanded=expanded):
         st.caption("Charts use the current module/workspace data. Edit a table, change the controls, and the visualization updates on the next Streamlit rerun.")
         if not tables:
-            st.info("Add or import a numeric engineering table in this module to generate a live graph.")
+            st.info("No result table is available yet. The workflow visual below shows the governed engineering path; it is not a measurement.")
+            steps = ["Import", "Validate", "Analyze", "Visualize", "Decide", "Export"]
+            workflow_fig = go.Figure()
+            workflow_fig.add_trace(
+                go.Scatter(
+                    x=list(range(len(steps))),
+                    y=[0] * len(steps),
+                    mode="lines+markers+text",
+                    text=steps,
+                    textposition="top center",
+                    hovertemplate="%{text}<extra></extra>",
+                    showlegend=False,
+                    marker={"size": 15},
+                    line={"width": 3},
+                )
+            )
+            workflow_fig.update_layout(
+                title=f"{module} · Engineering workflow",
+                height=260,
+                xaxis={"showgrid": False, "showticklabels": False, "zeroline": False},
+                yaxis={"visible": False},
+                margin={"l": 20, "r": 20, "t": 55, "b": 20},
+            )
+            st.plotly_chart(
+                workflow_fig,
+                use_container_width=True,
+                config={"displayModeBar": True, "displaylogo": False, "responsive": True},
+            )
             return
 
         labels = [label for label, _, _ in tables]
@@ -822,6 +849,58 @@ def _make_figure(
             return px.line(work, x=date_col, y=metric, markers=True, title=title or f"Metric Trend · {metric}")
         return None
 
+    if chart == "Categorical Distribution":
+        category = x if x in df.columns else (categorical[0] if categorical else None)
+        if category is None:
+            return None
+        counts = (
+            df[category].astype("string").fillna("<Missing>")
+            .value_counts(dropna=False)
+            .head(60)
+            .rename_axis(str(category))
+            .reset_index(name="Count")
+        )
+        if counts.empty:
+            return None
+        return px.bar(
+            counts,
+            x=str(category),
+            y="Count",
+            title=title or f"Category distribution · {category}",
+        )
+
+    if chart == "Data Completeness":
+        completeness = (
+            df.notna().mean()
+            .mul(100.0)
+            .sort_values()
+            .head(80)
+        )
+        if completeness.empty:
+            return None
+        return px.bar(
+            x=completeness.index.astype(str),
+            y=completeness.values,
+            range_y=[0, 100],
+            title=title or "Data completeness by field",
+            labels={"x": "Field", "y": "Completeness %"},
+        )
+
+    if chart == "Temporal Distribution":
+        date_col = x if x in df.columns else (_coerce_datetime_columns(df) or [None])[0]
+        if date_col is None:
+            return None
+        values = pd.to_datetime(df[date_col], errors="coerce").dropna()
+        if values.empty:
+            return None
+        counts = values.dt.floor("D").value_counts().sort_index()
+        return px.bar(
+            x=counts.index,
+            y=counts.values,
+            title=title or f"Observations over time · {date_col}",
+            labels={"x": str(date_col), "y": "Observations"},
+        )
+
     return _BASE_MAKE_FIGURE(df, chart, x, y, z, title)
 
 
@@ -890,6 +969,10 @@ def build_visualization_suite(
         add("Bar", f"{context} · KPI by category" if context else "KPI by category", categorical[0], numeric[0])
     if not plan and categorical:
         add("Categorical Distribution", f"{context} · Category counts" if context else "Category counts", categorical[0], None)
+    if not plan and dates:
+        add("Temporal Distribution", f"{context} · Observation frequency" if context else "Observation frequency", dates[0], None)
+    if not plan:
+        add("Data Completeness", f"{context} · Data completeness" if context else "Data completeness")
 
     suite: list[tuple[str, go.Figure]] = []
     for title, chart, x, y, z in plan:
