@@ -162,9 +162,15 @@ _ALLOWED_FUNCS = {"ABS","AVERAGE","COUNT","COUNTA","IF","IFERROR","MAX","MIN",
                   "OEE","TAKTTIME","LITTLELAW","CPK","PPK","EOQ","SAFETYSTOCK","NPV","CO2E","CONVERT"}
 
 class SafeFormulaEngine:
-    def __init__(self, workbook: Mapping[str, pd.DataFrame], formulas: Mapping[str, Mapping[str, str]] | None = None):
+    def __init__(
+        self,
+        workbook: Mapping[str, pd.DataFrame],
+        formulas: Mapping[str, Mapping[str, str]] | None = None,
+        variables: Mapping[str, Any] | None = None,
+    ):
         self.workbook = workbook
         self.formulas = formulas or {}
+        self.variables = {str(k).strip(): v for k, v in (variables or {}).items() if str(k).strip()}
         self._stack: set[tuple[str, str]] = set()
         self._current_sheet = ""
 
@@ -277,6 +283,11 @@ class SafeFormulaEngine:
             return True
         if isinstance(node, ast.Name):
             if node.id.upper() == "PI": return math.pi
+            if node.id in self.variables:
+                return self.variables[node.id]
+            if node.id.upper() in {str(k).upper() for k in self.variables}:
+                target = next(k for k in self.variables if k.upper() == node.id.upper())
+                return self.variables[target]
             raise ValueError(f"Unknown name in formula: {node.id}")
         if isinstance(node, ast.Call):
             if not isinstance(node.func, ast.Name): raise ValueError("Only named functions are allowed.")
@@ -311,9 +322,13 @@ class SafeFormulaEngine:
                 return evaluate_engineering_function(name, args)
         raise ValueError(f"Unsupported formula expression: {ast.dump(node, include_attributes=False)}")
 
-def evaluate_workbook_formulas(workbook: Mapping[str,pd.DataFrame], formulas: Mapping[str,Mapping[str,str]]) -> tuple[dict[str,pd.DataFrame],pd.DataFrame]:
+def evaluate_workbook_formulas(
+    workbook: Mapping[str,pd.DataFrame],
+    formulas: Mapping[str,Mapping[str,str]],
+    variables: Mapping[str,Any] | None = None,
+) -> tuple[dict[str,pd.DataFrame],pd.DataFrame]:
     result = {sheet: frame.copy(deep=True) for sheet,frame in workbook.items()}
-    engine = SafeFormulaEngine(result, formulas)
+    engine = SafeFormulaEngine(result, formulas, variables=variables)
     audit = []
     for sheet, sheet_formulas in formulas.items():
         if sheet not in result: continue
@@ -572,8 +587,19 @@ def ensure_workbook_db(path:str=DB_PATH)->None:
     with sqlite3.connect(path,timeout=30) as conn:
         conn.execute("""CREATE TABLE IF NOT EXISTS industrial_workbooks(
             workbook_id TEXT PRIMARY KEY,workspace TEXT NOT NULL,owner TEXT NOT NULL,name TEXT NOT NULL,
-            payload_b64 TEXT NOT NULL,formulas_json TEXT NOT NULL,semantic_map_json TEXT,sha256 TEXT NOT NULL,
-            created_at TEXT NOT NULL,updated_at TEXT NOT NULL)""")
+            payload_b64 TEXT NOT NULL,formulas_json TEXT NOT NULL,semantic_map_json TEXT,variables_json TEXT NOT NULL DEFAULT '{}',
+            sha256 TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL)""")
+        try:
+            conn.execute("ALTER TABLE industrial_workbooks ADD COLUMN variables_json TEXT NOT NULL DEFAULT '{}' ")
+        except sqlite3.OperationalError:
+            pass
+        conn.execute("""CREATE TABLE IF NOT EXISTS industrial_workbook_versions(
+            version_id TEXT PRIMARY KEY,workbook_id TEXT NOT NULL,workspace TEXT NOT NULL,owner TEXT NOT NULL,
+            version_number INTEGER NOT NULL,label TEXT,payload_b64 TEXT NOT NULL,formulas_json TEXT NOT NULL,
+            semantic_map_json TEXT,variables_json TEXT NOT NULL DEFAULT '{}',sha256 TEXT NOT NULL,created_at TEXT NOT NULL)""")
+        conn.execute("""CREATE TABLE IF NOT EXISTS industrial_workbook_comments(
+            comment_id TEXT PRIMARY KEY,workbook_id TEXT NOT NULL,workspace TEXT NOT NULL,owner TEXT NOT NULL,
+            sheet TEXT NOT NULL,cell TEXT NOT NULL,comment TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL)""")
         conn.execute("""CREATE TABLE IF NOT EXISTS industrial_workbook_templates(
             template_id TEXT PRIMARY KEY,workspace TEXT NOT NULL,owner TEXT NOT NULL,name TEXT NOT NULL,
             category TEXT NOT NULL,description TEXT,payload_b64 TEXT NOT NULL,builtin INTEGER NOT NULL DEFAULT 0,
@@ -605,30 +631,102 @@ def _deserialize_workbook(payload:bytes)->dict[str,pd.DataFrame]:
 
 def save_workbook(workbook:Mapping[str,pd.DataFrame],formulas:Mapping[str,Mapping[str,str]]|None=None,
                   semantic_map:Mapping[str,Any]|None=None,name:str="Industrial Workbook",workbook_id:str|None=None,
-                  path:str=DB_PATH)->str:
-    ensure_workbook_db(path); formulas=formulas or {}; payload=_serialize_workbook(workbook)
+                  path:str=DB_PATH,variables:Mapping[str,Any]|None=None,version_label:str="Autosave")->str:
+    ensure_workbook_db(path); formulas=formulas or {}; variables=variables or {}; payload=_serialize_workbook(workbook)
     digest=hashlib.sha256(payload).hexdigest(); wid=str(workbook_id or ("WB-"+uuid.uuid4().hex[:12].upper())); now=_now()
+    workspace,owner=_workspace(),_actor()
     with sqlite3.connect(path,timeout=30) as conn:
+        existing=conn.execute("SELECT sha256 FROM industrial_workbooks WHERE workbook_id=? AND workspace=?",(wid,workspace)).fetchone()
         conn.execute("""INSERT INTO industrial_workbooks(workbook_id,workspace,owner,name,payload_b64,formulas_json,
-                        semantic_map_json,sha256,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)
+                        semantic_map_json,variables_json,sha256,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)
                         ON CONFLICT(workbook_id) DO UPDATE SET workspace=excluded.workspace,owner=excluded.owner,
                         name=excluded.name,payload_b64=excluded.payload_b64,formulas_json=excluded.formulas_json,
-                        semantic_map_json=excluded.semantic_map_json,sha256=excluded.sha256,updated_at=excluded.updated_at""",
-                     (wid,_workspace(),_actor(),str(name)[:160],base64.b64encode(payload).decode("ascii"),
+                        semantic_map_json=excluded.semantic_map_json,variables_json=excluded.variables_json,
+                        sha256=excluded.sha256,updated_at=excluded.updated_at""",
+                     (wid,workspace,owner,str(name)[:160],base64.b64encode(payload).decode("ascii"),
                       json.dumps({str(k):dict(v) for k,v in formulas.items()},default=str),
-                      json.dumps(dict(semantic_map or {}),default=str),digest,now,now))
+                      json.dumps(dict(semantic_map or {}),default=str),
+                      json.dumps(dict(variables),default=str),digest,now,now))
+        # Version history is content-addressed: repeated Streamlit reruns do not
+        # create duplicate versions when the workbook payload and formulas are unchanged.
+        if not existing or str(existing[0]) != digest:
+            next_no=int(conn.execute("SELECT COALESCE(MAX(version_number),0)+1 FROM industrial_workbook_versions WHERE workbook_id=? AND workspace=?",(wid,workspace)).fetchone()[0])
+            vid="VER-"+uuid.uuid4().hex[:12].upper()
+            conn.execute("""INSERT INTO industrial_workbook_versions(
+                version_id,workbook_id,workspace,owner,version_number,label,payload_b64,formulas_json,
+                semantic_map_json,variables_json,sha256,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (vid,wid,workspace,owner,next_no,str(version_label or "Autosave")[:120],
+                 base64.b64encode(payload).decode("ascii"),
+                 json.dumps({str(k):dict(v) for k,v in formulas.items()},default=str),
+                 json.dumps(dict(semantic_map or {}),default=str),json.dumps(dict(variables),default=str),
+                 digest,now))
         conn.execute("INSERT INTO industrial_workbook_audit(workbook_id,workspace,owner,action,details,created_at) VALUES(?,?,?,?,?,?)",
-                     (wid,_workspace(),_actor(),"save",f"{name} | {len(workbook)} sheet(s) | {len(payload):,} bytes | sha256={digest}",now))
+                     (wid,workspace,owner,"save",f"{name} | {len(workbook)} sheet(s) | {len(payload):,} bytes | sha256={digest}",now))
         conn.commit()
     return wid
 
 def load_workbook(workbook_id:str,path:str=DB_PATH)->tuple[dict[str,pd.DataFrame],dict[str,dict[str,str]],dict[str,Any]]:
     ensure_workbook_db(path)
     with sqlite3.connect(path,timeout=30) as conn:
-        row=conn.execute("SELECT payload_b64,formulas_json,semantic_map_json FROM industrial_workbooks WHERE workbook_id=? AND workspace=?",
+        cols="payload_b64,formulas_json,semantic_map_json,COALESCE(variables_json,'{}')"
+        row=conn.execute(f"SELECT {cols} FROM industrial_workbooks WHERE workbook_id=? AND workspace=?",
                          (workbook_id,_workspace())).fetchone()
     if not row: raise KeyError("Workbook not found in the current workspace.")
-    return _deserialize_workbook(base64.b64decode(row[0])),json.loads(row[1] or "{}"),json.loads(row[2] or "{}")
+    return (_deserialize_workbook(base64.b64decode(row[0])),json.loads(row[1] or "{}"),
+            json.loads(row[2] or "{}"),json.loads(row[3] or "{}"))
+
+
+def list_workbook_versions(workbook_id:str,path:str=DB_PATH)->pd.DataFrame:
+    ensure_workbook_db(path)
+    with sqlite3.connect(path,timeout=30) as conn:
+        return pd.read_sql(
+            """SELECT version_id AS ID, version_number AS Version, label AS Label,
+                      sha256 AS SHA256, created_at AS Created
+               FROM industrial_workbook_versions
+               WHERE workbook_id=? AND workspace=?
+               ORDER BY version_number DESC""",
+            conn,params=(workbook_id,_workspace())
+        )
+
+def load_workbook_version(version_id:str,path:str=DB_PATH)->tuple[dict[str,pd.DataFrame],dict[str,dict[str,str]],dict[str,Any],dict[str,Any]]:
+    ensure_workbook_db(path)
+    with sqlite3.connect(path,timeout=30) as conn:
+        row=conn.execute(
+            """SELECT payload_b64,formulas_json,semantic_map_json,variables_json
+               FROM industrial_workbook_versions WHERE version_id=? AND workspace=?""",
+            (version_id,_workspace())
+        ).fetchone()
+    if not row: raise KeyError("Workbook version not found in the current workspace.")
+    return (_deserialize_workbook(base64.b64decode(row[0])),json.loads(row[1] or "{}"),
+            json.loads(row[2] or "{}"),json.loads(row[3] or "{}"))
+
+def save_workbook_comment(workbook_id:str,sheet:str,cell:str,comment:str,path:str=DB_PATH)->str:
+    ensure_workbook_db(path)
+    comment_text=str(comment or "").strip()
+    if not comment_text: raise ValueError("Comment text is required.")
+    _cell_parts(cell)
+    cid="CMT-"+uuid.uuid4().hex[:10].upper()
+    with sqlite3.connect(path,timeout=30) as conn:
+        conn.execute(
+            """INSERT INTO industrial_workbook_comments(
+               comment_id,workbook_id,workspace,owner,sheet,cell,comment,created_at,updated_at)
+               VALUES(?,?,?,?,?,?,?,?,?)""",
+            (cid,workbook_id,_workspace(),_actor(),str(sheet)[:160],str(cell).upper(),comment_text[:2000],_now(),_now())
+        )
+        conn.commit()
+    return cid
+
+def list_workbook_comments(workbook_id:str,path:str=DB_PATH)->pd.DataFrame:
+    ensure_workbook_db(path)
+    with sqlite3.connect(path,timeout=30) as conn:
+        return pd.read_sql(
+            """SELECT comment_id AS ID,sheet AS Sheet,cell AS Cell,comment AS Comment,
+                      owner AS Author,created_at AS Created
+               FROM industrial_workbook_comments
+               WHERE workbook_id=? AND workspace=? ORDER BY created_at DESC""",
+            conn,params=(workbook_id,_workspace())
+        )
+
 
 def list_saved_workbooks(path:str=DB_PATH)->pd.DataFrame:
     ensure_workbook_db(path)
@@ -752,11 +850,13 @@ def render_industrial_workbook(tier:str="Starter",username:str="unknown")->None:
     st.session_state.setdefault("industrial_workbook_redo",[])
     st.session_state.setdefault("industrial_workbook_query_steps",[])
     st.session_state.setdefault("industrial_workbook_semantic_map",{})
+    st.session_state.setdefault("industrial_workbook_variables",{})
     st.session_state.setdefault("industrial_workbook_query_result_df",pd.DataFrame())
     st.session_state.setdefault("industrial_workbook_analysis_df",pd.DataFrame())
     st.session_state.setdefault("industrial_workbook_formula_audit_df",pd.DataFrame())
     wb:dict[str,pd.DataFrame]=st.session_state[WORKBOOK_STATE_KEY]
     formulas:dict[str,dict[str,str]]=st.session_state[FORMULA_STATE_KEY]
+    variables:dict[str,Any]=st.session_state["industrial_workbook_variables"]
     st.markdown("""<style>
     .iw-hero{padding:26px 28px;border-radius:22px;background:linear-gradient(135deg,#081526,#1d3c7a 52%,#0f766e);color:#fff;box-shadow:0 18px 50px rgba(15,23,42,.14);margin-bottom:14px}
     .iw-title{font-size:30px;font-weight:900;line-height:1.08}.iw-copy{font-size:13px;color:#dbeafe;margin-top:6px}.iw-chip{display:inline-block;padding:5px 9px;margin:6px 6px 0 0;border-radius:999px;background:rgba(255,255,255,.09);border:1px solid rgba(255,255,255,.12);font-size:11px}
@@ -776,7 +876,7 @@ def render_industrial_workbook(tier:str="Starter",username:str="unknown")->None:
         wb.clear(); wb.update({k:v.copy(deep=True) for k,v in snap.items()}); st.rerun()
     if c5.button("💾 Save",type="primary",use_container_width=True):
         try:
-            wid=save_workbook(wb,formulas,st.session_state.get("industrial_workbook_semantic_map",{}),f"Shoir-IE Workbook · {current_sheet}",st.session_state.get("industrial_workbook_id"))
+            wid=save_workbook(wb,formulas,st.session_state.get("industrial_workbook_semantic_map",{}),f"Shoir-IE Workbook · {current_sheet}",st.session_state.get("industrial_workbook_id"),variables=variables)
             st.session_state["industrial_workbook_id"]=wid; st.success(f"Saved workbook {wid}.")
         except Exception as exc: st.error(f"Workbook save failed safely: {exc}")
     saved=list_saved_workbooks()
@@ -805,8 +905,8 @@ def render_industrial_workbook(tier:str="Starter",username:str="unknown")->None:
             labels=saved["ID"].tolist(); choice=st.selectbox("Saved workbook",labels,format_func=lambda x:saved.loc[saved["ID"].eq(x),"Name"].iloc[0],key="industrial_workbook_saved_choice")
             if st.button("Open saved workbook",type="primary",key="industrial_workbook_open_saved"):
                 try:
-                    loaded_wb,loaded_formulas,semantic=load_workbook(choice); st.session_state[WORKBOOK_STATE_KEY]=loaded_wb; st.session_state[FORMULA_STATE_KEY]=loaded_formulas
-                    st.session_state["industrial_workbook_semantic_map"]=semantic; st.session_state["industrial_workbook_id"]=choice; st.success("Workbook loaded."); st.rerun()
+                    loaded_wb,loaded_formulas,semantic,loaded_variables=load_workbook(choice); st.session_state[WORKBOOK_STATE_KEY]=loaded_wb; st.session_state[FORMULA_STATE_KEY]=loaded_formulas
+                    st.session_state["industrial_workbook_semantic_map"]=semantic; st.session_state["industrial_workbook_variables"]=loaded_variables; st.session_state["industrial_workbook_id"]=choice; st.success("Workbook loaded."); st.rerun()
                 except Exception as exc: st.error(f"Workbook load failed safely: {exc}")
 
     wb=st.session_state[WORKBOOK_STATE_KEY]; formulas=st.session_state[FORMULA_STATE_KEY]
@@ -824,7 +924,7 @@ def render_industrial_workbook(tier:str="Starter",username:str="unknown")->None:
         if f3.button("Apply formula",type="primary",key="industrial_workbook_apply_formula"):
             try:
                 _cell_parts(formula_cell); formulas.setdefault(current_sheet,{})[formula_cell.upper()]=formula_value
-                recalculated,audit=evaluate_workbook_formulas(wb,formulas); st.session_state[WORKBOOK_STATE_KEY]=recalculated; wb=recalculated
+                recalculated,audit=evaluate_workbook_formulas(wb,formulas,variables=variables); st.session_state[WORKBOOK_STATE_KEY]=recalculated; wb=recalculated
                 st.session_state["industrial_workbook_formula_audit_df"]=audit; st.success(f"Formula applied to {current_sheet}!{formula_cell.upper()}.")
             except Exception as exc: st.error(f"Formula error safely contained: {type(exc).__name__}: {exc}")
         if formulas.get(current_sheet):
@@ -835,6 +935,24 @@ def render_industrial_workbook(tier:str="Starter",username:str="unknown")->None:
             try: st.metric("Converted",f"{convert_units(value,fr,to):,.6g} {to}")
             except Exception as exc: st.warning(f"Unit conversion not available: {exc}")
         if not st.session_state["industrial_workbook_formula_audit_df"].empty: st.dataframe(st.session_state["industrial_workbook_formula_audit_df"],use_container_width=True,hide_index=True)
+        st.markdown("#### Named engineering variables")
+        variable_editor=st.data_editor(
+            pd.DataFrame(
+                [{"Name":k,"Value":v.get("value",v) if isinstance(v,dict) else v,
+                  "Unit":v.get("unit","") if isinstance(v,dict) else "",
+                  "Description":v.get("description","") if isinstance(v,dict) else ""}
+                 for k,v in variables.items()]
+            ),
+            num_rows="dynamic",use_container_width=True,hide_index=True,key="iw_variables_editor",
+        )
+        if st.button("💾 Save named variables",key="iw_variables_save"):
+            variables={}
+            for rec in variable_editor.fillna("").to_dict("records"):
+                name=str(rec.get("Name","")).strip()
+                if not name: continue
+                variables[name]={"value":rec.get("Value"),"unit":str(rec.get("Unit","")),"description":str(rec.get("Description",""))[:300]}
+            st.session_state["industrial_workbook_variables"]=variables
+            st.success(f"Saved {len(variables):,} named variable(s). Use them directly in formulas, e.g. =AnnualDemand*HoldingCost.")
 
     with tabs[1]:
         profile=instant_analyze(current); health=validate_workbook({current_sheet:current}); runtime=instant_runtime_profile(current)
@@ -1006,6 +1124,45 @@ def render_industrial_workbook(tier:str="Starter",username:str="unknown")->None:
 
     st.session_state["industrial_workbook_current_df"]=wb[current_sheet].copy(deep=True)
     st.session_state["industrial_workbook_query_result_df"]=st.session_state.get("industrial_workbook_query_result_df",pd.DataFrame())
+    if st.session_state.get("industrial_workbook_id"):
+        with st.expander("🕘 Version history & comments", expanded=False):
+            try:
+                versions=list_workbook_versions(st.session_state["industrial_workbook_id"])
+                if versions.empty:
+                    st.info("No saved versions yet.")
+                else:
+                    st.dataframe(versions,use_container_width=True,hide_index=True)
+                    version_choice=st.selectbox(
+                        "Version to restore",
+                        versions["ID"].tolist(),
+                        format_func=lambda x: str(versions.loc[versions["ID"].eq(x),"Version"].iloc[0]) + " · " + str(versions.loc[versions["ID"].eq(x),"Label"].iloc[0]),
+                        key="iw_version_choice",
+                    )
+                    if st.button("↩ Restore selected version", key="iw_restore_version"):
+                        loaded_wb,loaded_formulas,loaded_semantic,loaded_variables=load_workbook_version(version_choice)
+                        st.session_state[WORKBOOK_STATE_KEY]=loaded_wb
+                        st.session_state[FORMULA_STATE_KEY]=loaded_formulas
+                        st.session_state["industrial_workbook_semantic_map"]=loaded_semantic
+                        st.session_state["industrial_workbook_variables"]=loaded_variables
+                        st.success("Version restored into the editable workbook state.")
+                        st.rerun()
+            except Exception as exc:
+                st.warning(f"Version history unavailable: {type(exc).__name__}: {exc}")
+            comments=list_workbook_comments(st.session_state["industrial_workbook_id"])
+            st.markdown("#### Cell comments")
+            if comments.empty:
+                st.caption("No comments yet.")
+            else:
+                st.dataframe(comments,use_container_width=True,hide_index=True)
+            cc1,cc2=st.columns([1,3]); comment_cell=cc1.text_input("Cell",value="A1",key="iw_comment_cell"); comment_text=cc2.text_input("Comment",key="iw_comment_text")
+            if st.button("💬 Add comment",key="iw_comment_add"):
+                try:
+                    save_workbook_comment(st.session_state["industrial_workbook_id"],current_sheet,comment_cell,comment_text)
+                    st.success("Comment saved to this workbook version history.")
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"Comment could not be saved: {type(exc).__name__}: {exc}")
+
     try:
         export_payload=_serialize_workbook(wb)
         st.download_button("⬇️ Export current workbook (.xlsx)",data=export_payload,
@@ -1017,12 +1174,14 @@ def render_industrial_workbook(tier:str="Starter",username:str="unknown")->None:
     try:
         fingerprint_payload=json.dumps({
             "sheets":{str(k):hashlib.sha256(v.to_csv(index=False).encode("utf-8")).hexdigest() for k,v in wb.items()},
-            "formulas":formulas,"semantic":st.session_state.get("industrial_workbook_semantic_map",{})
+            "formulas":formulas,"semantic":st.session_state.get("industrial_workbook_semantic_map",{}),
+            "variables":variables
         },sort_keys=True,default=str).encode("utf-8")
         fingerprint=hashlib.sha256(fingerprint_payload).hexdigest()
         if fingerprint != st.session_state.get("industrial_workbook_last_autosave_fingerprint"):
             wid=save_workbook(wb,formulas,st.session_state.get("industrial_workbook_semantic_map",{}),
-                              f"Shoir-IE Workbook · {current_sheet}",st.session_state.get("industrial_workbook_id"))
+                              f"Shoir-IE Workbook · {current_sheet}",st.session_state.get("industrial_workbook_id"),
+                              variables=variables)
             st.session_state["industrial_workbook_id"]=wid
             st.session_state["industrial_workbook_last_autosave_fingerprint"]=fingerprint
     except Exception:
