@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<OfficeApp xmlns="http://schemas.microsoft.com/office/appforoffice/1.1"
+           xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+           xsi:type="TaskPaneApp">
+  <Id>7e2b8f72-3e66-4fb4-9d41-1c1d7c7e9b31</Id>
+  <Version>1.0.0.0</Version>
+  <ProviderName>Shoir-IE</ProviderName>
+  <DefaultLocale>en-US</DefaultLocale>
+  <DisplayName DefaultValue="Shoir-IE Excel Bridge"/>
+  <Description DefaultValue="Move selected engineering data between Excel and a deployed Shoir-IE workspace."/>
+  <IconUrl DefaultValue="https://YOUR-SHOIR-IE-HOST/excel_addin/icon-32.png"/>
+  <SupportUrl DefaultValue="https://github.com/MSJ1708/shoir-ie"/>
+  <Hosts><Host Name="Workbook"/></Hosts>
+  <DefaultSettings>
+    <SourceLocation DefaultValue="https://YOUR-SHOIR-IE-HOST/excel_addin/taskpane.html"/>
+  </DefaultSettings>
+  <Permissions>ReadWriteDocument</Permissions>
+</OfficeApp>
