@@ -664,6 +664,15 @@ def ensure_workbook_db(path:str=DB_PATH)->None:
         conn.execute("""CREATE TABLE IF NOT EXISTS industrial_workbook_audit(
             audit_id INTEGER PRIMARY KEY AUTOINCREMENT,workbook_id TEXT,workspace TEXT,owner TEXT,
             action TEXT,details TEXT,created_at TEXT)""")
+
+        conn.execute("""CREATE TABLE IF NOT EXISTS industrial_workbook_versions(
+            version_id INTEGER PRIMARY KEY AUTOINCREMENT,workbook_id TEXT NOT NULL,workspace TEXT NOT NULL,
+            owner TEXT NOT NULL,version_no INTEGER NOT NULL,payload_b64 TEXT NOT NULL,
+            formulas_json TEXT NOT NULL,semantic_map_json TEXT,sha256 TEXT NOT NULL,
+            created_at TEXT NOT NULL,UNIQUE(workbook_id,workspace,version_no))""")
+        conn.execute("""CREATE TABLE IF NOT EXISTS industrial_workbook_comments(
+            comment_id INTEGER PRIMARY KEY AUTOINCREMENT,workbook_id TEXT NOT NULL,workspace TEXT NOT NULL,
+            owner TEXT NOT NULL,sheet_name TEXT,cell_ref TEXT,comment TEXT NOT NULL,created_at TEXT NOT NULL)""")
         conn.commit()
 
 def _serialize_workbook(workbook:Mapping[str,pd.DataFrame])->bytes:
@@ -689,18 +698,77 @@ def save_workbook(workbook:Mapping[str,pd.DataFrame],formulas:Mapping[str,Mappin
     ensure_workbook_db(path); formulas=formulas or {}; payload=_serialize_workbook(workbook)
     digest=hashlib.sha256(payload).hexdigest(); wid=str(workbook_id or ("WB-"+uuid.uuid4().hex[:12].upper())); now=_now()
     with sqlite3.connect(path,timeout=30) as conn:
+        workspace=_workspace(); owner=_actor()
         conn.execute("""INSERT INTO industrial_workbooks(workbook_id,workspace,owner,name,payload_b64,formulas_json,
                         semantic_map_json,sha256,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)
                         ON CONFLICT(workbook_id) DO UPDATE SET workspace=excluded.workspace,owner=excluded.owner,
                         name=excluded.name,payload_b64=excluded.payload_b64,formulas_json=excluded.formulas_json,
                         semantic_map_json=excluded.semantic_map_json,sha256=excluded.sha256,updated_at=excluded.updated_at""",
-                     (wid,_workspace(),_actor(),str(name)[:160],base64.b64encode(payload).decode("ascii"),
+                     (wid,workspace,owner,str(name)[:160],base64.b64encode(payload).decode("ascii"),
                       json.dumps({str(k):dict(v) for k,v in formulas.items()},default=str),
                       json.dumps(dict(semantic_map or {}),default=str),digest,now,now))
         conn.execute("INSERT INTO industrial_workbook_audit(workbook_id,workspace,owner,action,details,created_at) VALUES(?,?,?,?,?,?)",
-                     (wid,_workspace(),_actor(),"save",f"{name} | {len(workbook)} sheet(s) | {len(payload):,} bytes | sha256={digest}",now))
+                     (wid,workspace,owner,"save",f"{name} | {len(workbook)} sheet(s) | {len(payload):,} bytes | sha256={digest}",now))
+        latest=conn.execute(
+            "SELECT sha256,version_no FROM industrial_workbook_versions WHERE workbook_id=? AND workspace=? ORDER BY version_no DESC LIMIT 1",
+            (wid,workspace)
+        ).fetchone()
+        if not latest or str(latest[0]) != digest:
+            next_version=int(latest[1])+1 if latest else 1
+            conn.execute(
+                """INSERT INTO industrial_workbook_versions(
+                    workbook_id,workspace,owner,version_no,payload_b64,formulas_json,semantic_map_json,sha256,created_at
+                ) VALUES(?,?,?,?,?,?,?,?,?)""",
+                (wid,workspace,owner,next_version,base64.b64encode(payload).decode("ascii"),
+                 json.dumps({str(k):dict(v) for k,v in formulas.items()},default=str),
+                 json.dumps(dict(semantic_map or {}),default=str),digest,now)
+            )
+            conn.execute("INSERT INTO industrial_workbook_audit(workbook_id,workspace,owner,action,details,created_at) VALUES(?,?,?,?,?,?)",
+                         (wid,workspace,owner,"version",f"Version {next_version} recorded | sha256={digest}",now))
         conn.commit()
     return wid
+
+def list_workbook_versions(workbook_id:str|None=None,path:str=DB_PATH)->pd.DataFrame:
+    ensure_workbook_db(path)
+    with sqlite3.connect(path,timeout=30) as conn:
+        if workbook_id:
+            return pd.read_sql(
+                "SELECT version_no AS Version,created_at AS Created,sha256 AS SHA256,owner AS Owner FROM industrial_workbook_versions WHERE workbook_id=? AND workspace=? ORDER BY version_no DESC",
+                conn,params=(workbook_id,_workspace())
+            )
+        return pd.read_sql(
+            "SELECT workbook_id AS ID,version_no AS Version,created_at AS Created,sha256 AS SHA256,owner AS Owner FROM industrial_workbook_versions WHERE workspace=? ORDER BY created_at DESC,version_no DESC",
+            conn,params=(_workspace(),)
+        )
+
+def load_workbook_version(workbook_id:str,version_no:int,path:str=DB_PATH)->tuple[dict[str,pd.DataFrame],dict[str,dict[str,str]],dict[str,Any]]:
+    ensure_workbook_db(path)
+    with sqlite3.connect(path,timeout=30) as conn:
+        row=conn.execute(
+            "SELECT payload_b64,formulas_json,semantic_map_json FROM industrial_workbook_versions WHERE workbook_id=? AND workspace=? AND version_no=?",
+            (workbook_id,_workspace(),int(version_no))
+        ).fetchone()
+    if not row: raise KeyError("Workbook version not found in the current workspace.")
+    return _deserialize_workbook(base64.b64decode(row[0])),json.loads(row[1] or "{}"),json.loads(row[2] or "{}")
+
+def save_workbook_comment(workbook_id:str,sheet_name:str,cell_ref:str,comment:str,path:str=DB_PATH)->int:
+    if not str(comment).strip(): raise ValueError("Comment text is required.")
+    ensure_workbook_db(path)
+    with sqlite3.connect(path,timeout=30) as conn:
+        cur=conn.execute(
+            "INSERT INTO industrial_workbook_comments(workbook_id,workspace,owner,sheet_name,cell_ref,comment,created_at) VALUES(?,?,?,?,?,?,?)",
+            (workbook_id,_workspace(),_actor(),str(sheet_name)[:160],str(cell_ref).upper()[:20],str(comment).strip()[:2000],_now())
+        )
+        conn.commit()
+        return int(cur.lastrowid)
+
+def list_workbook_comments(workbook_id:str,path:str=DB_PATH)->pd.DataFrame:
+    ensure_workbook_db(path)
+    with sqlite3.connect(path,timeout=30) as conn:
+        return pd.read_sql(
+            "SELECT comment_id AS ID,sheet_name AS Sheet,cell_ref AS Cell,comment AS Comment,owner AS Author,created_at AS Created FROM industrial_workbook_comments WHERE workbook_id=? AND workspace=? ORDER BY comment_id DESC",
+            conn,params=(workbook_id,_workspace())
+        )
 
 def load_workbook(workbook_id:str,path:str=DB_PATH)->tuple[dict[str,pd.DataFrame],dict[str,dict[str,str]],dict[str,Any]]:
     ensure_workbook_db(path)
@@ -910,6 +978,30 @@ def render_industrial_workbook(tier:str="Starter",username:str="unknown")->None:
         if formulas.get(current_sheet):
             with st.expander("Formula register"):
                 st.dataframe(pd.DataFrame([{"Cell":c,"Formula":v} for c,v in formulas[current_sheet].items()]),use_container_width=True,hide_index=True)
+        with st.expander("💬 Cell comments & version history", expanded=False):
+            cc1,cc2,cc3=st.columns([1,1,2])
+            comment_cell=cc1.text_input("Cell", value="A2", key="iw_comment_cell")
+            with cc2:
+                st.caption("Comments are workspace-scoped and retained with the workbook history.")
+            comment_text=cc3.text_input("Comment", key="iw_comment_text", placeholder="Explain an assumption, review note, or decision context…")
+            if st.button("➕ Add comment", key="iw_add_comment"):
+                try:
+                    if not st.session_state.get("industrial_workbook_id"):
+                        raise ValueError("Save the workbook once before attaching comments.")
+                    save_workbook_comment(st.session_state["industrial_workbook_id"],current_sheet,comment_cell,comment_text)
+                    st.success("Comment added.")
+                except Exception as exc:
+                    st.warning(f"Comment could not be added: {exc}")
+            wid=st.session_state.get("industrial_workbook_id")
+            if wid:
+                comments=list_workbook_comments(wid)
+                versions=list_workbook_versions(wid)
+                if not comments.empty:
+                    st.markdown("#### Comments")
+                    st.dataframe(comments,use_container_width=True,hide_index=True)
+                if not versions.empty:
+                    st.markdown("#### Version history")
+                    st.dataframe(versions,use_container_width=True,hide_index=True)
         u1,u2,u3,u4=st.columns(4); value=u1.number_input("Convert value",value=1.0,key="iw_unit_value"); fr=u2.text_input("From unit",value="min",key="iw_unit_from"); to=u3.text_input("To unit",value="h",key="iw_unit_to")
         if u4.button("Convert",key="iw_convert_unit"):
             try: st.metric("Converted",f"{convert_units(value,fr,to):,.6g} {to}")
@@ -1052,6 +1144,18 @@ def render_industrial_workbook(tier:str="Starter",username:str="unknown")->None:
             {"Function":"ABS","Example":"=ABS(B2)","Purpose":"Absolute value"},
             {"Function":"SQRT","Example":"=SQRT(B2)","Purpose":"Square root"},
             {"Function":"POWER","Example":"=POWER(B2,2)","Purpose":"Exponentiation"},
+            {"Function":"OEE","Example":"=OEE(B2,C2,D2)","Purpose":"Availability × Performance × Quality"},
+            {"Function":"TAKT_TIME","Example":"=TAKT_TIME(B2,C2)","Purpose":"Available time ÷ demand"},
+            {"Function":"LITTLE_LAW","Example":"=LITTLE_LAW(B2,C2)","Purpose":"Flow rate × flow time"},
+            {"Function":"CPK","Example":"=CPK(B2,C2,D2,E2)","Purpose":"Process capability"},
+            {"Function":"EOQ","Example":"=EOQ(B2,C2,D2)","Purpose":"Economic order quantity"},
+            {"Function":"SERVICE_LEVEL","Example":"=SERVICE_LEVEL(B2,C2)","Purpose":"On-time ÷ total"},
+            {"Function":"CO2E","Example":"=CO2E(B2,C2)","Purpose":"Activity × emission factor"},
+            {"Function":"CONVERT","Example":"=CONVERT(B2,"min","h")","Purpose":"Dimension-checked unit conversion"},
+            {"Function":"NPV","Example":"=NPV(B2,C2:C6)","Purpose":"Discounted cash-flow value"},
+            {"Function":"CAPEX_NPV","Example":"=CAPEX_NPV(B2,C2,C3:C7)","Purpose":"NPV minus upfront CAPEX"},
+            {"Function":"FORECAST_DEMAND","Example":"=FORECAST_DEMAND(B2:B13,1)","Purpose":"Deterministic trend forecast"},
+            {"Function":"CAPACITY_GAP","Example":"=CAPACITY_GAP(B2,C2)","Purpose":"Capacity minus demand"},
         ]),use_container_width=True,hide_index=True)
         exts=list_workbook_extensions()
         st.markdown("### Developer extension SDK")
