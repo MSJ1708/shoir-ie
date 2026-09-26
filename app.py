@@ -777,13 +777,24 @@ def get_copilot_response(prompt, history):
         api_key = st.secrets["anthropic"]["api_key"]
         import anthropic
         client = anthropic.Anthropic(api_key=api_key)
+        try:
+            _copilot_thread_context = build_copilot_platform_context(
+                st.session_state.get("current_user", "unknown"),
+                str(st.session_state.get("enterprise_module_selector", "")),
+            )
+        except Exception:
+            _copilot_thread_context = {}
+
         system_prompt = (
             "You are the Shoir-IE Copilot, embedded in an industrial engineering and "
             "operations research platform covering MILP/optimization, inventory, supply chain, APS/MES, "
             "facility layout, quality/reliability, simulation, digital twins, sustainability, economics, "
             "workforce, KPI Studio, engineering methods/equations, scenario versioning, process mining, "
             "drift monitoring, decision verification, DMAIC/A3, templates and platform diagnostics. "
-            "Use the shared Platform Excellence layer as part of your operating context. " + copilot_context() + " Available governed Copilot tools are: " + ", ".join(t[0] for t in COPILOT_TOOLS) + ". " 
+            "Use the shared Platform Excellence layer as part of your operating context. "
+            "Use the canonical Digital Thread context when present, but never invent missing industrial facts. "
+            + json.dumps(_copilot_thread_context, default=str)
+            + " Available governed Copilot tools are: " + ", ".join(t[0] for t in COPILOT_TOOLS) + ". " 
             "Recommend the most relevant existing module or workflow from the live platform catalog. "
             "Prefer validation, explainability, scenario analysis and auditable exports before action. "
             "Be concise and concrete. If asked to run something you can't execute directly, name the exact "
