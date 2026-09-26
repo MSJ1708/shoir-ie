@@ -490,7 +490,7 @@ def decision_outcomes_frame(
     if clauses:
         query += " WHERE " + " AND ".join(clauses)
     query += " ORDER BY created_at DESC"
-    with sqlite3.connect(db_path, timeout=30) as conn:
+    with _db(db_path) as conn:
         return pd.read_sql_query(query, conn, params=params)
 
 def add_comment(project_id: Optional[str], decision_id: Optional[str], actor: str, comment: str) -> None:
