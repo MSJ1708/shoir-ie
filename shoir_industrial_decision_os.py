@@ -1265,8 +1265,9 @@ def render_visualization_coverage_panel() -> None:
 def render_final_integration(module: str, tier: str, username: str) -> dict[str, Any]:
     """Single post-module orchestration surface.
 
-    Native module logic remains authoritative. This function only synchronizes
-    shared evidence and invokes existing universal presentation layers once.
+    Native module logic remains authoritative. Existing specialized enterprise
+    overlays are invoked here exactly once, followed by the shared parity/
+    enterprise evidence layers.
     """
     import streamlit as st
     from shoir_enterprise_services import render_enterprise_bridge
@@ -1281,19 +1282,61 @@ def render_final_integration(module: str, tier: str, username: str) -> dict[str,
         "errors": [],
     }
 
+    # Preserve the established specialized overlays without duplicating their
+    # implementation in a second enterprise module.
+    try:
+        from shoir_enterprise_ops import (
+            render_digital_twin_extension, render_control_tower_extension,
+            render_connectivity_extension, render_security_extension,
+            render_persistence_extension, render_collaboration_extension,
+            render_economics_extension, render_sustainability_extension,
+            render_human_factors_extension, render_geospatial_extension,
+            render_knowledge_extension, render_realtime_monitoring_extension,
+            render_data_intelligence_extension,
+        )
+        if module in {"Digital Twin & Discrete-Event Simulation", "Digital Twin & DES", "Live Industrial Digital Twin"}:
+            render_digital_twin_extension(username)
+            render_realtime_monitoring_extension(st.session_state.get("iot_sensors", []), module)
+            frame = st.session_state.get("digital_twin_state_snapshot")
+            if isinstance(frame, pd.DataFrame) and not frame.empty:
+                render_data_intelligence_extension(module, frame, frame)
+        elif module in {"Industrial Control Center", "Control Tower"}:
+            render_control_tower_extension()
+        elif module == "Industrial Connectivity Hub":
+            render_connectivity_extension()
+        elif module in {"Enterprise Integration & Collaboration", "Enterprise Integration", "Collaboration Suite", "Enterprise Security & Governance"}:
+            render_collaboration_extension(username)
+            render_security_extension()
+        elif module == "Persistence":
+            render_persistence_extension(username)
+        elif module in {"Engineering Economics & Finance", "Capital Investment & Engineering Economics", "Engineering Economics & Financial Analysis"}:
+            render_economics_extension(username)
+        elif module in {"Green IE & Sustainability", "Industrial Sustainability & LCA", "Sustainability & Circular Economy", "Green IE"}:
+            render_sustainability_extension(username)
+        elif module == "Human Factors & Ergonomics (NIOSH)":
+            render_human_factors_extension(username)
+        elif module == "Geospatial Network Designer":
+            render_geospatial_extension(username)
+        elif module in {"AI Copilot", "Advanced Engineering Copilot"}:
+            render_knowledge_extension(username)
+    except Exception as exc:
+        result["errors"].append(f"Specialized overlay: {type(exc).__name__}: {exc}")
+
     if username != "unknown":
         try:
+            # Restore the durable thread only when the current session has no
+            # graph, then synchronize current evidence into the same canonical graph.
+            if not st.session_state.get("global_thread_nodes"):
+                restore_latest_canonical_thread(username)
             result["canonical_thread"] = sync_canonical_thread(username, module)
         except Exception as exc:
             result["errors"].append(f"Digital Thread: {type(exc).__name__}: {exc}")
 
-    # Existing parity engine is the one visualization engine of record.
     try:
         render_universal_module_parity(module, phase="results")
     except Exception as exc:
         result["errors"].append(f"Module parity: {type(exc).__name__}: {exc}")
 
-    # Existing enterprise bridge owns governance/operations overlays.
     try:
         render_enterprise_bridge(module, tier, username)
     except Exception as exc:
@@ -1304,32 +1347,32 @@ def render_final_integration(module: str, tier: str, username: str) -> dict[str,
     except Exception as exc:
         result["errors"].append(f"Visualization contract: {type(exc).__name__}: {exc}")
 
-    if module in {"Industrial Connectivity Hub", "Enterprise Integration & Collaboration"}:
+    if module in {"Industrial Connectivity Hub", "Enterprise Integration & Collaboration", "Enterprise Integration", "Collaboration Suite"}:
         try:
             render_verified_connector_surface(username)
         except Exception as exc:
             result["errors"].append(f"Connector verification: {type(exc).__name__}: {exc}")
 
-    if module in {"Engineering Decision Center", "Engineering Economics & Finance"}:
+    if module in {"Engineering Decision Center", "Engineering Economics & Finance", "Capital Investment & Engineering Economics"}:
         try:
             render_decision_value_panel(username)
         except Exception as exc:
             result["errors"].append(f"Decision-to-value: {type(exc).__name__}: {exc}")
 
-    if module in {"Industrial Control Center", "Control Tower", "Industrial Simulation Lab", "Experiment Engine"}:
+    if module in {"Industrial Control Center", "Control Tower", "Industrial Simulation Lab", "Experiment Engine", "Multi-Objective Optimization", "Robust & Resilient Optimization"}:
         try:
             render_benchmark_panel(username)
         except Exception as exc:
             result["errors"].append(f"Benchmark lab: {type(exc).__name__}: {exc}")
 
     try:
-        if module in {"Enterprise Security & Governance", "Persistence", "Enterprise Integration & Collaboration"}:
+        if module in {"Enterprise Security & Governance", "Persistence", "Enterprise Integration & Collaboration", "Enterprise Integration", "Collaboration Suite"}:
             render_security_verification_surface(username)
     except Exception as exc:
         result["errors"].append(f"Security verification: {type(exc).__name__}: {exc}")
 
     try:
-        if module in {"Platform Health & Diagnostics", "Industrial Operating System", "Industrial Control Center"}:
+        if module in {"Platform Health & Diagnostics", "Industrial Operating System", "Industrial Control Center", "Control Tower"}:
             render_visualization_coverage_panel()
     except Exception as exc:
         result["errors"].append(f"Visualization coverage: {type(exc).__name__}: {exc}")
@@ -1339,8 +1382,6 @@ def render_final_integration(module: str, tier: str, username: str) -> dict[str,
             for error in result["errors"]:
                 st.warning(error)
 
-    # Persist the integration status as an artifact so every post-module cycle
-    # can be audited without relying on the ephemeral Streamlit session.
     if username != "unknown":
         try:
             from shoir_enterprise_layer import record_artifact
