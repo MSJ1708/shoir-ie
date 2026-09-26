@@ -260,3 +260,19 @@ def test_named_variables_are_resolved_by_safe_formula_engine():
     )
     assert out["S"].iloc[0, 0] == 24
     assert audit.iloc[0]["Status"] == "Calculated"
+
+
+def test_workbook_scenario_branch_preserves_source(tmp_path):
+    from shoir_adoption_engine import create_scenario_branch
+    from shoir_industrial_workbook import list_saved_workbooks
+
+    path = str(tmp_path / "branches.db")
+    wb = {"Sheet1": pd.DataFrame({"Demand": [100, 120]})}
+    parent = save_workbook(wb, {}, {}, "Parent", path=path)
+    child = create_scenario_branch(parent, "Demand +5%", path=path)
+    assert child != parent
+    saved = list_saved_workbooks(path=path)
+    assert len(saved) == 2
+    assert any(saved["ID"].astype(str).eq(parent))
+    assert any(saved["ID"].astype(str).eq(child))
+    assert any(saved["Name"].astype(str).str.contains("Demand \+5%", regex=True))
