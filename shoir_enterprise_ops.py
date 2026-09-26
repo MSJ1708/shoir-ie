@@ -342,6 +342,9 @@ def build_control_tower_health(state: Mapping[str, Any]) -> pd.DataFrame:
 
 
 def render_control_tower_extension() -> None:
+    # Operational health still comes from observable domain signals; the
+    # canonical Digital Thread is authoritative for cross-domain entity
+    # coverage and relationships.
     state = {
         "workstations": st.session_state.get("dt_workstations", []),
         "supply": st.session_state.get("supply_nodes", []),
@@ -353,17 +356,55 @@ def render_control_tower_extension() -> None:
         "energy": st.session_state.get("energy_units", []),
         "carbon": st.session_state.get("carbon_sources", []),
     }
+    try:
+        from shoir_industrial_decision_os import canonical_control_tower_state
+        thread_state = canonical_control_tower_state()
+        for area, item in thread_state.items():
+            current = dict(state.get(area, {})) if isinstance(state.get(area), Mapping) else {}
+            current_records = int(current.get("records", 0) or 0)
+            thread_records = int(item.get("records", 0) or 0)
+            if thread_records > current_records:
+                current["records"] = thread_records
+            if not current.get("status") and thread_records:
+                current["status"] = "Ready"
+            current["thread_records"] = thread_records
+            current["thread_source"] = "Canonical Digital Thread"
+            if not current.get("last_update") and item.get("last_update"):
+                current["last_update"] = item["last_update"]
+            state[area] = current
+    except Exception:
+        thread_state = {}
+
     health = build_control_tower_health(state)
+    if not health.empty:
+        health["Thread Records"] = [
+            int(thread_state.get(area, {}).get("records", 0) or 0)
+            for area in health["Area"].astype(str)
+        ]
+        health["Signal Source"] = [
+            "Digital Thread + operational signal"
+            if thread_state.get(area, {}).get("records", 0)
+            else "Operational signal"
+            for area in health["Area"].astype(str)
+        ]
     st.session_state["control_tower_unified_health_df"] = health
     st.markdown("### 🗼 Unified Industrial Health Map")
-    st.caption("Health is calculated only where an observable signal exists. Areas without source data stay blank rather than showing fabricated status.")
+    st.caption("Cross-domain relationships are anchored in the canonical Digital Thread; health scores remain based on observable operational signals. Areas without evidence stay No Data.")
     if health.empty:
         st.info("No cross-domain operational datasets are currently available.")
         return
     st.dataframe(health, use_container_width=True, hide_index=True)
-    plot_df = health.dropna(subset=["Health %"]).copy()
-    if not plot_df.empty:
-        fig = px.bar(plot_df, x="Area", y="Health %", color="Status", hover_data=["Signal"], range_y=[0, 100], title="Production · Supply · Inventory · Quality · Maintenance · Transport · Workforce · Energy · Carbon")
+    plot_df = health.dropna(subset=["Health %"]).copy() if "Health %" in health.columns else health.copy()
+    if "Health %" in plot_df.columns and not plot_df.empty:
+        fig = px.bar(
+            plot_df,
+            x="Area",
+            y="Health %",
+            color="Status",
+            range_y=[0, 100],
+            title="Production · Supply · Inventory · Quality · Maintenance · Transport · Workforce · Energy · Carbon",
+            hover_data=[c for c in ("Thread Records", "Signal Source") if c in plot_df.columns],
+        )
         st.plotly_chart(fig, use_container_width=True)
 
 
