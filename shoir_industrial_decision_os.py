@@ -1057,8 +1057,25 @@ def render_visualization_contract(module: str, *, expanded: bool = False) -> dic
             suite = build_visualization_suite(source, context=module, max_figures=6)
         except Exception:
             suite = []
-    elif not frames:
+    elif not chartable:
         suite = [("Engineering Workflow", structural_workflow_figure(module))]
+
+    # Display the fallback when the native Live Visualization Studio has not
+    # already rendered a chart. This makes the graph guarantee user-visible.
+    if suite and not _figure_has_been_rendered(module):
+        try:
+            for label, fig in suite[:1]:
+                st.markdown(f"**{label}**")
+                st.plotly_chart(
+                    fig,
+                    use_container_width=True,
+                    config={"displayModeBar": True, "displaylogo": False, "responsive": True},
+                )
+                token = _safe_slug(module)
+                st.session_state[f"liveviz_last_figure_json_{token}"] = fig.to_json()
+                break
+        except Exception:
+            pass
 
     fingerprints = [figure_fingerprint(fig) for _, fig in suite]
     if fingerprints:
