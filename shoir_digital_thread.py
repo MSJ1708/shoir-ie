@@ -407,14 +407,67 @@ def sync_workspace_to_thread(owner: str, active_module: str | None = None) -> di
                         f"canonical {left_type.lower()} to {right_type.lower()}",
                     )
 
+    workspace = str(
+        st.session_state.get("shoir_workspace_name")
+        or st.session_state.get("workspace")
+        or st.session_state.get("active_workspace_name")
+        or "default"
+    )
+
+    # Durable canonical store is the source of truth; session state is a cache.
+    try:
+        from shoir_enterprise_layer import (
+            upsert_canonical_entity, upsert_canonical_relationship, record_canonical_event,
+        )
+        canonical_ids = {}
+        for node in nodes:
+            state = dict(node)
+            state["thread_node_id"] = node.get("node_id")
+            entity_id = upsert_canonical_entity(
+                owner,
+                str(node.get("node_type", "Entity")),
+                str(node.get("name", "")),
+                str(node.get("source", "")),
+                state=state,
+                status=str(node.get("status", "Observed")),
+                workspace=workspace,
+            )
+            canonical_ids[str(node.get("node_id"))] = entity_id
+        relationship_ids = []
+        for edge in st.session_state[_keys()["edges"]]:
+            source_id = canonical_ids.get(str(edge.get("source_id")))
+            target_id = canonical_ids.get(str(edge.get("target_id")))
+            if not source_id or not target_id:
+                continue
+            relationship_ids.append(
+                upsert_canonical_relationship(
+                    owner,
+                    source_id,
+                    target_id,
+                    str(edge.get("relation", "Linked")),
+                    status=str(edge.get("status", "Linked")),
+                    metadata=edge.get("metadata", {}),
+                    workspace=workspace,
+                )
+            )
+        record_canonical_event(
+            owner,
+            "digital_thread_sync",
+            {
+                "project_id": st.session_state[_keys()["project"]].get("project_id", "global-thread"),
+                "module": active_module or "global",
+                "entity_count": len(canonical_ids),
+                "relationship_count": len(relationship_ids),
+                "canonical_lifecycle": CANONICAL_LIFECYCLE,
+            },
+            workspace=workspace,
+        )
+    except Exception:
+        # The graph remains available in-session if a persistence backend is temporarily unavailable.
+        pass
+
     try:
         from shoir_enterprise_layer import record_artifact
-        workspace = str(
-            st.session_state.get("shoir_workspace_name")
-            or st.session_state.get("workspace")
-            or st.session_state.get("active_workspace_name")
-            or "default"
-        )
         record_artifact(
             owner,
             "digital_thread_state",
@@ -470,6 +523,65 @@ def _restore_thread_from_artifact(owner: str, workspace: str = "default") -> boo
         st.session_state[keys["sync"]] = project.get("updated_at", _now())
         st.session_state[keys["version"]] = int(payload.get("version", 1))
         return True
+    except Exception:
+        return False
+
+
+def _restore_thread_from_canonical_store(owner: str, workspace: str = "default") -> bool:
+    """Restore the canonical Digital Thread from durable entities/relationships."""
+    try:
+        from shoir_enterprise_layer import canonical_entities_frame, canonical_relationships_frame
+        entities = canonical_entities_frame(owner, workspace, limit=5000)
+        relationships = canonical_relationships_frame(owner, workspace, limit=10000)
+        if entities.empty:
+            return False
+        keys = ensure_thread_state(owner)
+        nodes = []
+        canonical_to_thread = {}
+        for row in entities.to_dict("records"):
+            try:
+                payload = json.loads(row.get("state_json") or "{}")
+            except Exception:
+                payload = {}
+            thread_node = {
+                "node_id": payload.get("thread_node_id") or row["entity_id"],
+                "node_type": str(row.get("entity_type", "Entity")),
+                "name": str(row.get("name", "")),
+                "source": str(row.get("source", "")),
+                "module": str(payload.get("module", "")),
+                "status": str(row.get("status", "Observed")),
+                "metadata": payload.get("metadata", {}),
+                "updated_at": str(row.get("updated_at") or row.get("created_at") or _now()),
+            }
+            nodes.append(thread_node)
+            canonical_to_thread[str(row["entity_id"])] = thread_node["node_id"]
+
+        edges = []
+        for row in relationships.to_dict("records"):
+            source = canonical_to_thread.get(str(row.get("source_entity_id")))
+            target = canonical_to_thread.get(str(row.get("target_entity_id")))
+            if not source or not target:
+                continue
+            try:
+                metadata = json.loads(row.get("metadata_json") or "{}")
+            except Exception:
+                metadata = {}
+            edges.append({
+                "edge_id": str(row.get("relationship_id")),
+                "source_id": source,
+                "target_id": target,
+                "relation": str(row.get("relation", "Linked")),
+                "status": str(row.get("status", "Linked")),
+                "metadata": metadata,
+                "updated_at": str(row.get("updated_at") or row.get("created_at") or _now()),
+            })
+        st.session_state[keys["nodes"]] = nodes
+        st.session_state[keys["edges"]] = edges
+        st.session_state[keys["sync"]] = _now()
+        st.session_state[keys["version"]] = max(1, int(st.session_state.get(keys["version"], 1)))
+        if nodes:
+            st.session_state[keys["project"]]["updated_at"] = _now()
+        return bool(nodes)
     except Exception:
         return False
 
@@ -675,7 +787,7 @@ def render_global_project_digital_thread(module: str, username: str) -> None:
         st.metric("Project ID", project.get("project_id", "—"))
     project["updated_at"] = _now()
 
-    # First-open experience: recover durable thread state before harvesting new evidence.
+    # First-open experience: recover durable canonical state before artifact/session state.
     if not st.session_state.get(keys["sync"]):
         workspace = str(
             st.session_state.get("shoir_workspace_name")
@@ -683,7 +795,9 @@ def render_global_project_digital_thread(module: str, username: str) -> None:
             or st.session_state.get("active_workspace_name")
             or "default"
         )
-        _restore_thread_from_artifact(username, workspace)
+        restored = _restore_thread_from_canonical_store(username, workspace)
+        if not restored:
+            _restore_thread_from_artifact(username, workspace)
 
     if not st.session_state.get(keys["sync"]):
         try:
