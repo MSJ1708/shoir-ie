@@ -447,7 +447,7 @@ def render_connectivity_extension() -> None:
 
         profile = validate_connector_profile(system_type, protocol, endpoint)
         if profile["valid"]:
-            st.success(f"Adapter ready · {profile.get("adapter", protocol)}")
+            st.success("Adapter ready · " + str(profile.get("adapter", protocol)))
         else:
             st.warning("Configuration needs attention: " + " ".join(profile["errors"]))
 
@@ -474,7 +474,7 @@ def render_connectivity_extension() -> None:
 
     last = st.session_state.get("connector_last_test")
     if isinstance(last, dict):
-        st.markdown(f"**Last connector test:** {last.get("status","Unknown")} · {float(last.get("latency_ms",0.0)):.1f} ms · {last.get("detail","")}")
+        st.markdown("**Last connector test:** " + str(last.get("status", "Unknown")) + " · " + f"{float(last.get('latency_ms', 0.0)):.1f} ms · " + str(last.get("detail", "")))
 
     last_test = st.session_state.get("connector_last_test") or {}
     if last_test.get("connector_id") and str(last_test.get("status")) == "Healthy" and str(protocol).upper() in {"REST","ODATA","HTTPS","SQL","JDBC"}:
@@ -561,7 +561,7 @@ def render_security_extension() -> None:
                 scan_result = inspect_upload(uploaded.name, raw, uploaded.type or "")
                 scan = pd.DataFrame([
                     {"Check":"SHA-256","Status":"PASS","Evidence":scan_result["sha256"]},
-                    {"Check":"File size","Status":"PASS" if scan_result["bytes"] <= 50_000_000 else "FAIL","Evidence":f"{scan_result["bytes"]:,} bytes"},
+                    {"Check":"File size","Status":"PASS" if scan_result["bytes"] <= 50_000_000 else "FAIL","Evidence":str(f"{scan_result['bytes']:,} bytes")},
                     {"Check":"Upload safety","Status":"PASS" if scan_result["safe"] else "FAIL","Evidence":"; ".join(scan_result["reasons"]) or "Extension/container/signature checks passed"},
                 ])
                 st.session_state["security_file_scan_df"] = scan
@@ -584,7 +584,7 @@ def render_security_extension() -> None:
     configured = int(maturity["State"].isin(["Verified","Connected","Configured"]).sum()) if not maturity.empty else 0
     c1, c2 = st.columns(2)
     c1.metric("Controls configured / verified", f"{configured}/{len(maturity)}")
-    c2.metric("Sensitive session keys", f"{sum(1 for key in st.session_state.keys() if re.search(r"password|token|secret|otp|payment", str(key), re.I)):,}")
+    c2.metric("Sensitive session keys", f"{sum(1 for key in st.session_state.keys() if re.search(r'password|token|secret|otp|payment', str(key), re.I)):,}")
     st.caption("SSO/OIDC and MFA remain provider/session dependent. Secret values are never displayed or stored in connector health records.")
     _render_universal_viz("Enterprise Security & Governance", "enterprise_security_posture_df")
 
@@ -1362,11 +1362,11 @@ def render_benchmarking_evidence(username: str = "unknown") -> None:
         "Metric": "Cycle reduction", "Value": result["cycle_reduction_pct"] or 0.0, "Unit": "%",
     }])
     m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Annual hours saved", f"{result["annual_hours_saved"]:,.1f}")
-    m2.metric("Annual labor value", f"{result["annual_labor_value"]:,.2f}")
+    m1.metric("Annual hours saved", f"{result['annual_hours_saved']:,.1f}")
+    m2.metric("Annual labor value", f"{result['annual_labor_value']:,.2f}")
     payback = result["payback_months"]
     m3.metric("Payback", f"{payback:,.1f} months" if payback is not None else "Not reached")
-    m4.metric("Cycle reduction", f"{result["cycle_reduction_pct"]:,.1f}%" if result["cycle_reduction_pct"] is not None else "n/a")
+    m4.metric("Cycle reduction", f"{result['cycle_reduction_pct']:,.1f}%" if result["cycle_reduction_pct"] is not None else "n/a")
     st.dataframe(metrics, use_container_width=True, hide_index=True)
     st.caption("Evidence status: " + result["evidence_status"] + ". Replace defaults with measured pilot data before using the values externally.")
     st.session_state["benchmark_roi_df"] = metrics.copy(deep=True)
