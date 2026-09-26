@@ -42,8 +42,20 @@ def test_canonical_lifecycle_flow_is_renderable():
     assert "Asset" in CANONICAL_LIFECYCLE and "Outcome" in CANONICAL_LIFECYCLE
     assert canonical_flow_figure(nodes, edges) is not None
 
-def test_decision_variance_contract():
+def test_decision_outcome_persistence_and_variance(tmp_path, monkeypatch):
+    import sqlite3
     import industrial_experience as exp
+    db = str(tmp_path / "experience.db")
+    monkeypatch.setattr(exp, "_db", lambda path="enterprise_full_workspace.db": sqlite3.connect(db, timeout=30))
+    exp.ensure_experience_db(db)
+    did = exp.create_decision("Test decision", "Testing", {"Throughput": 100}, {}, {}, "owner")
+    oid = exp.record_decision_outcome(
+        did, "owner", "Verified", {"Throughput": 100, "Cost": 50}, {"Throughput": 90, "Cost": 55},
+        lesson="Actual throughput was lower than predicted.", workspace="plant-a"
+    )
+    assert oid.startswith("OUT-")
+    stored = exp.decision_outcomes_frame(decision_id=did, owner="owner", db_path=db)
+    assert len(stored) == 1
     variance = exp.calculate_decision_variance({"Throughput": 100, "Cost": 50}, {"Throughput": 90, "Cost": 55})
     assert list(variance["KPI"]) == ["Cost", "Throughput"]
     assert float(variance.loc[variance["KPI"].eq("Throughput"), "Delta"].iloc[0]) == -10.0
