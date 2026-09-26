@@ -1150,9 +1150,11 @@ def render_industrial_workbook(tier:str="Starter",username:str="unknown")->None:
                     if st.button("↩ Restore selected version as new current version",key="iw_restore_version"):
                         try:
                             restored_wb,restored_formulas,restored_semantic=load_workbook_version(wid,selected_version)
+                            restored_variables=load_workbook_version_variables(wid,selected_version)
                             st.session_state[WORKBOOK_STATE_KEY]=restored_wb
                             st.session_state[FORMULA_STATE_KEY]=restored_formulas
                             st.session_state["industrial_workbook_semantic_map"]=restored_semantic
+                            st.session_state["industrial_workbook_variables"]=restored_variables
                             save_workbook(
                                 restored_wb,
                                 restored_formulas,
@@ -1176,6 +1178,21 @@ def render_industrial_workbook(tier:str="Starter",username:str="unknown")->None:
         st.dataframe(profile["profile"],use_container_width=True,hide_index=True); st.markdown("#### What to analyze next")
         for item in profile["recommendations"]: st.write("✓ "+item)
         if profile["figure"] is not None: st.plotly_chart(profile["figure"],use_container_width=True,config={"displayModeBar":False})
+        numeric_cols=[str(col) for col in current.columns if pd.api.types.is_numeric_dtype(current[col])]
+        if numeric_cols:
+            with st.expander("🎨 Conditional formatting", expanded=False):
+                cf_col=st.selectbox("Metric",numeric_cols,key=f"iw_cf_col_{_slug(current_sheet)}")
+                low_col,high_col=st.columns(2)
+                low_enabled=low_col.checkbox("Flag below",key=f"iw_cf_low_enabled_{_slug(current_sheet)}")
+                high_enabled=high_col.checkbox("Flag above",key=f"iw_cf_high_enabled_{_slug(current_sheet)}")
+                low=low_col.number_input("Lower threshold",value=0.0,key=f"iw_cf_low_{_slug(current_sheet)}") if low_enabled else None
+                high=high_col.number_input("Upper threshold",value=100.0,key=f"iw_cf_high_{_slug(current_sheet)}") if high_enabled else None
+                try:
+                    from shoir_adoption_engine import conditional_format_dataframe
+                    st.dataframe(conditional_format_dataframe(current,cf_col,low,high),use_container_width=True,hide_index=True)
+                    st.caption("Formatting is a presentation layer; source values remain unchanged.")
+                except Exception as exc:
+                    st.warning(f"Conditional formatting preview unavailable: {type(exc).__name__}: {exc}")
         st.session_state["industrial_workbook_analysis_df"]=profile["profile"]
 
     with tabs[2]:
@@ -1303,6 +1320,10 @@ def render_industrial_workbook(tier:str="Starter",username:str="unknown")->None:
             {"Topic":"Semantic mapping","What to do":"Map columns into the same canonical vocabulary used by the Digital Thread."},
             {"Topic":"Templates","What to do":"Start from a reusable engineering pattern and publish it to the workspace library."},
             {"Topic":"Extensions","What to do":"Register a WorkbookExtension through the existing Shoir-IE plugin registry."},
+            {"Topic":"Industrial formulas","What to do":"Use the shared OEE, TAKTTIME, LITTLELAW, CPK, PPK, EOQ, SAFETYSTOCK, NPV, CO2E, CONVERT, MTBF, MTTR, UTILIZATION, FPY, DPMO, PERCENTCHANGE, CAPACITY and YIELD functions."},
+            {"Topic":"Industrial Pivot","What to do":"Summarize plant, line, machine, product or order measures using a multi-dimensional pivot view."},
+            {"Topic":"Shoir Script","What to do":"Use deterministic workbook automation from Industrial Home; executable Python is not accepted."},
+            {"Topic":"Trust & Explain","What to do":"Use the dependency graph and Explain This Number workflow to trace formulas and assumptions."},
         ]),use_container_width=True,hide_index=True)
         st.markdown("### Formula reference")
         st.dataframe(pd.DataFrame([
@@ -1326,6 +1347,14 @@ def render_industrial_workbook(tier:str="Starter",username:str="unknown")->None:
             {"Function":"FORECAST_DEMAND","Example":"=FORECAST_DEMAND(B2:B13,1)","Purpose":"Deterministic trend forecast"},
             {"Function":"CAPACITY_GAP","Example":"=CAPACITY_GAP(B2,C2)","Purpose":"Capacity minus demand"},
         ]),use_container_width=True,hide_index=True)
+        try:
+            from shoir_adoption_engine import formula_library_frame
+            st.markdown("### Shared industrial formula library")
+            st.dataframe(formula_library_frame(),use_container_width=True,hide_index=True)
+        except Exception as exc:
+            st.caption(f"Engineering formula library metadata unavailable: {type(exc).__name__}: {exc}")
+        st.markdown("### Safe automation reference")
+        st.code('load("Sheet1")\nadd_column("Extended Cost","Quantity * Unit Cost")\nanalyze()', language="text")
         exts=list_workbook_extensions()
         st.markdown("### Developer extension SDK")
         st.dataframe(pd.DataFrame([
@@ -1350,12 +1379,12 @@ def render_industrial_workbook(tier:str="Starter",username:str="unknown")->None:
     try:
         fingerprint_payload=json.dumps({
             "sheets":{str(k):hashlib.sha256(v.to_csv(index=False).encode("utf-8")).hexdigest() for k,v in wb.items()},
-            "formulas":formulas,"semantic":st.session_state.get("industrial_workbook_semantic_map",{})
+            "formulas":formulas,"semantic":st.session_state.get("industrial_workbook_semantic_map",{}),"variables":variables
         },sort_keys=True,default=str).encode("utf-8")
         fingerprint=hashlib.sha256(fingerprint_payload).hexdigest()
         if fingerprint != st.session_state.get("industrial_workbook_last_autosave_fingerprint"):
             wid=save_workbook(wb,formulas,st.session_state.get("industrial_workbook_semantic_map",{}),
-                              f"Shoir-IE Workbook · {current_sheet}",st.session_state.get("industrial_workbook_id"))
+                              f"Shoir-IE Workbook · {current_sheet}",st.session_state.get("industrial_workbook_id"),variables=variables)
             st.session_state["industrial_workbook_id"]=wid
             st.session_state["industrial_workbook_last_autosave_fingerprint"]=fingerprint
     except Exception:
