@@ -33,26 +33,11 @@ from urllib.parse import urlparse
 import numpy as np
 import pandas as pd
 
+# The Digital Thread module is the canonical owner of entity vocabulary.
+# This avoids maintaining two subtly different definitions of the thread.
+from shoir_digital_thread import THREAD_TYPES
 
-CANONICAL_ENTITY_TYPES = [
-    "Dataset",
-    "Asset",
-    "Process",
-    "Product",
-    "Material",
-    "Order",
-    "Workforce",
-    "Quality",
-    "Maintenance",
-    "Energy",
-    "Cost",
-    "Scenario",
-    "KPI",
-    "Model",
-    "Experiment",
-    "Decision",
-    "Outcome",
-]
+CANONICAL_ENTITY_TYPES = list(THREAD_TYPES)
 
 DECISION_SPINE = [
     ("Dataset", "feeds", "Asset"),
@@ -465,6 +450,49 @@ def canonical_thread_summary(username: str) -> dict[str, Any]:
     }
 
 
+CONTROL_TOWER_ENTITY_MAP: dict[str, tuple[str, ...]] = {
+    "Production": ("Process", "Order"),
+    "Supply": ("Product", "Material"),
+    "Inventory": ("Material", "Order"),
+    "Quality": ("Quality",),
+    "Maintenance": ("Maintenance",),
+    "Transport": ("Order", "Asset"),
+    "Workforce": ("Workforce",),
+    "Energy": ("Energy",),
+    # Carbon is represented through energy/cost evidence in the current
+    # canonical vocabulary; no synthetic Carbon entity is created.
+    "Carbon": ("Energy", "Cost"),
+}
+
+
+def canonical_control_tower_state() -> dict[str, dict[str, Any]]:
+    """Build operational-area evidence counts from the canonical Digital Thread."""
+    import streamlit as st
+
+    nodes = st.session_state.get("global_thread_nodes", [])
+    state: dict[str, dict[str, Any]] = {}
+    for area, entity_types in CONTROL_TOWER_ENTITY_MAP.items():
+        matching = [
+            node for node in nodes
+            if node.get("node_type") in entity_types
+        ]
+        state[area] = {
+            "records": len(matching),
+            "alerts": sum(
+                1 for node in matching
+                if str(node.get("status", "")).lower() in {"attention", "alert", "critical"}
+            ),
+            "status": "Ready" if matching else "No Data",
+            "kpi": ", ".join(entity_types),
+            "last_update": max(
+                (str(node.get("updated_at", "")) for node in matching),
+                default="—",
+            ),
+            "source": "Digital Thread",
+        }
+    return state
+
+
 def build_copilot_platform_context(username: str, module: str) -> dict[str, Any]:
     from shoir_enterprise_services import knowledge_context
     summary = canonical_thread_summary(username)
@@ -747,8 +775,8 @@ def connector_health_evidence(username: str, profile: Mapping[str, Any], result:
         result.protocol,
         str(profile.get("endpoint") or ""),
         result.status,
-        result.latency_ms,
         result.message,
+        result.latency_ms,
         workspace=_workspace_name(),
     )
     return {
@@ -761,6 +789,50 @@ def connector_health_evidence(username: str, profile: Mapping[str, Any], result:
         "Rows": result.rows,
         "Columns": result.columns,
         "Checked At": utc_now(),
+    }
+
+
+def sync_connector_with_retry(
+    profile: Mapping[str, Any],
+    *,
+    attempts: int = 3,
+    backoff_seconds: float = 0.5,
+) -> ConnectorResult:
+    """Run a bounded read-only connector sync with deterministic retry limits."""
+    max_attempts = max(1, min(5, int(attempts)))
+    last: ConnectorResult | None = None
+    for attempt in range(max_attempts):
+        last = sync_connector_profile(profile)
+        if last.status == "PASS":
+            return last
+        if attempt + 1 < max_attempts:
+            time.sleep(max(0.0, min(5.0, float(backoff_seconds))) * (attempt + 1))
+    return last or ConnectorResult(
+        "FAIL",
+        str(profile.get("protocol") or "UNSPECIFIED").upper(),
+        str(profile.get("system_type") or "Generic"),
+        None,
+        "Connector synchronization did not return a result.",
+    )
+
+
+def connector_schedule_spec(profile: Mapping[str, Any]) -> dict[str, Any]:
+    """Validate optional schedule metadata without pretending an external scheduler exists."""
+    raw_interval = profile.get("sync_interval_minutes", profile.get("interval_minutes", 0))
+    try:
+        interval = max(0, int(raw_interval or 0))
+    except (TypeError, ValueError):
+        interval = 0
+    enabled = bool(profile.get("schedule_enabled", False)) and interval > 0
+    return {
+        "enabled": enabled,
+        "interval_minutes": interval,
+        "mode": "On-demand" if not enabled else "Application-triggered schedule",
+        "note": (
+            "The profile is eligible for scheduled execution through the application job layer."
+            if enabled
+            else "No active connector schedule is configured."
+        ),
     }
 
 
@@ -1155,7 +1227,7 @@ def render_verified_connector_surface(username: str) -> None:
                 result = test_connector_profile(profile)
                 rows.append(connector_health_evidence(username, profile, result))
             if col3.button("Sync", key=f"verified_connector_sync_{_safe_slug(label)}_{index}", use_container_width=True):
-                result = sync_connector_profile(profile)
+                result = sync_connector_with_retry(profile)
                 evidence = connector_health_evidence(username, profile, result)
                 rows.append(evidence)
                 if result.dataframe is not None and not result.dataframe.empty:
