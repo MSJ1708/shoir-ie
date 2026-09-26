@@ -1154,44 +1154,55 @@ def render_model_registry_extension(username: str = "unknown") -> None:
 
 
 def render_jobs_extension(username: str = "unknown", module: str = "Industrial Simulation Lab") -> None:
+    from shoir_enterprise_layer import create_job_record, update_job_record, list_jobs, request_job_action
+
+    workspace = str(st.session_state.get("shoir_workspace_name") or st.session_state.get("workspace") or st.session_state.get("active_workspace_name") or "default")
     st.markdown("### 🕐 Engineering Job Control")
-    st.caption("Uses the existing durable job registry for queue, progress, pause/resume, cancellation and retry state. Execution remains operator-controlled unless a worker backend is configured.")
-    try:
-        from industrial_experience import create_job, update_job, ensure_experience_db
-        ensure_experience_db()
-        with st.expander("Create / control job", expanded=False):
-            job_type = st.selectbox("Job type", ["Simulation", "Optimization", "Forecast", "Report", "Data profiling"], key=f"job_ext_type_{module}")
-            payload_text = st.text_area("Job payload JSON", '{"priority":"standard","requested_by":"operator"}', key=f"job_ext_payload_{module}")
-            if st.button("➕ Queue job", use_container_width=True, key=f"job_ext_queue_{module}"):
-                try:
-                    payload = json.loads(payload_text)
-                except Exception:
-                    payload = {"raw_payload": payload_text}
-                jid = create_job(module, job_type, username, payload)
-                st.session_state["job_ext_active"] = jid
-                st.success(f"Queued {jid}")
-            active = st.session_state.get("job_ext_active")
-            if active:
-                state = st.selectbox("State action", ["Running", "Paused", "Queued", "Cancelled", "Completed", "Failed"], key=f"job_ext_state_{module}")
-                progress = st.slider("Progress %", 0, 100, 50, key=f"job_ext_progress_{module}")
-                if st.button("🔄 Apply job state", use_container_width=True, key=f"job_ext_update_{module}"):
-                    update_job(active, state, progress, f"Operator set state to {state}.")
-                    st.success(f"{active} → {state}")
-        try:
-            import sqlite3
-            with sqlite3.connect("enterprise_full_workspace.db") as conn:
-                history = pd.read_sql(
-                    "SELECT job_id,module,job_type,status,progress,message,started_at,finished_at FROM experience_jobs ORDER BY COALESCE(started_at, finished_at) DESC LIMIT 200",
-                    conn,
-                )
-            if not history.empty:
-                st.dataframe(history, use_container_width=True, hide_index=True)
-                st.session_state["job_history_df"] = history
-                _render_universal_viz(module, "job_history_df")
-        except Exception as exc:
-            st.warning(f"Job history unavailable: {type(exc).__name__}: {exc}")
-    except Exception as exc:
-        st.warning(f"Job controls unavailable: {type(exc).__name__}: {exc}")
+    st.caption("Single enterprise job registry for queued/running/completed work with cooperative pause, cancel and retry controls.")
+    with st.expander("Create / control job", expanded=False):
+        job_type = st.selectbox("Job type", ["Simulation","Optimization","Forecast","Report","Data profiling","Connector sync"], key=f"job_ext_type_{module}")
+        payload_text = st.text_area("Job payload JSON", '{"priority":"standard","requested_by":"operator"}', key=f"job_ext_payload_{module}")
+        if st.button("➕ Queue job", use_container_width=True, key=f"job_ext_queue_{module}"):
+            try:
+                payload = json.loads(payload_text)
+            except Exception:
+                payload = {"raw_payload": payload_text}
+            jid = create_job_record(username, module, job_type, payload, workspace)
+            st.session_state["job_ext_active"] = jid
+            st.success(f"Queued {jid}")
+        jobs = list_jobs(username, workspace, 200)
+        active = st.session_state.get("job_ext_active")
+        if active and not jobs.empty and active in set(jobs["job_id"].astype(str)):
+            row = jobs.loc[jobs["job_id"].astype(str).eq(str(active))].iloc[0]
+            st.dataframe(pd.DataFrame([row.to_dict()]), use_container_width=True, hide_index=True)
+            a1, a2, a3, a4 = st.columns(4)
+            if a1.button("▶ Run", use_container_width=True, key=f"job_ext_run_{module}"):
+                update_job_record(username, active, status="Running", progress=max(1.0, float(row["progress"])), message="Operator requested start.", workspace=workspace)
+                st.rerun()
+            if a2.button("⏸ Pause", use_container_width=True, key=f"job_ext_pause_{module}"):
+                request_job_action(username, active, "pause", workspace)
+                st.rerun()
+            if a3.button("⏹ Cancel", use_container_width=True, key=f"job_ext_cancel_{module}"):
+                request_job_action(username, active, "cancel", workspace)
+                st.rerun()
+            if a4.button("↻ Retry", use_container_width=True, key=f"job_ext_retry_{module}"):
+                request_job_action(username, active, "retry", workspace)
+                st.rerun()
+        elif not jobs.empty:
+            st.selectbox("Select job", jobs["job_id"].astype(str).tolist(), key=f"job_ext_select_{module}")
+            selected = st.session_state.get(f"job_ext_select_{module}")
+            if selected:
+                st.session_state["job_ext_active"] = selected
+
+    jobs = list_jobs(username, workspace, 200)
+    if not jobs.empty:
+        st.dataframe(jobs, use_container_width=True, hide_index=True)
+        st.session_state["enterprise_job_history_df"] = jobs.copy(deep=True)
+        st.session_state["job_history_df"] = jobs.copy(deep=True)
+        _render_universal_viz(module, "enterprise_job_history_df")
+    else:
+        st.info("No enterprise jobs have been queued in this workspace.")
+
 
 
 def build_realtime_monitoring(df: pd.DataFrame, threshold: float | None = None) -> pd.DataFrame:
