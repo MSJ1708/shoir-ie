@@ -994,6 +994,42 @@ def _figure_has_been_rendered(module: str) -> bool:
         return False
 
 
+def structural_workflow_figure(module: str) -> Any:
+    """Return a data-free workflow graph so every module has a visible chart surface."""
+    import plotly.graph_objects as go
+
+    steps = ["Import", "Validate", "Analyze", "Visualize", "Decide", "Export"]
+    fig = go.Figure()
+    fig.add_trace(
+        go.Scatter(
+            x=list(range(len(steps))),
+            y=[0] * len(steps),
+            mode="lines+markers+text",
+            text=steps,
+            textposition="top center",
+            hovertemplate="%{text}<extra></extra>",
+            line={"width": 3},
+            marker={"size": 16},
+            showlegend=False,
+        )
+    )
+    fig.update_layout(
+        title=f"{module} · Engineering Workflow",
+        height=280,
+        xaxis={
+            "tickmode": "array",
+            "tickvals": list(range(len(steps))),
+            "ticktext": steps,
+            "showgrid": False,
+            "zeroline": False,
+            "showticklabels": False,
+        },
+        yaxis={"visible": False},
+        margin={"l": 20, "r": 20, "t": 55, "b": 25},
+    )
+    return fig
+
+
 def render_visualization_contract(module: str, *, expanded: bool = False) -> dict[str, Any]:
     """Guarantee a visualization fallback without duplicating the graph engine."""
     import streamlit as st
@@ -1021,6 +1057,8 @@ def render_visualization_contract(module: str, *, expanded: bool = False) -> dic
             suite = build_visualization_suite(source, context=module, max_figures=6)
         except Exception:
             suite = []
+    elif not frames:
+        suite = [("Engineering Workflow", structural_workflow_figure(module))]
 
     fingerprints = [figure_fingerprint(fig) for _, fig in suite]
     if fingerprints:
@@ -1034,6 +1072,7 @@ def render_visualization_contract(module: str, *, expanded: bool = False) -> dic
         "chartable": bool(chartable),
         "figure_rendered": _figure_has_been_rendered(module),
         "fallback_figures": len(suite),
+        "graph_guaranteed": bool(suite),
         "figure_hashes": fingerprints,
     }
 
