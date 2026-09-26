@@ -276,3 +276,9 @@ def test_workbook_scenario_branch_preserves_source(tmp_path):
     assert any(saved["ID"].astype(str).eq(parent))
     assert any(saved["ID"].astype(str).eq(child))
     assert any(saved["Name"].astype(str).str.contains("Demand \+5%", regex=True))
+
+
+def test_query_filters_do_not_evaluate_unselected_operators():
+    source = pd.DataFrame({"Text": ["alpha", "beta", "alphabet"]})
+    result = apply_query_pipeline(source, [{"type": "filter", "column": "Text", "op": "contains", "value": "alpha"}])
+    assert result["Text"].tolist() == ["alpha", "alphabet"]
