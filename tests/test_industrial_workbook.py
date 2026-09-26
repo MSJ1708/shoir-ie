@@ -195,7 +195,7 @@ def test_workbook_shared_engineering_formulas_and_pivot_step():
         [{"type": "pivot", "index": ["Area"], "columns": "Month", "values": "Qty", "aggregation": "sum"}],
     )
     assert "Area" in pivoted.columns
-    assert float(pivoted.loc[pivoted["Area"].eq("A"), "Feb · Qty"].iloc[0]) == 20.0
+    assert float(pivoted.loc[pivoted["Area"].eq("A"), "Qty · Feb"].iloc[0]) == 20.0
 
 
 def test_workbook_versions_variables_and_comments_are_persistent(tmp_path):
