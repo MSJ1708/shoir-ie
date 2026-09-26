@@ -54,8 +54,8 @@ def test_industrial_pivot_supports_multidimensional_summary():
     )
     assert "Plant" in result.columns
     assert set(result["Plant"]) == {"A", "B"}
-    assert float(result.loc[result["Plant"].eq("A"), "L1 · Output"].iloc[0]) == 10.0
-    assert float(result.loc[result["Plant"].eq("B"), "L2 · Output"].iloc[0]) == 40.0
+    assert float(result.loc[result["Plant"].eq("A"), "Output · L1"].iloc[0]) == 10.0
+    assert float(result.loc[result["Plant"].eq("B"), "Output · L2"].iloc[0]) == 40.0
 
 
 def test_shoir_script_is_deterministic_and_python_execution_is_rejected():
