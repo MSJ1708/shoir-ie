@@ -602,23 +602,308 @@ def check_rest_connector(url: str, token: str = "", timeout: float = 8.0) -> tup
 
 
 def validate_connector_profile(system_type: str, protocol: str, endpoint: str) -> dict[str, Any]:
-    st = str(system_type or "").strip().upper()
-    pr = str(protocol or "").strip().upper()
+    system = str(system_type or "").strip().upper()
+    proto = str(protocol or "").strip().upper()
     ep = str(endpoint or "").strip()
     supported_systems = {"SAP", "ORACLE", "WMS", "MES", "ERP", "SQL", "REST", "MQTT", "OPC-UA"}
-    supported_protocols = {"REST", "ODATA", "SQL", "JDBC", "MQTT", "OPC-UA", "HTTPS"}
+    supported_protocols = set(CONNECTOR_PROTOCOLS)
     errors = []
-    if st not in supported_systems:
+    if system not in supported_systems:
         errors.append("Unsupported system type.")
-    if pr not in supported_protocols:
+    if proto not in supported_protocols:
         errors.append("Unsupported protocol profile.")
-    if pr in {"REST", "ODATA", "HTTPS"} and ep and not re.match(r"^https?://", ep, flags=re.I):
+    if proto in {"REST", "ODATA", "HTTPS"} and ep and not re.match(r"^https?://", ep, flags=re.I):
         errors.append("HTTP-based endpoints must use http:// or https://.")
-    if pr in {"MQTT"} and ep and not re.match(r"^(mqtt|mqtts)://", ep, flags=re.I):
-        errors.append("MQTT endpoint should use mqtt:// or mqtts://.")
-    if pr in {"OPC-UA"} and ep and not re.match(r"^opc.tcp://", ep, flags=re.I):
-        errors.append("OPC-UA endpoint should use opc.tcp://.")
-    return {"valid": not errors, "errors": errors, "system_type": st, "protocol": pr}
+    if proto == "MQTT" and ep and not re.match(r"^(mqtt|mqtts)://", ep, flags=re.I):
+        errors.append("MQTT endpoints should use mqtt:// or mqtts://.")
+    if proto == "OPC-UA" and ep and not re.match(r"^opc\.tcp://", ep, flags=re.I):
+        errors.append("OPC-UA endpoints should use opc.tcp://.")
+    if proto in {"SQL", "JDBC"} and ep and not re.match(r"^(sqlite:///|postgres(ql)?://)", ep, flags=re.I):
+        errors.append("SQL adapter currently accepts sqlite:/// or PostgreSQL DSNs.")
+    return {"valid": not errors, "errors": errors, "system_type": system, "protocol": proto, "adapter": CONNECTOR_PROTOCOLS.get(proto, proto)}
+
+CONNECTOR_PROTOCOLS = {
+    "REST": "HTTP(S) API",
+    "ODATA": "OData / HTTP API",
+    "HTTPS": "HTTP(S) API",
+    "SQL": "Relational database",
+    "JDBC": "JDBC-compatible database",
+    "MQTT": "MQTT telemetry broker",
+    "OPC-UA": "OPC-UA industrial endpoint",
+}
+
+
+def resolve_connector_secret(secret_ref: str = "") -> str:
+    """Resolve credentials by reference without ever persisting the secret value."""
+    ref = str(secret_ref or "").strip()
+    if not ref:
+        return ""
+    key = ref[4:] if ref.lower().startswith("env:") else ref
+    try:
+        value = os.environ.get(key)
+        if value:
+            return value
+    except Exception:
+        pass
+    try:
+        import streamlit as st
+        for section in ("connector_secrets", "secrets", "authentication"):
+            try:
+                section_value = st.secrets.get(section, {})
+                if isinstance(section_value, Mapping) and key in section_value:
+                    return str(section_value[key])
+            except Exception:
+                continue
+        try:
+            return str(st.secrets.get(key, ""))
+        except Exception:
+            return ""
+    except Exception:
+        return ""
+
+
+def _record_connector_run(
+    username: str,
+    connector_id: str,
+    operation: str,
+    status: str,
+    latency_ms: float,
+    detail: str,
+    records: int,
+    started: datetime,
+    finished: datetime,
+    workspace: str = "default",
+) -> str:
+    ensure_enterprise_schema()
+    wid = workspace_key(username, workspace)
+    run_id = "CRUN-" + uuid.uuid4().hex[:12].upper()
+    values = (
+        run_id, wid, connector_id, str(operation), str(status),
+        float(latency_ms), str(detail)[:500], int(max(0, records)),
+        started.isoformat(), finished.isoformat(),
+    )
+    if _remote():
+        with _pg_connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """INSERT INTO shoir_internal.connector_runs
+                    (run_id,workspace_id,connector_id,operation,status,latency_ms,detail,records,started_at,finished_at)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                    values,
+                )
+            conn.commit()
+    else:
+        with _local_connect() as conn:
+            conn.execute(
+                """INSERT INTO shoir_ent_connector_runs
+                (run_id,workspace_id,connector_id,operation,status,latency_ms,detail,records,started_at,finished_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                values,
+            )
+            conn.commit()
+    return run_id
+
+
+def connector_run_frame(username: str, workspace: str = "default", limit: int = 200) -> pd.DataFrame:
+    ensure_enterprise_schema()
+    wid = workspace_key(username, workspace)
+    table = "shoir_internal.connector_runs" if _remote() else "shoir_ent_connector_runs"
+    sql = (
+        "SELECT * FROM " + table +
+        (" WHERE workspace_id=%s" if _remote() else " WHERE workspace_id=?") +
+        " ORDER BY started_at DESC LIMIT " + str(max(1, min(1000, int(limit))))
+    )
+    with (_pg_connect() if _remote() else _local_connect()) as conn:
+        return pd.read_sql_query(sql, conn, params=[wid])
+
+
+def _connector_sql_test(endpoint: str, timeout: float = 8.0) -> tuple[str, float, str, int]:
+    started = datetime.now(timezone.utc)
+    target = str(endpoint or "").strip()
+    if target.lower().startswith("sqlite:///"):
+        db_path = target[10:]
+        try:
+            with sqlite3.connect(db_path, timeout=max(1.0, float(timeout))) as conn:
+                row = conn.execute("SELECT 1").fetchone()
+            elapsed = (datetime.now(timezone.utc) - started).total_seconds() * 1000.0
+            return "Healthy", elapsed, "SQLite connection validated.", int(bool(row))
+        except sqlite3.Error as exc:
+            elapsed = (datetime.now(timezone.utc) - started).total_seconds() * 1000.0
+            return "Offline", elapsed, f"{type(exc).__name__}: {str(exc)[:220]}", 0
+    if target.lower().startswith(("postgresql://", "postgres://")):
+        try:
+            import psycopg2
+            conn = psycopg2.connect(target, connect_timeout=max(1, int(timeout)))
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+                    row = cur.fetchone()
+            finally:
+                conn.close()
+            elapsed = (datetime.now(timezone.utc) - started).total_seconds() * 1000.0
+            return "Healthy", elapsed, "PostgreSQL connection validated.", int(bool(row))
+        except Exception as exc:
+            elapsed = (datetime.now(timezone.utc) - started).total_seconds() * 1000.0
+            return "Offline", elapsed, f"{type(exc).__name__}: {str(exc)[:220]}", 0
+    elapsed = (datetime.now(timezone.utc) - started).total_seconds() * 1000.0
+    return "Configuration Error", elapsed, "SQL adapter supports sqlite:/// and PostgreSQL DSNs.", 0
+
+
+def _connector_mqtt_test(endpoint: str, username: str = "", password: str = "", timeout: float = 8.0) -> tuple[str, float, str, int]:
+    started = datetime.now(timezone.utc)
+    target = str(endpoint or "").strip()
+    try:
+        import paho.mqtt.client as mqtt
+    except Exception:
+        return "Dependency Missing", 0.0, "Install paho-mqtt to enable live MQTT adapter tests.", 0
+    try:
+        from urllib.parse import urlparse
+        parsed = urlparse(target if "://" in target else "mqtt://" + target)
+        host = parsed.hostname or ""
+        port = parsed.port or (8883 if parsed.scheme == "mqtts" else 1883)
+        client = mqtt.Client()
+        if username:
+            client.username_pw_set(username, password or None)
+        client.connect(host, port, keepalive=max(5, int(timeout)))
+        client.disconnect()
+        elapsed = (datetime.now(timezone.utc) - started).total_seconds() * 1000.0
+        return "Healthy", elapsed, f"MQTT broker {host}:{port} accepted a connection.", 1
+    except Exception as exc:
+        elapsed = (datetime.now(timezone.utc) - started).total_seconds() * 1000.0
+        return "Offline", elapsed, f"{type(exc).__name__}: {str(exc)[:220]}", 0
+
+
+def _connector_opcua_test(endpoint: str, timeout: float = 8.0) -> tuple[str, float, str, int]:
+    started = datetime.now(timezone.utc)
+    try:
+        from opcua import Client
+    except Exception:
+        return "Dependency Missing", 0.0, "Install opcua to enable live OPC-UA adapter tests.", 0
+    client = None
+    try:
+        client = Client(str(endpoint), timeout=max(1.0, float(timeout)))
+        client.connect()
+        elapsed = (datetime.now(timezone.utc) - started).total_seconds() * 1000.0
+        return "Healthy", elapsed, "OPC-UA session handshake validated.", 1
+    except Exception as exc:
+        elapsed = (datetime.now(timezone.utc) - started).total_seconds() * 1000.0
+        return "Offline", elapsed, f"{type(exc).__name__}: {str(exc)[:220]}", 0
+    finally:
+        try:
+            if client is not None:
+                client.disconnect()
+        except Exception:
+            pass
+
+
+def test_connector_profile(
+    username: str,
+    name: str,
+    system_type: str,
+    protocol: str,
+    endpoint: str,
+    secret_ref: str = "",
+    workspace: str = "default",
+    timeout: float = 8.0,
+) -> dict[str, Any]:
+    """Run one opt-in connector smoke test and persist the result."""
+    validation = validate_connector_profile(system_type, protocol, endpoint)
+    if not validation.get("valid"):
+        connector_id = record_connector_health(
+            username,
+            name,
+            system_type,
+            protocol,
+            endpoint,
+            "Configuration Error",
+            "; ".join(validation.get("errors", [])),
+            0.0,
+            workspace,
+        )
+        return {
+            "connector_id": connector_id,
+            "run_id": "",
+            "status": "Configuration Error",
+            "latency_ms": 0.0,
+            "detail": "; ".join(validation.get("errors", [])),
+            "records": 0,
+        }
+
+    secret = resolve_connector_secret(secret_ref)
+    started = datetime.now(timezone.utc)
+    pr = str(protocol).strip().upper()
+    if pr in {"REST", "ODATA", "HTTPS"}:
+        status, latency, detail = check_rest_connector(endpoint, secret, timeout)
+        records = 1 if status == "Healthy" else 0
+    elif pr in {"SQL", "JDBC"}:
+        status, latency, detail, records = _connector_sql_test(endpoint, timeout)
+    elif pr == "MQTT":
+        status, latency, detail, records = _connector_mqtt_test(endpoint, username if secret else "", secret, timeout)
+    elif pr == "OPC-UA":
+        status, latency, detail, records = _connector_opcua_test(endpoint, timeout)
+    else:
+        status, latency, detail, records = "Configuration Error", 0.0, "No executable adapter is registered for this protocol.", 0
+
+    finished = datetime.now(timezone.utc)
+    connector_id = record_connector_health(
+        username, name, system_type, protocol, endpoint, status, detail,
+        float(latency), workspace,
+    )
+    run_id = _record_connector_run(
+        username, connector_id, "test", status, float(latency), detail,
+        int(records), started, finished, workspace,
+    )
+    return {
+        "connector_id": connector_id,
+        "run_id": run_id,
+        "status": status,
+        "latency_ms": round(float(latency), 1),
+        "detail": detail,
+        "records": int(records),
+        "adapter": CONNECTOR_PROTOCOLS.get(pr, pr),
+        "secret_ref_used": bool(secret_ref),
+    }
+
+
+def schedule_connector_sync(
+    username: str,
+    connector_id: str,
+    interval_minutes: int,
+    workspace: str = "default",
+    enabled: bool = True,
+) -> str:
+    """Persist connector synchronization cadence; execution is handled by the job backend."""
+    ensure_enterprise_schema()
+    wid = workspace_key(username, workspace)
+    schedule_id = "CSCH-" + uuid.uuid4().hex[:12].upper()
+    interval = max(1, int(interval_minutes))
+    now = datetime.now(timezone.utc)
+    next_run = now + pd.Timedelta(minutes=interval) if enabled else None
+    values = (
+        schedule_id, wid, connector_id, interval, bool(enabled),
+        next_run.isoformat() if next_run is not None else None,
+        None, "Scheduled" if enabled else "Disabled", now_iso(),
+    )
+    if _remote():
+        with _pg_connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """INSERT INTO shoir_internal.connector_schedules
+                    (schedule_id,workspace_id,connector_id,interval_minutes,enabled,next_run_at,last_run_at,last_status,updated_at)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                    values,
+                )
+            conn.commit()
+    else:
+        with _local_connect() as conn:
+            conn.execute(
+                """INSERT INTO shoir_ent_connector_schedules
+                (schedule_id,workspace_id,connector_id,interval_minutes,enabled,next_run_at,last_run_at,last_status,updated_at)
+                VALUES (?,?,?,?,?,?,?,?,?)""",
+                values,
+            )
+            conn.commit()
+    return schedule_id
 
 
 def create_job_record(username: str, module: str, job_type: str, payload: Mapping[str, Any], workspace: str = "default") -> str:
