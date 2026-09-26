@@ -139,7 +139,7 @@ def test_streaming_csv_profile_and_query():
 
 def test_runtime_profile_scales_by_cell_count():
     small = pd.DataFrame(np.ones((10, 10)))
-    medium = pd.DataFrame(np.ones((2000, 20)))
+    medium = pd.DataFrame(np.ones((10000, 30)))
     assert instant_runtime_profile(small)["mode"] == "interactive"
     assert instant_runtime_profile(medium)["mode"] == "vectorized"
 
