@@ -1414,6 +1414,18 @@ def render_final_integration(module: str, tier: str, username: str) -> dict[str,
         "errors": [],
     }
 
+    # Restore/synchronize the canonical Digital Thread BEFORE any dependent
+    # Control Tower/Digital Twin overlays run. The thread is authoritative for
+    # cross-domain relationships; operational modules continue to own their
+    # measured signals.
+    if username != "unknown":
+        try:
+            if not st.session_state.get("global_thread_nodes"):
+                restore_latest_canonical_thread(username)
+            result["canonical_thread"] = sync_canonical_thread(username, module)
+        except Exception as exc:
+            result["errors"].append(f"Digital Thread: {type(exc).__name__}: {exc}")
+
     # Preserve the established specialized overlays without duplicating their
     # implementation in a second enterprise module.
     try:
@@ -1453,16 +1465,6 @@ def render_final_integration(module: str, tier: str, username: str) -> dict[str,
             render_knowledge_extension(username)
     except Exception as exc:
         result["errors"].append(f"Specialized overlay: {type(exc).__name__}: {exc}")
-
-    if username != "unknown":
-        try:
-            # Restore the durable thread only when the current session has no
-            # graph, then synchronize current evidence into the same canonical graph.
-            if not st.session_state.get("global_thread_nodes"):
-                restore_latest_canonical_thread(username)
-            result["canonical_thread"] = sync_canonical_thread(username, module)
-        except Exception as exc:
-            result["errors"].append(f"Digital Thread: {type(exc).__name__}: {exc}")
 
     try:
         render_universal_module_parity(module, phase="results")
