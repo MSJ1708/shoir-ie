@@ -45,6 +45,21 @@ AGENT_ROUTES = {
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
+
+_SENSITIVE_KEY_FRAGMENTS = ("password", "token", "secret", "otp", "api_key", "authorization", "payment")
+
+
+def _redact(value: Any, key: str = "") -> Any:
+    if any(fragment in str(key).lower() for fragment in _SENSITIVE_KEY_FRAGMENTS):
+        return "[REDACTED]"
+    if isinstance(value, Mapping):
+        return {str(k): _redact(v, str(k)) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_redact(v, key) for v in value]
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    return str(value)
+
 def _safe_frame(value: Any) -> pd.DataFrame:
     if isinstance(value, pd.DataFrame):
         return value.copy(deep=True)
@@ -164,6 +179,20 @@ def pivot_table(
     agg_map = {"mean": "mean", "sum": "sum", "min": "min", "max": "max", "count": "count", "median": "median"}
     if aggregation not in agg_map:
         raise ValueError(f"Unsupported pivot aggregation: {aggregation}")
+    if not column_fields and len(row_fields) == 1 and len(value_fields) == 1 and len(work) * max(1, len(work.columns)) >= 100_000:
+        try:
+            import duckdb  # type: ignore
+            row_col, value_col = row_fields[0], value_fields[0]
+            quote = lambda name: '"' + str(name).replace('"', '""') + '"'
+            sql_agg = {"mean": "AVG", "sum": "SUM", "count": "COUNT", "min": "MIN", "max": "MAX", "median": "MEDIAN"}[aggregation]
+            relation = duckdb.from_df(work[[row_col, value_col]].copy())
+            return relation.query(
+                f"SELECT {quote(row_col)} AS {quote(row_col)}, {sql_agg}(CAST({quote(value_col)} AS DOUBLE)) AS {quote(value_col)} "
+                f"FROM relation GROUP BY {quote(row_col)} ORDER BY {quote(row_col)}"
+            ).df()
+        except Exception:
+            pass
+
     result = pd.pivot_table(
         work,
         index=row_fields,
@@ -342,16 +371,29 @@ def action_gate(requested_level: str, tier: str, approved: bool = False, admin: 
 def runtime_choice(df: pd.DataFrame) -> dict[str, Any]:
     frame = _safe_frame(df)
     cells = int(frame.shape[0] * frame.shape[1])
-    engine = "pandas"
+    duckdb_available = False
+    pyarrow_available = False
     try:
         import duckdb  # type: ignore
-        engine = "duckdb" if cells >= 100_000 else "pandas"
+        duckdb_available = True
     except Exception:
-        engine = "pandas"
-    return {"engine": engine, "cells": cells, "mode": "vectorized" if engine == "duckdb" else "in-memory", "duckdb_available": engine == "duckdb"}
+        pass
+    try:
+        import pyarrow  # type: ignore
+        pyarrow_available = True
+    except Exception:
+        pass
+    engine = "duckdb" if duckdb_available and cells >= 100_000 else "pandas"
+    return {
+        "engine": engine,
+        "cells": cells,
+        "mode": "vectorized/columnar" if engine == "duckdb" else "in-memory",
+        "duckdb_available": duckdb_available,
+        "pyarrow_available": pyarrow_available,
+    }
 
 def black_box_event(module: str, kind: str, payload: Mapping[str, Any], username: str = "unknown") -> dict[str, Any]:
-    safe_payload = json.loads(json.dumps(dict(payload), default=str))
+    safe_payload = json.loads(json.dumps(_redact(dict(payload)), default=str))
     canonical = json.dumps(
         {"module": module, "kind": kind, "payload": safe_payload},
         sort_keys=True,
@@ -546,7 +588,7 @@ def _render_ui(module: str, tier: str, username: str) -> None:
                 )
             action = st.selectbox("Permission level", ENGINE_ACTION_LEVELS, key="uie_action_level")
             approved = st.checkbox("Explicit approval recorded for this action", key="uie_action_approval")
-            admin = str(username).lower() in {"sho", "admin"}
+            admin = bool(st.session_state.get("is_admin") or st.session_state.get("admin") or st.session_state.get("is_workspace_admin"))
             gate = action_gate(action, tier, approved=approved, admin=admin)
             st.metric("Action gate", "ALLOWED" if gate["allowed"] else "BLOCKED")
             st.caption(gate["reason"])
