@@ -24,6 +24,14 @@ def test_engineering_formula_library_core_functions():
     assert np.isclose(evaluate_engineering_function("SAFETYSTOCK", [1.65, 120, 5]), 1.65 * 120 * math.sqrt(5))
     assert np.isclose(evaluate_engineering_function("NPV", [0.10, [100, 100]]), 100 / 1.1 + 100 / 1.21)
     assert np.isclose(evaluate_engineering_function("CO2E", [1000, 0.42]), 420.0)
+    assert np.isclose(evaluate_engineering_function("MTBF", [720, 3]), 240.0)
+    assert np.isclose(evaluate_engineering_function("MTTR", [12, 3]), 4.0)
+    assert np.isclose(evaluate_engineering_function("UTILIZATION", [144, 160]), 0.9)
+    assert np.isclose(evaluate_engineering_function("FPY", [950, 1000]), 0.95)
+    assert np.isclose(evaluate_engineering_function("YIELD", [980, 1000]), 0.98)
+    assert np.isclose(evaluate_engineering_function("DPMO", [12, 1000, 4]), 3000.0)
+    assert np.isclose(evaluate_engineering_function("PERCENTCHANGE", [100, 108]), 0.08)
+    assert np.isclose(evaluate_engineering_function("CAPACITY", [480, 2.5]), 1200.0)
     assert np.isclose(evaluate_engineering_function("CONVERT", [60, "min", "h"]), 1.0)
 
 
