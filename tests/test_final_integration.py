@@ -42,6 +42,47 @@ def test_canonical_lifecycle_flow_is_renderable():
     assert "Asset" in CANONICAL_LIFECYCLE and "Outcome" in CANONICAL_LIFECYCLE
     assert canonical_flow_figure(nodes, edges) is not None
 
+def test_decision_center_card_uses_shared_lifecycle_id(tmp_path):
+    import sqlite3
+    import industrial_platform as platform
+    import industrial_experience as exp
+
+    db = str(tmp_path / "decision.db")
+    platform.init_platform_db(db)
+    card = {
+        "title": "Unified decision",
+        "module": "Engineering Decision Center",
+        "metrics": {"Throughput": 100.0},
+        "assumptions": {"source": "test"},
+        "uncertainty": {"statement": "Test only"},
+        "status": "Implemented",
+        "created_at": "2026-09-26T00:00:00",
+    }
+    did = platform.save_decision_card(card, "alice", db_path=db)
+
+    with sqlite3.connect(db) as conn:
+        row = conn.execute(
+            "SELECT decision_id,status,owner FROM experience_decisions WHERE decision_id=?",
+            (did,),
+        ).fetchone()
+    assert row == (did, "Implemented", "alice")
+
+    oid = exp.record_decision_outcome(
+        did,
+        "alice",
+        "Verified",
+        {"Throughput": 100.0},
+        {"Throughput": 94.0},
+        lesson="Observed throughput was below prediction.",
+        workspace="plant-a",
+        db_path=db,
+        persist_artifact=False,
+    )
+    value = exp.decision_to_value_frame(owner="alice", decision_id=did, db_path=db)
+    assert oid.startswith("OUT-")
+    assert float(value.loc[value["KPI"].eq("Throughput"), "Delta"].iloc[0]) == -6.0
+
+
 def test_decision_outcome_persistence_and_variance(tmp_path, monkeypatch):
     import sqlite3
     import industrial_experience as exp
