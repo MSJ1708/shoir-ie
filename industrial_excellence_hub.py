@@ -233,7 +233,60 @@ def _overview(username: str) -> None:
     )
 
 
-def _digital_thread(username: str) -> None:
+    with st.expander("🧪 Benchmark Laboratory", expanded=False):
+        _benchmark_lab(username)
+    with st.expander("📊 Visualization Readiness Audit", expanded=False):
+        _visualization_readiness(username)
+
+def _benchmark_lab(username: str) -> None:
+    st.markdown("### 🧪 Benchmark Laboratory")
+    st.caption("Deterministic synthetic engineering workloads for runtime/reproducibility validation. These results are not customer ROI claims.")
+    from benchmark_harness import run_standard_benchmarks
+    if st.button("▶️ Run standard engineering benchmarks", type="primary", use_container_width=True, key="px_run_standard_benchmarks"):
+        with st.spinner("Running deterministic platform benchmarks..."):
+            st.session_state["px_benchmark_results"] = run_standard_benchmarks(repetitions=3, rows=10000)
+    results = st.session_state.get("px_benchmark_results")
+    if isinstance(results, pd.DataFrame) and not results.empty:
+        st.dataframe(
+            results[["label","benchmark_type","dataset_rows","mean_ms","median_ms","p95_ms","min_ms","max_ms"]].rename(
+                columns={"label":"Benchmark","benchmark_type":"Type","dataset_rows":"Rows","mean_ms":"Mean ms","median_ms":"Median ms","p95_ms":"P95 ms","min_ms":"Min ms","max_ms":"Max ms"}
+            ),
+            use_container_width=True,
+            hide_index=True,
+        )
+        fig = px.bar(results, x="label", y="mean_ms", title="Standard Benchmark Runtime")
+        fig.update_layout(xaxis_title=None, yaxis_title="Mean runtime (ms)")
+        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+        st.download_button(
+            "📥 Download benchmark evidence (CSV)",
+            results.to_csv(index=False).encode("utf-8"),
+            "shoir_ie_standard_benchmark_evidence.csv",
+            "text/csv",
+            use_container_width=True,
+            key="px_download_benchmark_results",
+        )
+
+
+def _visualization_readiness(username: str) -> None:
+    st.markdown("### 📊 Universal Visualization Readiness")
+    st.caption("Every populated registered table must produce a real graph; empty modules are shown as ready for incoming data.")
+    from shoir_live_visuals import audit_all_module_visualizations, visualization_readiness_summary
+    summary = visualization_readiness_summary(max_figures=4)
+    v1, v2, v3, v4 = st.columns(4)
+    v1.metric("Catalog modules", f'{summary["modules"]:,}')
+    v2.metric("Verified", f'{summary["verified"]:,}')
+    v3.metric("Awaiting data", f'{summary["awaiting_data"]:,}')
+    v4.metric("Gaps", f'{summary["gaps"]:,}')
+    audit = audit_all_module_visualizations(max_figures=4)
+    if not audit.empty:
+        st.dataframe(audit, use_container_width=True, hide_index=True)
+        if int(summary["gaps"]) == 0:
+            st.success("No populated module table is currently graphless.")
+        else:
+            st.warning(f'{summary["gaps"]:,} populated module table(s) require visualization work.')
+
+
+def _digital_thread(username: str) -> None:def _digital_thread(username: str) -> None:
     st.markdown("### 🔗 Digital Thread")
     st.caption("A shared industrial graph connecting the objects that modules reason about.")
     with _db() as conn:
