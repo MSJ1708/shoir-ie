@@ -48,6 +48,7 @@ from shoir_enterprise_layer import (
     build_research_paper_bundle,
 )
 from shoir_unified_product import render_unified_workspace, render_global_product_dock, copilot_context
+from shoir_adoption_engine import render_adoption_center
 from shoir_universal_engine import render_universal_engine_surface, postflight_contract
 from shoir_commercial import render_module_enrichment
 from shoir_160 import init_160_platform, render_160_command_center
@@ -1616,6 +1617,25 @@ render_global_product_dock(
     str(st.session_state.get("user_tier", "Starter Tier")),
     st.session_state.get("current_user", "unknown"),
 )
+if st.session_state.pop("force_workbook_module", False):
+    _wb_label = next((label for label, name in _module_label_map.items() if name == "Industrial Workbook"), None)
+    if _wb_label:
+        st.session_state["enterprise_module_selector"] = _wb_label
+        st.rerun()
+    else:
+        st.warning("Industrial Workbook is not available in the current tier.")
+if st.session_state.pop("force_adoption_center", False):
+    try:
+        render_adoption_center(
+            st.session_state.get("current_user", "unknown"),
+            str(st.session_state.get("user_tier", "Starter Tier")),
+            initial_tab=st.session_state.pop("adoption_tab_request", "Home"),
+        )
+    except Exception as exc:
+        st.error("Industrial Home could not render the productivity workspace safely.")
+        with st.expander("Adoption engine diagnostic", expanded=False):
+            st.code(f"{type(exc).__name__}: {exc}")
+    st.stop()
 if st.session_state.pop("force_unified_workspace", False):
     render_unified_workspace(
         selected_module,
@@ -1666,17 +1686,35 @@ def _render_pretty_result(value, title="Result", key_prefix="result"):
 
 def _render_result_chart(df,title,key_prefix):
     if not isinstance(df,pd.DataFrame) or df.empty: return
+    # Manual chart controls stay available, but the universal visualization
+    # contract is always the first fallback so categorical/unknown results
+    # never silently become graph-less.
+    try:
+        from shoir_live_visuals import ensure_visualization_suite
+        auto_suite=ensure_visualization_suite(df, context=title, max_figures=1)
+    except Exception:
+        auto_suite=[]
     nums=[x for x in df.columns if pd.api.types.is_numeric_dtype(df[x])]
-    if not nums: return
+    if not nums:
+        if auto_suite:
+            st.plotly_chart(auto_suite[0][1],use_container_width=True,config={"displayModeBar":False,"responsive":True})
+        return
     y=st.selectbox("Metric",nums,key=f"{key_prefix}_metric")
     xs=[x for x in df.columns if x!=y]
     x=st.selectbox("X-axis / category",xs,key=f"{key_prefix}_x") if xs else None
-    kind=st.selectbox("Chart",["Bar","Line","Scatter"],key=f"{key_prefix}_chart")
+    kind=st.selectbox("Chart",["Auto","Bar","Line","Scatter"],key=f"{key_prefix}_chart")
+    if kind=="Auto":
+        if auto_suite:
+            st.plotly_chart(auto_suite[0][1],use_container_width=True,config={"displayModeBar":False,"responsive":True})
+        return
     plot=df[[x,y]].dropna() if x else df[[y]].dropna()
-    if plot.empty: return
+    if plot.empty:
+        if auto_suite:
+            st.plotly_chart(auto_suite[0][1],use_container_width=True,config={"displayModeBar":False,"responsive":True})
+        return
     fig=px.line(plot,x=x,y=y,markers=True,title=title) if kind=="Line" and x else px.scatter(plot,x=x,y=y,title=title) if kind=="Scatter" and x else px.bar(plot,x=x,y=y,title=title) if x else px.bar(plot,y=y,title=title)
     fig.update_layout(height=340,margin=dict(l=10,r=10,t=55,b=10))
-    st.plotly_chart(fig,use_container_width=True)
+    st.plotly_chart(fig,use_container_width=True,config={"displayModeBar":False,"responsive":True})
 
 # =====================================================================
 # UNIVERSAL MODULE PARITY — PREPARE
