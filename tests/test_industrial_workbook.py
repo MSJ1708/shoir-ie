@@ -169,12 +169,24 @@ def test_platform_and_visualization_integration():
 def test_engineering_formula_functions_are_safe_and_deterministic():
     from shoir_industrial_workbook import SafeFormulaEngine, evaluate_workbook_formulas
 
-    wb = {"Sheet1": pd.DataFrame({"Avail":[0.9,0.95], "Perf":[0.8,0.9], "Quality":[0.98,0.99], "Value":[10.0,20.0], "Out":[0.0,0.0], "Demand":[100.0,110.0]})}
-    formulas = {"Sheet1": {"E2": "=OEE(A2,B2,C2)", "E3": "=TAKT_TIME(D2,F2)"}}
+    wb = {"Sheet1": pd.DataFrame({
+        "Avail":[90.0,95.0],
+        "Perf":[80.0,90.0],
+        "Quality":[98.0,99.0],
+        "AvailableTime":[10.0,20.0],
+        "Demand":[100.0,110.0],
+        "OutOEE":[0.0,0.0],
+        "OutTakt":[0.0,0.0],
+    })}
+    formulas = {"Sheet1": {
+        "F1": "=OEE(A1,B1,C1)",
+        "G2": "=TAKT_TIME(D2,E2)",
+    }}
     result, audit = evaluate_workbook_formulas(wb, formulas)
-    assert not audit[audit["Status"].eq("Error")].any().any()
-    assert result["Sheet1"].iat[0,4] == pytest.approx(0.9 * 0.8 * 0.98)
-    assert result["Sheet1"].iat[1,4] == pytest.approx(20.0 / 110.0)
+    errors = audit[audit["Status"].eq("Error")]
+    assert errors.empty, errors.to_dict("records")
+    assert result["Sheet1"].iat[0,5] == pytest.approx(0.90 * 0.80 * 0.98)
+    assert result["Sheet1"].iat[1,6] == pytest.approx(20.0 / 110.0)
 
     engine = SafeFormulaEngine(wb)
     assert engine.evaluate('=CONVERT(60,"min","h")', "Sheet1") == pytest.approx(1.0)
