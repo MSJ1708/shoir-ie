@@ -331,6 +331,7 @@ def init_db():
         # this file, if this project has ever been pushed to git (even a
         # private repo) or shared anywhere, treat it as compromised and
         # change it via secrets.toml.
+        admin_pass_hash = None
         try:
             admin_password = str(st.secrets["admin"]["password"])
         except Exception:
@@ -366,13 +367,18 @@ def init_db():
 
         # Never recreate/delete accounts on app startup.
         cursor.execute("SELECT 1 FROM users WHERE LOWER(username)='sho' LIMIT 1")
-        if cursor.fetchone() is None:
+        if cursor.fetchone() is None and admin_pass_hash:
             cursor.execute("""
                 INSERT INTO users
                 (username,password,role,tier,email,created_at,subscription_expires_at)
                 VALUES (?,?,?,?,?,?,?)
             """, ("sho", admin_pass_hash, "admin", "Enterprise Tier ($199)",
                   "shoirtheagent@gmail.com", "2020-01-01T00:00:00", "2030-01-01T00:00:00"))
+        elif admin_pass_hash:
+            cursor.execute(
+                "UPDATE users SET password=?, role=?, tier=?, email=? WHERE LOWER(username)='sho'",
+                (admin_pass_hash, "admin", "Enterprise Tier ($199)", "shoirtheagent@gmail.com"),
+            )
 
         conn.commit()
 
