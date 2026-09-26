@@ -767,7 +767,11 @@ def connector_health_evidence(username: str, profile: Mapping[str, Any], result:
 def connector_profiles_from_state() -> list[dict[str, Any]]:
     try:
         import streamlit as st
-        profiles = st.session_state.get("connector_profiles") or st.session_state.get("erp_connectors") or []
+        profiles = st.session_state.get("connector_profiles")
+        if profiles is None:
+            profiles = st.session_state.get("erp_connectors")
+        if profiles is None:
+            profiles = []
         if isinstance(profiles, pd.DataFrame):
             return profiles.to_dict("records")
         if isinstance(profiles, Mapping):
@@ -777,7 +781,6 @@ def connector_profiles_from_state() -> list[dict[str, Any]]:
     except Exception:
         pass
     return []
-
 
 def decision_value_record(
     username: str,
@@ -817,13 +820,14 @@ def decision_value_record(
         "source": str(source),
         "verified_at": utc_now(),
     }
+    history_key = f"{username}|{decision_id}|{kpi}|{payload['verified_at']}"
     return record_artifact(
         username,
         "decision_value",
-        f"{decision_id} · {kpi}",
+        f"{decision_id} · {kpi} · {payload['verified_at']}",
         payload,
         workspace=_workspace_name(),
-        artifact_id=f"DVL-{hashlib.sha256((username+'|'+decision_id+'|'+kpi).encode()).hexdigest()[:14].upper()}",
+        artifact_id=f"DVL-{hashlib.sha256(history_key.encode()).hexdigest()[:14].upper()}",
     )
 
 
