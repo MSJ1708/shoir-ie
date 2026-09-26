@@ -263,6 +263,7 @@ def resource_efficiency_analysis(df: pd.DataFrame) -> tuple[pd.DataFrame, list[s
                 "Field Used": "",
                 "Detected Fields": "",
                 "Observations": 0,
+                "Total": np.nan,
                 "Mean": np.nan,
                 "Min": np.nan,
                 "Max": np.nan,
@@ -274,6 +275,7 @@ def resource_efficiency_analysis(df: pd.DataFrame) -> tuple[pd.DataFrame, list[s
             "Field Used": field,
             "Detected Fields": ", ".join(fields),
             "Observations": int(len(values)),
+            "Total": float(values.sum()) if not values.empty else np.nan,
             "Mean": float(values.mean()) if not values.empty else np.nan,
             "Min": float(values.min()) if not values.empty else np.nan,
             "Max": float(values.max()) if not values.empty else np.nan,
@@ -299,7 +301,12 @@ def scenario_tradeoff_matrix(
     work = df[[scenario_col, *chosen]].copy()
     for c in chosen:
         work[c] = pd.to_numeric(work[c], errors="coerce")
-    grouped = work.groupby(scenario_col, dropna=False)[chosen].mean().reset_index()
+    grouped = work.groupby(scenario_col, dropna=False, sort=False)[chosen].mean().reset_index()
+    labels = grouped[scenario_col].astype("string")
+    baseline_mask = labels.str.strip().str.lower().isin({"baseline", "base"})
+    if baseline_mask.any():
+        base_pos = int(np.flatnonzero(baseline_mask.to_numpy())[0])
+        grouped = pd.concat([grouped.iloc[[base_pos]], grouped.drop(grouped.index[base_pos])], ignore_index=True)
     baseline = grouped.iloc[0]
     for metric in chosen:
         grouped[f"{metric} Δ"] = grouped[metric] - float(baseline[metric])
