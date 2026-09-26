@@ -1187,16 +1187,64 @@ def render_industrial_workbook(tier:str="Starter",username:str="unknown")->None:
                                 restored_semantic,
                                 f"Shoir-IE Workbook · restored v{selected_version}",
                                 wid,
+                                variables=restored_variables,
+                                version_label=f"Restored from v{selected_version}",
                             )
                             st.success(f"Version {selected_version} restored as the new current workbook state.")
                             st.rerun()
                         except Exception as exc:
                             st.warning(f"Version restore failed safely: {exc}")
+                st.markdown("#### Scenario branch")
+                branch_name=st.text_input("Branch name",placeholder="e.g. Demand +5%",key="iw_branch_name")
+                if st.button("🌿 Create scenario branch",key="iw_branch_create"):
+                    try:
+                        from shoir_adoption_engine import create_scenario_branch
+                        branch_id=create_scenario_branch(st.session_state["industrial_workbook_id"],branch_name)
+                        st.success(f"Scenario branch created: {branch_id}")
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(f"Scenario branch could not be created: {type(exc).__name__}: {exc}")
         u1,u2,u3,u4=st.columns(4); value=u1.number_input("Convert value",value=1.0,key="iw_unit_value"); fr=u2.text_input("From unit",value="min",key="iw_unit_from"); to=u3.text_input("To unit",value="h",key="iw_unit_to")
         if u4.button("Convert",key="iw_convert_unit"):
             try: st.metric("Converted",f"{convert_units(value,fr,to):,.6g} {to}")
             except Exception as exc: st.warning(f"Unit conversion not available: {exc}")
         if not st.session_state["industrial_workbook_formula_audit_df"].empty: st.dataframe(st.session_state["industrial_workbook_formula_audit_df"],use_container_width=True,hide_index=True)
+        with st.expander("📐 Named engineering variables", expanded=False):
+            variable_editor=st.data_editor(
+                pd.DataFrame([
+                    {
+                        "Name": k,
+                        "Value": v.get("value", v) if isinstance(v, dict) else v,
+                        "Unit": v.get("unit", "") if isinstance(v, dict) else "",
+                        "Description": v.get("description", "") if isinstance(v, dict) else "",
+                    }
+                    for k,v in variables.items()
+                ]),
+                num_rows="dynamic",
+                use_container_width=True,
+                hide_index=True,
+                key="iw_variables_editor",
+            )
+            if st.button("💾 Save named variables",key="iw_variables_save"):
+                updated_variables={}
+                for rec in variable_editor.fillna("").to_dict("records"):
+                    name=str(rec.get("Name","")).strip()
+                    if not name:
+                        continue
+                    raw_value=rec.get("Value")
+                    try:
+                        value=float(raw_value)
+                    except (TypeError,ValueError):
+                        value=raw_value
+                    updated_variables[name]={
+                        "value": value,
+                        "unit": str(rec.get("Unit","")),
+                        "description": str(rec.get("Description",""))[:300],
+                    }
+                variables.clear()
+                variables.update(updated_variables)
+                st.session_state["industrial_workbook_variables"]=variables
+                st.success(f"Saved {len(variables):,} named variable(s). They can be referenced directly in formulas.")
 
     with tabs[1]:
         profile=instant_analyze(current); health=validate_workbook({current_sheet:current}); runtime=instant_runtime_profile(current)
