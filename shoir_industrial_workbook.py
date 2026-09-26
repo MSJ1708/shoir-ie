@@ -864,16 +864,42 @@ def list_workbook_versions(workbook_id:str|None=None,path:str=DB_PATH)->pd.DataF
             conn,params=(_workspace(),)
         )
 
-def load_workbook_version(workbook_id:str,version_no:int,path:str=DB_PATH)->tuple[dict[str,pd.DataFrame],dict[str,dict[str,str]],dict[str,Any]]:
+def load_workbook_version(
+    workbook_id_or_version_id:str,
+    version_no:int|None=None,
+    path:str=DB_PATH,
+):
+    """Load a workbook version with backward-compatible and version-ID APIs.
+
+    Two-argument form returns the historical three-value tuple used by the
+    existing workbook UI. One-argument form accepts the version row ID and
+    returns workbook, formulas, semantic map and variables.
+    """
     ensure_workbook_db(path)
     with sqlite3.connect(path,timeout=30) as conn:
+        if version_no is None:
+            row=conn.execute(
+                """SELECT payload_b64,formulas_json,semantic_map_json,COALESCE(variables_json,'{}')
+                   FROM industrial_workbook_versions
+                   WHERE version_id=? AND workspace=?""",
+                (workbook_id_or_version_id,_workspace())
+            ).fetchone()
+            if not row:
+                raise KeyError("Workbook version not found in the current workspace.")
+            return (
+                _deserialize_workbook(base64.b64decode(row[0])),
+                json.loads(row[1] or "{}"),
+                json.loads(row[2] or "{}"),
+                json.loads(row[3] or "{}"),
+            )
         row=conn.execute(
             """SELECT payload_b64,formulas_json,semantic_map_json
                FROM industrial_workbook_versions
                WHERE workbook_id=? AND workspace=? AND version_no=?""",
-            (workbook_id,_workspace(),int(version_no))
+            (workbook_id_or_version_id,_workspace(),int(version_no))
         ).fetchone()
-    if not row: raise KeyError("Workbook version not found in the current workspace.")
+    if not row:
+        raise KeyError("Workbook version not found in the current workspace.")
     return _deserialize_workbook(base64.b64decode(row[0])),json.loads(row[1] or "{}"),json.loads(row[2] or "{}")
 
 def load_workbook_version_variables(workbook_id:str,version_no:int,path:str=DB_PATH)->dict[str,Any]:
