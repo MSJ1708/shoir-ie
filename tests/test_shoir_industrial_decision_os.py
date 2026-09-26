@@ -6,7 +6,7 @@ from shoir_industrial_decision_os import (
     canonical_thread_contract,
     decision_value_record,
     run_standard_benchmark_suite,
-    test_connector_profile,
+    test_connector_profile as run_connector_profile,
     visualization_contract_report,
 )
 
@@ -26,7 +26,7 @@ def test_canonical_thread_contract_contains_operational_spine():
 
 
 def test_connector_adapter_rejects_unsafe_and_unknown_protocols():
-    invalid_rest = test_connector_profile({
+    invalid_rest = run_connector_profile({
         "name": "bad",
         "system_type": "REST",
         "protocol": "REST",
@@ -34,7 +34,7 @@ def test_connector_adapter_rejects_unsafe_and_unknown_protocols():
     })
     assert invalid_rest.status == "FAIL"
 
-    unknown = test_connector_profile({
+    unknown = run_connector_profile({
         "name": "bad",
         "system_type": "Unknown",
         "protocol": "TELNET",
