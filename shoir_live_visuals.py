@@ -148,7 +148,7 @@ def _is_candidate_key(key: str) -> bool:
     return not k.startswith(("_", "signin_", "reg_"))
 
 
-def discover_visual_tables(module: str, preferred_key: str | None = None) -> list[tuple[str, str, pd.DataFrame]]:
+def discover_visual_tables(module: str, preferred_key: str | None = None, *, allow_global_fallback: bool = True) -> list[tuple[str, str, pd.DataFrame]]:
     """Discover safe, non-secret tables relevant to the active module.
 
     preferred_key is placed first when it contains a usable DataFrame. This
@@ -186,10 +186,9 @@ def discover_visual_tables(module: str, preferred_key: str | None = None) -> lis
             result.append((str(key).replace("_", " ").title(), str(key), df))
             seen.add(str(key))
 
-    # Finally, allow safe workspace tables as a fallback. This prevents a new
-    # module from shipping without visualization solely because its state key
-    # was not registered yet.
-    if not result:
+    # Optional final fallback for interactive use. Audits disable this path
+    # so one module can never inherit another module's unrelated table.
+    if allow_global_fallback and not result:
         for key, value in list(st.session_state.items()):
             if key in seen or not _is_candidate_key(str(key)):
                 continue
@@ -1081,7 +1080,7 @@ def audit_all_module_visualizations(max_figures: int = 4) -> pd.DataFrame:
 
     rows = []
     for module in module_names:
-        tables = discover_visual_tables(module)
+        tables = discover_visual_tables(module, allow_global_fallback=False)
         if not tables:
             rows.append({
                 "Module": module,
