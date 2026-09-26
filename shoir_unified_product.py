@@ -742,12 +742,21 @@ def copilot_context() -> str:
         "Platform Health",
         "Showcase Mode",
         "Universal Evidence Export",
+        "Industrial Home",
+        "Industrial Workbook",
+        "Industrial Pivot",
+        "Quick Analyze",
+        "Shoir Script automation",
+        "Engineering Formula Library",
+        "Workbook version history and cell comments",
+        "Formula dependency graph and Explain This Number",
+        "Capability-aware analytical runtime",
         "Command Palette",
         "cross-module recommendations",
     ]
     return (
         "Shoir-IE now operates as one unified industrial product. "
-        "Its shared workflow is Problem → Data → Model → Scenario → Decision → Implementation → Lesson. "
+        "Its shared workflow is Workbook/Data → Validate → Analyze → Visualize → Simulate/Optimize → Scenario → Decision → Implementation → Outcome → Learn. "
         "Available cross-cutting experience surfaces: " + ", ".join(capabilities) + ". "
         "Use evidence-first language, never invent values, clearly separate measured results from assumptions, "
         "and prefer preview/approval before any destructive action."
