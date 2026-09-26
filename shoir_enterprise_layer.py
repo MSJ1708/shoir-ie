@@ -917,7 +917,11 @@ def infer_canonical_schema(frame: pd.DataFrame) -> dict[str, str]:
 
 def _safe_read_sql_query(query: str) -> bool:
     normalized = re.sub(r"\s+", " ", str(query or "").strip().lower())
-    return bool(re.match(r"^(select|with)\b", normalized)) and ";" not in normalized.rstrip(";")
+    if not re.match(r"^(select|with)\b", normalized):
+        return False
+    if ";" in normalized.rstrip(";"):
+        return False
+    return not bool(re.search(r"\b(insert|update|delete|drop|alter|create|truncate|attach|detach|pragma|vacuum|grant|revoke)\b", normalized))
 
 
 def fetch_connector_sample(
