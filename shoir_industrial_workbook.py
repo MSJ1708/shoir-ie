@@ -1041,11 +1041,13 @@ def render_industrial_workbook(tier:str="Starter",username:str="unknown")->None:
     st.session_state.setdefault("industrial_workbook_redo",[])
     st.session_state.setdefault("industrial_workbook_query_steps",[])
     st.session_state.setdefault("industrial_workbook_semantic_map",{})
+    st.session_state.setdefault("industrial_workbook_variables",{})
     st.session_state.setdefault("industrial_workbook_query_result_df",pd.DataFrame())
     st.session_state.setdefault("industrial_workbook_analysis_df",pd.DataFrame())
     st.session_state.setdefault("industrial_workbook_formula_audit_df",pd.DataFrame())
     wb:dict[str,pd.DataFrame]=st.session_state[WORKBOOK_STATE_KEY]
     formulas:dict[str,dict[str,str]]=st.session_state[FORMULA_STATE_KEY]
+    variables:dict[str,Any]=st.session_state["industrial_workbook_variables"]
     st.markdown("""<style>
     .iw-hero{padding:26px 28px;border-radius:22px;background:linear-gradient(135deg,#081526,#1d3c7a 52%,#0f766e);color:#fff;box-shadow:0 18px 50px rgba(15,23,42,.14);margin-bottom:14px}
     .iw-title{font-size:30px;font-weight:900;line-height:1.08}.iw-copy{font-size:13px;color:#dbeafe;margin-top:6px}.iw-chip{display:inline-block;padding:5px 9px;margin:6px 6px 0 0;border-radius:999px;background:rgba(255,255,255,.09);border:1px solid rgba(255,255,255,.12);font-size:11px}
@@ -1065,7 +1067,7 @@ def render_industrial_workbook(tier:str="Starter",username:str="unknown")->None:
         wb.clear(); wb.update({k:v.copy(deep=True) for k,v in snap.items()}); st.rerun()
     if c5.button("💾 Save",type="primary",use_container_width=True):
         try:
-            wid=save_workbook(wb,formulas,st.session_state.get("industrial_workbook_semantic_map",{}),f"Shoir-IE Workbook · {current_sheet}",st.session_state.get("industrial_workbook_id"))
+            wid=save_workbook(wb,formulas,st.session_state.get("industrial_workbook_semantic_map",{}),f"Shoir-IE Workbook · {current_sheet}",st.session_state.get("industrial_workbook_id"),variables=variables)
             st.session_state["industrial_workbook_id"]=wid; st.success(f"Saved workbook {wid}.")
         except Exception as exc: st.error(f"Workbook save failed safely: {exc}")
     saved=list_saved_workbooks()
@@ -1094,8 +1096,8 @@ def render_industrial_workbook(tier:str="Starter",username:str="unknown")->None:
             labels=saved["ID"].tolist(); choice=st.selectbox("Saved workbook",labels,format_func=lambda x:saved.loc[saved["ID"].eq(x),"Name"].iloc[0],key="industrial_workbook_saved_choice")
             if st.button("Open saved workbook",type="primary",key="industrial_workbook_open_saved"):
                 try:
-                    loaded_wb,loaded_formulas,semantic=load_workbook(choice); st.session_state[WORKBOOK_STATE_KEY]=loaded_wb; st.session_state[FORMULA_STATE_KEY]=loaded_formulas
-                    st.session_state["industrial_workbook_semantic_map"]=semantic; st.session_state["industrial_workbook_id"]=choice; st.success("Workbook loaded."); st.rerun()
+                    loaded_wb,loaded_formulas,semantic=load_workbook(choice); loaded_variables=load_workbook_variables(choice); st.session_state[WORKBOOK_STATE_KEY]=loaded_wb; st.session_state[FORMULA_STATE_KEY]=loaded_formulas
+                    st.session_state["industrial_workbook_semantic_map"]=semantic; st.session_state["industrial_workbook_variables"]=loaded_variables; st.session_state["industrial_workbook_id"]=choice; st.success("Workbook loaded."); st.rerun()
                 except Exception as exc: st.error(f"Workbook load failed safely: {exc}")
 
     wb=st.session_state[WORKBOOK_STATE_KEY]; formulas=st.session_state[FORMULA_STATE_KEY]
@@ -1113,7 +1115,7 @@ def render_industrial_workbook(tier:str="Starter",username:str="unknown")->None:
         if f3.button("Apply formula",type="primary",key="industrial_workbook_apply_formula"):
             try:
                 _cell_parts(formula_cell); formulas.setdefault(current_sheet,{})[formula_cell.upper()]=formula_value
-                recalculated,audit=evaluate_workbook_formulas(wb,formulas); st.session_state[WORKBOOK_STATE_KEY]=recalculated; wb=recalculated
+                recalculated,audit=evaluate_workbook_formulas(wb,formulas,variables=variables); st.session_state[WORKBOOK_STATE_KEY]=recalculated; wb=recalculated
                 st.session_state["industrial_workbook_formula_audit_df"]=audit; st.success(f"Formula applied to {current_sheet}!{formula_cell.upper()}.")
             except Exception as exc: st.error(f"Formula error safely contained: {type(exc).__name__}: {exc}")
         if formulas.get(current_sheet):
@@ -1178,7 +1180,7 @@ def render_industrial_workbook(tier:str="Starter",username:str="unknown")->None:
 
     with tabs[2]:
         st.markdown("### Power Query-style pipeline"); st.caption("Build a repeatable sequence: select → rename → filter → clean → calculate → group → sort.")
-        cols=list(map(str,current.columns)); step_type=st.selectbox("Add step",["select","rename","filter","fill_missing","cast_numeric","drop_duplicates","sort","add_formula","groupby"],key="iw_query_type"); params:dict[str,Any]={}
+        cols=list(map(str,current.columns)); step_type=st.selectbox("Add step",["select","rename","filter","fill_missing","cast_numeric","drop_duplicates","sort","add_formula","groupby","pivot"],key="iw_query_type"); params:dict[str,Any]={}
         if step_type=="select": params["columns"]=st.multiselect("Columns",cols,default=cols,key="iw_query_select")
         elif step_type=="rename":
             q1,q2=st.columns(2); params["source"]=q1.selectbox("Source",cols,key="iw_query_rename_source"); params["target"]=q2.text_input("Target",key="iw_query_rename_target")
@@ -1192,7 +1194,14 @@ def render_industrial_workbook(tier:str="Starter",username:str="unknown")->None:
         elif step_type=="add_formula":
             q1,q2=st.columns(2); params["target"]=q1.text_input("New column",key="iw_query_formula_target"); params["expression"]=q2.text_input("Expression",placeholder="Quantity * UnitCost",key="iw_query_formula_expr")
         elif step_type=="groupby":
-            q1,q2,q3=st.columns(3); params["columns"]=q1.multiselect("Group columns",cols,key="iw_query_group_cols"); params["value_column"]=q2.selectbox("Value",cols,key="iw_query_group_value"); params["aggregation"]=q3.selectbox("Aggregation",["sum","mean","count","min","max"],key="iw_query_group_agg")
+            q1,q2,q3=st.columns(3); params["columns"]=q1.multiselect("Group columns",cols,key="iw_query_group_cols"); params["value_column"]=q2.selectbox("Value",cols,key="iw_query_group_value"); params["aggregation"]=q3.selectbox("Aggregation",["sum","mean","median","count","min","max","std"],key="iw_query_group_agg")
+        elif step_type=="pivot":
+            q1,q2,q3=st.columns(3)
+            params["index"]=q1.multiselect("Pivot rows",cols,default=cols[:1],key="iw_query_pivot_index")
+            pivot_col=q2.selectbox("Pivot columns",["(none)"]+cols,key="iw_query_pivot_columns")
+            params["columns"]=None if pivot_col=="(none)" else pivot_col
+            params["values"]=q3.selectbox("Pivot values",cols,key="iw_query_pivot_values")
+            params["aggregation"]=st.selectbox("Pivot aggregation",["sum","mean","median","count","min","max","std"],key="iw_query_pivot_agg")
         b1,b2,b3=st.columns(3)
         if b1.button("➕ Add step",type="primary",key="iw_query_add_step"):
             try: apply_query_pipeline(current,[params|{"type":step_type}]); st.session_state["industrial_workbook_query_steps"].append(params|{"type":step_type}); st.success("Step added.")
