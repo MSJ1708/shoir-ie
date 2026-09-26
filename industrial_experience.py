@@ -406,6 +406,7 @@ def record_decision_outcome(
     verified_at: Optional[str] = None,
     workspace: str = "default",
     db_path: str = "enterprise_full_workspace.db",
+    persist_artifact: bool = True,
 ) -> str:
     """Persist implementation outcome evidence and link it to Decision Memory."""
     ensure_experience_db(db_path)
@@ -448,8 +449,9 @@ def record_decision_outcome(
                 ),
             )
         conn.commit()
-    try:
-        from shoir_enterprise_layer import record_artifact
+    if persist_artifact:
+        try:
+            from shoir_enterprise_layer import record_artifact
         record_artifact(
             owner,
             "decision_outcome",
@@ -465,7 +467,7 @@ def record_decision_outcome(
             workspace,
         )
     except Exception:
-        pass
+            pass
     return outcome_id
 
 
