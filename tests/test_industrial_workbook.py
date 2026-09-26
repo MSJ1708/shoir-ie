@@ -164,3 +164,61 @@ def test_platform_and_visualization_integration():
     assert entry["tier"] == "Starter"
     assert "Industrial Workbook" in _MODULE_KEYS
     assert "industrial_workbook_current_df" in _MODULE_KEYS["Industrial Workbook"]
+
+
+def test_engineering_formula_functions_are_safe_and_deterministic():
+    from shoir_industrial_workbook import SafeFormulaEngine, evaluate_workbook_formulas
+
+    wb = {"Sheet1": pd.DataFrame({
+        "Avail":[90.0,95.0],
+        "Perf":[80.0,90.0],
+        "Quality":[98.0,99.0],
+        "AvailableTime":[10.0,20.0],
+        "Demand":[100.0,110.0],
+        "OutOEE":[0.0,0.0],
+        "OutTakt":[0.0,0.0],
+    })}
+    formulas = {"Sheet1": {
+        "F1": "=OEE(A1,B1,C1)",
+        "G2": "=TAKT_TIME(D2,E2)",
+    }}
+    result, audit = evaluate_workbook_formulas(wb, formulas)
+    errors = audit[audit["Status"].eq("Error")]
+    assert errors.empty, errors.to_dict("records")
+    assert result["Sheet1"].iat[0,5] == pytest.approx(0.90 * 0.80 * 0.98)
+    assert result["Sheet1"].iat[1,6] == pytest.approx(20.0 / 110.0)
+
+    engine = SafeFormulaEngine(wb)
+    assert engine.evaluate('=CONVERT(60,"min","h")', "Sheet1") == pytest.approx(1.0)
+    assert engine.evaluate("=CPK(10,1,7,13)", "Sheet1") == pytest.approx(1.0)
+
+
+def test_workbook_version_history_and_comments_round_trip(tmp_path, monkeypatch):
+    import streamlit as st
+    from shoir_industrial_workbook import (
+        save_workbook, list_workbook_versions, save_workbook_comment,
+        list_workbook_comments,
+    )
+
+    monkeypatch.setenv("SHOIR_WORKSPACE_NAME", "test")
+    st.session_state.clear()
+    st.session_state["shoir_workspace_name"] = "workspace-test"
+    st.session_state["current_user"] = "tester"
+
+    db = tmp_path / "workbook.db"
+    wb = {"Sheet1": pd.DataFrame({"A":[1,2], "B":[3,4]})}
+    wid = save_workbook(wb, {"Sheet1":{"C2":"=A2+B2"}}, {}, "Test Workbook", path=str(db))
+    versions = list_workbook_versions(wid, path=str(db))
+    assert len(versions) == 1
+    assert int(versions.iloc[0]["Version"]) == 1
+
+    wb2 = {"Sheet1": pd.DataFrame({"A":[1,2], "B":[3,5]})}
+    save_workbook(wb2, {"Sheet1":{"C2":"=A2+B2"}}, {}, "Test Workbook", wid, path=str(db))
+    versions = list_workbook_versions(wid, path=str(db))
+    assert len(versions) == 2
+    assert set(versions["Version"].astype(int)) == {1,2}
+
+    cid = save_workbook_comment(wid, "Sheet1", "B2", "Reviewed by engineering.", path=str(db))
+    comments = list_workbook_comments(wid, path=str(db))
+    assert cid > 0
+    assert comments.iloc[0]["Comment"] == "Reviewed by engineering."
