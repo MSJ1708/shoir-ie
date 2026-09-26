@@ -210,25 +210,36 @@ def _matched_columns(df: pd.DataFrame, tokens: Sequence[str]) -> list[str]:
     ]
 
 def resource_efficiency_analysis(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
-    if not isinstance(df, pd.DataFrame):
-        return pd.DataFrame(columns=["Resource Family", "Detected Fields", "Numeric Fields", "Observations", "Total", "Mean"]), list(RESOURCE_FAMILIES)
+    """Map resource families to evidence without summing incompatible units."""
+    columns = [str(c) for c in df.columns] if isinstance(df, pd.DataFrame) else []
+    numeric_columns = _numeric_columns(df) if isinstance(df, pd.DataFrame) else []
     rows: list[dict[str, Any]] = []
     gaps: list[str] = []
     for family, tokens in RESOURCE_FAMILIES.items():
-        fields = _matched_columns(df, tokens)
-        nums = [c for c in fields if c in _numeric_columns(df)]
-        if not fields:
+        fields = [c for c in columns if any(token in c.lower() for token in tokens)]
+        numeric_fields = [c for c in fields if c in numeric_columns]
+        field = numeric_fields[0] if numeric_fields else (fields[0] if fields else "")
+        if not field:
             gaps.append(family)
-            rows.append({"Resource Family": family, "Detected Fields": "", "Numeric Fields": "", "Observations": 0, "Total": np.nan, "Mean": np.nan})
+            rows.append({
+                "Resource Family": family,
+                "Field Used": "",
+                "Detected Fields": "",
+                "Observations": 0,
+                "Mean": np.nan,
+                "Min": np.nan,
+                "Max": np.nan,
+            })
             continue
-        numeric = pd.concat([pd.to_numeric(df[c], errors="coerce") for c in nums], ignore_index=True).dropna() if nums else pd.Series(dtype=float)
+        values = pd.to_numeric(df[field], errors="coerce").dropna()
         rows.append({
             "Resource Family": family,
+            "Field Used": field,
             "Detected Fields": ", ".join(fields),
-            "Numeric Fields": ", ".join(nums),
-            "Observations": int(len(numeric)),
-            "Total": float(numeric.sum()) if not numeric.empty else np.nan,
-            "Mean": float(numeric.mean()) if not numeric.empty else np.nan,
+            "Observations": int(len(values)),
+            "Mean": float(values.mean()) if not values.empty else np.nan,
+            "Min": float(values.min()) if not values.empty else np.nan,
+            "Max": float(values.max()) if not values.empty else np.nan,
         })
     return pd.DataFrame(rows), gaps
 
@@ -331,9 +342,11 @@ def operating_system_contract(
     state = session_state or {}
     frame = df if isinstance(df, pd.DataFrame) else pd.DataFrame()
     has_data = not frame.empty
-    has_validation = bool(state.get("industrial_workbook_formula_audit_df") is not None or state.get("unified_readiness_score") is not None)
+    audit_df = state.get("industrial_workbook_formula_audit_df")
+    has_validation = (
+        isinstance(audit_df, pd.DataFrame) and not audit_df.empty
+    ) or state.get("unified_readiness_score") is not None
     has_analysis = isinstance(state.get("industrial_workbook_analysis_df"), pd.DataFrame) and not state.get("industrial_workbook_analysis_df").empty
-    has_visual = bool(state.get("shoir_universal_postflight", {}).get("graph_available")) if isinstance(state.get("shoir_universal_postflight"), Mapping) else False
     rows = [
         ("Observe", has_data, "A real table is available in the active workspace."),
         ("Understand", has_data, "Data profile/readiness can be inspected."),
