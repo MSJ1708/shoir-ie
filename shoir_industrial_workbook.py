@@ -1012,6 +1012,21 @@ def render_industrial_workbook(tier:str="Starter",username:str="unknown")->None:
         st.dataframe(profile["profile"],use_container_width=True,hide_index=True); st.markdown("#### What to analyze next")
         for item in profile["recommendations"]: st.write("✓ "+item)
         if profile["figure"] is not None: st.plotly_chart(profile["figure"],use_container_width=True,config={"displayModeBar":False})
+        numeric_cols=[str(col) for col in current.columns if pd.api.types.is_numeric_dtype(current[col])]
+        if numeric_cols:
+            with st.expander("🎨 Conditional formatting", expanded=False):
+                cf_col=st.selectbox("Metric",numeric_cols,key=f"iw_cf_col_{_slug(current_sheet)}")
+                low_col,high_col=st.columns(2)
+                low_enabled=low_col.checkbox("Flag below",key=f"iw_cf_low_enabled_{_slug(current_sheet)}")
+                high_enabled=high_col.checkbox("Flag above",key=f"iw_cf_high_enabled_{_slug(current_sheet)}")
+                low=low_col.number_input("Lower threshold",value=0.0,key=f"iw_cf_low_{_slug(current_sheet)}") if low_enabled else None
+                high=high_col.number_input("Upper threshold",value=100.0,key=f"iw_cf_high_{_slug(current_sheet)}") if high_enabled else None
+                try:
+                    from shoir_adoption_engine import conditional_format_dataframe
+                    st.dataframe(conditional_format_dataframe(current,cf_col,low,high),use_container_width=True,hide_index=True)
+                    st.caption("Formatting is a presentation layer; source values remain unchanged.")
+                except Exception as exc:
+                    st.warning(f"Conditional formatting preview unavailable: {type(exc).__name__}: {exc}")
         st.session_state["industrial_workbook_analysis_df"]=profile["profile"]
 
     with tabs[2]:
@@ -1200,6 +1215,16 @@ def render_industrial_workbook(tier:str="Starter",username:str="unknown")->None:
                         st.rerun()
             except Exception as exc:
                 st.warning(f"Version history unavailable: {type(exc).__name__}: {exc}")
+            st.markdown("#### Scenario branch")
+            branch_name=st.text_input("Branch name",placeholder="e.g. Demand +5%",key="iw_branch_name")
+            if st.button("🌿 Create scenario branch",key="iw_branch_create"):
+                try:
+                    from shoir_adoption_engine import create_scenario_branch
+                    branch_id=create_scenario_branch(st.session_state["industrial_workbook_id"],branch_name)
+                    st.success(f"Scenario branch created: {branch_id}")
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"Scenario branch could not be created: {type(exc).__name__}: {exc}")
             comments=list_workbook_comments(st.session_state["industrial_workbook_id"])
             st.markdown("#### Cell comments")
             if comments.empty:
