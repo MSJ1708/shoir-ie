@@ -558,33 +558,35 @@ def render_universal_engine_surface(module: str, tier: str = "Starter Tier", use
     _render_ui(str(module), str(tier), str(username))
 
 def postflight_contract(module: str, username: str = "unknown", preferred_key: str | None = None) -> dict[str, Any]:
-    """Create the machine-readable universal contract after a module run."""
+    """Create a machine-readable universal contract after a module run."""
     tables = module_tables(module, preferred_key=preferred_key)
     source = tables[0][1] if tables else ""
     frame = tables[0][2] if tables else pd.DataFrame()
     validation = data_readiness(frame)
     fig = guaranteed_figure(frame, f"{module} · Universal") if not frame.empty else None
-    event = black_box_event(
-        module,
-        "module_postflight",
-        {
-            "source_key": source,
-            "rows": int(len(frame)),
-            "columns": int(len(frame.columns)),
-            "readiness": validation,
-            "figure_available": fig is not None,
-        },
-        username,
-    )
-    return {
+    contract = {
         "module": module,
         "source_key": source,
         "rows": int(len(frame)),
         "columns": int(len(frame.columns)),
         "readiness": validation,
         "graph_available": fig is not None,
-        "event_id": event["event_id"],
     }
+    signature = hashlib.sha256(json.dumps(contract, sort_keys=True, default=str).encode("utf-8")).hexdigest()
+    try:
+        import streamlit as st
+        prior = st.session_state.get("shoir_universal_postflight_signature")
+        event_id = st.session_state.get("shoir_universal_postflight_event_id")
+        if prior != signature:
+            event = black_box_event(module, "module_postflight", contract, username)
+            event_id = event["event_id"]
+            st.session_state["shoir_universal_postflight_signature"] = signature
+            st.session_state["shoir_universal_postflight_event_id"] = event_id
+    except Exception:
+        event_id = None
+    contract["event_id"] = event_id
+    contract["signature"] = signature
+    return contract
 
 def universal_health_report(module: str) -> dict[str, Any]:
     tables = module_tables(module)
