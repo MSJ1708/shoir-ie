@@ -251,7 +251,6 @@ class SafeFormulaEngine:
     def _eval_node(self, node: ast.AST, sheet: str) -> Any:
         self._current_sheet = sheet
         if isinstance(node, ast.Constant): return node.value
-        if isinstance(node, ast.Num): return node.n
         if isinstance(node, ast.List): return [self._eval_node(x, sheet) for x in node.elts]
         if isinstance(node, ast.Tuple): return tuple(self._eval_node(x, sheet) for x in node.elts)
         if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub, ast.Not)):
