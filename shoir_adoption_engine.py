@@ -908,9 +908,11 @@ def render_adoption_center(username: str, tier: str, initial_tab: str = "Home") 
                     wb,
                     active_sheet=st.session_state.get("industrial_workbook_active_sheet", next(iter(wb), "Sheet1")),
                     formulas=st.session_state.get(FORMULA_STATE_KEY, {}),
+                    variables=st.session_state.get("industrial_workbook_variables", {}),
                 )
                 st.session_state[WORKBOOK_STATE_KEY] = result["workbook"]
                 st.session_state[FORMULA_STATE_KEY] = result["formulas"]
+                st.session_state["industrial_workbook_variables"] = result.get("variables", st.session_state.get("industrial_workbook_variables", {}))
                 st.session_state["adoption_script_outputs"] = result["outputs"]
                 st.success(f"Automation completed · {len(result['outputs']):,} command(s).")
             except Exception as exc:
