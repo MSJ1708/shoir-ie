@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import math
 import json
 import sqlite3
 import time
@@ -136,6 +137,8 @@ def ensure_experience_db(path: str = "enterprise_full_workspace.db") -> None:
             "CREATE TABLE IF NOT EXISTS experience_decision_specs(decision_id TEXT PRIMARY KEY,baseline_json TEXT,alternatives_json TEXT,constraints_json TEXT,kpis_json TEXT,uncertainty_json TEXT,evidence_json TEXT,verification_json TEXT,owner TEXT,created_at TEXT,updated_at TEXT)",
             "CREATE TABLE IF NOT EXISTS experience_decision_approvals(id INTEGER PRIMARY KEY AUTOINCREMENT,decision_id TEXT,from_status TEXT,to_status TEXT,actor TEXT,comment TEXT,created_at TEXT)",
             "CREATE TABLE IF NOT EXISTS experience_comments(id INTEGER PRIMARY KEY AUTOINCREMENT,project_id TEXT,decision_id TEXT,actor TEXT,comment TEXT,created_at TEXT)",
+            "CREATE TABLE IF NOT EXISTS experience_decision_outcomes(outcome_id TEXT PRIMARY KEY,decision_id TEXT NOT NULL,owner TEXT NOT NULL,implementation_status TEXT NOT NULL,predicted_json TEXT NOT NULL,actual_json TEXT NOT NULL,variance_json TEXT NOT NULL,lesson TEXT,verified_at TEXT,created_at TEXT)",
+            "CREATE INDEX IF NOT EXISTS idx_exp_decision_outcomes_decision ON experience_decision_outcomes(decision_id,created_at DESC)",
             "CREATE TABLE IF NOT EXISTS experience_jobs(job_id TEXT PRIMARY KEY,module TEXT,job_type TEXT,status TEXT,progress REAL,message TEXT,payload_json TEXT,started_at TEXT,finished_at TEXT)",
             "CREATE TABLE IF NOT EXISTS experience_copilot_actions(id INTEGER PRIMARY KEY AUTOINCREMENT,run_id TEXT,module TEXT,action TEXT,status TEXT,requires_approval INTEGER,evidence_json TEXT,actor TEXT,created_at TEXT)",
             "CREATE TABLE IF NOT EXISTS experience_observability(id INTEGER PRIMARY KEY AUTOINCREMENT,run_id TEXT,module TEXT,event_type TEXT,duration_ms REAL,details_json TEXT,created_at TEXT)",
@@ -225,11 +228,12 @@ def create_decision(
     uncertainty: Mapping[str, Any],
     owner: str,
     status: str = "Draft",
+    db_path: str = "enterprise_full_workspace.db",
 ) -> str:
-    ensure_experience_db()
+    ensure_experience_db(db_path)
     did = "DEC-" + uuid.uuid4().hex[:12].upper()
     stamp = _now()
-    with _db() as conn:
+    with _db(db_path) as conn:
         conn.execute(
             "INSERT INTO experience_decisions VALUES(?,?,?,?,?,?,?,?,?,?)",
             (
@@ -247,7 +251,6 @@ def create_decision(
         )
         conn.commit()
     return did
-
 
 def save_decision_spec(
     decision_id: str,
@@ -366,6 +369,212 @@ def transition_decision(decision_id: str, actor: str, to_status: str, comment: s
             (decision_id, current, to_status, actor, str(comment)[:500], _now()),
         )
         conn.commit()
+
+
+def calculate_decision_variance(predicted: Mapping[str, Any], actual: Mapping[str, Any]) -> pd.DataFrame:
+    """Compare predicted and observed KPI values using the shared decision schema."""
+    predicted = dict(predicted or {})
+    actual = dict(actual or {})
+    rows = []
+    for name in sorted(set(predicted) & set(actual)):
+        try:
+            p = float(predicted[name])
+            a = float(actual[name])
+        except (TypeError, ValueError):
+            continue
+        if not (math.isfinite(p) and math.isfinite(a)):
+            continue
+        delta = a - p
+        delta_pct = (delta / p * 100.0) if p != 0 else None
+        rows.append({
+            "KPI": str(name),
+            "Predicted": p,
+            "Actual": a,
+            "Delta": delta,
+            "Delta %": delta_pct,
+            "Absolute Error": abs(delta),
+        })
+    return pd.DataFrame(rows, columns=["KPI","Predicted","Actual","Delta","Delta %","Absolute Error"])
+
+
+def record_decision_outcome(
+    decision_id: str,
+    owner: str,
+    implementation_status: str,
+    predicted: Mapping[str, Any],
+    actual: Mapping[str, Any],
+    lesson: str = "",
+    verified_at: Optional[str] = None,
+    workspace: str = "default",
+    db_path: str = "enterprise_full_workspace.db",
+    persist_artifact: bool = True,
+) -> str:
+    """Persist implementation outcome evidence and link it to Decision Memory."""
+    ensure_experience_db(db_path)
+    decision_id = str(decision_id).strip()
+    owner = str(owner).strip()
+    status = str(implementation_status).strip()
+    if status not in {"Planned", "Implemented", "Verified"}:
+        raise ValueError("Invalid implementation status.")
+    with _db(db_path) as conn:
+        row = conn.execute("SELECT owner FROM experience_decisions WHERE decision_id=?", (decision_id,)).fetchone()
+        if not row:
+            raise ValueError("Decision not found.")
+        if str(row[0]) != owner:
+            raise PermissionError("Decision belongs to another workspace owner.")
+    variance = calculate_decision_variance(predicted, actual)
+    outcome_id = "OUT-" + uuid.uuid4().hex[:12].upper()
+    now = _now()
+    actual_payload = dict(actual or {})
+    predicted_payload = dict(predicted or {})
+    variance_payload = variance.to_dict("records")
+    with _db(db_path) as conn:
+        conn.execute(
+            "INSERT INTO experience_decision_outcomes VALUES(?,?,?,?,?,?,?,?,?,?)",
+            (
+                outcome_id, decision_id, owner, status,
+                json.dumps(predicted_payload, default=str, sort_keys=True),
+                json.dumps(actual_payload, default=str, sort_keys=True),
+                json.dumps(variance_payload, default=str),
+                str(lesson or "")[:2000], str(verified_at or "") or None, now,
+            ),
+        )
+        if lesson or actual_payload:
+            conn.execute(
+                "INSERT INTO experience_memory(memory_id,problem,data_ref,model_ref,scenario_ref,decision_ref,actual_result,lesson,owner,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    "MEM-" + uuid.uuid4().hex[:12].upper(),
+                    decision_id, "", "", "", decision_id,
+                    json.dumps(actual_payload, default=str, sort_keys=True),
+                    str(lesson or "")[:2000], owner, now, now,
+                ),
+            )
+        conn.commit()
+    if persist_artifact:
+        try:
+            from shoir_enterprise_layer import record_artifact
+            record_artifact(
+                owner,
+                "decision_outcome",
+                outcome_id,
+                {
+                    "decision_id": decision_id,
+                    "implementation_status": status,
+                    "predicted": predicted_payload,
+                    "actual": actual_payload,
+                    "variance": variance_payload,
+                    "lesson": str(lesson or "")[:2000],
+                },
+                workspace,
+            )
+        except Exception:
+            pass
+
+    # Close the loop in the canonical Digital Thread: Decision → Outcome.
+    try:
+        from shoir_enterprise_layer import (
+            upsert_canonical_entity, upsert_canonical_relationship, record_canonical_event,
+        )
+        decision_entity = upsert_canonical_entity(
+            owner, "Decision", decision_id, f"decision:{decision_id}",
+            state={"decision_id": decision_id, "status": status},
+            status="Implemented" if status == "Implemented" else "Verified" if status == "Verified" else "Proposed",
+            workspace=workspace,
+        )
+        outcome_entity = upsert_canonical_entity(
+            owner, "Outcome", outcome_id, f"outcome:{outcome_id}",
+            state={
+                "decision_id": decision_id,
+                "implementation_status": status,
+                "predicted": predicted_payload,
+                "actual": actual_payload,
+                "variance": variance_payload,
+                "lesson": str(lesson or "")[:2000],
+            },
+            status=status,
+            workspace=workspace,
+        )
+        relationship_id = upsert_canonical_relationship(
+            owner,
+            decision_entity,
+            outcome_entity,
+            "decision has verified outcome",
+            status="Verified" if status == "Verified" else "Linked",
+            metadata={"outcome_id": outcome_id},
+            workspace=workspace,
+        )
+        record_canonical_event(
+            owner,
+            "decision_outcome_recorded",
+            {
+                "decision_id": decision_id,
+                "outcome_id": outcome_id,
+                "implementation_status": status,
+                "kpi_count": len(variance_payload),
+            },
+            entity_id=outcome_entity,
+            relationship_id=relationship_id,
+            workspace=workspace,
+        )
+    except Exception:
+        pass
+    return outcome_id
+
+
+def decision_outcomes_frame(
+    decision_id: Optional[str] = None,
+    owner: Optional[str] = None,
+    db_path: str = "enterprise_full_workspace.db",
+) -> pd.DataFrame:
+    ensure_experience_db(db_path)
+    query = "SELECT outcome_id,decision_id,owner,implementation_status,predicted_json,actual_json,variance_json,lesson,verified_at,created_at FROM experience_decision_outcomes"
+    clauses = []
+    params = []
+    if decision_id is not None:
+        clauses.append("decision_id=?")
+        params.append(str(decision_id))
+    if owner is not None:
+        clauses.append("owner=?")
+        params.append(str(owner))
+    if clauses:
+        query += " WHERE " + " AND ".join(clauses)
+    query += " ORDER BY created_at DESC"
+    with _db(db_path) as conn:
+        return pd.read_sql_query(query, conn, params=params)
+
+def decision_to_value_frame(
+    owner: Optional[str] = None,
+    decision_id: Optional[str] = None,
+    db_path: str = "enterprise_full_workspace.db",
+) -> pd.DataFrame:
+    """Flatten decision → implementation → actual → variance → lesson evidence."""
+    outcomes = decision_outcomes_frame(decision_id=decision_id, owner=owner, db_path=db_path)
+    if outcomes.empty:
+        return pd.DataFrame(columns=[
+            "Outcome ID","Decision ID","Implementation Status","KPI",
+            "Predicted","Actual","Delta","Delta %","Absolute Error","Lesson","Verified At",
+        ])
+    rows = []
+    for row in outcomes.to_dict("records"):
+        try:
+            variance = json.loads(row.get("variance_json") or "[]")
+        except Exception:
+            variance = []
+        for item in variance if isinstance(variance, list) else []:
+            rows.append({
+                "Outcome ID": row.get("outcome_id"),
+                "Decision ID": row.get("decision_id"),
+                "Implementation Status": row.get("implementation_status"),
+                "KPI": item.get("KPI"),
+                "Predicted": item.get("Predicted"),
+                "Actual": item.get("Actual"),
+                "Delta": item.get("Delta"),
+                "Delta %": item.get("Delta %"),
+                "Absolute Error": item.get("Absolute Error"),
+                "Lesson": row.get("lesson", ""),
+                "Verified At": row.get("verified_at"),
+            })
+    return pd.DataFrame(rows)
 
 
 def add_comment(project_id: Optional[str], decision_id: Optional[str], actor: str, comment: str) -> None:
@@ -2016,6 +2225,52 @@ def render_blank_module_studio(module: str, tier: str, username: str) -> None:
                 if st.button("➡️ Move to Validated", use_container_width=True, key="sx_validate_" + key):
                     transition_decision(did, username, "Validated", "Validation evidence captured from module canvas.")
                     st.success("Decision moved to Validated.")
+            with st.expander("📈 Decision-to-Value Verification", expanded=False):
+                st.caption("Record what the decision predicted, what actually happened, and the resulting variance. This evidence remains separate from the approval status until a human verifies it.")
+                predicted_text = st.text_area("Predicted KPIs (JSON)", value='{"Throughput": 100, "Cost": 5000}', key="sx_predicted_json_" + key, height=110)
+                actual_text = st.text_area("Actual KPIs (JSON)", value='{"Throughput": 0, "Cost": 0}', key="sx_actual_json_" + key, height=110)
+                outcome_status = st.selectbox("Implementation status", ["Planned", "Implemented", "Verified"], key="sx_outcome_status_" + key)
+                lesson = st.text_area("Lesson / explanation", key="sx_outcome_lesson_" + key, height=90)
+                if st.button("🧾 Record actual outcome", use_container_width=True, key="sx_record_outcome_" + key):
+                    try:
+                        predicted = json.loads(predicted_text)
+                        actual = json.loads(actual_text)
+                        if not isinstance(predicted, dict) or not isinstance(actual, dict):
+                            raise ValueError("Predicted and actual KPI payloads must be JSON objects.")
+                        active_workspace = str(
+                            st.session_state.get("shoir_workspace_name")
+                            or st.session_state.get("workspace")
+                            or st.session_state.get("active_workspace_name")
+                            or "default"
+                        )
+                        outcome_id = record_decision_outcome(
+                            did, username, outcome_status, predicted, actual, lesson.strip(),
+                            workspace=active_workspace,
+                        )
+                        st.session_state["sx_last_outcome_id_" + key] = outcome_id
+                        st.success("Outcome recorded: " + outcome_id)
+                    except Exception as exc:
+                        st.error("Outcome could not be recorded: " + str(exc))
+
+                outcome_df = decision_outcomes_frame(decision_id=did, owner=username)
+                st.session_state["decision_outcomes_df"] = outcome_df
+                if not outcome_df.empty:
+                    latest = outcome_df.iloc[0]
+                    try:
+                        variance_records = json.loads(latest["variance_json"] or "[]")
+                        variance_df = pd.DataFrame(variance_records)
+                    except Exception:
+                        variance_df = pd.DataFrame()
+                    if not variance_df.empty:
+                        st.dataframe(variance_df, use_container_width=True, hide_index=True)
+                        try:
+                            from shoir_live_visuals import build_visualization_suite
+                            suite = build_visualization_suite(variance_df, context="Decision-to-Value", max_figures=3)
+                            for title, fig in suite:
+                                st.plotly_chart(fig, use_container_width=True)
+                        except Exception:
+                            pass
+                    st.dataframe(outcome_df[["outcome_id","implementation_status","lesson","verified_at","created_at"]].head(20), use_container_width=True, hide_index=True)
 
     with tabs[4]:
         st.download_button(

@@ -15,5 +15,7 @@ scikit-learn
 requests
 kaleido>=1.0.0
 playwright
-pytest>=8.0,<9
+pytest>=9.0.3,<10
 psycopg2-binary>=2.9,<3
+
+paho-mqtt>=2,<3

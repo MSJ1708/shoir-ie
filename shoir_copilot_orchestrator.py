@@ -361,6 +361,7 @@ def build_export_bundle(
     explanation: str,
     figure: go.Figure | None,
     knowledge_context: str = "",
+    evidence_manifest: Mapping[str, Any] | None = None,
 ) -> bytes:
     from shoir_upgrade import build_excel_report
     tables = [("Analysis Result", result)]
@@ -383,6 +384,8 @@ def build_export_bundle(
         zf.writestr("method.json", json.dumps(dict(method), indent=2, default=str).encode("utf-8"))
         zf.writestr("results.csv", result.to_csv(index=False).encode("utf-8"))
         zf.writestr("explanation.md", explanation.encode("utf-8"))
+        if evidence_manifest:
+            zf.writestr("evidence_manifest.json", json.dumps(dict(evidence_manifest), indent=2, default=str).encode("utf-8"))
         if str(knowledge_context).strip():
             zf.writestr("knowledge_context.txt", str(knowledge_context)[:12000].encode("utf-8"))
         zf.writestr("copilot_analysis.xlsx", xlsx)
@@ -423,6 +426,101 @@ def build_workflow_plan(prompt: str, module: str, df: pd.DataFrame, knowledge_do
     }
 
 
+def stage_copilot_decision(
+    run: Mapping[str, Any],
+    actor: str,
+    workspace: str = "default",
+) -> str:
+    """Create a governed Decision Card from a completed Copilot run."""
+    actor = str(actor or "").strip()
+    if not actor:
+        raise ValueError("An authenticated actor is required.")
+    try:
+        from shoir_enterprise_layer import enforce_action_gate, record_canonical_event, upsert_canonical_entity, upsert_canonical_relationship
+        enforce_action_gate(actor, "write", workspace, require_approval=True)
+    except ImportError:
+        pass
+
+    from industrial_experience import create_decision, save_decision_spec, register_lineage
+
+    inspection = dict(run.get("inspection") or {})
+    method = dict(run.get("method") or {})
+    meta = dict(run.get("analysis_meta") or {})
+    result = run.get("result")
+    if not isinstance(result, pd.DataFrame):
+        result = pd.DataFrame()
+    module = str(run.get("module") or "Engineering")
+    run_id = str(run.get("run_id") or "")
+    prompt = str(run.get("prompt") or "")
+
+    metrics = {
+        "result_rows": int(len(result)),
+        "analysis_type": str(meta.get("type", "")),
+        "method": str(method.get("method", "")),
+    }
+    assumptions = {
+        "request": prompt[:1000],
+        "data_rows": int(inspection.get("rows", 0)),
+        "data_columns": int(inspection.get("columns", 0)),
+        "missing_cells": int(inspection.get("missing_cells", 0)),
+        "data_hash": hashlib.sha256(result.to_csv(index=False).encode("utf-8")).hexdigest(),
+    }
+    uncertainty = {
+        "limitations": "Decision staging records evidence and assumptions; it does not assert causality or implementation success.",
+        "knowledge_context_used": bool(run.get("knowledge_context_used")),
+    }
+    did = create_decision(
+        f"Copilot decision · {module}",
+        module,
+        metrics,
+        assumptions,
+        uncertainty,
+        actor,
+        status="Proposed",
+    )
+    save_decision_spec(
+        did,
+        actor,
+        baseline={"source": "Copilot result", "run_id": run_id},
+        alternatives=[],
+        constraints={"approval_required": True},
+        kpis=[metrics],
+        uncertainty=uncertainty,
+        evidence=[run.get("evidence_manifest", {})],
+        verification=[{"status": "Pending implementation and outcome verification"}],
+    )
+    register_lineage("Copilot Run", run_id, "Decision", did, "staged decision", actor)
+
+    try:
+        decision_entity = upsert_canonical_entity(
+            actor, "Decision", did, f"decision:{did}",
+            state={"run_id": run_id, "module": module, "prompt": prompt[:1000], "metrics": metrics, "assumptions": assumptions},
+            status="Proposed",
+            workspace=workspace,
+        )
+        record_canonical_event(
+            actor, "copilot_decision_staged",
+            {"run_id": run_id, "decision_id": did, "module": module},
+            entity_id=decision_entity,
+            workspace=workspace,
+        )
+        run_entity = upsert_canonical_entity(
+            actor, "Experiment", run_id, f"copilot:{run_id}",
+            state={"module": module, "evidence_manifest": run.get("evidence_manifest", {})},
+            status="Completed",
+            workspace=workspace,
+        )
+        upsert_canonical_relationship(
+            actor, run_entity, decision_entity, "Copilot run supports decision",
+            status="Proposed",
+            metadata={"run_id": run_id},
+            workspace=workspace,
+        )
+    except Exception:
+        pass
+    return did
+
+
 def run_orchestration(prompt: str, module: str, df: pd.DataFrame, context: Mapping[str, Any] | None = None) -> dict[str, Any]:
     run_id = "COP-" + uuid.uuid4().hex[:12].upper()
     inspection = inspect_data(df)
@@ -431,6 +529,7 @@ def run_orchestration(prompt: str, module: str, df: pd.DataFrame, context: Mappi
     runtime = dict(context or {})
     knowledge_text = str(runtime.get("knowledge_context") or "").strip()
     knowledge_count = int(runtime.get("knowledge_documents", 0) or 0)
+    knowledge_used = bool(knowledge_text)
     if intent_info["intent"] == "optimization" and callable(runtime.get("milp_solver")):
         customers = runtime.get("customers") or []
         warehouses = runtime.get("warehouses") or []
@@ -470,7 +569,49 @@ def run_orchestration(prompt: str, module: str, df: pd.DataFrame, context: Mappi
     explanation = explain_results(prompt, inspection, method, analysis_meta, result)
     if knowledge_text:
         explanation += f" Linked knowledge context was available from {knowledge_count} document(s) and is included in the evidence bundle; it was not treated as independently validated evidence."
-    export = build_export_bundle(prompt, module, run_id, inspection, method, result, explanation, figure, knowledge_text)
+    figure_hashes = [figure_fingerprint(fig) for _, fig in visual_suite]
+    evidence_manifest = {
+        "run_id": run_id,
+        "module": module,
+        "data_rows": int(inspection.get("rows", 0)),
+        "data_columns": int(inspection.get("columns", 0)),
+        "data_hash": hashlib.sha256(df.to_csv(index=False).encode("utf-8")).hexdigest(),
+        "method": str(method.get("method", "")),
+        "analysis_type": str(analysis_meta.get("type", "")),
+        "model_version": str(analysis_meta.get("model_version", "")),
+        "assumptions": dict(analysis_meta.get("assumptions", {}) or {}),
+        "knowledge_documents": knowledge_count,
+        "knowledge_context_used": knowledge_used,
+        "figure_hashes": figure_hashes,
+        "approval_required": True,
+        "human_approval_required_for_write_or_execute": True,
+    }
+    try:
+        from industrial_experience import log_copilot_action
+        log_copilot_action(
+            module,
+            "analyze",
+            str(runtime.get("actor") or runtime.get("username") or "unknown"),
+            requires_approval=True,
+            status="Completed",
+            evidence=evidence_manifest,
+            run_id=run_id,
+        )
+    except Exception:
+        pass
+    try:
+        from shoir_enterprise_layer import record_artifact
+        record_artifact(
+            str(runtime.get("actor") or runtime.get("username") or "unknown"),
+            "copilot_run",
+            run_id,
+            evidence_manifest,
+            workspace=str(runtime.get("workspace") or "default"),
+        )
+    except Exception:
+        pass
+
+    export = build_export_bundle(prompt, module, run_id, inspection, method, result, explanation, figure, knowledge_text, evidence_manifest=evidence_manifest)
     return {
         "run_id": run_id,
         "intent": intent_info,
@@ -482,7 +623,8 @@ def run_orchestration(prompt: str, module: str, df: pd.DataFrame, context: Mappi
         "result": result,
         "figure": figure,
         "visual_suite": visual_suite,
-        "figure_hashes": [figure_fingerprint(fig) for _, fig in visual_suite],
+        "figure_hashes": evidence_manifest["figure_hashes"],
+        "evidence_manifest": evidence_manifest,
         "explanation": explanation,
         "export": export,
         "module": module,

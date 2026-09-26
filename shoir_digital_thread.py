@@ -26,16 +26,51 @@ import plotly.graph_objects as go
 import streamlit as st
 
 
+# Canonical entity vocabulary for the Industrial Decision Operating System.
+# Domain modules own their calculations; this module owns cross-domain identity
+# and relationships. Every other integration layer should reference this list
+# instead of defining a competing entity taxonomy.
 THREAD_TYPES = [
     "Dataset",
     "Asset",
     "Process",
+    "Product",
+    "Material",
+    "Order",
+    "Workforce",
+    "Quality",
+    "Maintenance",
+    "Energy",
+    "Cost",
+    "Scenario",
     "KPI",
     "Model",
     "Experiment",
     "Decision",
     "Outcome",
 ]
+
+CANONICAL_LIFECYCLE = [
+    "Asset", "Process", "Product", "Material", "Order", "Workforce",
+    "Quality", "Maintenance", "Energy", "Cost", "Scenario", "Decision", "Outcome",
+]
+
+CANONICAL_FIELD_ALIASES = {
+    "Asset": ("asset", "asset_id", "machine", "equipment", "facility", "workcenter", "work_center", "node"),
+    "Process": ("process", "operation", "activity", "route", "workcenter", "work_center"),
+    "Product": ("product", "product_id", "sku", "part", "part_number", "item"),
+    "Material": ("material", "material_id", "component", "raw_material", "bom"),
+    "Order": ("order", "order_id", "work_order", "workorder", "sales_order", "purchase_order"),
+    "Workforce": ("operator", "employee", "employee_id", "worker", "technician", "staff", "workforce"),
+    "Quality": ("quality", "defect", "failure", "scrap", "yield", "inspection", "nonconformance"),
+    "Maintenance": ("maintenance", "failure", "downtime", "mtbf", "mttr", "rul", "reliability"),
+    "Energy": ("energy", "kwh", "electricity", "power", "water"),
+    "Cost": ("cost", "price", "opex", "capex", "expense", "revenue"),
+    "Scenario": ("scenario", "case", "variant", "alternative"),
+    "Decision": ("decision", "recommendation", "action"),
+    "Outcome": ("outcome", "actual", "result", "verification", "impact"),
+}
+
 
 
 def _now() -> str:
@@ -245,6 +280,39 @@ def sync_workspace_to_thread(owner: str, active_module: str | None = None) -> di
         process_by_module[module] = process_id
         _upsert_edge(dataset_id, process_id, "feeds process")
 
+        canonical_by_type: dict[str, list[str]] = {}
+        for node_type, aliases in CANONICAL_FIELD_ALIASES.items():
+            if node_type == "Process":
+                values = [module]
+                matched_cols = []
+            else:
+                matched_cols = [
+                    col for col in df.columns
+                    if any(alias in str(col).lower().replace("-", "_").replace(" ", "_") for alias in aliases)
+                ]
+                values = []
+                for col in matched_cols[:4]:
+                    try:
+                        for value in df[col].dropna().astype(str).drop_duplicates().head(40):
+                            clean_value = value.strip()
+                            if clean_value and clean_value not in values:
+                                values.append(clean_value)
+                    except Exception:
+                        continue
+            canonical_by_type[node_type] = values
+            for value in values[:40]:
+                node_id = _upsert_node(
+                    node_type,
+                    value,
+                    f"{module}|canonical|{node_type}|{value}",
+                    module,
+                    status="Observed",
+                    metadata={"canonical": True, "fields": matched_cols[:4]},
+                )
+                if node_type != "Process":
+                    _upsert_edge(dataset_id, node_id, f"contains {node_type.lower()}")
+                _upsert_edge(process_id, node_id, f"uses {node_type.lower()}")
+
         lowered = {str(c).lower(): c for c in df.columns}
         asset_cols = [c for c in df.columns if any(k in str(c).lower() for k in ("asset", "machine", "facility", "workcenter", "equipment", "node"))]
         for col in asset_cols[:3]:
@@ -340,6 +408,95 @@ def sync_workspace_to_thread(owner: str, active_module: str | None = None) -> di
             for decision in module_decisions[:3]:
                 _upsert_edge(experiment["node_id"], decision["node_id"], "informs decision")
 
+    for left_type, right_type in zip(CANONICAL_LIFECYCLE, CANONICAL_LIFECYCLE[1:]):
+        left_nodes = [n for n in nodes if n["node_type"] == left_type and n.get("module") in {module, ""}]
+        right_nodes = [n for n in nodes if n["node_type"] == right_type and n.get("module") in {module, ""}]
+        if left_nodes and right_nodes:
+            for left in left_nodes[:6]:
+                for right in right_nodes[:6]:
+                    _upsert_edge(
+                        left["node_id"],
+                        right["node_id"],
+                        f"canonical {left_type.lower()} to {right_type.lower()}",
+                    )
+
+    workspace = str(
+        st.session_state.get("shoir_workspace_name")
+        or st.session_state.get("workspace")
+        or st.session_state.get("active_workspace_name")
+        or "default"
+    )
+
+    # Durable canonical store is the source of truth; session state is a cache.
+    try:
+        from shoir_enterprise_layer import (
+            upsert_canonical_entity, upsert_canonical_relationship, record_canonical_event,
+        )
+        canonical_ids = {}
+        for node in nodes:
+            state = dict(node)
+            state["thread_node_id"] = node.get("node_id")
+            entity_id = upsert_canonical_entity(
+                owner,
+                str(node.get("node_type", "Entity")),
+                str(node.get("name", "")),
+                str(node.get("source", "")),
+                state=state,
+                status=str(node.get("status", "Observed")),
+                workspace=workspace,
+            )
+            canonical_ids[str(node.get("node_id"))] = entity_id
+        relationship_ids = []
+        for edge in st.session_state[_keys()["edges"]]:
+            source_id = canonical_ids.get(str(edge.get("source_id")))
+            target_id = canonical_ids.get(str(edge.get("target_id")))
+            if not source_id or not target_id:
+                continue
+            relationship_ids.append(
+                upsert_canonical_relationship(
+                    owner,
+                    source_id,
+                    target_id,
+                    str(edge.get("relation", "Linked")),
+                    status=str(edge.get("status", "Linked")),
+                    metadata=edge.get("metadata", {}),
+                    workspace=workspace,
+                )
+            )
+        record_canonical_event(
+            owner,
+            "digital_thread_sync",
+            {
+                "project_id": st.session_state[_keys()["project"]].get("project_id", "global-thread"),
+                "module": active_module or "global",
+                "entity_count": len(canonical_ids),
+                "relationship_count": len(relationship_ids),
+                "canonical_lifecycle": CANONICAL_LIFECYCLE,
+            },
+            workspace=workspace,
+        )
+    except Exception:
+        # The graph remains available in-session if a persistence backend is temporarily unavailable.
+        pass
+
+    try:
+        from shoir_enterprise_layer import record_artifact
+        record_artifact(
+            owner,
+            "digital_thread_state",
+            st.session_state[_keys()["project"]].get("project_id", "global-thread"),
+            {
+                "project": st.session_state[_keys()["project"]],
+                "nodes": nodes,
+                "edges": st.session_state[_keys()["edges"]],
+                "canonical_lifecycle": CANONICAL_LIFECYCLE,
+                "version": int(st.session_state.get(_keys()["version"], 1)) + 1,
+            },
+            workspace,
+        )
+    except Exception:
+        pass
+
     st.session_state[_keys()["sync"]] = _now()
     st.session_state[_keys()["version"]] = int(st.session_state.get(_keys()["version"], 1)) + 1
     st.session_state[_keys()["project"]]["updated_at"] = _now()
@@ -355,6 +512,116 @@ def sync_workspace_to_thread(owner: str, active_module: str | None = None) -> di
         "edges": len(st.session_state[_keys()["edges"]]),
     }
 
+
+def _restore_thread_from_artifact(owner: str, workspace: str = "default") -> bool:
+    """Recover the most recent durable Digital Thread snapshot into session state."""
+    try:
+        from shoir_enterprise_layer import list_artifacts
+        table = list_artifacts(owner, "digital_thread_state", workspace, limit=1)
+        if table.empty or "payload_json" not in table.columns:
+            return False
+        raw = table.iloc[0]["payload_json"]
+        payload = json.loads(raw) if isinstance(raw, str) else dict(raw or {})
+        project = payload.get("project")
+        nodes = payload.get("nodes")
+        edges = payload.get("edges")
+        if not isinstance(project, dict) or not isinstance(nodes, list) or not isinstance(edges, list):
+            return False
+        keys = ensure_thread_state(owner)
+        if st.session_state.get(keys["nodes"]) or st.session_state.get(keys["edges"]):
+            return False
+        st.session_state[keys["project"]] = project
+        st.session_state[keys["nodes"]] = nodes
+        st.session_state[keys["edges"]] = edges
+        st.session_state[keys["sync"]] = project.get("updated_at", _now())
+        st.session_state[keys["version"]] = int(payload.get("version", 1))
+        return True
+    except Exception:
+        return False
+
+
+def _restore_thread_from_canonical_store(owner: str, workspace: str = "default") -> bool:
+    """Restore the canonical Digital Thread from durable entities/relationships."""
+    try:
+        from shoir_enterprise_layer import canonical_entities_frame, canonical_relationships_frame
+        entities = canonical_entities_frame(owner, workspace, limit=5000)
+        relationships = canonical_relationships_frame(owner, workspace, limit=10000)
+        if entities.empty:
+            return False
+        keys = ensure_thread_state(owner)
+        nodes = []
+        canonical_to_thread = {}
+        for row in entities.to_dict("records"):
+            try:
+                payload = json.loads(row.get("state_json") or "{}")
+            except Exception:
+                payload = {}
+            thread_node = {
+                "node_id": payload.get("thread_node_id") or row["entity_id"],
+                "node_type": str(row.get("entity_type", "Entity")),
+                "name": str(row.get("name", "")),
+                "source": str(row.get("source", "")),
+                "module": str(payload.get("module", "")),
+                "status": str(row.get("status", "Observed")),
+                "metadata": payload.get("metadata", {}),
+                "updated_at": str(row.get("updated_at") or row.get("created_at") or _now()),
+            }
+            nodes.append(thread_node)
+            canonical_to_thread[str(row["entity_id"])] = thread_node["node_id"]
+
+        edges = []
+        for row in relationships.to_dict("records"):
+            source = canonical_to_thread.get(str(row.get("source_entity_id")))
+            target = canonical_to_thread.get(str(row.get("target_entity_id")))
+            if not source or not target:
+                continue
+            try:
+                metadata = json.loads(row.get("metadata_json") or "{}")
+            except Exception:
+                metadata = {}
+            edges.append({
+                "edge_id": str(row.get("relationship_id")),
+                "source_id": source,
+                "target_id": target,
+                "relation": str(row.get("relation", "Linked")),
+                "status": str(row.get("status", "Linked")),
+                "metadata": metadata,
+                "updated_at": str(row.get("updated_at") or row.get("created_at") or _now()),
+            })
+        st.session_state[keys["nodes"]] = nodes
+        st.session_state[keys["edges"]] = edges
+        st.session_state[keys["sync"]] = _now()
+        st.session_state[keys["version"]] = max(1, int(st.session_state.get(keys["version"], 1)))
+        if nodes:
+            st.session_state[keys["project"]]["updated_at"] = _now()
+        return bool(nodes)
+    except Exception:
+        return False
+
+
+def canonical_flow_figure(nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> go.Figure | None:
+    """Plot only observed canonical lifecycle objects; never create measurements."""
+    allowed = set(CANONICAL_LIFECYCLE)
+    selected = [node for node in nodes if node.get("node_type") in allowed]
+    if not selected or not edges:
+        return None
+    index = {node["node_id"]: idx for idx, node in enumerate(selected)}
+    labels = [f"{node['node_type']} · {str(node.get('name', ''))[:36]}" for node in selected]
+    sources, targets, values = [], [], []
+    for edge in edges:
+        if edge.get("source_id") in index and edge.get("target_id") in index:
+            sources.append(index[edge["source_id"]])
+            targets.append(index[edge["target_id"]])
+            values.append(1)
+    if not sources:
+        return None
+    fig = go.Figure(go.Sankey(
+        arrangement="snap",
+        node={"label": labels, "pad": 12, "thickness": 14},
+        link={"source": sources, "target": targets, "value": values},
+    ))
+    fig.update_layout(title="Canonical Industrial Decision Flow", height=620, margin={"l":10,"r":10,"t":60,"b":10})
+    return fig
 
 def _stable_kpi_for(module: str, col: str) -> str:
     return stable_id("KPI", str(col), f"{module}|kpi|{col}")
@@ -533,8 +800,18 @@ def render_global_project_digital_thread(module: str, username: str) -> None:
         st.metric("Project ID", project.get("project_id", "—"))
     project["updated_at"] = _now()
 
-    # First-open experience: automatically harvest the current workspace once
-    # so the user lands on an evidence-backed graph rather than an empty canvas.
+    # First-open experience: recover durable canonical state before artifact/session state.
+    if not st.session_state.get(keys["sync"]):
+        workspace = str(
+            st.session_state.get("shoir_workspace_name")
+            or st.session_state.get("workspace")
+            or st.session_state.get("active_workspace_name")
+            or "default"
+        )
+        restored = _restore_thread_from_canonical_store(username, workspace)
+        if not restored:
+            _restore_thread_from_artifact(username, workspace)
+
     if not st.session_state.get(keys["sync"]):
         try:
             sync_workspace_to_thread(username, active_module=None)
@@ -560,16 +837,22 @@ def render_global_project_digital_thread(module: str, username: str) -> None:
     tabs = st.tabs(["🧭 Overview", "🕸️ Thread Map", "🧬 Trace an Item", "🔗 Manage Links", "📦 Evidence"])
 
     with tabs[0]:
-        st.markdown("### Canonical lifecycle")
-        step_cols = st.columns(len(THREAD_TYPES))
-        for idx, kind in enumerate(THREAD_TYPES):
-            step_cols[idx].markdown(f"<div class='sx-step'>{idx+1}. {kind}<br><small>{counts[kind]:,}</small></div>", unsafe_allow_html=True)
+        st.markdown("### Canonical entity lifecycle")
+        for row_start in range(0, len(THREAD_TYPES), 6):
+            kinds = THREAD_TYPES[row_start : row_start + 6]
+            step_cols = st.columns(len(kinds))
+            for offset, kind in enumerate(kinds):
+                idx = row_start + offset
+                step_cols[offset].markdown(
+                    f"<div class='sx-step'>{idx+1}. {kind}<br><small>{counts[kind]:,}</small></div>",
+                    unsafe_allow_html=True,
+                )
 
         missing_layers = [kind for kind in THREAD_TYPES if counts[kind] == 0]
         if missing_layers:
             st.info("Layers not populated yet: " + ", ".join(missing_layers) + ". Run a workspace sync or create the missing record explicitly.")
         else:
-            st.success("✅ All eight traceability layers are represented in this project.")
+            st.success(f"✅ All {len(THREAD_TYPES)} canonical entity layers are represented in this project.")
 
         if raw_nodes:
             st.dataframe(nodes.head(300), use_container_width=True, hide_index=True)
@@ -593,7 +876,7 @@ def render_global_project_digital_thread(module: str, username: str) -> None:
             st.info("Sync the workspace first.")
         else:
             labels = {n["node_id"]: f"{n['node_type']} · {n['name']}" for n in raw_nodes}
-            selected_id = st.selectbox("Select any Dataset / Asset / KPI / Model / Experiment / Decision / Outcome", list(labels.keys()), format_func=labels.get, key="global_thread_trace_node")
+            selected_id = st.selectbox("Select any canonical thread item", list(labels.keys()), format_func=labels.get, key="global_thread_trace_node")
             traced = trace_from(selected_id)
             st.metric("Reachable trace items", len(traced))
             if traced:

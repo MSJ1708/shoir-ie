@@ -33,7 +33,7 @@ from workspace_persistence import ensure_workspace_state_db, load_user_workspace
 from shoir_visual_system import apply_shoir_design_system, render_workspace_status
 from shoir_live_visuals import render_live_visualization_studio, discover_visual_tables
 from shoir_module_parity import render_universal_module_parity
-from shoir_copilot_orchestrator import build_workflow_plan, recommend_module, run_orchestration
+from shoir_copilot_orchestrator import build_workflow_plan, recommend_module, run_orchestration, stage_copilot_decision
 from shoir_digital_thread import render_global_project_digital_thread
 from shoir_enterprise_services import render_enterprise_bridge
 from durable_account_store import (durable_backend_configured, sync_durable_accounts, sync_remote_requests_to_local, edge_login, edge_admin_list_requests, edge_renew_request, upsert_remote_account, insert_remote_request, remote_account, account_is_expired, renewed_expiry)
@@ -189,6 +189,9 @@ def init_db():
             )
         """)
 
+        # Password hash is optional on first boot. Never synthesize a default credential.
+        admin_pass_hash = None
+
         # Auto-migrate missing columns safely if updating an existing database
         migrations = [
             ("tier", "TEXT DEFAULT 'Starter Tier'"),
@@ -323,7 +326,7 @@ def init_db():
         # .streamlit/secrets.toml (same file your email credentials already
         # live in):
         #   [admin]
-        #   password = "your-password-here"
+        #   password value should come from the configured secret provider.
         # Until you do, it falls back to the exact same password that was
         # already hardcoded here, so sho's login does not change today.
         # IMPORTANT: since that password has been sitting in plain text in
@@ -351,6 +354,11 @@ def init_db():
         else:
             # Preserve an existing admin credential; only seed metadata for a
             # first-run account when one does not already exist.
+            existing_admin = cursor.execute(
+                "SELECT password_hash FROM enterprise_users WHERE LOWER(username)='sho' LIMIT 1"
+            ).fetchone()
+            if existing_admin and existing_admin[0]:
+                admin_pass_hash = existing_admin[0]
             cursor.execute("""
                 INSERT OR IGNORE INTO enterprise_users
                 (username, role, tier, email, trial_expires, affiliate_code, ticket_expiry)
@@ -365,7 +373,7 @@ def init_db():
 
         # Never recreate/delete accounts on app startup.
         cursor.execute("SELECT 1 FROM users WHERE LOWER(username)='sho' LIMIT 1")
-        if cursor.fetchone() is None:
+        if cursor.fetchone() is None and admin_pass_hash:
             cursor.execute("""
                 INSERT INTO users
                 (username,password,role,tier,email,created_at,subscription_expires_at)
@@ -764,7 +772,7 @@ if not any(x.get("name") == _IOS_CATALOG_ENTRY["name"] for x in MODULE_CATALOG):
 #      To turn this on: add `anthropic` to requirements.txt, then add to
 #      .streamlit/secrets.toml:
 #        [anthropic]
-#        api_key = "your-key-here"
+#        API-key value should come from the configured secret provider.
 #      That's a real per-request cost billed to your account, so it's
 #      opt-in, not switched on for you automatically.
 #   2. Without a key, it falls back to real commands grounded in your
@@ -1469,73 +1477,97 @@ if is_admin:
     tier3_features.append("Admin Panel")
 
 def _render_post_module_layers(module_name: str) -> None:
-    """Run cross-cutting enterprise/visualization layers before legacy st.stop()."""
-    _ops_user = st.session_state.get("current_user", "unknown")
+    """Run one governed post-module pipeline and synchronize canonical state."""
+    username = st.session_state.get("current_user", "unknown")
+    module_name = str(module_name)
+    workspace = str(
+        st.session_state.get("shoir_workspace_name")
+        or st.session_state.get("workspace")
+        or st.session_state.get("active_workspace_name")
+        or "default"
+    )
+
+    # Synchronize the canonical Digital Thread BEFORE dependent overlays render.
+    # This makes the thread the cross-domain source of truth while preserving
+    # each native module's measured calculations as the source of operational
+    # signals.
     try:
-        _ops_name = str(module_name)
-        if _ops_name in {"Digital Twin & Discrete-Event Simulation", "Live Industrial Digital Twin"}:
-            render_digital_twin_extension(_ops_user)
-            render_realtime_monitoring_extension(st.session_state.get("iot_sensors", []), _ops_name)
-            _ops_frame = st.session_state.get("digital_twin_state_snapshot")
-            if isinstance(_ops_frame, pd.DataFrame) and not _ops_frame.empty:
-                render_data_intelligence_extension(_ops_name, _ops_frame, _ops_frame)
-        elif _ops_name == "Industrial Control Center":
+        from shoir_digital_thread import sync_workspace_to_thread
+        sync_workspace_to_thread(username, active_module=module_name)
+    except Exception as exc:
+        st.warning("Digital Thread synchronization is temporarily unavailable; dependent overlays will use their last verified state.")
+        with st.expander("Digital Thread diagnostic", expanded=False):
+            st.code(f"{type(exc).__name__}: {exc}")
+
+    # Existing specialized integrations remain attached to their established modules.
+    try:
+        if module_name in {"Digital Twin & Discrete-Event Simulation", "Live Industrial Digital Twin"}:
+            render_digital_twin_extension(username)
+            render_realtime_monitoring_extension(st.session_state.get("iot_sensors", []), module_name)
+            frame = st.session_state.get("digital_twin_state_snapshot")
+            if isinstance(frame, pd.DataFrame) and not frame.empty:
+                render_data_intelligence_extension(module_name, frame, frame)
+        elif module_name in {"Industrial Control Center", "Control Tower"}:
             render_control_tower_extension()
-        elif _ops_name == "Industrial Connectivity Hub":
+        elif module_name == "Industrial Connectivity Hub":
             render_connectivity_extension()
-        elif _ops_name in {"Enterprise Integration & Collaboration", "Enterprise Security & Governance"}:
-            render_collaboration_extension(_ops_user)
+        elif module_name in {"Enterprise Integration & Collaboration", "Enterprise Security & Governance"}:
+            render_collaboration_extension(username)
             render_security_extension()
-        elif _ops_name == "Persistence":
-            render_persistence_extension(_ops_user)
-        elif _ops_name in {"Engineering Economics & Finance", "Capital Investment & Engineering Economics"}:
-            render_economics_extension(_ops_user)
-        elif _ops_name in {"Green IE & Sustainability", "Industrial Sustainability & LCA"}:
-            render_sustainability_extension(_ops_user)
-        elif _ops_name == "Human Factors & Ergonomics (NIOSH)":
-            render_human_factors_extension(_ops_user)
-        elif _ops_name == "Geospatial Network Designer":
-            render_geospatial_extension(_ops_user)
-        elif _ops_name == "AI Copilot":
-            render_knowledge_extension(_ops_user)
-    except Exception as _ops_error:
-        st.warning("Additional enterprise governance surfaces remain non-blocking; native module results are preserved.")
-        with st.expander("Enterprise governance diagnostic", expanded=False):
-            st.code(f"{type(_ops_error).__name__}: {_ops_error}")
+        elif module_name == "Persistence":
+            render_persistence_extension(username)
+        elif module_name in {"Engineering Economics & Finance", "Capital Investment & Engineering Economics"}:
+            render_economics_extension(username)
+        elif module_name in {"Green IE & Sustainability", "Industrial Sustainability & LCA"}:
+            render_sustainability_extension(username)
+        elif module_name == "Human Factors & Ergonomics (NIOSH)":
+            render_human_factors_extension(username)
+        elif module_name == "Geospatial Network Designer":
+            render_geospatial_extension(username)
+        elif module_name == "AI Copilot":
+            render_knowledge_extension(username)
+        elif module_name == "Benchmarking & Engineering Standards":
+            from shoir_enterprise_ops import render_benchmarking_evidence
+            render_benchmarking_evidence(username)
+    except Exception as exc:
+        st.warning("Specialized enterprise extension could not render; native results remain available.")
+        with st.expander("Enterprise extension diagnostic", expanded=False):
+            st.code(f"{type(exc).__name__}: {exc}")
+
+    # Use the compatibility bridge only for modules that do not already
+    # own a richer enterprise integration surface. This prevents duplicate
+    # Digital Twin / Control Tower / Connector / Security UI.
+    specialized_modules = {
+        "Digital Twin & Discrete-Event Simulation", "Live Industrial Digital Twin",
+        "Industrial Control Center", "Control Tower", "Industrial Connectivity Hub",
+        "Enterprise Integration & Collaboration", "Enterprise Security & Governance",
+        "Persistence", "Engineering Economics & Finance",
+        "Capital Investment & Engineering Economics", "Green IE & Sustainability",
+        "Industrial Sustainability & LCA", "Human Factors & Ergonomics (NIOSH)",
+        "Geospatial Network Designer", "AI Copilot", "Benchmarking & Engineering Standards",
+        "Experiment Engine", "Experiment Lab",
+    }
+    if module_name not in specialized_modules:
+        try:
+            render_enterprise_bridge(module_name, tier_val, username)
+        except Exception as exc:
+            st.warning("Enterprise governance layer could not render; native results remain available.")
+            with st.expander("Governance diagnostic", expanded=False):
+                st.code(f"{type(exc).__name__}: {exc}")
 
     try:
-        render_enterprise_bridge(str(module_name), tier_val, st.session_state.get("current_user", "unknown"))
+        render_universal_module_parity(module_name, phase="results")
     except Exception as exc:
-        st.warning("Enterprise capability layer could not render for this legacy module; native results remain available.")
-        with st.expander("Enterprise layer diagnostic"):
+        st.warning("Universal Module Studio could not render; native results remain available.")
+        with st.expander("Visualization diagnostic", expanded=False):
             st.code(f"{type(exc).__name__}: {exc}")
-    try:
-        render_universal_module_parity(str(module_name), phase="results")
-    except Exception as exc:
-        st.warning("Universal Module Studio could not render for this legacy module; native results remain available.")
-        with st.expander("Visualization layer diagnostic"):
-            st.code(f"{type(exc).__name__}: {exc}")
-    finally:
-        if st.session_state.get("current_user"):
-            save_user_workspace(st.session_state["current_user"], st.session_state)
 
-    try:
-        render_enterprise_bridge(str(module_name), tier_val, st.session_state.get("current_user", "unknown"))
-    except Exception as exc:
-        st.warning("Enterprise capability layer could not render for this legacy module; native results remain available.")
-        with st.expander("Enterprise layer diagnostic"):
-            st.code(f"{type(exc).__name__}: {exc}")
-    try:
-        render_universal_module_parity(str(module_name), phase="results")
-    except Exception as exc:
-        st.warning("Universal Module Studio could not render for this legacy module; native results remain available.")
-        with st.expander("Visualization layer diagnostic"):
-            st.code(f"{type(exc).__name__}: {exc}")
-    finally:
-        # Persistence is deliberately independent from cross-cutting rendering.
-        # A visualization failure must never prevent recovery of module state.
-        if st.session_state.get("current_user"):
-            save_user_workspace(st.session_state["current_user"], st.session_state)
+    if username != "unknown":
+        try:
+            save_user_workspace(username, st.session_state)
+        except Exception:
+            # Persistence failures must never discard in-session engineering results.
+            pass
 
 
 st.sidebar.markdown("### 🧭 Navigation Menu")
@@ -8727,375 +8759,10 @@ if selected_module in ["Green IE & Sustainability", "Sustainability & Circular E
 # SHOIR-IE: ENTERPRISE INTEGRATION, REPORTING & RBAC SUITE (V4.7 - MASTER)
 # ==============================================================================
 if selected_module in ["Enterprise Integration & Collaboration", "Enterprise Integration", "Collaboration Suite"]:
-    
-    import streamlit as st
-    import pandas as pd
-    import plotly.express as px
-    import plotly.graph_objects as go
-    import uuid
-    import datetime
-    import io
-
-    # 1. Initialize Enterprise Session States across all modules
-    if "erp_connectors" not in st.session_state:
-        st.session_state.erp_connectors = [
-            {"connector_id": "ERP-01", "system_name": "SAP S/4HANA Manufacturing", "protocol": "REST API / OData", "status": "Connected", "last_sync": "10 min ago"},
-            {"connector_id": "ERP-02", "system_name": "Oracle MES Cloud", "protocol": "Kafka Event Stream", "status": "Active", "last_sync": "Real-time"},
-            {"connector_id": "ERP-03", "system_name": "Wonderware Historian SCADA", "protocol": "OPC-UA Gateway", "status": "Standby", "last_sync": "1 hr ago"},
-        ]
-
-    if "workspace_users" not in st.session_state:
-        st.session_state.workspace_users = [
-            {"user_id": "USR-101", "name": "Mohammed Suhail", "role": "Plant Manager", "department": "Industrial Engineering", "access_level": "Full Administrative"},
-            {"user_id": "USR-102", "name": "Sarah Al-Amri", "role": "Senior Process Engineer", "department": "Lean & Automation", "access_level": "Editor / Execution"},
-            {"user_id": "USR-103", "name": "Fahad Al-Harbi", "role": "Floor Operator", "department": "CNC Machining Cell", "access_level": "Read-Only / Console"},
-        ]
-
-    if "current_role" not in st.session_state:
-        st.session_state.current_role = "Plant Manager"
-
-    if "audit_report_history" not in st.session_state:
-        st.session_state.audit_report_history = []
-
-    # 2. Glassmorphism Header Banner
-    st.markdown(f"""
-    <div style="background: linear-gradient(135deg, #1e1b4b 0%, #312e81 50%, #172554 100%); padding: 30px; border-radius: 16px; color: white; margin-bottom: 24px; box-shadow: 0 10px 25px rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.08);">
-        <div style="display: flex; align-items: center; justify-content: space-between;">
-            <div>
-                <span style="background: rgba(129, 140, 248, 0.25); color: #818cf8; padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;">Tier 5: Enterprise Governance & Integration</span>
-                <h1 style="margin:8px 0 4px 0; color: #ffffff; font-size: 26px; font-weight: 800; letter-spacing: -0.025em;">🏢 Enterprise Integration & Collaboration Suite (V4.7)</h1>
-                <p style="margin:0; color: #c7d2fe; font-size: 13px;">Comprehensive Modular Export Wizard &bull; Bulletproof Data Coercion &bull; Native Excel Charts &bull; RBAC Security</p>
-            </div>
-            <div style="background: rgba(59, 130, 246, 0.2); border: 1px solid rgba(96, 165, 250, 0.4); padding: 8px 16px; border-radius: 30px; color: #93c5fd; font-weight: 600; font-size: 12px; display: flex; align-items: center; gap: 6px;">
-                <span style="width: 8px; height: 8px; background: #60a5fa; border-radius: 50%; display: inline-block; box-shadow: 0 0 8px #60a5fa;"></span> Active Role: {st.session_state.current_role}
-            </div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    # 3. Multi-Tab Navigation Architecture
-    tab_reports, tab_erp, tab_rbac = st.tabs([
-        "📊 Comprehensive Export Wizard", 
-        "🔌 ERP/MES Connectors & Data Ingestion", 
-        "👤 Workspace & RBAC Security"
-    ])
-
-    # ----------------------------------------------------
-    # TAB 1: COMPREHENSIVE MODULAR EXPORT WIZARD & EMBEDDED CHARTS
-    # ----------------------------------------------------
-    with tab_reports:
-        st.markdown("#### 📊 Comprehensive Enterprise Export Wizard & Multi-Module Bundler")
-        st.markdown("""
-        <div style="background: rgba(31, 41, 55, 0.5); padding: 14px; border-radius: 8px; border-left: 3px solid #38bdf8; font-size: 13px; color: #d1d5db; margin-bottom: 20px;">
-            <b>Enterprise Multi-Module Export Engine:</b> Select your desired analytical and operational modules below. Click <b>"Convert Selected to Master File"</b> to bundle all raw data, telemetry, simulation outputs, and <b>native embedded Excel charts</b> into a master executive workbook.
-        </div>
-        """, unsafe_allow_html=True)
-
-        col_exp1, col_exp2 = st.columns([1.2, 1.8])
-
-        with col_exp1:
-            st.markdown("##### ⚙️ Step 1: Select Enterprise Modules")
-            
-            with st.form("comprehensive_export_form"):
-                report_name = st.text_input("Master Audit Package Title", value="Shoir-IE_Master_Operations_Audit")
-                
-                st.markdown("---")
-                st.markdown("<span style='color: #818cf8; font-weight: 700; font-size: 12px;'>1. OPTIMIZATION & CORE IE</span>", unsafe_allow_html=True)
-                inc_mlp = st.checkbox("📈 MLP Solvers & Network Demand", value=True)
-                inc_eoq = st.checkbox("⚙️ Core IE: EOQ Engine & OEE", value=True)
-                inc_meio = st.checkbox("📦 MEIO Matrix & Buffer Allocation", value=True)
-                inc_slotting = st.checkbox("🏭 Slotting & Gantt Schedule", value=True)
-
-                st.markdown("<span style='color: #818cf8; font-weight: 700; font-size: 12px;'>2. SUPPLY CHAIN, INVENTORY & RISK</span>", unsafe_allow_html=True)
-                inc_inventory = st.checkbox("📊 Advanced Inventory & Safety Thresholds", value=True)
-                inc_suppliers = st.checkbox("🤝 Supplier Risk Matrix & Evaluation", value=True)
-                inc_scenario = st.checkbox("⚖️ What-If Scenario Manager & Levers", value=True)
-                inc_tower = st.checkbox("🌐 Global Supply Chain Control Tower", value=True)
-
-                st.markdown("<span style='color: #818cf8; font-weight: 700; font-size: 12px;'>3. IOT, TWINS, FLEET & SUSTAINABILITY</span>", unsafe_allow_html=True)
-                inc_iot = st.checkbox("🔌 IoT Digital Twin & Telemetry Stream", value=True)
-                inc_carbon = st.checkbox("🌍 Carbon Accounting & Decarbonization", value=True)
-                inc_fleet = st.checkbox("🚛 Fleet Routing & Vehicle Management", value=True)
-                inc_heatmap = st.checkbox("🗺️ Warehouse Heatmap & Pick Path Grid", value=True)
-
-                st.markdown("<span style='color: #818cf8; font-weight: 700; font-size: 12px;'>4. GOVERNANCE, SIMULATION & APIS</span>", unsafe_allow_html=True)
-                inc_monte_carlo = st.checkbox("🎲 Monte Carlo Simulation Outputs", value=True)
-                inc_tornado = st.checkbox("🌪️ Sensitivity & Financial Tornado Matrix", value=True)
-                inc_agents = st.checkbox("🤖 Agentic Workflows & Swarm Telemetry", value=True)
-                inc_api = st.checkbox("⚡ FastAPI Gateway & Testbench Logs", value=True)
-                inc_ledger = st.checkbox("📋 Audit Governance & State Checkpoints", value=True)
-                inc_users = st.checkbox("👤 Workspace & RBAC Roster", value=True)
-
-                convert_clicked = st.form_submit_button("🔄 Convert Selected to Master File", use_container_width=True)
-
-            if convert_clicked:
-                st.session_state.conversion_ready = True
-                st.session_state.export_params = {
-                    "title": report_name,
-                    "mlp": inc_mlp, "eoq": inc_eoq, "meio": inc_meio, "slotting": inc_slotting,
-                    "inventory": inc_inventory, "suppliers": inc_suppliers, "scenario": inc_scenario, "tower": inc_tower,
-                    "iot": inc_iot, "carbon": inc_carbon, "fleet": inc_fleet, "heatmap": inc_heatmap,
-                    "monte_carlo": inc_monte_carlo, "tornado": inc_tornado, "agents": inc_agents, "api": inc_api, "ledger": inc_ledger, "users": inc_users,
-                    "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                }
-                st.success("Successfully compiled selected modules into master export package!")
-
-        with col_exp2:
-            st.markdown("##### 📁 Step 2: Download Master Executive Package")
-            
-            if st.session_state.get("conversion_ready", False):
-                params = st.session_state.export_params
-                selected_count = sum(1 for k, v in params.items() if v is True and k not in ['title', 'timestamp'])
-                
-                st.markdown(f"""
-                <div style="background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); padding: 16px; border-radius: 12px; margin-bottom: 16px;">
-                    <div style="color: #34d399; font-weight: 700; font-size: 14px; margin-bottom: 6px;">✅ Master Workbook Ready ({selected_count} Modules Included)</div>
-                    <div style="color: #d1d5db; font-size: 12px; line-height: 1.5;">
-                        <b>Package Title:</b> {params['title']}<br>
-                        <b>Generated:</b> {params['timestamp']}<br>
-                        <b>Features:</b> Formatted multi-sheet layout with Title blocks, timestamp headers, bulletproof data coercion, auto-adjusted columns, and native Excel column charts.
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
-
-                try:
-                    import openpyxl
-                    from openpyxl.chart import BarChart, Reference
-                    from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
-                    from openpyxl.utils import get_column_letter
-
-                    output = io.BytesIO()
-                    wb = openpyxl.Workbook()
-                    wb.remove(wb.active)  # Remove default blank sheet
-
-                    # Professional styling definitions
-                    title_font = Font(name="Calibri", size=15, bold=True, color="1E1B4B")
-                    subtitle_font = Font(name="Calibri", size=10, italic=True, color="4B5563")
-                    header_fill = PatternFill(start_color="312E81", end_color="312E81", fill_type="solid")
-                    header_font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
-                    border_thin = Border(left=Side(style='thin', color='D1D5DB'),
-                                         right=Side(style='thin', color='D1D5DB'),
-                                         top=Side(style='thin', color='D1D5DB'),
-                                         bottom=Side(style='thin', color='D1D5DB'))
-
-                    def add_sheet_with_chart(sheet_name, raw_data, chart_title):
-                        # Bulletproof DataFrame coercion (handles None, lists, dicts, or DataFrames seamlessly)
-                        try:
-                            if raw_data is None:
-                                df = pd.DataFrame({"Metric": ["Status", "Efficiency", "Load"], "Value": [100, 85, 92]})
-                            elif isinstance(raw_data, pd.DataFrame):
-                                df = raw_data.copy()
-                            elif isinstance(raw_data, (list, dict)):
-                                df = pd.DataFrame(raw_data)
-                            else:
-                                df = pd.DataFrame({"Metric": ["Status"], "Value": [100]})
-                        except Exception:
-                            df = pd.DataFrame({"Metric": ["Status"], "Value": [100]})
-                            
-                        if df.empty:
-                            df = pd.DataFrame({"Metric": ["Status", "Efficiency", "Load"], "Value": [100, 85, 92]})
-                        
-                        ws = wb.create_sheet(title=sheet_name[:31])
-                        
-                        # Title & Date Block
-                        ws['A1'] = params['title']
-                        ws['A1'].font = title_font
-                        ws['A2'] = f"Date: {params['timestamp']} | Module: {sheet_name}"
-                        ws['A2'].font = subtitle_font
-                        
-                        # Table Headers at Row 4
-                        headers = list(df.columns)
-                        for col_idx, h in enumerate(headers, start=1):
-                            cell = ws.cell(row=4, column=col_idx, value=str(h))
-                            cell.fill = header_fill
-                            cell.font = header_font
-                            cell.alignment = Alignment(horizontal="center", vertical="center")
-                            cell.border = border_thin
-
-                        # Data Rows starting at Row 5
-                        for r_idx, row in enumerate(df.itertuples(index=False), start=5):
-                            for c_idx, val in enumerate(row, start=1):
-                                cell = ws.cell(row=r_idx, column=c_idx, value=val)
-                                cell.border = border_thin
-                                cell.alignment = Alignment(horizontal="left" if c_idx == 1 else "center", vertical="center")
-
-                        # Auto-adjust column widths cleanly
-                        for col in ws.columns:
-                            max_len = max(len(str(cell.value or '')) for cell in col)
-                            col_letter = get_column_letter(col[0].column)
-                            ws.column_dimensions[col_letter].width = max(max_len + 4, 16)
-
-                        # Embed Native Excel Bar Chart if numeric columns exist
-                        numeric_cols = [i+1 for i, val in enumerate(df.iloc[0]) if isinstance(val, (int, float))] if not df.empty else []
-                        if numeric_cols and len(df) > 0:
-                            chart = BarChart()
-                            chart.type = "col"
-                            chart.style = 10
-                            chart.title = chart_title
-                            chart.y_axis.title = "Value"
-                            chart.x_axis.title = headers[0]
-                            
-                            data_ref = Reference(ws, min_col=numeric_cols[0], min_row=4, max_col=numeric_cols[-1], max_row=len(df)+4)
-                            cats_ref = Reference(ws, min_col=1, min_row=5, max_row=len(df)+4)
-                            
-                            chart.add_data(data_ref, titles_from_data=True)
-                            chart.set_categories(cats_ref)
-                            chart.height = 12
-                            chart.width = 18
-                            
-                            ws.add_chart(chart, f"{get_column_letter(len(headers) + 2)}4")
-
-                    # Map selections to session states with robust fallback DataFrames
-                    mapping = [
-                        ("mlp", "MLP_Solvers", st.session_state.get("mlp_results", pd.DataFrame({"Facility": ["Plant A", "Plant B", "Warehouse C"], "Demand_Load": [1200, 950, 1400], "Capacity_Utilization": [0.88, 0.75, 0.92]})), "Network Demand & Solver Load"),
-                        ("eoq", "Core_IE_EOQ_OEE", st.session_state.get("eoq_data", pd.DataFrame({"Component": ["Part X1", "Part Y2", "Part Z3"], "EOQ_Units": [450, 300, 600], "OEE_Percent": [87.5, 91.2, 84.0]})), "EOQ & OEE Performance Matrix"),
-                        ("meio", "MEIO_Matrix", st.session_state.get("meio_buffers", pd.DataFrame({"Echelon": ["Tier-1 DC", "Regional Hub", "Local Depot"], "Buffer_Stock": [3200, 1850, 950], "Service_Level": [0.98, 0.95, 0.92]})), "MEIO Echelon Buffer Allocation"),
-                        ("slotting", "Slotting_Gantt", st.session_state.get("slotting_data", pd.DataFrame({"Zone": ["A-High Velocity", "B-Medium", "C-Bulk Storage"], "Slot_Occupancy": [0.94, 0.78, 0.65], "Pick_Efficiency": [96, 88, 79]})), "Warehouse Slotting & Efficiency"),
-                        ("inventory", "Inventory_Playback", st.session_state.get("inventory_playback", pd.DataFrame({"SKU": ["SKU-101", "SKU-102", "SKU-103"], "Stock_Level": [540, 210, 890], "Safety_Threshold": [300, 250, 400]})), "Inventory Levels vs Safety Thresholds"),
-                        ("suppliers", "Supplier_Risk_Matrix", st.session_state.get("supplier_database", pd.DataFrame({"Supplier": ["Apex Metals", "Global Logistics", "Vanguard Tech"], "Risk_Score": [12.4, 8.1, 15.6], "Reliability": [96, 99, 91]})), "Supplier Evaluation & Risk Scores"),
-                        ("scenario", "Scenario_Manager", st.session_state.get("scenario_results", pd.DataFrame({"Scenario": ["Baseline", "High Demand", "Supply Shock"], "Throughput": [10000, 12500, 7800], "Cost_Index": [1.0, 1.22, 1.45]})), "What-If Scenario Impact Analysis"),
-                        ("tower", "Control_Tower", st.session_state.get("control_tower_metrics", pd.DataFrame({"Region": ["North America", "EMEA", "APAC"], "On_Time_Delivery": [97.2, 94.8, 96.1], "Lead_Time_Days": [4.2, 5.1, 4.8]})), "Global Supply Chain Control Tower"),
-                        ("iot", "IoT_Digital_Twin", st.session_state.get("dt_workstations", pd.DataFrame({"Workstation": ["CNC-01", "Robotic Arm", "Conveyor B"], "Temperature_C": [42.5, 38.1, 45.0], "Vibration_Hz": [2.1, 1.4, 2.8]})), "IoT Telemetry & Workstation Health"),
-                        ("carbon", "Carbon_Accounting", st.session_state.get("carbon_sources", pd.DataFrame({"Scope": ["Scope 1 (Direct)", "Scope 2 (Energy)", "Scope 3 (Supply)"], "Emissions_tCO2e": [450, 820, 1650]})), "Carbon Accounting & Scope Breakdown"),
-                        ("fleet", "Fleet_Routing", st.session_state.get("fleet_vehicles", pd.DataFrame({"Vehicle": ["Truck-01", "Van-02", "Truck-03"], "Distance_km": [320, 145, 410], "Fuel_Efficiency": [8.5, 12.0, 7.8]})), "Fleet Routing & Active Vehicles"),
-                        ("heatmap", "Warehouse_Heatmap", st.session_state.get("heatmap_grid", pd.DataFrame({"Zone": ["Aisle 1", "Aisle 2", "Aisle 3"], "Pick_Density": [1450, 980, 1820], "Congestion_Index": [0.65, 0.42, 0.81]})), "Warehouse Heatmap & Pick Path Metrics"),
-                        ("monte_carlo", "Monte_Carlo_Sim", st.session_state.get("monte_carlo_results", pd.DataFrame({"Percentile": ["P10", "P50 (Median)", "P90"], "Lead_Time": [3.2, 4.8, 7.5], "Cost": [42000, 51000, 68000]})), "Monte Carlo Simulation Distribution"),
-                        ("tornado", "Sensitivity_Tornado", st.session_state.get("tornado_matrix", pd.DataFrame({"Parameter": ["Raw Material Cost", "Labor Rate", "Energy Price"], "Elasticity": [0.45, 0.32, 0.18]})), "Financial Sensitivity Tornado Matrix"),
-                        ("agents", "Agentic_Workflows", st.session_state.get("agent_telemetry", pd.DataFrame({"Agent": ["Optimizer-Bot", "Scheduler-Agent", "Risk-Evaluator"], "Tasks_Completed": [342, 512, 198], "Success_Rate": [0.99, 0.97, 0.98]})), "Agentic Workflows & Swarm Telemetry"),
-                        ("api", "FastAPI_Gateway", st.session_state.get("erp_connectors", pd.DataFrame({"Endpoint": ["/v1/erp/sync", "/v1/iot/stream", "/v1/inventory"], "Calls_Min": [120, 450, 85], "Latency_ms": [14, 8, 22]})), "FastAPI Gateway & Endpoint Traffic"),
-                        ("ledger", "Governance_Ledger", st.session_state.get("audit_governance_ledger", pd.DataFrame({"Event_ID": ["EVT-01", "EVT-02", "EVT-03"], "Severity": ["Info", "Warning", "Critical"], "Compliance_Score": [100, 92, 95]})), "Audit Governance & State Checkpoints"),
-                        ("users", "Workspace_Users", st.session_state.get("workspace_users", pd.DataFrame({"User": ["Mohammed Suhail", "Sarah Al-Amri", "Fahad Al-Harbi"], "Clearance": ["Admin", "Editor", "Viewer"]})), "Workspace RBAC Roster")
-                    ]
-
-                    for param_key, sheet_name, df_data, chart_title in mapping:
-                        if params.get(param_key, False):
-                            add_sheet_with_chart(sheet_name, df_data, chart_title)
-
-                    wb.save(output)
-                    excel_data = output.getvalue()
-
-                    st.download_button(
-                        label="📥 Download Master Executive Package (.xlsx)",
-                        data=excel_data,
-                        file_name=f"{params['title']}_{datetime.date.today()}.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        use_container_width=True
-                    )
-                except ImportError:
-                    st.warning("⚠️ Please ensure `openpyxl` is added to your `requirements.txt` file on GitHub to enable multi-sheet formatting and embedded charts.")
-            else:
-                st.info("👈 Select your desired enterprise modules on the left and click **'Convert Selected to Master File'** to generate your comprehensive workbook.")
-
-    # ----------------------------------------------------
-    # TAB 2: ERP / MES DATA CONNECTORS & BULK INGESTION
-    # ----------------------------------------------------
-    with tab_erp:
-        st.markdown("#### 🔌 ERP & MES Data Connectors / Bulk File Ingestion")
-        col_e1, col_e2 = st.columns([1, 2])
-
-        with col_e1:
-            st.markdown("##### ➕ Register API / MES Connector")
-            with st.form("add_erp_form"):
-                sys_name = st.text_input("Enterprise System Name", value="Infor CloudSuite Industrial")
-                protocol = st.selectbox("Integration Protocol", ["REST API / OData", "Kafka Event Stream", "OPC-UA Gateway", "Direct SQL Bridge"])
-                status_conn = st.selectbox("Connection Status", ["Connected", "Active", "Standby", "Maintenance"])
-
-                if st.form_submit_button("📥 Deploy API Connector", use_container_width=True):
-                    new_eid = f"ERP-{str(uuid.uuid4())[:4].upper()}"
-                    st.session_state.erp_connectors.append({
-                        "connector_id": new_eid, "system_name": sys_name, "protocol": protocol, "status": status_conn, "last_sync": "Just now"
-                    })
-                    st.rerun()
-
-            if st.session_state.erp_connectors:
-                with st.form("del_erp_form"):
-                    erp_to_del = st.selectbox("🗑️ Remove Connector by ID", [e["connector_id"] for e in st.session_state.erp_connectors])
-                    if st.form_submit_button("Delete Connector", use_container_width=True):
-                        st.session_state.erp_connectors = [e for e in st.session_state.erp_connectors if e["connector_id"] != erp_to_del]
-                        st.rerun()
-
-            st.markdown("##### 📁 Bulk CSV / Excel File Ingestion")
-            uploaded_file = st.file_uploader("Upload Plant Floor Dataset (CSV/XLSX)", type=["csv", "xlsx"])
-            if uploaded_file is not None:
-                try:
-                    if uploaded_file.name.endswith('.csv'):
-                        df_uploaded = pd.read_csv(uploaded_file)
-                    else:
-                        df_uploaded = pd.read_excel(uploaded_file)
-                    st.success(f"Successfully parsed {uploaded_file.name} ({len(df_uploaded)} rows)")
-                    st.dataframe(df_uploaded.head(3), use_container_width=True)
-                except Exception as e:
-                    st.error(f"Error parsing file: {e}")
-
-        with col_e2:
-            st.markdown("##### 🌐 Active Enterprise API Integrations")
-            df_erp = pd.DataFrame(st.session_state.erp_connectors)
-            if not df_erp.empty:
-                st.dataframe(df_erp.rename(columns={"connector_id": "ID", "system_name": "Enterprise System", "protocol": "Protocol", "status": "Status", "last_sync": "Last Sync"}), use_container_width=True, hide_index=True)
-                
-                fig_erp = px.bar(df_erp, x="system_name", y=[100]*len(df_erp), color="status",
-                                 color_discrete_map={"Connected": "#34d399", "Active": "#38bdf8", "Standby": "#f59e0b", "Maintenance": "#f43f5e"},
-                                 title="Enterprise Connector Health & Status Overview")
-                fig_erp.update_layout(plot_bgcolor="#0b0f19", paper_bgcolor="#0b0f19", font=dict(color="#f3f4f6"), height=260, yaxis_title="Health Index (%)")
-                st.plotly_chart(fig_erp, use_container_width=True)
-
-    # ----------------------------------------------------
-    # TAB 3: USER WORKSPACE & RBAC SECURITY
-    # ----------------------------------------------------
-    with tab_rbac:
-        st.markdown("#### 👤 Workspace Management & Role-Based Access Control (RBAC)")
-        
-        col_r_sel1, col_r_sel2 = st.columns([2, 1])
-        with col_r_sel1:
-            st.markdown("""
-            <div style="background: rgba(31, 41, 55, 0.4); padding: 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.08); font-size: 13px; color: #d1d5db;">
-                <b>Security Policy Enforcement:</b> Restricts or grants module configuration based on user clearance level (Plant Manager, Senior Engineer, Floor Operator).
-            </div>
-            """, unsafe_allow_html=True)
-        with col_r_sel2:
-            selected_role = st.selectbox("Switch Active Role", ["Plant Manager", "Senior Process Engineer", "Floor Operator"], index=["Plant Manager", "Senior Process Engineer", "Floor Operator"].index(st.session_state.current_role) if st.session_state.current_role in ["Plant Manager", "Senior Process Engineer", "Floor Operator"] else 0)
-            if selected_role != st.session_state.current_role:
-                st.session_state.current_role = selected_role
-                st.rerun()
-
-        col_u1, col_u2 = st.columns([1, 2])
-        with col_u1:
-            st.markdown("##### ➕ Register Workspace User")
-            with st.form("add_user_form"):
-                u_name = st.text_input("Full Name", value="Zainab Malik")
-                u_role = st.selectbox("Assigned Role", ["Plant Manager", "Senior Process Engineer", "Floor Operator", "Data Analyst"])
-                u_dept = st.text_input("Department", value="Supply Chain Analytics")
-                u_access = st.selectbox("Clearance Level", ["Full Administrative", "Editor / Execution", "Read-Only / Console"])
-
-                if st.form_submit_button("📥 Provision User", use_container_width=True):
-                    new_uid = f"USR-{str(uuid.uuid4())[:4].upper()}"
-                    st.session_state.workspace_users.append({
-                        "user_id": new_uid, "name": u_name, "role": u_role, "department": u_dept, "access_level": u_access
-                    })
-                    st.rerun()
-
-            if st.session_state.workspace_users:
-                with st.form("del_user_form"):
-                    usr_to_del = st.selectbox("🗑️ Remove User by ID", [u["user_id"] for u in st.session_state.workspace_users])
-                    if st.form_submit_button("Revoke User Access", use_container_width=True):
-                        st.session_state.workspace_users = [u for u in st.session_state.workspace_users if u["user_id"] != usr_to_del]
-                        st.rerun()
-
-        with col_u2:
-            st.markdown("##### 👥 Active Roster & Permissions Matrix")
-            df_users = pd.DataFrame(st.session_state.workspace_users)
-            if not df_users.empty:
-                st.dataframe(df_users.rename(columns={"user_id": "User ID", "name": "Name", "role": "Role", "department": "Department", "access_level": "Clearance"}), use_container_width=True, hide_index=True)
-                
-                st.markdown(f"""
-                <div style="background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); padding: 12px; border-radius: 8px; margin-top: 12px; color: #34d399; font-size: 13px;">
-                    <b>Current Security Context:</b> Active user role is <b>{st.session_state.current_role}</b>. All module configuration edits and API deployments are fully authorized.
-                </div>
-                """, unsafe_allow_html=True)
-
+    # One canonical implementation for connectors, persistence, collaboration and security.
     _render_post_module_layers("Enterprise Integration & Collaboration")
     st.stop()
-    
+
 def render_data_editor(df, key_name):
     if hasattr(st, "data_editor"):
         return st.data_editor(df, num_rows="dynamic", use_container_width=True, key=key_name)
@@ -9248,21 +8915,8 @@ elif current_view == "Feedback":
 else:
     # Dashboard / Modules View
     
-    # =====================================================================
-    # VALUE BOOSTER 4: SOCIAL PROOF & TRUST SIGNALS BANNER
-    # =====================================================================
-    st.markdown(
-        """
-        <div class="trust-banner">
-            <p style='margin: 0; font-weight: 600; color: #31333F; font-size: 15px;'>
-                🚀 Over $12M in logistics costs optimized globally | Trusted by operations planners at leading manufacturing hubs
-            </p>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-    
     st.title("Enterprise Operations & Cognitive Logistics Suite")
+    st.caption("Evidence-first mode · operational metrics, savings and performance claims are shown only when supported by connected data or recorded benchmark runs.")
     # SECURITY FIX: this line renders with unsafe_allow_html=True while
     # interpolating the username directly. Since registration now restricts
     # usernames to a safe character set (see is_valid_username), this is
@@ -9480,11 +9134,73 @@ else:
             figure_json = st.session_state.get("copilot_orchestrator_figure_json")
             if isinstance(figure_json, str) and figure_json:
                 try:
-                    st.markdown("### 📈 Live graph")
+                    st.markdown("### 📈 Primary analysis graph")
                     orchestrator_fig = go.Figure(json.loads(figure_json))
                     st.plotly_chart(orchestrator_fig, use_container_width=True)
                 except Exception:
-                    st.info("The graph was generated but could not be reconstructed in this view.")
+                    st.info("The primary graph was generated but could not be reconstructed in this view.")
+
+            visual_suite = saved_run.get("visual_suite") or []
+            if visual_suite:
+                st.markdown("### 📊 Engineering evidence graph suite")
+                for idx, item in enumerate(visual_suite, 1):
+                    try:
+                        label, payload = item
+                        fig = payload if isinstance(payload, go.Figure) else go.Figure(payload)
+                        st.markdown(f"**{idx}. {label}**")
+                        st.plotly_chart(fig, use_container_width=True)
+                    except Exception:
+                        continue
+
+            manifest = saved_run.get("evidence_manifest") or {}
+            if manifest:
+                st.markdown("### 🔎 Evidence & reproducibility")
+                em1, em2, em3, em4 = st.columns(4)
+                em1.metric("Input rows", f"{int(manifest.get('data_rows', 0)):,}")
+                em2.metric("Data hash", str(manifest.get("data_hash", ""))[:12] + "…" if manifest.get("data_hash") else "—")
+                em3.metric("Figures", f"{len(manifest.get('figure_hashes', [])):,}")
+                em4.metric("Knowledge docs", f"{int(manifest.get('knowledge_documents', 0)):,}")
+                st.json({
+                    "method": manifest.get("method"),
+                    "analysis_type": manifest.get("analysis_type"),
+                    "model_version": manifest.get("model_version"),
+                    "assumptions": manifest.get("assumptions", {}),
+                    "figure_hashes": manifest.get("figure_hashes", []),
+                })
+
+            st.markdown("### ✅ Decision governance")
+            stage_key = "copilot_stage_decision_" + str(saved_run.get("run_id", "run"))
+            approve_stage = st.checkbox(
+                "I approve staging this completed Copilot run as a Proposed Decision Card.",
+                key=stage_key + "_approval",
+            )
+            if st.button(
+                "📝 Stage Proposed Decision Card",
+                type="primary",
+                use_container_width=True,
+                disabled=not approve_stage,
+                key=stage_key + "_button",
+            ):
+                try:
+                    st.session_state["current_action_approved"] = True
+                    decision_id = stage_copilot_decision(
+                        saved_run,
+                        st.session_state.get("current_user", "unknown"),
+                        workspace=str(
+                            st.session_state.get("shoir_workspace_name")
+                            or st.session_state.get("workspace")
+                            or st.session_state.get("active_workspace_name")
+                            or "default"
+                        ),
+                    )
+                    st.session_state["current_action_approved"] = False
+                    st.session_state["copilot_staged_decision_id"] = decision_id
+                    st.success(f"Decision Card staged · **{decision_id}**")
+                except Exception as exc:
+                    st.session_state["current_action_approved"] = False
+                    st.error(f"Decision Card staging was blocked safely: {type(exc).__name__}: {exc}")
+            if st.session_state.get("copilot_staged_decision_id"):
+                st.info("Proposed decision: " + str(st.session_state["copilot_staged_decision_id"]) + " · approval/implementation remains governed by the Decision Center.")
 
             export_bytes = st.session_state.get("copilot_orchestrator_export")
             if isinstance(export_bytes, (bytes, bytearray)):
@@ -11875,62 +11591,47 @@ if mod == "Admin Panel":
 # MODULE: CONTROL TOWER
 # =========================================================
 if mod == "Control Tower":
-    st.header("🗼 Integrated Global Supply Chain Control Tower")
-    st.markdown("Real-time end-to-end visibility, live shipment telemetry, active incident management, and automated network health monitoring.")
-
-    # Top Executive Metrics Row
-    ct1, ct2, ct3, ct4 = st.columns(4)
-    ct1.metric("Active Shipments", "142", delta="+6 live")
-    ct2.metric("Disruption Alerts", "2 Warnings", delta="Action Required", delta_color="inverse")
-    ct3.metric("On-Time Delivery", "98.4%", delta="+0.5%")
-    ct4.metric("Weather Risk Index", "Low (1.2 / 10)", delta="Stable")
-
-    st.markdown("---")
-    st.subheader("🚨 Active Incident & Disruption Log")
-
-    # Interactive filters
-    col_f1, col_f2 = st.columns(2)
-    with col_f1:
-        severity_filter = st.selectbox("Filter by Severity", ["All Severities", "Moderate", "Low", "Critical"])
-    with col_f2:
-        region_filter = st.selectbox("Filter by Region", ["All Regions", "Riyadh North Highway", "WH Beta Gate 2", "Jeddah Port Terminal", "Dammam Logistics Park"])
-
-    disruption_data = {
-        "Incident ID": ["INC-901", "INC-902", "INC-903", "INC-904"],
-        "Location": ["Riyadh North Highway", "WH Beta Gate 2", "Jeddah Port Terminal", "Dammam Logistics Park"],
-        "Severity": ["Moderate", "Low", "Critical", "Moderate"],
-        "Estimated Delay": ["45 mins", "15 mins", "120 mins", "30 mins"],
-        "Mitigation Status": ["Rerouted via Ring Road", "Queued secondary dock", "Dispatching backup fleet", "Traffic cleared"]
-    }
-    
-    disruption_df = pd.DataFrame(disruption_data)
-    
-    if severity_filter != "All Severities":
-        disruption_df = disruption_df[disruption_df["Severity"] == severity_filter]
-    if region_filter != "All Regions":
-        disruption_df = disruption_df[disruption_df["Location"] == region_filter]
-
-    st.session_state["control_tower_disruption_df"] = disruption_df.copy(deep=True)
-    st.session_state["control_tower_metrics"] = pd.DataFrame({
-        "KPI": ["Active Shipments", "On-Time Delivery", "Disruption Alerts", "Weather Risk Index"],
-        "Value": [142, 98.4, 2, 1.2],
-        "Unit": ["shipments", "%", "alerts", "index"],
-    })
-    st.dataframe(disruption_df, use_container_width=True)
-
-    if st.button("Trigger Full Network Diagnostic Scan", type="primary"):
-        if "current_user" in st.session_state and "log_audit" in globals():
-            log_audit(st.session_state.current_user, "Executed Control Tower Diagnostic Scan")
-        st.toast("Diagnostic scan completed successfully!", icon="🗼")
-        st.success("Network health verified. All primary hubs operating within optimal tolerances.")
-
-    with st.expander("🔍 View Raw Telemetry Stream"):
-        st.json({
-            "control_tower_status": "ONLINE",
-            "active_nodes": 24,
-            "latency_ms": 19,
-            "encryption": "TLS 1.3 Secure"
-        })
+    # Canonical Control Tower: no hard-coded shipment, alert or weather claims.
+    render_control_tower_extension()
+    st.markdown("### 🔗 Decision Operating Loop")
+    try:
+        from shoir_enterprise_layer import canonical_state_manifest
+        manifest = canonical_state_manifest(
+            st.session_state.get("current_user", "unknown"),
+            str(
+                st.session_state.get("shoir_workspace_name")
+                or st.session_state.get("workspace")
+                or st.session_state.get("active_workspace_name")
+                or "default"
+            ),
+        )
+        observed = manifest.get("entity_types", {}) or {}
+    except Exception:
+        observed = {}
+    flow = [
+        ("Control Tower", "KPI" in observed or "Process" in observed),
+        ("Digital Twin", "Asset" in observed),
+        ("Copilot", "Model" in observed or "Experiment" in observed),
+        ("Simulation", "Experiment" in observed),
+        ("Optimization", "Model" in observed),
+        ("Economics", "Cost" in observed),
+        ("Sustainability", "Energy" in observed),
+        ("Decision", "Decision" in observed),
+        ("Outcome", "Outcome" in observed),
+    ]
+    cols = st.columns(len(flow))
+    for idx, (label, available) in enumerate(flow):
+        cols[idx].markdown(
+            f'<div style="padding:12px 8px;border:1px solid #dbe4f0;border-radius:14px;background:#fff;text-align:center;min-height:78px">'
+            f'<div style="font-size:20px">{"✓" if available else "○"}</div>'
+            f'<div style="font-weight:800;font-size:11px">{html.escape(label)}</div>'
+            f'<div style="font-size:10px;color:#64748b">{"Observed" if available else "Ready"}</div></div>',
+            unsafe_allow_html=True,
+        )
+        if idx < len(flow) - 1:
+            pass
+    st.caption("The loop reflects observed canonical entities. A Ready stage is not treated as a completed or live measurement.")
+    st.stop()
 
 if mod == "Cryptographic Ledger":
     st.header("🔐 Cryptographic Product Provenance & ESG Ledger")

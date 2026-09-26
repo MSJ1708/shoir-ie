@@ -664,6 +664,27 @@ def render_enterprise_bridge(module: str, tier: str, username: str) -> None:
                 if module == "Engineering Decision Center" and isinstance(approval_history, pd.DataFrame) and not approval_history.empty:
                     st.markdown("##### ✅ Approval history")
                     st.dataframe(approval_history, use_container_width=True, hide_index=True)
+
+                if module == "Engineering Decision Center":
+                    st.markdown("##### 🔁 Decision-to-Value Verification")
+                    try:
+                        from industrial_experience import decision_to_value_frame
+                        value_frame = decision_to_value_frame(owner=username)
+                    except Exception:
+                        value_frame = pd.DataFrame()
+                    if value_frame.empty:
+                        st.info("No implemented or verified decision outcomes are recorded yet.")
+                    else:
+                        st.dataframe(value_frame, use_container_width=True, hide_index=True)
+                        plot = value_frame.dropna(subset=["Predicted","Actual"]).copy()
+                        if not plot.empty:
+                            st.plotly_chart(
+                                px.bar(plot, x="KPI", y=["Predicted","Actual"], barmode="group",
+                                       title="Predicted vs Actual KPI Outcomes"),
+                                use_container_width=True,
+                            )
+                        st.caption("Variance is calculated from recorded implementation outcomes; it is not a forecast.")
+
             elif module in {"Enterprise Security & Governance","Enterprise Integration & Collaboration","Persistence"}:
                 roles = st.session_state.get("workspace_users", st.session_state.get("workspace_members_df", []))
                 st.dataframe(_safe_frame(roles), use_container_width=True, hide_index=True)

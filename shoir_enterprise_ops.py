@@ -342,30 +342,48 @@ def build_control_tower_health(state: Mapping[str, Any]) -> pd.DataFrame:
 
 
 def render_control_tower_extension() -> None:
-    state = {
-        "workstations": st.session_state.get("dt_workstations", []),
-        "supply": st.session_state.get("supply_nodes", []),
-        "inventory": st.session_state.get("inventory_playback", st.session_state.get("meio_data", [])),
-        "quality": st.session_state.get("quality_df", []),
-        "maintenance": st.session_state.get("maintenance_assets", []),
-        "transport": st.session_state.get("agv_fleet", []),
-        "workforce": st.session_state.get("work_elements", []),
-        "energy": st.session_state.get("energy_units", []),
-        "carbon": st.session_state.get("carbon_sources", []),
-    }
-    health = build_control_tower_health(state)
+    username = st.session_state.get("current_user", "unknown")
+    workspace = str(
+        st.session_state.get("shoir_workspace_name")
+        or st.session_state.get("workspace")
+        or st.session_state.get("active_workspace_name")
+        or "default"
+    )
+    try:
+        from shoir_enterprise_layer import build_control_tower_health_from_canonical, canonical_health, canonical_events_frame
+        health = build_control_tower_health_from_canonical(username, workspace)
+        manifest = canonical_health(username, workspace)
+        st.session_state["control_tower_canonical_health"] = manifest
+    except Exception:
+        health = pd.DataFrame()
+        manifest = {"coverage": 0.0}
+    if health.empty or int(health["Records"].sum()) == 0:
+        state = {
+            "workstations": st.session_state.get("dt_workstations", []),
+            "supply": st.session_state.get("supply_nodes", []),
+            "inventory": st.session_state.get("inventory_playback", st.session_state.get("meio_data", [])),
+            "quality": st.session_state.get("quality_df", []),
+            "maintenance": st.session_state.get("maintenance_assets", []),
+            "transport": st.session_state.get("agv_fleet", []),
+            "workforce": st.session_state.get("work_elements", []),
+            "energy": st.session_state.get("energy_units", []),
+            "carbon": st.session_state.get("carbon_sources", []),
+        }
+        health = build_control_tower_health(state)
+        signal_source = "Current module state"
+    else:
+        signal_source = "Canonical Digital Thread"
     st.session_state["control_tower_unified_health_df"] = health
     st.markdown("### 🗼 Unified Industrial Health Map")
-    st.caption("Health is calculated only where an observable signal exists. Areas without source data stay blank rather than showing fabricated status.")
+    st.caption(
+        f"Source: **{signal_source}** · Canonical coverage: **{float(manifest.get('coverage', 0.0)):.1f}%**. "
+        "Unobserved areas remain No Data; no health values are fabricated."
+    )
     if health.empty:
         st.info("No cross-domain operational datasets are currently available.")
         return
     st.dataframe(health, use_container_width=True, hide_index=True)
-    plot_df = health.dropna(subset=["Health %"]).copy()
-    if not plot_df.empty:
-        fig = px.bar(plot_df, x="Area", y="Health %", color="Status", hover_data=["Signal"], range_y=[0, 100], title="Production · Supply · Inventory · Quality · Maintenance · Transport · Workforce · Energy · Carbon")
-        st.plotly_chart(fig, use_container_width=True)
-
+    _render_universal_viz("Control Tower", "control_tower_unified_health_df")
 
 # ---------------------------------------------------------------------------
 # Connectivity + health monitoring
@@ -402,19 +420,130 @@ def normalize_connector_health(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def render_connectivity_extension() -> None:
+    from shoir_enterprise_layer import (
+        connector_health_frame, connector_run_frame, connector_schedule_frame,
+        test_connector_profile, schedule_connector_sync, run_due_connector_syncs,
+        validate_connector_profile, fetch_connector_sample,
+    )
+
+    username = st.session_state.get("current_user", "unknown")
+    workspace = str(
+        st.session_state.get("shoir_workspace_name")
+        or st.session_state.get("workspace")
+        or st.session_state.get("active_workspace_name")
+        or "default"
+    )
     raw = st.session_state.get("conn_df", st.session_state.get("erp_connectors", []))
     health = normalize_connector_health(_df(raw))
+    persisted = connector_health_frame(username, workspace)
+    if not persisted.empty:
+        persisted = persisted.rename(columns={
+            "name": "Name", "system_type": "System Type", "protocol": "Protocol",
+            "status": "Status", "latency_ms": "Latency ms", "detail": "Errors",
+            "checked_at": "Last Sync",
+        })
+        health = pd.concat([health, persisted], ignore_index=True)
+        if "Name" in health.columns and "Protocol" in health.columns:
+            health = health.drop_duplicates(subset=["Name", "Protocol"], keep="last")
     st.session_state["connectivity_health_df"] = health
-    st.markdown("### 🔌 Connector Health & Deployment Readiness")
-    st.caption("SAP · Oracle · SQL · REST · MQTT · OPC-UA · WMS/MES/ERP profiles share one health surface. Live tests remain opt-in per connector.")
-    if health.empty:
-        st.info("Register a connector to begin health monitoring.")
-        return
-    st.dataframe(health, use_container_width=True, hide_index=True)
-    fig = px.bar(health, x="Name", y="Health %", color="Protocol", range_y=[0, 100], title="Enterprise Connector Health")
-    st.plotly_chart(fig, use_container_width=True)
-    _render_universal_viz("Industrial Connectivity Hub", "connectivity_health_df")
 
+    st.markdown("### 🔌 Connector Health & Deployment Readiness")
+    st.caption("One governed adapter surface for SAP · Oracle · WMS · MES · ERP · REST · SQL · MQTT · OPC-UA. Live tests are opt-in; this build validates executable transports only and never stores secret values.")
+
+    with st.expander("🧭 Live Connection Wizard", expanded=False):
+        left, right = st.columns(2)
+        with left:
+            system_type = st.selectbox("System", ["SAP","ORACLE","WMS","MES","ERP","REST","SQL","MQTT","OPC-UA"], key="conn_wizard_system")
+            defaults = {"SAP":"ODATA","ORACLE":"REST","WMS":"REST","MES":"REST","ERP":"REST","REST":"REST","SQL":"SQL","MQTT":"MQTT","OPC-UA":"OPC-UA"}
+            protocols = ["REST","ODATA","HTTPS","SQL","JDBC","MQTT","OPC-UA"]
+            default_protocol = defaults.get(system_type, "REST")
+            protocol = st.selectbox("Protocol / adapter", protocols, index=protocols.index(default_protocol), key="conn_wizard_protocol")
+            name = st.text_input("Connection name", value=f"{system_type} connection", key="conn_wizard_name")
+        with right:
+            endpoint = st.text_input("Endpoint / DSN", placeholder="https://… | postgresql://… | sqlite:///… | mqtt://… | opc.tcp://…", key="conn_wizard_endpoint")
+            secret_ref = st.text_input("Secret reference (optional)", placeholder="env:SAP_API_TOKEN", type="password", key="conn_wizard_secret_ref", help="Reference only. The secret value is never persisted.")
+            timeout = st.number_input("Timeout (seconds)", 1.0, 60.0, 8.0, 1.0, key="conn_wizard_timeout")
+
+        profile = validate_connector_profile(system_type, protocol, endpoint)
+        if profile["valid"]:
+            st.success("Adapter ready · " + str(profile.get("adapter", protocol)))
+        else:
+            st.warning("Configuration needs attention: " + " ".join(profile["errors"]))
+
+        c1, c2 = st.columns(2)
+        with c1:
+            if st.button("🧪 Test connection", type="primary", use_container_width=True, key="conn_wizard_test"):
+                if not endpoint.strip():
+                    st.warning("Enter an endpoint before testing.")
+                else:
+                    result = test_connector_profile(username, name, system_type, protocol, endpoint, secret_ref, workspace, float(timeout))
+                    st.session_state["connector_last_test"] = result
+                    st.rerun()
+        with c2:
+            interval = st.number_input("Sync interval (minutes)", 1, 10080, 60, 5, key="conn_wizard_interval")
+            enabled = st.checkbox("Enable schedule", value=True, key="conn_wizard_enabled")
+            if st.button("⏱️ Save synchronization schedule", use_container_width=True, key="conn_wizard_schedule"):
+                last = st.session_state.get("connector_last_test") or {}
+                connector_id = str(last.get("connector_id") or "")
+                if not connector_id:
+                    st.warning("Test the connection first so a connector ID exists.")
+                else:
+                    sid = schedule_connector_sync(username, connector_id, int(interval), workspace, bool(enabled))
+                    st.success(f"Synchronization schedule saved · {sid}")
+
+    last = st.session_state.get("connector_last_test")
+    if isinstance(last, dict):
+        st.markdown("**Last connector test:** " + str(last.get("status", "Unknown")) + " · " + f"{float(last.get('latency_ms', 0.0)):.1f} ms · " + str(last.get("detail", "")))
+
+    schedules = connector_schedule_frame(username, workspace)
+    if not schedules.empty:
+        st.markdown("#### ⏱️ Synchronization schedules")
+        st.dataframe(schedules, use_container_width=True, hide_index=True)
+        if st.button("▶️ Run due synchronization checks", use_container_width=True, key="conn_run_due"):
+            try:
+                result = run_due_connector_syncs(username, workspace, max_attempts=3, require_approval=True)
+                st.session_state["connector_due_run_result"] = result
+                st.rerun()
+            except PermissionError as exc:
+                st.error(str(exc))
+            except Exception as exc:
+                st.error("Scheduled connector checks failed safely: " + str(exc))
+    due_result = st.session_state.get("connector_due_run_result")
+    if isinstance(due_result, pd.DataFrame) and not due_result.empty:
+        st.markdown("#### Latest scheduled synchronization result")
+        st.dataframe(due_result, use_container_width=True, hide_index=True)
+
+    last_test = st.session_state.get("connector_last_test") or {}
+    if last_test.get("connector_id") and str(last_test.get("status")) == "Healthy" and str(protocol).upper() in {"REST","ODATA","HTTPS","SQL","JDBC"}:
+        with st.expander("📥 Pull bounded sample + map canonical fields", expanded=False):
+            sample_query = ""
+            if str(protocol).upper() in {"SQL","JDBC"}:
+                sample_query = st.text_area("Read-only SQL query", value="SELECT * FROM your_table", key="conn_sample_query")
+            sample_limit = st.number_input("Sample limit", 1, 10000, 1000, 100, key="conn_sample_limit")
+            if st.button("📥 Fetch sample", use_container_width=True, key="conn_sample_fetch"):
+                result = fetch_connector_sample(username, str(last_test["connector_id"]), protocol, endpoint, secret_ref, sample_query, workspace, int(sample_limit), float(timeout))
+                st.session_state["connector_sample_result"] = result
+            sample = st.session_state.get("connector_sample_result")
+            if isinstance(sample, dict):
+                st.caption(str(sample.get("detail", "")))
+                frame = sample.get("frame")
+                if isinstance(frame, pd.DataFrame) and not frame.empty:
+                    st.dataframe(frame.head(100), use_container_width=True, hide_index=True)
+                    st.json(sample.get("schema_mapping", {}))
+                    st.session_state["connector_sample_df"] = frame.copy(deep=True)
+    if health.empty:
+        st.info("Register or test a connector above to begin health monitoring.")
+    else:
+        st.dataframe(health, use_container_width=True, hide_index=True)
+        if "Health %" in health.columns:
+            fig = px.bar(health, x="Name", y="Health %", color="Protocol", range_y=[0,100], title="Enterprise Connector Health")
+            st.plotly_chart(fig, use_container_width=True)
+        runs = connector_run_frame(username, workspace, 100)
+        if not runs.empty:
+            st.markdown("#### Connector Test / Sync History")
+            st.dataframe(runs, use_container_width=True, hide_index=True)
+
+    _render_universal_viz("Industrial Connectivity Hub", "connectivity_health_df")
 
 # ---------------------------------------------------------------------------
 # Enterprise Security
@@ -454,35 +583,46 @@ def security_posture() -> pd.DataFrame:
 
 
 def render_security_extension() -> None:
+    from shoir_enterprise_layer import security_maturity_status, security_access_check, inspect_upload
+
+    username = st.session_state.get("current_user", "unknown")
+    workspace = str(st.session_state.get("shoir_workspace_name") or st.session_state.get("workspace") or st.session_state.get("active_workspace_name") or "default")
     posture = security_posture()
     st.session_state["enterprise_security_posture_df"] = posture
+
     with st.expander("🔐 Secure File Handling", expanded=False):
-        uploaded = st.file_uploader(
-            "Security-scan an engineering file",
-            type=["csv", "xlsx", "txt", "md", "json", "pdf", "docx"],
-            key="enterprise_security_file_scan_upload",
-        )
+        uploaded = st.file_uploader("Security-scan an engineering file", type=["csv","xlsx","txt","md","json","pdf","docx"], key="enterprise_security_file_scan_upload")
         if uploaded is not None:
             raw = uploaded.getvalue()
-            name = str(uploaded.name)
-            unsafe_ext = bool(re.search(r"\.(exe|dll|bat|cmd|ps1|sh|js|vbs)$", name.lower()))
-            scan = pd.DataFrame([
-                {"Check": "SHA-256", "Status": "PASS", "Evidence": hashlib.sha256(raw).hexdigest()},
-                {"Check": "File size", "Status": "PASS" if len(raw) <= 50_000_000 else "REVIEW", "Evidence": f"{len(raw):,} bytes"},
-                {"Check": "Extension", "Status": "FAIL" if unsafe_ext else "PASS", "Evidence": name},
-                {"Check": "Empty file", "Status": "FAIL" if not raw else "PASS", "Evidence": ""},
-            ])
-            st.session_state["security_file_scan_df"] = scan
-            st.dataframe(scan, use_container_width=True, hide_index=True)
-            if unsafe_ext:
-                st.error("Potentially executable file type rejected by the security scan.")
+            try:
+                scan_result = inspect_upload(uploaded.name, raw, uploaded.type or "")
+                scan = pd.DataFrame([
+                    {"Check":"SHA-256","Status":"PASS","Evidence":scan_result["sha256"]},
+                    {"Check":"File size","Status":"PASS" if scan_result["bytes"] <= 50_000_000 else "FAIL","Evidence":str(f"{scan_result['bytes']:,} bytes")},
+                    {"Check":"Upload safety","Status":"PASS" if scan_result["safe"] else "FAIL","Evidence":"; ".join(scan_result["reasons"]) or "Extension/container/signature checks passed"},
+                ])
+                st.session_state["security_file_scan_df"] = scan
+                st.dataframe(scan, use_container_width=True, hide_index=True)
+                if not scan_result["safe"]:
+                    st.error("File rejected by the secure upload gate.")
+            except Exception as exc:
+                st.error("Secure upload scan failed safely: " + str(exc))
+
     st.markdown("### 🔐 Enterprise Security Posture")
     st.dataframe(posture, use_container_width=True, hide_index=True)
-    configured = int((posture["Status"].isin(["Configured", "CI hook"])).sum()) if not posture.empty else 0
+    maturity = security_maturity_status(username, workspace)
+    st.markdown("### 🛡️ Security Control Maturity")
+    st.dataframe(maturity, use_container_width=True, hide_index=True)
+    gate = security_access_check(username, "connector_sync", workspace, require_approval=False)
+    message = "Allowed" if gate["allowed"] else "Blocked"
+    if gate["reasons"]:
+        message += " · " + " ".join(gate["reasons"])
+    st.caption("Current connector-sync authorization: " + message)
+    configured = int(maturity["State"].isin(["Verified","Connected","Configured"]).sum()) if not maturity.empty else 0
     c1, c2 = st.columns(2)
-    c1.metric("Governance controls configured", f"{configured}/{len(posture)}")
-    c2.metric("Sensitive keys detected", f"{sum(1 for key in st.session_state.keys() if re.search(r'password|token|secret|otp|payment', str(key), re.I)):,}")
-    st.caption("SSO/OIDC and MFA are reported as configured only when their configuration sections are actually present; no secret contents are inspected or printed.")
+    c1.metric("Controls configured / verified", f"{configured}/{len(maturity)}")
+    c2.metric("Sensitive session keys", f"{sum(1 for key in st.session_state.keys() if re.search(r'password|token|secret|otp|payment', str(key), re.I)):,}")
+    st.caption("SSO/OIDC and MFA remain provider/session dependent. Secret values are never displayed or stored in connector health records.")
     _render_universal_viz("Enterprise Security & Governance", "enterprise_security_posture_df")
 
 
@@ -572,6 +712,14 @@ def render_persistence_extension(username: str, show_controls: bool = True) -> N
 
 
 def render_collaboration_extension(username: str) -> None:
+    from shoir_enterprise_layer import add_collaboration_item, collaboration_frame
+
+    workspace = str(
+        st.session_state.get("shoir_workspace_name")
+        or st.session_state.get("workspace")
+        or st.session_state.get("active_workspace_name")
+        or "default"
+    )
     st.markdown("### 👥 Engineering Collaboration Board")
     users = st.session_state.get("workspace_users", [])
     users_df = _df(users)
@@ -579,10 +727,6 @@ def render_collaboration_extension(username: str) -> None:
         users_df = pd.DataFrame({"User": [username], "Role": ["Owner"]})
     st.session_state["collaboration_roster_df"] = users_df
 
-    board = st.session_state.setdefault(
-        "shoir_collaboration_board",
-        {"assignments": [], "mentions": [], "comments": [], "reviewers": []},
-    )
     with st.expander("Comments · Mentions · Assignments · Reviewers", expanded=False):
         comment = st.text_area("Comment", key="collab_comment_text")
         mention = st.text_input("Mention", placeholder="@Engineer or @Manager", key="collab_mention_text")
@@ -590,39 +734,39 @@ def render_collaboration_extension(username: str) -> None:
         with c1:
             if st.button("💬 Add comment", use_container_width=True, key="collab_add_comment"):
                 if comment.strip():
-                    board["comments"].append({"Actor": username, "Comment": comment.strip(), "Timestamp": _now()})
-                    try:
-                        from industrial_experience import add_comment
-                        add_comment(
-                            st.session_state.get("active_project_id") or st.session_state.get("project_id"),
-                            st.session_state.get("decision_active_id"),
-                            username,
-                            comment.strip(),
-                        )
-                    except Exception:
-                        pass
+                    iid = add_collaboration_item(username, "Comment", comment.strip(), "Engineering comment", workspace=workspace)
+                    st.success(f"Comment saved · {iid}")
         with c2:
             if st.button("🔔 Add mention", use_container_width=True, key="collab_add_mention"):
                 if mention.strip():
-                    board["mentions"].append({"Actor": username, "Mention": mention.strip(), "Timestamp": _now()})
+                    iid = add_collaboration_item(username, "Mention", mention.strip(), "Workspace mention", workspace=workspace)
+                    st.success(f"Mention saved · {iid}")
         with c3:
             assignee = st.selectbox("Assignee", users_df.iloc[:, 0].astype(str).tolist(), key="collab_assignee")
             if st.button("📌 Assign review", use_container_width=True, key="collab_assign"):
-                board["assignments"].append({"Assignee": assignee, "Assigned By": username, "Status": "Pending", "Timestamp": _now()})
+                iid = add_collaboration_item(
+                    username, "Assignment", "Review assigned", "Engineering review",
+                    assignee=assignee, status="Pending", workspace=workspace,
+                )
+                st.success(f"Assignment saved · {iid}")
         with c4:
             reviewer = st.text_input("Reviewer role", "Engineering Manager", key="collab_reviewer_role")
             if st.button("🧑‍⚖️ Add reviewer", use_container_width=True, key="collab_reviewer"):
-                board["reviewers"].append({"Role": reviewer, "Added By": username, "Status": "Pending", "Timestamp": _now()})
-        for label, key in [("Comments", "comments"), ("Assignments", "assignments"), ("Reviewers", "reviewers"), ("Mentions", "mentions")]:
-            data = pd.DataFrame(board[key])
-            if not data.empty:
-                st.markdown(f"**{label}**")
-                st.dataframe(data, use_container_width=True, hide_index=True)
-    st.session_state["shoir_collaboration_board"] = board
-    board_frame = pd.DataFrame([x for key in ("assignments", "reviewers") for x in board.get(key, [])])
-    if not board_frame.empty:
-        st.session_state["collaboration_assignment_df"] = board_frame
-    _render_universal_viz("Team Workspaces & RBAC", "collaboration_assignment_df")
+                iid = add_collaboration_item(
+                    username, "Reviewer", "Reviewer role added", "Engineering review",
+                    reviewer=reviewer, status="Pending", workspace=workspace,
+                )
+                st.success(f"Reviewer saved · {iid}")
+
+    persisted = collaboration_frame(username, workspace)
+    if not persisted.empty:
+        st.markdown("#### Persisted collaboration activity")
+        st.dataframe(persisted, use_container_width=True, hide_index=True)
+        st.session_state["collaboration_assignment_df"] = persisted.copy(deep=True)
+        _render_universal_viz("Team Workspaces & RBAC", "collaboration_assignment_df")
+    else:
+        st.info("No persisted collaboration items exist in this workspace yet.")
+
 
 
 # ---------------------------------------------------------------------------
@@ -1051,44 +1195,55 @@ def render_model_registry_extension(username: str = "unknown") -> None:
 
 
 def render_jobs_extension(username: str = "unknown", module: str = "Industrial Simulation Lab") -> None:
+    from shoir_enterprise_layer import create_job_record, update_job_record, list_jobs, request_job_action
+
+    workspace = str(st.session_state.get("shoir_workspace_name") or st.session_state.get("workspace") or st.session_state.get("active_workspace_name") or "default")
     st.markdown("### 🕐 Engineering Job Control")
-    st.caption("Uses the existing durable job registry for queue, progress, pause/resume, cancellation and retry state. Execution remains operator-controlled unless a worker backend is configured.")
-    try:
-        from industrial_experience import create_job, update_job, ensure_experience_db
-        ensure_experience_db()
-        with st.expander("Create / control job", expanded=False):
-            job_type = st.selectbox("Job type", ["Simulation", "Optimization", "Forecast", "Report", "Data profiling"], key=f"job_ext_type_{module}")
-            payload_text = st.text_area("Job payload JSON", '{"priority":"standard","requested_by":"operator"}', key=f"job_ext_payload_{module}")
-            if st.button("➕ Queue job", use_container_width=True, key=f"job_ext_queue_{module}"):
-                try:
-                    payload = json.loads(payload_text)
-                except Exception:
-                    payload = {"raw_payload": payload_text}
-                jid = create_job(module, job_type, username, payload)
-                st.session_state["job_ext_active"] = jid
-                st.success(f"Queued {jid}")
-            active = st.session_state.get("job_ext_active")
-            if active:
-                state = st.selectbox("State action", ["Running", "Paused", "Queued", "Cancelled", "Completed", "Failed"], key=f"job_ext_state_{module}")
-                progress = st.slider("Progress %", 0, 100, 50, key=f"job_ext_progress_{module}")
-                if st.button("🔄 Apply job state", use_container_width=True, key=f"job_ext_update_{module}"):
-                    update_job(active, state, progress, f"Operator set state to {state}.")
-                    st.success(f"{active} → {state}")
-        try:
-            import sqlite3
-            with sqlite3.connect("enterprise_full_workspace.db") as conn:
-                history = pd.read_sql(
-                    "SELECT job_id,module,job_type,status,progress,message,started_at,finished_at FROM experience_jobs ORDER BY COALESCE(started_at, finished_at) DESC LIMIT 200",
-                    conn,
-                )
-            if not history.empty:
-                st.dataframe(history, use_container_width=True, hide_index=True)
-                st.session_state["job_history_df"] = history
-                _render_universal_viz(module, "job_history_df")
-        except Exception as exc:
-            st.warning(f"Job history unavailable: {type(exc).__name__}: {exc}")
-    except Exception as exc:
-        st.warning(f"Job controls unavailable: {type(exc).__name__}: {exc}")
+    st.caption("Single enterprise job registry for queued/running/completed work with cooperative pause, cancel and retry controls.")
+    with st.expander("Create / control job", expanded=False):
+        job_type = st.selectbox("Job type", ["Simulation","Optimization","Forecast","Report","Data profiling","Connector sync"], key=f"job_ext_type_{module}")
+        payload_text = st.text_area("Job payload JSON", '{"priority":"standard","requested_by":"operator"}', key=f"job_ext_payload_{module}")
+        if st.button("➕ Queue job", use_container_width=True, key=f"job_ext_queue_{module}"):
+            try:
+                payload = json.loads(payload_text)
+            except Exception:
+                payload = {"raw_payload": payload_text}
+            jid = create_job_record(username, module, job_type, payload, workspace)
+            st.session_state["job_ext_active"] = jid
+            st.success(f"Queued {jid}")
+        jobs = list_jobs(username, workspace, 200)
+        active = st.session_state.get("job_ext_active")
+        if active and not jobs.empty and active in set(jobs["job_id"].astype(str)):
+            row = jobs.loc[jobs["job_id"].astype(str).eq(str(active))].iloc[0]
+            st.dataframe(pd.DataFrame([row.to_dict()]), use_container_width=True, hide_index=True)
+            a1, a2, a3, a4 = st.columns(4)
+            if a1.button("▶ Run", use_container_width=True, key=f"job_ext_run_{module}"):
+                update_job_record(username, active, status="Running", progress=max(1.0, float(row["progress"])), message="Operator requested start.", workspace=workspace)
+                st.rerun()
+            if a2.button("⏸ Pause", use_container_width=True, key=f"job_ext_pause_{module}"):
+                request_job_action(username, active, "pause", workspace)
+                st.rerun()
+            if a3.button("⏹ Cancel", use_container_width=True, key=f"job_ext_cancel_{module}"):
+                request_job_action(username, active, "cancel", workspace)
+                st.rerun()
+            if a4.button("↻ Retry", use_container_width=True, key=f"job_ext_retry_{module}"):
+                request_job_action(username, active, "retry", workspace)
+                st.rerun()
+        elif not jobs.empty:
+            st.selectbox("Select job", jobs["job_id"].astype(str).tolist(), key=f"job_ext_select_{module}")
+            selected = st.session_state.get(f"job_ext_select_{module}")
+            if selected:
+                st.session_state["job_ext_active"] = selected
+
+    jobs = list_jobs(username, workspace, 200)
+    if not jobs.empty:
+        st.dataframe(jobs, use_container_width=True, hide_index=True)
+        st.session_state["enterprise_job_history_df"] = jobs.copy(deep=True)
+        st.session_state["job_history_df"] = jobs.copy(deep=True)
+        _render_universal_viz(module, "enterprise_job_history_df")
+    else:
+        st.info("No enterprise jobs have been queued in this workspace.")
+
 
 
 def build_realtime_monitoring(df: pd.DataFrame, threshold: float | None = None) -> pd.DataFrame:
@@ -1222,6 +1377,41 @@ def render_sustainability_extension(username: str = "unknown") -> None:
     st.plotly_chart(px.bar(summary, x="Metric", y="Value", title="Sustainability KPI Bridge"), use_container_width=True)
     _render_universal_viz("Industrial Sustainability & LCA", "sustainability_decision_bridge_df")
 
+
+def render_benchmarking_evidence(username: str = "unknown") -> None:
+    """Extend the existing Benchmarking module with measured ROI evidence."""
+    from benchmark_harness import calculate_roi_evidence
+
+    st.markdown("### 🧪 Benchmark & ROI Evidence Lab")
+    st.caption("Enter measured baseline and Shoir-IE timings. The calculator does not invent savings; it exposes the assumptions used to derive them.")
+    c1, c2, c3 = st.columns(3)
+    baseline = c1.number_input("Baseline cycle time (minutes)", 0.0, 100000.0, 240.0, 5.0, key="roi_baseline_minutes")
+    shoir = c2.number_input("Shoir-IE cycle time (minutes)", 0.0, 100000.0, 18.0, 1.0, key="roi_shoir_minutes")
+    runs = c3.number_input("Annual runs", 0.0, 10000000.0, 250.0, 10.0, key="roi_annual_runs")
+    c4, c5, c6 = st.columns(3)
+    hourly_rate = c4.number_input("Engineering labor rate / hour", 0.0, 100000.0, 50.0, 5.0, key="roi_hourly_rate")
+    implementation_cost = c5.number_input("Implementation cost", 0.0, 100000000.0, 25000.0, 1000.0, key="roi_implementation_cost")
+    adoption = c6.slider("Expected adoption fraction", 0.0, 1.0, 1.0, 0.05, key="roi_adoption_fraction")
+    result = calculate_roi_evidence(baseline, shoir, runs, hourly_rate, implementation_cost, adoption)
+    metrics = pd.DataFrame([{
+        "Metric": "Annual hours saved", "Value": result["annual_hours_saved"], "Unit": "hours/year",
+    }, {
+        "Metric": "Annual labor value", "Value": result["annual_labor_value"], "Unit": "currency/year",
+    }, {
+        "Metric": "First-year net value", "Value": result["first_year_net_value"], "Unit": "currency",
+    }, {
+        "Metric": "Cycle reduction", "Value": result["cycle_reduction_pct"] or 0.0, "Unit": "%",
+    }])
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Annual hours saved", f"{result['annual_hours_saved']:,.1f}")
+    m2.metric("Annual labor value", f"{result['annual_labor_value']:,.2f}")
+    payback = result["payback_months"]
+    m3.metric("Payback", f"{payback:,.1f} months" if payback is not None else "Not reached")
+    m4.metric("Cycle reduction", f"{result['cycle_reduction_pct']:,.1f}%" if result["cycle_reduction_pct"] is not None else "n/a")
+    st.dataframe(metrics, use_container_width=True, hide_index=True)
+    st.caption("Evidence status: " + result["evidence_status"] + ". Replace defaults with measured pilot data before using the values externally.")
+    st.session_state["benchmark_roi_df"] = metrics.copy(deep=True)
+    _render_universal_viz("Benchmarking & Engineering Standards", "benchmark_roi_df")
 
 def render_human_factors_extension(username: str = "unknown") -> None:
     st.markdown("### 🧑‍🏭 Workforce & Human-Factors Decision Layer")

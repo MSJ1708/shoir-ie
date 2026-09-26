@@ -22,6 +22,9 @@ import streamlit as st
 
 _MODULE_KEYS = {
     "Engineering Validation Center": ["validation_df", "validation_result"],
+    "Industrial Operating System": ["os_compare_result", "os_process_result", "os_drift_result", "os_verify_result"],
+    "Global Project & Digital Thread": ["global_thread_nodes", "global_thread_edges", "global_thread_project"],
+    "Advanced Engineering Copilot": ["copilot_orchestrator_run", "copilot_orchestrator_figure_json", "copilot_staged_decision_id", "copilot_orchestrator_export", "copilot_clean_audit"],
     "MILP Solvers": ["milp_result_df", "milp_summary_df", "milp_allocation_flow_df"],
     "Industrial Data Model & Digital Thread": ["thread_df", "thread_rel"],
     "Advanced Planning & Scheduling": ["aps_demand", "aps_bom", "aps_orders", "aps_schedule_result"],
@@ -32,23 +35,23 @@ _MODULE_KEYS = {
     "Multi-Objective Optimization": ["multiobj_df", "multiobj_result", "pareto", "optimization_pareto_df", "optimization_result_df"],
     "Robust & Resilient Optimization": ["robust_df", "robust_result", "robust_result_df"],
     "Experiment Lab": ["experiment_df", "experiment_results", "experiment_doe_design", "experiment_factorial_effects", "experiment_factorial_summary", "experiment_mc_results", "experiment_mc_result_summary", "experiment_bootstrap_results", "experiment_bootstrap_summary", "experiment_replication_summary", "experiment_sensitivity_results"],
-    "Engineering Decision Center": ["decision_metrics_df", "decision_alternatives_df", "decision_kpi_df", "decision_verification_df"],
+    "Engineering Decision Center": ["decision_metrics_df", "decision_alternatives_df", "decision_kpi_df", "decision_verification_df", "decision_outcomes_df"],
     "Industrial Data Platform": ["data_platform_latest_df"],
     "Capital Investment & Engineering Economics": ["capex_df", "capex_result"],
     "Workforce Engineering": ["work_elements", "balance_result", "skills_df"],
     "Industrial Sustainability & LCA": ["sustain_df", "sustain_result"],
-    "Benchmarking & Engineering Standards": ["benchmark_actual", "benchmark_targets", "benchmark_result"],
+    "Benchmarking & Engineering Standards": ["benchmark_actual", "benchmark_targets", "benchmark_result", "benchmark_roi_df"],
     "Advanced ML Demand Forecasting": ["forecast_df", "forecast_result", "forecast_metrics"],
     "Scenario Versioning & Comparison": ["scenario_df"],
     "Predictive Maintenance Digital Twin": ["maint_df", "maint_result"],
     "Localization & Multi-Currency": ["currency_df", "currency_result", "trade_rules_df"],
     "IoT Digital Twin": ["node_mesh_df", "sensor_stream", "dt_workstations", "twin_tel", "twin_whatif_result", "enterprise_twin_anomalies_df", "enterprise_artifact_ledger"],
     "Live Industrial Digital Twin": ["twin_tel", "twin_whatif_result", "enterprise_twin_anomalies_df", "enterprise_artifact_ledger"],
-    "Industrial Connectivity Hub": ["conn_df", "connector_profiles", "erp_connectors", "enterprise_connector_health_df"],
+    "Industrial Connectivity Hub": ["conn_df", "connector_profiles", "erp_connectors", "enterprise_connector_health_df", "connectivity_health_df", "connector_sample_df"],
     "Industrial Control Center": ["control_center_metrics", "enterprise_control_tower_health_df"],
     "Enterprise Integration & Collaboration": ["erp_connectors", "workspace_users", "audit_report_history", "enterprise_connector_health_df", "enterprise_collaboration_assignments", "enterprise_artifact_ledger"],
     "Persistence": ["enterprise_artifact_ledger"],
-    "Enterprise Security & Governance": ["security_roles", "audit_governance_ledger", "enterprise_artifact_ledger"],
+    "Enterprise Security & Governance": ["security_roles", "audit_governance_ledger", "enterprise_artifact_ledger", "enterprise_security_posture_df", "security_file_scan_df"],
     "Team Workspaces & RBAC": ["workspace_members_df", "workspace_users", "enterprise_collaboration_assignments", "enterprise_artifact_ledger"],
     "Engineering Model Registry": ["model_registry_df", "enterprise_artifact_ledger"],
     "Research Workspace": ["enterprise_research_runs_df", "enterprise_research_decisions_df"],
@@ -115,6 +118,15 @@ def _as_frame(value: Any) -> pd.DataFrame:
             return pd.DataFrame(value)
         return pd.DataFrame({"Value": value})
     if isinstance(value, dict):
+        # Many orchestration surfaces store the actual result table inside a
+        # run envelope. Prefer that nested evidence over metadata so the
+        # universal visualization engine can render it directly.
+        for nested_key in ("result", "results", "data", "frame", "table"):
+            nested = value.get(nested_key)
+            if isinstance(nested, (pd.DataFrame, list, dict)):
+                nested_frame = _as_frame(nested)
+                if not nested_frame.empty:
+                    return nested_frame
         # Results with scalar values become a useful one-row KPI table.
         flat = {}
         for k, v in value.items():
@@ -257,6 +269,7 @@ def _auto_chart_choice(df: pd.DataFrame) -> str:
     """Choose a useful chart from structural signals, not invented semantics."""
     cols = [str(c) for c in df.columns]
     nums = _numeric_columns(df)
+    categorical = _categorical_columns(df)
     dates = _coerce_datetime_columns(df)
     source = _find_col(df, ("source", "from", "origin", "customer", "facility", "warehouse"))
     target = _find_col(df, ("target", "to", "destination", "warehouse", "facility", "customer"))
@@ -303,7 +316,9 @@ def _auto_chart_choice(df: pd.DataFrame) -> str:
         return "Bar"
     if nums:
         return "Distribution"
-    return "Network Map" if len([c for c in df.columns if not pd.api.types.is_numeric_dtype(df[c])]) >= 2 else "Bar"
+    if categorical:
+        return "Categorical Distribution"
+    return "Bar"
 
 
 def _suggest_chart(df: pd.DataFrame, x: str | None, y: str | None) -> str:
@@ -316,7 +331,7 @@ def _suggest_chart(df: pd.DataFrame, x: str | None, y: str | None) -> str:
     if y:
         return "Histogram"
     if x:
-        return "Bar"
+        return "Categorical Distribution" if (x in _categorical_columns(df) and not y) else "Bar"
     return _auto_chart_choice(df)
 
 
@@ -332,6 +347,15 @@ def _make_figure(df: pd.DataFrame, chart: str, x: str | None, y: str | None, z: 
             return None
         corr = df[numeric].corr(numeric_only=True)
         return px.imshow(corr, text_auto=".2f", aspect="auto", title=title or "Correlation Heatmap")
+
+    if chart in {"Categorical Distribution", "Count by Category"}:
+        category = x if x in df.columns else (categorical[0] if categorical else None)
+        if category is None:
+            return None
+        work = df[[category]].copy()
+        work[category] = work[category].astype("string").fillna("(Missing)")
+        counts = work[category].value_counts(dropna=False).rename_axis(category).reset_index(name="Count").head(50)
+        return px.bar(counts, x=category, y="Count", text="Count", title=title or f"Count by {category}")
 
     if chart in {"Distribution", "Histogram"}:
         metric = y or (numeric[0] if numeric else None)
@@ -576,7 +600,34 @@ def render_live_visualization_studio(module: str, *, expanded: bool = False, pre
     with st.expander("📊 Live Engineering Visualization Studio", expanded=expanded):
         st.caption("Charts use the current module/workspace data. Edit a table, change the controls, and the visualization updates on the next Streamlit rerun.")
         if not tables:
-            st.info("Add or import a numeric engineering table in this module to generate a live graph.")
+            st.info("No result table is available yet. The workflow visual below shows the governed engineering path; it is not a measurement.")
+            steps = ["Import", "Validate", "Analyze", "Visualize", "Decide", "Export"]
+            workflow_fig = go.Figure()
+            workflow_fig.add_trace(
+                go.Scatter(
+                    x=list(range(len(steps))),
+                    y=[0] * len(steps),
+                    mode="lines+markers+text",
+                    text=steps,
+                    textposition="top center",
+                    hovertemplate="%{text}<extra></extra>",
+                    showlegend=False,
+                    marker={"size": 15},
+                    line={"width": 3},
+                )
+            )
+            workflow_fig.update_layout(
+                title=f"{module} · Engineering workflow",
+                height=260,
+                xaxis={"showgrid": False, "showticklabels": False, "zeroline": False},
+                yaxis={"visible": False},
+                margin={"l": 20, "r": 20, "t": 55, "b": 20},
+            )
+            st.plotly_chart(
+                workflow_fig,
+                use_container_width=True,
+                config={"displayModeBar": True, "displaylogo": False, "responsive": True},
+            )
             return
 
         labels = [label for label, _, _ in tables]
@@ -599,8 +650,8 @@ def render_live_visualization_studio(module: str, *, expanded: bool = False, pre
         dates = _coerce_datetime_columns(df)
         cols = [str(c) for c in df.columns]
 
-        if not nums and len(cols) < 2:
-            st.info("This table needs at least one numeric measure and a useful category/time field for a graph.")
+        if not cols:
+            st.info("This table has no columns to visualize.")
             return
 
         default_y = nums[0] if nums else None
@@ -723,8 +774,14 @@ def _auto_chart_choice(df: pd.DataFrame) -> str:
     has_anomaly = any("anomaly" in n or "outlier" in n for n in names)
     has_scenario = any("scenario" in n or "case" in n for n in names)
     has_timestamp = bool(dates)
+    has_control_limits = any("ucl" in n or "lcl" in n or "upper control" in n or "lower control" in n for n in names)
 
-    if has_health and has_area and numeric:
+    if has_control_limits and numeric:
+        return "Control Chart"
+    if has_health and has_area and numeric and any(
+        "health score" in n or n.strip() == "score" or "health %" in n or "health percentage" in n
+        for n in names
+    ):
         return "Health Heatmap"
     if has_anomaly and has_timestamp and numeric:
         return "Anomaly Timeline"
@@ -804,6 +861,58 @@ def _make_figure(
             return px.line(work, x=date_col, y=metric, markers=True, title=title or f"Metric Trend · {metric}")
         return None
 
+    if chart == "Categorical Distribution":
+        category = x if x in df.columns else (categorical[0] if categorical else None)
+        if category is None:
+            return None
+        counts = (
+            df[category].astype("string").fillna("<Missing>")
+            .value_counts(dropna=False)
+            .head(60)
+            .rename_axis(str(category))
+            .reset_index(name="Count")
+        )
+        if counts.empty:
+            return None
+        return px.bar(
+            counts,
+            x=str(category),
+            y="Count",
+            title=title or f"Category distribution · {category}",
+        )
+
+    if chart == "Data Completeness":
+        completeness = (
+            df.notna().mean()
+            .mul(100.0)
+            .sort_values()
+            .head(80)
+        )
+        if completeness.empty:
+            return None
+        return px.bar(
+            x=completeness.index.astype(str),
+            y=completeness.values,
+            range_y=[0, 100],
+            title=title or "Data completeness by field",
+            labels={"x": "Field", "y": "Completeness %"},
+        )
+
+    if chart == "Temporal Distribution":
+        date_col = x if x in df.columns else (_coerce_datetime_columns(df) or [None])[0]
+        if date_col is None:
+            return None
+        values = pd.to_datetime(df[date_col], errors="coerce").dropna()
+        if values.empty:
+            return None
+        counts = values.dt.floor("D").value_counts().sort_index()
+        return px.bar(
+            x=counts.index,
+            y=counts.values,
+            title=title or f"Observations over time · {date_col}",
+            labels={"x": str(date_col), "y": "Observations"},
+        )
+
     return _BASE_MAKE_FIGURE(df, chart, x, y, z, title)
 
 
@@ -870,6 +979,12 @@ def build_visualization_suite(
 
     if not plan and categorical and numeric:
         add("Bar", f"{context} · KPI by category" if context else "KPI by category", categorical[0], numeric[0])
+    if not plan and categorical:
+        add("Categorical Distribution", f"{context} · Category counts" if context else "Category counts", categorical[0], None)
+    if not plan and dates:
+        add("Temporal Distribution", f"{context} · Observation frequency" if context else "Observation frequency", dates[0], None)
+    if not plan:
+        add("Data Completeness", f"{context} · Data completeness" if context else "Data completeness")
 
     suite: list[tuple[str, go.Figure]] = []
     for title, chart, x, y, z in plan:
@@ -877,6 +992,126 @@ def build_visualization_suite(
         if fig is not None:
             suite.append((title, fig))
     return suite[:max(1, int(max_figures))]
+
+
+def visualization_contract_report(module: str, max_figures: int = 4) -> pd.DataFrame:
+    """Verify that every non-empty discoverable module table has a graph suite."""
+    rows: list[dict[str, Any]] = []
+    for label, key, frame in discover_visual_tables(str(module)):
+        if not isinstance(frame, pd.DataFrame) or frame.empty:
+            continue
+        suite = build_visualization_suite(frame, context=str(module), max_figures=max_figures)
+        rows.append({
+            "Module": str(module),
+            "Table": str(label),
+            "State Key": str(key),
+            "Rows": int(len(frame)),
+            "Columns": int(len(frame.columns)),
+            "Graphs": int(len(suite)),
+            "Status": "Verified" if suite else "No compatible chart",
+            "Primary Chart": str(suite[0][0]) if suite else "",
+        })
+    return pd.DataFrame(rows, columns=["Module","Table","State Key","Rows","Columns","Graphs","Status","Primary Chart"])
+
+MODULE_VISUAL_CONTRACTS = {
+    "Operating System": ("Metric Trend", "Health Heatmap", "Sankey"),
+    "Project & Digital Thread": ("Sankey", "Network Map", "Bar"),
+    "Copilot": ("Metric Trend", "Distribution", "Bar"),
+    "Quality": ("Pareto", "SPC", "Distribution"),
+    "OEE": ("Metric Trend", "Pareto", "Distribution"),
+    "Forecast": ("Metric Trend", "Distribution", "Scatter"),
+    "Optimization": ("Pareto", "Sensitivity Plot", "Scatter"),
+    "Economics": ("Waterfall", "Metric Trend", "Distribution"),
+    "Simulation": ("Metric Trend", "Distribution", "Scatter"),
+    "Maintenance": ("Metric Trend", "Anomaly Timeline", "Distribution"),
+    "Workforce": ("Bar", "Metric Trend", "Distribution"),
+    "Sustainability": ("Sankey", "Distribution", "Bar"),
+    "Digital Twin": ("Metric Trend", "Anomaly Timeline", "Line"),
+    "Control Tower": ("Health Heatmap", "Metric Trend", "Bar"),
+    "Connectivity": ("Bar", "Metric Trend", "Distribution"),
+    "Geospatial": ("Network Map", "Sankey", "Scatter"),
+    "Research": ("Scatter", "Distribution", "Sensitivity Plot"),
+}
+
+
+def _module_visual_keys(module: str) -> list[str]:
+    return list(_MODULE_KEYS.get(str(module), []))
+
+
+def audit_all_module_visualizations(max_figures: int = 4) -> pd.DataFrame:
+    """Audit every catalog module without fabricating data.
+
+    Populated tables must yield at least one real Plotly figure. Modules with
+    no current result table are explicitly marked Ready · awaiting data.
+    """
+    try:
+        from industrial_platform import PLATFORM_CATALOG
+        module_names = [str(item.get("name")) for item in PLATFORM_CATALOG if isinstance(item, dict) and item.get("name")]
+    except Exception:
+        module_names = list(_MODULE_KEYS.keys())
+
+    rows = []
+    for module in module_names:
+        keys = _module_visual_keys(module)
+        frames = []
+        for key in keys:
+            value = st.session_state.get(key)
+            frame = _as_frame(value)
+            if not frame.empty:
+                frames.append((key, frame))
+        if not frames:
+            rows.append({
+                "Module": module,
+                "Tables": 0,
+                "Rows": 0,
+                "Graphs": 0,
+                "Status": "Ready · awaiting data",
+                "Contract": ", ".join(_contract_for_module(module)),
+            })
+            continue
+        graph_tables = 0
+        total_rows = 0
+        graph_types = []
+        for key, frame in frames:
+            total_rows += int(len(frame))
+            suite = build_visualization_suite(frame, context=module, max_figures=max_figures)
+            if suite:
+                graph_tables += 1
+                graph_types.append(suite[0][0])
+        status = "Verified" if graph_tables == len(frames) else "Gap"
+        rows.append({
+            "Module": module,
+            "Tables": len(frames),
+            "Rows": total_rows,
+            "Graphs": graph_tables,
+            "Status": status,
+            "Contract": ", ".join(_contract_for_module(module)),
+            "Primary Views": ", ".join(graph_types[:6]),
+        })
+    return pd.DataFrame(rows, columns=["Module","Tables","Rows","Graphs","Status","Contract","Primary Views"])
+
+
+def _contract_for_module(module: str) -> tuple[str, ...]:
+    name = str(module).lower()
+    for family, charts in MODULE_VISUAL_CONTRACTS.items():
+        if family.lower() in name:
+            return charts
+    return ("Auto visualization",)
+
+
+def visualization_readiness_summary(max_figures: int = 4) -> dict[str, Any]:
+    audit = audit_all_module_visualizations(max_figures=max_figures)
+    total = len(audit)
+    verified = int(audit["Status"].eq("Verified").sum()) if total else 0
+    awaiting = int(audit["Status"].eq("Ready · awaiting data").sum()) if total else 0
+    gaps = int(audit["Status"].eq("Gap").sum()) if total else 0
+    return {
+        "modules": total,
+        "verified": verified,
+        "awaiting_data": awaiting,
+        "gaps": gaps,
+        "coverage_pct": round((verified + awaiting) / max(1, total) * 100.0, 1),
+    }
 
 
 def figure_fingerprint(fig: go.Figure) -> str:

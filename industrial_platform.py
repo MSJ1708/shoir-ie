@@ -452,9 +452,43 @@ def create_decision_card(title: str, module: str, metrics: dict, assumptions: di
     return {"title":title,"module":module,"metrics":metrics,"assumptions":assumptions,"uncertainty":uncertainty,"status":status,"created_at":_now()}
 
 def save_decision_card(card: dict, username: str, db_path="enterprise_full_workspace.db") -> str:
+    """Persist one Decision Center card into the shared decision lifecycle ledger."""
     did="DEC-"+hashlib.sha256(json.dumps(card,sort_keys=True,default=str).encode()).hexdigest()[:12].upper()
     with sqlite3.connect(db_path) as c:
-        c.execute("INSERT OR REPLACE INTO platform_decisions VALUES(?,?,?,?,?,?,?,?,?)",(did,card["title"],card["module"],json.dumps(card["metrics"],default=str),json.dumps(card["assumptions"],default=str),json.dumps(card["uncertainty"],default=str),username,card["created_at"],card["status"])); c.commit()
+        c.execute("INSERT OR REPLACE INTO platform_decisions VALUES(?,?,?,?,?,?,?,?,?)",(did,card["title"],card["module"],json.dumps(card["metrics"],default=str),json.dumps(card["assumptions"],default=str),json.dumps(card["uncertainty"],default=str),username,card["created_at"],card["status"]))
+        c.commit()
+
+    # Mirror the same decision ID into the experience lifecycle so
+    # implementation, actual results, variance and lessons are not stored in
+    # a second unrelated decision namespace.
+    try:
+        from industrial_experience import ensure_experience_db
+        ensure_experience_db(db_path)
+        lifecycle_status = {"Under Review": "Review"}.get(str(card.get("status")), str(card.get("status", "Draft")))
+        with sqlite3.connect(db_path) as c:
+            c.execute(
+                """INSERT OR REPLACE INTO experience_decisions(
+                    decision_id,title,module,status,metrics_json,assumptions_json,
+                    uncertainty_json,owner,created_at,updated_at
+                ) VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    did,
+                    str(card.get("title", ""))[:180],
+                    str(card.get("module", "Engineering Decision Center"))[:120],
+                    lifecycle_status[:40],
+                    json.dumps(card.get("metrics", {}), default=str),
+                    json.dumps(card.get("assumptions", {}), default=str),
+                    json.dumps(card.get("uncertainty", {}), default=str),
+                    str(username),
+                    str(card.get("created_at") or _now()),
+                    _now(),
+                ),
+            )
+            c.commit()
+    except Exception:
+        # The platform decision remains persisted; lifecycle mirroring must
+        # never erase or invalidate the governed card itself.
+        pass
     return did
 
 def save_model_snapshot(

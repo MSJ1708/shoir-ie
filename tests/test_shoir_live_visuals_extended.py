@@ -81,7 +81,7 @@ def test_enterprise_operations_visualizations_render():
         "Health %": [90, 70],
         "Status": ["Observed", "Review"],
     })
-    assert _auto_chart_choice(health) == "Bar"
+    assert _auto_chart_choice(health) == "Health Heatmap"
 
     network = pd.DataFrame({
         "Source": ["Plant A", "Plant B"],
@@ -112,3 +112,20 @@ def test_enterprise_capability_visualization_registry_covers_requested_outputs()
     for module, keys in required.items():
         assert module in _MODULE_KEYS, module
         assert keys.intersection(set(_MODULE_KEYS[module])), module
+
+
+def test_universal_fallback_visualizations_render():
+    from shoir_live_visuals import build_visualization_suite
+
+    categorical = pd.DataFrame({"Station": ["A", "A", "B", "C", "C"]})
+    suite = build_visualization_suite(categorical, context="Categorical", max_figures=3)
+    assert suite
+    assert any("Category counts" in label for label, _ in suite)
+
+    sparse = pd.DataFrame({"KPI": [None, None, None], "Status": ["Missing"] * 3})
+    sparse_suite = build_visualization_suite(sparse, context="Sparse", max_figures=3)
+    assert sparse_suite
+
+    date_only = pd.DataFrame({"Timestamp": pd.date_range("2026-01-01", periods=4, freq="h")})
+    date_suite = build_visualization_suite(date_only, context="Time", max_figures=3)
+    assert date_suite
