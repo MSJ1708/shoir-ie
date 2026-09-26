@@ -448,13 +448,13 @@ def render_connectivity_extension() -> None:
     st.session_state["connectivity_health_df"] = health
 
     st.markdown("### 🔌 Connector Health & Deployment Readiness")
-    st.caption("One governed adapter surface for SAP · Oracle · WMS · MES · ERP · REST · SQL · MQTT · OPC-UA. Live tests are opt-in; secret values are never stored in connector records.")
+    st.caption("One governed adapter surface for SAP · Oracle · WMS · MES · ERP · REST · SQL · MQTT · OPC-UA. Live tests are opt-in; this build validates executable transports only and never stores secret values.")
 
     with st.expander("🧭 Live Connection Wizard", expanded=False):
         left, right = st.columns(2)
         with left:
             system_type = st.selectbox("System", ["SAP","ORACLE","WMS","MES","ERP","REST","SQL","MQTT","OPC-UA"], key="conn_wizard_system")
-            defaults = {"SAP":"ODATA","ORACLE":"SQL","WMS":"REST","MES":"REST","ERP":"REST","REST":"REST","SQL":"SQL","MQTT":"MQTT","OPC-UA":"OPC-UA"}
+            defaults = {"SAP":"ODATA","ORACLE":"REST","WMS":"REST","MES":"REST","ERP":"REST","REST":"REST","SQL":"SQL","MQTT":"MQTT","OPC-UA":"OPC-UA"}
             protocols = ["REST","ODATA","HTTPS","SQL","JDBC","MQTT","OPC-UA"]
             default_protocol = defaults.get(system_type, "REST")
             protocol = st.selectbox("Protocol / adapter", protocols, index=protocols.index(default_protocol), key="conn_wizard_protocol")
