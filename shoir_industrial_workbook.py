@@ -170,7 +170,13 @@ class SafeFormulaEngine:
     ):
         self.workbook = workbook
         self.formulas = formulas or {}
-        self.variables = {str(k).strip(): v for k, v in (variables or {}).items() if str(k).strip()}
+        self.variables = {
+            str(k).strip(): (
+                v.get("value") if isinstance(v, Mapping) and "value" in v else v
+            )
+            for k, v in (variables or {}).items()
+            if str(k).strip()
+        }
         self._stack: set[tuple[str, str]] = set()
         self._current_sheet = ""
 
@@ -666,14 +672,26 @@ def save_workbook(workbook:Mapping[str,pd.DataFrame],formulas:Mapping[str,Mappin
     return wid
 
 def load_workbook(workbook_id:str,path:str=DB_PATH)->tuple[dict[str,pd.DataFrame],dict[str,dict[str,str]],dict[str,Any]]:
+    """Load a workbook using the original three-value API; variables are a separate metadata channel."""
     ensure_workbook_db(path)
     with sqlite3.connect(path,timeout=30) as conn:
-        cols="payload_b64,formulas_json,semantic_map_json,COALESCE(variables_json,'{}')"
-        row=conn.execute(f"SELECT {cols} FROM industrial_workbooks WHERE workbook_id=? AND workspace=?",
-                         (workbook_id,_workspace())).fetchone()
+        row=conn.execute(
+            "SELECT payload_b64,formulas_json,semantic_map_json FROM industrial_workbooks WHERE workbook_id=? AND workspace=?",
+            (workbook_id,_workspace()),
+        ).fetchone()
     if not row: raise KeyError("Workbook not found in the current workspace.")
-    return (_deserialize_workbook(base64.b64decode(row[0])),json.loads(row[1] or "{}"),
-            json.loads(row[2] or "{}"),json.loads(row[3] or "{}"))
+    return (_deserialize_workbook(base64.b64decode(row[0])),json.loads(row[1] or "{}"),json.loads(row[2] or "{}"))
+
+def load_workbook_variables(workbook_id:str,path:str=DB_PATH)->dict[str,Any]:
+    """Load named engineering variables without breaking the original load_workbook contract."""
+    ensure_workbook_db(path)
+    with sqlite3.connect(path,timeout=30) as conn:
+        row=conn.execute(
+            "SELECT COALESCE(variables_json,'{}') FROM industrial_workbooks WHERE workbook_id=? AND workspace=?",
+            (workbook_id,_workspace()),
+        ).fetchone()
+    if not row: raise KeyError("Workbook not found in the current workspace.")
+    return json.loads(row[0] or "{}")
 
 
 def list_workbook_versions(workbook_id:str,path:str=DB_PATH)->pd.DataFrame:
@@ -905,7 +923,7 @@ def render_industrial_workbook(tier:str="Starter",username:str="unknown")->None:
             labels=saved["ID"].tolist(); choice=st.selectbox("Saved workbook",labels,format_func=lambda x:saved.loc[saved["ID"].eq(x),"Name"].iloc[0],key="industrial_workbook_saved_choice")
             if st.button("Open saved workbook",type="primary",key="industrial_workbook_open_saved"):
                 try:
-                    loaded_wb,loaded_formulas,semantic,loaded_variables=load_workbook(choice); st.session_state[WORKBOOK_STATE_KEY]=loaded_wb; st.session_state[FORMULA_STATE_KEY]=loaded_formulas
+                    loaded_wb,loaded_formulas,semantic=load_workbook(choice); loaded_variables=load_workbook_variables(choice); st.session_state[WORKBOOK_STATE_KEY]=loaded_wb; st.session_state[FORMULA_STATE_KEY]=loaded_formulas
                     st.session_state["industrial_workbook_semantic_map"]=semantic; st.session_state["industrial_workbook_variables"]=loaded_variables; st.session_state["industrial_workbook_id"]=choice; st.success("Workbook loaded."); st.rerun()
                 except Exception as exc: st.error(f"Workbook load failed safely: {exc}")
 
