@@ -136,6 +136,8 @@ def ensure_experience_db(path: str = "enterprise_full_workspace.db") -> None:
             "CREATE TABLE IF NOT EXISTS experience_decision_specs(decision_id TEXT PRIMARY KEY,baseline_json TEXT,alternatives_json TEXT,constraints_json TEXT,kpis_json TEXT,uncertainty_json TEXT,evidence_json TEXT,verification_json TEXT,owner TEXT,created_at TEXT,updated_at TEXT)",
             "CREATE TABLE IF NOT EXISTS experience_decision_approvals(id INTEGER PRIMARY KEY AUTOINCREMENT,decision_id TEXT,from_status TEXT,to_status TEXT,actor TEXT,comment TEXT,created_at TEXT)",
             "CREATE TABLE IF NOT EXISTS experience_comments(id INTEGER PRIMARY KEY AUTOINCREMENT,project_id TEXT,decision_id TEXT,actor TEXT,comment TEXT,created_at TEXT)",
+            "CREATE TABLE IF NOT EXISTS experience_decision_outcomes(outcome_id TEXT PRIMARY KEY,decision_id TEXT NOT NULL,owner TEXT NOT NULL,implementation_status TEXT NOT NULL,predicted_json TEXT NOT NULL,actual_json TEXT NOT NULL,variance_json TEXT NOT NULL,lesson TEXT,verified_at TEXT,created_at TEXT)",
+            "CREATE INDEX IF NOT EXISTS idx_exp_decision_outcomes_decision ON experience_decision_outcomes(decision_id,created_at DESC)",
             "CREATE TABLE IF NOT EXISTS experience_jobs(job_id TEXT PRIMARY KEY,module TEXT,job_type TEXT,status TEXT,progress REAL,message TEXT,payload_json TEXT,started_at TEXT,finished_at TEXT)",
             "CREATE TABLE IF NOT EXISTS experience_copilot_actions(id INTEGER PRIMARY KEY AUTOINCREMENT,run_id TEXT,module TEXT,action TEXT,status TEXT,requires_approval INTEGER,evidence_json TEXT,actor TEXT,created_at TEXT)",
             "CREATE TABLE IF NOT EXISTS experience_observability(id INTEGER PRIMARY KEY AUTOINCREMENT,run_id TEXT,module TEXT,event_type TEXT,duration_ms REAL,details_json TEXT,created_at TEXT)",
@@ -367,6 +369,107 @@ def transition_decision(decision_id: str, actor: str, to_status: str, comment: s
         )
         conn.commit()
 
+
+def calculate_decision_variance(predicted: Mapping[str, Any], actual: Mapping[str, Any]) -> pd.DataFrame:
+    """Compare predicted and observed KPI values using the shared decision schema."""
+    predicted = dict(predicted or {})
+    actual = dict(actual or {})
+    rows = []
+    for name in sorted(set(predicted) & set(actual)):
+        try:
+            p = float(predicted[name])
+            a = float(actual[name])
+        except (TypeError, ValueError):
+            continue
+        if not (math.isfinite(p) and math.isfinite(a)):
+            continue
+        delta = a - p
+        delta_pct = (delta / p * 100.0) if p != 0 else None
+        rows.append({
+            "KPI": str(name),
+            "Predicted": p,
+            "Actual": a,
+            "Delta": delta,
+            "Delta %": delta_pct,
+            "Absolute Error": abs(delta),
+        })
+    return pd.DataFrame(rows, columns=["KPI","Predicted","Actual","Delta","Delta %","Absolute Error"])
+
+
+def record_decision_outcome(
+    decision_id: str,
+    owner: str,
+    implementation_status: str,
+    predicted: Mapping[str, Any],
+    actual: Mapping[str, Any],
+    lesson: str = "",
+    verified_at: Optional[str] = None,
+    db_path: str = "enterprise_full_workspace.db",
+) -> str:
+    """Persist implementation outcome evidence and link it to Decision Memory."""
+    ensure_experience_db(db_path)
+    decision_id = str(decision_id).strip()
+    owner = str(owner).strip()
+    status = str(implementation_status).strip()
+    if status not in {"Planned", "Implemented", "Verified"}:
+        raise ValueError("Invalid implementation status.")
+    with sqlite3.connect(db_path, timeout=30) as conn:
+        row = conn.execute("SELECT owner FROM experience_decisions WHERE decision_id=?", (decision_id,)).fetchone()
+        if not row:
+            raise ValueError("Decision not found.")
+        if str(row[0]) != owner:
+            raise PermissionError("Decision belongs to another workspace owner.")
+    variance = calculate_decision_variance(predicted, actual)
+    outcome_id = "OUT-" + uuid.uuid4().hex[:12].upper()
+    now = _now()
+    actual_payload = dict(actual or {})
+    predicted_payload = dict(predicted or {})
+    variance_payload = variance.to_dict("records")
+    with sqlite3.connect(db_path, timeout=30) as conn:
+        conn.execute(
+            "INSERT INTO experience_decision_outcomes VALUES(?,?,?,?,?,?,?,?,?,?)",
+            (
+                outcome_id, decision_id, owner, status,
+                json.dumps(predicted_payload, default=str, sort_keys=True),
+                json.dumps(actual_payload, default=str, sort_keys=True),
+                json.dumps(variance_payload, default=str),
+                str(lesson or "")[:2000], str(verified_at or "") or None, now,
+            ),
+        )
+        if lesson or actual_payload:
+            conn.execute(
+                "INSERT INTO experience_memory(memory_id,problem,data_ref,model_ref,scenario_ref,decision_ref,actual_result,lesson,owner,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    "MEM-" + uuid.uuid4().hex[:12].upper(),
+                    decision_id, "", "", "", decision_id,
+                    json.dumps(actual_payload, default=str, sort_keys=True),
+                    str(lesson or "")[:2000], owner, now, now,
+                ),
+            )
+        conn.commit()
+    return outcome_id
+
+
+def decision_outcomes_frame(
+    decision_id: Optional[str] = None,
+    owner: Optional[str] = None,
+    db_path: str = "enterprise_full_workspace.db",
+) -> pd.DataFrame:
+    ensure_experience_db(db_path)
+    query = "SELECT outcome_id,decision_id,owner,implementation_status,predicted_json,actual_json,variance_json,lesson,verified_at,created_at FROM experience_decision_outcomes"
+    clauses = []
+    params = []
+    if decision_id is not None:
+        clauses.append("decision_id=?")
+        params.append(str(decision_id))
+    if owner is not None:
+        clauses.append("owner=?")
+        params.append(str(owner))
+    if clauses:
+        query += " WHERE " + " AND ".join(clauses)
+    query += " ORDER BY created_at DESC"
+    with sqlite3.connect(db_path, timeout=30) as conn:
+        return pd.read_sql_query(query, conn, params=params)
 
 def add_comment(project_id: Optional[str], decision_id: Optional[str], actor: str, comment: str) -> None:
     text = str(comment or "").strip()
