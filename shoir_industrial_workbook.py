@@ -881,8 +881,8 @@ def load_workbook_version(
             row=conn.execute(
                 """SELECT payload_b64,formulas_json,semantic_map_json,COALESCE(variables_json,'{}')
                    FROM industrial_workbook_versions
-                   WHERE version_id=? AND workspace=?""",
-                (workbook_id_or_version_id,_workspace())
+                   WHERE version_id=?""",
+                (int(workbook_id_or_version_id),)
             ).fetchone()
             if not row:
                 raise KeyError("Workbook version not found in the current workspace.")
@@ -941,6 +941,15 @@ def load_workbook(workbook_id:str,path:str=DB_PATH)->tuple[dict[str,pd.DataFrame
             (workbook_id,_workspace())).fetchone()
     if not row: raise KeyError("Workbook not found in the current workspace.")
     return _deserialize_workbook(base64.b64decode(row[0])),json.loads(row[1] or "{}"),json.loads(row[2] or "{}")
+
+def list_saved_workbooks(path:str=DB_PATH)->pd.DataFrame:
+    ensure_workbook_db(path)
+    with sqlite3.connect(path,timeout=30) as conn:
+        return pd.read_sql(
+            "SELECT workbook_id AS ID,name AS Name,owner AS Owner,updated_at AS Updated,sha256 AS SHA256 "
+            "FROM industrial_workbooks WHERE workspace=? ORDER BY updated_at DESC",
+            conn,params=(_workspace(),)
+        )
 
 def load_workbook_variables(workbook_id:str,path:str=DB_PATH)->dict[str,Any]:
     ensure_workbook_db(path)
