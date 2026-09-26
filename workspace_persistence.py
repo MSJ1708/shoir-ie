@@ -189,6 +189,46 @@ def _snapshot(session_state: MutableMapping[str, Any]) -> dict[str, Any]:
             continue
     return result
 
+def _persist_domain_manifest(username: str, session_state: MutableMapping[str, Any], db_path: str) -> None:
+    """Persist a compact durable manifest of the user's engineering state."""
+    try:
+        from shoir_enterprise_layer import record_artifact, canonical_state_manifest
+        workspace = str(
+            session_state.get("shoir_workspace_name")
+            or session_state.get("workspace")
+            or session_state.get("active_workspace_name")
+            or "default"
+        )
+        ids = {}
+        for key in (
+            "active_project_id", "project_id", "sx_project_id", "sx_research_study_id",
+            "sx_research_id", "sx_research_protocol_hash", "decision_active_id",
+            "copilot_orchestrator_run_id", "sx_copilot_run_id",
+        ):
+            value = session_state.get(key)
+            if value:
+                ids[key] = str(value)
+        dataframe_keys = [
+            str(k) for k, v in session_state.items()
+            if isinstance(v, pd.DataFrame) and not str(k).startswith(("password","token","secret"))
+        ]
+        artifact_catalog = session_state.get("shoir_artifact_catalog", [])
+        manifest = {
+            "workspace": workspace,
+            "owner": username,
+            "identifiers": ids,
+            "dataframe_keys": dataframe_keys[:200],
+            "artifact_count": int(len(artifact_catalog)) if isinstance(artifact_catalog, list) else 0,
+            "canonical": canonical_state_manifest(username, workspace),
+            "persisted_at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
+            "backend": "managed" if (db_path == "enterprise_full_workspace.db" and durable_backend_configured()) else "local",
+        }
+        record_artifact(username, "workspace_manifest", f"{username}:{workspace}", manifest, workspace)
+    except Exception:
+        # Manifest persistence is supplementary; native workspace save must remain independent.
+        pass
+
+
 def save_user_workspace(
     username: str,
     session_state: MutableMapping[str, Any],
@@ -205,7 +245,10 @@ def save_user_workspace(
         if remote_mode:
             # In durable mode, never silently persist to shared/ephemeral SQLite.
             # A failed cloud write must stay a failed cloud write.
-            return save_remote_workspace(username, payload)
+            ok = bool(save_remote_workspace(username, payload))
+            if ok:
+                _persist_domain_manifest(username, session_state, db_path)
+            return ok
 
         # Local development fallback only. A deployed Streamlit instance should
         # configure a managed database because local files are ephemeral.
@@ -223,6 +266,7 @@ def save_user_workspace(
                 (username.strip().lower(), payload, now),
             )
             conn.commit()
+        _persist_domain_manifest(username, session_state, db_path)
         return True
     except Exception:
         # Workspace persistence should never crash the engineering application.
