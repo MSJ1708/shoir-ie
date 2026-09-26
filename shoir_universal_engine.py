@@ -428,7 +428,12 @@ def _render_ui(module: str, tier: str, username: str) -> None:
     import streamlit as st
 
     tables = module_tables(module)
-    with st.expander("🧠 Universal Industrial Engine", expanded=False):
+    force_open = False
+    try:
+        force_open = bool(st.session_state.pop("force_universal_engine", False))
+    except Exception:
+        force_open = False
+    with st.expander("🧠 Universal Industrial Engine", expanded=force_open):
         st.caption("One shared engine around every module: Quick Analyze · Pivot · Explain · Dependencies · Agents · Automation · Trust.")
         if tables:
             st.success(f"Universal data contract ready · {len(tables)} data source(s) discovered.")
