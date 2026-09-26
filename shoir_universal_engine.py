@@ -40,6 +40,10 @@ AGENT_ROUTES = {
     "Carbon Agent": ("carbon", "co2", "emission", "sustainability"),
     "Finance Agent": ("cost", "capex", "opex", "npv", "investment", "finance"),
     "Research Agent": ("research", "hypothesis", "experiment", "statistical", "paper"),
+    "Operations Agent": ("throughput", "bottleneck", "line balance", "lean", "flow"),
+    "Risk & Safety Agent": ("risk", "safety", "hazop", "hazid", "fmea", "bowtie"),
+    "Resource Agent": ("resource", "labor", "workforce", "capacity", "space", "energy"),
+    "Facilities Agent": ("layout", "facility", "warehouse layout", "travel distance"),
 }
 
 def _now() -> str:
@@ -121,8 +125,8 @@ def guaranteed_figure(df: pd.DataFrame, title: str = "Universal Engineering View
     if frame.empty or len(frame.columns) == 0:
         return None
     try:
-        from shoir_live_visuals import build_visualization_suite
-        suite = build_visualization_suite(frame, context=title, max_figures=1)
+        from shoir_live_visuals import ensure_visualization_suite
+        suite = ensure_visualization_suite(frame, context=title, max_figures=1)
         if suite:
             return suite[0][1]
     except Exception:
@@ -485,7 +489,7 @@ def _render_ui(module: str, tier: str, username: str) -> None:
             st.success(f"Universal data contract ready · {len(tables)} data source(s) discovered.")
         else:
             st.info("No module result table is currently populated. Import data or run the native module; the visualization contract remains available.")
-        tabs = st.tabs(["⚡ Quick Analyze", "📊 Industrial Pivot", "🔎 Explain & Trace", "🤖 Agents", "⚙ Automation", "🛡 Trust"])
+        tabs = st.tabs(["⚡ Quick Analyze", "📊 Industrial Pivot", "🔎 Explain & Trace", "🤖 Agents", "⚙ Automation", "🛡 Trust", "🏭 IE Operating System"])
         
         with tabs[0]:
             if not tables:
@@ -607,6 +611,15 @@ def _render_ui(module: str, tier: str, username: str) -> None:
             st.dataframe(trust_snapshot(username, tier), use_container_width=True, hide_index=True)
             st.caption("Trust Center complements the existing enterprise security, audit, connector and persistence layers; it is intentionally read-only.")
 
+        with tabs[6]:
+            try:
+                from shoir_engineering_os import render_operating_system_layer
+                render_operating_system_layer(module, username)
+            except Exception as exc:
+                st.warning("Industrial Engineering OS layer is temporarily unavailable; native and universal analysis remain available.")
+                with st.expander("IE Operating System diagnostic", expanded=False):
+                    st.code(f"{type(exc).__name__}: {exc}")
+
 def render_universal_engine_surface(module: str, tier: str = "Starter Tier", username: str = "unknown") -> None:
     _render_ui(str(module), str(tier), str(username))
 
@@ -647,8 +660,11 @@ def universal_health_report(module: str) -> dict[str, Any]:
         return {"module": module, "status": "Ready · awaiting data", "tables": 0, "graphs": 0}
     graph_count = 0
     for _, _, frame in tables:
-        if guaranteed_figure(frame, module) is not None:
-            graph_count += 1
+        try:
+            if guaranteed_figure(frame, module) is not None:
+                graph_count += 1
+        except Exception:
+            continue
     return {
         "module": module,
         "status": "Verified" if graph_count == len(tables) else "Gap",
