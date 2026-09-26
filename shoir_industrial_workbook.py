@@ -771,37 +771,75 @@ def _deserialize_workbook(payload:bytes)->dict[str,pd.DataFrame]:
 
 def save_workbook(workbook:Mapping[str,pd.DataFrame],formulas:Mapping[str,Mapping[str,str]]|None=None,
                   semantic_map:Mapping[str,Any]|None=None,name:str="Industrial Workbook",workbook_id:str|None=None,
-                  path:str=DB_PATH)->str:
-    ensure_workbook_db(path); formulas=formulas or {}; payload=_serialize_workbook(workbook)
-    digest=hashlib.sha256(payload).hexdigest(); wid=str(workbook_id or ("WB-"+uuid.uuid4().hex[:12].upper())); now=_now()
+                  path:str=DB_PATH,variables:Mapping[str,Any]|None=None,version_label:str="Autosave")->str:
+    ensure_workbook_db(path)
+    formulas=formulas or {}
+    variables=variables or {}
+    payload=_serialize_workbook(workbook)
+    digest=hashlib.sha256(payload).hexdigest()
+    wid=str(workbook_id or ("WB-"+uuid.uuid4().hex[:12].upper()))
+    now=_now()
+    workspace,owner=_workspace(),_actor()
+    formula_json=json.dumps({str(k):dict(v) for k,v in formulas.items()},default=str,sort_keys=True)
+    semantic_json=json.dumps(dict(semantic_map or {}),default=str,sort_keys=True)
+    variables_json=json.dumps(dict(variables),default=str,sort_keys=True)
     with sqlite3.connect(path,timeout=30) as conn:
-        workspace=_workspace(); owner=_actor()
-        conn.execute("""INSERT INTO industrial_workbooks(workbook_id,workspace,owner,name,payload_b64,formulas_json,
-                        semantic_map_json,sha256,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)
-                        ON CONFLICT(workbook_id) DO UPDATE SET workspace=excluded.workspace,owner=excluded.owner,
-                        name=excluded.name,payload_b64=excluded.payload_b64,formulas_json=excluded.formulas_json,
-                        semantic_map_json=excluded.semantic_map_json,sha256=excluded.sha256,updated_at=excluded.updated_at""",
-                     (wid,workspace,owner,str(name)[:160],base64.b64encode(payload).decode("ascii"),
-                      json.dumps({str(k):dict(v) for k,v in formulas.items()},default=str),
-                      json.dumps(dict(semantic_map or {}),default=str),digest,now,now))
-        conn.execute("INSERT INTO industrial_workbook_audit(workbook_id,workspace,owner,action,details,created_at) VALUES(?,?,?,?,?,?)",
-                     (wid,workspace,owner,"save",f"{name} | {len(workbook)} sheet(s) | {len(payload):,} bytes | sha256={digest}",now))
-        latest=conn.execute(
-            "SELECT sha256,version_no FROM industrial_workbook_versions WHERE workbook_id=? AND workspace=? ORDER BY version_no DESC LIMIT 1",
-            (wid,workspace)
+        existing=conn.execute(
+            "SELECT sha256,formulas_json,semantic_map_json,COALESCE(variables_json,'{}') "
+            "FROM industrial_workbooks WHERE workbook_id=? AND workspace=?",
+            (wid,workspace),
         ).fetchone()
-        if not latest or str(latest[0]) != digest:
-            next_version=int(latest[1])+1 if latest else 1
+        conn.execute(
+            """INSERT INTO industrial_workbooks(
+                workbook_id,workspace,owner,name,payload_b64,formulas_json,semantic_map_json,
+                variables_json,sha256,created_at,updated_at
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(workbook_id) DO UPDATE SET
+                workspace=excluded.workspace,owner=excluded.owner,name=excluded.name,
+                payload_b64=excluded.payload_b64,formulas_json=excluded.formulas_json,
+                semantic_map_json=excluded.semantic_map_json,variables_json=excluded.variables_json,
+                sha256=excluded.sha256,updated_at=excluded.updated_at""",
+            (
+                wid,workspace,owner,str(name)[:160],base64.b64encode(payload).decode("ascii"),
+                formula_json,semantic_json,variables_json,digest,now,now,
+            ),
+        )
+        conn.execute(
+            "INSERT INTO industrial_workbook_audit(workbook_id,workspace,owner,action,details,created_at) VALUES(?,?,?,?,?,?)",
+            (wid,workspace,owner,"save",
+             f"{name} | {len(workbook)} sheet(s) | {len(payload):,} bytes | sha256={digest}",now),
+        )
+        latest=conn.execute(
+            """SELECT sha256,formulas_json,semantic_map_json,COALESCE(variables_json,'{}'),version_no
+               FROM industrial_workbook_versions
+               WHERE workbook_id=? AND workspace=?
+               ORDER BY version_no DESC LIMIT 1""",
+            (wid,workspace),
+        ).fetchone()
+        unchanged=bool(
+            latest
+            and str(latest[0])==digest
+            and str(latest[1] or "{}")==formula_json
+            and str(latest[2] or "{}")==semantic_json
+            and str(latest[3] or "{}")==variables_json
+        )
+        if not unchanged:
+            next_version=int(latest[4])+1 if latest else 1
             conn.execute(
                 """INSERT INTO industrial_workbook_versions(
-                    workbook_id,workspace,owner,version_no,payload_b64,formulas_json,semantic_map_json,sha256,created_at
-                ) VALUES(?,?,?,?,?,?,?,?,?)""",
-                (wid,workspace,owner,next_version,base64.b64encode(payload).decode("ascii"),
-                 json.dumps({str(k):dict(v) for k,v in formulas.items()},default=str),
-                 json.dumps(dict(semantic_map or {}),default=str),digest,now)
+                    workbook_id,workspace,owner,version_no,label,variables_json,
+                    payload_b64,formulas_json,semantic_map_json,sha256,created_at
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    wid,workspace,owner,next_version,str(version_label or "Autosave")[:120],variables_json,
+                    base64.b64encode(payload).decode("ascii"),formula_json,semantic_json,digest,now,
+                ),
             )
-            conn.execute("INSERT INTO industrial_workbook_audit(workbook_id,workspace,owner,action,details,created_at) VALUES(?,?,?,?,?,?)",
-                         (wid,workspace,owner,"version",f"Version {next_version} recorded | sha256={digest}",now))
+            conn.execute(
+                "INSERT INTO industrial_workbook_audit(workbook_id,workspace,owner,action,details,created_at) VALUES(?,?,?,?,?,?)",
+                (wid,workspace,owner,"version",
+                 f"Version {next_version} recorded · label={str(version_label or 'Autosave')[:120]} | sha256={digest}",now),
+            )
         conn.commit()
     return wid
 
@@ -810,11 +848,19 @@ def list_workbook_versions(workbook_id:str|None=None,path:str=DB_PATH)->pd.DataF
     with sqlite3.connect(path,timeout=30) as conn:
         if workbook_id:
             return pd.read_sql(
-                "SELECT version_no AS Version,created_at AS Created,sha256 AS SHA256,owner AS Owner FROM industrial_workbook_versions WHERE workbook_id=? AND workspace=? ORDER BY version_no DESC",
+                """SELECT version_id AS ID,version_no AS Version,COALESCE(label,'Autosave') AS Label,
+                          created_at AS Created,sha256 AS SHA256,owner AS Owner
+                   FROM industrial_workbook_versions
+                   WHERE workbook_id=? AND workspace=?
+                   ORDER BY version_no DESC""",
                 conn,params=(workbook_id,_workspace())
             )
         return pd.read_sql(
-            "SELECT workbook_id AS ID,version_no AS Version,created_at AS Created,sha256 AS SHA256,owner AS Owner FROM industrial_workbook_versions WHERE workspace=? ORDER BY created_at DESC,version_no DESC",
+            """SELECT version_id AS ID,workbook_id AS Workbook,version_no AS Version,
+                      COALESCE(label,'Autosave') AS Label,created_at AS Created,sha256 AS SHA256,owner AS Owner
+               FROM industrial_workbook_versions
+               WHERE workspace=?
+               ORDER BY created_at DESC,version_no DESC""",
             conn,params=(_workspace(),)
         )
 
@@ -822,11 +868,24 @@ def load_workbook_version(workbook_id:str,version_no:int,path:str=DB_PATH)->tupl
     ensure_workbook_db(path)
     with sqlite3.connect(path,timeout=30) as conn:
         row=conn.execute(
-            "SELECT payload_b64,formulas_json,semantic_map_json FROM industrial_workbook_versions WHERE workbook_id=? AND workspace=? AND version_no=?",
+            """SELECT payload_b64,formulas_json,semantic_map_json
+               FROM industrial_workbook_versions
+               WHERE workbook_id=? AND workspace=? AND version_no=?""",
             (workbook_id,_workspace(),int(version_no))
         ).fetchone()
     if not row: raise KeyError("Workbook version not found in the current workspace.")
     return _deserialize_workbook(base64.b64decode(row[0])),json.loads(row[1] or "{}"),json.loads(row[2] or "{}")
+
+def load_workbook_version_variables(workbook_id:str,version_no:int,path:str=DB_PATH)->dict[str,Any]:
+    ensure_workbook_db(path)
+    with sqlite3.connect(path,timeout=30) as conn:
+        row=conn.execute(
+            """SELECT COALESCE(variables_json,'{}') FROM industrial_workbook_versions
+               WHERE workbook_id=? AND workspace=? AND version_no=?""",
+            (workbook_id,_workspace(),int(version_no))
+        ).fetchone()
+    if not row: raise KeyError("Workbook version not found in the current workspace.")
+    return json.loads(row[0] or "{}")
 
 def save_workbook_comment(workbook_id:str,sheet_name:str,cell_ref:str,comment:str,path:str=DB_PATH)->int:
     if not str(comment).strip(): raise ValueError("Comment text is required.")
@@ -843,23 +902,28 @@ def list_workbook_comments(workbook_id:str,path:str=DB_PATH)->pd.DataFrame:
     ensure_workbook_db(path)
     with sqlite3.connect(path,timeout=30) as conn:
         return pd.read_sql(
-            "SELECT comment_id AS ID,sheet_name AS Sheet,cell_ref AS Cell,comment AS Comment,owner AS Author,created_at AS Created FROM industrial_workbook_comments WHERE workbook_id=? AND workspace=? ORDER BY comment_id DESC",
+            "SELECT comment_id AS ID,sheet_name AS Sheet,cell_ref AS Cell,comment AS Comment,owner AS Author,created_at AS Created "
+            "FROM industrial_workbook_comments WHERE workbook_id=? AND workspace=? ORDER BY comment_id DESC",
             conn,params=(workbook_id,_workspace())
         )
 
 def load_workbook(workbook_id:str,path:str=DB_PATH)->tuple[dict[str,pd.DataFrame],dict[str,dict[str,str]],dict[str,Any]]:
     ensure_workbook_db(path)
     with sqlite3.connect(path,timeout=30) as conn:
-        row=conn.execute("SELECT payload_b64,formulas_json,semantic_map_json FROM industrial_workbooks WHERE workbook_id=? AND workspace=?",
-                         (workbook_id,_workspace())).fetchone()
+        row=conn.execute(
+            "SELECT payload_b64,formulas_json,semantic_map_json FROM industrial_workbooks WHERE workbook_id=? AND workspace=?",
+            (workbook_id,_workspace())).fetchone()
     if not row: raise KeyError("Workbook not found in the current workspace.")
     return _deserialize_workbook(base64.b64decode(row[0])),json.loads(row[1] or "{}"),json.loads(row[2] or "{}")
 
-def list_saved_workbooks(path:str=DB_PATH)->pd.DataFrame:
+def load_workbook_variables(workbook_id:str,path:str=DB_PATH)->dict[str,Any]:
     ensure_workbook_db(path)
     with sqlite3.connect(path,timeout=30) as conn:
-        return pd.read_sql("SELECT workbook_id AS ID,name AS Name,owner AS Owner,updated_at AS Updated,sha256 AS SHA256 FROM industrial_workbooks WHERE workspace=? ORDER BY updated_at DESC",
-                           conn,params=(_workspace(),))
+        row=conn.execute(
+            "SELECT COALESCE(variables_json,'{}') FROM industrial_workbooks WHERE workbook_id=? AND workspace=?",
+            (workbook_id,_workspace())).fetchone()
+    if not row: raise KeyError("Workbook not found in the current workspace.")
+    return json.loads(row[0] or "{}")
 
 def save_template(name:str,category:str,description:str,workbook:Mapping[str,pd.DataFrame],path:str=DB_PATH)->str:
     ensure_workbook_db(path); payload=_serialize_workbook(workbook); tid="TPL-"+uuid.uuid4().hex[:10].upper()
