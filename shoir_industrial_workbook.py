@@ -642,7 +642,13 @@ def save_workbook(workbook:Mapping[str,pd.DataFrame],formulas:Mapping[str,Mappin
     digest=hashlib.sha256(payload).hexdigest(); wid=str(workbook_id or ("WB-"+uuid.uuid4().hex[:12].upper())); now=_now()
     workspace,owner=_workspace(),_actor()
     with sqlite3.connect(path,timeout=30) as conn:
-        existing=conn.execute("SELECT sha256 FROM industrial_workbooks WHERE workbook_id=? AND workspace=?",(wid,workspace)).fetchone()
+        existing=conn.execute(
+            "SELECT sha256,formulas_json,semantic_map_json,COALESCE(variables_json,'{}') FROM industrial_workbooks WHERE workbook_id=? AND workspace=?",
+            (wid,workspace),
+        ).fetchone()
+        formula_json=json.dumps({str(k):dict(v) for k,v in formulas.items()},default=str,sort_keys=True)
+        semantic_json=json.dumps(dict(semantic_map or {}),default=str,sort_keys=True)
+        variables_json=json.dumps(dict(variables),default=str,sort_keys=True)
         conn.execute("""INSERT INTO industrial_workbooks(workbook_id,workspace,owner,name,payload_b64,formulas_json,
                         semantic_map_json,variables_json,sha256,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)
                         ON CONFLICT(workbook_id) DO UPDATE SET workspace=excluded.workspace,owner=excluded.owner,
@@ -650,12 +656,17 @@ def save_workbook(workbook:Mapping[str,pd.DataFrame],formulas:Mapping[str,Mappin
                         semantic_map_json=excluded.semantic_map_json,variables_json=excluded.variables_json,
                         sha256=excluded.sha256,updated_at=excluded.updated_at""",
                      (wid,workspace,owner,str(name)[:160],base64.b64encode(payload).decode("ascii"),
-                      json.dumps({str(k):dict(v) for k,v in formulas.items()},default=str),
-                      json.dumps(dict(semantic_map or {}),default=str),
-                      json.dumps(dict(variables),default=str),digest,now,now))
+                      formula_json,semantic_json,variables_json,digest,now,now))
         # Version history is content-addressed: repeated Streamlit reruns do not
         # create duplicate versions when the workbook payload and formulas are unchanged.
-        if not existing or str(existing[0]) != digest:
+        unchanged = bool(
+            existing
+            and str(existing[0]) == digest
+            and str(existing[1] or "{}") == formula_json
+            and str(existing[2] or "{}") == semantic_json
+            and str(existing[3] or "{}") == variables_json
+        )
+        if not unchanged:
             next_no=int(conn.execute("SELECT COALESCE(MAX(version_number),0)+1 FROM industrial_workbook_versions WHERE workbook_id=? AND workspace=?",(wid,workspace)).fetchone()[0])
             vid="VER-"+uuid.uuid4().hex[:12].upper()
             conn.execute("""INSERT INTO industrial_workbook_versions(
