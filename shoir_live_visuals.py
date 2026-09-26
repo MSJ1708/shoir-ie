@@ -257,6 +257,7 @@ def _auto_chart_choice(df: pd.DataFrame) -> str:
     """Choose a useful chart from structural signals, not invented semantics."""
     cols = [str(c) for c in df.columns]
     nums = _numeric_columns(df)
+    categorical = _categorical_columns(df)
     dates = _coerce_datetime_columns(df)
     source = _find_col(df, ("source", "from", "origin", "customer", "facility", "warehouse"))
     target = _find_col(df, ("target", "to", "destination", "warehouse", "facility", "customer"))
@@ -303,7 +304,9 @@ def _auto_chart_choice(df: pd.DataFrame) -> str:
         return "Bar"
     if nums:
         return "Distribution"
-    return "Network Map" if len([c for c in df.columns if not pd.api.types.is_numeric_dtype(df[c])]) >= 2 else "Bar"
+    if categorical:
+        return "Categorical Distribution"
+    return "Bar"
 
 
 def _suggest_chart(df: pd.DataFrame, x: str | None, y: str | None) -> str:
@@ -332,6 +335,15 @@ def _make_figure(df: pd.DataFrame, chart: str, x: str | None, y: str | None, z: 
             return None
         corr = df[numeric].corr(numeric_only=True)
         return px.imshow(corr, text_auto=".2f", aspect="auto", title=title or "Correlation Heatmap")
+
+    if chart in {"Categorical Distribution", "Count by Category"}:
+        category = x if x in df.columns else (categorical[0] if categorical else None)
+        if category is None:
+            return None
+        work = df[[category]].copy()
+        work[category] = work[category].astype("string").fillna("(Missing)")
+        counts = work[category].value_counts(dropna=False).rename_axis(category).reset_index(name="Count").head(50)
+        return px.bar(counts, x=category, y="Count", text="Count", title=title or f"Count by {category}")
 
     if chart in {"Distribution", "Histogram"}:
         metric = y or (numeric[0] if numeric else None)
@@ -870,6 +882,8 @@ def build_visualization_suite(
 
     if not plan and categorical and numeric:
         add("Bar", f"{context} · KPI by category" if context else "KPI by category", categorical[0], numeric[0])
+    if not plan and categorical:
+        add("Categorical Distribution", f"{context} · Category counts" if context else "Category counts", categorical[0], None)
 
     suite: list[tuple[str, go.Figure]] = []
     for title, chart, x, y, z in plan:
@@ -878,6 +892,25 @@ def build_visualization_suite(
             suite.append((title, fig))
     return suite[:max(1, int(max_figures))]
 
+
+def visualization_contract_report(module: str, max_figures: int = 4) -> pd.DataFrame:
+    """Verify that every non-empty discoverable module table has a graph suite."""
+    rows: list[dict[str, Any]] = []
+    for label, key, frame in discover_visual_tables(str(module)):
+        if not isinstance(frame, pd.DataFrame) or frame.empty:
+            continue
+        suite = build_visualization_suite(frame, context=str(module), max_figures=max_figures)
+        rows.append({
+            "Module": str(module),
+            "Table": str(label),
+            "State Key": str(key),
+            "Rows": int(len(frame)),
+            "Columns": int(len(frame.columns)),
+            "Graphs": int(len(suite)),
+            "Status": "Verified" if suite else "No compatible chart",
+            "Primary Chart": str(suite[0][0]) if suite else "",
+        })
+    return pd.DataFrame(rows, columns=["Module","Table","State Key","Rows","Columns","Graphs","Status","Primary Chart"])
 
 def figure_fingerprint(fig: go.Figure) -> str:
     """Stable SHA-256 fingerprint of the exact Plotly figure JSON."""
