@@ -874,18 +874,92 @@ def render_industrial_workbook(tier:str="Starter",username:str="unknown")->None:
         st.info("The workspace library is persistent per configured Shoir-IE workspace. A shared/public marketplace requires the durable backend and explicit publication controls.")
 
     with tabs[4]:
-        st.markdown("### Industrial Semantic / Ontology Layer"); st.caption("This reuses the Digital Thread vocabulary; it does not create a second ontology.")
-        inferred=infer_semantic_roles(current); st.dataframe(inferred,use_container_width=True,hide_index=True)
+        st.markdown("### Industrial Semantic / Ontology Layer")
+        st.caption("This reuses the Digital Thread vocabulary; it does not create a second ontology.")
+        inferred=infer_semantic_roles(current)
+        st.dataframe(inferred,use_container_width=True,hide_index=True)
         overrides=st.session_state.get("industrial_workbook_semantic_map",{}).get(current_sheet,{})
         selected_roles={}
         for col in current.columns:
-            suggested=str(inferred.loc[inferred["Column"].eq(str(col)),"Suggested Role"].iloc[0]); default=overrides.get(str(col),suggested)
-            selected_roles[str(col)]=st.selectbox(str(col),CANONICAL_TYPES,index=CANONICAL_TYPES.index(default) if default in CANONICAL_TYPES else 0,key=f"iw_sem_{_slug(current_sheet)}_{_slug(str(col))}")
+            suggested=str(inferred.loc[inferred["Column"].eq(str(col)),"Suggested Role"].iloc[0])
+            default=overrides.get(str(col),suggested)
+            selected_roles[str(col)]=st.selectbox(
+                str(col),CANONICAL_TYPES,
+                index=CANONICAL_TYPES.index(default) if default in CANONICAL_TYPES else 0,
+                key=f"iw_sem_{_slug(current_sheet)}_{_slug(str(col))}",
+            )
         if st.button("💾 Apply semantic mapping",key="iw_semantic_apply"):
             st.session_state["industrial_workbook_semantic_map"][current_sheet]=selected_roles
-            st.session_state["industrial_workbook_semantic_map_df"]=pd.DataFrame([{"Sheet":current_sheet,"Column":col,"Role":role} for col,role in selected_roles.items()])
+            st.session_state["industrial_workbook_semantic_map_df"]=pd.DataFrame([
+                {"Sheet":current_sheet,"Column":col,"Role":role} for col,role in selected_roles.items()
+            ])
             try:
-                st.session_state["industrial_workbook_current_df"]=wb[current_sheet].copy(deep=True)
+                st.session_state["industrial_workbook_current_df"]=current.copy(deep=True)
+                from shoir_digital_thread import sync_workspace_to_thread
+                sync_workspace_to_thread(username,active_module="Industrial Workbook")
+                st.success("Semantic mapping saved and sent through the existing Digital Thread synchronization path.")
+            except Exception as exc:
+                st.warning(f"Semantic mapping saved locally; Digital Thread synchronization needs attention: {exc}")
+        semantic_df=st.session_state.get("industrial_workbook_semantic_map_df",pd.DataFrame())
+        if isinstance(semantic_df,pd.DataFrame) and not semantic_df.empty:
+            st.dataframe(semantic_df,use_container_width=True,hide_index=True)
+            rel=semantic_relationships(semantic_df.rename(columns={"Role":"Suggested Role"}),current_sheet)
+            if not rel.empty:
+                st.markdown("#### Traceability relationships")
+                st.dataframe(rel,use_container_width=True,hide_index=True)
+
+    with tabs[5]:
+        st.markdown("### Copilot direct editing")
+        st.caption("Edits are deterministic and transparent. The governed Copilot remains responsible for planning and approval-gated actions.")
+        prompt=st.text_input("Tell the workbook what to change",placeholder="Add column Total = Quantity * UnitCost",key="iw_copilot_edit_prompt")
+        if st.button("✨ Apply safe edit",type="primary",key="iw_copilot_apply"):
+            try:
+                prior={k:v.copy(deep=True) for k,v in wb.items()}
+                updated,message=_copilot_edit(prompt,wb,current_sheet)
+                st.session_state["industrial_workbook_undo"].append(prior)
+                st.session_state["industrial_workbook_undo"]=st.session_state["industrial_workbook_undo"][-20:]
+                st.session_state["industrial_workbook_redo"].clear()
+                st.session_state[WORKBOOK_STATE_KEY]=updated
+                st.success(message)
+                st.rerun()
+            except Exception as exc:
+                st.error(f"Copilot edit was not applied: {exc}")
+        st.caption("Examples: rename column Unit Cost to UnitCost · sort by Total Cost descending · fill missing Quantity with 0 · filter Quantity > 10 · add column ExtendedCost = Quantity * Unit Cost.")
+        st.info("Multi-step analytical requests continue through the existing governed Advanced Engineering Copilot and its approval gates.")
+
+    with tabs[6]:
+        st.markdown("### Learn & Extend")
+        st.dataframe(pd.DataFrame([
+            {"Topic":"Workbook basics","What to do":"Import, edit, save, and export an engineering workbook."},
+            {"Topic":"Formula engine","What to do":"Use =B2*C2, =SUM(D2:D10), =IF(B2>0,1,0), and cross-sheet references."},
+            {"Topic":"Units","What to do":"Convert common engineering units with explicit from/to units before mixing measurements."},
+            {"Topic":"Query Studio","What to do":"Build a repeatable data-preparation and aggregation pipeline."},
+            {"Topic":"Semantic mapping","What to do":"Map columns into the same canonical vocabulary used by the Digital Thread."},
+            {"Topic":"Templates","What to do":"Start from a reusable engineering pattern and publish it to the workspace library."},
+            {"Topic":"Extensions","What to do":"Register a WorkbookExtension through the existing Shoir-IE plugin registry."},
+        ]),use_container_width=True,hide_index=True)
+        st.markdown("### Formula reference")
+        st.dataframe(pd.DataFrame([
+            {"Function":"SUM","Example":"=SUM(D2:D10)","Purpose":"Total"},
+            {"Function":"AVERAGE","Example":"=AVERAGE(B2:B10)","Purpose":"Mean"},
+            {"Function":"IF","Example":'=IF(B2>10,"High","Low")',"Purpose":"Conditional logic"},
+            {"Function":"ROUND","Example":"=ROUND(B2,2)","Purpose":"Rounding"},
+            {"Function":"ABS","Example":"=ABS(B2)","Purpose":"Absolute value"},
+            {"Function":"SQRT","Example":"=SQRT(B2)","Purpose":"Square root"},
+            {"Function":"POWER","Example":"=POWER(B2,2)","Purpose":"Exponentiation"},
+        ]),use_container_width=True,hide_index=True)
+        exts=list_workbook_extensions()
+        st.markdown("### Developer extension SDK")
+        st.dataframe(pd.DataFrame([
+            {"Name":x.name,"Version":x.version,"Category":x.category,"Description":x.description,"Executable":bool(x.transform)}
+            for x in exts
+        ]) if exts else pd.DataFrame([{"Name":"No extensions installed","Executable":False}]),
+        use_container_width=True,hide_index=True)
+        st.markdown("### Excel interoperability & product shell")
+        st.write("Import/export uses the existing Shoir-IE Excel pipeline. The responsive workbook UI is browser-first, and the companion Office add-in scaffold in excel_addin/ can connect to a configured Shoir-IE API host.")
+        st.caption("Large-data mode is explicit: interactive cell editing remains in-memory, while vectorized and chunked CSV primitives provide a path for larger datasets without changing the workbook contract.")
+
+    st.session_state["industrial_workbook_current_df"]=wb[current_sheet].copy(deep=True)
     st.session_state["industrial_workbook_query_result_df"]=st.session_state.get("industrial_workbook_query_result_df",pd.DataFrame())
     try:
         export_payload=_serialize_workbook(wb)
