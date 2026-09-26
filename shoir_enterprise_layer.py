@@ -143,6 +143,28 @@ LOCAL_DDL = [
         workspace_id TEXT PRIMARY KEY, require_mfa INTEGER NOT NULL DEFAULT 0,
         oidc_provider TEXT, oidc_enabled INTEGER NOT NULL DEFAULT 0,
         retention_days INTEGER NOT NULL DEFAULT 365, updated_by TEXT, updated_at TEXT NOT NULL)""",
+    """CREATE TABLE IF NOT EXISTS shoir_ent_canonical_entities (
+        entity_id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, entity_type TEXT NOT NULL,
+        name TEXT NOT NULL, source TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'Observed',
+        state_json TEXT NOT NULL, content_hash TEXT NOT NULL, created_by TEXT,
+        created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+        UNIQUE(workspace_id,entity_type,name,source))""",
+    """CREATE INDEX IF NOT EXISTS idx_shoir_ent_canonical_entities_ws
+        ON shoir_ent_canonical_entities(workspace_id,entity_type,updated_at DESC)""",
+    """CREATE TABLE IF NOT EXISTS shoir_ent_canonical_relationships (
+        relationship_id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL,
+        source_entity_id TEXT NOT NULL, target_entity_id TEXT NOT NULL,
+        relation TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'Linked',
+        metadata_json TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+        UNIQUE(workspace_id,source_entity_id,target_entity_id,relation))""",
+    """CREATE INDEX IF NOT EXISTS idx_shoir_ent_canonical_relationships_ws
+        ON shoir_ent_canonical_relationships(workspace_id,updated_at DESC)""",
+    """CREATE TABLE IF NOT EXISTS shoir_ent_canonical_events (
+        event_id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, event_type TEXT NOT NULL,
+        entity_id TEXT, relationship_id TEXT, payload_json TEXT NOT NULL, actor TEXT,
+        created_at TEXT NOT NULL)""",
+    """CREATE INDEX IF NOT EXISTS idx_shoir_ent_canonical_events_ws
+        ON shoir_ent_canonical_events(workspace_id,created_at DESC)""",
 ]
 
 
@@ -221,6 +243,28 @@ REMOTE_DDL = [
         workspace_id text PRIMARY KEY, require_mfa boolean NOT NULL DEFAULT false,
         oidc_provider text, oidc_enabled boolean NOT NULL DEFAULT false,
         retention_days integer NOT NULL DEFAULT 365, updated_by text, updated_at timestamptz NOT NULL)""",
+    """CREATE TABLE IF NOT EXISTS shoir_internal.canonical_entities (
+        entity_id text PRIMARY KEY, workspace_id text NOT NULL, entity_type text NOT NULL,
+        name text NOT NULL, source text NOT NULL, status text NOT NULL DEFAULT 'Observed',
+        state_json text NOT NULL, content_hash text NOT NULL, created_by text,
+        created_at timestamptz NOT NULL, updated_at timestamptz NOT NULL,
+        UNIQUE(workspace_id,entity_type,name,source))""",
+    """CREATE INDEX IF NOT EXISTS idx_shoir_internal_canonical_entities_ws
+        ON shoir_internal.canonical_entities(workspace_id,entity_type,updated_at DESC)""",
+    """CREATE TABLE IF NOT EXISTS shoir_internal.canonical_relationships (
+        relationship_id text PRIMARY KEY, workspace_id text NOT NULL,
+        source_entity_id text NOT NULL, target_entity_id text NOT NULL,
+        relation text NOT NULL, status text NOT NULL DEFAULT 'Linked',
+        metadata_json text NOT NULL, created_at timestamptz NOT NULL, updated_at timestamptz NOT NULL,
+        UNIQUE(workspace_id,source_entity_id,target_entity_id,relation))""",
+    """CREATE INDEX IF NOT EXISTS idx_shoir_internal_canonical_relationships_ws
+        ON shoir_internal.canonical_relationships(workspace_id,updated_at DESC)""",
+    """CREATE TABLE IF NOT EXISTS shoir_internal.canonical_events (
+        event_id text PRIMARY KEY, workspace_id text NOT NULL, event_type text NOT NULL,
+        entity_id text, relationship_id text, payload_json text NOT NULL, actor text,
+        created_at timestamptz NOT NULL)""",
+    """CREATE INDEX IF NOT EXISTS idx_shoir_internal_canonical_events_ws
+        ON shoir_internal.canonical_events(workspace_id,created_at DESC)""",
 ]
 
 
@@ -291,6 +335,303 @@ def record_artifact(
             )
             conn.commit()
     return aid
+
+
+_CANONICAL_PAYLOAD_LIMIT = 60000
+_CANONICAL_SENSITIVE_KEYS = {
+    "password", "token", "secret", "api_key", "apikey", "client_secret",
+    "access_token", "refresh_token", "authorization", "otp",
+}
+
+
+def _canonical_safe(value: Any, depth: int = 0) -> Any:
+    if depth > 5:
+        return "[truncated]"
+    if isinstance(value, Mapping):
+        out = {}
+        for key, item in value.items():
+            if str(key).strip().lower() in _CANONICAL_SENSITIVE_KEYS:
+                continue
+            out[str(key)[:120]] = _canonical_safe(item, depth + 1)
+            if len(out) >= 120:
+                break
+        return out
+    if isinstance(value, pd.DataFrame):
+        return {
+            "__type__": "dataframe",
+            "rows": int(len(value)),
+            "columns": [str(x) for x in value.columns[:80]],
+            "sha256": hashlib.sha256(value.to_csv(index=False).encode("utf-8")).hexdigest(),
+        }
+    if isinstance(value, pd.Series):
+        return {"__type__": "series", "length": int(len(value))}
+    if isinstance(value, (list, tuple)):
+        return [_canonical_safe(x, depth + 1) for x in list(value)[:200]]
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value[:4000] if isinstance(value, str) else value
+    if isinstance(value, np.generic):
+        return _canonical_safe(value.item(), depth + 1)
+    return str(value)[:4000]
+
+
+def _canonical_json(payload: Any) -> tuple[str, str]:
+    safe = _canonical_safe(payload)
+    raw = json.dumps(safe, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+    if len(raw.encode("utf-8")) > _CANONICAL_PAYLOAD_LIMIT:
+        digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()
+        safe = {"truncated": True, "sha256": digest, "preview": raw[:56000]}
+        raw = json.dumps(safe, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return raw, hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def canonical_entity_id(username: str, workspace: str, entity_type: str, name: str, source: str = "") -> str:
+    wid = workspace_key(username, workspace)
+    raw = f"{wid}|{str(entity_type).strip()}|{str(name).strip()}|{str(source).strip()}"
+    return "CEN-" + hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16].upper()
+
+
+def upsert_canonical_entity(
+    username: str,
+    entity_type: str,
+    name: str,
+    source: str = "",
+    state: Any = None,
+    status: str = "Observed",
+    workspace: str = "default",
+) -> str:
+    ensure_enterprise_schema()
+    wid = workspace_key(username, workspace)
+    eid = canonical_entity_id(username, workspace, entity_type, name, source)
+    payload_json, content_hash = _canonical_json(state or {})
+    stamp = now_iso()
+    values = (eid, wid, str(entity_type)[:100], str(name)[:240], str(source)[:300],
+              str(status)[:80] or "Observed", payload_json, content_hash, username, stamp, stamp)
+    if _remote():
+        with _pg_connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """INSERT INTO shoir_internal.canonical_entities
+                    (entity_id,workspace_id,entity_type,name,source,status,state_json,content_hash,created_by,created_at,updated_at)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    ON CONFLICT (entity_id) DO UPDATE SET
+                      status=EXCLUDED.status,state_json=EXCLUDED.state_json,
+                      content_hash=EXCLUDED.content_hash,updated_at=EXCLUDED.updated_at""",
+                    values,
+                )
+            conn.commit()
+    else:
+        with _local_connect() as conn:
+            conn.execute(
+                """INSERT INTO shoir_ent_canonical_entities
+                (entity_id,workspace_id,entity_type,name,source,status,state_json,content_hash,created_by,created_at,updated_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                ON CONFLICT(entity_id) DO UPDATE SET
+                  status=excluded.status,state_json=excluded.state_json,
+                  content_hash=excluded.content_hash,updated_at=excluded.updated_at""",
+                values,
+            )
+            conn.commit()
+    return eid
+
+
+def canonical_relationship_id(username: str, workspace: str, source_entity_id: str, target_entity_id: str, relation: str) -> str:
+    wid = workspace_key(username, workspace)
+    raw = f"{wid}|{source_entity_id}|{target_entity_id}|{relation}"
+    return "CREL-" + hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16].upper()
+
+
+def upsert_canonical_relationship(
+    username: str,
+    source_entity_id: str,
+    target_entity_id: str,
+    relation: str,
+    status: str = "Linked",
+    metadata: Any = None,
+    workspace: str = "default",
+) -> str:
+    ensure_enterprise_schema()
+    wid = workspace_key(username, workspace)
+    rid = canonical_relationship_id(username, workspace, source_entity_id, target_entity_id, relation)
+    metadata_json, _ = _canonical_json(metadata or {})
+    stamp = now_iso()
+    values = (rid, wid, str(source_entity_id), str(target_entity_id), str(relation)[:180],
+              str(status)[:80] or "Linked", metadata_json, stamp, stamp)
+    if _remote():
+        with _pg_connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """INSERT INTO shoir_internal.canonical_relationships
+                    (relationship_id,workspace_id,source_entity_id,target_entity_id,relation,status,metadata_json,created_at,updated_at)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    ON CONFLICT (relationship_id) DO UPDATE SET
+                      status=EXCLUDED.status,metadata_json=EXCLUDED.metadata_json,updated_at=EXCLUDED.updated_at""",
+                    values,
+                )
+            conn.commit()
+    else:
+        with _local_connect() as conn:
+            conn.execute(
+                """INSERT INTO shoir_ent_canonical_relationships
+                (relationship_id,workspace_id,source_entity_id,target_entity_id,relation,status,metadata_json,created_at,updated_at)
+                VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(relationship_id) DO UPDATE SET
+                  status=excluded.status,metadata_json=excluded.metadata_json,updated_at=excluded.updated_at""",
+                values,
+            )
+            conn.commit()
+    return rid
+
+
+def record_canonical_event(
+    username: str,
+    event_type: str,
+    payload: Any = None,
+    entity_id: str = "",
+    relationship_id: str = "",
+    workspace: str = "default",
+) -> str:
+    ensure_enterprise_schema()
+    wid = workspace_key(username, workspace)
+    event_id = "CEVT-" + uuid.uuid4().hex[:14].upper()
+    payload_json, _ = _canonical_json(payload or {})
+    stamp = now_iso()
+    values = (event_id, wid, str(event_type)[:120], str(entity_id or "")[:80] or None,
+              str(relationship_id or "")[:80] or None, payload_json, username, stamp)
+    if _remote():
+        with _pg_connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """INSERT INTO shoir_internal.canonical_events
+                    (event_id,workspace_id,event_type,entity_id,relationship_id,payload_json,actor,created_at)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s)""",
+                    values,
+                )
+            conn.commit()
+    else:
+        with _local_connect() as conn:
+            conn.execute(
+                """INSERT INTO shoir_ent_canonical_events
+                (event_id,workspace_id,event_type,entity_id,relationship_id,payload_json,actor,created_at)
+                VALUES (?,?,?,?,?,?,?,?)""",
+                values,
+            )
+            conn.commit()
+    return event_id
+
+
+def canonical_entities_frame(username: str, workspace: str = "default", entity_type: str = "", limit: int = 2000) -> pd.DataFrame:
+    ensure_enterprise_schema()
+    wid = workspace_key(username, workspace)
+    table = "shoir_internal.canonical_entities" if _remote() else "shoir_ent_canonical_entities"
+    sql = "SELECT entity_id,workspace_id,entity_type,name,source,status,state_json,content_hash,created_by,created_at,updated_at FROM " + table
+    sql += " WHERE workspace_id=" + ("%s" if _remote() else "?")
+    params = [wid]
+    if entity_type:
+        sql += " AND entity_type=" + ("%s" if _remote() else "?")
+        params.append(str(entity_type))
+    sql += " ORDER BY updated_at DESC LIMIT " + str(max(1, min(5000, int(limit))))
+    with (_pg_connect() if _remote() else _local_connect()) as conn:
+        return pd.read_sql_query(sql, conn, params=params)
+
+
+def canonical_relationships_frame(username: str, workspace: str = "default", limit: int = 5000) -> pd.DataFrame:
+    ensure_enterprise_schema()
+    wid = workspace_key(username, workspace)
+    table = "shoir_internal.canonical_relationships" if _remote() else "shoir_ent_canonical_relationships"
+    sql = "SELECT * FROM " + table + " WHERE workspace_id=" + ("%s" if _remote() else "?") + " ORDER BY updated_at DESC LIMIT " + str(max(1, min(10000, int(limit))))
+    with (_pg_connect() if _remote() else _local_connect()) as conn:
+        return pd.read_sql_query(sql, conn, params=[wid])
+
+
+def canonical_events_frame(username: str, workspace: str = "default", limit: int = 5000) -> pd.DataFrame:
+    ensure_enterprise_schema()
+    wid = workspace_key(username, workspace)
+    table = "shoir_internal.canonical_events" if _remote() else "shoir_ent_canonical_events"
+    sql = "SELECT * FROM " + table + " WHERE workspace_id=" + ("%s" if _remote() else "?") + " ORDER BY created_at DESC LIMIT " + str(max(1, min(10000, int(limit))))
+    with (_pg_connect() if _remote() else _local_connect()) as conn:
+        return pd.read_sql_query(sql, conn, params=[wid])
+
+
+def canonical_state_manifest(username: str, workspace: str = "default") -> dict[str, Any]:
+    entities = canonical_entities_frame(username, workspace, limit=5000)
+    relationships = canonical_relationships_frame(username, workspace, limit=10000)
+    events = canonical_events_frame(username, workspace, limit=10000)
+    combined = (
+        entities.to_json(orient="records", date_format="iso")
+        + relationships.to_json(orient="records", date_format="iso")
+        + events.to_json(orient="records", date_format="iso")
+    )
+    return {
+        "workspace_id": workspace_key(username, workspace),
+        "workspace": str(workspace),
+        "entity_count": int(len(entities)),
+        "relationship_count": int(len(relationships)),
+        "event_count": int(len(events)),
+        "entity_types": entities["entity_type"].value_counts().to_dict() if not entities.empty else {},
+        "last_entity_update": str(entities["updated_at"].max()) if not entities.empty else None,
+        "last_event": str(events["created_at"].max()) if not events.empty else None,
+        "content_hash": hashlib.sha256(combined.encode("utf-8")).hexdigest(),
+    }
+
+
+def canonical_health(username: str, workspace: str = "default") -> dict[str, Any]:
+    manifest = canonical_state_manifest(username, workspace)
+    required = 13
+    observed_types = len([x for x in manifest["entity_types"] if x in {
+        "Asset","Process","Product","Material","Order","Workforce",
+        "Quality","Maintenance","Energy","Cost","Scenario","Decision","Outcome",
+    }])
+    return {
+        "status": "Healthy" if manifest["entity_count"] > 0 else "No Data",
+        "coverage": round(observed_types / required * 100.0, 1),
+        **manifest,
+    }
+
+
+def build_control_tower_health_from_canonical(username: str, workspace: str = "default") -> pd.DataFrame:
+    """Build the Control Tower from the durable canonical industrial state."""
+    entities = canonical_entities_frame(username, workspace, limit=5000)
+    events = canonical_events_frame(username, workspace, limit=10000)
+    domain_types = {
+        "Production": {"Process", "KPI"},
+        "Supply": {"Order", "Material"},
+        "Inventory": {"Material", "Product"},
+        "Quality": {"Quality"},
+        "Maintenance": {"Maintenance", "Asset"},
+        "Transport": {"Transport", "Route"},
+        "Workforce": {"Workforce"},
+        "Energy": {"Energy"},
+        "Carbon": {"Carbon"},
+    }
+    alert_events = (
+        events[events["event_type"].astype(str).str.lower().str.contains("alert|anomaly|attention|error|offline", regex=True)]
+        if not events.empty else pd.DataFrame()
+    )
+    rows = []
+    for domain, types in domain_types.items():
+        subset = entities[entities["entity_type"].isin(types)] if not entities.empty else pd.DataFrame()
+        records = int(len(subset))
+        related_ids = set(subset["entity_id"].astype(str)) if not subset.empty else set()
+        domain_events = (
+            alert_events[alert_events["entity_id"].astype(str).isin(related_ids)]
+            if not alert_events.empty and related_ids else pd.DataFrame()
+        )
+        alerts = int(len(domain_events))
+        if records == 0:
+            status, score = "No Data", 0.0
+        elif alerts:
+            status, score = "Attention", 35.0
+        else:
+            status, score = "Healthy", 100.0
+        rows.append({
+            "Area": domain,
+            "Status": status,
+            "Health %": score,
+            "Records": records,
+            "Alerts": alerts,
+            "Last Update": str(subset["updated_at"].max()) if not subset.empty else "—",
+            "Signal": "Canonical Digital Thread" if records else "No canonical entity mapped",
+        })
+    return pd.DataFrame(rows)
 
 
 def list_artifacts(username: str, artifact_type: Optional[str] = None, workspace: str = "default", limit: int = 200) -> pd.DataFrame:
@@ -1047,6 +1388,103 @@ def schedule_connector_sync(
     return schedule_id
 
 
+def connector_schedule_frame(username: str, workspace: str = "default") -> pd.DataFrame:
+    ensure_enterprise_schema()
+    wid = workspace_key(username, workspace)
+    table = "shoir_internal.connector_schedules" if _remote() else "shoir_ent_connector_schedules"
+    sql = "SELECT * FROM " + table + " WHERE workspace_id=" + ("%s" if _remote() else "?") + " ORDER BY next_run_at ASC"
+    with (_pg_connect() if _remote() else _local_connect()) as conn:
+        return pd.read_sql_query(sql, conn, params=[wid])
+
+
+def _update_connector_schedule_after_run(
+    schedule_id: str,
+    username: str,
+    status: str,
+    workspace: str = "default",
+    interval_minutes: int = 60,
+) -> None:
+    ensure_enterprise_schema()
+    wid = workspace_key(username, workspace)
+    next_run = (datetime.now(timezone.utc) + pd.Timedelta(minutes=max(1, int(interval_minutes)))).isoformat()
+    table = "shoir_internal.connector_schedules" if _remote() else "shoir_ent_connector_schedules"
+    if _remote():
+        with _pg_connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""UPDATE {table}
+                    SET last_run_at=%s,last_status=%s,next_run_at=CASE WHEN enabled THEN %s::timestamptz ELSE NULL END,updated_at=%s
+                    WHERE schedule_id=%s AND workspace_id=%s""",
+                    (now_iso(), str(status)[:120], next_run, now_iso(), schedule_id, wid),
+                )
+            conn.commit()
+    else:
+        with _local_connect() as conn:
+            conn.execute(
+                """UPDATE shoir_ent_connector_schedules
+                SET last_run_at=?,last_status=?,next_run_at=?,updated_at=?
+                WHERE schedule_id=? AND workspace_id=?""",
+                (now_iso(), str(status)[:120], next_run, now_iso(), schedule_id, wid),
+            )
+            conn.commit()
+
+
+def run_due_connector_syncs(
+    username: str,
+    workspace: str = "default",
+    max_attempts: int = 3,
+    require_approval: bool = True,
+) -> pd.DataFrame:
+    """Execute due connector health checks with bounded retry and no secret persistence."""
+    if require_approval:
+        enforce_action_gate(username, "connector_sync", workspace, require_approval=True)
+    schedules = connector_schedule_frame(username, workspace)
+    if schedules.empty:
+        return pd.DataFrame(columns=["Schedule ID","Connector ID","Status","Attempts","Detail"])
+    now = datetime.now(timezone.utc)
+    due = schedules[
+        schedules["enabled"].astype(bool)
+        & pd.to_datetime(schedules["next_run_at"], errors="coerce", utc=True).le(now)
+    ].copy()
+    results = []
+    for _, row in due.iterrows():
+        connector_id = str(row["connector_id"])
+        health = connector_health_frame(username, workspace)
+        connector = health[health["connector_id"].astype(str).eq(connector_id)] if "connector_id" in health.columns else pd.DataFrame()
+        if connector.empty:
+            results.append({"Schedule ID":row["schedule_id"],"Connector ID":connector_id,"Status":"Review","Attempts":0,"Detail":"Connector health record not found."})
+            continue
+        record = connector.iloc[0]
+        attempts = 0
+        status = "Offline"
+        detail = "No attempt completed."
+        for attempt in range(1, max(1, int(max_attempts)) + 1):
+            attempts = attempt
+            result = test_connector_profile(
+                username,
+                str(record.get("name","Connector")),
+                str(record.get("system_type","REST")),
+                str(record.get("protocol","REST")),
+                str(record.get("endpoint","")),
+                "",
+                workspace,
+                8.0,
+            )
+            status = str(result.get("status","Review"))
+            detail = str(result.get("detail",""))
+            if status == "Healthy":
+                break
+        interval = int(row.get("interval_minutes", 60) or 60)
+        _update_connector_schedule_after_run(str(row["schedule_id"]), username, status, workspace, interval)
+        record_canonical_event(
+            username, "connector_sync",
+            {"schedule_id":str(row["schedule_id"]),"connector_id":connector_id,"status":status,"attempts":attempts,"detail":detail[:300]},
+            workspace=workspace,
+        )
+        results.append({"Schedule ID":row["schedule_id"],"Connector ID":connector_id,"Status":status,"Attempts":attempts,"Detail":detail})
+    return pd.DataFrame(results, columns=["Schedule ID","Connector ID","Status","Attempts","Detail"])
+
+
 def create_job_record(username: str, module: str, job_type: str, payload: Mapping[str, Any], workspace: str = "default") -> str:
     ensure_enterprise_schema()
     wid = workspace_key(username, workspace)
@@ -1372,6 +1810,17 @@ def security_access_check(username: str, action: str, workspace: str = "default"
     }
 
 
+def enforce_action_gate(
+    username: str,
+    action: str,
+    workspace: str = "default",
+    require_approval: bool = False,
+) -> None:
+    decision = security_access_check(username, action, workspace, require_approval=require_approval)
+    if not decision.get("allowed"):
+        raise PermissionError("Action blocked: " + " ".join(decision.get("reasons", [])))
+
+
 def security_maturity_status(username: str, workspace: str = "default") -> pd.DataFrame:
     """Report implementation maturity without overstating provider-dependent controls."""
     policy = security_policy(username, workspace)
@@ -1648,7 +2097,7 @@ def render_enterprise_integration_surface(module: str, username: str, tier: str)
         st.markdown("### 🌐 Connected Digital Twin")
         twin = load_twin_state(username, workspace)
         if twin.empty:
-            twin = pd.DataFrame({"Asset":["CNC-01","Packing-01"],"Status":["Running","Running"],"Temperature":[65.0,72.0],"Vibration":[2.4,1.8]})
+            st.info("No live Digital Twin state is currently connected to this workspace. Import telemetry or synchronize a real source to activate the twin view.")
         t1,t2,t3,t4 = st.tabs(["Live State","What-if","Scenario Replay","Scenarios"])
         with t1:
             st.dataframe(twin, use_container_width=True, hide_index=True)
