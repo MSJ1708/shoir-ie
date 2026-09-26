@@ -9363,6 +9363,10 @@ else:
                                 "validate_network_inputs": validate_network_inputs,
                                 "knowledge_context": linked_knowledge,
                                 "knowledge_documents": linked_knowledge_count,
+                                "canonical_context": build_copilot_platform_context(
+                                    st.session_state.get("current_user", "unknown"),
+                                    routed_module,
+                                ),
                             },
                         )
                     run_id = run["run_id"]
