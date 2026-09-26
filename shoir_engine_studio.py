@@ -1185,3 +1185,77 @@ def render_decision_center_studio(tier: str, username: str) -> None:
         )
         st.json(card)
         _json_download(st.session_state["decision_governed_card"], "shoir_ie_decision_package.json")
+
+    decision_id = str(card.get("decision_id") or "").strip()
+    if decision_id:
+        st.markdown("### 🔄 Decision-to-Value Loop")
+        st.caption("Prediction → implementation → actual KPI → variance → lesson. Actual outcome values must be entered from observed evidence; Shoir-IE does not synthesize them.")
+        with st.expander("Record implementation outcome", expanded=False):
+            predicted_default = {}
+            metrics_payload = card.get("metrics")
+            if isinstance(metrics_payload, dict):
+                for key, value in metrics_payload.items():
+                    if isinstance(value, (int, float)) and not isinstance(value, bool):
+                        predicted_default[str(key)] = value
+            predicted_json = st.text_area(
+                "Predicted KPI JSON",
+                value=json.dumps(predicted_default, indent=2),
+                key="decision_value_predicted_json",
+                help="Use the KPI values that the selected decision/scenario actually predicted.",
+            )
+            actual_json = st.text_area(
+                "Actual KPI JSON",
+                value="{}",
+                key="decision_value_actual_json",
+                help="Enter observed post-implementation values only.",
+            )
+            outcome_status = st.selectbox(
+                "Implementation outcome status",
+                ["Planned", "Implemented", "Verified"],
+                key="decision_value_status",
+            )
+            lesson = st.text_area(
+                "Learning / variance explanation",
+                value="",
+                key="decision_value_lesson",
+            )
+            if st.button(
+                "📊 Record actual outcome & calculate variance",
+                type="primary",
+                use_container_width=True,
+                key="decision_value_record",
+            ):
+                try:
+                    predicted = json.loads(predicted_json)
+                    actual = json.loads(actual_json)
+                    if not isinstance(predicted, dict) or not isinstance(actual, dict):
+                        raise ValueError("Predicted and actual KPI inputs must both be JSON objects.")
+                    if not actual:
+                        raise ValueError("At least one actual KPI value is required.")
+                    from industrial_experience import record_decision_outcome, decision_to_value_frame
+                    oid = record_decision_outcome(
+                        decision_id,
+                        username,
+                        outcome_status,
+                        predicted,
+                        actual,
+                        lesson=lesson,
+                        workspace=str(st.session_state.get("shoir_workspace_name") or "default"),
+                    )
+                    value_frame = decision_to_value_frame(owner=username, decision_id=decision_id)
+                    st.session_state["decision_outcomes_df"] = value_frame.copy(deep=True)
+                    st.session_state["decision_last_outcome_id"] = oid
+                    st.success(f"Outcome evidence recorded: {oid}")
+                except (json.JSONDecodeError, ValueError, PermissionError) as exc:
+                    st.error(f"Outcome evidence could not be recorded: {exc}")
+                except Exception as exc:
+                    st.error(f"Outcome persistence failed safely: {type(exc).__name__}: {exc}")
+
+        from industrial_experience import decision_to_value_frame
+        value_frame = decision_to_value_frame(owner=username, decision_id=decision_id)
+        if not value_frame.empty:
+            st.markdown("#### Decision-to-Value Evidence")
+            st.dataframe(value_frame, use_container_width=True, hide_index=True)
+        else:
+            st.info("No actual outcome has been recorded yet. Verification remains evidence-driven.")
+
