@@ -684,7 +684,7 @@ def _mqtt_request(profile: Mapping[str, Any]) -> ConnectorResult:
 def _opcua_request(profile: Mapping[str, Any]) -> ConnectorResult:
     system_type = str(profile.get("system_type") or "OPC-UA")
     try:
-        from opcua import Client
+        from asyncua.sync import Client
     except Exception:
         return ConnectorResult("FAIL", "OPC-UA", system_type, None, "Install the optional opcua package to enable OPC-UA connectivity.")
     endpoint = str(profile.get("endpoint") or "").strip()
