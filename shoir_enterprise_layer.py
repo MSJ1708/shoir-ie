@@ -65,8 +65,11 @@ def _remote() -> bool:
         return False
 
 
-def _local_connect(db_path: str = DEFAULT_DB):
-    conn = sqlite3.connect(db_path, timeout=30, check_same_thread=False)
+def _local_connect(db_path: Optional[str] = None):
+    # Resolve DEFAULT_DB at call time so tests and local deployments can safely
+    # override the enterprise store without relying on a stale default argument.
+    target = str(db_path or DEFAULT_DB)
+    conn = sqlite3.connect(target, timeout=30, check_same_thread=False)
     conn.execute("PRAGMA journal_mode=WAL")
     return conn
 
@@ -268,8 +271,9 @@ REMOTE_DDL = [
 ]
 
 
-def ensure_enterprise_schema(db_path: str = DEFAULT_DB) -> None:
+def ensure_enterprise_schema(db_path: Optional[str] = None) -> None:
     """Create the additive enterprise layer in private schema/local tables."""
+    db_path = str(db_path or DEFAULT_DB)
     if _remote():
         with _pg_connect() as conn:
             with conn.cursor() as cur:
