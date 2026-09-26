@@ -378,6 +378,11 @@ class SafeFormulaEngine:
             return True
         if isinstance(node, ast.Name):
             if node.id.upper() == "PI": return math.pi
+            if node.id in self.variables:
+                return self.variables[node.id]
+            target = next((k for k in self.variables if k.upper() == node.id.upper()), None)
+            if target is not None:
+                return self.variables[target]
             raise ValueError(f"Unknown name in formula: {node.id}")
         if isinstance(node, ast.Call):
             if not isinstance(node.func, ast.Name): raise ValueError("Only named functions are allowed.")
@@ -389,6 +394,13 @@ class SafeFormulaEngine:
                 s = self._eval_node(node.args[0], sheet); ref = str(self._eval_node(node.args[1], sheet))
                 return self._range(None if s is None or s == "None" else str(s), ref)
             if name not in _ALLOWED_FUNCS: raise ValueError(f"Function is not allowed: {name}")
+            shared_names = {"OEE","TAKTTIME","LITTLELAW","PPK","EOQ","SAFETYSTOCK","CO2E","CONVERT","NPV","MTBF","MTTR","UTILIZATION","FPY","DPMO","PERCENTCHANGE","CAPACITY","YIELD"}
+            if name == "CPK" and len(node.args) == 3:
+                shared_names.add("CPK")
+            if name in shared_names:
+                args = [self._eval_node(x, sheet) for x in node.args]
+                from shoir_adoption_engine import evaluate_engineering_function
+                return evaluate_engineering_function(name, args)
             if name in {"OEE","TAKT_TIME","LITTLE_LAW","CPK","EOQ","SERVICE_LEVEL","CO2E","CONVERT","NPV","CAPEX_NPV","FORECAST_DEMAND","CAPACITY_GAP"}:
                 args = [self._eval_node(x, sheet) for x in node.args]
                 return _engineering_formula(name, args)
@@ -412,9 +424,13 @@ class SafeFormulaEngine:
             if name == "OR": return any(bool(x) for x in args)
         raise ValueError(f"Unsupported formula expression: {ast.dump(node, include_attributes=False)}")
 
-def evaluate_workbook_formulas(workbook: Mapping[str,pd.DataFrame], formulas: Mapping[str,Mapping[str,str]]) -> tuple[dict[str,pd.DataFrame],pd.DataFrame]:
+def evaluate_workbook_formulas(
+    workbook: Mapping[str,pd.DataFrame],
+    formulas: Mapping[str,Mapping[str,str]],
+    variables: Mapping[str,Any] | None = None,
+) -> tuple[dict[str,pd.DataFrame],pd.DataFrame]:
     result = {sheet: frame.copy(deep=True) for sheet,frame in workbook.items()}
-    engine = SafeFormulaEngine(result, formulas)
+    engine = SafeFormulaEngine(result, formulas, variables=variables)
     audit = []
     for sheet, sheet_formulas in formulas.items():
         if sheet not in result: continue
@@ -538,9 +554,14 @@ def apply_query_pipeline(df:pd.DataFrame, steps:Sequence[Mapping[str,Any]])->pd.
             s_num=pd.to_numeric(work[col],errors="coerce")
             try: rhs=float(raw); left=s_num
             except (TypeError,ValueError): rhs=str(raw); left=work[col].astype("string")
-            mask={"==":left==rhs,"!=":left!=rhs,">":left>rhs,">=":left>=rhs,"<":left<rhs,"<=":left<=rhs,
-                  "contains":left.astype("string").str.contains(str(rhs),case=False,na=False)}.get(op)
-            if mask is None: raise ValueError(f"Unsupported filter operator: {op}")
+            if op=="==": mask=left==rhs
+            elif op=="!=": mask=left!=rhs
+            elif op==">": mask=left>rhs
+            elif op==">=": mask=left>=rhs
+            elif op=="<": mask=left<rhs
+            elif op=="<=": mask=left<=rhs
+            elif op=="contains": mask=left.astype("string").str.contains(str(rhs),case=False,na=False)
+            else: raise ValueError(f"Unsupported filter operator: {op}")
             work=work.loc[mask].copy()
         elif kind=="groupby":
             groups=[c for c in step.get("columns",[]) if c in work.columns]; value_col=str(step.get("value_column",""))
@@ -548,8 +569,18 @@ def apply_query_pipeline(df:pd.DataFrame, steps:Sequence[Mapping[str,Any]])->pd.
             if not groups or value_col not in work.columns: raise ValueError("Group By requires grouping columns and a value column.")
             metric=pd.to_numeric(work[value_col],errors="coerce")
             grouped=work.assign(__value=metric).groupby(groups,dropna=False)["__value"]
-            out={"mean":grouped.mean(),"count":grouped.size(),"min":grouped.min(),"max":grouped.max()}.get(agg,grouped.sum())
+            out={"mean":grouped.mean(),"count":grouped.size(),"min":grouped.min(),"max":grouped.max(),"median":grouped.median(),"std":grouped.std(ddof=1)}.get(agg,grouped.sum())
             work=out.reset_index(name=f"{agg.title()} {value_col}")
+        elif kind=="pivot":
+            from shoir_adoption_engine import industrial_pivot
+            work=industrial_pivot(
+                work,
+                index=step.get("index", step.get("rows", [])),
+                columns=step.get("columns") or None,
+                values=step.get("values", step.get("value_column", "")),
+                aggfunc=step.get("aggregation", "sum"),
+                fill_value=step.get("fill_value"),
+            )
         elif kind=="add_formula":
             target,expression=str(step.get("target","")),str(step.get("expression",""))
             if not target or not expression: raise ValueError("Add Formula requires a target and expression.")
