@@ -739,7 +739,10 @@ def _auto_chart_choice(df: pd.DataFrame) -> str:
 
     if has_control_limits and numeric:
         return "Control Chart"
-    if has_health and has_area and numeric and any("health score" in n or n.strip() == "score" for n in names):
+    if has_health and has_area and numeric and any(
+        "health score" in n or n.strip() == "score" or "health %" in n or "health percentage" in n
+        for n in names
+    ):
         return "Health Heatmap"
     if has_anomaly and has_timestamp and numeric:
         return "Anomaly Timeline"
@@ -914,6 +917,103 @@ def visualization_contract_report(module: str, max_figures: int = 4) -> pd.DataF
             "Primary Chart": str(suite[0][0]) if suite else "",
         })
     return pd.DataFrame(rows, columns=["Module","Table","State Key","Rows","Columns","Graphs","Status","Primary Chart"])
+
+MODULE_VISUAL_CONTRACTS = {
+    "Quality": ("Pareto", "SPC", "Distribution"),
+    "OEE": ("Metric Trend", "Pareto", "Distribution"),
+    "Forecast": ("Metric Trend", "Distribution", "Scatter"),
+    "Optimization": ("Pareto", "Sensitivity Plot", "Scatter"),
+    "Economics": ("Waterfall", "Metric Trend", "Distribution"),
+    "Simulation": ("Metric Trend", "Distribution", "Scatter"),
+    "Maintenance": ("Metric Trend", "Anomaly Timeline", "Distribution"),
+    "Workforce": ("Bar", "Metric Trend", "Distribution"),
+    "Sustainability": ("Sankey", "Distribution", "Bar"),
+    "Digital Twin": ("Metric Trend", "Anomaly Timeline", "Line"),
+    "Control Tower": ("Health Heatmap", "Metric Trend", "Bar"),
+    "Connectivity": ("Bar", "Metric Trend", "Distribution"),
+    "Geospatial": ("Network Map", "Sankey", "Scatter"),
+    "Research": ("Scatter", "Distribution", "Sensitivity Plot"),
+}
+
+
+def _module_visual_keys(module: str) -> list[str]:
+    return list(_MODULE_KEYS.get(str(module), []))
+
+
+def audit_all_module_visualizations(max_figures: int = 4) -> pd.DataFrame:
+    """Audit every catalog module without fabricating data.
+
+    Populated tables must yield at least one real Plotly figure. Modules with
+    no current result table are explicitly marked Ready · awaiting data.
+    """
+    try:
+        from industrial_platform import PLATFORM_CATALOG
+        module_names = [str(item.get("name")) for item in PLATFORM_CATALOG if isinstance(item, dict) and item.get("name")]
+    except Exception:
+        module_names = list(_MODULE_KEYS.keys())
+
+    rows = []
+    for module in module_names:
+        keys = _module_visual_keys(module)
+        frames = []
+        for key in keys:
+            value = st.session_state.get(key)
+            if isinstance(value, pd.DataFrame) and not value.empty:
+                frames.append((key, value))
+        if not frames:
+            rows.append({
+                "Module": module,
+                "Tables": 0,
+                "Rows": 0,
+                "Graphs": 0,
+                "Status": "Ready · awaiting data",
+                "Contract": ", ".join(_contract_for_module(module)),
+            })
+            continue
+        graph_tables = 0
+        total_rows = 0
+        graph_types = []
+        for key, frame in frames:
+            total_rows += int(len(frame))
+            suite = build_visualization_suite(frame, context=module, max_figures=max_figures)
+            if suite:
+                graph_tables += 1
+                graph_types.append(suite[0][0])
+        status = "Verified" if graph_tables == len(frames) else "Gap"
+        rows.append({
+            "Module": module,
+            "Tables": len(frames),
+            "Rows": total_rows,
+            "Graphs": graph_tables,
+            "Status": status,
+            "Contract": ", ".join(_contract_for_module(module)),
+            "Primary Views": ", ".join(graph_types[:6]),
+        })
+    return pd.DataFrame(rows, columns=["Module","Tables","Rows","Graphs","Status","Contract","Primary Views"])
+
+
+def _contract_for_module(module: str) -> tuple[str, ...]:
+    name = str(module).lower()
+    for family, charts in MODULE_VISUAL_CONTRACTS.items():
+        if family.lower() in name:
+            return charts
+    return ("Auto visualization",)
+
+
+def visualization_readiness_summary(max_figures: int = 4) -> dict[str, Any]:
+    audit = audit_all_module_visualizations(max_figures=max_figures)
+    total = len(audit)
+    verified = int(audit["Status"].eq("Verified").sum()) if total else 0
+    awaiting = int(audit["Status"].eq("Ready · awaiting data").sum()) if total else 0
+    gaps = int(audit["Status"].eq("Gap").sum()) if total else 0
+    return {
+        "modules": total,
+        "verified": verified,
+        "awaiting_data": awaiting,
+        "gaps": gaps,
+        "coverage_pct": round((verified + awaiting) / max(1, total) * 100.0, 1),
+    }
+
 
 def figure_fingerprint(fig: go.Figure) -> str:
     """Stable SHA-256 fingerprint of the exact Plotly figure JSON."""
