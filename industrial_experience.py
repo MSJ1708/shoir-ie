@@ -2150,8 +2150,15 @@ def render_blank_module_studio(module: str, tier: str, username: str) -> None:
                         actual = json.loads(actual_text)
                         if not isinstance(predicted, dict) or not isinstance(actual, dict):
                             raise ValueError("Predicted and actual KPI payloads must be JSON objects.")
+                        active_workspace = str(
+                            st.session_state.get("shoir_workspace_name")
+                            or st.session_state.get("workspace")
+                            or st.session_state.get("active_workspace_name")
+                            or "default"
+                        )
                         outcome_id = record_decision_outcome(
-                            did, username, outcome_status, predicted, actual, lesson.strip()
+                            did, username, outcome_status, predicted, actual, lesson.strip(),
+                            workspace=active_workspace,
                         )
                         st.session_state["sx_last_outcome_id_" + key] = outcome_id
                         st.success("Outcome recorded: " + outcome_id)
@@ -2159,6 +2166,7 @@ def render_blank_module_studio(module: str, tier: str, username: str) -> None:
                         st.error("Outcome could not be recorded: " + str(exc))
 
                 outcome_df = decision_outcomes_frame(decision_id=did, owner=username)
+                st.session_state["decision_outcomes_df"] = outcome_df
                 if not outcome_df.empty:
                     latest = outcome_df.iloc[0]
                     try:
