@@ -85,3 +85,10 @@ def test_visualization_contract_audits_catalog():
     assert not report.empty
     assert report["Visualization contract"].eq("Universal").all()
     assert report["Status"].notna().all()
+
+
+def test_structural_workflow_figure_is_available_without_data():
+    from shoir_industrial_decision_os import structural_workflow_figure
+    fig = structural_workflow_figure("Empty Module")
+    assert fig is not None
+    assert len(fig.data) >= 1
