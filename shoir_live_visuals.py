@@ -1104,7 +1104,12 @@ def ensure_visualization_suite(df: pd.DataFrame, context: str = "", max_figures:
     """
     if not isinstance(df, pd.DataFrame) or df.empty:
         return []
-    suite = build_visualization_suite(df, context=context, max_figures=max_figures)
+    try:
+        suite = build_visualization_suite(df, context=context, max_figures=max_figures)
+    except Exception:
+        # Visualization failures must never escape as module failures; the
+        # deterministic fallback below is the final completeness guard.
+        suite = []
     if suite:
         return suite
     completeness = df.notna().mean().mul(100.0).sort_values(ascending=True)
