@@ -469,6 +469,55 @@ def record_decision_outcome(
             )
         except Exception:
             pass
+
+    # Close the loop in the canonical Digital Thread: Decision → Outcome.
+    try:
+        from shoir_enterprise_layer import (
+            upsert_canonical_entity, upsert_canonical_relationship, record_canonical_event,
+        )
+        decision_entity = upsert_canonical_entity(
+            owner, "Decision", decision_id, f"decision:{decision_id}",
+            state={"decision_id": decision_id, "status": status},
+            status="Implemented" if status == "Implemented" else "Verified" if status == "Verified" else "Proposed",
+            workspace=workspace,
+        )
+        outcome_entity = upsert_canonical_entity(
+            owner, "Outcome", outcome_id, f"outcome:{outcome_id}",
+            state={
+                "decision_id": decision_id,
+                "implementation_status": status,
+                "predicted": predicted_payload,
+                "actual": actual_payload,
+                "variance": variance_payload,
+                "lesson": str(lesson or "")[:2000],
+            },
+            status=status,
+            workspace=workspace,
+        )
+        relationship_id = upsert_canonical_relationship(
+            owner,
+            decision_entity,
+            outcome_entity,
+            "decision has verified outcome",
+            status="Verified" if status == "Verified" else "Linked",
+            metadata={"outcome_id": outcome_id},
+            workspace=workspace,
+        )
+        record_canonical_event(
+            owner,
+            "decision_outcome_recorded",
+            {
+                "decision_id": decision_id,
+                "outcome_id": outcome_id,
+                "implementation_status": status,
+                "kpi_count": len(variance_payload),
+            },
+            entity_id=outcome_entity,
+            relationship_id=relationship_id,
+            workspace=workspace,
+        )
+    except Exception:
+        pass
     return outcome_id
 
 
@@ -492,6 +541,41 @@ def decision_outcomes_frame(
     query += " ORDER BY created_at DESC"
     with _db(db_path) as conn:
         return pd.read_sql_query(query, conn, params=params)
+
+def decision_to_value_frame(
+    owner: Optional[str] = None,
+    decision_id: Optional[str] = None,
+    db_path: str = "enterprise_full_workspace.db",
+) -> pd.DataFrame:
+    """Flatten decision → implementation → actual → variance → lesson evidence."""
+    outcomes = decision_outcomes_frame(decision_id=decision_id, owner=owner, db_path=db_path)
+    if outcomes.empty:
+        return pd.DataFrame(columns=[
+            "Outcome ID","Decision ID","Implementation Status","KPI",
+            "Predicted","Actual","Delta","Delta %","Absolute Error","Lesson","Verified At",
+        ])
+    rows = []
+    for row in outcomes.to_dict("records"):
+        try:
+            variance = json.loads(row.get("variance_json") or "[]")
+        except Exception:
+            variance = []
+        for item in variance if isinstance(variance, list) else []:
+            rows.append({
+                "Outcome ID": row.get("outcome_id"),
+                "Decision ID": row.get("decision_id"),
+                "Implementation Status": row.get("implementation_status"),
+                "KPI": item.get("KPI"),
+                "Predicted": item.get("Predicted"),
+                "Actual": item.get("Actual"),
+                "Delta": item.get("Delta"),
+                "Delta %": item.get("Delta %"),
+                "Absolute Error": item.get("Absolute Error"),
+                "Lesson": row.get("lesson", ""),
+                "Verified At": row.get("verified_at"),
+            })
+    return pd.DataFrame(rows)
+
 
 def add_comment(project_id: Optional[str], decision_id: Optional[str], actor: str, comment: str) -> None:
     text = str(comment or "").strip()
