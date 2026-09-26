@@ -528,35 +528,46 @@ def security_posture() -> pd.DataFrame:
 
 
 def render_security_extension() -> None:
+    from shoir_enterprise_layer import security_maturity_status, security_access_check, inspect_upload
+
+    username = st.session_state.get("current_user", "unknown")
+    workspace = str(st.session_state.get("shoir_workspace_name") or st.session_state.get("workspace") or st.session_state.get("active_workspace_name") or "default")
     posture = security_posture()
     st.session_state["enterprise_security_posture_df"] = posture
+
     with st.expander("🔐 Secure File Handling", expanded=False):
-        uploaded = st.file_uploader(
-            "Security-scan an engineering file",
-            type=["csv", "xlsx", "txt", "md", "json", "pdf", "docx"],
-            key="enterprise_security_file_scan_upload",
-        )
+        uploaded = st.file_uploader("Security-scan an engineering file", type=["csv","xlsx","txt","md","json","pdf","docx"], key="enterprise_security_file_scan_upload")
         if uploaded is not None:
             raw = uploaded.getvalue()
-            name = str(uploaded.name)
-            unsafe_ext = bool(re.search(r"\.(exe|dll|bat|cmd|ps1|sh|js|vbs)$", name.lower()))
-            scan = pd.DataFrame([
-                {"Check": "SHA-256", "Status": "PASS", "Evidence": hashlib.sha256(raw).hexdigest()},
-                {"Check": "File size", "Status": "PASS" if len(raw) <= 50_000_000 else "REVIEW", "Evidence": f"{len(raw):,} bytes"},
-                {"Check": "Extension", "Status": "FAIL" if unsafe_ext else "PASS", "Evidence": name},
-                {"Check": "Empty file", "Status": "FAIL" if not raw else "PASS", "Evidence": ""},
-            ])
-            st.session_state["security_file_scan_df"] = scan
-            st.dataframe(scan, use_container_width=True, hide_index=True)
-            if unsafe_ext:
-                st.error("Potentially executable file type rejected by the security scan.")
+            try:
+                scan_result = inspect_upload(uploaded.name, raw, uploaded.type or "")
+                scan = pd.DataFrame([
+                    {"Check":"SHA-256","Status":"PASS","Evidence":scan_result["sha256"]},
+                    {"Check":"File size","Status":"PASS" if scan_result["bytes"] <= 50_000_000 else "FAIL","Evidence":f"{scan_result["bytes"]:,} bytes"},
+                    {"Check":"Upload safety","Status":"PASS" if scan_result["safe"] else "FAIL","Evidence":"; ".join(scan_result["reasons"]) or "Extension/container/signature checks passed"},
+                ])
+                st.session_state["security_file_scan_df"] = scan
+                st.dataframe(scan, use_container_width=True, hide_index=True)
+                if not scan_result["safe"]:
+                    st.error("File rejected by the secure upload gate.")
+            except Exception as exc:
+                st.error("Secure upload scan failed safely: " + str(exc))
+
     st.markdown("### 🔐 Enterprise Security Posture")
     st.dataframe(posture, use_container_width=True, hide_index=True)
-    configured = int((posture["Status"].isin(["Configured", "CI hook"])).sum()) if not posture.empty else 0
+    maturity = security_maturity_status(username, workspace)
+    st.markdown("### 🛡️ Security Control Maturity")
+    st.dataframe(maturity, use_container_width=True, hide_index=True)
+    gate = security_access_check(username, "connector_sync", workspace, require_approval=False)
+    message = "Allowed" if gate["allowed"] else "Blocked"
+    if gate["reasons"]:
+        message += " · " + " ".join(gate["reasons"])
+    st.caption("Current connector-sync authorization: " + message)
+    configured = int(maturity["State"].isin(["Verified","Connected","Configured"]).sum()) if not maturity.empty else 0
     c1, c2 = st.columns(2)
-    c1.metric("Governance controls configured", f"{configured}/{len(posture)}")
-    c2.metric("Sensitive keys detected", f"{sum(1 for key in st.session_state.keys() if re.search(r'password|token|secret|otp|payment', str(key), re.I)):,}")
-    st.caption("SSO/OIDC and MFA are reported as configured only when their configuration sections are actually present; no secret contents are inspected or printed.")
+    c1.metric("Controls configured / verified", f"{configured}/{len(maturity)}")
+    c2.metric("Sensitive session keys", f"{sum(1 for key in st.session_state.keys() if re.search(r"password|token|secret|otp|payment", str(key), re.I)):,}")
+    st.caption("SSO/OIDC and MFA remain provider/session dependent. Secret values are never displayed or stored in connector health records.")
     _render_universal_viz("Enterprise Security & Governance", "enterprise_security_posture_df")
 
 
