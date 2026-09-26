@@ -1013,7 +1013,7 @@ CONNECTOR_SYSTEM_PROTOCOLS = {
     "WMS": {"REST", "ODATA", "HTTPS"},
     "MES": {"REST", "ODATA", "HTTPS", "MQTT"},
     "ERP": {"REST", "ODATA", "HTTPS"},
-    "SQL": {"SQL", "JDBC"},
+    "SQL": {"SQL"},
     "REST": {"REST", "ODATA", "HTTPS"},
     "MQTT": {"MQTT"},
     "OPC-UA": {"OPC-UA"},
