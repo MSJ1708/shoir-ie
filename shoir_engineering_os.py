@@ -457,10 +457,16 @@ def render_operating_system_layer(module: str, username: str = "unknown") -> Non
         st.dataframe(resource_df, use_container_width=True, hide_index=True)
         if gaps:
             st.caption("Evidence gaps: " + ", ".join(gaps))
-        suite = ensure_visualization_suite(resource_df, context=f"{module} · Resource efficiency", max_figures=2)
+        coverage = resource_df[["Resource Family", "Observations"]].copy()
+        coverage["Evidence Present"] = (coverage["Observations"] > 0).astype(int)
+        suite = ensure_visualization_suite(
+            coverage[["Resource Family", "Evidence Present"]],
+            context=f"{module} · Resource evidence coverage",
+            max_figures=1,
+        )
         for title, fig in suite:
-            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
-        st.caption("Resource totals are measured only from matching numeric fields in the active table; no values are invented.")
+            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False, "responsive": True})
+        st.caption("Resource statistics remain field-specific; the chart shows evidence coverage rather than comparing incompatible units.")
 
     with tabs[2]:
         if frame.empty:
