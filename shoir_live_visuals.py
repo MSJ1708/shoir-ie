@@ -1056,8 +1056,9 @@ def audit_all_module_visualizations(max_figures: int = 4) -> pd.DataFrame:
         frames = []
         for key in keys:
             value = st.session_state.get(key)
-            if isinstance(value, pd.DataFrame) and not value.empty:
-                frames.append((key, value))
+            frame = _as_frame(value)
+            if not frame.empty:
+                frames.append((key, frame))
         if not frames:
             rows.append({
                 "Module": module,
