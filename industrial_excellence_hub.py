@@ -286,7 +286,7 @@ def _visualization_readiness(username: str) -> None:
             st.warning(f'{summary["gaps"]:,} populated module table(s) require visualization work.')
 
 
-def _digital_thread(username: str) -> None:def _digital_thread(username: str) -> None:
+def _digital_thread(username: str) -> None:
     st.markdown("### 🔗 Digital Thread")
     st.caption("A shared industrial graph connecting the objects that modules reason about.")
     with _db() as conn:
