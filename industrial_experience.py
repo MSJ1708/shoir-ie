@@ -428,7 +428,7 @@ def record_decision_outcome(
     actual_payload = dict(actual or {})
     predicted_payload = dict(predicted or {})
     variance_payload = variance.to_dict("records")
-    with sqlite3.connect(db_path, timeout=30) as conn:
+    with _db(db_path) as conn:
         conn.execute(
             "INSERT INTO experience_decision_outcomes VALUES(?,?,?,?,?,?,?,?,?,?)",
             (
