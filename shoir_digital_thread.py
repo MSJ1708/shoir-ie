@@ -26,10 +26,23 @@ import plotly.graph_objects as go
 import streamlit as st
 
 
+# Canonical entity vocabulary for the Industrial Decision Operating System.
+# Domain modules own their calculations; this module owns cross-domain identity
+# and relationships. Every other integration layer should reference this list
+# instead of defining a competing entity taxonomy.
 THREAD_TYPES = [
     "Dataset",
     "Asset",
     "Process",
+    "Product",
+    "Material",
+    "Order",
+    "Workforce",
+    "Quality",
+    "Maintenance",
+    "Energy",
+    "Cost",
+    "Scenario",
     "KPI",
     "Model",
     "Experiment",
@@ -824,16 +837,22 @@ def render_global_project_digital_thread(module: str, username: str) -> None:
     tabs = st.tabs(["🧭 Overview", "🕸️ Thread Map", "🧬 Trace an Item", "🔗 Manage Links", "📦 Evidence"])
 
     with tabs[0]:
-        st.markdown("### Canonical lifecycle")
-        step_cols = st.columns(len(THREAD_TYPES))
-        for idx, kind in enumerate(THREAD_TYPES):
-            step_cols[idx].markdown(f"<div class='sx-step'>{idx+1}. {kind}<br><small>{counts[kind]:,}</small></div>", unsafe_allow_html=True)
+        st.markdown("### Canonical entity lifecycle")
+        for row_start in range(0, len(THREAD_TYPES), 6):
+            kinds = THREAD_TYPES[row_start : row_start + 6]
+            step_cols = st.columns(len(kinds))
+            for offset, kind in enumerate(kinds):
+                idx = row_start + offset
+                step_cols[offset].markdown(
+                    f"<div class='sx-step'>{idx+1}. {kind}<br><small>{counts[kind]:,}</small></div>",
+                    unsafe_allow_html=True,
+                )
 
         missing_layers = [kind for kind in THREAD_TYPES if counts[kind] == 0]
         if missing_layers:
             st.info("Layers not populated yet: " + ", ".join(missing_layers) + ". Run a workspace sync or create the missing record explicitly.")
         else:
-            st.success("✅ All eight traceability layers are represented in this project.")
+            st.success(f"✅ All {len(THREAD_TYPES)} canonical entity layers are represented in this project.")
 
         if raw_nodes:
             st.dataframe(nodes.head(300), use_container_width=True, hide_index=True)
@@ -857,7 +876,7 @@ def render_global_project_digital_thread(module: str, username: str) -> None:
             st.info("Sync the workspace first.")
         else:
             labels = {n["node_id"]: f"{n['node_type']} · {n['name']}" for n in raw_nodes}
-            selected_id = st.selectbox("Select any Dataset / Asset / KPI / Model / Experiment / Decision / Outcome", list(labels.keys()), format_func=labels.get, key="global_thread_trace_node")
+            selected_id = st.selectbox("Select any canonical thread item", list(labels.keys()), format_func=labels.get, key="global_thread_trace_node")
             traced = trace_from(selected_id)
             st.metric("Reachable trace items", len(traced))
             if traced:
