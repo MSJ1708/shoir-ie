@@ -1469,73 +1469,81 @@ if is_admin:
     tier3_features.append("Admin Panel")
 
 def _render_post_module_layers(module_name: str) -> None:
-    """Run cross-cutting enterprise/visualization layers before legacy st.stop()."""
-    _ops_user = st.session_state.get("current_user", "unknown")
+    """Run one governed post-module pipeline and synchronize canonical state."""
+    username = st.session_state.get("current_user", "unknown")
+    module_name = str(module_name)
+    workspace = str(
+        st.session_state.get("shoir_workspace_name")
+        or st.session_state.get("workspace")
+        or st.session_state.get("active_workspace_name")
+        or "default"
+    )
+
+    # Existing specialized integrations remain attached to their established modules.
     try:
-        _ops_name = str(module_name)
-        if _ops_name in {"Digital Twin & Discrete-Event Simulation", "Live Industrial Digital Twin"}:
-            render_digital_twin_extension(_ops_user)
-            render_realtime_monitoring_extension(st.session_state.get("iot_sensors", []), _ops_name)
-            _ops_frame = st.session_state.get("digital_twin_state_snapshot")
-            if isinstance(_ops_frame, pd.DataFrame) and not _ops_frame.empty:
-                render_data_intelligence_extension(_ops_name, _ops_frame, _ops_frame)
-        elif _ops_name == "Industrial Control Center":
+        if module_name in {"Digital Twin & Discrete-Event Simulation", "Live Industrial Digital Twin"}:
+            render_digital_twin_extension(username)
+            render_realtime_monitoring_extension(st.session_state.get("iot_sensors", []), module_name)
+            frame = st.session_state.get("digital_twin_state_snapshot")
+            if isinstance(frame, pd.DataFrame) and not frame.empty:
+                render_data_intelligence_extension(module_name, frame, frame)
+        elif module_name in {"Industrial Control Center", "Control Tower"}:
             render_control_tower_extension()
-        elif _ops_name == "Industrial Connectivity Hub":
+        elif module_name == "Industrial Connectivity Hub":
             render_connectivity_extension()
-        elif _ops_name in {"Enterprise Integration & Collaboration", "Enterprise Security & Governance"}:
-            render_collaboration_extension(_ops_user)
+        elif module_name in {"Enterprise Integration & Collaboration", "Enterprise Security & Governance"}:
+            render_collaboration_extension(username)
             render_security_extension()
-        elif _ops_name == "Persistence":
-            render_persistence_extension(_ops_user)
-        elif _ops_name in {"Engineering Economics & Finance", "Capital Investment & Engineering Economics"}:
-            render_economics_extension(_ops_user)
-        elif _ops_name in {"Green IE & Sustainability", "Industrial Sustainability & LCA"}:
-            render_sustainability_extension(_ops_user)
-        elif _ops_name == "Human Factors & Ergonomics (NIOSH)":
-            render_human_factors_extension(_ops_user)
-        elif _ops_name == "Geospatial Network Designer":
-            render_geospatial_extension(_ops_user)
-        elif _ops_name == "AI Copilot":
-            render_knowledge_extension(_ops_user)
-    except Exception as _ops_error:
-        st.warning("Additional enterprise governance surfaces remain non-blocking; native module results are preserved.")
-        with st.expander("Enterprise governance diagnostic", expanded=False):
-            st.code(f"{type(_ops_error).__name__}: {_ops_error}")
+        elif module_name == "Persistence":
+            render_persistence_extension(username)
+        elif module_name in {"Engineering Economics & Finance", "Capital Investment & Engineering Economics"}:
+            render_economics_extension(username)
+        elif module_name in {"Green IE & Sustainability", "Industrial Sustainability & LCA"}:
+            render_sustainability_extension(username)
+        elif module_name == "Human Factors & Ergonomics (NIOSH)":
+            render_human_factors_extension(username)
+        elif module_name == "Geospatial Network Designer":
+            render_geospatial_extension(username)
+        elif module_name == "AI Copilot":
+            render_knowledge_extension(username)
+        elif module_name == "Benchmarking & Engineering Standards":
+            from shoir_enterprise_ops import render_benchmarking_evidence
+            render_benchmarking_evidence(username)
+    except Exception as exc:
+        st.warning("Specialized enterprise extension could not render; native results remain available.")
+        with st.expander("Enterprise extension diagnostic", expanded=False):
+            st.code(f"{type(exc).__name__}: {exc}")
+
+    # One enterprise governance bridge, one universal visualization surface.
+    try:
+        render_enterprise_bridge(module_name, tier_val, username)
+    except Exception as exc:
+        st.warning("Enterprise governance layer could not render; native results remain available.")
+        with st.expander("Governance diagnostic", expanded=False):
+            st.code(f"{type(exc).__name__}: {exc}")
 
     try:
-        render_enterprise_bridge(str(module_name), tier_val, st.session_state.get("current_user", "unknown"))
+        render_universal_module_parity(module_name, phase="results")
     except Exception as exc:
-        st.warning("Enterprise capability layer could not render for this legacy module; native results remain available.")
-        with st.expander("Enterprise layer diagnostic"):
+        st.warning("Universal Module Studio could not render; native results remain available.")
+        with st.expander("Visualization diagnostic", expanded=False):
             st.code(f"{type(exc).__name__}: {exc}")
-    try:
-        render_universal_module_parity(str(module_name), phase="results")
-    except Exception as exc:
-        st.warning("Universal Module Studio could not render for this legacy module; native results remain available.")
-        with st.expander("Visualization layer diagnostic"):
-            st.code(f"{type(exc).__name__}: {exc}")
-    finally:
-        if st.session_state.get("current_user"):
-            save_user_workspace(st.session_state["current_user"], st.session_state)
 
+    # Canonical Digital Thread is synchronized after native results exist.
     try:
-        render_enterprise_bridge(str(module_name), tier_val, st.session_state.get("current_user", "unknown"))
+        from shoir_digital_thread import sync_workspace_to_thread
+        sync_workspace_to_thread(username, active_module=module_name)
     except Exception as exc:
-        st.warning("Enterprise capability layer could not render for this legacy module; native results remain available.")
-        with st.expander("Enterprise layer diagnostic"):
+        st.warning("Digital Thread synchronization is temporarily unavailable; module results remain intact.")
+        with st.expander("Digital Thread diagnostic", expanded=False):
             st.code(f"{type(exc).__name__}: {exc}")
-    try:
-        render_universal_module_parity(str(module_name), phase="results")
-    except Exception as exc:
-        st.warning("Universal Module Studio could not render for this legacy module; native results remain available.")
-        with st.expander("Visualization layer diagnostic"):
-            st.code(f"{type(exc).__name__}: {exc}")
-    finally:
-        # Persistence is deliberately independent from cross-cutting rendering.
-        # A visualization failure must never prevent recovery of module state.
-        if st.session_state.get("current_user"):
-            save_user_workspace(st.session_state["current_user"], st.session_state)
+
+    if username != "unknown":
+        try:
+            save_user_workspace(username, st.session_state)
+        except Exception:
+            # Persistence failures must never discard in-session engineering results.
+            pass
 
 
 st.sidebar.markdown("### 🧭 Navigation Menu")
