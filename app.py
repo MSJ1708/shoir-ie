@@ -1686,17 +1686,35 @@ def _render_pretty_result(value, title="Result", key_prefix="result"):
 
 def _render_result_chart(df,title,key_prefix):
     if not isinstance(df,pd.DataFrame) or df.empty: return
+    # Manual chart controls stay available, but the universal visualization
+    # contract is always the first fallback so categorical/unknown results
+    # never silently become graph-less.
+    try:
+        from shoir_live_visuals import ensure_visualization_suite
+        auto_suite=ensure_visualization_suite(df, context=title, max_figures=1)
+    except Exception:
+        auto_suite=[]
     nums=[x for x in df.columns if pd.api.types.is_numeric_dtype(df[x])]
-    if not nums: return
+    if not nums:
+        if auto_suite:
+            st.plotly_chart(auto_suite[0][1],use_container_width=True,config={"displayModeBar":False,"responsive":True})
+        return
     y=st.selectbox("Metric",nums,key=f"{key_prefix}_metric")
     xs=[x for x in df.columns if x!=y]
     x=st.selectbox("X-axis / category",xs,key=f"{key_prefix}_x") if xs else None
-    kind=st.selectbox("Chart",["Bar","Line","Scatter"],key=f"{key_prefix}_chart")
+    kind=st.selectbox("Chart",["Auto","Bar","Line","Scatter"],key=f"{key_prefix}_chart")
+    if kind=="Auto":
+        if auto_suite:
+            st.plotly_chart(auto_suite[0][1],use_container_width=True,config={"displayModeBar":False,"responsive":True})
+        return
     plot=df[[x,y]].dropna() if x else df[[y]].dropna()
-    if plot.empty: return
+    if plot.empty:
+        if auto_suite:
+            st.plotly_chart(auto_suite[0][1],use_container_width=True,config={"displayModeBar":False,"responsive":True})
+        return
     fig=px.line(plot,x=x,y=y,markers=True,title=title) if kind=="Line" and x else px.scatter(plot,x=x,y=y,title=title) if kind=="Scatter" and x else px.bar(plot,x=x,y=y,title=title) if x else px.bar(plot,y=y,title=title)
     fig.update_layout(height=340,margin=dict(l=10,r=10,t=55,b=10))
-    st.plotly_chart(fig,use_container_width=True)
+    st.plotly_chart(fig,use_container_width=True,config={"displayModeBar":False,"responsive":True})
 
 # =====================================================================
 # UNIVERSAL MODULE PARITY — PREPARE
