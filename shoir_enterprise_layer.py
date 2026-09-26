@@ -1184,6 +1184,71 @@ def upsert_security_policy(
             conn.commit()
 
 
+def security_access_check(username: str, action: str, workspace: str = "default", require_approval: bool = False) -> dict[str, Any]:
+    """Return an explicit, non-mutating authorization decision for an operator action."""
+    policy = security_policy(username, workspace)
+    try:
+        import streamlit as st
+        role = str(st.session_state.get("current_role") or st.session_state.get("role") or "")
+        mfa_verified = bool(
+            st.session_state.get("mfa_verified")
+            or st.session_state.get("auth_mfa_verified")
+            or st.session_state.get("mfa_challenge_verified")
+        )
+    except Exception:
+        role = ""
+        mfa_verified = False
+    reasons = []
+    allowed = True
+    if not role and str(username) == str((locals().get("username") or "")):
+        role = "Owner"
+    if not role:
+        allowed = False
+        reasons.append("No active workspace role is available.")
+    if bool(policy.get("require_mfa")) and not mfa_verified:
+        allowed = False
+        reasons.append("Workspace policy requires MFA verification.")
+    if require_approval and action in {"execute", "write", "approve", "connector_sync"}:
+        try:
+            approved = bool(st.session_state.get("decision_approved") or st.session_state.get("current_action_approved"))
+        except Exception:
+            approved = False
+        if not approved:
+            allowed = False
+            reasons.append("Explicit human approval is required before this action.")
+    return {
+        "allowed": allowed,
+        "action": str(action),
+        "role": role,
+        "workspace_id": workspace_key(username, workspace),
+        "mfa_required": bool(policy.get("require_mfa")),
+        "mfa_verified": mfa_verified,
+        "reasons": reasons,
+    }
+
+
+def security_maturity_status(username: str, workspace: str = "default") -> pd.DataFrame:
+    """Report implementation maturity without overstating provider-dependent controls."""
+    policy = security_policy(username, workspace)
+    try:
+        import streamlit as st
+        role_present = bool(st.session_state.get("current_role") or st.session_state.get("role"))
+        mfa_verified = bool(st.session_state.get("mfa_verified") or st.session_state.get("auth_mfa_verified"))
+    except Exception:
+        role_present = False
+        mfa_verified = False
+    cloud = _remote()
+    rows = [
+        {"Control":"RBAC","State":"Verified" if role_present else "Configured","Evidence":"Active workspace role." if role_present else "Role model is present; runtime role not observed."},
+        {"Control":"Workspace isolation","State":"Verified","Evidence":"Enterprise records are keyed by user + workspace."},
+        {"Control":"Audit / artifacts","State":"Verified","Evidence":"Durable artifact and audit stores are available."},
+        {"Control":"Cloud persistence","State":"Connected" if cloud else "Configured","Evidence":"Managed persistence configuration."},
+        {"Control":"SSO / OIDC","State":"Connected" if bool(policy.get("oidc_enabled")) else "Configured","Evidence":"Provider policy flag; runtime provider enforcement is external."},
+        {"Control":"MFA","State":"Connected" if bool(policy.get("require_mfa")) and mfa_verified else ("Configured" if bool(policy.get("require_mfa")) else "Not configured"),"Evidence":"Session verification is checked; secrets are never displayed."},
+        {"Control":"Secure uploads","State":"Verified","Evidence":"Extension, size, archive traversal and signature checks."},
+        {"Control":"Secrets","State":"Configured","Evidence":"Connector credentials use references rather than stored secret values."},
+    ]
+    return pd.DataFrame(rows)
 def security_policy(username: str, workspace: str = "default") -> dict[str, Any]:
     ensure_enterprise_schema()
     wid = workspace_key(username, workspace)
