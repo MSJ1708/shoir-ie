@@ -431,6 +431,7 @@ def run_orchestration(prompt: str, module: str, df: pd.DataFrame, context: Mappi
     runtime = dict(context or {})
     knowledge_text = str(runtime.get("knowledge_context") or "").strip()
     knowledge_count = int(runtime.get("knowledge_documents", 0) or 0)
+    canonical_context = runtime.get("canonical_context") or {}
     if intent_info["intent"] == "optimization" and callable(runtime.get("milp_solver")):
         customers = runtime.get("customers") or []
         warehouses = runtime.get("warehouses") or []
@@ -467,9 +468,22 @@ def run_orchestration(prompt: str, module: str, df: pd.DataFrame, context: Mappi
     if figure is not None and not any(figure_fingerprint(figure) == figure_fingerprint(existing) for _, existing in visual_suite):
         visual_suite = [(f"{module} · Primary analysis", figure)] + visual_suite
         visual_suite = visual_suite[:4]
+    if canonical_context:
+        analysis_meta = {
+            **analysis_meta,
+            "digital_thread_context": canonical_context,
+            "governed_execution": True,
+        }
     explanation = explain_results(prompt, inspection, method, analysis_meta, result)
     if knowledge_text:
         explanation += f" Linked knowledge context was available from {knowledge_count} document(s) and is included in the evidence bundle; it was not treated as independently validated evidence."
+    if canonical_context:
+        thread = canonical_context.get("digital_thread", {})
+        explanation += (
+            f" The workflow was grounded in the current canonical Digital Thread for workspace "
+            f"{canonical_context.get('workspace', 'default')}, containing {thread.get('nodes', 0)} nodes "
+            f"and {thread.get('edges', 0)} traceability edges."
+        )
     export = build_export_bundle(prompt, module, run_id, inspection, method, result, explanation, figure, knowledge_text)
     return {
         "run_id": run_id,
@@ -489,5 +503,6 @@ def run_orchestration(prompt: str, module: str, df: pd.DataFrame, context: Mappi
         "prompt": prompt,
         "knowledge_context": knowledge_text[:12000],
         "knowledge_documents": knowledge_count,
+        "canonical_context": canonical_context,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
