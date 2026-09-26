@@ -571,15 +571,21 @@ def render_global_project_digital_thread(module: str, username: str) -> None:
 
     with tabs[0]:
         st.markdown("### Canonical lifecycle")
-        step_cols = st.columns(len(THREAD_TYPES))
-        for idx, kind in enumerate(THREAD_TYPES):
-            step_cols[idx].markdown(f"<div class='sx-step'>{idx+1}. {kind}<br><small>{counts[kind]:,}</small></div>", unsafe_allow_html=True)
+        for row_start in range(0, len(THREAD_TYPES), 6):
+            kinds = THREAD_TYPES[row_start : row_start + 6]
+            step_cols = st.columns(len(kinds))
+            for offset, kind in enumerate(kinds):
+                idx = row_start + offset
+                step_cols[offset].markdown(
+                    f"<div class='sx-step'>{idx+1}. {kind}<br><small>{counts[kind]:,}</small></div>",
+                    unsafe_allow_html=True,
+                )
 
         missing_layers = [kind for kind in THREAD_TYPES if counts[kind] == 0]
         if missing_layers:
             st.info("Layers not populated yet: " + ", ".join(missing_layers) + ". Run a workspace sync or create the missing record explicitly.")
         else:
-            st.success("✅ All eight traceability layers are represented in this project.")
+            st.success(f"✅ All {len(THREAD_TYPES)} canonical traceability layers are represented in this project.")
 
         if raw_nodes:
             st.dataframe(nodes.head(300), use_container_width=True, hide_index=True)
@@ -603,7 +609,7 @@ def render_global_project_digital_thread(module: str, username: str) -> None:
             st.info("Sync the workspace first.")
         else:
             labels = {n["node_id"]: f"{n['node_type']} · {n['name']}" for n in raw_nodes}
-            selected_id = st.selectbox("Select any Dataset / Asset / KPI / Model / Experiment / Decision / Outcome", list(labels.keys()), format_func=labels.get, key="global_thread_trace_node")
+            selected_id = st.selectbox("Select any canonical thread item", list(labels.keys()), format_func=labels.get, key="global_thread_trace_node")
             traced = trace_from(selected_id)
             st.metric("Reachable trace items", len(traced))
             if traced:
@@ -673,4 +679,4 @@ def render_global_project_digital_thread(module: str, username: str) -> None:
         coverage = pd.DataFrame([{"Layer": kind, "Nodes": counts[kind], "Present": counts[kind] > 0} for kind in THREAD_TYPES])
         st.dataframe(coverage, use_container_width=True, hide_index=True)
 
-    st.caption("Persistence: project metadata and Digital Thread nodes/links live in the user workspace state and are captured by the existing autosave/durable persistence path.")
+    st.caption("The Digital Thread is the canonical relationship layer for this workspace. Snapshots are persisted through the durable artifact path; measured domain values remain owned by their source modules.")
