@@ -272,6 +272,9 @@ def _auto_chart_choice(df: pd.DataFrame) -> str:
     propagated = _find_col(df, ("propagated kpi", "bootstrap statistic", "bootstrap effect"))
     sensitivity = _find_col(df, ("sensitivity", "elasticity", "importance"))
     defect_metric = _find_col(df, ("defect", "failure", "rpn", "risk priority"))
+    control_ucl = _find_col(df, ("ucl", "upper control limit", "upper control"))
+    control_lcl = _find_col(df, ("lcl", "lower control limit", "lower control"))
+    control_measurement = _find_col(df, ("measurement", "measure", "observation", "sample"))
 
     ci_low = _find_col(df, ("ci low", "lower 95", "lower ci"))
     ci_high = _find_col(df, ("ci high", "upper 95", "upper ci"))
@@ -724,7 +727,10 @@ def _auto_chart_choice(df: pd.DataFrame) -> str:
     has_scenario = any("scenario" in n or "case" in n for n in names)
     has_timestamp = bool(dates)
 
-    if has_health and has_area and numeric:
+    # Explicit control-limit columns always beat generic 3D heuristics.
+    if control_ucl and control_lcl and (control_measurement or numeric):
+        return "Control Chart"
+    if has_health and has_area and numeric and any("health score" in n or "health index" in n for n in names):
         return "Health Heatmap"
     if has_anomaly and has_timestamp and numeric:
         return "Anomaly Timeline"
