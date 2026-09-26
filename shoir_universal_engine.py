@@ -185,11 +185,15 @@ def pivot_table(
             row_col, value_col = row_fields[0], value_fields[0]
             quote = lambda name: '"' + str(name).replace('"', '""') + '"'
             sql_agg = {"mean": "AVG", "sum": "SUM", "count": "COUNT", "min": "MIN", "max": "MAX", "median": "MEDIAN"}[aggregation]
-            relation = duckdb.from_df(work[[row_col, value_col]].copy())
-            return relation.query(
-                f"SELECT {quote(row_col)} AS {quote(row_col)}, {sql_agg}(CAST({quote(value_col)} AS DOUBLE)) AS {quote(value_col)} "
-                f"FROM relation GROUP BY {quote(row_col)} ORDER BY {quote(row_col)}"
-            ).df()
+            con = duckdb.connect()
+            try:
+                con.register("shoir_pivot_frame", work[[row_col, value_col]].copy())
+                return con.execute(
+                    f"SELECT {quote(row_col)} AS {quote(row_col)}, {sql_agg}(CAST({quote(value_col)} AS DOUBLE)) AS {quote(value_col)} "
+                    f"FROM shoir_pivot_frame GROUP BY {quote(row_col)} ORDER BY {quote(row_col)}"
+                ).df()
+            finally:
+                con.close()
         except Exception:
             pass
 
