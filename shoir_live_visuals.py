@@ -735,8 +735,11 @@ def _auto_chart_choice(df: pd.DataFrame) -> str:
     has_anomaly = any("anomaly" in n or "outlier" in n for n in names)
     has_scenario = any("scenario" in n or "case" in n for n in names)
     has_timestamp = bool(dates)
+    has_control_limits = any("ucl" in n or "lcl" in n or "upper control" in n or "lower control" in n for n in names)
 
-    if has_health and has_area and numeric:
+    if has_control_limits and numeric:
+        return "Control Chart"
+    if has_health and has_area and numeric and any("health score" in n or n.strip() == "score" for n in names):
         return "Health Heatmap"
     if has_anomaly and has_timestamp and numeric:
         return "Anomaly Timeline"
