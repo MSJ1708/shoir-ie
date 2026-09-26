@@ -470,6 +470,45 @@ def run_orchestration(prompt: str, module: str, df: pd.DataFrame, context: Mappi
     explanation = explain_results(prompt, inspection, method, analysis_meta, result)
     if knowledge_text:
         explanation += f" Linked knowledge context was available from {knowledge_count} document(s) and is included in the evidence bundle; it was not treated as independently validated evidence."
+    figure_hashes = [figure_fingerprint(fig) for _, fig in visual_suite]
+    evidence_manifest = {
+        "run_id": run_id,
+        "module": module,
+        "data_rows": int(inspection.get("rows", 0)),
+        "data_columns": int(inspection.get("columns", 0)),
+        "method": str(method.get("method", "")),
+        "analysis_type": str(analysis_meta.get("type", "")),
+        "knowledge_documents": knowledge_count,
+        "knowledge_context_used": knowledge_used,
+        "figure_hashes": figure_hashes,
+        "approval_required": True,
+        "human_approval_required_for_write_or_execute": True,
+    }
+    try:
+        from industrial_experience import log_copilot_action
+        log_copilot_action(
+            module,
+            "analyze",
+            str(runtime.get("actor") or runtime.get("username") or "unknown"),
+            requires_approval=True,
+            status="Completed",
+            evidence=evidence_manifest,
+            run_id=run_id,
+        )
+    except Exception:
+        pass
+    try:
+        from shoir_enterprise_layer import record_artifact
+        record_artifact(
+            str(runtime.get("actor") or runtime.get("username") or "unknown"),
+            "copilot_run",
+            run_id,
+            evidence_manifest,
+            workspace=str(runtime.get("workspace") or "default"),
+        )
+    except Exception:
+        pass
+
     export = build_export_bundle(prompt, module, run_id, inspection, method, result, explanation, figure, knowledge_text)
     return {
         "run_id": run_id,
@@ -482,7 +521,8 @@ def run_orchestration(prompt: str, module: str, df: pd.DataFrame, context: Mappi
         "result": result,
         "figure": figure,
         "visual_suite": visual_suite,
-        "figure_hashes": [figure_fingerprint(fig) for _, fig in visual_suite],
+        "figure_hashes": evidence_manifest["figure_hashes"],
+        "evidence_manifest": evidence_manifest,
         "explanation": explanation,
         "export": export,
         "module": module,
