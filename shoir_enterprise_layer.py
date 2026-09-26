@@ -888,6 +888,120 @@ def test_connector_profile(
     }
 
 
+def infer_canonical_schema(frame: pd.DataFrame) -> dict[str, str]:
+    """Map observed source fields to canonical industrial roles without renaming data silently."""
+    if not isinstance(frame, pd.DataFrame):
+        return {}
+    aliases = {
+        "asset_id": ("asset", "asset_id", "machine", "equipment", "workcenter", "work_center", "node"),
+        "product_id": ("product", "product_id", "sku", "part", "item"),
+        "material_id": ("material", "material_id", "component", "raw_material"),
+        "order_id": ("order", "order_id", "work_order", "sales_order", "purchase_order"),
+        "operator_id": ("operator", "employee", "employee_id", "worker", "technician"),
+        "process": ("process", "operation", "activity", "route"),
+        "quality_metric": ("quality", "defect", "scrap", "yield", "inspection"),
+        "maintenance_metric": ("maintenance", "downtime", "mtbf", "mttr", "rul", "failure"),
+        "energy_metric": ("energy", "kwh", "electricity", "power"),
+        "cost_metric": ("cost", "price", "opex", "capex", "expense"),
+        "scenario": ("scenario", "case", "variant", "alternative"),
+    }
+    result = {}
+    for role, terms in aliases.items():
+        for column in frame.columns:
+            lowered = str(column).lower().replace("-", "_").replace(" ", "_")
+            if any(term in lowered for term in terms):
+                result[role] = str(column)
+                break
+    return result
+
+
+def _safe_read_sql_query(query: str) -> bool:
+    normalized = re.sub(r"\s+", " ", str(query or "").strip().lower())
+    return bool(re.match(r"^(select|with)\b", normalized)) and ";" not in normalized.rstrip(";")
+
+
+def fetch_connector_sample(
+    username: str,
+    connector_id: str,
+    protocol: str,
+    endpoint: str,
+    secret_ref: str = "",
+    query: str = "",
+    workspace: str = "default",
+    limit: int = 1000,
+    timeout: float = 10.0,
+) -> dict[str, Any]:
+    """Read a bounded sample from supported REST/SQL connectors and persist it with lineage."""
+    limit = max(1, min(10000, int(limit)))
+    started = datetime.now(timezone.utc)
+    proto = str(protocol or "").strip().upper()
+    secret = resolve_connector_secret(secret_ref)
+    frame = pd.DataFrame()
+    detail = ""
+    status = "Configuration Error"
+    if proto in {"REST", "ODATA", "HTTPS"}:
+        try:
+            response = requests.get(str(endpoint).strip(), headers={"Authorization":"Bearer "+secret} if secret else {}, timeout=max(1.0, float(timeout)))
+            response.raise_for_status()
+            payload = response.json()
+            if isinstance(payload, list):
+                frame = pd.json_normalize(payload).head(limit)
+            elif isinstance(payload, dict):
+                rows = payload.get("data") if isinstance(payload.get("data"), list) else payload.get("results")
+                if isinstance(rows, list):
+                    frame = pd.json_normalize(rows).head(limit)
+                else:
+                    frame = pd.DataFrame([payload]).head(limit)
+            else:
+                raise ValueError("Response body is not JSON object/array data.")
+            status = "Healthy"
+            detail = f"Fetched {len(frame):,} record(s) from the REST endpoint."
+        except Exception as exc:
+            detail = f"{type(exc).__name__}: {str(exc)[:300]}"
+            status = "Offline" if isinstance(exc, requests.RequestException) else "Read Error"
+    elif proto in {"SQL", "JDBC"}:
+        if not _safe_read_sql_query(query):
+            detail = "Only a single read-only SELECT/WITH query is allowed for connector samples."
+        else:
+            bounded_query = "SELECT * FROM (" + str(query).strip().rstrip(";") + f") AS shoir_sample LIMIT {limit}"
+            try:
+                target = str(endpoint).strip()
+                if target.lower().startswith("sqlite:///"):
+                    db_path = target[10:]
+                    with sqlite3.connect(db_path, timeout=max(1.0, float(timeout))) as conn:
+                        frame = pd.read_sql_query(bounded_query, conn)
+                elif target.lower().startswith(("postgresql://", "postgres://")):
+                    import psycopg2
+                    conn = psycopg2.connect(target, connect_timeout=max(1, int(timeout)))
+                    try:
+                        frame = pd.read_sql_query(bounded_query, conn)
+                    finally:
+                        conn.close()
+                else:
+                    raise ValueError("SQL sample adapter supports sqlite:/// and PostgreSQL DSNs.")
+                status = "Healthy"
+                detail = f"Fetched {len(frame):,} record(s) from the SQL source."
+            except Exception as exc:
+                detail = f"{type(exc).__name__}: {str(exc)[:300]}"
+                status = "Read Error"
+    else:
+        detail = "Sample reads are currently supported for REST/ODATA/HTTPS and SQL/JDBC adapters."
+    finished = datetime.now(timezone.utc)
+    mapping = infer_canonical_schema(frame)
+    artifact_id = ""
+    if status == "Healthy" and not frame.empty:
+        artifact_id = persist_dataframe_artifact(username, "Industrial Connectivity Hub", "connector_sample_"+connector_id, frame, workspace, limit)
+        record_artifact(username, "connector_schema_mapping", connector_id, {"connector_id":connector_id, "mapping":mapping, "columns":[str(x) for x in frame.columns], "artifact_id":artifact_id}, workspace)
+    _record_connector_run(username, connector_id, "sample_read", status, (finished-started).total_seconds()*1000.0, detail, len(frame), started, finished, workspace)
+    return {
+        "status": status,
+        "detail": detail,
+        "records": int(len(frame)),
+        "artifact_id": artifact_id,
+        "schema_mapping": mapping,
+        "frame": frame,
+    }
+
 def schedule_connector_sync(
     username: str,
     connector_id: str,
