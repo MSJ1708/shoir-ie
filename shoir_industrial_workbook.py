@@ -262,10 +262,15 @@ class SafeFormulaEngine:
             left = self._eval_node(node.left, sheet)
             for op, comp in zip(node.ops, node.comparators):
                 right = self._eval_node(comp, sheet)
-                passed = {ast.Eq:left==right, ast.NotEq:left!=right, ast.Lt:left<right,
-                          ast.LtE:left<=right, ast.Gt:left>right, ast.GtE:left>=right,
-                          ast.In:left in right, ast.NotIn:left not in right}.get(type(op))
-                if passed is None: raise ValueError(f"Unsupported comparison operator: {type(op).__name__}")
+                if isinstance(op, ast.Eq): passed = left == right
+                elif isinstance(op, ast.NotEq): passed = left != right
+                elif isinstance(op, ast.Lt): passed = left < right
+                elif isinstance(op, ast.LtE): passed = left <= right
+                elif isinstance(op, ast.Gt): passed = left > right
+                elif isinstance(op, ast.GtE): passed = left >= right
+                elif isinstance(op, ast.In): passed = left in right
+                elif isinstance(op, ast.NotIn): passed = left not in right
+                else: raise ValueError(f"Unsupported comparison operator: {type(op).__name__}")
                 if not passed: return False
                 left = right
             return True
@@ -465,8 +470,14 @@ def _evaluate_row_expression(expression:str,row:Mapping[str,Any])->Any:
         if isinstance(node,ast.Compare):
             a=walk(node.left)
             for op,comp in zip(node.ops,node.comparators):
-                b=walk(comp); ok={ast.Eq:a==b,ast.NotEq:a!=b,ast.Lt:a<b,ast.LtE:a<=b,ast.Gt:a>b,ast.GtE:a>=b}.get(type(op))
-                if ok is None: raise ValueError("Unsupported comparison")
+                b=walk(comp)
+                if isinstance(op, ast.Eq): ok = a == b
+                elif isinstance(op, ast.NotEq): ok = a != b
+                elif isinstance(op, ast.Lt): ok = a < b
+                elif isinstance(op, ast.LtE): ok = a <= b
+                elif isinstance(op, ast.Gt): ok = a > b
+                elif isinstance(op, ast.GtE): ok = a >= b
+                else: raise ValueError("Unsupported comparison")
                 if not ok: return False
                 a=b
             return True
