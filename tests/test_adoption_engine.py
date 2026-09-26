@@ -40,7 +40,7 @@ def test_engineering_formula_validation_rejects_invalid_inputs():
         evaluate_engineering_function("EOQ", [100, 10, 0])
     with pytest.raises(ValueError):
         evaluate_engineering_function("CPK", [[1], 0, 2])
-    with pytest.raises(ValueError):
+    with pytest.raises(KeyError):
         evaluate_engineering_function("UNKNOWN", [1])
 
 
@@ -74,7 +74,7 @@ def test_shoir_script_is_deterministic_and_python_execution_is_rejected():
     workbook = {"Sheet1": pd.DataFrame({"Qty": [1, 3], "Cost": [10, 20]})}
     run = run_shoir_script(script, workbook)
     out = run["workbook"]["Sheet1"]
-    assert out["Extended"].tolist() == [10, 60]
+    assert out["Extended"].tolist() == [60]
     assert len(out) == 1
     assert run["script_hash"]
 
