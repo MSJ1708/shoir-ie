@@ -792,11 +792,11 @@ def render_module(module: str, tier: str, username: str):
             (username,module,_now()),
         )
         _usage_conn.commit()
-    render_module_data_exchange(module, st, tier, username)
     if module=="Industrial Workbook":
         from shoir_industrial_workbook import render_industrial_workbook
         render_industrial_workbook(tier, username)
         return
+    render_module_data_exchange(module, st, tier, username)
     required=next((x["tier"] for x in PLATFORM_CATALOG if x["name"]==module),None)
     if required and not tier_allows(tier,required):
         st.warning(f"🔒 {module} requires {required}. Your current tier is {tier}. Open Subscriptions to review upgrade options.")
