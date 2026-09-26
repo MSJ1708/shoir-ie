@@ -155,3 +155,12 @@ def test_extension_contract():
     ))
     out = run_workbook_extension(register_name, pd.DataFrame({"Value": [2, 3]}))
     assert out["Double"].tolist() == [4, 6]
+
+
+def test_platform_and_visualization_integration():
+    from industrial_platform import PLATFORM_CATALOG
+    from shoir_live_visuals import _MODULE_KEYS
+    entry = next(x for x in PLATFORM_CATALOG if x["name"] == "Industrial Workbook")
+    assert entry["tier"] == "Starter"
+    assert "Industrial Workbook" in _MODULE_KEYS
+    assert "industrial_workbook_current_df" in _MODULE_KEYS["Industrial Workbook"]
