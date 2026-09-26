@@ -649,6 +649,8 @@ def create_scenario_branch(
 ) -> str:
     """Create a persisted workbook branch while preserving the source workbook."""
     from shoir_industrial_workbook import (
+        _actor,
+        _workspace,
         load_workbook,
         load_workbook_variables,
         list_saved_workbooks,
@@ -677,8 +679,8 @@ def create_scenario_branch(
             "INSERT INTO industrial_workbook_audit(workbook_id,workspace,owner,action,details,created_at) VALUES(?,?,?,?,?,?)",
             (
                 child_id,
-                "default" if path == "enterprise_full_workspace.db" else "test",
-                "unknown",
+                _workspace(),
+                _actor(),
                 "branch",
                 f"source_workbook={workbook_id} | branch={name}",
                 _now(),
