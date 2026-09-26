@@ -1297,6 +1297,41 @@ def render_sustainability_extension(username: str = "unknown") -> None:
     _render_universal_viz("Industrial Sustainability & LCA", "sustainability_decision_bridge_df")
 
 
+def render_benchmarking_evidence(username: str = "unknown") -> None:
+    """Extend the existing Benchmarking module with measured ROI evidence."""
+    from benchmark_harness import calculate_roi_evidence
+
+    st.markdown("### 🧪 Benchmark & ROI Evidence Lab")
+    st.caption("Enter measured baseline and Shoir-IE timings. The calculator does not invent savings; it exposes the assumptions used to derive them.")
+    c1, c2, c3 = st.columns(3)
+    baseline = c1.number_input("Baseline cycle time (minutes)", 0.0, 100000.0, 240.0, 5.0, key="roi_baseline_minutes")
+    shoir = c2.number_input("Shoir-IE cycle time (minutes)", 0.0, 100000.0, 18.0, 1.0, key="roi_shoir_minutes")
+    runs = c3.number_input("Annual runs", 0.0, 10000000.0, 250.0, 10.0, key="roi_annual_runs")
+    c4, c5, c6 = st.columns(3)
+    hourly_rate = c4.number_input("Engineering labor rate / hour", 0.0, 100000.0, 50.0, 5.0, key="roi_hourly_rate")
+    implementation_cost = c5.number_input("Implementation cost", 0.0, 100000000.0, 25000.0, 1000.0, key="roi_implementation_cost")
+    adoption = c6.slider("Expected adoption fraction", 0.0, 1.0, 1.0, 0.05, key="roi_adoption_fraction")
+    result = calculate_roi_evidence(baseline, shoir, runs, hourly_rate, implementation_cost, adoption)
+    metrics = pd.DataFrame([{
+        "Metric": "Annual hours saved", "Value": result["annual_hours_saved"], "Unit": "hours/year",
+    }, {
+        "Metric": "Annual labor value", "Value": result["annual_labor_value"], "Unit": "currency/year",
+    }, {
+        "Metric": "First-year net value", "Value": result["first_year_net_value"], "Unit": "currency",
+    }, {
+        "Metric": "Cycle reduction", "Value": result["cycle_reduction_pct"] or 0.0, "Unit": "%",
+    }])
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Annual hours saved", f"{result["annual_hours_saved"]:,.1f}")
+    m2.metric("Annual labor value", f"{result["annual_labor_value"]:,.2f}")
+    payback = result["payback_months"]
+    m3.metric("Payback", f"{payback:,.1f} months" if payback is not None else "Not reached")
+    m4.metric("Cycle reduction", f"{result["cycle_reduction_pct"]:,.1f}%" if result["cycle_reduction_pct"] is not None else "n/a")
+    st.dataframe(metrics, use_container_width=True, hide_index=True)
+    st.caption("Evidence status: " + result["evidence_status"] + ". Replace defaults with measured pilot data before using the values externally.")
+    st.session_state["benchmark_roi_df"] = metrics.copy(deep=True)
+    _render_universal_viz("Benchmarking & Engineering Standards", "benchmark_roi_df")
+
 def render_human_factors_extension(username: str = "unknown") -> None:
     st.markdown("### 🧑‍🏭 Workforce & Human-Factors Decision Layer")
     tasks = _df(st.session_state.get("ergonomic_tasks", []))
