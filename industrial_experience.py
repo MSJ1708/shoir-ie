@@ -2119,6 +2119,44 @@ def render_blank_module_studio(module: str, tier: str, username: str) -> None:
                 if st.button("➡️ Move to Validated", use_container_width=True, key="sx_validate_" + key):
                     transition_decision(did, username, "Validated", "Validation evidence captured from module canvas.")
                     st.success("Decision moved to Validated.")
+            with st.expander("📈 Decision-to-Value Verification", expanded=False):
+                st.caption("Record what the decision predicted, what actually happened, and the resulting variance. This evidence remains separate from the approval status until a human verifies it.")
+                predicted_text = st.text_area("Predicted KPIs (JSON)", value='{"Throughput": 100, "Cost": 5000}', key="sx_predicted_json_" + key, height=110)
+                actual_text = st.text_area("Actual KPIs (JSON)", value='{"Throughput": 0, "Cost": 0}', key="sx_actual_json_" + key, height=110)
+                outcome_status = st.selectbox("Implementation status", ["Planned", "Implemented", "Verified"], key="sx_outcome_status_" + key)
+                lesson = st.text_area("Lesson / explanation", key="sx_outcome_lesson_" + key, height=90)
+                if st.button("🧾 Record actual outcome", use_container_width=True, key="sx_record_outcome_" + key):
+                    try:
+                        predicted = json.loads(predicted_text)
+                        actual = json.loads(actual_text)
+                        if not isinstance(predicted, dict) or not isinstance(actual, dict):
+                            raise ValueError("Predicted and actual KPI payloads must be JSON objects.")
+                        outcome_id = record_decision_outcome(
+                            did, username, outcome_status, predicted, actual, lesson.strip()
+                        )
+                        st.session_state["sx_last_outcome_id_" + key] = outcome_id
+                        st.success("Outcome recorded: " + outcome_id)
+                    except Exception as exc:
+                        st.error("Outcome could not be recorded: " + str(exc))
+
+                outcome_df = decision_outcomes_frame(decision_id=did, owner=username)
+                if not outcome_df.empty:
+                    latest = outcome_df.iloc[0]
+                    try:
+                        variance_records = json.loads(latest["variance_json"] or "[]")
+                        variance_df = pd.DataFrame(variance_records)
+                    except Exception:
+                        variance_df = pd.DataFrame()
+                    if not variance_df.empty:
+                        st.dataframe(variance_df, use_container_width=True, hide_index=True)
+                        try:
+                            from shoir_live_visuals import build_visualization_suite
+                            suite = build_visualization_suite(variance_df, context="Decision-to-Value", max_figures=3)
+                            for title, fig in suite:
+                                st.plotly_chart(fig, use_container_width=True)
+                        except Exception:
+                            pass
+                    st.dataframe(outcome_df[["outcome_id","implementation_status","lesson","verified_at","created_at"]].head(20), use_container_width=True, hide_index=True)
 
     with tabs[4]:
         st.download_button(
