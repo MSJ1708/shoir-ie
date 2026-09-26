@@ -77,3 +77,117 @@ def test_connector_sql_adapter_and_endpoint_redaction(tmp_path, monkeypatch):
     saved = str(health.loc[health["connector_id"].eq(secret_id), "endpoint"].iloc[0])
     assert "topsecret" not in saved
     assert "***" in saved
+
+
+
+def test_canonical_store_roundtrip_and_workspace_isolation(tmp_path, monkeypatch):
+    import shoir_enterprise_layer as ent
+    monkeypatch.setattr(ent, "DEFAULT_DB", str(tmp_path / "enterprise.db"))
+    monkeypatch.setattr(ent, "_remote", lambda: False)
+
+    a = ent.upsert_canonical_entity(
+        "alice", "Asset", "CNC-01", "test",
+        {"temperature": 64.0}, "Observed", "plant-a",
+    )
+    b = ent.upsert_canonical_entity(
+        "bob", "Asset", "CNC-01", "test",
+        {"temperature": 77.0}, "Observed", "plant-a",
+    )
+    rel = ent.upsert_canonical_relationship("alice", a, a, "self-check", metadata={"ok": True}, workspace="plant-a")
+    ent.record_canonical_event("alice", "asset_observed", {"value": 64.0}, entity_id=a, relationship_id=rel, workspace="plant-a")
+
+    entities = ent.canonical_entities_frame("alice", "plant-a")
+    assert len(entities) == 1
+    assert entities.iloc[0]["entity_id"] == a
+    assert len(ent.canonical_entities_frame("bob", "plant-a")) == 1
+    assert ent.canonical_entities_frame("alice", "other").empty
+    assert ent.canonical_state_manifest("alice", "plant-a")["event_count"] == 1
+
+
+def test_canonical_control_tower_uses_real_entities(tmp_path, monkeypatch):
+    import shoir_enterprise_layer as ent
+    monkeypatch.setattr(ent, "DEFAULT_DB", str(tmp_path / "tower.db"))
+    monkeypatch.setattr(ent, "_remote", lambda: False)
+    ent.upsert_canonical_entity("alice", "Process", "Assembly", "test", {"rows": 20}, workspace="plant-a")
+    ent.upsert_canonical_entity("alice", "Quality", "FPY", "test", {"value": 97.0}, workspace="plant-a")
+    ent.upsert_canonical_entity("alice", "Energy", "Electricity", "test", {"kwh": 1200}, workspace="plant-a")
+    tower = ent.build_control_tower_health_from_canonical("alice", "plant-a")
+    assert set(["Production", "Quality", "Energy"]).issubset(set(tower["Area"]))
+    assert float(tower.loc[tower["Area"].eq("Quality"), "Health %"].iloc[0]) == 100.0
+    assert float(tower.loc[tower["Area"].eq("Production"), "Records"].iloc[0]) >= 1
+
+
+def test_connector_schedule_executes_due_health_check(tmp_path, monkeypatch):
+    import sqlite3
+    import shoir_enterprise_layer as ent
+    db = tmp_path / "source.db"
+    with sqlite3.connect(db) as conn:
+        conn.execute("create table t(x integer)")
+        conn.execute("insert into t values(1)")
+        conn.commit()
+    monkeypatch.setattr(ent, "DEFAULT_DB", str(tmp_path / "enterprise.db"))
+    monkeypatch.setattr(ent, "_remote", lambda: False)
+    tested = ent.test_connector_profile("alice", "Local SQL", "SQL", "SQL", f"sqlite:///{db}")
+    schedule_id = ent.schedule_connector_sync("alice", tested["connector_id"], 60, "plant-a", enabled=True)
+    with sqlite3.connect(str(ent.DEFAULT_DB)) as conn:
+        conn.execute("update shoir_ent_connector_schedules set next_run_at=? where schedule_id=?",
+                     ("2000-01-01T00:00:00+00:00", schedule_id))
+        conn.commit()
+    results = ent.run_due_connector_syncs("alice", "plant-a", max_attempts=2, require_approval=False)
+    assert len(results) == 1
+    assert results.iloc[0]["Attempts"] >= 1
+    assert results.iloc[0]["Status"] == "Healthy"
+
+
+def test_security_gate_requires_explicit_approval(monkeypatch):
+    import streamlit as st
+    import shoir_enterprise_layer as ent
+    st.session_state.clear()
+    st.session_state["current_user"] = "alice"
+    st.session_state["current_role"] = "Owner"
+    st.session_state["current_action_approved"] = False
+    try:
+        ent.enforce_action_gate("alice", "write", "plant-a", require_approval=True)
+        raise AssertionError("Expected the write gate to block without approval.")
+    except PermissionError:
+        pass
+    st.session_state["current_action_approved"] = True
+    ent.enforce_action_gate("alice", "write", "plant-a", require_approval=True)
+
+
+def test_decision_to_value_is_canonical_and_traceable(tmp_path, monkeypatch):
+    import sqlite3
+    import industrial_experience as exp
+    import shoir_enterprise_layer as ent
+    experience_db = str(tmp_path / "experience.db")
+    enterprise_db = str(tmp_path / "enterprise.db")
+    monkeypatch.setattr(exp, "_db", lambda path="enterprise_full_workspace.db": sqlite3.connect(experience_db, timeout=30))
+    monkeypatch.setattr(ent, "DEFAULT_DB", enterprise_db)
+    monkeypatch.setattr(ent, "_remote", lambda: False)
+    exp.ensure_experience_db(experience_db)
+    did = exp.create_decision("Decision", "Test", {"Throughput": 100}, {}, {}, "alice")
+    oid = exp.record_decision_outcome(
+        did, "alice", "Verified",
+        {"Throughput": 100}, {"Throughput": 92},
+        lesson="Actual throughput was below prediction.",
+        workspace="plant-a", persist_artifact=False,
+    )
+    frame = exp.decision_to_value_frame(owner="alice", decision_id=did, db_path=experience_db)
+    assert len(frame) == 1
+    assert float(frame.iloc[0]["Delta"]) == -8.0
+    entities = ent.canonical_entities_frame("alice", "plant-a")
+    assert oid in " ".join(entities["name"].astype(str).tolist())
+
+
+def test_visualization_audit_has_no_populated_gaps():
+    from shoir_live_visuals import audit_all_module_visualizations
+    audit = audit_all_module_visualizations(max_figures=3)
+    assert not audit.empty
+    assert not audit["Status"].eq("Gap").any()
+
+
+def test_no_fabricated_digital_twin_fallback():
+    import inspect
+    import shoir_enterprise_layer as ent
+    source = inspect.getsource(ent.render_enterprise_integration_surface)
+    assert 'CNC-01","Packing-01' not in source
