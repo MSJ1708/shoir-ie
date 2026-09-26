@@ -157,8 +157,99 @@ def _excel_aggregate(name: str, values: Any) -> float:
     if name == "COUNTA": return float(sum(x not in (None, "") for x in _flatten(values)))
     raise ValueError(name)
 
+def _formula_number(value: Any, name: str) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"{name} requires numeric inputs.")
+    if not math.isfinite(number):
+        raise ValueError(f"{name} does not accept NaN or infinite values.")
+    return number
+
+
+def _formula_fraction(value: Any) -> float:
+    number = _formula_number(value, "Percentage")
+    return number / 100.0 if abs(number) > 1.0 else number
+
+
+def _engineering_formula(name: str, args: list[Any]) -> Any:
+    """Scalar/series industrial functions exposed through the safe workbook evaluator."""
+    def nums(value: Any) -> list[float]:
+        return _numeric(value)
+
+    if name == "OEE":
+        if len(args) != 3: raise ValueError("OEE requires Availability, Performance and Quality.")
+        return _formula_fraction(args[0]) * _formula_fraction(args[1]) * _formula_fraction(args[2])
+    if name == "TAKT_TIME":
+        if len(args) != 2: raise ValueError("TAKT_TIME requires available time and demand.")
+        demand = _formula_number(args[1], "Demand")
+        if demand <= 0: raise ValueError("TAKT_TIME demand must be greater than zero.")
+        return _formula_number(args[0], "Available time") / demand
+    if name == "LITTLE_LAW":
+        if len(args) != 2: raise ValueError("LITTLE_LAW requires arrival/throughput rate and flow time.")
+        return _formula_number(args[0], "Rate") * _formula_number(args[1], "Flow time")
+    if name == "CPK":
+        if len(args) != 4: raise ValueError("CPK requires mean, standard deviation, LSL and USL.")
+        mean, sigma, lsl, usl = [_formula_number(x, "Cpk input") for x in args]
+        if sigma <= 0: raise ValueError("CPK standard deviation must be greater than zero.")
+        return min((usl - mean) / (3.0 * sigma), (mean - lsl) / (3.0 * sigma))
+    if name == "EOQ":
+        if len(args) != 3: raise ValueError("EOQ requires annual demand, ordering cost and holding cost.")
+        demand, ordering, holding = [_formula_number(x, "EOQ input") for x in args]
+        if demand < 0 or ordering < 0 or holding <= 0: raise ValueError("EOQ requires non-negative demand/order cost and positive holding cost.")
+        return math.sqrt((2.0 * demand * ordering) / holding)
+    if name == "SERVICE_LEVEL":
+        if len(args) != 2: raise ValueError("SERVICE_LEVEL requires on-time count and total count.")
+        total = _formula_number(args[1], "Total count")
+        if total <= 0: raise ValueError("SERVICE_LEVEL total count must be greater than zero.")
+        return _formula_number(args[0], "On-time count") / total
+    if name == "CO2E":
+        if len(args) != 2: raise ValueError("CO2E requires activity and emission factor.")
+        return _formula_number(args[0], "Activity") * _formula_number(args[1], "Emission factor")
+    if name == "CONVERT":
+        if len(args) != 3: raise ValueError("CONVERT requires value, source unit and target unit.")
+        return convert_units(_formula_number(args[0], "Value"), str(args[1]), str(args[2]))
+    if name == "NPV":
+        if len(args) < 2: raise ValueError("NPV requires discount rate and at least one cash-flow.")
+        rate = _formula_number(args[0], "Discount rate")
+        cashflows = nums(args[1:])
+        if rate <= -1.0: raise ValueError("NPV discount rate must be greater than -100%.")
+        return sum(cf / ((1.0 + rate) ** period) for period, cf in enumerate(cashflows))
+    if name == "CAPEX_NPV":
+        if len(args) < 3: raise ValueError("CAPEX_NPV requires capex, discount rate and cash-flow values.")
+        capex = _formula_number(args[0], "CAPEX")
+        result = _engineering_formula("NPV", args[1:])
+        return result - capex
+    if name == "FORECAST_DEMAND":
+        if not args: raise ValueError("FORECAST_DEMAND requires historical demand values.")
+        periods = 1
+        history_args = list(args)
+        if len(history_args) >= 2:
+            tail = history_args[-1]
+            try:
+                tail_n = _formula_number(tail, "Forecast periods")
+                if float(tail_n).is_integer() and 1 <= tail_n <= 24:
+                    periods = int(tail_n)
+                    history_args = history_args[:-1]
+            except ValueError:
+                pass
+        history = nums(history_args)
+        if len(history) < 2: raise ValueError("FORECAST_DEMAND needs at least two historical observations.")
+        x = np.arange(1, len(history) + 1, dtype=float)
+        coef = np.polyfit(x, np.asarray(history, dtype=float), 1)
+        future_x = np.arange(len(history) + 1, len(history) + periods + 1, dtype=float)
+        forecast = np.polyval(coef, future_x)
+        return float(forecast[0]) if periods == 1 else forecast.tolist()
+    if name == "CAPACITY_GAP":
+        if len(args) != 2: raise ValueError("CAPACITY_GAP requires capacity and demand.")
+        return _formula_number(args[0], "Capacity") - _formula_number(args[1], "Demand")
+    raise ValueError(f"Engineering function is not implemented: {name}")
+
+
 _ALLOWED_FUNCS = {"ABS","AVERAGE","COUNT","COUNTA","IF","IFERROR","MAX","MIN",
-                  "MOD","NOT","OR","AND","POWER","ROUND","SQRT","SUM"}
+                  "MOD","NOT","OR","AND","POWER","ROUND","SQRT","SUM",
+                  "OEE","TAKT_TIME","LITTLE_LAW","CPK","EOQ","SERVICE_LEVEL",
+                  "CO2E","CONVERT","NPV","CAPEX_NPV","FORECAST_DEMAND","CAPACITY_GAP"}
 
 class SafeFormulaEngine:
     def __init__(self, workbook: Mapping[str, pd.DataFrame], formulas: Mapping[str, Mapping[str, str]] | None = None):
@@ -287,6 +378,9 @@ class SafeFormulaEngine:
                 s = self._eval_node(node.args[0], sheet); ref = str(self._eval_node(node.args[1], sheet))
                 return self._range(None if s is None or s == "None" else str(s), ref)
             if name not in _ALLOWED_FUNCS: raise ValueError(f"Function is not allowed: {name}")
+            if name in {"OEE","TAKT_TIME","LITTLE_LAW","CPK","EOQ","SERVICE_LEVEL","CO2E","CONVERT","NPV","CAPEX_NPV","FORECAST_DEMAND","CAPACITY_GAP"}:
+                args = [self._eval_node(x, sheet) for x in node.args]
+                return _engineering_formula(name, args)
             if name == "IF":
                 if len(node.args) < 2: raise ValueError("IF requires a condition and true value.")
                 condition = self._eval_node(node.args[0], sheet)
