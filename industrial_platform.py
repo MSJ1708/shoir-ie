@@ -37,6 +37,7 @@ from shoir_engine_studio import (
 )
 
 PLATFORM_CATALOG = [
+    {"tier":"Starter","category":"Core Platform","name":"Industrial Workbook","when":"Work with engineering data in an editable Excel-like workspace that connects formulas, analysis, templates and the Digital Thread.","example":"Import an existing workbook, edit cells, calculate engineering formulas, clean data, analyze results and send the evidence into Shoir-IE workflows."},
     {"tier":"Enterprise","category":"Platform","name":"Industrial Operating System","when":"Unified KPI, method, scenario, process, model-health, improvement and decision-verification workspace.","example":"Connect engineering analysis outputs through one governed decision layer with reusable templates and exports."},
     {"tier":"Enterprise","category":"Project & Traceability","name":"Global Project & Digital Thread","when":"Connect datasets, assets, processes, KPIs, models, experiments, decisions and outcomes across the entire Shoir-IE workspace.","example":"Trace a KPI from its source dataset and asset through the model and experiment that informed a decision, then track the verified outcome."},
     {"tier":"Starter","category":"Core Platform","name":"Engineering Validation Center","when":"Validate tables, model assumptions, units, ranges and result health before acting.","example":"Upload an engineering table and receive a data-quality, feasibility and reproducibility checklist."},
@@ -791,6 +792,10 @@ def render_module(module: str, tier: str, username: str):
             (username,module,_now()),
         )
         _usage_conn.commit()
+    if module=="Industrial Workbook":
+        from shoir_industrial_workbook import render_industrial_workbook
+        render_industrial_workbook(tier, username)
+        return
     render_module_data_exchange(module, st, tier, username)
     required=next((x["tier"] for x in PLATFORM_CATALOG if x["name"]==module),None)
     if required and not tier_allows(tier,required):

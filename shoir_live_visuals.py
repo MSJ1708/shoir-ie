@@ -69,6 +69,7 @@ _MODULE_KEYS = {
     "Control Tower": ["control_tower_metrics", "control_tower_disruption_df", "enterprise_control_tower_health_df", "enterprise_artifact_ledger"],
     "Cryptographic Ledger": ["ledger_history"],
     "Carbon Accounting": ["carbon_latest_df"],
+    "Industrial Workbook": ["industrial_workbook_current_df", "industrial_workbook_query_result_df", "industrial_workbook_analysis_df", "industrial_workbook_formula_audit_df", "industrial_workbook_semantic_map_df"],
 }
 
 # Conflict-resolution registry: richer enterprise result aliases are additive.
