@@ -311,7 +311,7 @@ def evaluate_workbook_formulas(workbook: Mapping[str,pd.DataFrame], formulas: Ma
         for ref, formula in sheet_formulas.items():
             try:
                 col, row = _cell_parts(ref)
-                if row >= len(result[sheet]) or col >= len(result[sheet]).columns:
+                if row >= len(result[sheet]) or col >= len(result[sheet].columns):
                     audit.append({"Sheet":sheet,"Cell":ref,"Formula":formula,"Status":"Error","Detail":"Cell is outside the current sheet range."})
                     continue
                 engine._current_sheet = sheet
