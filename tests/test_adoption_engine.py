@@ -108,3 +108,10 @@ def test_cpk_uses_sample_standard_deviation():
     sigma = np.std(values, ddof=1)
     expected = min((10.5 - np.mean(values)) / (3 * sigma), (np.mean(values) - 9.5) / (3 * sigma))
     assert np.isclose(evaluate_engineering_function("CPK", [values, 9.5, 10.5]), expected)
+
+
+def test_conditional_formatting_is_non_destructive():
+    from shoir_adoption_engine import conditional_format_dataframe
+    df = pd.DataFrame({"KPI": [40, 60, 80]})
+    styled = conditional_format_dataframe(df, "KPI", low=50, high=75)
+    assert styled.data.equals(df)
