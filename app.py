@@ -11588,9 +11588,46 @@ if mod == "Admin Panel":
 # MODULE: CONTROL TOWER
 # =========================================================
 if mod == "Control Tower":
-    # The legacy demo dashboard used hard-coded shipment/health values.
-    # Route the module into the canonical Digital Thread-backed Control Tower instead.
+    # Canonical Control Tower: no hard-coded shipment, alert or weather claims.
     render_control_tower_extension()
+    st.markdown("### 🔗 Decision Operating Loop")
+    try:
+        from shoir_enterprise_layer import canonical_state_manifest
+        manifest = canonical_state_manifest(
+            st.session_state.get("current_user", "unknown"),
+            str(
+                st.session_state.get("shoir_workspace_name")
+                or st.session_state.get("workspace")
+                or st.session_state.get("active_workspace_name")
+                or "default"
+            ),
+        )
+        observed = manifest.get("entity_types", {}) or {}
+    except Exception:
+        observed = {}
+    flow = [
+        ("Control Tower", "KPI" in observed or "Process" in observed),
+        ("Digital Twin", "Asset" in observed),
+        ("Copilot", "Model" in observed or "Experiment" in observed),
+        ("Simulation", "Experiment" in observed),
+        ("Optimization", "Model" in observed),
+        ("Economics", "Cost" in observed),
+        ("Sustainability", "Energy" in observed),
+        ("Decision", "Decision" in observed),
+        ("Outcome", "Outcome" in observed),
+    ]
+    cols = st.columns(len(flow))
+    for idx, (label, available) in enumerate(flow):
+        cols[idx].markdown(
+            f'<div style="padding:12px 8px;border:1px solid #dbe4f0;border-radius:14px;background:#fff;text-align:center;min-height:78px">'
+            f'<div style="font-size:20px">{"✓" if available else "○"}</div>'
+            f'<div style="font-weight:800;font-size:11px">{html.escape(label)}</div>'
+            f'<div style="font-size:10px;color:#64748b">{"Observed" if available else "Ready"}</div></div>',
+            unsafe_allow_html=True,
+        )
+        if idx < len(flow) - 1:
+            pass
+    st.caption("The loop reflects observed canonical entities. A Ready stage is not treated as a completed or live measurement.")
     st.stop()
 
 if mod == "Cryptographic Ledger":
