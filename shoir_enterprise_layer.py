@@ -94,7 +94,7 @@ LOCAL_DDL = [
     """CREATE TABLE IF NOT EXISTS shoir_ent_connector_health (
         connector_id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, name TEXT NOT NULL,
         system_type TEXT NOT NULL, protocol TEXT NOT NULL, endpoint TEXT, status TEXT NOT NULL,
-        latency_ms REAL, detail TEXT, checked_at TEXT NOT NULL, checked_by TEXT)""",
+        latency_ms REAL, detail TEXT, checked_at TEXT NOT NULL, checked_by TEXT, secret_ref TEXT)""",
     """CREATE TABLE IF NOT EXISTS shoir_ent_connector_runs (
         run_id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, connector_id TEXT NOT NULL,
         operation TEXT NOT NULL, status TEXT NOT NULL, latency_ms REAL, detail TEXT,
@@ -192,7 +192,7 @@ REMOTE_DDL = [
     """CREATE TABLE IF NOT EXISTS shoir_internal.connector_health (
         connector_id text PRIMARY KEY, workspace_id text NOT NULL, name text NOT NULL,
         system_type text NOT NULL, protocol text NOT NULL, endpoint text, status text NOT NULL,
-        latency_ms double precision, detail text, checked_at timestamptz NOT NULL, checked_by text)""",
+        latency_ms double precision, detail text, checked_at timestamptz NOT NULL, checked_by text, secret_ref text)""",
     """CREATE TABLE IF NOT EXISTS shoir_internal.connector_runs (
         run_id text PRIMARY KEY, workspace_id text NOT NULL, connector_id text NOT NULL,
         operation text NOT NULL, status text NOT NULL, latency_ms double precision,
@@ -279,6 +279,7 @@ def ensure_enterprise_schema(db_path: Optional[str] = None) -> None:
             with conn.cursor() as cur:
                 for sql in REMOTE_DDL:
                     cur.execute(sql)
+                cur.execute("ALTER TABLE IF EXISTS shoir_internal.connector_health ADD COLUMN IF NOT EXISTS secret_ref text")
                 cur.execute("REVOKE ALL ON SCHEMA shoir_internal FROM anon, authenticated")
                 cur.execute("REVOKE ALL ON ALL TABLES IN SCHEMA shoir_internal FROM anon, authenticated")
             conn.commit()
@@ -286,6 +287,10 @@ def ensure_enterprise_schema(db_path: Optional[str] = None) -> None:
     with _local_connect(db_path) as conn:
         for sql in LOCAL_DDL:
             conn.execute(sql)
+        try:
+            conn.execute("ALTER TABLE shoir_ent_connector_health ADD COLUMN secret_ref TEXT")
+        except sqlite3.OperationalError:
+            pass
         conn.commit()
 
 
@@ -402,9 +407,11 @@ def upsert_canonical_entity(
     state: Any = None,
     status: str = "Observed",
     workspace: str = "default",
+    secret_ref: str = "",
 ) -> str:
     ensure_enterprise_schema()
     wid = workspace_key(username, workspace)
+    safe_secret_ref = str(secret_ref or "")[:300]
     eid = canonical_entity_id(username, workspace, entity_type, name, source)
     payload_json, content_hash = _canonical_json(state or {})
     stamp = now_iso()
@@ -915,14 +922,14 @@ def record_connector_health(
     cid = "CONN-" + hashlib.sha256((wid + "|" + name + "|" + system_type + "|" + protocol).encode()).hexdigest()[:14].upper()
     stamp = now_iso()
     safe_endpoint = redact_connector_endpoint(endpoint)
-    params = (cid, wid, name, system_type, protocol, safe_endpoint, status, latency_ms, detail, stamp, username)
+    params = (cid, wid, name, system_type, protocol, safe_endpoint, status, latency_ms, detail, stamp, username, safe_secret_ref)
     if _remote():
         with _pg_connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """INSERT INTO shoir_internal.connector_health
-                    (connector_id,workspace_id,name,system_type,protocol,endpoint,status,latency_ms,detail,checked_at,checked_by)
-                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    (connector_id,workspace_id,name,system_type,protocol,endpoint,status,latency_ms,detail,checked_at,checked_by,secret_ref)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                     ON CONFLICT(connector_id) DO UPDATE SET
                     status=EXCLUDED.status,latency_ms=EXCLUDED.latency_ms,detail=EXCLUDED.detail,
                     checked_at=EXCLUDED.checked_at,checked_by=EXCLUDED.checked_by""",
@@ -933,8 +940,8 @@ def record_connector_health(
         with _local_connect() as conn:
             conn.execute(
                 """INSERT INTO shoir_ent_connector_health
-                (connector_id,workspace_id,name,system_type,protocol,endpoint,status,latency_ms,detail,checked_at,checked_by)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                (connector_id,workspace_id,name,system_type,protocol,endpoint,status,latency_ms,detail,checked_at,checked_by,secret_ref)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
                 ON CONFLICT(connector_id) DO UPDATE SET
                 status=excluded.status,latency_ms=excluded.latency_ms,detail=excluded.detail,
                 checked_at=excluded.checked_at,checked_by=excluded.checked_by""",
@@ -1187,6 +1194,7 @@ def test_connector_profile(
             "; ".join(validation.get("errors", [])),
             0.0,
             workspace,
+            secret_ref=secret_ref,
         )
         return {
             "connector_id": connector_id,
@@ -1215,7 +1223,7 @@ def test_connector_profile(
     finished = datetime.now(timezone.utc)
     connector_id = record_connector_health(
         username, name, system_type, protocol, endpoint, status, detail,
-        float(latency), workspace,
+        float(latency), workspace, secret_ref=secret_ref,
     )
     run_id = _record_connector_run(
         username, connector_id, "test", status, float(latency), detail,
@@ -1470,7 +1478,7 @@ def run_due_connector_syncs(
                 str(record.get("system_type","REST")),
                 str(record.get("protocol","REST")),
                 str(record.get("endpoint","")),
-                "",
+                str(record.get("secret_ref","")),
                 workspace,
                 8.0,
             )
