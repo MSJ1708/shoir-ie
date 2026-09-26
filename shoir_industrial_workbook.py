@@ -639,6 +639,26 @@ def list_query_pipelines(path:str=DB_PATH)->pd.DataFrame:
         return pd.read_sql("SELECT pipeline_id AS ID,name AS Name,source_sheet AS Source,updated_at AS Updated FROM industrial_workbook_queries WHERE workspace=? ORDER BY updated_at DESC",
                            conn,params=(_workspace(),))
 
+def stream_profile_csv(raw: bytes, chunksize: int = 50_000) -> dict[str, Any]:
+    """Profile a CSV in chunks without materializing the whole table."""
+    if not raw: raise ValueError("The CSV payload is empty.")
+    total_rows=total_missing=0; columns=[]; numeric_min={}; numeric_max={}
+    for chunk in pd.read_csv(io.BytesIO(raw), chunksize=max(1,int(chunksize))):
+        if not columns: columns=[str(x) for x in chunk.columns]
+        total_rows += int(len(chunk)); total_missing += int(chunk.isna().sum().sum())
+        for col in chunk.select_dtypes(include=np.number).columns:
+            vals=pd.to_numeric(chunk[col],errors="coerce").dropna()
+            if vals.empty: continue
+            name=str(col); numeric_min[name]=min(numeric_min.get(name,float(vals.min())),float(vals.min()))
+            numeric_max[name]=max(numeric_max.get(name,float(vals.max())),float(vals.max()))
+    return {"mode":"streaming","rows":total_rows,"columns":len(columns),"missing_cells":total_missing,
+            "columns_sample":columns[:80],"numeric_min":numeric_min,"numeric_max":numeric_max}
+
+def stream_query_csv(raw: bytes, steps: Sequence[Mapping[str, Any]], chunksize: int = 50_000) -> pd.DataFrame:
+    """Apply safe query steps chunk-by-chunk and concatenate results."""
+    outputs=[apply_query_pipeline(chunk,steps) for chunk in pd.read_csv(io.BytesIO(raw),chunksize=max(1,int(chunksize)))]
+    return pd.concat(outputs,ignore_index=True) if outputs else pd.DataFrame()
+
 def instant_runtime_profile(df:pd.DataFrame)->dict[str,Any]:
     cells=int(df.size)
     mode="interactive" if cells<=250_000 else "vectorized" if cells<=2_000_000 else "large-table"
@@ -722,10 +742,18 @@ def render_industrial_workbook(tier:str="Starter",username:str="unknown")->None:
 
     if uploaded is not None:
         try:
-            from shoir_upgrade import read_uploaded_workbook
-            loaded=read_uploaded_workbook(uploaded.getvalue(),uploaded.name); st.session_state["industrial_workbook_undo"].append({k:v.copy(deep=True) for k,v in wb.items()})
-            wb.clear(); wb.update({k:v.copy(deep=True) for k,v in loaded.items()}); st.session_state[FORMULA_STATE_KEY]={k:{} for k in wb}
-            st.session_state["industrial_workbook_redo"].clear(); st.success(f"Imported {len(loaded)} sheet(s) from {uploaded.name}."); st.rerun()
+            upload_sig = hashlib.sha256(uploaded.getvalue()).hexdigest()
+            if upload_sig != st.session_state.get("industrial_workbook_last_upload_signature"):
+                from shoir_upgrade import read_uploaded_workbook
+                loaded=read_uploaded_workbook(uploaded.getvalue(),uploaded.name)
+                st.session_state["industrial_workbook_undo"].append({k: v.copy(deep=True) for k,v in wb.items()})
+                st.session_state["industrial_workbook_undo"]=st.session_state["industrial_workbook_undo"][-20:]
+                wb.clear(); wb.update({k: v.copy(deep=True) for k,v in loaded.items()})
+                st.session_state[FORMULA_STATE_KEY]={k:{} for k in wb}
+                st.session_state["industrial_workbook_redo"].clear()
+                st.session_state["industrial_workbook_last_upload_signature"]=upload_sig
+                st.success(f"Imported {len(loaded)} sheet(s) from {uploaded.name}.")
+                st.rerun()
         except Exception as exc: st.error(f"Excel import failed safely: {exc}")
 
     if st.session_state.pop("industrial_workbook_show_saved",False):
@@ -840,56 +868,26 @@ def render_industrial_workbook(tier:str="Starter",username:str="unknown")->None:
             st.session_state["industrial_workbook_semantic_map"][current_sheet]=selected_roles
             st.session_state["industrial_workbook_semantic_map_df"]=pd.DataFrame([{"Sheet":current_sheet,"Column":col,"Role":role} for col,role in selected_roles.items()])
             try:
-                st.session_state["industrial_workbook_current_df"]=current.copy(deep=True)
-                from shoir_digital_thread import sync_workspace_to_thread
-                sync_workspace_to_thread(username,active_module="Industrial Workbook"); st.success("Semantic mapping saved and sent through the existing Digital Thread synchronization path.")
-            except Exception as exc: st.warning(f"Semantic mapping saved locally; Digital Thread synchronization needs attention: {exc}")
-        semantic_df=st.session_state.get("industrial_workbook_semantic_map_df",pd.DataFrame())
-        if isinstance(semantic_df,pd.DataFrame) and not semantic_df.empty:
-            st.dataframe(semantic_df,use_container_width=True,hide_index=True)
-            rel=semantic_relationships(semantic_df.rename(columns={"Role":"Suggested Role"}),current_sheet)
-            if not rel.empty: st.dataframe(rel,use_container_width=True,hide_index=True)
-
-    with tabs[5]:
-        st.markdown("### Copilot direct editing"); st.caption("Edits are deterministic and transparent. The governed Copilot remains responsible for planning and approval-gated actions.")
-        prompt=st.text_input("Tell the workbook what to change",placeholder="Add column Total = Quantity * UnitCost",key="iw_copilot_edit_prompt")
-        if st.button("✨ Apply safe edit",type="primary",key="iw_copilot_apply"):
-            try:
-                updated,message=_copilot_edit(prompt,wb,current_sheet); st.session_state[WORKBOOK_STATE_KEY]=updated; st.success(message)
-            except Exception as exc: st.error(f"Copilot edit was not applied: {exc}")
-        st.caption("Examples: rename column Unit Cost to UnitCost · sort by Total Cost descending · fill missing Quantity with 0 · filter Quantity > 10 · add column ExtendedCost = Quantity * Unit Cost.")
-        st.info("Multi-step analytical requests continue through the existing governed Advanced Engineering Copilot and its approval gates.")
-
-    with tabs[6]:
-        st.markdown("### Learn")
-        st.dataframe(pd.DataFrame([
-            {"Topic":"Workbook basics","What to do":"Import, edit, save, and export an engineering workbook."},
-            {"Topic":"Formula engine","What to do":"Use =B2*C2, =SUM(D2:D10), =IF(B2>0,1,0), and cross-sheet references."},
-            {"Topic":"Units","What to do":"Convert common engineering units with explicit from/to units before mixing measurements."},
-            {"Topic":"Query Studio","What to do":"Build a repeatable data-preparation and aggregation pipeline."},
-            {"Topic":"Semantic mapping","What to do":"Map columns into the same canonical vocabulary used by the Digital Thread."},
-            {"Topic":"Templates","What to do":"Start from a reusable engineering pattern and publish it to the workspace library."},
-        ]),use_container_width=True,hide_index=True)
-        st.markdown("### Formula reference")
-        st.dataframe(pd.DataFrame([
-            {"Function":"SUM","Example":"=SUM(D2:D10)","Purpose":"Total"},
-            {"Function":"AVERAGE","Example":"=AVERAGE(B2:B10)","Purpose":"Mean"},
-            {"Function":"IF","Example":'=IF(B2>10,"High","Low")',"Purpose":"Conditional logic"},
-            {"Function":"ROUND","Example":"=ROUND(B2,2)","Purpose":"Rounding"},
-            {"Function":"ABS","Example":"=ABS(B2)","Purpose":"Absolute value"},
-            {"Function":"SQRT","Example":"=SQRT(B2)","Purpose":"Square root"},
-            {"Function":"POWER","Example":"=POWER(B2,2)","Purpose":"Exponentiation"},
-        ]),use_container_width=True,hide_index=True)
-        exts=list_workbook_extensions()
-        st.markdown("### Developer extension SDK")
-        st.dataframe(pd.DataFrame([{"Name":x.name,"Version":x.version,"Category":x.category,"Description":x.description,"Executable":bool(x.transform)} for x in exts]) if exts else pd.DataFrame([{"Name":"No extensions installed","Executable":False}]),use_container_width=True,hide_index=True)
-        st.markdown("### Excel interoperability & product shell")
-        st.write("Import/export uses the existing Shoir-IE Excel pipeline. The workbook is responsive for browser use, and the companion Excel add-in scaffold in excel_addin/ can be deployed against a configured Shoir-IE API host.")
-        st.caption("Large-data mode is explicit: workbook editing stays interactive while repeatable query/analysis operations can operate on larger in-memory tables. A future distributed runtime can replace the execution adapter without changing the workbook contract.")
-
-    st.session_state["industrial_workbook_current_df"]=wb[current_sheet].copy(deep=True)
+                st.session_state["industrial_workbook_current_df"]=wb[current_sheet].copy(deep=True)
     st.session_state["industrial_workbook_query_result_df"]=st.session_state.get("industrial_workbook_query_result_df",pd.DataFrame())
     try:
-        save_workbook(wb,formulas,st.session_state.get("industrial_workbook_semantic_map",{}),f"Shoir-IE Workbook · {current_sheet}",st.session_state.get("industrial_workbook_id"))
+        export_payload=_serialize_workbook(wb)
+        st.download_button("⬇️ Export current workbook (.xlsx)",data=export_payload,
+                           file_name=f"{_slug('Shoir-IE-' + current_sheet)}.xlsx",
+                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                           use_container_width=True,key="industrial_workbook_export_xlsx")
+    except Exception as exc:
+        st.warning(f"Workbook export is temporarily unavailable: {exc}")
+    try:
+        fingerprint_payload=json.dumps({
+            "sheets":{str(k):hashlib.sha256(v.to_csv(index=False).encode("utf-8")).hexdigest() for k,v in wb.items()},
+            "formulas":formulas,"semantic":st.session_state.get("industrial_workbook_semantic_map",{})
+        },sort_keys=True,default=str).encode("utf-8")
+        fingerprint=hashlib.sha256(fingerprint_payload).hexdigest()
+        if fingerprint != st.session_state.get("industrial_workbook_last_autosave_fingerprint"):
+            wid=save_workbook(wb,formulas,st.session_state.get("industrial_workbook_semantic_map",{}),
+                              f"Shoir-IE Workbook · {current_sheet}",st.session_state.get("industrial_workbook_id"))
+            st.session_state["industrial_workbook_id"]=wid
+            st.session_state["industrial_workbook_last_autosave_fingerprint"]=fingerprint
     except Exception:
         pass
