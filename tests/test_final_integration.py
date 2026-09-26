@@ -113,10 +113,13 @@ def test_connector_system_transport_boundaries_are_explicit():
 
     oracle_opc = validate_connector_profile("ORACLE", "OPC-UA", "opc.tcp://example.test:4840")
     sql_rest = validate_connector_profile("SQL", "REST", "https://example.test")
+    sql_jdbc = validate_connector_profile("SQL", "JDBC", "postgresql://example.test/db")
     assert not oracle_opc["valid"]
     assert not sql_rest["valid"]
+    assert not sql_jdbc["valid"]
     assert "not executable" in " ".join(oracle_opc["errors"])
     assert "not executable" in " ".join(sql_rest["errors"])
+    assert "not executable" in " ".join(sql_jdbc["errors"])
 
 
 def test_connector_sql_adapter_and_endpoint_redaction(tmp_path, monkeypatch):
@@ -301,6 +304,30 @@ def test_visualization_engine_unwraps_nested_copilot_results():
     frame = _as_frame(nested)
     assert list(frame.columns) == ["Scenario", "Throughput"]
     assert len(build_visualization_suite(frame, context="Advanced Engineering Copilot", max_figures=3)) >= 1
+
+
+def test_every_catalog_module_can_render_a_generic_live_chart():
+    import streamlit as st
+    from industrial_platform import PLATFORM_CATALOG
+    from shoir_live_visuals import _module_visual_keys, audit_all_module_visualizations
+
+    catalog = [
+        str(item.get("name"))
+        for item in PLATFORM_CATALOG
+        if isinstance(item, dict) and item.get("name")
+    ]
+    for module in catalog:
+        st.session_state.clear()
+        keys = _module_visual_keys(module)
+        assert keys, f"No visualization state key registered for {module}"
+        st.session_state[keys[0]] = pd.DataFrame(
+            {"Metric": ["A", "B"], "Value": [1.0, 2.0]}
+        )
+        audit = audit_all_module_visualizations(max_figures=3)
+        row = audit.loc[audit["Module"].eq(module)]
+        assert len(row) == 1, module
+        assert row.iloc[0]["Status"] == "Verified", module
+        assert int(row.iloc[0]["Graphs"]) >= 1, module
 
 
 def test_visualization_audit_has_no_populated_gaps():
