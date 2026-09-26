@@ -22,6 +22,9 @@ import streamlit as st
 
 _MODULE_KEYS = {
     "Engineering Validation Center": ["validation_df", "validation_result"],
+    "Industrial Operating System": ["os_compare_result", "os_process_result", "os_drift_result", "os_verify_result"],
+    "Global Project & Digital Thread": ["global_thread_nodes", "global_thread_edges", "global_thread_project"],
+    "Advanced Engineering Copilot": ["copilot_orchestrator_run", "copilot_orchestrator_figure_json", "copilot_staged_decision_id", "copilot_orchestrator_export", "copilot_clean_audit"],
     "MILP Solvers": ["milp_result_df", "milp_summary_df", "milp_allocation_flow_df"],
     "Industrial Data Model & Digital Thread": ["thread_df", "thread_rel"],
     "Advanced Planning & Scheduling": ["aps_demand", "aps_bom", "aps_orders", "aps_schedule_result"],
@@ -115,6 +118,15 @@ def _as_frame(value: Any) -> pd.DataFrame:
             return pd.DataFrame(value)
         return pd.DataFrame({"Value": value})
     if isinstance(value, dict):
+        # Many orchestration surfaces store the actual result table inside a
+        # run envelope. Prefer that nested evidence over metadata so the
+        # universal visualization engine can render it directly.
+        for nested_key in ("result", "results", "data", "frame", "table"):
+            nested = value.get(nested_key)
+            if isinstance(nested, (pd.DataFrame, list, dict)):
+                nested_frame = _as_frame(nested)
+                if not nested_frame.empty:
+                    return nested_frame
         # Results with scalar values become a useful one-row KPI table.
         flat = {}
         for k, v in value.items():
@@ -1002,6 +1014,9 @@ def visualization_contract_report(module: str, max_figures: int = 4) -> pd.DataF
     return pd.DataFrame(rows, columns=["Module","Table","State Key","Rows","Columns","Graphs","Status","Primary Chart"])
 
 MODULE_VISUAL_CONTRACTS = {
+    "Operating System": ("Metric Trend", "Health Heatmap", "Sankey"),
+    "Project & Digital Thread": ("Sankey", "Network Map", "Bar"),
+    "Copilot": ("Metric Trend", "Distribution", "Bar"),
     "Quality": ("Pareto", "SPC", "Distribution"),
     "OEE": ("Metric Trend", "Pareto", "Distribution"),
     "Forecast": ("Metric Trend", "Distribution", "Scatter"),
