@@ -47,7 +47,8 @@ from shoir_enterprise_layer import (
     upsert_security_policy, record_artifact, save_report_provenance,
     build_research_paper_bundle,
 )
-from shoir_unified_product import render_unified_workspace, render_global_product_dock, copilot_context\nfrom shoir_universal_engine import render_universal_engine_surface, postflight_contract
+from shoir_unified_product import render_unified_workspace, render_global_product_dock, copilot_context
+from shoir_universal_engine import render_universal_engine_surface, postflight_contract
 from shoir_commercial import render_module_enrichment
 from shoir_160 import init_160_platform, render_160_command_center
 from shoir_enterprise_ops import (
