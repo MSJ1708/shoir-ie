@@ -32,6 +32,12 @@ from industrial_experience import (
 
 
 COMMAND_ACTIONS = [
+    "Open Industrial Home",
+    "Open Industrial Workbook",
+    "Quick Analyze",
+    "Industrial Pivot",
+    "Automate",
+    "Trust & Explain",
     "Open Unified Study Center",
     "Check Data Readiness",
     "Create Decision Card",
@@ -641,6 +647,12 @@ def render_global_product_dock(module: str, tier: str, username: str) -> None:
     with d4:
         if st.button("▶ Open", type="primary", use_container_width=True, key="global_command_open_" + key):
             mapping = {
+                "Open Industrial Home": "adoption_home",
+                "Open Industrial Workbook": "workbook",
+                "Quick Analyze": "adoption_quick",
+                "Industrial Pivot": "adoption_pivot",
+                "Automate": "adoption_automate",
+                "Trust & Explain": "adoption_trust",
                 "Open Unified Study Center": "open",
                 "Check Data Readiness": "readiness",
                 "Create Decision Card": "decision",
@@ -651,6 +663,19 @@ def render_global_product_dock(module: str, tier: str, username: str) -> None:
                 "Export Evidence Pack": "export",
             }
             st.session_state["global_command_action"] = mapping[choice]
+            if choice == "Open Industrial Workbook":
+                st.session_state["force_workbook_module"] = True
+                st.rerun()
+            if choice in {"Open Industrial Home","Quick Analyze","Industrial Pivot","Automate","Trust & Explain"}:
+                st.session_state["force_adoption_center"] = True
+                st.session_state["adoption_tab_request"] = {
+                    "Open Industrial Home": "Home",
+                    "Quick Analyze": "Quick Analyze",
+                    "Industrial Pivot": "Industrial Pivot",
+                    "Automate": "Automate",
+                    "Trust & Explain": "Trust & Explain",
+                }[choice]
+                st.rerun()
             if choice == "Open Unified Study Center":
                 st.session_state["force_unified_workspace"] = True
                 st.rerun()
@@ -717,12 +742,21 @@ def copilot_context() -> str:
         "Platform Health",
         "Showcase Mode",
         "Universal Evidence Export",
+        "Industrial Home",
+        "Industrial Workbook",
+        "Industrial Pivot",
+        "Quick Analyze",
+        "Shoir Script automation",
+        "Engineering Formula Library",
+        "Workbook version history and cell comments",
+        "Formula dependency graph and Explain This Number",
+        "Capability-aware analytical runtime",
         "Command Palette",
         "cross-module recommendations",
     ]
     return (
         "Shoir-IE now operates as one unified industrial product. "
-        "Its shared workflow is Problem → Data → Model → Scenario → Decision → Implementation → Lesson. "
+        "Its shared workflow is Workbook/Data → Validate → Analyze → Visualize → Simulate/Optimize → Scenario → Decision → Implementation → Outcome → Learn. "
         "Available cross-cutting experience surfaces: " + ", ".join(capabilities) + ". "
         "Use evidence-first language, never invent values, clearly separate measured results from assumptions, "
         "and prefer preview/approval before any destructive action."

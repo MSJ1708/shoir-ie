@@ -148,7 +148,7 @@ def _is_candidate_key(key: str) -> bool:
     return not k.startswith(("_", "signin_", "reg_"))
 
 
-def discover_visual_tables(module: str, preferred_key: str | None = None) -> list[tuple[str, str, pd.DataFrame]]:
+def discover_visual_tables(module: str, preferred_key: str | None = None, *, allow_global_fallback: bool = True) -> list[tuple[str, str, pd.DataFrame]]:
     """Discover safe, non-secret tables relevant to the active module.
 
     preferred_key is placed first when it contains a usable DataFrame. This
@@ -186,10 +186,9 @@ def discover_visual_tables(module: str, preferred_key: str | None = None) -> lis
             result.append((str(key).replace("_", " ").title(), str(key), df))
             seen.add(str(key))
 
-    # Finally, allow safe workspace tables as a fallback. This prevents a new
-    # module from shipping without visualization solely because its state key
-    # was not registered yet.
-    if not result:
+    # Optional final fallback for interactive use. Audits disable this path
+    # so one module can never inherit another module's unrelated table.
+    if allow_global_fallback and not result:
         for key, value in list(st.session_state.items()):
             if key in seen or not _is_candidate_key(str(key)):
                 continue
@@ -1001,7 +1000,7 @@ def visualization_contract_report(module: str, max_figures: int = 4) -> pd.DataF
     for label, key, frame in discover_visual_tables(str(module)):
         if not isinstance(frame, pd.DataFrame) or frame.empty:
             continue
-        suite = build_visualization_suite(frame, context=str(module), max_figures=max_figures)
+        suite = ensure_visualization_suite(frame, context=str(module), max_figures=max_figures)
         rows.append({
             "Module": str(module),
             "Table": str(label),
@@ -1039,28 +1038,55 @@ def _module_visual_keys(module: str) -> list[str]:
     return list(_MODULE_KEYS.get(str(module), []))
 
 
-def audit_all_module_visualizations(max_figures: int = 4) -> pd.DataFrame:
-    """Audit every catalog module without fabricating data.
+def ensure_visualization_suite(df: pd.DataFrame, context: str = "", max_figures: int = 4) -> list[tuple[str, go.Figure]]:
+    """Universal visualization contract: every non-empty table gets a real view.
 
-    Populated tables must yield at least one real Plotly figure. Modules with
-    no current result table are explicitly marked Ready · awaiting data.
+    The first attempt uses the industrial chart suite. If a future/custom
+    table cannot satisfy a semantic chart, the deterministic completeness view
+    is the final safety net; it visualizes only values present in the table.
+    """
+    if not isinstance(df, pd.DataFrame) or df.empty:
+        return []
+    suite = build_visualization_suite(df, context=context, max_figures=max_figures)
+    if suite:
+        return suite
+    completeness = df.notna().mean().mul(100.0).sort_values(ascending=True)
+    if completeness.empty:
+        return []
+    fig = px.bar(
+        x=completeness.index.astype(str),
+        y=completeness.values,
+        range_y=[0, 100],
+        title=f"{context} · Data completeness" if context else "Data completeness",
+        labels={"x": "Field", "y": "Completeness %"},
+    )
+    return [("Data completeness", fig)]
+
+
+def audit_all_module_visualizations(max_figures: int = 4) -> pd.DataFrame:
+    """Audit the actual discoverable workspace for every catalog module.
+
+    The audit intentionally calls discover_visual_tables rather than only the
+    static key registry. This means a new module can inherit the universal
+    visualization contract simply by putting a safe table into workspace state.
+    Populated tables must yield at least one real Plotly figure; modules with no
+    current data remain explicitly marked Ready · awaiting data.
     """
     try:
         from industrial_platform import PLATFORM_CATALOG
-        module_names = [str(item.get("name")) for item in PLATFORM_CATALOG if isinstance(item, dict) and item.get("name")]
+        catalog_names = [
+            str(item.get("name"))
+            for item in PLATFORM_CATALOG
+            if isinstance(item, dict) and item.get("name")
+        ]
     except Exception:
-        module_names = list(_MODULE_KEYS.keys())
+        catalog_names = []
+    module_names = list(dict.fromkeys([*catalog_names, *_MODULE_KEYS.keys()]))
 
     rows = []
     for module in module_names:
-        keys = _module_visual_keys(module)
-        frames = []
-        for key in keys:
-            value = st.session_state.get(key)
-            frame = _as_frame(value)
-            if not frame.empty:
-                frames.append((key, frame))
-        if not frames:
+        tables = discover_visual_tables(module, allow_global_fallback=False)
+        if not tables:
             rows.append({
                 "Module": module,
                 "Tables": 0,
@@ -1070,26 +1096,36 @@ def audit_all_module_visualizations(max_figures: int = 4) -> pd.DataFrame:
                 "Contract": ", ".join(_contract_for_module(module)),
             })
             continue
+
         graph_tables = 0
         total_rows = 0
         graph_types = []
-        for key, frame in frames:
+        failures = []
+        seen_keys = set()
+        for label, key, frame in tables:
+            if key in seen_keys or not isinstance(frame, pd.DataFrame) or frame.empty:
+                continue
+            seen_keys.add(key)
             total_rows += int(len(frame))
-            suite = build_visualization_suite(frame, context=module, max_figures=max_figures)
+            suite = ensure_visualization_suite(frame, context=module, max_figures=max_figures)
             if suite:
                 graph_tables += 1
                 graph_types.append(suite[0][0])
-        status = "Verified" if graph_tables == len(frames) else "Gap"
+            else:
+                failures.append(key)
+
+        status = "Verified" if graph_tables == len(seen_keys) and not failures else "Gap"
         rows.append({
             "Module": module,
-            "Tables": len(frames),
+            "Tables": len(seen_keys),
             "Rows": total_rows,
             "Graphs": graph_tables,
             "Status": status,
             "Contract": ", ".join(_contract_for_module(module)),
             "Primary Views": ", ".join(graph_types[:6]),
+            "Failed State Keys": ", ".join(failures[:6]),
         })
-    return pd.DataFrame(rows, columns=["Module","Tables","Rows","Graphs","Status","Contract","Primary Views"])
+    return pd.DataFrame(rows, columns=["Module","Tables","Rows","Graphs","Status","Contract","Primary Views","Failed State Keys"])
 
 
 def _contract_for_module(module: str) -> tuple[str, ...]:

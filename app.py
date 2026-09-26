@@ -48,6 +48,7 @@ from shoir_enterprise_layer import (
     build_research_paper_bundle,
 )
 from shoir_unified_product import render_unified_workspace, render_global_product_dock, copilot_context
+from shoir_adoption_engine import render_adoption_center
 from shoir_commercial import render_module_enrichment
 from shoir_160 import init_160_platform, render_160_command_center
 from shoir_enterprise_ops import (
@@ -1615,6 +1616,25 @@ render_global_product_dock(
     str(st.session_state.get("user_tier", "Starter Tier")),
     st.session_state.get("current_user", "unknown"),
 )
+if st.session_state.pop("force_workbook_module", False):
+    _wb_label = next((label for label, name in _module_label_map.items() if name == "Industrial Workbook"), None)
+    if _wb_label:
+        st.session_state["enterprise_module_selector"] = _wb_label
+        st.rerun()
+    else:
+        st.warning("Industrial Workbook is not available in the current tier.")
+if st.session_state.pop("force_adoption_center", False):
+    try:
+        render_adoption_center(
+            st.session_state.get("current_user", "unknown"),
+            str(st.session_state.get("user_tier", "Starter Tier")),
+            initial_tab=st.session_state.pop("adoption_tab_request", "Home"),
+        )
+    except Exception as exc:
+        st.error("Industrial Home could not render the adoption workspace safely.")
+        with st.expander("Adoption engine diagnostic", expanded=False):
+            st.code(f"{type(exc).__name__}: {exc}")
+    st.stop()
 if st.session_state.pop("force_unified_workspace", False):
     render_unified_workspace(
         selected_module,
