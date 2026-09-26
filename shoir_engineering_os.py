@@ -47,6 +47,43 @@ PERSONA_VIEWS = {
     "Researcher": ("Protocol", "Data lineage", "Model", "Uncertainty", "Reproducibility"),
 }
 
+CANONICAL_ENTITIES = (
+    "Asset", "Process", "Product", "Material", "Order", "Workforce",
+    "Quality", "Maintenance", "Energy", "Cost", "Risk", "Scenario",
+    "Decision", "Outcome",
+)
+
+CANONICAL_ALIASES = {
+    "Asset": ("asset", "machine", "equipment", "workcenter", "line"),
+    "Process": ("process", "operation", "step", "route"),
+    "Product": ("product", "sku", "part", "item"),
+    "Material": ("material", "component", "raw material"),
+    "Order": ("order", "work order", "job", "sales order"),
+    "Workforce": ("operator", "employee", "labor", "labour", "staff", "workforce"),
+    "Quality": ("quality", "defect", "scrap", "yield", "cpk", "ppk"),
+    "Maintenance": ("maintenance", "failure", "downtime", "mtbf", "mttr"),
+    "Energy": ("energy", "power", "kwh", "mwh", "electric"),
+    "Cost": ("cost", "price", "capex", "opex", "revenue"),
+    "Risk": ("risk", "severity", "occurrence", "detection", "safety"),
+    "Scenario": ("scenario", "alternative", "option"),
+    "Decision": ("decision", "approval", "recommendation"),
+    "Outcome": ("outcome", "actual", "verified", "savings"),
+}
+
+def digital_thread_contract(df: pd.DataFrame | None) -> pd.DataFrame:
+    columns = [str(c) for c in df.columns] if isinstance(df, pd.DataFrame) else []
+    rows = []
+    for entity in CANONICAL_ENTITIES:
+        aliases = CANONICAL_ALIASES[entity]
+        detected = [c for c in columns if any(alias in c.lower() for alias in aliases)]
+        rows.append({
+            "Entity": entity,
+            "Detected Fields": ", ".join(detected),
+            "Status": "Mapped" if detected else "Awaiting evidence",
+            "Authority": "Existing Digital Thread",
+        })
+    return pd.DataFrame(rows)
+
 RESOURCE_FAMILIES = {
     "People / Labor": ("labor", "labour", "operator", "staff", "workforce", "headcount", "hours worked"),
     "Machines / Capacity": ("machine", "equipment", "asset", "capacity", "utilization", "utilisation", "runtime"),
@@ -389,7 +426,7 @@ def render_operating_system_layer(module: str, username: str = "unknown") -> Non
     c2.metric("Resource fields", f"{len(RESOURCE_FAMILIES):,}")
     c3.metric("Current table", f"{len(frame):,} × {len(frame.columns):,}")
 
-    tabs = st.tabs(["Problem Solver", "Resource Efficiency", "Scenario & Verify", "Method Library", "OS Contract"])
+    tabs = st.tabs(["Problem Solver", "Resource Efficiency", "Scenario & Verify", "Method Library", "Digital Thread", "OS Contract"])
 
     with tabs[0]:
         prompt = st.text_area("Engineering problem / objective", placeholder="Example: throughput fell 12% and downtime increased.", key="ieos_problem")
@@ -470,12 +507,19 @@ def render_operating_system_layer(module: str, username: str = "unknown") -> Non
         st.caption("Coverage distinguishes native engines from workflow adapters; no unimplemented method is presented as a completed solver.")
 
     with tabs[4]:
+        thread = digital_thread_contract(frame)
+        st.dataframe(thread, use_container_width=True, hide_index=True)
+        st.caption("Canonical objects reuse the existing Digital Thread authority; this layer only maps evidence into the shared contract.")
+
+    with tabs[5]:
         contract = operating_system_contract(module, frame, session_state=st.session_state)
         st.dataframe(contract, use_container_width=True, hide_index=True)
         st.caption("Profile: " + profile + " · Persona: " + persona + " · Actor: " + str(username))
 
 __all__ = [
     "WORKFLOW_STAGES",
+    "CANONICAL_ENTITIES",
+    "CANONICAL_ALIASES",
     "INDUSTRY_PROFILES",
     "PERSONA_VIEWS",
     "RESOURCE_FAMILIES",
@@ -488,5 +532,6 @@ __all__ = [
     "verification_table",
     "operating_system_contract",
     "event_contract",
+    "digital_thread_contract",
     "render_operating_system_layer",
 ]
