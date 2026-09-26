@@ -608,6 +608,86 @@ def choose_runtime(rows: int, columns: int) -> dict[str, Any]:
     }
 
 
+def conditional_format_dataframe(
+    df: pd.DataFrame,
+    column: str,
+    low: float | None = None,
+    high: float | None = None,
+) -> Any:
+    """Return an accessible conditional-format preview without changing source data."""
+    if not isinstance(df, pd.DataFrame):
+        raise TypeError("Conditional formatting requires a DataFrame.")
+    if column not in df.columns:
+        raise KeyError(f"Column not found: {column}")
+    if low is None and high is None:
+        return df.style
+    numeric = pd.to_numeric(df[column], errors="coerce")
+
+    def style_row(row: pd.Series) -> list[str]:
+        styles = [""] * len(row)
+        value = numeric.loc[row.name]
+        css = ""
+        try:
+            value = float(value)
+            if high is not None and value > float(high):
+                css = "background-color: rgba(34,197,94,.12); font-weight: 700;"
+            elif low is not None and value < float(low):
+                css = "background-color: rgba(239,68,68,.12); font-weight: 700;"
+        except (TypeError, ValueError):
+            pass
+        if css:
+            styles[df.columns.get_loc(column)] = css
+        return styles
+
+    return df.style.apply(style_row, axis=1)
+
+
+def create_scenario_branch(
+    workbook_id: str,
+    branch_name: str,
+    path: str = "enterprise_full_workspace.db",
+) -> str:
+    """Create a persisted workbook branch while preserving the source workbook."""
+    from shoir_industrial_workbook import (
+        load_workbook,
+        load_workbook_variables,
+        list_saved_workbooks,
+        save_workbook,
+    )
+    name = str(branch_name or "").strip()
+    if not name:
+        raise ValueError("Scenario branch name is required.")
+    workbook, formulas, semantic = load_workbook(workbook_id, path=path)
+    variables = load_workbook_variables(workbook_id, path=path)
+    saved = list_saved_workbooks(path=path)
+    parent_name = "Industrial Workbook"
+    if not saved.empty and workbook_id in set(saved["ID"].astype(str)):
+        parent_name = str(saved.loc[saved["ID"].astype(str).eq(workbook_id), "Name"].iloc[0])
+    child_id = save_workbook(
+        workbook,
+        formulas,
+        semantic,
+        name=f"{parent_name} · {name}",
+        path=path,
+        variables=variables,
+        version_label=f"Scenario branch · {name}",
+    )
+    with sqlite3.connect(path, timeout=30) as conn:
+        conn.execute(
+            "INSERT INTO industrial_workbook_audit(workbook_id,workspace,owner,action,details,created_at) VALUES(?,?,?,?,?,?)",
+            (
+                child_id,
+                "default" if path == "enterprise_full_workspace.db" else "test",
+                "unknown",
+                "branch",
+                f"source_workbook={workbook_id} | branch={name}",
+                _now(),
+            ),
+        )
+        conn.commit()
+    return child_id
+
+
 def product_home_snapshot(username: str, workspace: str = "default", db_path: str = "enterprise_full_workspace.db") -> dict[str, Any]:
     """Collect adoption metrics without exposing credentials or secret values."""
     counts = {"workbooks": 0, "decisions": 0, "studies": 0, "templates": 0}
