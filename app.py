@@ -1487,6 +1487,18 @@ def _render_post_module_layers(module_name: str) -> None:
         or "default"
     )
 
+    # Synchronize the canonical Digital Thread BEFORE dependent overlays render.
+    # This makes the thread the cross-domain source of truth while preserving
+    # each native module's measured calculations as the source of operational
+    # signals.
+    try:
+        from shoir_digital_thread import sync_workspace_to_thread
+        sync_workspace_to_thread(username, active_module=module_name)
+    except Exception as exc:
+        st.warning("Digital Thread synchronization is temporarily unavailable; dependent overlays will use their last verified state.")
+        with st.expander("Digital Thread diagnostic", expanded=False):
+            st.code(f"{type(exc).__name__}: {exc}")
+
     # Existing specialized integrations remain attached to their established modules.
     try:
         if module_name in {"Digital Twin & Discrete-Event Simulation", "Live Industrial Digital Twin"}:
@@ -1548,15 +1560,6 @@ def _render_post_module_layers(module_name: str) -> None:
     except Exception as exc:
         st.warning("Universal Module Studio could not render; native results remain available.")
         with st.expander("Visualization diagnostic", expanded=False):
-            st.code(f"{type(exc).__name__}: {exc}")
-
-    # Canonical Digital Thread is synchronized after native results exist.
-    try:
-        from shoir_digital_thread import sync_workspace_to_thread
-        sync_workspace_to_thread(username, active_module=module_name)
-    except Exception as exc:
-        st.warning("Digital Thread synchronization is temporarily unavailable; module results remain intact.")
-        with st.expander("Digital Thread diagnostic", expanded=False):
             st.code(f"{type(exc).__name__}: {exc}")
 
     if username != "unknown":
