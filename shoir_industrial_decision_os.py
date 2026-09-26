@@ -1034,6 +1034,49 @@ def render_visualization_contract(module: str, *, expanded: bool = False) -> dic
     }
 
 
+def run_standard_benchmark_suite() -> pd.DataFrame:
+    """Measure representative native engines on deterministic small workloads.
+
+    The results are runtime measurements only; they are not customer ROI claims
+    and are not comparisons against external vendors.
+    """
+    from industrial_platform import calculate_oee, finite_schedule, queue_simulation, data_quality_report
+
+    cases = [
+        ("Data Quality", lambda: data_quality_report(pd.DataFrame({
+            "Asset": ["A", "B", "B", "C"], "Value": [10.0, 12.0, 12.0, 15.0]
+        }))),
+        ("OEE", lambda: calculate_oee(420.0, 480.0, 0.95, 0.98)),
+        ("Finite Schedule", lambda: finite_schedule(pd.DataFrame({
+            "Order": ["O1", "O2", "O3"],
+            "Product": ["P1", "P2", "P1"],
+            "Qty": [20, 15, 10],
+            "DueDate": ["2026-01-02", "2026-01-03", "2026-01-04"],
+            "ProcessingMin": [30, 35, 25],
+            "SetupMin": [5, 5, 5],
+            "Machine": ["M1", "M1", "M1"],
+            "Priority": [1, 2, 3],
+        }))),
+        ("Queue Simulation", lambda: queue_simulation(10, 20, servers=2, replications=3, duration_min=60)),
+    ]
+
+    rows = []
+    for name, fn in cases:
+        try:
+            measured = timed_engine_benchmark(name, fn, repeats=3)
+            measured["status"] = "Measured"
+            rows.append(measured)
+        except Exception as exc:
+            rows.append({
+                "benchmark_name": name,
+                "status": "Failed",
+                "evidence_status": "Runtime benchmark failed safely",
+                "error": f"{type(exc).__name__}: {exc}",
+                "measured_at": utc_now(),
+            })
+    return pd.DataFrame(rows)
+
+
 def render_verified_connector_surface(username: str) -> None:
     import streamlit as st
 
@@ -1109,6 +1152,24 @@ def render_benchmark_panel(username: str) -> None:
 
     frame = benchmark_frame(username)
     with st.expander("🧪 Benchmark Laboratory", expanded=False):
+        if st.button("⏱️ Run native Shoir-IE runtime benchmark", use_container_width=True, key="run_native_benchmark_suite"):
+            measured = run_standard_benchmark_suite()
+            st.session_state["native_runtime_benchmark_df"] = measured
+            try:
+                from shoir_enterprise_layer import record_artifact
+                record_artifact(
+                    username,
+                    "benchmark_runtime",
+                    "Native Shoir-IE Runtime Benchmark",
+                    {"rows": measured.to_dict("records"), "evidence_status": "Measured in Shoir-IE runtime"},
+                    workspace=_workspace_name(),
+                )
+            except Exception:
+                pass
+        native_runtime = st.session_state.get("native_runtime_benchmark_df")
+        if isinstance(native_runtime, pd.DataFrame) and not native_runtime.empty:
+            st.markdown("**Measured native runtime evidence**")
+            st.dataframe(native_runtime, use_container_width=True, hide_index=True)
         st.caption("Benchmark entries are explicitly labeled user-supplied unless they were measured by the runtime benchmark harness.")
         with st.form("benchmark_evidence_form"):
             c1, c2 = st.columns(2)
