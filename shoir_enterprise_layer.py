@@ -916,13 +916,18 @@ def record_connector_health(
     detail: str = "",
     latency_ms: Optional[float] = None,
     workspace: str = "default",
+    secret_ref: str = "",
 ) -> str:
     ensure_enterprise_schema()
     wid = workspace_key(username, workspace)
     cid = "CONN-" + hashlib.sha256((wid + "|" + name + "|" + system_type + "|" + protocol).encode()).hexdigest()[:14].upper()
     stamp = now_iso()
     safe_endpoint = redact_connector_endpoint(endpoint)
-    params = (cid, wid, name, system_type, protocol, safe_endpoint, status, latency_ms, detail, stamp, username, safe_secret_ref)
+    safe_secret_ref = str(secret_ref or "")[:300]
+    params = (
+        cid, wid, name, system_type, protocol, safe_endpoint, status, latency_ms,
+        detail, stamp, username, safe_secret_ref,
+    )
     if _remote():
         with _pg_connect() as conn:
             with conn.cursor() as cur:
@@ -932,7 +937,7 @@ def record_connector_health(
                     VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                     ON CONFLICT(connector_id) DO UPDATE SET
                     status=EXCLUDED.status,latency_ms=EXCLUDED.latency_ms,detail=EXCLUDED.detail,
-                    checked_at=EXCLUDED.checked_at,checked_by=EXCLUDED.checked_by""",
+                    checked_at=EXCLUDED.checked_at,checked_by=EXCLUDED.checked_by,secret_ref=EXCLUDED.secret_ref""",
                     params,
                 )
             conn.commit()
@@ -944,7 +949,7 @@ def record_connector_health(
                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
                 ON CONFLICT(connector_id) DO UPDATE SET
                 status=excluded.status,latency_ms=excluded.latency_ms,detail=excluded.detail,
-                checked_at=excluded.checked_at,checked_by=excluded.checked_by""",
+                checked_at=excluded.checked_at,checked_by=excluded.checked_by,secret_ref=excluded.secret_ref""",
                 params,
             )
             conn.commit()
