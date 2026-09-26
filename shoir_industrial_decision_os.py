@@ -1046,7 +1046,7 @@ def run_standard_benchmark_suite() -> pd.DataFrame:
         ("Data Quality", lambda: data_quality_report(pd.DataFrame({
             "Asset": ["A", "B", "B", "C"], "Value": [10.0, 12.0, 12.0, 15.0]
         }))),
-        ("OEE", lambda: calculate_oee(420.0, 480.0, 0.95, 0.98)),
+        ("OEE", lambda: calculate_oee(92.0, 95.0, 98.0)),
         ("Finite Schedule", lambda: finite_schedule(pd.DataFrame({
             "Order": ["O1", "O2", "O3"],
             "Product": ["P1", "P2", "P1"],
