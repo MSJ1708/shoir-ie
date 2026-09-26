@@ -139,9 +139,11 @@ def test_connector_schedule_executes_due_health_check(tmp_path, monkeypatch):
     assert results.iloc[0]["Status"] == "Healthy"
 
 
-def test_security_gate_requires_explicit_approval(monkeypatch):
+def test_security_gate_requires_explicit_approval(tmp_path, monkeypatch):
     import streamlit as st
     import shoir_enterprise_layer as ent
+    monkeypatch.setattr(ent, "DEFAULT_DB", str(tmp_path / "security.db"))
+    monkeypatch.setattr(ent, "_remote", lambda: False)
     st.session_state.clear()
     st.session_state["current_user"] = "alice"
     st.session_state["current_role"] = "Owner"
