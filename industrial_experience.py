@@ -404,6 +404,7 @@ def record_decision_outcome(
     actual: Mapping[str, Any],
     lesson: str = "",
     verified_at: Optional[str] = None,
+    workspace: str = "default",
     db_path: str = "enterprise_full_workspace.db",
 ) -> str:
     """Persist implementation outcome evidence and link it to Decision Memory."""
@@ -461,7 +462,7 @@ def record_decision_outcome(
                 "variance": variance_payload,
                 "lesson": str(lesson or "")[:2000],
             },
-            "default",
+            workspace,
         )
     except Exception:
         pass
