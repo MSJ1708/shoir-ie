@@ -992,6 +992,8 @@ def validate_connector_profile(system_type: str, protocol: str, endpoint: str) -
         errors.append("Unsupported system type.")
     if proto not in supported_protocols:
         errors.append("Unsupported protocol profile.")
+    elif system in CONNECTOR_SYSTEM_PROTOCOLS and proto not in CONNECTOR_SYSTEM_PROTOCOLS[system]:
+        errors.append(f"Protocol {proto} is not executable for system type {system} in the current adapter build.")
     if proto in {"REST", "ODATA", "HTTPS"} and ep and not re.match(r"^https?://", ep, flags=re.I):
         errors.append("HTTP-based endpoints must use http:// or https://.")
     if proto == "MQTT" and ep and not re.match(r"^(mqtt|mqtts)://", ep, flags=re.I):
@@ -1001,6 +1003,22 @@ def validate_connector_profile(system_type: str, protocol: str, endpoint: str) -
     if proto in {"SQL", "JDBC"} and ep and not re.match(r"^(sqlite:///|postgres(ql)?://)", ep, flags=re.I):
         errors.append("SQL adapter currently accepts sqlite:/// or PostgreSQL DSNs.")
     return {"valid": not errors, "errors": errors, "system_type": system, "protocol": proto, "adapter": CONNECTOR_PROTOCOLS.get(proto, proto)}
+
+CONNECTOR_SYSTEM_PROTOCOLS = {
+    # These are executable transports in the current adapter build. A named
+    # system is not treated as a native database driver unless the adapter
+    # actually implements and tests that transport.
+    "SAP": {"REST", "ODATA", "HTTPS"},
+    "ORACLE": {"REST", "ODATA", "HTTPS"},
+    "WMS": {"REST", "ODATA", "HTTPS"},
+    "MES": {"REST", "ODATA", "HTTPS", "MQTT"},
+    "ERP": {"REST", "ODATA", "HTTPS"},
+    "SQL": {"SQL", "JDBC"},
+    "REST": {"REST", "ODATA", "HTTPS"},
+    "MQTT": {"MQTT"},
+    "OPC-UA": {"OPC-UA"},
+}
+
 
 CONNECTOR_PROTOCOLS = {
     "REST": "HTTP(S) API",
