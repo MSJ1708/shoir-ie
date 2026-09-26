@@ -42,12 +42,26 @@ def test_canonical_lifecycle_flow_is_renderable():
     assert "Asset" in CANONICAL_LIFECYCLE and "Outcome" in CANONICAL_LIFECYCLE
     assert canonical_flow_figure(nodes, edges) is not None
 
-def test_decision_variance_round_trip(tmp_path):
+def test_decision_variance_contract():
     import industrial_experience as exp
-    db = str(tmp_path / "experience.db")
-    exp.ensure_experience_db(db)
-    did = exp.create_decision("Test decision", "Testing", {"Throughput": 100}, {}, {}, "owner", db_path=db) if False else None
-    # Verify the pure comparison contract independently of UI state.
     variance = exp.calculate_decision_variance({"Throughput": 100, "Cost": 50}, {"Throughput": 90, "Cost": 55})
     assert list(variance["KPI"]) == ["Cost", "Throughput"]
     assert float(variance.loc[variance["KPI"].eq("Throughput"), "Delta"].iloc[0]) == -10.0
+    assert float(variance.loc[variance["KPI"].eq("Cost"), "Delta %"].iloc[0]) == 10.0
+
+def test_connector_sql_adapter_and_endpoint_redaction(tmp_path):
+    import shoir_enterprise_layer as ent
+    db = tmp_path / "source.db"
+    import sqlite3
+    with sqlite3.connect(db) as conn:
+        conn.execute("select 1")
+    ent.DEFAULT_DB = str(tmp_path / "enterprise.db")
+    ent._remote = lambda: False
+    result = ent.test_connector_profile("alice", "Local SQL", "SQL", "SQL", "sqlite:///" + str(db))
+    assert result["status"] == "Healthy"
+    assert result["run_id"].startswith("CRUN-")
+    secret_id = ent.record_connector_health("alice", "REST", "REST", "REST", "https://example.test/api?token=topsecret&x=1", "Healthy")
+    health = ent.connector_health_frame("alice")
+    saved = str(health.loc[health["connector_id"].eq(secret_id), "endpoint"].iloc[0])
+    assert "topsecret" not in saved
+    assert "***" in saved
