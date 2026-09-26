@@ -691,8 +691,11 @@ def render_live_visualization_studio(module: str, *, expanded: bool = False, pre
         fig = _make_figure(prepared, actual_chart, x, y, z, title)
 
         if fig is None:
-            st.warning("This visualization needs compatible columns. Try a numeric Y-axis, a category/date X-axis, or choose Heatmap.")
-            return
+            fig = guaranteed_figure(prepared, title)
+            if fig is None:
+                st.warning("No truthful visualization could be generated from the selected table.")
+                return
+            actual_chart = "Universal Fallback"
 
         q1, q2, q3, q4 = st.columns(4)
         q1.metric("Rows visualized", f"{len(prepared):,}")
@@ -917,6 +920,53 @@ def _make_figure(
     return _BASE_MAKE_FIGURE(df, chart, x, y, z, title)
 
 
+
+def guaranteed_figure(df: pd.DataFrame, title: str = "Universal Engineering View") -> go.Figure | None:
+    """Guarantee a truthful visualization for any non-empty, displayable table."""
+    if not isinstance(df, pd.DataFrame) or df.empty or len(df.columns) == 0:
+        return None
+
+    # Reuse the same suite first; this keeps specialized industrial semantics.
+    try:
+        numeric = _numeric_columns(df)
+        categorical = _categorical_columns(df)
+        dates = _coerce_datetime_columns(df)
+        if dates and numeric:
+            fig = _make_figure(df, "Metric Trend", dates[0], numeric[0], None, title)
+            if fig is not None:
+                return fig
+        if categorical and numeric:
+            fig = _make_figure(df, "Bar", categorical[0], numeric[0], None, title)
+            if fig is not None:
+                return fig
+        if numeric:
+            fig = _make_figure(df, "Distribution", None, numeric[0], None, title)
+            if fig is not None:
+                return fig
+        if categorical:
+            fig = _make_figure(df, "Categorical Distribution", categorical[0], None, None, title)
+            if fig is not None:
+                return fig
+        completeness = df.notna().mean().mul(100.0).sort_values().head(80)
+        if not completeness.empty:
+            return px.bar(
+                x=completeness.index.astype(str),
+                y=completeness.values,
+                range_y=[0, 100],
+                title=f"{title} · Data completeness",
+                labels={"x": "Field", "y": "Completeness %"},
+            )
+    except Exception:
+        pass
+
+    # Last-resort coverage chart: this is metadata, never a fabricated KPI.
+    try:
+        footprint = pd.DataFrame({"Metric": ["Rows", "Columns"], "Value": [len(df), len(df.columns)]})
+        return px.bar(footprint, x="Metric", y="Value", title=f"{title} · Data footprint")
+    except Exception:
+        return None
+
+
 def build_visualization_suite(
     df: pd.DataFrame,
     context: str = "",
@@ -992,6 +1042,13 @@ def build_visualization_suite(
         fig = _make_figure(df, chart, x, y, z, title)
         if fig is not None:
             suite.append((title, fig))
+
+    # Universal anti-graphless contract: a populated table always receives
+    # one truthful view, even when its semantics are unfamiliar to the registry.
+    if not suite:
+        fallback = guaranteed_figure(df, f"{context or 'Engineering'} · Universal fallback")
+        if fallback is not None:
+            suite.append((f"{context or 'Engineering'} · Universal fallback", fallback))
     return suite[:max(1, int(max_figures))]
 
 
