@@ -88,6 +88,54 @@ FORMULA_LIBRARY: dict[str, dict[str, str]] = {
         "example": '=CONVERT(60,"min","h")',
         "notes": "Incompatible dimensions are rejected.",
     },
+    "MTBF": {
+        "signature": "MTBF(Uptime, Failures)",
+        "purpose": "Mean time between failures under the supplied uptime/failure convention.",
+        "example": "=MTBF(720,3)",
+        "notes": "Failures must be greater than zero.",
+    },
+    "MTTR": {
+        "signature": "MTTR(Downtime, Failures)",
+        "purpose": "Mean time to repair under the supplied downtime/failure convention.",
+        "example": "=MTTR(12,3)",
+        "notes": "Failures must be greater than zero.",
+    },
+    "UTILIZATION": {
+        "signature": "UTILIZATION(Used, Available)",
+        "purpose": "Resource utilization ratio.",
+        "example": "=UTILIZATION(144,160)",
+        "notes": "Available must be greater than zero.",
+    },
+    "FPY": {
+        "signature": "FPY(GoodUnits, TotalUnits)",
+        "purpose": "First-pass yield ratio.",
+        "example": "=FPY(950,1000)",
+        "notes": "TotalUnits must be greater than zero.",
+    },
+    "DPMO": {
+        "signature": "DPMO(Defects, Units, OpportunitiesPerUnit)",
+        "purpose": "Defects per million opportunities.",
+        "example": "=DPMO(12,1000,4)",
+        "notes": "Units and opportunities per unit must be greater than zero.",
+    },
+    "PERCENTCHANGE": {
+        "signature": "PERCENTCHANGE(Old, New)",
+        "purpose": "Relative change from Old to New.",
+        "example": "=PERCENTCHANGE(100,108)",
+        "notes": "Old must be non-zero.",
+    },
+    "CAPACITY": {
+        "signature": "CAPACITY(AvailableTime, Rate)",
+        "purpose": "Capacity from available time multiplied by rate.",
+        "example": "=CAPACITY(480,2.5)",
+        "notes": "Inputs retain their supplied engineering units.",
+    },
+    "YIELD": {
+        "signature": "YIELD(Good, Total)",
+        "purpose": "Good-output yield ratio.",
+        "example": "=YIELD(980,1000)",
+        "notes": "Total must be greater than zero.",
+    },
 }
 
 
@@ -177,6 +225,59 @@ def evaluate_engineering_function(name: str, args: Sequence[Any]) -> Any:
     if key == "CO2E":
         if len(a) != 2:
             raise ValueError("CO2E requires Activity and EmissionFactor.")
+        return float(a[0]) * float(a[1])
+
+    if key == "MTBF":
+        if len(a) != 2:
+            raise ValueError("MTBF requires Uptime and Failures.")
+        failures=float(a[1])
+        if failures <= 0:
+            raise ValueError("Failures must be greater than zero.")
+        return float(a[0]) / failures
+
+    if key == "MTTR":
+        if len(a) != 2:
+            raise ValueError("MTTR requires Downtime and Failures.")
+        failures=float(a[1])
+        if failures <= 0:
+            raise ValueError("Failures must be greater than zero.")
+        return float(a[0]) / failures
+
+    if key == "UTILIZATION":
+        if len(a) != 2:
+            raise ValueError("UTILIZATION requires Used and Available.")
+        available=float(a[1])
+        if available <= 0:
+            raise ValueError("Available must be greater than zero.")
+        return float(a[0]) / available
+
+    if key in {"FPY","YIELD"}:
+        if len(a) != 2:
+            raise ValueError(f"{key} requires Good and Total.")
+        total=float(a[1])
+        if total <= 0:
+            raise ValueError("Total must be greater than zero.")
+        return float(a[0]) / total
+
+    if key == "DPMO":
+        if len(a) != 3:
+            raise ValueError("DPMO requires Defects, Units and OpportunitiesPerUnit.")
+        defects,units,opps=map(float,a)
+        if units <= 0 or opps <= 0:
+            raise ValueError("Units and OpportunitiesPerUnit must be greater than zero.")
+        return defects / (units * opps) * 1_000_000.0
+
+    if key == "PERCENTCHANGE":
+        if len(a) != 2:
+            raise ValueError("PERCENTCHANGE requires Old and New.")
+        old=float(a[0])
+        if old == 0:
+            raise ValueError("Old value must be non-zero.")
+        return (float(a[1]) - old) / old
+
+    if key == "CAPACITY":
+        if len(a) != 2:
+            raise ValueError("CAPACITY requires AvailableTime and Rate.")
         return float(a[0]) * float(a[1])
 
     if key == "CONVERT":
