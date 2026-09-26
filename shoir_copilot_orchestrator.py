@@ -434,6 +434,7 @@ def run_orchestration(prompt: str, module: str, df: pd.DataFrame, context: Mappi
     runtime = dict(context or {})
     knowledge_text = str(runtime.get("knowledge_context") or "").strip()
     knowledge_count = int(runtime.get("knowledge_documents", 0) or 0)
+    knowledge_used = bool(knowledge_text)
     if intent_info["intent"] == "optimization" and callable(runtime.get("milp_solver")):
         customers = runtime.get("customers") or []
         warehouses = runtime.get("warehouses") or []
