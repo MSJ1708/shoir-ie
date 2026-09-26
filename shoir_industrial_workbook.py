@@ -498,6 +498,23 @@ _EXTENSION_REGISTRY:dict[str,WorkbookExtension]={}
 def register_workbook_extension(extension:WorkbookExtension)->None:
     if not extension.name.strip(): raise ValueError("Extension name is required.")
     _EXTENSION_REGISTRY[extension.name]=extension
+    # Reuse Shoir-IE's existing plugin registry rather than creating a second
+    # extension catalog. The adapter remains metadata-only unless a transform
+    # function is explicitly installed.
+    try:
+        from plugin_registry import PluginSpec, register_plugin
+        register_plugin(
+            PluginSpec(
+                name="Workbook Extension · " + extension.name,
+                category="Workbook",
+                version=extension.version,
+                description=extension.description,
+            ),
+            handler=(lambda df, _name=extension.name: run_workbook_extension(_name, df))
+                if extension.transform is not None else None,
+        )
+    except Exception:
+        pass
 
 def list_workbook_extensions()->list[WorkbookExtension]:
     return list(_EXTENSION_REGISTRY.values())
