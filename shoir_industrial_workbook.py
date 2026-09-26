@@ -277,10 +277,10 @@ class SafeFormulaEngine:
             name = node.func.id.upper()
             if name == "_CELL":
                 s = self._eval_node(node.args[0], sheet); ref = str(self._eval_node(node.args[1], sheet))
-                return self._cell(None if s == "None" else str(s), ref)
+                return self._cell(None if s is None or s == "None" else str(s), ref)
             if name == "_RANGE":
                 s = self._eval_node(node.args[0], sheet); ref = str(self._eval_node(node.args[1], sheet))
-                return self._range(None if s == "None" else str(s), ref)
+                return self._range(None if s is None or s == "None" else str(s), ref)
             if name not in _ALLOWED_FUNCS: raise ValueError(f"Function is not allowed: {name}")
             if name == "IF":
                 if len(node.args) < 2: raise ValueError("IF requires a condition and true value.")
