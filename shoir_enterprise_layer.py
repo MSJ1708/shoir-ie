@@ -550,7 +550,7 @@ def redact_connector_endpoint(endpoint: str) -> str:
             host = userinfo + "@"+host
         blocked = {"token","access_token","api_key","apikey","key","password","passwd","secret","client_secret"}
         query = [(k, "***" if k.lower() in blocked else v) for k, v in parse_qsl(parts.query, keep_blank_values=True)]
-        return urlunsplit((parts.scheme, host, parts.path, urlencode(query), ""))
+        return urlunsplit((parts.scheme, host, parts.path, urlencode(query, safe="*"), ""))
     except Exception:
         return re.sub(r"(?i)(password|token|api[_-]?key|secret)=([^&\s]+)", r"\1=***", value)
 
