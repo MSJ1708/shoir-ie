@@ -127,7 +127,7 @@ def test_connector_schedule_executes_due_health_check(tmp_path, monkeypatch):
         conn.commit()
     monkeypatch.setattr(ent, "DEFAULT_DB", str(tmp_path / "enterprise.db"))
     monkeypatch.setattr(ent, "_remote", lambda: False)
-    tested = ent.test_connector_profile("alice", "Local SQL", "SQL", "SQL", f"sqlite:///{db}")
+    tested = ent.test_connector_profile("alice", "Local SQL", "SQL", "SQL", f"sqlite:///{db}", workspace="plant-a")
     schedule_id = ent.schedule_connector_sync("alice", tested["connector_id"], 60, "plant-a", enabled=True)
     with sqlite3.connect(str(ent.DEFAULT_DB)) as conn:
         conn.execute("update shoir_ent_connector_schedules set next_run_at=? where schedule_id=?",
