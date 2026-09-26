@@ -227,11 +227,12 @@ def create_decision(
     uncertainty: Mapping[str, Any],
     owner: str,
     status: str = "Draft",
+    db_path: str = "enterprise_full_workspace.db",
 ) -> str:
-    ensure_experience_db()
+    ensure_experience_db(db_path)
     did = "DEC-" + uuid.uuid4().hex[:12].upper()
     stamp = _now()
-    with _db() as conn:
+    with _db(db_path) as conn:
         conn.execute(
             "INSERT INTO experience_decisions VALUES(?,?,?,?,?,?,?,?,?,?)",
             (
@@ -249,7 +250,6 @@ def create_decision(
         )
         conn.commit()
     return did
-
 
 def save_decision_spec(
     decision_id: str,
@@ -415,7 +415,7 @@ def record_decision_outcome(
     status = str(implementation_status).strip()
     if status not in {"Planned", "Implemented", "Verified"}:
         raise ValueError("Invalid implementation status.")
-    with sqlite3.connect(db_path, timeout=30) as conn:
+    with _db(db_path) as conn:
         row = conn.execute("SELECT owner FROM experience_decisions WHERE decision_id=?", (decision_id,)).fetchone()
         if not row:
             raise ValueError("Decision not found.")
