@@ -181,6 +181,70 @@ def test_decision_to_value_is_canonical_and_traceable(tmp_path, monkeypatch):
     assert oid in " ".join(entities["name"].astype(str).tolist())
 
 
+def test_catalog_level_visualization_registry_covers_all_surfaces():
+    import streamlit as st
+    from industrial_platform import PLATFORM_CATALOG
+    from shoir_live_visuals import _module_visual_keys, discover_visual_tables, audit_all_module_visualizations
+
+    st.session_state.clear()
+    catalog = [
+        str(item.get("name"))
+        for item in PLATFORM_CATALOG
+        if isinstance(item, dict) and item.get("name")
+    ]
+    missing = [name for name in catalog if not _module_visual_keys(name)]
+    assert missing == []
+
+    st.session_state["os_compare_result"] = pd.DataFrame(
+        {"Scenario": ["Baseline", "Alternative"], "Value": [100.0, 112.0]}
+    )
+    st.session_state["global_thread_nodes"] = [
+        {"node_id": "A1", "node_type": "Asset", "name": "CNC-01", "status": "Observed"},
+        {"node_id": "P1", "node_type": "Process", "name": "Assembly", "status": "Observed"},
+    ]
+    st.session_state["global_thread_edges"] = [
+        {"source_id": "A1", "target_id": "P1", "relation": "participates in"}
+    ]
+    st.session_state["copilot_orchestrator_run"] = {
+        "run_id": "COP-TEST",
+        "result": pd.DataFrame(
+            {"Scenario": ["Baseline", "Alternative"], "Throughput": [100.0, 108.0]}
+        ),
+    }
+
+    audit = audit_all_module_visualizations(max_figures=3)
+    selected = audit[
+        audit["Module"].isin(
+            {
+                "Industrial Operating System",
+                "Global Project & Digital Thread",
+                "Advanced Engineering Copilot",
+            }
+        )
+    ]
+    assert len(selected) == 3
+    assert not selected["Status"].eq("Gap").any()
+    assert set(selected["Status"]) == {"Verified"}
+
+    discovered = discover_visual_tables("Advanced Engineering Copilot")
+    assert any(key == "copilot_orchestrator_run" for _, key, _ in discovered)
+
+
+def test_visualization_engine_unwraps_nested_copilot_results():
+    from shoir_live_visuals import _as_frame, build_visualization_suite
+
+    nested = {
+        "run_id": "COP-TEST",
+        "result": pd.DataFrame(
+            {"Scenario": ["Base", "Alt"], "Throughput": [100.0, 109.0]}
+        ),
+        "analysis_meta": {"type": "scenario_compare"},
+    }
+    frame = _as_frame(nested)
+    assert list(frame.columns) == ["Scenario", "Throughput"]
+    assert len(build_visualization_suite(frame, context="Advanced Engineering Copilot", max_figures=3)) >= 1
+
+
 def test_visualization_audit_has_no_populated_gaps():
     from shoir_live_visuals import audit_all_module_visualizations
     audit = audit_all_module_visualizations(max_figures=3)
