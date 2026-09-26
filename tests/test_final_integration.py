@@ -49,14 +49,14 @@ def test_decision_variance_contract():
     assert float(variance.loc[variance["KPI"].eq("Throughput"), "Delta"].iloc[0]) == -10.0
     assert float(variance.loc[variance["KPI"].eq("Cost"), "Delta %"].iloc[0]) == 10.0
 
-def test_connector_sql_adapter_and_endpoint_redaction(tmp_path):
+def test_connector_sql_adapter_and_endpoint_redaction(tmp_path, monkeypatch):
     import shoir_enterprise_layer as ent
     db = tmp_path / "source.db"
     import sqlite3
     with sqlite3.connect(db) as conn:
         conn.execute("select 1")
-    ent.DEFAULT_DB = str(tmp_path / "enterprise.db")
-    ent._remote = lambda: False
+    monkeypatch.setattr(ent, "DEFAULT_DB", str(tmp_path / "enterprise.db"))
+    monkeypatch.setattr(ent, "_remote", lambda: False)
     result = ent.test_connector_profile("alice", "Local SQL", "SQL", "SQL", "sqlite:///" + str(db))
     assert result["status"] == "Healthy"
     assert result["run_id"].startswith("CRUN-")
