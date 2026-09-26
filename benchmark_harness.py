@@ -78,3 +78,57 @@ def calculate_roi_evidence(
         "cycle_reduction_pct": cycle_reduction_pct,
         "evidence_status": "User-entered measurement + explicit assumptions",
     }
+
+
+
+def run_standard_benchmarks(repetitions: int = 3, rows: int = 10000) -> pd.DataFrame:
+    """Run deterministic engineering benchmark recipes on labeled synthetic data.
+
+    These are platform-engineering benchmarks only; they are not customer
+    savings claims and must not be presented as production ROI evidence.
+    """
+    from industrial_platform import (
+        calculate_oee,
+        line_balance,
+        robust_risk_analysis,
+        spc_limits,
+    )
+    from shoir_live_visuals import build_visualization_suite
+
+    rows = max(100, int(rows))
+    repetitions = max(1, int(repetitions))
+    quality_df = pd.DataFrame({
+        "Asset": [f"A-{i % 25:02d}" for i in range(rows)],
+        "Value": [float((i % 100) + 1) for i in range(rows)],
+        "Defect": [int(i % 17 == 0) for i in range(rows)],
+    })
+    oee_df = pd.DataFrame({
+        "Availability": [0.92] * min(rows, 1000),
+        "Performance": [0.88] * min(rows, 1000),
+        "Quality": [0.97] * min(rows, 1000),
+    })
+    balance_df = pd.DataFrame({
+        "Element": [f"E{i}" for i in range(20)],
+        "TimeMin": [2 + (i % 4) for i in range(20)],
+    })
+    measurements = [10.0 + ((i % 7) - 3) * 0.1 for i in range(60)]
+
+    cases = [
+        ("Data Quality / profiling", lambda: data_quality_report(quality_df)),
+        ("OEE calculation", lambda: calculate_oee(
+            float(oee_df["Availability"].mean() * 100),
+            float(oee_df["Performance"].mean() * 100),
+            float(oee_df["Quality"].mean() * 100),
+        )),
+        ("Line balance", lambda: line_balance(balance_df, 6)),
+        ("Robust risk analysis", lambda: robust_risk_analysis(100, 5, 120, 5, 1, 0.1, 0.5, 500)),
+        ("SPC limits", lambda: spc_limits(measurements)),
+        ("Universal visualization suite", lambda: build_visualization_suite(quality_df, context="Benchmark", max_figures=4)),
+    ]
+    records = []
+    for label, callback in cases:
+        result = benchmark_callable(label, callback, repetitions=repetitions, warmup=1)
+        result["dataset_rows"] = rows
+        result["benchmark_type"] = "Synthetic deterministic platform benchmark"
+        records.append(result)
+    return pd.DataFrame(records)
