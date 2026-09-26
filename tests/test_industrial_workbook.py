@@ -164,3 +164,35 @@ def test_platform_and_visualization_integration():
     assert entry["tier"] == "Starter"
     assert "Industrial Workbook" in _MODULE_KEYS
     assert "industrial_workbook_current_df" in _MODULE_KEYS["Industrial Workbook"]
+
+
+def test_workbook_shared_engineering_formulas_and_pivot_step():
+    wb = {
+        "Inputs": pd.DataFrame({
+            "Availability": [0.92],
+            "Performance": [0.95],
+            "Quality": [0.99],
+            "Demand": [12000],
+            "OrderCost": [50],
+            "HoldingCost": [2],
+        }),
+        "Calc": pd.DataFrame({"OEE": [0.0], "EOQ": [0.0]}),
+        "Summary": pd.DataFrame({"Area": ["A", "A", "B"], "Month": ["Jan", "Feb", "Jan"], "Qty": [10, 20, 30]}),
+    }
+    formulas = {
+        "Calc": {
+            "A1": "=OEE('Inputs'!A1,'Inputs'!B1,'Inputs'!C1)",
+            "B1": "=EOQ('Inputs'!D1,'Inputs'!E1,'Inputs'!F1)",
+        }
+    }
+    out, audit = evaluate_workbook_formulas(wb, formulas)
+    assert np.isclose(out["Calc"].iloc[0, 0], 0.92 * 0.95 * 0.99)
+    assert np.isclose(out["Calc"].iloc[0, 1], np.sqrt(2 * 12000 * 50 / 2))
+    assert (audit["Status"] == "Calculated").all()
+
+    pivoted = apply_query_pipeline(
+        wb["Summary"],
+        [{"type": "pivot", "index": ["Area"], "columns": "Month", "values": "Qty", "aggregation": "sum"}],
+    )
+    assert "Area" in pivoted.columns
+    assert float(pivoted.loc[pivoted["Area"].eq("A"), "Feb · Qty"].iloc[0]) == 20.0
