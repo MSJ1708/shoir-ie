@@ -51,7 +51,7 @@ def test_decision_outcome_persistence_and_variance(tmp_path, monkeypatch):
     did = exp.create_decision("Test decision", "Testing", {"Throughput": 100}, {}, {}, "owner")
     oid = exp.record_decision_outcome(
         did, "owner", "Verified", {"Throughput": 100, "Cost": 50}, {"Throughput": 90, "Cost": 55},
-        lesson="Actual throughput was lower than predicted.", workspace="plant-a"
+        lesson="Actual throughput was lower than predicted.", workspace="plant-a", persist_artifact=False
     )
     assert oid.startswith("OUT-")
     stored = exp.decision_outcomes_frame(decision_id=did, owner="owner", db_path=db)
