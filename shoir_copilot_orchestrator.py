@@ -383,7 +383,9 @@ def build_export_bundle(
         zf.writestr("inspection.json", json.dumps(dict(inspection), indent=2, default=str).encode("utf-8"))
         zf.writestr("method.json", json.dumps(dict(method), indent=2, default=str).encode("utf-8"))
         zf.writestr("results.csv", result.to_csv(index=False).encode("utf-8"))
-        zf.writestr("explanation.md", explanation.encode("utf-8"))\n        if evidence_manifest:\n            zf.writestr("evidence_manifest.json", json.dumps(dict(evidence_manifest), indent=2, default=str).encode("utf-8"))
+        zf.writestr("explanation.md", explanation.encode("utf-8"))
+        if evidence_manifest:
+            zf.writestr("evidence_manifest.json", json.dumps(dict(evidence_manifest), indent=2, default=str).encode("utf-8"))
         if str(knowledge_context).strip():
             zf.writestr("knowledge_context.txt", str(knowledge_context)[:12000].encode("utf-8"))
         zf.writestr("copilot_analysis.xlsx", xlsx)
