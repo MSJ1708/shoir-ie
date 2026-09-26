@@ -257,6 +257,7 @@ def _auto_chart_choice(df: pd.DataFrame) -> str:
     """Choose a useful chart from structural signals, not invented semantics."""
     cols = [str(c) for c in df.columns]
     nums = _numeric_columns(df)
+    categorical = _categorical_columns(df)
     dates = _coerce_datetime_columns(df)
     source = _find_col(df, ("source", "from", "origin", "customer", "facility", "warehouse"))
     target = _find_col(df, ("target", "to", "destination", "warehouse", "facility", "customer"))
