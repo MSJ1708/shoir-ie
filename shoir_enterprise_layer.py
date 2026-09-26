@@ -92,6 +92,18 @@ LOCAL_DDL = [
         connector_id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, name TEXT NOT NULL,
         system_type TEXT NOT NULL, protocol TEXT NOT NULL, endpoint TEXT, status TEXT NOT NULL,
         latency_ms REAL, detail TEXT, checked_at TEXT NOT NULL, checked_by TEXT)""",
+    """CREATE TABLE IF NOT EXISTS shoir_ent_connector_runs (
+        run_id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, connector_id TEXT NOT NULL,
+        operation TEXT NOT NULL, status TEXT NOT NULL, latency_ms REAL, detail TEXT,
+        records INTEGER NOT NULL DEFAULT 0, started_at TEXT NOT NULL, finished_at TEXT NOT NULL)""",
+    """CREATE INDEX IF NOT EXISTS idx_shoir_ent_connector_runs_ws
+        ON shoir_ent_connector_runs(workspace_id, started_at DESC)""",
+    """CREATE TABLE IF NOT EXISTS shoir_ent_connector_schedules (
+        schedule_id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, connector_id TEXT NOT NULL,
+        interval_minutes INTEGER NOT NULL, enabled INTEGER NOT NULL DEFAULT 1,
+        next_run_at TEXT, last_run_at TEXT, last_status TEXT, updated_at TEXT NOT NULL)""",
+    """CREATE INDEX IF NOT EXISTS idx_shoir_ent_connector_sched_ws
+        ON shoir_ent_connector_schedules(workspace_id, next_run_at)""",
     """CREATE INDEX IF NOT EXISTS idx_shoir_ent_connector_ws
         ON shoir_ent_connector_health(workspace_id, checked_at DESC)""",
     """CREATE TABLE IF NOT EXISTS shoir_ent_jobs (
@@ -156,6 +168,19 @@ REMOTE_DDL = [
         connector_id text PRIMARY KEY, workspace_id text NOT NULL, name text NOT NULL,
         system_type text NOT NULL, protocol text NOT NULL, endpoint text, status text NOT NULL,
         latency_ms double precision, detail text, checked_at timestamptz NOT NULL, checked_by text)""",
+    """CREATE TABLE IF NOT EXISTS shoir_internal.connector_runs (
+        run_id text PRIMARY KEY, workspace_id text NOT NULL, connector_id text NOT NULL,
+        operation text NOT NULL, status text NOT NULL, latency_ms double precision,
+        detail text, records integer NOT NULL DEFAULT 0, started_at timestamptz NOT NULL,
+        finished_at timestamptz NOT NULL)""",
+    """CREATE INDEX IF NOT EXISTS idx_shoir_internal_connector_runs_ws
+        ON shoir_internal.connector_runs(workspace_id, started_at DESC)""",
+    """CREATE TABLE IF NOT EXISTS shoir_internal.connector_schedules (
+        schedule_id text PRIMARY KEY, workspace_id text NOT NULL, connector_id text NOT NULL,
+        interval_minutes integer NOT NULL, enabled boolean NOT NULL DEFAULT true,
+        next_run_at timestamptz, last_run_at timestamptz, last_status text, updated_at timestamptz NOT NULL)""",
+    """CREATE INDEX IF NOT EXISTS idx_shoir_internal_connector_sched_ws
+        ON shoir_internal.connector_schedules(workspace_id, next_run_at)""",
     """CREATE INDEX IF NOT EXISTS idx_shoir_internal_connector_ws
         ON shoir_internal.connector_health(workspace_id, checked_at DESC)""",
     """CREATE TABLE IF NOT EXISTS shoir_internal.jobs (
