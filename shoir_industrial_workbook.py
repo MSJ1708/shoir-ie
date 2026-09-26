@@ -158,7 +158,8 @@ def _excel_aggregate(name: str, values: Any) -> float:
     raise ValueError(name)
 
 _ALLOWED_FUNCS = {"ABS","AVERAGE","COUNT","COUNTA","IF","IFERROR","MAX","MIN",
-                  "MOD","NOT","OR","AND","POWER","ROUND","SQRT","SUM"}
+                  "MOD","NOT","OR","AND","POWER","ROUND","SQRT","SUM",
+                  "OEE","TAKTTIME","LITTLELAW","CPK","PPK","EOQ","SAFETYSTOCK","NPV","CO2E","CONVERT"}
 
 class SafeFormulaEngine:
     def __init__(self, workbook: Mapping[str, pd.DataFrame], formulas: Mapping[str, Mapping[str, str]] | None = None):
@@ -305,6 +306,9 @@ class SafeFormulaEngine:
             if name == "NOT": return not bool(args[0])
             if name == "AND": return all(bool(x) for x in args)
             if name == "OR": return any(bool(x) for x in args)
+            if name in {"OEE","TAKTTIME","LITTLELAW","CPK","PPK","EOQ","SAFETYSTOCK","NPV","CO2E","CONVERT"}:
+                from shoir_adoption_engine import evaluate_engineering_function
+                return evaluate_engineering_function(name, args)
         raise ValueError(f"Unsupported formula expression: {ast.dump(node, include_attributes=False)}")
 
 def evaluate_workbook_formulas(workbook: Mapping[str,pd.DataFrame], formulas: Mapping[str,Mapping[str,str]]) -> tuple[dict[str,pd.DataFrame],pd.DataFrame]:
@@ -443,8 +447,18 @@ def apply_query_pipeline(df:pd.DataFrame, steps:Sequence[Mapping[str,Any]])->pd.
             if not groups or value_col not in work.columns: raise ValueError("Group By requires grouping columns and a value column.")
             metric=pd.to_numeric(work[value_col],errors="coerce")
             grouped=work.assign(__value=metric).groupby(groups,dropna=False)["__value"]
-            out={"mean":grouped.mean(),"count":grouped.size(),"min":grouped.min(),"max":grouped.max()}.get(agg,grouped.sum())
+            out={"mean":grouped.mean(),"count":grouped.size(),"min":grouped.min(),"max":grouped.max(),"median":grouped.median(),"std":grouped.std(ddof=1)}.get(agg,grouped.sum())
             work=out.reset_index(name=f"{agg.title()} {value_col}")
+        elif kind=="pivot":
+            from shoir_adoption_engine import industrial_pivot
+            work=industrial_pivot(
+                work,
+                index=step.get("index", step.get("rows", [])),
+                columns=step.get("columns") or None,
+                values=step.get("values", step.get("value_column", "")),
+                aggfunc=step.get("aggregation", "sum"),
+                fill_value=step.get("fill_value"),
+            )
         elif kind=="add_formula":
             target,expression=str(step.get("target","")),str(step.get("expression",""))
             if not target or not expression: raise ValueError("Add Formula requires a target and expression.")
@@ -832,7 +846,7 @@ def render_industrial_workbook(tier:str="Starter",username:str="unknown")->None:
 
     with tabs[2]:
         st.markdown("### Power Query-style pipeline"); st.caption("Build a repeatable sequence: select → rename → filter → clean → calculate → group → sort.")
-        cols=list(map(str,current.columns)); step_type=st.selectbox("Add step",["select","rename","filter","fill_missing","cast_numeric","drop_duplicates","sort","add_formula","groupby"],key="iw_query_type"); params:dict[str,Any]={}
+        cols=list(map(str,current.columns)); step_type=st.selectbox("Add step",["select","rename","filter","fill_missing","cast_numeric","drop_duplicates","sort","add_formula","groupby","pivot"],key="iw_query_type"); params:dict[str,Any]={}
         if step_type=="select": params["columns"]=st.multiselect("Columns",cols,default=cols,key="iw_query_select")
         elif step_type=="rename":
             q1,q2=st.columns(2); params["source"]=q1.selectbox("Source",cols,key="iw_query_rename_source"); params["target"]=q2.text_input("Target",key="iw_query_rename_target")
@@ -846,7 +860,14 @@ def render_industrial_workbook(tier:str="Starter",username:str="unknown")->None:
         elif step_type=="add_formula":
             q1,q2=st.columns(2); params["target"]=q1.text_input("New column",key="iw_query_formula_target"); params["expression"]=q2.text_input("Expression",placeholder="Quantity * UnitCost",key="iw_query_formula_expr")
         elif step_type=="groupby":
-            q1,q2,q3=st.columns(3); params["columns"]=q1.multiselect("Group columns",cols,key="iw_query_group_cols"); params["value_column"]=q2.selectbox("Value",cols,key="iw_query_group_value"); params["aggregation"]=q3.selectbox("Aggregation",["sum","mean","count","min","max"],key="iw_query_group_agg")
+            q1,q2,q3=st.columns(3); params["columns"]=q1.multiselect("Group columns",cols,key="iw_query_group_cols"); params["value_column"]=q2.selectbox("Value",cols,key="iw_query_group_value"); params["aggregation"]=q3.selectbox("Aggregation",["sum","mean","median","count","min","max","std"],key="iw_query_group_agg")
+        elif step_type=="pivot":
+            q1,q2,q3=st.columns(3)
+            params["index"]=q1.multiselect("Pivot rows",cols,default=cols[:1],key="iw_query_pivot_index")
+            pivot_cols=q2.selectbox("Pivot columns",["(none)"]+cols,key="iw_query_pivot_columns")
+            params["columns"]=None if pivot_cols=="(none)" else pivot_cols
+            params["values"]=q3.selectbox("Pivot values",cols,key="iw_query_pivot_values")
+            params["aggregation"]=st.selectbox("Pivot aggregation",["sum","mean","median","count","min","max","std"],key="iw_query_pivot_agg")
         b1,b2,b3=st.columns(3)
         if b1.button("➕ Add step",type="primary",key="iw_query_add_step"):
             try: apply_query_pipeline(current,[params|{"type":step_type}]); st.session_state["industrial_workbook_query_steps"].append(params|{"type":step_type}); st.success("Step added.")
@@ -948,6 +969,10 @@ def render_industrial_workbook(tier:str="Starter",username:str="unknown")->None:
             {"Topic":"Semantic mapping","What to do":"Map columns into the same canonical vocabulary used by the Digital Thread."},
             {"Topic":"Templates","What to do":"Start from a reusable engineering pattern and publish it to the workspace library."},
             {"Topic":"Extensions","What to do":"Register a WorkbookExtension through the existing Shoir-IE plugin registry."},
+            {"Topic":"Industrial formulas","What to do":"Use OEE, TAKTTIME, LITTLELAW, CPK, PPK, EOQ, SAFETYSTOCK, NPV, CO2E and CONVERT from the shared engineering formula library."},
+            {"Topic":"Industrial Pivot","What to do":"Summarize plant, line, machine, product or order measures using multi-dimensional pivot views."},
+            {"Topic":"Shoir Script","What to do":"Run deterministic workbook automations through the shared Shoir Script engine; executable Python is rejected."},
+            {"Topic":"Trust & Explain","What to do":"Use the dependency graph and Explain This Number surface to trace formulas and semantic links."},
         ]),use_container_width=True,hide_index=True)
         st.markdown("### Formula reference")
         st.dataframe(pd.DataFrame([
@@ -959,6 +984,15 @@ def render_industrial_workbook(tier:str="Starter",username:str="unknown")->None:
             {"Function":"SQRT","Example":"=SQRT(B2)","Purpose":"Square root"},
             {"Function":"POWER","Example":"=POWER(B2,2)","Purpose":"Exponentiation"},
         ]),use_container_width=True,hide_index=True)
+        try:
+            from shoir_adoption_engine import formula_library_frame
+            st.markdown("### Shared industrial formula library")
+            st.dataframe(formula_library_frame(),use_container_width=True,hide_index=True)
+        except Exception as exc:
+            st.caption(f"Engineering formula library metadata unavailable: {exc}")
+        st.markdown("### Automation")
+        st.caption("For multi-step workflows use the shared Shoir Script surface from Industrial Home; this workbook stays the editable artifact.")
+        st.code('load("Sheet1")\nadd_column("Extended Cost","Quantity * Unit Cost")\nanalyze()', language="text")
         exts=list_workbook_extensions()
         st.markdown("### Developer extension SDK")
         st.dataframe(pd.DataFrame([
