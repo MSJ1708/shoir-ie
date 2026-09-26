@@ -319,7 +319,7 @@ def _suggest_chart(df: pd.DataFrame, x: str | None, y: str | None) -> str:
     if y:
         return "Histogram"
     if x:
-        return "Bar"
+        return "Categorical Distribution" if (x in _categorical_columns(df) and not y) else "Bar"
     return _auto_chart_choice(df)
 
 
@@ -611,8 +611,8 @@ def render_live_visualization_studio(module: str, *, expanded: bool = False, pre
         dates = _coerce_datetime_columns(df)
         cols = [str(c) for c in df.columns]
 
-        if not nums and len(cols) < 2:
-            st.info("This table needs at least one numeric measure and a useful category/time field for a graph.")
+        if not cols:
+            st.info("This table has no columns to visualize.")
             return
 
         default_y = nums[0] if nums else None
