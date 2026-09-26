@@ -196,3 +196,67 @@ def test_workbook_shared_engineering_formulas_and_pivot_step():
     )
     assert "Area" in pivoted.columns
     assert float(pivoted.loc[pivoted["Area"].eq("A"), "Feb · Qty"].iloc[0]) == 20.0
+
+
+def test_workbook_versions_variables_and_comments_are_persistent(tmp_path):
+    from shoir_industrial_workbook import (
+        list_workbook_comments,
+        list_workbook_versions,
+        load_workbook_variables,
+        load_workbook_version,
+        save_workbook_comment,
+    )
+
+    path = str(tmp_path / "history.db")
+    wb = {"Sheet1": pd.DataFrame({"Demand": [100, 120], "Rate": [0.1, 0.1], "NPV": [0.0, 0.0]})}
+    variables = {"AnnualDemand": {"value": 12000, "unit": "units/year", "description": "Annual demand assumption"}}
+    wid = save_workbook(
+        wb,
+        {"Sheet1": {"C1": "=AnnualDemand"}},
+        {},
+        "Versioned",
+        path=path,
+        variables=variables,
+        version_label="Baseline",
+    )
+    save_workbook_comment(wid, "Sheet1", "C1", "Review this assumption before approval.", path=path)
+
+    wb["Sheet1"].iat[0, 0] = 125
+    save_workbook(
+        wb,
+        {"Sheet1": {"C1": "=AnnualDemand*1.05"}},
+        {},
+        "Versioned",
+        workbook_id=wid,
+        path=path,
+        variables=variables,
+        version_label="Scenario A",
+    )
+
+    versions = list_workbook_versions(wid, path=path)
+    assert len(versions) == 2
+    assert set(versions["Label"]) == {"Baseline", "Scenario A"}
+
+    loaded_variables = load_workbook_variables(wid, path=path)
+    assert loaded_variables["AnnualDemand"]["value"] == 12000
+
+    latest_version_id = versions.iloc[0]["ID"]
+    restored_wb, restored_formulas, _, restored_variables = load_workbook_version(latest_version_id, path=path)
+    assert restored_wb["Sheet1"].iat[0, 0] == 125
+    assert restored_formulas["Sheet1"]["C1"] == "=AnnualDemand*1.05"
+    assert restored_variables["AnnualDemand"]["value"] == 12000
+
+    comments = list_workbook_comments(wid, path=path)
+    assert len(comments) == 1
+    assert comments.iloc[0]["Cell"] == "C1"
+
+
+def test_named_variables_are_resolved_by_safe_formula_engine():
+    wb = {"S": pd.DataFrame({"Value": [0]})}
+    out, audit = evaluate_workbook_formulas(
+        wb,
+        {"S": {"A1": "=AnnualDemand*2"}},
+        variables={"AnnualDemand": {"value": 12, "unit": "units", "description": "test"}},
+    )
+    assert out["S"].iloc[0, 0] == 24
+    assert audit.iloc[0]["Status"] == "Calculated"
