@@ -497,6 +497,41 @@ def _make_figure(df: pd.DataFrame, chart: str, x: str | None, y: str | None, z: 
         z3 = z if z in numeric else numeric[2]
         return px.scatter_3d(df, x=x3, y=y3, z=z3, title=title or "3D Engineering View")
 
+    if chart == "Bar":
+        if x and x in df.columns:
+            if y and y in df.columns:
+                work = df[[x, y]].copy()
+                work[y] = pd.to_numeric(work[y], errors="coerce")
+                work = work.dropna(subset=[y]).head(60)
+                if not work.empty:
+                    return px.bar(work, x=x, y=y, title=title or f"{y} by {x}")
+            counts = (
+                df[x].astype("string").fillna("<Missing>")
+                .value_counts()
+                .head(40)
+                .rename_axis(str(x))
+                .reset_index(name="Count")
+            )
+            return px.bar(counts, x=str(x), y="Count", title=title or f"Category distribution · {x}")
+        if y and y in df.columns:
+            values = pd.to_numeric(df[y], errors="coerce").dropna()
+            return px.bar(
+                x=list(range(1, len(values) + 1)),
+                y=values,
+                title=title or f"{y} values",
+                labels={"x": "Observation"},
+            )
+
+    if chart == "Data Completeness":
+        rates = df.notna().mean().mul(100).sort_values().head(60)
+        return px.bar(
+            x=rates.index.astype(str),
+            y=rates.values,
+            range_y=[0, 100],
+            title=title or "Data completeness by field",
+            labels={"x": "Field", "y": "Completeness %"},
+        )
+
     if chart == "Pie" and x and y:
         return px.pie(df, names=x, values=y, title=title or f"Share of {y}")
 
@@ -880,6 +915,12 @@ def build_visualization_suite(
 
     if not plan and categorical and numeric:
         add("Bar", f"{context} · KPI by category" if context else "KPI by category", categorical[0], numeric[0])
+
+    if not plan and categorical:
+        add("Bar", f"{context} · Category distribution" if context else "Category distribution", categorical[0], None)
+
+    if not plan and len(df.columns):
+        add("Data Completeness", f"{context} · Data completeness" if context else "Data completeness")
 
     suite: list[tuple[str, go.Figure]] = []
     for title, chart, x, y, z in plan:
