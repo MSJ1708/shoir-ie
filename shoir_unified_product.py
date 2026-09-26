@@ -33,6 +33,7 @@ from industrial_experience import (
 
 COMMAND_ACTIONS = [
     "Open Unified Study Center",
+    "Open Universal Industrial Engine",
     "Check Data Readiness",
     "Create Decision Card",
     "Open Implementation Tracker",
@@ -642,6 +643,7 @@ def render_global_product_dock(module: str, tier: str, username: str) -> None:
         if st.button("▶ Open", type="primary", use_container_width=True, key="global_command_open_" + key):
             mapping = {
                 "Open Unified Study Center": "open",
+                "Open Universal Industrial Engine": "universal",
                 "Check Data Readiness": "readiness",
                 "Create Decision Card": "decision",
                 "Open Implementation Tracker": "implementation",
@@ -657,6 +659,9 @@ def render_global_product_dock(module: str, tier: str, username: str) -> None:
 
     action = st.session_state.pop("global_command_action", None)
     if action and action != "open":
+        if action == "universal":
+            st.session_state["force_universal_engine"] = True
+            st.rerun()
         with st.expander("⌘ Quick workspace action", expanded=True):
             if action == "readiness":
                 data = st.session_state.get("unified_data", _starter_for_module(module))
@@ -718,6 +723,11 @@ def copilot_context() -> str:
         "Showcase Mode",
         "Universal Evidence Export",
         "Command Palette",
+        "Universal Industrial Engine",
+        "Industrial Pivot",
+        "Explain & Trace",
+        "Automation replay",
+        "Trust Center",
         "cross-module recommendations",
     ]
     return (
