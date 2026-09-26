@@ -1074,9 +1074,14 @@ def audit_all_module_visualizations(max_figures: int = 4) -> pd.DataFrame:
     """
     try:
         from industrial_platform import PLATFORM_CATALOG
-        module_names = [str(item.get("name")) for item in PLATFORM_CATALOG if isinstance(item, dict) and item.get("name")]
+        catalog_names = [
+            str(item.get("name"))
+            for item in PLATFORM_CATALOG
+            if isinstance(item, dict) and item.get("name")
+        ]
     except Exception:
-        module_names = list(_MODULE_KEYS.keys())
+        catalog_names = []
+    module_names = list(dict.fromkeys([*catalog_names, *_MODULE_KEYS.keys()]))
 
     rows = []
     for module in module_names:
