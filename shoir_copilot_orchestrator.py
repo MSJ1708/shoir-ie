@@ -361,6 +361,7 @@ def build_export_bundle(
     explanation: str,
     figure: go.Figure | None,
     knowledge_context: str = "",
+    evidence_manifest: Mapping[str, Any] | None = None,
 ) -> bytes:
     from shoir_upgrade import build_excel_report
     tables = [("Analysis Result", result)]
@@ -382,7 +383,7 @@ def build_export_bundle(
         zf.writestr("inspection.json", json.dumps(dict(inspection), indent=2, default=str).encode("utf-8"))
         zf.writestr("method.json", json.dumps(dict(method), indent=2, default=str).encode("utf-8"))
         zf.writestr("results.csv", result.to_csv(index=False).encode("utf-8"))
-        zf.writestr("explanation.md", explanation.encode("utf-8"))
+        zf.writestr("explanation.md", explanation.encode("utf-8"))\n        if evidence_manifest:\n            zf.writestr("evidence_manifest.json", json.dumps(dict(evidence_manifest), indent=2, default=str).encode("utf-8"))
         if str(knowledge_context).strip():
             zf.writestr("knowledge_context.txt", str(knowledge_context)[:12000].encode("utf-8"))
         zf.writestr("copilot_analysis.xlsx", xlsx)
@@ -509,7 +510,7 @@ def run_orchestration(prompt: str, module: str, df: pd.DataFrame, context: Mappi
     except Exception:
         pass
 
-    export = build_export_bundle(prompt, module, run_id, inspection, method, result, explanation, figure, knowledge_text)
+    export = build_export_bundle(prompt, module, run_id, inspection, method, result, explanation, figure, knowledge_text, evidence_manifest=evidence_manifest)
     return {
         "run_id": run_id,
         "intent": intent_info,
