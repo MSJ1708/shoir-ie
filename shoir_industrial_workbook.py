@@ -1151,7 +1151,7 @@ def render_industrial_workbook(tier:str="Starter",username:str="unknown")->None:
             {"Function":"EOQ","Example":"=EOQ(B2,C2,D2)","Purpose":"Economic order quantity"},
             {"Function":"SERVICE_LEVEL","Example":"=SERVICE_LEVEL(B2,C2)","Purpose":"On-time ÷ total"},
             {"Function":"CO2E","Example":"=CO2E(B2,C2)","Purpose":"Activity × emission factor"},
-            {"Function":"CONVERT","Example":"=CONVERT(B2,"min","h")","Purpose":"Dimension-checked unit conversion"},
+            {"Function":"CONVERT","Example":'=CONVERT(B2,"min","h")',"Purpose":"Dimension-checked unit conversion"},
             {"Function":"NPV","Example":"=NPV(B2,C2:C6)","Purpose":"Discounted cash-flow value"},
             {"Function":"CAPEX_NPV","Example":"=CAPEX_NPV(B2,C2,C3:C7)","Purpose":"NPV minus upfront CAPEX"},
             {"Function":"FORECAST_DEMAND","Example":"=FORECAST_DEMAND(B2:B13,1)","Purpose":"Deterministic trend forecast"},
