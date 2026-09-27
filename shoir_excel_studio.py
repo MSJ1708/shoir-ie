@@ -58,9 +58,31 @@ def _header_score(row: pd.Series) -> float:
     nonblank = [v for v in vals if v]
     if not nonblank:
         return -1.0
+
     unique_ratio = len(set(v.casefold() for v in nonblank)) / len(nonblank)
     text_ratio = sum(not re.fullmatch(r"[-+]?\d+(?:\.\d+)?", v) for v in nonblank) / len(nonblank)
-    return len(nonblank) + unique_ratio * 2.0 + text_ratio
+    word_only_rate = sum(
+        bool(re.search(r"[A-Za-z]", v)) and not bool(re.search(r"\d", v))
+        for v in nonblank
+    ) / len(nonblank)
+    digit_rate = sum(bool(re.search(r"\d", v)) for v in nonblank) / len(nonblank)
+    date_like_rate = sum(
+        bool(re.fullmatch(r"\d{4}[-/]\d{1,2}[-/]\d{1,2}", v))
+        or bool(re.fullmatch(r"\d{1,2}[-/]\d{1,2}[-/]\d{2,4}", v))
+        for v in nonblank
+    ) / len(nonblank)
+
+    # Header rows tend to be short, unique, word-oriented labels. Data rows
+    # commonly contain digits, dates, identifiers and measurements. Penalize
+    # those signals enough to prefer the actual schema row over the first data row.
+    return (
+        len(nonblank)
+        + unique_ratio * 2.0
+        + text_ratio
+        + word_only_rate * 2.5
+        - digit_rate * 2.0
+        - date_like_rate * 3.0
+    )
 
 
 def detect_header_row(raw: pd.DataFrame, scan_rows: int = 20) -> int:
@@ -128,16 +150,22 @@ def _coerce_series(series: pd.Series, name: str) -> tuple[pd.Series, str]:
             return pct / 100.0, "Percentage"
 
     compact_name = re.sub(r"[^a-z0-9]+", "", name.lower())
-    has_date_name = any(h in compact_name for h in DATE_HINTS)
+    name_tokens = set(re.findall(r"[a-z0-9]+", name.lower()))
+    has_date_name = bool(name_tokens & DATE_HINTS)
     date_signal = float(nonblank.str.contains(r"[-/:]|[A-Za-z]{3,}", regex=True).mean()) >= 0.60
-    if has_date_name or date_signal:
+
+    numeric = pd.to_numeric(normal, errors="coerce")
+    numeric_rate = float(numeric.notna().mean()) if len(s) else 0.0
+
+    # Parse dates only when the data itself looks date-like. This prevents
+    # numeric durations/counts in columns named "Lead Time", "Cycle Time", etc.
+    # from being silently converted into timestamps.
+    if (has_date_name or date_signal) and (date_signal or numeric_rate < 0.85):
         parsed_date = pd.to_datetime(s, errors="coerce")
         date_rate = float(parsed_date.notna().mean()) if len(s) else 0.0
         if date_rate >= 0.94:
             return parsed_date, "Date / time"
 
-    numeric = pd.to_numeric(normal, errors="coerce")
-    numeric_rate = float(numeric.notna().mean()) if len(s) else 0.0
     if numeric_rate >= 0.94:
         return numeric, "Number"
 
