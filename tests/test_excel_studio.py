@@ -116,6 +116,7 @@ def test_excel_studio_supports_semicolon_csv_and_clock_time_without_fake_dates()
     raw = "SKU;Start;Qty\\nA-01;08:30;1,200\\nA-02;09:45;950\\n".encode("utf-8")
     result = process_uploaded_workbook(raw, "schedule.csv")
     frame = result["cleaned_sheets"]["CSV"]
+    assert "SKU" in frame.columns, f"Parsed columns: {frame.columns.tolist()}"
     assert frame["SKU"].tolist() == ["A-01", "A-02"]
     assert frame["Qty"].tolist() == [1200, 950]
     assert "Clock time" in {row["Type"] for row in result["field_intelligence"] if row["Field"] == "Start"} or frame["Start"].dtype == "string"
