@@ -610,7 +610,7 @@ def render_excel_data_cleaning_studio(tier: str, username: str) -> None:
 
     upload = st.file_uploader(
         "Upload raw Excel / CSV",
-        type=["xlsx", "csv"],
+        type=["xlsx", "xlsm", "csv"],
         key="excel_studio_upload",
         help="Messy exports, multi-sheet workbooks and title/metadata rows are supported.",
     )
@@ -1375,8 +1375,6 @@ def build_ultimate_workbook(
             nav.append(("FORMULA INVENTORY", "Source formulas archived as inert evidence for traceability."))
         if cross_sheet_map:
             nav.append(("CROSS-SHEET MAP", "Potential shared fields that could support controlled joins."))
-        for fixed_name, purpose in nav:
-            start.write_url(row=start.dim_rowmax + 1 if start.dim_rowmax is not None else 5, col=0, url=f"internal:'{fixed_name}'!A1", string=fixed_name)
         row = 5
         for fixed_name, purpose in nav:
             start.write_url(row, 0, f"internal:'{fixed_name}'!A1", string=fixed_name)
@@ -1861,3 +1859,176 @@ def render_excel_data_cleaning_studio(tier: str, username: str) -> None:
 clean_dataframe = _enhanced_clean_dataframe
 profile_dataframe = _enhanced_profile_dataframe
 detect_header_row = _enhanced_detect_header_row
+
+
+
+# Final ingestion hardening: locale-safe CSV, duration-safe typing and
+# multi-table provenance review. These overrides keep the public API stable.
+
+def _enhanced_read_raw_workbook(raw: bytes, filename: str) -> dict[str, pd.DataFrame]:
+    if not raw:
+        raise ValueError("The uploaded file is empty.")
+    lower = str(filename).lower()
+    if lower.endswith(".csv"):
+        import csv
+        decoded = None
+        chosen_encoding = "utf-8-sig"
+        for encoding in ("utf-8-sig", "utf-8", "cp1252", "latin-1"):
+            try:
+                decoded = raw.decode(encoding)
+                chosen_encoding = encoding
+                break
+            except UnicodeDecodeError:
+                continue
+        if decoded is None:
+            raise ValueError("CSV encoding could not be decoded safely.")
+        delimiter = ","
+        try:
+            dialect = csv.Sniffer().sniff(decoded[:8192], delimiters=",;\t|")
+            delimiter = dialect.delimiter
+        except Exception:
+            pass
+        return {
+            "CSV": pd.read_csv(
+                io.StringIO(decoded),
+                header=None,
+                dtype=object,
+                sep=delimiter,
+                keep_default_na=False,
+            )
+        }
+    if lower.endswith((".xlsx", ".xlsm")):
+        book = pd.ExcelFile(io.BytesIO(raw), engine="openpyxl")
+        return {
+            str(sheet): pd.read_excel(book, sheet_name=sheet, header=None, dtype=object)
+            for sheet in book.sheet_names
+        }
+    raise ValueError("Only .xlsx, .xlsm and .csv files are supported.")
+
+
+def _enhanced_coerce_series(series: pd.Series, name: str) -> tuple[pd.Series, str]:
+    s = series.copy()
+    if pd.api.types.is_object_dtype(s) or pd.api.types.is_string_dtype(s):
+        s = s.map(lambda v: _normalise_text(v) if isinstance(v, str) else v)
+        s = s.replace(list(ERROR_TOKENS), pd.NA)
+    nonblank = s.dropna().astype(str).str.strip()
+    if nonblank.empty:
+        return s, "Empty / unknown"
+    if _is_identifier(name, s):
+        return s.astype("string"), "Identifier / text"
+
+    normal = (
+        s.astype("string")
+        .str.replace("$", "", regex=False)
+        .str.replace("€", "", regex=False)
+        .str.replace("£", "", regex=False)
+        .str.replace(",", "", regex=False)
+    )
+    percent_rate = float(nonblank.str.endswith("%").mean())
+    if percent_rate >= 0.75:
+        pct = pd.to_numeric(normal.str.rstrip("%"), errors="coerce")
+        if float(pct.notna().mean()) >= 0.94:
+            return pct / 100.0, "Percentage"
+
+    numeric = pd.to_numeric(normal, errors="coerce")
+    numeric_rate = float(numeric.notna().mean()) if len(s) else 0.0
+    lowered_name = str(name).casefold()
+    name_tokens = set(re.findall(r"[a-z0-9]+", lowered_name))
+    strong_date_name = bool(name_tokens & {"date", "datetime", "timestamp", "created", "updated", "due"})
+    full_date_signal = float(
+        nonblank.str.contains(
+            r"\b\d{4}[-/]\d{1,2}[-/]\d{1,2}\b|\b\d{1,2}[-/]\d{1,2}[-/]\d{2,4}\b|[A-Za-z]{3,9}\s+\d{1,2}[, ]+\d{4}",
+            regex=True,
+        ).mean()
+    ) >= 0.60
+    time_only_signal = float(nonblank.str.fullmatch(r"\d{1,2}:\d{2}(?::\d{2})?").mean()) >= 0.75
+
+    if strong_date_name and full_date_signal:
+        parsed_date = pd.to_datetime(s, errors="coerce")
+        if float(parsed_date.notna().mean()) >= 0.94:
+            return parsed_date, "Date / time"
+    if time_only_signal and not full_date_signal:
+        return s.astype("string"), "Clock time"
+    if numeric_rate >= 0.94:
+        return numeric, "Number"
+
+    lowered = nonblank.str.lower()
+    if len(lowered) >= 5 and float(lowered.isin(BOOL_VALUES).mean()) >= 0.95:
+        mapping = {
+            "true": True, "false": False, "yes": True, "no": False,
+            "y": True, "n": False, "active": True, "inactive": False,
+        }
+        return lowered.map(mapping).astype("boolean"), "Boolean"
+
+    # Conservative European decimal support: only activate when the majority
+    # of values clearly use dot thousands + comma decimals.
+    eu_pattern = nonblank.str.fullmatch(r"-?\d{1,3}(?:\.\d{3})+,\d+")
+    if float(eu_pattern.mean()) >= 0.75:
+        converted = pd.to_numeric(
+            nonblank.str.replace(".", "", regex=False).str.replace(",", ".", regex=False),
+            errors="coerce",
+        )
+        if float(converted.notna().mean()) >= 0.94:
+            aligned = pd.Series(pd.NA, index=s.index, dtype="Float64")
+            for idx, value in converted.items():
+                aligned.loc[nonblank.index[idx]] = value
+            return aligned, "Number"
+
+    return s.astype("string"), "Text"
+
+
+def _rebuild_excel_result(result: dict[str, Any]) -> dict[str, Any]:
+    result["xlsx"] = build_ultimate_workbook(
+        f"Shoir-IE — {result['filename']}",
+        result["cleaned_sheets"],
+        result["raw_sheets"],
+        result["audits"],
+        result["profiles"],
+        source_metadata=result.get("source_metadata"),
+        field_intelligence=result.get("field_intelligence"),
+        review_register=result.get("review_register"),
+        before_after=result.get("before_after"),
+        formula_inventory=result.get("formula_inventory"),
+        cross_sheet_map=result.get("cross_sheet_map"),
+    )
+    result["bundle"] = build_ultimate_bundle(
+        f"Shoir-IE — {result['filename']}",
+        result["xlsx"],
+        result["audits"],
+        result["profiles"],
+        cleaned_sheets=result["cleaned_sheets"],
+        raw_sheets=result["raw_sheets"],
+        field_intelligence=result.get("field_intelligence"),
+        review_register=result.get("review_register"),
+        source_metadata=result.get("source_metadata"),
+    )
+    return result
+
+
+_BASE_PROCESS_UPGRADED = process_uploaded_workbook
+_read_raw_workbook = _enhanced_read_raw_workbook
+_coerce_series = _enhanced_coerce_series
+
+
+def process_uploaded_workbook(raw: bytes, filename: str) -> dict[str, Any]:
+    result = _BASE_PROCESS_UPGRADED(raw, filename)
+    # A second non-empty region separated by blank rows is a review signal.
+    for meta in result.get("source_metadata", []):
+        blocks = int(meta.get("Detected table blocks", 1) or 1)
+        if blocks > 1:
+            sheet = str(meta.get("Source sheet", ""))
+            result.setdefault("review_register", []).append({
+                "Severity": "Medium",
+                "Sheet": sheet,
+                "Field": "Sheet structure",
+                "Issue": "Multiple table blocks detected",
+                "Evidence": f"{blocks} non-empty table region(s) were inferred from blank-row separation.",
+                "Recommended action": "Verify that all regions belong to one analytical table before downstream joins or aggregation.",
+            })
+    if result.get("source_metadata"):
+        # Rebuild only after structure review flags have been added.
+        _rebuild_excel_result(result)
+    return result
+
+# Rebind public names one last time so imports from the module use the hardened
+# versions rather than the pre-upgrade implementations.
