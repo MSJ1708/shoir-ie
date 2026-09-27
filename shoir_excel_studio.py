@@ -95,19 +95,60 @@ def detect_header_row(raw: pd.DataFrame, scan_rows: int = 20) -> int:
     return scores[0][1] if scores and scores[0][0] >= 2 else 0
 
 
+def _decode_text_bytes(raw: bytes) -> tuple[str, str]:
+    """Decode delimited text deterministically across common industrial export encodings."""
+    last_error: Exception | None = None
+    for encoding in ("utf-8-sig", "utf-8", "cp1252", "latin-1"):
+        try:
+            return raw.decode(encoding), encoding
+        except UnicodeDecodeError as exc:
+            last_error = exc
+    raise ValueError("CSV/text encoding could not be decoded safely.") from last_error
+
+
+def _detect_csv_delimiter(text: str) -> str:
+    """Detect common CSV delimiters while avoiding false positives from decimal commas."""
+    sample = "\n".join(text.splitlines()[:40])
+    try:
+        import csv
+        dialect = csv.Sniffer().sniff(sample, delimiters=",;\\t|")
+        return dialect.delimiter
+    except (csv.Error, TypeError, AttributeError):
+        candidates = [",", ";", "\\t", "|"]
+        lines = [line for line in sample.splitlines() if line.strip()]
+        scores = {
+            delim: float(np.mean([line.count(delim) for line in lines]))
+            if lines else 0.0
+            for delim in candidates
+        }
+        return max(scores, key=scores.get) if max(scores.values(), default=0.0) > 0 else ","
+
+
 def _read_raw_workbook(raw: bytes, filename: str) -> dict[str, pd.DataFrame]:
     if not raw:
         raise ValueError("The uploaded file is empty.")
     lower = str(filename).lower()
-    if lower.endswith(".csv"):
-        return {"CSV": pd.read_csv(io.BytesIO(raw), header=None, dtype=object)}
-    if lower.endswith(".xlsx"):
+    if lower.endswith((".csv", ".txt", ".tsv")):
+        text, encoding = _decode_text_bytes(raw)
+        delimiter = _detect_csv_delimiter(text)
+        frame = pd.read_csv(
+            io.StringIO(text),
+            sep=delimiter,
+            header=None,
+            dtype=object,
+            keep_default_na=False,
+            na_filter=False,
+        )
+        frame.attrs["source_encoding"] = encoding
+        frame.attrs["source_delimiter"] = delimiter
+        return {"CSV": frame}
+    if lower.endswith((".xlsx", ".xlsm")):
         book = pd.ExcelFile(io.BytesIO(raw), engine="openpyxl")
         return {
             str(sheet): pd.read_excel(book, sheet_name=sheet, header=None, dtype=object)
             for sheet in book.sheet_names
         }
-    raise ValueError("Only .xlsx and .csv files are supported.")
+    raise ValueError("Supported imports are .xlsx, .xlsm, .csv, .tsv and .txt.")
 
 
 def _is_identifier(name: str, series: pd.Series) -> bool:
