@@ -1679,6 +1679,13 @@ def process_uploaded_workbook(raw: bytes, filename: str) -> dict[str, Any]:
 
     for source_name, raw_df in raw_sheets.items():
         header_row = _enhanced_detect_header_row(raw_df)
+        # Tiny CSV exports are especially easy to mis-rank: if the detector
+        # selects the final row there is no body left, so prefer a valid first
+        # schema row when it contains multiple label-like fields.
+        if str(filename).lower().endswith(".csv") and len(raw_df) >= 2 and header_row >= len(raw_df) - 1:
+            first = [_normalise_text(v) for v in raw_df.iloc[0].tolist() if _normalise_text(v)]
+            if len(first) >= 2 and sum(bool(re.search(r"[A-Za-z]", v)) for v in first) >= max(2, len(first) - 1):
+                header_row = 0
         header_rows[source_name] = header_row
         if raw_df.empty:
             table = pd.DataFrame()
