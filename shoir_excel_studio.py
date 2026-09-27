@@ -748,3 +748,1116 @@ def render_excel_data_cleaning_studio(tier: str, username: str) -> None:
             mime="application/zip",
             use_container_width=True,
         )
+
+
+
+# ---------------------------------------------------------------------------
+# Shoir-IE Excel Studio quality/governance upgrade layer
+# ---------------------------------------------------------------------------
+# This layer intentionally builds on the existing ingestion primitives above.
+# It adds industrial data-governance, review intelligence and safer export
+# without removing the existing API surface.
+
+_ENHANCED_NULL_TOKENS = {
+    "", "na", "n/a", "n.a.", "none", "null", "nil", "unknown", "not available",
+    "not_applicable", "not applicable", "-", "—", "–", "n.m.", "missing", "?",
+}
+_PERCENT_NAME_HINTS = {
+    "percent", "percentage", "pct", "rate", "ratio", "yield", "oee", "utilization",
+    "availability", "performance", "quality", "fpy", "service level",
+}
+_ENTITY_HINTS = {
+    "asset": ("Asset", ("asset", "equipment", "machine", "workcenter", "work centre")),
+    "process": ("Process", ("process", "operation", "step", "routing")),
+    "product": ("Product", ("product", "sku", "part", "item")),
+    "material": ("Material", ("material", "component", "raw material")),
+    "order": ("Order", ("order", "work order", "wo")),
+    "workforce": ("Workforce", ("employee", "operator", "worker", "workforce")),
+    "quality": ("Quality", ("quality", "defect", "scrap", "yield", "fpy")),
+    "maintenance": ("Maintenance", ("maintenance", "failure", "repair", "mtbf", "mttr")),
+    "energy": ("Energy", ("energy", "electricity", "gas", "kwh", "mwh")),
+    "cost": ("Cost", ("cost", "price", "expense", "capex", "opex")),
+    "customer": ("Customer", ("customer", "client", "account")),
+    "supplier": ("Supplier", ("supplier", "vendor")),
+    "time": ("Time", ("date", "datetime", "timestamp", "time", "created", "updated")),
+}
+
+
+def _enhanced_null_normalise(df: pd.DataFrame) -> tuple[pd.DataFrame, int]:
+    out = df.copy(deep=True)
+    changed = 0
+    for col in list(out.columns):
+        if _is_identifier(str(col), out[col]):
+            # Identifiers are deliberately protected: values such as "-" or
+            # "NA" may be legitimate codes and must not be rewritten silently.
+            continue
+        series = out[col]
+        mask = series.map(
+            lambda v: isinstance(v, str)
+            and _normalise_text(v).casefold() in _ENHANCED_NULL_TOKENS
+        )
+        changed += int(mask.sum())
+        if changed:
+            out.loc[mask, col] = pd.NA
+    return out, changed
+
+
+def _normalise_accounting_numbers(df: pd.DataFrame) -> tuple[pd.DataFrame, int]:
+    out = df.copy(deep=True)
+    changed = 0
+    for col in list(out.columns):
+        if _is_identifier(str(col), out[col]):
+            continue
+        if not (pd.api.types.is_object_dtype(out[col]) or pd.api.types.is_string_dtype(out[col])):
+            continue
+        def fix(value: Any) -> Any:
+            nonlocal changed
+            if not isinstance(value, str):
+                return value
+            text = _normalise_text(value).strip()
+            m = re.fullmatch(r"\(([-+]?\d[\d,]*(?:\.\d+)?)\)", text)
+            if not m:
+                return value
+            changed += 1
+            return f"-{m.group(1)}"
+        out[col] = out[col].map(fix)
+    return out, changed
+
+
+def _enhanced_clean_dataframe(df: pd.DataFrame) -> tuple[pd.DataFrame, list[dict[str, str]]]:
+    prepared, missing_changes = _enhanced_null_normalise(df)
+    prepared, accounting_changes = _normalise_accounting_numbers(prepared)
+    cleaned, audit = _BASE_CLEAN_DATAFRAME(prepared)
+    if missing_changes:
+        audit.insert(0, {
+            "Action": "Normalize common missing-value tokens",
+            "Details": f"Converted {missing_changes:,} non-identifier token(s) such as N/A, NULL, — and ? to blanks.",
+        })
+    if accounting_changes:
+        audit.insert(0, {
+            "Action": "Normalize accounting negatives",
+            "Details": f"Converted {accounting_changes:,} parenthesized numeric value(s) such as (1,250) to -1250.",
+        })
+    return cleaned, audit
+
+
+def _column_role(name: str, series: pd.Series) -> str:
+    low = str(name).casefold()
+    norm = re.sub(r"[^a-z0-9]+", "", low)
+    if _is_identifier(str(name), series):
+        return "Identifier"
+    if any(h in low for h in ("date", "datetime", "timestamp", "created", "updated", "due")):
+        return "Time"
+    if any(h in low for h in (
+        "qty", "quantity", "amount", "cost", "price", "rate", "time", "duration",
+        "demand", "supply", "output", "input", "value", "score", "hours", "seconds",
+        "temperature", "pressure", "weight", "energy", "power", "revenue", "margin",
+    )) and pd.api.types.is_numeric_dtype(series):
+        return "Measure"
+    if pd.api.types.is_numeric_dtype(series):
+        return "Measure"
+    if len(series) and series.nunique(dropna=True) <= max(12, int(len(series) * 0.1)):
+        return "Dimension"
+    if norm in {"description", "comment", "notes", "remarks"}:
+        return "Text"
+    return "Attribute"
+
+
+def _canonical_entity_hint(name: str) -> str:
+    low = str(name).casefold()
+    for entity, (label, hints) in _ENTITY_HINTS.items():
+        if any(h in low for h in hints):
+            return label
+    return "—"
+
+
+def _unit_hint(name: str) -> str:
+    text = str(name)
+    patterns = [
+        r"[\(\[]\s*(kg|g|mg|lb|mm|cm|m|km|s|sec|min|hr|hrs|h|hours|kwh|mwh|kw|mw|usd|sar|%|°c|°f|c|f)\s*[\)\]]",
+        r"(?:^|[\s_])(?:unit|units)\s*[:=_-]\s*([A-Za-z%°]+)",
+        r"(?:^|[\s_])([A-Za-z%°]+)\s*$",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if match:
+            token = match.group(1).lower()
+            if token in {"m", "h", "s", "c", "f"} and len(text.split()) == 1:
+                continue
+            return token
+    return "—"
+
+
+def _type_confidence(series: pd.Series, role: str) -> str:
+    if series.empty:
+        return "Low"
+    if role in {"Identifier", "Time"}:
+        return "High"
+    if pd.api.types.is_numeric_dtype(series) or pd.api.types.is_bool_dtype(series):
+        return "High"
+    unique = int(series.nunique(dropna=True))
+    if unique <= 1:
+        return "High"
+    return "Medium"
+
+
+def _potential_outlier_count(series: pd.Series) -> int:
+    if not pd.api.types.is_numeric_dtype(series) or pd.api.types.is_bool_dtype(series):
+        return 0
+    values = pd.to_numeric(series, errors="coerce").dropna()
+    if len(values) < 8:
+        return 0
+    q1, q3 = values.quantile([0.25, 0.75])
+    iqr = float(q3 - q1)
+    if iqr <= 0:
+        return 0
+    low, high = float(q1 - 1.5 * iqr), float(q3 + 1.5 * iqr)
+    return int(((values < low) | (values > high)).sum())
+
+
+def _date_sanity_count(series: pd.Series) -> int:
+    if not pd.api.types.is_datetime64_any_dtype(series):
+        return 0
+    values = series.dropna()
+    if values.empty:
+        return 0
+    bad = (values.dt.year < 1900) | (values.dt.year > 2100)
+    return int(bad.sum())
+
+
+def _percentage_range_count(name: str, series: pd.Series) -> int:
+    low = str(name).casefold()
+    if not any(token in low for token in _PERCENT_NAME_HINTS):
+        return 0
+    if not pd.api.types.is_numeric_dtype(series) or pd.api.types.is_bool_dtype(series):
+        return 0
+    values = pd.to_numeric(series, errors="coerce").dropna()
+    if values.empty:
+        return 0
+    # After percentage normalization, ratios should normally live in [0, 1].
+    return int(((values < 0) | (values > 1)).sum())
+
+
+def _table_block_count(raw: pd.DataFrame, header_row: int) -> int:
+    if raw.empty or header_row >= len(raw) - 1:
+        return 1
+    body = raw.iloc[header_row + 1:].copy()
+    if body.empty:
+        return 1
+    blank_rows = body.isna().all(axis=1).tolist()
+    blocks = 1
+    for i in range(len(blank_rows) - 1):
+        if blank_rows[i] and not blank_rows[i + 1]:
+            blocks += 1
+    return max(1, min(blocks, 20))
+
+
+def _schema_fingerprint(df: pd.DataFrame) -> str:
+    payload = "|".join(
+        f"{str(col).casefold()}::{str(df[col].dtype)}"
+        for col in df.columns
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16].upper()
+
+
+def _quality_review_register(df: pd.DataFrame, sheet: str) -> list[dict[str, Any]]:
+    issues: list[dict[str, Any]] = []
+    rows = len(df)
+    duplicates = int(df.duplicated().sum()) if rows else 0
+    if duplicates:
+        issues.append({
+            "Severity": "High" if duplicates / max(1, rows) >= 0.05 else "Medium",
+            "Sheet": sheet, "Field": "Row level", "Issue": "Duplicate rows detected",
+            "Evidence": f"{duplicates:,} exact duplicate row(s).",
+            "Recommended action": "Confirm whether repeats are genuine events or accidental duplicates.",
+        })
+    for col in df.columns:
+        series = df[col]
+        missing = int(series.isna().sum())
+        missing_pct = float(series.isna().mean() * 100) if rows else 100.0
+        role = _column_role(str(col), series)
+        outliers = _potential_outlier_count(series)
+        duplicate_ids = 0
+        if role == "Identifier":
+            duplicate_ids = int(series.dropna().astype("string").duplicated().sum())
+        if missing_pct >= 50:
+            issues.append({
+                "Severity": "High", "Sheet": sheet, "Field": str(col),
+                "Issue": "High missingness", "Evidence": f"{missing:,} missing value(s) ({missing_pct:.1f}%).",
+                "Recommended action": "Validate whether the field is required; consider source-system remediation.",
+            })
+        elif missing_pct >= 20:
+            issues.append({
+                "Severity": "Medium", "Sheet": sheet, "Field": str(col),
+                "Issue": "Material missingness", "Evidence": f"{missing:,} missing value(s) ({missing_pct:.1f}%).",
+                "Recommended action": "Confirm the missingness mechanism before analysis.",
+            })
+        if duplicate_ids:
+            issues.append({
+                "Severity": "High", "Sheet": sheet, "Field": str(col),
+                "Issue": "Duplicate identifier values", "Evidence": f"{duplicate_ids:,} repeated identifier occurrence(s).",
+                "Recommended action": "Verify key uniqueness before joins, aggregation or master-data use.",
+            })
+        if outliers:
+            issues.append({
+                "Severity": "Low", "Sheet": sheet, "Field": str(col),
+                "Issue": "Potential statistical outliers", "Evidence": f"{outliers:,} value(s) outside the 1.5×IQR fence.",
+                "Recommended action": "Review the records; do not delete automatically.",
+            })
+        if series.nunique(dropna=True) <= 1 and len(series) >= 3:
+            issues.append({
+                "Severity": "Low", "Sheet": sheet, "Field": str(col),
+                "Issue": "Constant / near-empty field", "Evidence": "Only one distinct non-null value is present.",
+                "Recommended action": "Check whether the field is useful for analysis or should remain metadata.",
+            })
+        percent_range = _percentage_range_count(str(col), series)
+        if percent_range:
+            issues.append({
+                "Severity": "High", "Sheet": sheet, "Field": str(col),
+                "Issue": "Percentage/ratio range violation",
+                "Evidence": f"{percent_range:,} value(s) fall outside the normalized 0–1 range.",
+                "Recommended action": "Confirm whether the source uses percentages (e.g. 95) or ratios (e.g. 0.95).",
+            })
+        date_bad = _date_sanity_count(series)
+        if date_bad:
+            issues.append({
+                "Severity": "Medium", "Sheet": sheet, "Field": str(col),
+                "Issue": "Date sanity exception", "Evidence": f"{date_bad:,} date(s) fall outside the 1900–2100 review window.",
+                "Recommended action": "Validate source dates and time interpretation.",
+            })
+    if len(df.columns):
+        first = df.iloc[:, 0].astype("string").str.casefold()
+        subtotal = first.str.contains(r"^(grand\s+)?sub(total|total)$", regex=True, na=False)
+        if int(subtotal.sum()):
+            issues.append({
+                "Severity": "Low", "Sheet": sheet, "Field": str(df.columns[0]),
+                "Issue": "Potential subtotal / footer rows",
+                "Evidence": f"{int(subtotal.sum()):,} row(s) look like subtotal/total labels.",
+                "Recommended action": "Decide whether these rows are source totals or should be excluded from row-level analysis.",
+            })
+    return issues
+
+
+def _enhanced_profile_dataframe(df: pd.DataFrame) -> dict[str, Any]:
+    base = _BASE_PROFILE_DATAFRAME(df)
+    rows = int(len(df))
+    duplicate_ids = 0
+    outliers = 0
+    constants = 0
+    for col in df.columns:
+        role = _column_role(str(col), df[col])
+        if role == "Identifier":
+            duplicate_ids += int(df[col].dropna().astype("string").duplicated().sum())
+        outliers += _potential_outlier_count(df[col])
+        if len(df) >= 3 and int(df[col].nunique(dropna=True)) <= 1:
+            constants += 1
+    review_count = len(_quality_review_register(df, "_profile"))
+    missing_pct = float(base.get("Missing %", 0.0))
+    duplicate_ratio = float(base.get("Duplicate rows", 0)) / max(1, rows) * 100
+    duplicate_id_ratio = duplicate_ids / max(1, rows) * 100
+    outlier_ratio = outliers / max(1, rows) * 100
+    score = max(
+        0.0,
+        min(
+            100.0,
+            100.0
+            - missing_pct * 0.55
+            - duplicate_ratio * 0.25
+            - duplicate_id_ratio * 0.20
+            - min(outlier_ratio, 20.0) * 0.08
+        ),
+    )
+    status = "READY" if score >= 95 and review_count == 0 else "READY WITH REVIEW" if score >= 80 else "REVIEW REQUIRED"
+    return {
+        **base,
+        "Potential outliers": outliers,
+        "Duplicate identifier occurrences": duplicate_ids,
+        "Constant columns": constants,
+        "Review items": review_count,
+        "Quality score": round(score, 1),
+        "Readiness": status,
+        "Schema fingerprint": _schema_fingerprint(df),
+    }
+
+
+def _field_intelligence_rows(df: pd.DataFrame, sheet: str) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for col in df.columns:
+        series = df[col]
+        role = _column_role(str(col), series)
+        non_null = int(series.notna().sum())
+        missing = int(series.isna().sum())
+        examples = " | ".join(str(x) for x in series.dropna().head(3).tolist())[:180]
+        unique = int(series.nunique(dropna=True))
+        outliers = _potential_outlier_count(series)
+        action = "Use as analysis field"
+        if role == "Identifier":
+            action = "Protect as key / join candidate"
+        elif missing:
+            action = "Review missing values"
+        elif outliers:
+            action = "Review potential outliers"
+        elif series.nunique(dropna=True) <= 1:
+            action = "Review low-information field"
+        elif pd.api.types.is_datetime64_any_dtype(series):
+            action = "Use as time axis"
+        elif role == "Dimension":
+            action = "Use for grouping / segmentation"
+        rows.append({
+            "Sheet": sheet,
+            "Field": str(col),
+            "Role": role,
+            "Inferred type": (
+                "Date / time" if pd.api.types.is_datetime64_any_dtype(series)
+                else "Boolean" if pd.api.types.is_bool_dtype(series)
+                else "Number" if pd.api.types.is_numeric_dtype(series)
+                else "Text"
+            ),
+            "Type confidence": _type_confidence(series, role),
+            "Canonical entity": _canonical_entity_hint(str(col)),
+            "Unit hint": _unit_hint(str(col)),
+            "Rows": int(len(series)),
+            "Non-null": non_null,
+            "Missing %": round(float(missing / max(1, len(series)) * 100), 2),
+            "Unique": unique,
+            "Potential outliers": outliers,
+            "Example values": examples,
+            "Suggested action": action,
+        })
+    return rows
+
+
+def _cross_sheet_map(cleaned: dict[str, pd.DataFrame]) -> list[dict[str, Any]]:
+    names = list(cleaned)
+    rows: list[dict[str, Any]] = []
+    for i, left in enumerate(names):
+        left_norm = {re.sub(r"[^a-z0-9]+", "", str(c).casefold()): str(c) for c in cleaned[left].columns}
+        for right in names[i + 1:]:
+            right_norm = {re.sub(r"[^a-z0-9]+", "", str(c).casefold()): str(c) for c in cleaned[right].columns}
+            shared = sorted(set(left_norm) & set(right_norm))
+            if shared:
+                rows.append({
+                    "Sheet A": left,
+                    "Sheet B": right,
+                    "Potential shared fields": ", ".join(shared[:12]),
+                    "Shared field count": len(shared),
+                    "Join guidance": "Review key uniqueness and semantic meaning before joining.",
+                })
+    return rows
+
+
+def _extract_source_metadata(raw: bytes, filename: str, raw_sheets: dict[str, pd.DataFrame], header_rows: dict[str, int]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    signature = hashlib.sha256(raw).hexdigest()
+    imported = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    metadata: list[dict[str, Any]] = []
+    formulas: list[dict[str, Any]] = []
+    workbook_formula_scanned = False
+    try:
+        import openpyxl
+        if str(filename).lower().endswith(".xlsx"):
+            book = openpyxl.load_workbook(io.BytesIO(raw), read_only=True, data_only=False)
+            workbook_formula_scanned = True
+            for source_name, frame in raw_sheets.items():
+                ws = book[source_name] if source_name in book.sheetnames else None
+                formula_count = 0
+                formula_limit = 10000
+                if ws is not None:
+                    for row in ws.iter_rows():
+                        for cell in row:
+                            value = cell.value
+                            if isinstance(value, str) and value.startswith("="):
+                                formula_count += 1
+                                if len(formulas) < formula_limit:
+                                    formulas.append({
+                                        "Sheet": source_name,
+                                        "Cell": cell.coordinate,
+                                        "Formula": value,
+                                        "Type": "Original source formula",
+                                        "Note": "Archived for traceability; cleaned sheets contain values, not executable source formulas.",
+                                    })
+                metadata.append({
+                    "File": str(filename),
+                    "SHA256": signature,
+                    "Imported": imported,
+                    "Source type": "Excel .xlsx",
+                    "Source sheet": source_name,
+                    "Sheet state": getattr(ws, "sheet_state", "visible") if ws is not None else "unknown",
+                    "Source rows": int(len(raw_sheets[source_name])),
+                    "Source columns": int(len(raw_sheets[source_name].columns)),
+                    "Detected header row": int(header_rows.get(source_name, 0) + 1),
+                    "Detected table blocks": _table_block_count(raw_sheets[source_name], header_rows.get(source_name, 0)),
+                    "Merged ranges": int(len(getattr(ws, "merged_cells", []) or [])) if ws is not None else 0,
+                    "Source formulas": formula_count,
+                })
+            try:
+                book.close()
+            except Exception:
+                pass
+    except Exception:
+        workbook_formula_scanned = False
+
+    if not workbook_formula_scanned:
+        delimiter = "—"
+        try:
+            import csv
+            sample = raw[:4096].decode("utf-8-sig", errors="replace")
+            delimiter = csv.Sniffer().sniff(sample).delimiter
+        except Exception:
+            if str(filename).lower().endswith(".csv"):
+                delimiter = ","
+        for source_name, frame in raw_sheets.items():
+            metadata.append({
+                "File": str(filename),
+                "SHA256": signature,
+                "Imported": imported,
+                "Source type": "CSV" if str(filename).lower().endswith(".csv") else "Workbook",
+                "Source sheet": source_name,
+                "Sheet state": "—",
+                "Source rows": int(len(frame)),
+                "Source columns": int(len(frame.columns)),
+                "Detected header row": int(header_rows.get(source_name, 0) + 1),
+                "Detected table blocks": _table_block_count(frame, header_rows.get(source_name, 0)),
+                "Merged ranges": 0,
+                "Source formulas": 0,
+                "CSV delimiter": delimiter,
+            })
+    return metadata, formulas
+
+
+def _safe_xlsx_write(ws: Any, row: int, col: int, value: Any, fmt: Any = None) -> None:
+    if _cell_is_na(value):
+        ws.write_blank(row, col, None, fmt)
+        return
+    if isinstance(value, pd.Timestamp):
+        value = value.to_pydatetime()
+    if isinstance(value, bool):
+        ws.write_boolean(row, col, bool(value), fmt)
+        return
+    if isinstance(value, (int, float, np.integer, np.floating)) and not isinstance(value, bool):
+        try:
+            number = float(value)
+            if math.isfinite(number):
+                ws.write_number(row, col, number, fmt)
+                return
+        except Exception:
+            pass
+    # Never use worksheet.write() for arbitrary strings: strings beginning with
+    # "=" can otherwise become formulas. write_string makes the export inert.
+    ws.write_string(row, col, str(value), fmt)
+
+
+def _safe_write_frame(ws: Any, df: pd.DataFrame, start_row: int, start_col: int, header_fmt: Any, date_fmt: Any, datetime_fmt: Any, number_fmt: Any) -> None:
+    for j, col in enumerate(df.columns):
+        ws.write_string(start_row, start_col + j, str(col), header_fmt)
+    for i, row in enumerate(df.itertuples(index=False, name=None), start_row + 1):
+        for j, value in enumerate(row):
+            fmt = date_fmt if isinstance(value, pd.Timestamp) and not (value.hour or value.minute or value.second) else datetime_fmt if isinstance(value, pd.Timestamp) else number_fmt if pd.api.types.is_number(value) and not isinstance(value, bool) else None
+            _safe_xlsx_write(ws, i, start_col + j, value, fmt)
+
+
+def _safe_table_name(name: str, used: set[str]) -> str:
+    base = re.sub(r"[^A-Za-z0-9_]", "_", str(name)).strip("_") or "Table"
+    base = ("T_" + base)[:200]
+    candidate = base
+    n = 2
+    while candidate in used:
+        suffix = f"_{n}"
+        candidate = (base[:200 - len(suffix)] + suffix)
+        n += 1
+    used.add(candidate)
+    return candidate
+
+
+_BASE_CLEAN_DATAFRAME = clean_dataframe
+_BASE_PROFILE_DATAFRAME = profile_dataframe
+
+
+def _enhanced_detect_header_row(raw: pd.DataFrame, scan_rows: int = 25) -> int:
+    if raw.empty:
+        return 0
+    limit = min(scan_rows, len(raw))
+    candidates: list[tuple[float, int]] = []
+    for i in range(limit):
+        row = raw.iloc[i]
+        score = _header_score(row)
+        nonblank = [_normalise_text(v) for v in row.tolist() if _normalise_text(v)]
+        if not nonblank:
+            continue
+        next_rows = raw.iloc[i + 1:min(i + 4, len(raw))]
+        if not next_rows.empty:
+            populated = next_rows.notna().sum(axis=1)
+            consistency = float((populated >= max(1, int(len(nonblank) * 0.5))).mean())
+            score += consistency * 2.5
+            if any(
+                bool(re.search(r"\d", _normalise_text(v)))
+                or bool(re.search(r"[-/:]", _normalise_text(v)))
+                for v in next_rows.astype(object).to_numpy().ravel()
+                if _normalise_text(v)
+            ):
+                score += 1.0
+        # Standalone report titles should lose to a row that explains the table
+        # schema and is followed by actual records.
+        if len(nonblank) <= 2 and i + 1 < len(raw):
+            score -= 1.5
+        candidates.append((score, i))
+    candidates.sort(reverse=True)
+    return candidates[0][1] if candidates else 0
+
+
+def build_ultimate_workbook(
+    title: str,
+    sheets: dict[str, pd.DataFrame],
+    raw_sheets: dict[str, pd.DataFrame],
+    audits: dict[str, list[dict[str, str]]],
+    profiles: dict[str, dict[str, Any]],
+    *,
+    source_metadata: list[dict[str, Any]] | None = None,
+    field_intelligence: list[dict[str, Any]] | None = None,
+    review_register: list[dict[str, Any]] | None = None,
+    before_after: list[dict[str, Any]] | None = None,
+    formula_inventory: list[dict[str, Any]] | None = None,
+    cross_sheet_map: list[dict[str, Any]] | None = None,
+) -> bytes:
+    source_metadata = source_metadata or []
+    field_intelligence = field_intelligence or []
+    review_register = review_register or []
+    before_after = before_after or []
+    formula_inventory = formula_inventory or []
+    cross_sheet_map = cross_sheet_map or []
+
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine="xlsxwriter", datetime_format="yyyy-mm-dd hh:mm", date_format="yyyy-mm-dd") as writer:
+        workbook = writer.book
+        workbook.set_properties({
+            "title": title,
+            "subject": "Shoir-IE Industrial Excel Intelligence Workbook",
+            "author": "Shoir-IE",
+            "comments": "Traceable workbook generated by Shoir-IE Excel Intelligence & Data Governance.",
+        })
+        navy = workbook.add_format({"bold": True, "font_color": "#FFFFFF", "bg_color": "#163A5F", "border": 0})
+        teal = workbook.add_format({"bold": True, "font_color": "#FFFFFF", "bg_color": "#0F766E"})
+        title_fmt = workbook.add_format({"bold": True, "font_size": 20, "font_color": "#163A5F"})
+        subtitle_fmt = workbook.add_format({"font_color": "#4B6175", "italic": True})
+        section_fmt = workbook.add_format({"bold": True, "font_size": 12, "font_color": "#163A5F"})
+        note_fmt = workbook.add_format({"text_wrap": True, "valign": "top"})
+        kpi_label_fmt = workbook.add_format({"bold": True, "font_color": "#FFFFFF", "bg_color": "#163A5F", "align": "center"})
+        kpi_value_fmt = workbook.add_format({"bold": True, "font_size": 16, "font_color": "#163A5F", "align": "center", "border": 1, "border_color": "#D7E2EA"})
+        high_fmt = workbook.add_format({"bold": True, "font_color": "#991B1B", "bg_color": "#FEE2E2"})
+        medium_fmt = workbook.add_format({"bold": True, "font_color": "#92400E", "bg_color": "#FEF3C7"})
+        low_fmt = workbook.add_format({"font_color": "#166534", "bg_color": "#DCFCE7"})
+        number_fmt = workbook.add_format({"num_format": "#,##0.00"})
+        integer_fmt = workbook.add_format({"num_format": "#,##0"})
+        percent_fmt = workbook.add_format({"num_format": "0.0%"})
+        date_fmt = workbook.add_format({"num_format": "yyyy-mm-dd"})
+        datetime_fmt = workbook.add_format({"num_format": "yyyy-mm-dd hh:mm"})
+        code_fmt = workbook.add_format({"font_name": "Consolas", "text_wrap": True})
+        used: set[str] = set()
+        table_names: set[str] = set()
+        clean_names: dict[str, str] = {}
+        raw_names: dict[str, str] = {}
+
+        start = workbook.add_worksheet("START HERE"); used.add("START HERE"); start.hide_gridlines(2); start.set_tab_color("#163A5F")
+        start.set_column("A:A", 32); start.set_column("B:B", 82); start.set_column("C:C", 24)
+        start.write("A1", "Shoir-IE · Industrial Excel Intelligence Workbook", title_fmt)
+        start.write("A2", title, subtitle_fmt)
+        start.write("A4", "Navigation", section_fmt)
+        start.write_row("A5", ["Sheet", "Purpose", "Status"], navy)
+        nav = [
+            ("EXECUTIVE DASHBOARD", "Management-ready health, readiness and workbook KPIs."),
+            ("DATA QUALITY CENTER", "Sheet-level quality, missingness, duplicate and outlier intelligence."),
+            ("FIELD INTELLIGENCE", "Field roles, type confidence, units, canonical entities and recommended actions."),
+            ("VALIDATION & REVIEW", "Actionable review register; nothing is silently deleted as an 'outlier'."),
+            ("BEFORE vs AFTER", "What changed between source and cleaned working data."),
+            ("SOURCE METADATA", "File hash, source sheet structure, detected headers and formula provenance."),
+            ("CLEANING AUDIT", "Exact automatic transformations applied."),
+        ]
+        if formula_inventory:
+            nav.append(("FORMULA INVENTORY", "Source formulas archived as inert evidence for traceability."))
+        if cross_sheet_map:
+            nav.append(("CROSS-SHEET MAP", "Potential shared fields that could support controlled joins."))
+        for fixed_name, purpose in nav:
+            start.write_url(row=start.dim_rowmax + 1 if start.dim_rowmax is not None else 5, col=0, url=f"internal:'{fixed_name}'!A1", string=fixed_name)
+        row = 5
+        for fixed_name, purpose in nav:
+            start.write_url(row, 0, f"internal:'{fixed_name}'!A1", string=fixed_name)
+            start.write(row, 1, purpose)
+            row += 1
+        for original in sheets:
+            clean_name = _safe_sheet(original, used, "CLEAN - ")
+            raw_name = _safe_sheet(original, used, "RAW - ")
+            clean_names[original] = clean_name; raw_names[original] = raw_name
+            start.write_url(row, 0, f"internal:'{clean_name}'!A1", string=clean_name)
+            start.write(row, 1, f"Primary cleaned working table from source sheet '{original}'.")
+            start.write(row, 2, profiles.get(original, {}).get("Readiness", "—"))
+            row += 1
+        start.write(row + 1, 0, "Governance principle", section_fmt)
+        start.merge_range(row + 2, 0, row + 4, 1,
+            "Shoir-IE separates working data from evidence. CLEAN sheets are the analysis-ready tables; "
+            "RAW sheets preserve source values; SOURCE METADATA proves where the import came from; "
+            "VALIDATION & REVIEW identifies issues without silently changing the analyst's intent.",
+            note_fmt)
+
+        summary = workbook.add_worksheet("EXECUTIVE DASHBOARD"); used.add("EXECUTIVE DASHBOARD"); summary.hide_gridlines(2); summary.set_tab_color("#0F766E")
+        summary.set_column("A:A", 28); summary.set_column("B:I", 18)
+        summary.write("A1", "EXECUTIVE DASHBOARD", title_fmt)
+        summary.write("A2", "Decision-ready view of the imported workbook.", subtitle_fmt)
+        avg_quality = round(float(np.mean([p["Quality score"] for p in profiles.values()])) if profiles else 0.0, 1)
+        total_rows = sum(int(p.get("Rows", 0)) for p in profiles.values())
+        total_missing = sum(int(p.get("Missing cells", 0)) for p in profiles.values())
+        review_high = sum(1 for x in review_register if x.get("Severity") == "High")
+        kpis = [("SOURCE SHEETS", len(sheets)), ("CLEANED ROWS", total_rows), ("FIELDS", sum(int(p.get("Columns", 0)) for p in profiles.values())), ("AVG QUALITY", f"{avg_quality:.1f}%"), ("MISSING CELLS", total_missing), ("REVIEW ITEMS", len(review_register)), ("HIGH PRIORITY", review_high), ("SOURCE HASHED", "YES")]
+        for i, (label, value) in enumerate(kpis):
+            c = i % 4; r = 4 + (i // 4) * 3
+            summary.merge_range(r, c * 2, r, c * 2 + 1, label, kpi_label_fmt)
+            summary.merge_range(r + 1, c * 2, r + 1, c * 2 + 1, value, kpi_value_fmt)
+        summary.write("A11", "Sheet readiness", section_fmt)
+        readiness = pd.DataFrame([
+            {
+                "Sheet": _safe_sheet(k, set(), "CLEAN - "),
+                "Rows": v.get("Rows", 0), "Fields": v.get("Columns", 0),
+                "Missing %": v.get("Missing %", 0), "Duplicate rows": v.get("Duplicate rows", 0),
+                "Potential outliers": v.get("Potential outliers", 0),
+                "Review items": v.get("Review items", 0),
+                "Quality": v.get("Quality score", 0), "Readiness": v.get("Readiness", "—"),
+            }
+            for k, v in profiles.items()
+        ])
+        _safe_write_frame(summary, readiness, 11, 0, navy, date_fmt, datetime_fmt, number_fmt)
+        summary.freeze_panes(12, 0)
+        if not readiness.empty:
+            chart = workbook.add_chart({"type": "column"})
+            chart.add_series({"name": "Quality score", "categories": ["EXECUTIVE DASHBOARD", 12, 0, 11 + len(readiness), 0], "values": ["EXECUTIVE DASHBOARD", 12, 7, 11 + len(readiness), 7]})
+            chart.set_title({"name": "Quality/readiness profile"}); chart.set_y_axis({"min": 0, "max": 100}); chart.set_size({"width": 760, "height": 340})
+            summary.insert_chart("A24", chart)
+
+        quality = workbook.add_worksheet("DATA QUALITY CENTER"); used.add("DATA QUALITY CENTER"); quality.hide_gridlines(2); quality.set_tab_color("#B45309")
+        quality.write("A1", "DATA QUALITY CENTER", title_fmt)
+        quality.write("A2", "Automated evidence checks. Scores are readiness heuristics, not a substitute for engineering judgment.", subtitle_fmt)
+        qframe = readiness.copy()
+        _safe_write_frame(quality, qframe, 3, 0, navy, date_fmt, datetime_fmt, number_fmt)
+        if not qframe.empty:
+            quality.autofilter(3, 0, 3 + len(qframe), max(0, len(qframe.columns) - 1))
+        quality.write("A16", "Review workload by severity", section_fmt)
+        severity = pd.DataFrame([{"Severity": s, "Count": sum(1 for x in review_register if x.get("Severity") == s)} for s in ["High", "Medium", "Low"]])
+        _safe_write_frame(quality, severity, 17, 0, navy, date_fmt, datetime_fmt, number_fmt)
+        if not severity.empty:
+            chart = workbook.add_chart({"type": "bar"})
+            chart.add_series({"name": "Review items", "categories": ["DATA QUALITY CENTER", 18, 0, 17 + len(severity), 0], "values": ["DATA QUALITY CENTER", 18, 1, 17 + len(severity), 1]})
+            chart.set_title({"name": "Review workload by severity"}); chart.set_size({"width": 540, "height": 260}); quality.insert_chart("D17", chart)
+
+        fields = workbook.add_worksheet("FIELD INTELLIGENCE"); used.add("FIELD INTELLIGENCE"); fields.hide_gridlines(2); fields.set_tab_color("#7C3AED")
+        fields.write("A1", "FIELD INTELLIGENCE", title_fmt)
+        fields.write("A2", "Semantic profiling for engineering analysis, joins and the Digital Thread.", subtitle_fmt)
+        fframe = pd.DataFrame(field_intelligence)
+        if fframe.empty:
+            fframe = pd.DataFrame([{"Sheet": "", "Field": "", "Role": "", "Inferred type": "", "Type confidence": "", "Canonical entity": "", "Unit hint": "", "Rows": 0, "Non-null": 0, "Missing %": 100.0, "Unique": 0, "Potential outliers": 0, "Example values": "", "Suggested action": "No fields detected."}])
+        _safe_write_frame(fields, fframe, 3, 0, navy, date_fmt, datetime_fmt, number_fmt)
+        fields.freeze_panes(4, 0); fields.autofilter(3, 0, 3 + len(fframe), len(fframe.columns) - 1)
+        fields.set_column("A:B", 24); fields.set_column("C:G", 18); fields.set_column("H:N", 20); fields.set_column("O:O", 48)
+        type_counts = fframe["Inferred type"].value_counts().reset_index()
+        type_counts.columns = ["Type", "Count"]
+        if not type_counts.empty:
+            chart = workbook.add_chart({"type": "doughnut"})
+            chart.add_series({"name": "Field types", "categories": ["FIELD INTELLIGENCE", 4 + len(fframe), 0, 3 + len(fframe) + len(type_counts), 0], "values": ["FIELD INTELLIGENCE", 4 + len(fframe), 1, 3 + len(fframe) + len(type_counts), 1]})
+            _safe_write_frame(fields, type_counts, 4 + len(fframe), 0, navy, date_fmt, datetime_fmt, number_fmt)
+            chart.set_title({"name": "Field type mix"}); chart.set_size({"width": 460, "height": 280}); fields.insert_chart("Q4", chart)
+
+        review = workbook.add_worksheet("VALIDATION & REVIEW"); used.add("VALIDATION & REVIEW"); review.hide_gridlines(2); review.set_tab_color("#DC2626")
+        review.write("A1", "VALIDATION & REVIEW", title_fmt)
+        review.write("A2", "Review flags are explicit. Shoir-IE does not silently delete statistical outliers or semantic anomalies.", subtitle_fmt)
+        rframe = pd.DataFrame(review_register)
+        if rframe.empty:
+            rframe = pd.DataFrame([{"Severity": "Info", "Sheet": "—", "Field": "—", "Issue": "No review flags", "Evidence": "No automated exception was detected.", "Recommended action": "Proceed with normal engineering validation."}])
+        _safe_write_frame(review, rframe, 3, 0, navy, date_fmt, datetime_fmt, number_fmt)
+        review.freeze_panes(4, 0); review.autofilter(3, 0, 3 + len(rframe), len(rframe.columns) - 1)
+        if "Severity" in rframe.columns:
+            review.conditional_format(4, 0, 3 + len(rframe), 0, {"type": "text", "criteria": "containing", "value": "High", "format": high_fmt})
+            review.conditional_format(4, 0, 3 + len(rframe), 0, {"type": "text", "criteria": "containing", "value": "Medium", "format": medium_fmt})
+            review.conditional_format(4, 0, 3 + len(rframe), 0, {"type": "text", "criteria": "containing", "value": "Low", "format": low_fmt})
+        review.set_column("A:A", 12); review.set_column("B:C", 25); review.set_column("D:D", 32); review.set_column("E:F", 68)
+
+        before = workbook.add_worksheet("BEFORE vs AFTER"); used.add("BEFORE vs AFTER"); before.hide_gridlines(2)
+        before.write("A1", "BEFORE vs AFTER", title_fmt); before.write("A2", "How much changed, and what happened to the data shape.", subtitle_fmt)
+        baframe = pd.DataFrame(before_after)
+        if baframe.empty:
+            baframe = pd.DataFrame([{"Sheet": "—", "Source rows": 0, "Clean rows": 0, "Rows removed": 0, "Source columns": 0, "Clean columns": 0, "Columns removed": 0, "Missing before": 0, "Missing after": 0, "Duplicate rows removed": 0, "Schema fingerprint": "—"}])
+        _safe_write_frame(before, baframe, 3, 0, navy, date_fmt, datetime_fmt, number_fmt)
+        before.freeze_panes(4, 0)
+        before.set_column("A:A", 28); before.set_column("B:K", 18)
+
+        meta = workbook.add_worksheet("SOURCE METADATA"); used.add("SOURCE METADATA"); meta.hide_gridlines(2)
+        meta.write("A1", "SOURCE METADATA", title_fmt); meta.write("A2", "Import provenance and source-structure facts.", subtitle_fmt)
+        mframe = pd.DataFrame(source_metadata)
+        _safe_write_frame(meta, mframe, 3, 0, navy, date_fmt, datetime_fmt, number_fmt)
+        meta.freeze_panes(4, 0); meta.set_column("A:A", 28); meta.set_column("B:B", 68); meta.set_column("C:Z", 18)
+        meta.write("A" + str(max(6, 5 + len(mframe))), "Source hash principle: the SHA256 identifies the exact uploaded byte payload used for this workbook.", code_fmt)
+
+        audit = workbook.add_worksheet("CLEANING AUDIT"); used.add("CLEANING AUDIT"); audit.hide_gridlines(2)
+        audit.write("A1", "CLEANING AUDIT", title_fmt); audit.write("A2", "Every automated transformation is recorded for reproducibility.", subtitle_fmt)
+        audit_rows = [{"Sheet": k, **event} for k, events in audits.items() for event in events]
+        if not audit_rows:
+            audit_rows = [{"Sheet": "", "Action": "No changes required", "Details": "The source workbook already satisfied the automatic cleaning rules."}]
+        aframe = pd.DataFrame(audit_rows)
+        _safe_write_frame(audit, aframe, 3, 0, navy, date_fmt, datetime_fmt, number_fmt)
+        audit.freeze_panes(4, 0); audit.set_column("A:A", 28); audit.set_column("B:B", 34); audit.set_column("C:C", 100)
+
+        if formula_inventory:
+            finv = workbook.add_worksheet("FORMULA INVENTORY"); used.add("FORMULA INVENTORY"); finv.hide_gridlines(2)
+            finv.write("A1", "FORMULA INVENTORY", title_fmt)
+            finv.write("A2", "Inert source-formula evidence. Formula text is retained as evidence and is not executed during import.", subtitle_fmt)
+            frame = pd.DataFrame(formula_inventory)
+            _safe_write_frame(finv, frame, 3, 0, navy, date_fmt, datetime_fmt, number_fmt)
+            finv.freeze_panes(4, 0); finv.set_column("A:B", 24); finv.set_column("C:C", 72); finv.set_column("D:E", 32)
+
+        if cross_sheet_map:
+            cmap = workbook.add_worksheet("CROSS-SHEET MAP"); used.add("CROSS-SHEET MAP"); cmap.hide_gridlines(2)
+            cmap.write("A1", "CROSS-SHEET MAP", title_fmt)
+            cmap.write("A2", "Potential shared fields for controlled joins. Shared names do not prove referential integrity.", subtitle_fmt)
+            frame = pd.DataFrame(cross_sheet_map)
+            _safe_write_frame(cmap, frame, 3, 0, navy, date_fmt, datetime_fmt, number_fmt)
+            cmap.freeze_panes(4, 0); cmap.set_column("A:B", 28); cmap.set_column("C:C", 50); cmap.set_column("D:D", 18); cmap.set_column("E:E", 72)
+
+        for original, df in sheets.items():
+            clean_name = clean_names[original]; raw_name = raw_names[original]
+            ws = workbook.add_worksheet(clean_name); ws.hide_gridlines(2); ws.freeze_panes(6, 0); ws.set_tab_color("#2F6B8A")
+            profile = profiles[original]
+            ws.set_column("A:A", 24)
+            ws.write_url("A1", "internal:'START HERE'!A1", string="← Back to START HERE")
+            ws.write("A2", f"{clean_name} — {original}", title_fmt)
+            ws.write("A3", f"Readiness: {profile.get('Readiness','—')} | Quality: {profile.get('Quality score',0):.1f}% | Schema: {profile.get('Schema fingerprint','—')}", subtitle_fmt)
+            ws.write("A5", "CLEAN WORKING DATA", section_fmt)
+            _safe_write_frame(ws, df, 5, 0, navy, date_fmt, datetime_fmt, number_fmt)
+            if len(df.columns) and len(df):
+                try:
+                    end_row = 5 + len(df)
+                    ws.add_table(5, 0, end_row, len(df.columns) - 1, {
+                        "name": _safe_table_name(clean_name, table_names),
+                        "style": "Table Style Medium 2",
+                        "columns": [{"header": str(c)} for c in df.columns],
+                    })
+                    ws.autofilter(5, 0, end_row, len(df.columns) - 1)
+                except Exception:
+                    pass
+            for j, col in enumerate(df.columns):
+                sample = [str(x) for x in df[col].head(80).tolist()]
+                width = min(46, max(12, len(str(col)) + 2, max([len(x) for x in sample] + [0]) + 2))
+                ws.set_column(j, j, width)
+                if pd.api.types.is_numeric_dtype(df[col]) and not pd.api.types.is_bool_dtype(df[col]):
+                    ws.conditional_format(6, j, max(6, 5 + len(df)), j, {"type": "3_color_scale", "min_color": "#FEE2E2", "mid_color": "#FEF3C7", "max_color": "#DCFCE7"})
+            issues = [x for x in review_register if x.get("Sheet") == original]
+            if issues:
+                ws.write("A4", f"Review flags: {len(issues)} · see VALIDATION & REVIEW", medium_fmt if any(x.get("Severity") == "High" for x in issues) else subtitle_fmt)
+            raw_ws = workbook.add_worksheet(raw_name); raw_ws.hide(); raw_ws.write("A1", f"RAW ARCHIVE — {original}", title_fmt)
+            _safe_write_frame(raw_ws, raw_sheets.get(original, pd.DataFrame()), 2, 0, navy, date_fmt, datetime_fmt, number_fmt)
+
+            numeric = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c]) and not pd.api.types.is_bool_dtype(df[c])]
+            if numeric and len(df) >= 2:
+                y = numeric[0]; y_idx = list(df.columns).index(y)
+                x = next((c for c in df.columns if c != y and (pd.api.types.is_datetime64_any_dtype(df[c]) or not pd.api.types.is_numeric_dtype(df[c]))), None)
+                if x is not None:
+                    x_idx = list(df.columns).index(x)
+                    chart = workbook.add_chart({"type": "line" if pd.api.types.is_datetime64_any_dtype(df[x]) else "column"})
+                    chart.add_series({"name": [clean_name, 5, y_idx], "categories": [clean_name, 6, x_idx, 5 + len(df), x_idx], "values": [clean_name, 6, y_idx, 5 + len(df), y_idx]})
+                    chart.set_title({"name": f"{y} by {x}"}); chart.set_legend({"none": True}); chart.set_size({"width": 720, "height": 330})
+                    ws.insert_chart("A" + str(8), chart)
+
+    return buf.getvalue()
+
+
+def build_ultimate_bundle(
+    title: str,
+    xlsx_bytes: bytes,
+    audits: dict[str, list[dict[str, str]]],
+    profiles: dict[str, dict[str, Any]],
+    *,
+    cleaned_sheets: dict[str, pd.DataFrame] | None = None,
+    raw_sheets: dict[str, pd.DataFrame] | None = None,
+    field_intelligence: list[dict[str, Any]] | None = None,
+    review_register: list[dict[str, Any]] | None = None,
+    source_metadata: list[dict[str, Any]] | None = None,
+) -> bytes:
+    cleaned_sheets = cleaned_sheets or {}
+    raw_sheets = raw_sheets or {}
+    field_intelligence = field_intelligence or []
+    review_register = review_register or []
+    source_metadata = source_metadata or []
+    manifest = {
+        "product": "Shoir-IE Excel Intelligence Studio",
+        "title": title,
+        "workbook_hash": hashlib.sha256(xlsx_bytes).hexdigest(),
+        "source_sheets": list(raw_sheets),
+        "cleaned_sheets": list(cleaned_sheets),
+        "profiles": profiles,
+        "quality_review_items": len(review_register),
+        "generated_utc": datetime.now(timezone.utc).isoformat(),
+    }
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("shoir_ie_industrial_excel_workbook.xlsx", xlsx_bytes)
+        zf.writestr("manifest.json", json.dumps(manifest, indent=2, ensure_ascii=False))
+        zf.writestr("cleaning_audit.json", json.dumps(audits, indent=2, ensure_ascii=False))
+        zf.writestr("quality_profiles.json", json.dumps(profiles, indent=2, ensure_ascii=False))
+        zf.writestr("field_intelligence.csv", pd.DataFrame(field_intelligence).to_csv(index=False))
+        zf.writestr("validation_review.csv", pd.DataFrame(review_register).to_csv(index=False))
+        zf.writestr("source_metadata.csv", pd.DataFrame(source_metadata).to_csv(index=False))
+        for name, frame in cleaned_sheets.items():
+            safe = re.sub(r"[^A-Za-z0-9_-]+", "_", str(name)).strip("_") or "sheet"
+            zf.writestr(f"clean_csv/{safe}.csv", frame.to_csv(index=False, date_format="%Y-%m-%dT%H:%M:%S"))
+        for name, frame in raw_sheets.items():
+            safe = re.sub(r"[^A-Za-z0-9_-]+", "_", str(name)).strip("_") or "sheet"
+            zf.writestr(f"raw_csv/{safe}.csv", frame.to_csv(index=False))
+        zf.writestr("README.txt", (
+            f"{title}\n\n"
+            "This package contains a presentation-ready XLSX plus machine-readable evidence files.\n"
+            "CLEAN sheets are the working tables. RAW sheets and source metadata preserve provenance. "
+            "Validation flags are review prompts, not automatic deletions. Source formulas, when detected, "
+            "are archived as inert evidence in FORMULA INVENTORY.\n"
+        ))
+    return buf.getvalue()
+
+
+def process_uploaded_workbook(raw: bytes, filename: str) -> dict[str, Any]:
+    signature = hashlib.sha256(raw).hexdigest()
+    raw_sheets = _read_raw_workbook(raw, filename)
+    cleaned: dict[str, pd.DataFrame] = {}
+    audits: dict[str, list[dict[str, str]]] = {}
+    profiles: dict[str, dict[str, Any]] = {}
+    fields: list[dict[str, Any]] = []
+    reviews: list[dict[str, Any]] = []
+    before_after: list[dict[str, Any]] = []
+    header_rows: dict[str, int] = {}
+
+    for source_name, raw_df in raw_sheets.items():
+        header_row = _enhanced_detect_header_row(raw_df)
+        header_rows[source_name] = header_row
+        if raw_df.empty:
+            table = pd.DataFrame()
+        else:
+            headers = _deduplicate_headers(raw_df.iloc[header_row].tolist())
+            table = raw_df.iloc[header_row + 1:].copy()
+            table.columns = headers
+            table = table.dropna(axis=1, how="all").dropna(axis=0, how="all")
+        cleaned_df, audit = _enhanced_clean_dataframe(table)
+        cleaned[source_name] = cleaned_df
+        audits[source_name] = [{"Action": "Detect table header", "Details": f"Detected source header row {header_row + 1}."}] + audit
+        profiles[source_name] = _enhanced_profile_dataframe(cleaned_df)
+        fields.extend(_field_intelligence_rows(cleaned_df, source_name))
+        reviews.extend(_quality_review_register(cleaned_df, source_name))
+        before_after.append({
+            "Sheet": source_name,
+            "Source rows": int(len(table)),
+            "Clean rows": int(len(cleaned_df)),
+            "Rows removed": int(max(0, len(table) - len(cleaned_df))),
+            "Source columns": int(len(table.columns)),
+            "Clean columns": int(len(cleaned_df.columns)),
+            "Columns removed": int(max(0, len(table.columns) - len(cleaned_df.columns))),
+            "Missing before": int(table.isna().sum().sum()) if not table.empty else 0,
+            "Missing after": int(cleaned_df.isna().sum().sum()) if not cleaned_df.empty else 0,
+            "Duplicate rows removed": max(0, int(table.duplicated().sum()) - int(cleaned_df.duplicated().sum())) if not table.empty else 0,
+            "Schema fingerprint": profiles[source_name].get("Schema fingerprint", "—"),
+        })
+
+    source_metadata, formula_inventory = _extract_source_metadata(raw, filename, raw_sheets, header_rows)
+    cross_map = _cross_sheet_map(cleaned)
+    workbook_title = f"Shoir-IE — {filename}"
+    xlsx = build_ultimate_workbook(
+        workbook_title, cleaned, raw_sheets, audits, profiles,
+        source_metadata=source_metadata,
+        field_intelligence=fields,
+        review_register=reviews,
+        before_after=before_after,
+        formula_inventory=formula_inventory,
+        cross_sheet_map=cross_map,
+    )
+    return {
+        "signature": signature,
+        "filename": filename,
+        "raw_sheets": raw_sheets,
+        "cleaned_sheets": cleaned,
+        "audits": audits,
+        "profiles": profiles,
+        "field_intelligence": fields,
+        "review_register": reviews,
+        "before_after": before_after,
+        "source_metadata": source_metadata,
+        "formula_inventory": formula_inventory,
+        "cross_sheet_map": cross_map,
+        "xlsx": xlsx,
+        "bundle": build_ultimate_bundle(
+            workbook_title, xlsx, audits, profiles,
+            cleaned_sheets=cleaned,
+            raw_sheets=raw_sheets,
+            field_intelligence=fields,
+            review_register=reviews,
+            source_metadata=source_metadata,
+        ),
+    }
+
+
+def render_excel_data_cleaning_studio(tier: str, username: str) -> None:
+    import streamlit as st
+    from shoir_tier_capabilities import tier_allows
+
+    if not tier_allows(tier, "Starter"):
+        st.warning("This workspace is not included in your current package.")
+        return
+
+    st.markdown("## 📊 Excel Intelligence & Data Cleaning Studio")
+    st.caption(
+        "Import → profile → clean → validate → map → review → analyze → export. "
+        "Shoir-IE preserves raw evidence and creates a governed industrial workbook."
+    )
+    with st.expander("What Shoir-IE checks automatically", expanded=False):
+        st.write("Headers, duplicate columns/rows, identifier preservation, missing-value tokens, accounting negatives, data types, identifier uniqueness, statistical outliers, percentage/ratio ranges, date sanity, source formulas, schema fingerprint, cross-sheet shared fields and provenance hash.")
+
+    left, right = st.columns([5, 1])
+    upload = left.file_uploader(
+        "Upload raw Excel / CSV",
+        type=["xlsx", "csv"],
+        key="excel_studio_upload",
+        help="Messy exports, title rows and multi-sheet Excel workbooks are supported.",
+    )
+    if right.button("Clear", use_container_width=True, key="excel_studio_clear"):
+        for key in ["excel_studio_signature", "excel_studio_result", "excel_studio_sheet", "excel_studio_visual_df"]:
+            st.session_state.pop(key, None)
+        st.rerun()
+
+    if upload is not None:
+        raw = upload.getvalue()
+        signature = hashlib.sha256(raw).hexdigest()
+        if st.session_state.get("excel_studio_signature") != signature:
+            try:
+                with st.spinner("Building governed industrial workbook…"):
+                    result = process_uploaded_workbook(raw, upload.name)
+                st.session_state["excel_studio_signature"] = signature
+                st.session_state["excel_studio_result"] = result
+                st.success(
+                    f"✅ Processed {len(result['cleaned_sheets']):,} sheet(s), "
+                    f"flagged {len(result['review_register']):,} review item(s), and preserved the source hash."
+                )
+            except Exception as exc:
+                st.error(f"Excel could not be transformed safely: {type(exc).__name__}: {exc}")
+
+    result = st.session_state.get("excel_studio_result")
+    if not isinstance(result, dict):
+        st.info("Upload a workbook to activate the governed Excel workflow.")
+        return
+
+    cleaned = result["cleaned_sheets"]
+    profiles = result["profiles"]
+    audits = result["audits"]
+    profile_frame = pd.DataFrame([{"Sheet": k, **v} for k, v in profiles.items()])
+    if cleaned:
+        selected = st.session_state.get("excel_studio_sheet")
+        if selected not in cleaned:
+            selected = next(iter(cleaned))
+        st.session_state["excel_studio_visual_df"] = cleaned[selected].copy(deep=True)
+
+    scores = [float(v.get("Quality score", 0)) for v in profiles.values()]
+    high_reviews = sum(1 for x in result.get("review_register", []) if x.get("Severity") == "High")
+    m1, m2, m3, m4, m5 = st.columns(5)
+    m1.metric("Sheets", len(cleaned))
+    m2.metric("Clean rows", f"{sum(len(v) for v in cleaned.values()):,}")
+    m3.metric("Avg quality", f"{float(np.mean(scores)):.1f}%" if scores else "—")
+    m4.metric("Review items", f"{len(result.get('review_register', [])):,}")
+    m5.metric("High priority", high_reviews)
+
+    tabs = st.tabs(["Overview", "Clean Data", "Quality Center", "Field Intelligence", "Export"])
+
+    with tabs[0]:
+        st.dataframe(profile_frame, use_container_width=True, hide_index=True)
+        st.markdown("### Before vs after")
+        st.dataframe(pd.DataFrame(result.get("before_after", [])), use_container_width=True, hide_index=True)
+        st.markdown("### Source provenance")
+        st.dataframe(pd.DataFrame(result.get("source_metadata", [])), use_container_width=True, hide_index=True)
+        if result.get("cross_sheet_map"):
+            st.markdown("### Potential cross-sheet relationships")
+            st.dataframe(pd.DataFrame(result["cross_sheet_map"]), use_container_width=True, hide_index=True)
+
+    with tabs[1]:
+        sheet = st.selectbox("Clean sheet", list(cleaned), key="excel_studio_sheet")
+        df = cleaned[sheet]
+        st.session_state["excel_studio_visual_df"] = df.copy(deep=True)
+        profile = profiles[sheet]
+        st.caption(f"{sheet} · {len(df):,} rows × {len(df.columns):,} fields · {profile.get('Readiness','—')} · schema {profile.get('Schema fingerprint','—')}")
+        st.dataframe(df.head(1500), use_container_width=True, hide_index=True)
+        sheet_reviews = [x for x in result.get("review_register", []) if x.get("Sheet") == sheet]
+        if sheet_reviews:
+            st.markdown("#### Review flags for this sheet")
+            st.dataframe(pd.DataFrame(sheet_reviews), use_container_width=True, hide_index=True)
+        c1, c2 = st.columns(2)
+        if c1.button("↻ Re-run cleaning", key="excel_studio_reclean", use_container_width=True):
+            cleaned_df, new_audit = clean_dataframe(df)
+            result["cleaned_sheets"][sheet] = cleaned_df
+            result["audits"][sheet].extend(new_audit)
+            result["profiles"][sheet] = _enhanced_profile_dataframe(cleaned_df)
+            result["field_intelligence"] = [x for x in result["field_intelligence"] if x.get("Sheet") != sheet] + _field_intelligence_rows(cleaned_df, sheet)
+            result["review_register"] = [x for x in result["review_register"] if x.get("Sheet") != sheet] + _quality_review_register(cleaned_df, sheet)
+            result["xlsx"] = build_ultimate_workbook(
+                f"Shoir-IE — {result['filename']}", result["cleaned_sheets"], result["raw_sheets"], result["audits"], result["profiles"],
+                source_metadata=result.get("source_metadata"), field_intelligence=result.get("field_intelligence"),
+                review_register=result.get("review_register"), before_after=result.get("before_after"),
+                formula_inventory=result.get("formula_inventory"), cross_sheet_map=result.get("cross_sheet_map"),
+            )
+            result["bundle"] = build_ultimate_bundle(
+                f"Shoir-IE — {result['filename']}", result["xlsx"], result["audits"], result["profiles"],
+                cleaned_sheets=result["cleaned_sheets"], raw_sheets=result["raw_sheets"],
+                field_intelligence=result["field_intelligence"], review_register=result["review_register"],
+                source_metadata=result.get("source_metadata"),
+            )
+            st.session_state["excel_studio_result"] = result
+            st.rerun()
+        if c2.button("↩ Restore from preserved RAW", key="excel_studio_restore", use_container_width=True):
+            raw_df = result["raw_sheets"][sheet]
+            header_row = int(result.get("source_metadata", [{}])[0].get("Detected header row", 1)) - 1 if result.get("source_metadata") else detect_header_row(raw_df)
+            header_row = max(0, min(header_row, max(0, len(raw_df) - 1)))
+            table = raw_df.iloc[header_row + 1:].copy()
+            table.columns = _deduplicate_headers(raw_df.iloc[header_row].tolist())
+            table = table.dropna(axis=1, how="all").dropna(axis=0, how="all")
+            restored, restore_audit = _enhanced_clean_dataframe(table)
+            result["cleaned_sheets"][sheet] = restored
+            result["audits"][sheet] = [{"Action": "Restore", "Details": "Restored from preserved RAW values and re-applied governed cleaning."}] + restore_audit
+            result["profiles"][sheet] = _enhanced_profile_dataframe(restored)
+            st.session_state["excel_studio_result"] = result
+            st.rerun()
+
+    with tabs[2]:
+        review_frame = pd.DataFrame(result.get("review_register", []))
+        if review_frame.empty:
+            st.success("No automated review exceptions detected.")
+        else:
+            st.dataframe(review_frame, use_container_width=True, hide_index=True)
+            counts = review_frame["Severity"].value_counts().rename_axis("Severity").reset_index(name="Count")
+            st.dataframe(counts, use_container_width=True, hide_index=True)
+        st.caption("Potential outliers are flagged for review; Shoir-IE does not delete them automatically.")
+
+    with tabs[3]:
+        field_frame = pd.DataFrame(result.get("field_intelligence", []))
+        st.dataframe(field_frame, use_container_width=True, hide_index=True)
+        if result.get("formula_inventory"):
+            with st.expander("Source formula inventory"):
+                st.dataframe(pd.DataFrame(result["formula_inventory"]), use_container_width=True, hide_index=True)
+
+    with tabs[4]:
+        safe_name = re.sub(r"[^A-Za-z0-9]+", "_", result["filename"]).strip("_").lower()
+        st.download_button(
+            "📥 Download Industrial Excel Intelligence Workbook",
+            result["xlsx"],
+            file_name=f"shoir_ie_industrial_{safe_name}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            type="primary",
+            use_container_width=True,
+        )
+        st.download_button(
+            "📦 Download Complete Evidence Package",
+            result["bundle"],
+            file_name=f"shoir_ie_industrial_{safe_name}.zip",
+            mime="application/zip",
+            use_container_width=True,
+        )
+
+
+# Final symbol bindings for backward compatibility with imports/tests.
+clean_dataframe = _enhanced_clean_dataframe
+profile_dataframe = _enhanced_profile_dataframe
+detect_header_row = _enhanced_detect_header_row
