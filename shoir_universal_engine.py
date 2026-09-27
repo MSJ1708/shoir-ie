@@ -20,7 +20,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
 
-from shoir_performance import as_frame as _perf_as_frame, sample_for_plot
+from shoir_performance import as_frame as _perf_as_frame, quick_readiness, sample_for_plot
 
 ENGINE_ACTION_LEVELS = (
     "Read",
@@ -504,7 +504,7 @@ def _render_ui(module: str, tier: str, username: str) -> None:
                 labels = [x[0] for x in tables]
                 choice = st.selectbox("Data source", labels, key="uie_source_" + hashlib.sha1(module.encode()).hexdigest()[:8])
                 df = tables[labels.index(choice)][2]
-                ready = data_readiness(df)
+                ready = quick_readiness(df) if len(df) >= 50_000 else data_readiness(df)
                 runtime = runtime_choice(df)
                 a, b, c, d = st.columns(4)
                 a.metric("Rows", f"{ready['rows']:,}")
@@ -634,7 +634,7 @@ def postflight_contract(module: str, username: str = "unknown", preferred_key: s
     tables = module_tables(module, preferred_key=preferred_key)
     source = tables[0][1] if tables else ""
     frame = tables[0][2] if tables else pd.DataFrame()
-    validation = data_readiness(frame)
+    validation = quick_readiness(frame) if len(frame) >= 50_000 else data_readiness(frame)
     # Postflight is deliberately metadata-only. Generating a Plotly figure here
     # would duplicate work that the results/visualization surfaces perform for
     # the user and would make every Streamlit rerun slower.
