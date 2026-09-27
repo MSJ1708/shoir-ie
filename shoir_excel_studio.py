@@ -2990,8 +2990,17 @@ def _excel_missingness_patterns(df: pd.DataFrame, sheet: str = "") -> list[dict[
 def _excel_duplicate_intelligence(df: pd.DataFrame, sheet: str) -> list[dict[str, Any]]:
     findings: list[dict[str, Any]] = []
     id_cols = [str(c) for c in df.columns if _is_identifier(str(c), df[c])]
-    for size in range(2, min(4, len(id_cols)) + 1):
-        for combo in __import__("itertools").combinations(id_cols, size):
+    time_cols = [
+        str(c) for c in df.columns
+        if str(c) not in id_cols
+        and (
+            pd.api.types.is_datetime64_any_dtype(df[c])
+            or any(token in str(c).casefold() for token in ("date", "timestamp"))
+        )
+    ]
+    key_candidates = (id_cols + time_cols)[:6]
+    for size in range(2, min(4, len(key_candidates)) + 1):
+        for combo in __import__("itertools").combinations(key_candidates, size):
             work = df[list(combo)].copy()
             dup_mask = work.duplicated(keep=False) & work.notna().all(axis=1)
             count = int(dup_mask.sum())
@@ -3515,51 +3524,76 @@ def _excel_persist_result(username: str, result: dict[str, Any]) -> bool:
 
 def _excel_refresh_governance(result: dict[str, Any]) -> dict[str, Any]:
     cleaned = result.get("cleaned_sheets", {})
+    result["validation_rules"] = result.get("validation_rules") or _EXCEL_DEFAULT_RULES
+    result["engineering_limits"] = result.get("engineering_limits") or {}
     result["field_profile"] = [row for sheet, df in cleaned.items() for row in _excel_profile_enrichment(df, sheet)]
     result["missingness_patterns"] = [row for sheet, df in cleaned.items() for row in _excel_missingness_patterns(df, sheet)]
-    for row in result["missingness_patterns"]:
-        row["Sheet"] = next((s for s, df in cleaned.items() if row["Field"] in [str(c) for c in df.columns]), row.get("Sheet", ""))
     result["duplicate_intelligence"] = [item for sheet, df in cleaned.items() for item in _excel_duplicate_intelligence(df, sheet)]
+    result["duplicate_candidates"] = [item for sheet, frame in cleaned.items() for item in _normalised_duplicate_candidates(frame, sheet)]
     result["extended_outliers"] = [item for sheet, df in cleaned.items() for item in _excel_extended_outlier_findings(df, sheet)]
-    result["engineering_limit_findings"] = [item for sheet, df in cleaned.items() for item in _excel_engineering_limits(df, sheet, result.get("engineering_limits", {}))]
+    result["engineering_limit_findings"] = [item for sheet, df in cleaned.items() for item in _excel_engineering_limits(df, sheet, result["engineering_limits"])]
     result["semantic_mapping"] = [item for sheet, df in cleaned.items() for item in _excel_semantic_mapping(df)]
-    result["validation_results"] = [item for sheet, df in cleaned.items() for item in _excel_apply_validation_rules(df, result.get("validation_rules", _EXCEL_DEFAULT_RULES), sheet)]
+    result["validation_results"] = [
+        item for sheet, df in cleaned.items()
+        for item in (_excel_apply_validation_rules(df, result["validation_rules"], sheet) + _excel_custom_rule_results(df, result.get("custom_validation_rules", []), sheet))
+    ]
     result["formula_dependencies"] = _excel_formula_dependencies(result.get("formula_inventory", []))
     result["formula_gap_findings"] = _excel_formula_gap_scan(result.get("formula_inventory", []))
     result["security_scan"] = _excel_security_scan(cleaned)
-    result["review_register"].extend(result.get("formula_gap_findings", []))
-    for item in result.get("security_scan", []):
-        result["review_register"].append({
-            "Severity": "High",
-            "Sheet": item["Sheet"],
-            "Field": item["Field"],
-            "Issue": "Potential secret/security exposure",
-            "Evidence": f"{item['Indicator']}: {item['Matches']:,} match(es).",
-            "Recommended action": item["Action"],
-        })
     result["source_fidelity"] = _excel_source_fidelity(result.get("_raw_bytes", b""), result.get("filename", ""))
     result["unit_catalog"] = [
-        {"Sheet": sheet, "Field": str(col), "Detected unit": _excel_unit_token(str(col)),
-         "Convertible targets": ", ".join(sorted(
-             [u for u in _EXCEL_UNIT_FACTORS if _EXCEL_UNIT_FACTORS[u][0] == _EXCEL_UNIT_FACTORS.get(_excel_unit_token(str(col)), ("", 0))[0]]
-         ))}
+        {
+            "Sheet": sheet,
+            "Field": str(col),
+            "Detected unit": _excel_unit_token(str(col)),
+            "Convertible targets": ", ".join(sorted([
+                u for u in _EXCEL_UNIT_FACTORS
+                if _EXCEL_UNIT_FACTORS[u][0] == _EXCEL_UNIT_FACTORS.get(
+                    _excel_unit_token(str(col)), ("", 0)
+                )[0]
+            ])),
+        }
         for sheet, frame in cleaned.items() for col in frame.columns if _excel_unit_token(str(col))
     ]
-    reviews = list(result.get("review_register", []))
-    reviews.extend(result["extended_outliers"])
-    reviews.extend(result["engineering_limit_findings"])
-    for item in result["duplicate_intelligence"]:
-        reviews.append({
-            "Severity": "Medium",
-            "Sheet": item["Sheet"],
-            "Field": item.get("Fields", ""),
+    result["module_readiness"] = _multi_module_readiness(cleaned)
+    result["formula_quality"] = _formula_quality_inventory(result.get("formula_inventory", []))
+    result["relationship_integrity"] = _relationship_integrity(cleaned)
+    result["privacy_scan"] = _privacy_scan(cleaned)
+    result["data_contract"] = _data_contract(cleaned, result.get("field_intelligence", []))
+    base_reviews = [
+        issue for sheet, frame in cleaned.items()
+        for issue in _quality_review_register(frame, sheet)
+    ]
+    for meta in result.get("source_metadata", []):
+        blocks = int(meta.get("Detected table blocks", 1) or 1)
+        if blocks > 1:
+            base_reviews.append({
+                "Severity": "Medium", "Sheet": str(meta.get("Source sheet", "")),
+                "Field": "Sheet structure", "Issue": "Multiple table blocks detected",
+                "Evidence": f"{blocks:,} non-empty table region(s) inferred.",
+                "Recommended action": "Review the discovered datasets before joins or aggregation.",
+            })
+    for item in result["duplicate_candidates"]:
+        base_reviews.append({
+            "Severity": "Medium", "Sheet": item["Sheet"], "Field": item["Field"],
             "Issue": item["Review"],
             "Evidence": item.get("Source variants", f"{item.get('Occurrences', 0):,} occurrence(s)"),
             "Recommended action": item["Recommended action"],
         })
+    for item in result["security_scan"]:
+        base_reviews.append({
+            "Severity": "High", "Sheet": item["Sheet"], "Field": item["Field"],
+            "Issue": "Potential secret/security exposure",
+            "Evidence": f"{item['Indicator']}: {item['Matches']:,} match(es).",
+            "Recommended action": item["Action"],
+        })
+    for issue in result["extended_outliers"] + result["engineering_limit_findings"]:
+        base_reviews.append(issue)
+    for item in result["formula_gap_findings"]:
+        base_reviews.append(item)
     for item in result["validation_results"]:
-        if item["Status"] == "FAIL":
-            reviews.append({
+        if item.get("Status") == "FAIL":
+            base_reviews.append({
                 "Severity": item.get("Severity", "High"),
                 "Sheet": item.get("Sheet", ""),
                 "Field": item.get("Field", ""),
@@ -3567,7 +3601,7 @@ def _excel_refresh_governance(result: dict[str, Any]) -> dict[str, Any]:
                 "Evidence": item.get("Evidence", ""),
                 "Recommended action": "Correct or explicitly approve the exception before downstream analysis.",
             })
-    result["review_register"] = reviews
+    result["review_register"] = base_reviews
     return result
 
 _BASE_EXCEL_ENGINE_PROCESS = process_uploaded_workbook
@@ -3591,6 +3625,7 @@ def _excel_engine_read(raw: bytes, filename: str) -> dict[str, pd.DataFrame]:
             sep=delimiter,
             keep_default_na=False,
             na_filter=False,
+            engine="python",
         )
         frame.attrs["source_encoding"] = encoding
         frame.attrs["source_delimiter"] = delimiter
