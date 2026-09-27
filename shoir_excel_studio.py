@@ -311,6 +311,116 @@ def _write_df(
             ws.write(i, start_col + j, cell, fmt)
 
 
+
+def _column_role(name: str, series: pd.Series) -> str:
+    norm = re.sub(r"[^a-z0-9]+", " ", str(name).lower()).strip()
+    tokens = set(norm.split())
+    if tokens & {"id", "sku", "code", "serial", "part", "asset", "order", "customer", "employee"}:
+        return "Identifier"
+    if tokens & {"date", "time", "timestamp", "created", "updated", "due"}:
+        return "Time"
+    if pd.api.types.is_datetime64_any_dtype(series):
+        return "Time"
+    if pd.api.types.is_numeric_dtype(series) and not pd.api.types.is_bool_dtype(series):
+        return "Measure"
+    nunique = int(series.nunique(dropna=True))
+    if len(series) and nunique <= min(25, max(5, int(len(series) * 0.20))):
+        return "Dimension"
+    return "Text / Attribute"
+
+
+def _infer_display_type(series: pd.Series) -> str:
+    if pd.api.types.is_datetime64_any_dtype(series):
+        return "Date / time"
+    if pd.api.types.is_bool_dtype(series):
+        return "Boolean"
+    if pd.api.types.is_numeric_dtype(series):
+        return "Number"
+    return "Text"
+
+
+def _column_format(workbook: Any, series: pd.Series):
+    if pd.api.types.is_datetime64_any_dtype(series):
+        return workbook.add_format({"num_format": "yyyy-mm-dd"})
+    if pd.api.types.is_numeric_dtype(series) and not pd.api.types.is_bool_dtype(series):
+        return workbook.add_format({"num_format": "#,##0.00"})
+    if pd.api.types.is_bool_dtype(series):
+        return workbook.add_format({"align": "center"})
+    return None
+
+
+def _potential_outlier_count(series: pd.Series) -> int:
+    if not pd.api.types.is_numeric_dtype(series) or pd.api.types.is_bool_dtype(series):
+        return 0
+    values = pd.to_numeric(series, errors="coerce").dropna()
+    if len(values) < 8:
+        return 0
+    q1, q3 = values.quantile([0.25, 0.75])
+    iqr = float(q3 - q1)
+    if iqr <= 0:
+        return 0
+    lower, upper = float(q1 - 1.5 * iqr), float(q3 + 1.5 * iqr)
+    return int(((values < lower) | (values > upper)).sum())
+
+
+def _sheet_intelligence(df: pd.DataFrame, name: str) -> dict[str, Any]:
+    numeric = [
+        str(c) for c in df.columns
+        if pd.api.types.is_numeric_dtype(df[c]) and not pd.api.types.is_bool_dtype(df[c])
+    ]
+    dates = [str(c) for c in df.columns if pd.api.types.is_datetime64_any_dtype(df[c])]
+    identifiers = [str(c) for c in df.columns if _column_role(str(c), df[c]) == "Identifier"]
+    dimensions = [str(c) for c in df.columns if _column_role(str(c), df[c]) == "Dimension"]
+    missing = int(df.isna().sum().sum())
+    duplicates = int(df.duplicated().sum()) if len(df) else 0
+    outliers = int(sum(_potential_outlier_count(df[c]) for c in df.columns))
+    completeness = round(100.0 - (missing / max(1, len(df) * max(1, len(df.columns)))) * 100.0, 1)
+    issues = int(missing > 0) + int(duplicates > 0) + int(outliers > 0)
+    quality = max(0.0, round(completeness - (duplicates / max(1, len(df))) * 25.0 - (outliers / max(1, len(df) * max(1, len(numeric)))) * 10.0, 1))
+    if quality >= 95 and issues == 0:
+        status = "READY"
+    elif quality >= 85:
+        status = "READY WITH REVIEW"
+    else:
+        status = "REVIEW REQUIRED"
+
+    if dates and numeric:
+        visual = "Trend / time-series"
+    elif len(numeric) >= 2:
+        visual = "Scatter / relationship"
+    elif numeric and dimensions:
+        visual = "Category comparison"
+    elif numeric:
+        visual = "Distribution"
+    elif dimensions:
+        visual = "Category distribution"
+    else:
+        visual = "Data completeness"
+
+    next_action = (
+        "Proceed to analysis"
+        if status == "READY"
+        else "Review missing values / duplicates / outlier flags"
+    )
+    return {
+        "rows": int(len(df)),
+        "columns": int(len(df.columns)),
+        "missing": missing,
+        "duplicates": duplicates,
+        "outliers": outliers,
+        "completeness": completeness,
+        "quality": quality,
+        "status": status,
+        "numeric": numeric,
+        "dates": dates,
+        "identifiers": identifiers,
+        "dimensions": dimensions,
+        "visual": visual,
+        "next_action": next_action,
+    }
+
+
+
 def build_ultimate_workbook(
     title: str,
     sheets: dict[str, pd.DataFrame],
@@ -318,7 +428,7 @@ def build_ultimate_workbook(
     audits: dict[str, list[dict[str, str]]],
     profiles: dict[str, dict[str, Any]],
 ) -> bytes:
-    """Create a navigable, traceable and presentation-ready XLSX workbook."""
+    """Build a polished, navigable industrial workbook with an executive layer."""
     buf = io.BytesIO()
     with pd.ExcelWriter(
         buf,
@@ -329,203 +439,442 @@ def build_ultimate_workbook(
         workbook = writer.book
         workbook.set_properties({
             "title": title,
-            "subject": "Shoir-IE professionally cleaned industrial workbook",
+            "subject": "Shoir-IE Industrial Excel Intelligence Workbook",
             "author": "Shoir-IE",
-            "comments": "Generated by the Shoir-IE Excel Intelligence & Cleaning Studio.",
+            "comments": (
+                "Automatically assembled by Shoir-IE. Clean working data, "
+                "quality intelligence, analysis blueprint, audit trail and raw source archives."
+            ),
         })
 
-        navy = workbook.add_format({"bold": True, "font_color": "#FFFFFF", "bg_color": "#163A5F"})
-        sub = workbook.add_format({"font_color": "#4B6175", "italic": True})
-        title_fmt = workbook.add_format({"bold": True, "font_size": 18, "font_color": "#163A5F"})
-        section_fmt = workbook.add_format({"bold": True, "font_size": 12, "font_color": "#163A5F"})
-        note_fmt = workbook.add_format({"text_wrap": True, "valign": "top"})
+        # Design system for a restrained professional industrial workbook.
+        dark = workbook.add_format({"bold": True, "font_color": "#FFFFFF", "bg_color": "#17324D"})
+        accent = workbook.add_format({"bold": True, "font_color": "#FFFFFF", "bg_color": "#0F766E"})
+        pale = workbook.add_format({"bg_color": "#F4F7FA", "font_color": "#334155"})
+        title_fmt = workbook.add_format({"bold": True, "font_size": 20, "font_color": "#17324D"})
+        subtitle_fmt = workbook.add_format({"font_size": 10, "font_color": "#64748B", "italic": True})
+        section_fmt = workbook.add_format({"bold": True, "font_size": 13, "font_color": "#17324D"})
+        note_fmt = workbook.add_format({"text_wrap": True, "valign": "top", "font_color": "#475569"})
+        link_fmt = workbook.add_format({"font_color": "#2563EB", "underline": True, "bold": True})
+        good_fmt = workbook.add_format({"bold": True, "font_color": "#166534", "bg_color": "#DCFCE7"})
+        review_fmt = workbook.add_format({"bold": True, "font_color": "#92400E", "bg_color": "#FEF3C7"})
+        alert_fmt = workbook.add_format({"bold": True, "font_color": "#991B1B", "bg_color": "#FEE2E2"})
+        card_label_fmt = workbook.add_format({"bold": True, "font_color": "#FFFFFF", "bg_color": "#17324D", "align": "center", "valign": "vcenter"})
+        card_value_fmt = workbook.add_format({"bold": True, "font_size": 18, "font_color": "#17324D", "bg_color": "#F4F7FA", "align": "center", "valign": "vcenter"})
         number_fmt = workbook.add_format({"num_format": "#,##0.00"})
+        percent_fmt = workbook.add_format({"num_format": "0.0%"})
         date_fmt = workbook.add_format({"num_format": "yyyy-mm-dd"})
         datetime_fmt = workbook.add_format({"num_format": "yyyy-mm-dd hh:mm"})
         used: set[str] = set()
+
+        intelligence: dict[str, dict[str, Any]] = {}
         clean_names: dict[str, str] = {}
         raw_names: dict[str, str] = {}
-
-        start = workbook.add_worksheet("START HERE")
-        used.add("START HERE")
-        start.set_tab_color("#163A5F")
-        start.hide_gridlines(2)
-        start.set_column("A:A", 28)
-        start.set_column("B:B", 70)
-        start.write("A1", title, title_fmt)
-        start.write("A2", "Shoir-IE Excel Intelligence Studio", section_fmt)
-        start.write("A4", "Workbook map", section_fmt)
-        row = 4
-        start.write(row, 0, "Sheet", navy)
-        start.write(row, 1, "Purpose", navy)
-        row += 1
-        for fixed_name, purpose in [
-            ("EXECUTIVE SUMMARY", "Workbook health and how to use the file."),
-            ("DATA DICTIONARY", "Inferred types, completeness and example values."),
-            ("QUALITY CHECKS", "Quality and readiness metrics for each cleaned sheet."),
-            ("CLEANING AUDIT", "Every automatic transformation applied."),
-        ]:
-            start.write_url(row, 0, f"internal:'{fixed_name}'!A1", string=fixed_name)
-            start.write(row, 1, purpose)
-            row += 1
-
-        for original in sheets:
-            clean_name = _safe_sheet(original, used, "CLEAN - ")
-            raw_name = _safe_sheet(original, used, "RAW - ")
-            clean_names[original] = clean_name
-            raw_names[original] = raw_name
-            start.write_url(row, 0, f"internal:'{clean_name}'!A1", string=clean_name)
-            start.write(row, 1, f"Professionally cleaned working table from source sheet '{original}'.")
-            row += 1
-
-        start.write(row + 1, 0, "Traceability", section_fmt)
-        start.merge_range(
-            row + 2, 0, row + 3, 1,
-            "CLEAN sheets are the working tables. Hidden RAW sheets preserve the original imported values. "
-            "Use the DATA DICTIONARY, QUALITY CHECKS and CLEANING AUDIT to understand what Shoir-IE changed.",
-            note_fmt,
-        )
-
-        summary = workbook.add_worksheet("EXECUTIVE SUMMARY")
-        used.add("EXECUTIVE SUMMARY")
-        summary.hide_gridlines(2)
-        summary.set_column("A:A", 30)
-        summary.set_column("B:B", 26)
-        summary.write("A1", title, title_fmt)
-        summary.write("A2", f"Generated {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}", sub)
-        summary.write("A4", "Workbook health", section_fmt)
-        avg_quality = round(float(np.mean([v["Quality score"] for v in profiles.values()])) if profiles else 0.0, 1)
-        for i, (label, value) in enumerate([
-            ("Source sheets", len(sheets)),
-            ("Clean sheets", len(sheets)),
-            ("Total cleaned rows", sum(int(v["Rows"]) for v in profiles.values())),
-            ("Total columns", sum(int(v["Columns"]) for v in profiles.values())),
-            ("Average quality score", avg_quality),
-            ("Transformations recorded", sum(len(v) for v in audits.values())),
-        ], 5):
-            summary.write(i, 0, label, navy)
-            summary.write(i, 1, value)
-        summary.write("A13", "Suggested workflow", section_fmt)
-        summary.merge_range(
-            "A14:B17",
-            "1. Start with a CLEAN sheet. 2. Review the Data Dictionary. 3. Check Quality Checks. "
-            "4. Review the Cleaning Audit. 5. Keep RAW sheets available when you need to trace a value back to its source.",
-            note_fmt,
-        )
-
-        quality_rows: list[dict[str, Any]] = []
         dictionary_rows: list[dict[str, Any]] = []
+        quality_rows: list[dict[str, Any]] = []
+        blueprint_rows: list[dict[str, Any]] = []
         audit_rows: list[dict[str, Any]] = []
+        issue_rows: list[dict[str, Any]] = []
 
         for original, df in sheets.items():
-            clean_name = clean_names[original]
-            profile = profiles[original]
+            info = _sheet_intelligence(df, original)
+            intelligence[original] = info
+            clean_names[original] = _safe_sheet(original, used, "CLEAN - ")
+            raw_names[original] = _safe_sheet(original, used, "RAW - ")
+
             quality_rows.append({
-                "Sheet": clean_name,
+                "Sheet": clean_names[original],
                 "Source": original,
-                **profile,
-                "Status": "Ready" if profile["Quality score"] >= 90 else "Review",
+                "Rows": info["rows"],
+                "Columns": info["columns"],
+                "Missing cells": info["missing"],
+                "Missing %": round(100.0 - info["completeness"], 1),
+                "Duplicate rows": info["duplicates"],
+                "Potential outliers": info["outliers"],
+                "Quality": info["quality"],
+                "Status": info["status"],
+            })
+            blueprint_rows.append({
+                "Sheet": clean_names[original],
+                "Source": original,
+                "Identifier fields": ", ".join(info["identifiers"][:6]) or "—",
+                "Time fields": ", ".join(info["dates"][:4]) or "—",
+                "Measure fields": ", ".join(info["numeric"][:8]) or "—",
+                "Dimension fields": ", ".join(info["dimensions"][:8]) or "—",
+                "Recommended visual": info["visual"],
+                "Next recommended action": info["next_action"],
             })
 
-            for col in df.columns:
-                if pd.api.types.is_datetime64_any_dtype(df[col]):
-                    inferred = "Date / time"
-                elif pd.api.types.is_bool_dtype(df[col]):
-                    inferred = "Boolean"
-                elif pd.api.types.is_numeric_dtype(df[col]):
-                    inferred = "Number"
-                else:
-                    inferred = "Text"
-                sample = " | ".join(str(x) for x in df[col].dropna().head(3).tolist())
-                dictionary_rows.append({
-                    "Sheet": clean_name,
-                    "Column": str(col),
-                    "Inferred type": inferred,
-                    "Non-null": int(df[col].notna().sum()),
-                    "Missing %": round(float(df[col].isna().mean() * 100) if len(df) else 100.0, 2),
-                    "Example values": sample[:250],
+            if info["missing"]:
+                issue_rows.append({
+                    "Severity": "REVIEW",
+                    "Sheet": clean_names[original],
+                    "Issue": "Missing values",
+                    "Count": info["missing"],
+                    "Action": "Review blanks before statistical analysis or KPI reporting.",
+                })
+            if info["duplicates"]:
+                issue_rows.append({
+                    "Severity": "REVIEW",
+                    "Sheet": clean_names[original],
+                    "Issue": "Duplicate rows",
+                    "Count": info["duplicates"],
+                    "Action": "Confirm whether duplicates are legitimate transactions or repeated exports.",
+                })
+            if info["outliers"]:
+                issue_rows.append({
+                    "Severity": "REVIEW",
+                    "Sheet": clean_names[original],
+                    "Issue": "Potential statistical outliers",
+                    "Count": info["outliers"],
+                    "Action": "Investigate flagged numeric values; Shoir-IE does not delete them automatically.",
                 })
 
+            for col in df.columns:
+                role = _column_role(str(col), df[col])
+                dtype = _infer_display_type(df[col])
+                nonnull = int(df[col].notna().sum())
+                missing_pct = round(float(df[col].isna().mean() * 100) if len(df) else 100.0, 2)
+                unique = int(df[col].nunique(dropna=True))
+                sample = [str(x) for x in df[col].dropna().head(3).tolist()]
+                if pd.api.types.is_numeric_dtype(df[col]) and not pd.api.types.is_bool_dtype(df[col]):
+                    nums = pd.to_numeric(df[col], errors="coerce").dropna()
+                    minimum = f"{nums.min():,.4g}" if not nums.empty else "—"
+                    maximum = f"{nums.max():,.4g}" if not nums.empty else "—"
+                else:
+                    minimum = "—"
+                    maximum = "—"
+                suggested = {
+                    "Identifier": "Join keys / traceability",
+                    "Time": "Trend analysis / time-series",
+                    "Measure": "KPI / statistics / charting",
+                    "Dimension": "Grouping / segmentation",
+                    "Text / Attribute": "Description / annotation",
+                }[role]
+                dictionary_rows.append({
+                    "Sheet": clean_names[original],
+                    "Column": str(col),
+                    "Role": role,
+                    "Type": dtype,
+                    "Non-null": nonnull,
+                    "Missing %": missing_pct,
+                    "Unique": unique,
+                    "Example 1": sample[0] if len(sample) > 0 else "—",
+                    "Example 2": sample[1] if len(sample) > 1 else "—",
+                    "Example 3": sample[2] if len(sample) > 2 else "—",
+                    "Min": minimum,
+                    "Max": maximum,
+                    "Suggested use": suggested,
+                })
             for event in audits.get(original, []):
-                audit_rows.append({"Sheet": clean_name, "Source": original, **event})
+                audit_rows.append({"Sheet": clean_names[original], "Source": original, **event})
+
+        # ---------- START HERE ----------
+        start = workbook.add_worksheet("START HERE")
+        used.add("START HERE")
+        start.hide_gridlines(2)
+        start.set_tab_color("#17324D")
+        start.set_column("A:A", 24)
+        start.set_column("B:B", 66)
+        start.set_column("C:C", 24)
+        start.merge_range("A1:C2", title, title_fmt)
+        start.write("A3", "Shoir-IE Industrial Excel Intelligence Workbook", section_fmt)
+        start.write("A5", "How this workbook is organized", section_fmt)
+        start.write("A6", "1", dark)
+        start.write("B6", "START HERE — navigation and workbook map")
+        start.write_url("A7", "internal:'EXECUTIVE DASHBOARD'!A1", "EXECUTIVE DASHBOARD", link_fmt)
+        start.write("B7", "Management-ready summary of scale, quality and readiness.")
+        start.write_url("A8", "internal:'DATA QUALITY CENTER'!A1", "DATA QUALITY CENTER", link_fmt)
+        start.write("B8", "Missing values, duplicates, potential outliers and review actions.")
+        start.write_url("A9", "internal:'DATA DICTIONARY'!A1", "DATA DICTIONARY", link_fmt)
+        start.write("B9", "What every field means structurally: role, type, completeness and examples.")
+        start.write_url("A10", "internal:'ANALYSIS BLUEPRINT'!A1", "ANALYSIS BLUEPRINT", link_fmt)
+        start.write("B10", "What Shoir-IE recommends doing next with each sheet.")
+        start.write_url("A11", "internal:'CLEANING AUDIT'!A1", "CLEANING AUDIT", link_fmt)
+        start.write("B11", "Every automatic transformation recorded for traceability.")
+        start.write("A13", "Clean working sheets", section_fmt)
+        start.write("A14", "Sheet", dark)
+        start.write("B14", "Purpose", dark)
+        row = 15
+        for original in sheets:
+            name = clean_names[original]
+            start.write_url(row - 1, 0, f"internal:'{name}'!A1", name, link_fmt)
+            start.write(row - 1, 1, f"Working table prepared from source sheet '{original}'.")
+            row += 1
+        row += 1
+        start.write(row - 1, 0, "Traceability", section_fmt)
+        start.merge_range(
+            row, 0, row + 2, 2,
+            "The CLEAN sheets are intended for working, analysis and presentation. "
+            "Hidden RAW sheets preserve the imported source values. Shoir-IE does not silently discard "
+            "potential outliers; they are flagged for review so engineering judgment remains visible.",
+            note_fmt,
+        )
+        start.set_zoom(90)
+        start.freeze_panes(5, 0)
+
+        # ---------- EXECUTIVE DASHBOARD ----------
+        dash = workbook.add_worksheet("EXECUTIVE DASHBOARD")
+        used.add("EXECUTIVE DASHBOARD")
+        dash.hide_gridlines(2)
+        dash.set_tab_color("#0F766E")
+        dash.set_column("A:A", 25)
+        dash.set_column("B:H", 16)
+        dash.set_column("I:N", 16)
+        dash.merge_range("A1:N2", f"{title} · Executive Dashboard", title_fmt)
+        dash.write("A3", f"Generated {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}", subtitle_fmt)
+
+        total_rows = sum(info["rows"] for info in intelligence.values())
+        total_columns = sum(info["columns"] for info in intelligence.values())
+        total_missing = sum(info["missing"] for info in intelligence.values())
+        total_issues = sum(int(info["missing"] > 0) + int(info["duplicates"] > 0) + int(info["outliers"] > 0) for info in intelligence.values())
+        avg_quality = round(float(np.mean([info["quality"] for info in intelligence.values()])) if intelligence else 0.0, 1)
+
+        card_metrics = [
+            ("SOURCE SHEETS", len(sheets)),
+            ("RECORDS", total_rows),
+            ("FIELDS", total_columns),
+            ("AVG QUALITY", f"{avg_quality:.1f}%"),
+            ("MISSING CELLS", total_missing),
+            ("REVIEW ITEMS", total_issues),
+        ]
+        for idx, (label, value) in enumerate(card_metrics):
+            c = idx * 2
+            dash.merge_range(4, c, 4, c + 1, label, card_label_fmt)
+            dash.merge_range(5, c, 6, c + 1, value, card_value_fmt)
+        dash.write("A8", "Readiness by source", section_fmt)
+        q_frame = pd.DataFrame(quality_rows)
+        _write_df(dash, q_frame, 8, 0, dark, date_fmt, datetime_fmt, number_fmt)
+        dash.freeze_panes(9, 0)
+        if len(q_frame):
+            for j, col in enumerate(q_frame.columns):
+                dash.set_column(j, j, 17 if col not in {"Sheet", "Source", "Status"} else 24)
+            dash.conditional_format(9, 8, 8 + len(q_frame), 8, {
+                "type": "3_color_scale", "min_color": "#FEE2E2", "mid_color": "#FEF3C7", "max_color": "#DCFCE7"
+            })
+            chart = workbook.add_chart({"type": "column"})
+            sheet_col = list(q_frame.columns).index("Sheet")
+            quality_col = list(q_frame.columns).index("Quality")
+            chart.add_series({
+                "name": "Quality",
+                "categories": ["EXECUTIVE DASHBOARD", 9, sheet_col, 8 + len(q_frame), sheet_col],
+                "values": ["EXECUTIVE DASHBOARD", 9, quality_col, 8 + len(q_frame), quality_col],
+                "fill": {"color": "#0F766E"},
+                "border": {"color": "#0F766E"},
+            })
+            chart.set_title({"name": "Sheet quality"})
+            chart.set_y_axis({"min": 0, "max": 100, "name": "Quality %"})
+            chart.set_legend({"none": True})
+            chart.set_size({"width": 560, "height": 290})
+            dash.insert_chart(8, 10, chart)
+        dash.write("A" + str(11 + len(q_frame) + 2), "Workbook operating sequence", section_fmt)
+        dash.merge_range(12 + len(q_frame), 0, 14 + len(q_frame), 8,
+                         "IMPORT → CLEAN → QUALITY CHECK → UNDERSTAND FIELDS → ANALYZE → VISUALIZE → EXPORT. "
+                         "Use the Analysis Blueprint as the bridge from cleaned data to the next engineering workflow.",
+                         note_fmt)
+
+        # ---------- DATA QUALITY CENTER ----------
+        quality_ws = workbook.add_worksheet("DATA QUALITY CENTER")
+        used.add("DATA QUALITY CENTER")
+        quality_ws.hide_gridlines(2)
+        quality_ws.set_tab_color("#D97706")
+        quality_ws.set_column("A:A", 24)
+        quality_ws.set_column("B:H", 18)
+        quality_ws.set_column("I:I", 72)
+        quality_ws.merge_range("A1:I2", "DATA QUALITY CENTER", title_fmt)
+        quality_ws.write("A3", "Quality issues are surfaced for review; Shoir-IE does not hide or silently delete suspicious values.", subtitle_fmt)
+        _write_df(quality_ws, q_frame, 4, 0, dark, date_fmt, datetime_fmt, number_fmt)
+        quality_ws.freeze_panes(5, 0)
+        if len(q_frame):
+            quality_ws.autofilter(4, 0, 4 + len(q_frame), len(q_frame.columns) - 1)
+        issue_frame = pd.DataFrame(issue_rows or [{
+            "Severity": "PASS",
+            "Sheet": "Workbook",
+            "Issue": "No automatic review flags",
+            "Count": 0,
+            "Action": "The current workbook passed the automatic quality checks.",
+        }])
+        start_issue = 4 + len(q_frame) + 3
+        quality_ws.write(start_issue - 1, 0, "Review register", section_fmt)
+        _write_df(quality_ws, issue_frame, start_issue, 0, dark, date_fmt, datetime_fmt, number_fmt)
+        quality_ws.set_column("F:F", 18)
+        quality_ws.set_column("E:E", 12)
+        quality_ws.set_column("F:F", 72)
+        quality_ws.conditional_format(start_issue + 1, 0, start_issue + len(issue_frame), 0, {
+            "type": "text", "criteria": "containing", "value": "PASS", "format": good_fmt
+        })
+        quality_ws.conditional_format(start_issue + 1, 0, start_issue + len(issue_frame), 0, {
+            "type": "text", "criteria": "containing", "value": "REVIEW", "format": review_fmt
+        })
+
+        # ---------- DATA DICTIONARY ----------
+        dict_ws = workbook.add_worksheet("DATA DICTIONARY")
+        used.add("DATA DICTIONARY")
+        dict_ws.hide_gridlines(2)
+        dict_ws.set_tab_color("#2563EB")
+        dict_ws.set_column("A:A", 24)
+        dict_ws.set_column("B:B", 30)
+        dict_ws.set_column("C:D", 18)
+        dict_ws.set_column("E:G", 14)
+        dict_ws.set_column("H:J", 28)
+        dict_ws.set_column("K:L", 14)
+        dict_ws.set_column("M:M", 32)
+        dict_ws.merge_range("A1:M2", "DATA DICTIONARY · Field Intelligence", title_fmt)
+        dict_ws.write("A3", "Roles are structural suggestions, not business semantics invented from thin evidence.", subtitle_fmt)
+        dict_frame = pd.DataFrame(dictionary_rows)
+        _write_df(dict_ws, dict_frame, 4, 0, dark, date_fmt, datetime_fmt, number_fmt)
+        dict_ws.freeze_panes(5, 0)
+        if len(dict_frame):
+            dict_ws.autofilter(4, 0, 4 + len(dict_frame), len(dict_frame.columns) - 1)
+            dict_ws.conditional_format(5, 5, 4 + len(dict_frame), 5, {
+                "type": "3_color_scale", "min_color": "#DCFCE7", "mid_color": "#FEF3C7", "max_color": "#FEE2E2"
+            })
+
+        # ---------- ANALYSIS BLUEPRINT ----------
+        blue_ws = workbook.add_worksheet("ANALYSIS BLUEPRINT")
+        used.add("ANALYSIS BLUEPRINT")
+        blue_ws.hide_gridlines(2)
+        blue_ws.set_tab_color("#7C3AED")
+        blue_ws.set_column("A:A", 25)
+        blue_ws.set_column("B:B", 24)
+        blue_ws.set_column("C:F", 32)
+        blue_ws.set_column("G:H", 28)
+        blue_ws.merge_range("A1:H2", "ANALYSIS BLUEPRINT · From Clean Data to Engineering Work", title_fmt)
+        blue_ws.write("A3", "Use this sheet as the handoff from data preparation into Shoir-IE's analysis modules.", subtitle_fmt)
+        blue_frame = pd.DataFrame(blueprint_rows)
+        _write_df(blue_ws, blue_frame, 4, 0, dark, date_fmt, datetime_fmt, number_fmt)
+        blue_ws.freeze_panes(5, 0)
+        if len(blue_frame):
+            blue_ws.autofilter(4, 0, 4 + len(blue_frame), len(blue_frame.columns) - 1)
+
+        # ---------- CLEANING AUDIT ----------
+        audit_ws = workbook.add_worksheet("CLEANING AUDIT")
+        used.add("CLEANING AUDIT")
+        audit_ws.hide_gridlines(2)
+        audit_ws.set_tab_color("#64748B")
+        audit_ws.set_column("A:B", 24)
+        audit_ws.set_column("C:C", 30)
+        audit_ws.set_column("D:D", 96)
+        audit_ws.merge_range("A1:D2", "CLEANING AUDIT · Exact Automatic Transformations", title_fmt)
+        audit_ws.write("A3", "This log explains what Shoir-IE changed. Raw source sheets remain hidden for traceability.", subtitle_fmt)
+        audit_frame = pd.DataFrame(audit_rows or [{
+            "Sheet": "", "Source": "", "Action": "No changes required", "Details": "Source data was already clean.",
+        }])
+        _write_df(audit_ws, audit_frame, 4, 0, dark, date_fmt, datetime_fmt, number_fmt)
+        audit_ws.freeze_panes(5, 0)
+        if len(audit_frame):
+            audit_ws.autofilter(4, 0, 4 + len(audit_frame), len(audit_frame.columns) - 1)
+        audit_ws.set_row(3, 28)
+
+        # ---------- CLEAN WORKING SHEETS ----------
+        for original, df in sheets.items():
+            clean_name = clean_names[original]
+            raw_name = raw_names[original]
+            info = intelligence[original]
 
             ws = workbook.add_worksheet(clean_name)
             ws.hide_gridlines(2)
-            ws.freeze_panes(5, 0)
-            ws.set_tab_color("#2F6B8A")
-            ws.write("A1", f"{clean_name} — {original}", title_fmt)
-            ws.write("A2", "Cleaned, typed, duplicate-checked and presentation-formatted by Shoir-IE.", sub)
-            ws.write("A4", "Working data", section_fmt)
-            _write_df(ws, df, 4, 0, navy, date_fmt, datetime_fmt, number_fmt)
+            ws.set_tab_color("#0F766E" if info["status"] == "READY" else "#D97706")
+            ws.freeze_panes(7, 0)
+            ws.set_zoom(90)
+            ws.set_column(0, len(df.columns) - 1, 14)
+            if len(df.columns):
+                widths = []
+                for col in df.columns:
+                    values = [str(x) for x in df[col].head(80).tolist()]
+                    width = min(38, max(12, len(str(col)) + 2, max([len(v) for v in values] + [0]) + 2))
+                    widths.append(width)
+                for j, width in enumerate(widths):
+                    ws.set_column(j, j, width)
+
+            ws.merge_range(0, 0, 1, max(1, len(df.columns) + 5), f"{clean_name} · {original}", title_fmt)
+            ws.write(2, 0, f"Status: {info['status']}", good_fmt if info["status"] == "READY" else review_fmt)
+            ws.write(2, 1, f"Quality {info['quality']:.1f}%", section_fmt)
+            ws.write(2, 2, f"Rows {info['rows']:,}", pale)
+            ws.write(2, 3, f"Fields {info['columns']:,}", pale)
+            ws.write(2, 4, f"Missing {info['missing']:,}", pale)
+            ws.write(2, 5, f"Potential outliers {info['outliers']:,}", pale)
+            ws.write(4, 0, "Working data", section_fmt)
+            ws.write(5, 0, "Use filters to isolate records; hidden RAW archive remains available for source tracing.", subtitle_fmt)
+
+            # Header row + data with semantic column formats.
+            for j, col in enumerate(df.columns):
+                ws.write(6, j, str(col), dark)
+                ws.write_comment(6, j, f"Role: {_column_role(str(col), df[col])}\nType: {_infer_display_type(df[col])}")
+            for i, row_values in enumerate(df.itertuples(index=False, name=None), 7):
+                for j, value in enumerate(row_values):
+                    cell = "" if _cell_is_na(value) else value
+                    fmt = _column_format(workbook, df.iloc[:, j])
+                    ws.write(i, j, cell, fmt)
 
             if len(df.columns) and len(df):
-                ws.autofilter(4, 0, 4 + len(df), len(df.columns) - 1)
-                for j, col in enumerate(df.columns):
-                    values = [str(x) for x in df[col].head(100).tolist()]
-                    width = min(42, max(11, len(str(col)) + 2, max([len(x) for x in values] + [0]) + 2))
-                    ws.set_column(j, j, width)
-                    if pd.api.types.is_numeric_dtype(df[col]) and not pd.api.types.is_bool_dtype(df[col]):
-                        ws.conditional_format(
-                            5, j, 4 + len(df), j,
-                            {"type": "3_color_scale", "min_color": "#FEE2E2", "mid_color": "#FEF3C7", "max_color": "#DCFCE7"},
-                        )
+                end_row = 6 + len(df)
+                ws.autofilter(6, 0, end_row, len(df.columns) - 1)
                 table_name = re.sub(r"[^A-Za-z0-9_]", "_", f"T_{clean_name}")[:240] or f"T_{len(used)}"
                 try:
-                    ws.add_table(4, 0, 4 + len(df), len(df.columns) - 1, {
+                    ws.add_table(6, 0, end_row, len(df.columns) - 1, {
                         "name": table_name,
-                        "style": "Table Style Medium 2",
+                        "style": "Table Style Medium 4",
                         "columns": [{"header": str(c)} for c in df.columns],
                     })
                 except Exception:
                     pass
 
-            raw_ws = workbook.add_worksheet(raw_names[original])
-            raw_ws.hide()
-            raw_ws.write(0, 0, f"RAW ARCHIVE — {original}", title_fmt)
-            _write_df(raw_ws, raw_sheets.get(original, pd.DataFrame()), 2, 0, navy, date_fmt, datetime_fmt, number_fmt)
-
-            numeric_cols = [
-                c for c in df.columns
-                if pd.api.types.is_numeric_dtype(df[c]) and not pd.api.types.is_bool_dtype(df[c])
-            ]
-            if numeric_cols and len(df) >= 2:
-                y = numeric_cols[0]
-                y_idx = list(df.columns).index(y)
-                cat_col = next((c for c in df.columns if c != y and not pd.api.types.is_numeric_dtype(df[c])), df.columns[0])
-                cat_idx = list(df.columns).index(cat_col)
-                chart_type = "line" if pd.api.types.is_datetime64_any_dtype(df[cat_col]) else "column"
-                chart = workbook.add_chart({"type": chart_type})
-                chart.add_series({
-                    "name": [clean_name, 4, y_idx],
-                    "categories": [clean_name, 5, cat_idx, 4 + len(df), cat_idx],
-                    "values": [clean_name, 5, y_idx, 4 + len(df), y_idx],
+                # Make blanks visible without overwriting the underlying data.
+                ws.conditional_format(7, 0, end_row, len(df.columns) - 1, {
+                    "type": "blanks", "format": review_fmt
                 })
-                chart.set_title({"name": f"{y} by {cat_col}"})
-                chart.set_legend({"none": True})
-                chart.set_size({"width": 700, "height": 340})
-                ws.insert_chart(3, len(df.columns) + 2, chart)
+                for j, col in enumerate(df.columns):
+                    if pd.api.types.is_numeric_dtype(df[col]) and not pd.api.types.is_bool_dtype(df[col]):
+                        ws.conditional_format(7, j, end_row, j, {
+                            "type": "3_color_scale",
+                            "min_color": "#FEE2E2",
+                            "mid_color": "#FEF3C7",
+                            "max_color": "#DCFCE7",
+                        })
+                    ws.set_column(j, j, min(42, max(12, len(str(col)) + 3)))
 
-        for name, rows, widths in [
-            ("QUALITY CHECKS", quality_rows, [28, 24, 14, 12, 16, 16, 16, 18, 18, 14]),
-            ("DATA DICTIONARY", dictionary_rows, [28, 32, 20, 14, 14, 44]),
-            ("CLEANING AUDIT", audit_rows or [{
-                "Sheet": "", "Source": "", "Action": "No changes required",
-                "Details": "The source workbook was already clean.",
-            }], [28, 24, 30, 90]),
-        ]:
-            ws = workbook.add_worksheet(name)
-            used.add(name)
-            ws.hide_gridlines(2)
-            frame = pd.DataFrame(rows)
-            _write_df(ws, frame, 2, 0, navy, date_fmt, datetime_fmt, number_fmt)
-            ws.freeze_panes(3, 0)
-            if len(frame.columns) and len(frame):
-                ws.autofilter(2, 0, 2 + len(frame), len(frame.columns) - 1)
-            for j, width in enumerate(widths):
-                ws.set_column(j, j, width)
+                # One truthful chart per cleaned sheet when numeric data exists.
+                numeric_cols = [
+                    c for c in df.columns
+                    if pd.api.types.is_numeric_dtype(df[c]) and not pd.api.types.is_bool_dtype(df[c])
+                ]
+                if numeric_cols:
+                    y = numeric_cols[0]
+                    y_idx = list(df.columns).index(y)
+                    x_col = info["dates"][0] if info["dates"] else (
+                        info["dimensions"][0] if info["dimensions"] else next(
+                            (str(c) for c in df.columns if str(c) != str(y)), str(y)
+                        )
+                    )
+                    x_idx = list(df.columns).index(x_col)
+                    chart = workbook.add_chart({"type": "line" if x_col in info["dates"] else "column"})
+                    chart.add_series({
+                        "name": [clean_name, 6, y_idx],
+                        "categories": [clean_name, 7, x_idx, end_row, x_idx],
+                        "values": [clean_name, 7, y_idx, end_row, y_idx],
+                    })
+                    chart.set_title({"name": f"{y} · {x_col}"})
+                    chart.set_legend({"none": True})
+                    chart.set_size({"width": 620, "height": 300})
+                    ws.insert_chart(3, max(2, len(df.columns) + 1), chart)
+
+            # Hidden source archive.
+            raw_ws = workbook.add_worksheet(raw_name)
+            raw_ws.hide()
+            raw_ws.write(0, 0, f"RAW ARCHIVE · {original}", title_fmt)
+            raw_ws.write(1, 0, "Original imported values. Do not edit this sheet; use a CLEAN sheet for working.", subtitle_fmt)
+            _write_df(raw_ws, raw_sheets.get(original, pd.DataFrame()), 3, 0, dark, date_fmt, datetime_fmt, number_fmt)
+            raw_ws.freeze_panes(4, 0)
+            raw_ws.set_column(0, max(0, len(raw_sheets.get(original, pd.DataFrame()).columns) - 1), 15)
+
+        # Navigation links on every governance sheet.
+        for sheet_name in ["EXECUTIVE DASHBOARD", "DATA QUALITY CENTER", "DATA DICTIONARY", "ANALYSIS BLUEPRINT", "CLEANING AUDIT"]:
+            ws = workbook.get_worksheet_by_name(sheet_name)
+            if ws is not None:
+                ws.write_url("A" + str(ws.dim_rowmax + 2), "internal:'START HERE'!A1", "← Back to START HERE", link_fmt)
 
     return buf.getvalue()
-
 
 def build_ultimate_bundle(
     title: str,
