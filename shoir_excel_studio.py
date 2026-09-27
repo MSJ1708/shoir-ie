@@ -1168,16 +1168,26 @@ def _field_intelligence_rows(df: pd.DataFrame, sheet: str) -> list[dict[str, Any
             action = "Use as time axis"
         elif role == "Dimension":
             action = "Use for grouping / segmentation"
+        inferred_type = (
+            "Date / time" if pd.api.types.is_datetime64_any_dtype(series)
+            else "Boolean" if pd.api.types.is_bool_dtype(series)
+            else "Number" if pd.api.types.is_numeric_dtype(series)
+            else "Clock time" if (
+                pd.api.types.is_string_dtype(series)
+                and float(
+                    series.dropna().astype("string").str.fullmatch(r"\\d{1,2}:\\d{2}(?::\\d{2})?").mean()
+                ) >= 0.75
+            )
+            else "Text"
+        )
         rows.append({
             "Sheet": sheet,
             "Field": str(col),
             "Role": role,
-            "Inferred type": (
-                "Date / time" if pd.api.types.is_datetime64_any_dtype(series)
-                else "Boolean" if pd.api.types.is_bool_dtype(series)
-                else "Number" if pd.api.types.is_numeric_dtype(series)
-                else "Text"
-            ),
+            # "Type" is retained as a stable public compatibility alias for
+            # consumers/tests that predate the richer "Inferred type" field.
+            "Type": inferred_type,
+            "Inferred type": inferred_type,
             "Type confidence": _type_confidence(series, role),
             "Canonical entity": _canonical_entity_hint(str(col)),
             "Unit hint": _unit_hint(str(col)),
