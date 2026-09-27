@@ -3525,7 +3525,26 @@ def _excel_refresh_governance(result: dict[str, Any]) -> dict[str, Any]:
     result["semantic_mapping"] = [item for sheet, df in cleaned.items() for item in _excel_semantic_mapping(df)]
     result["validation_results"] = [item for sheet, df in cleaned.items() for item in _excel_apply_validation_rules(df, result.get("validation_rules", _EXCEL_DEFAULT_RULES), sheet)]
     result["formula_dependencies"] = _excel_formula_dependencies(result.get("formula_inventory", []))
+    result["formula_gap_findings"] = _excel_formula_gap_scan(result.get("formula_inventory", []))
+    result["security_scan"] = _excel_security_scan(cleaned)
+    result["review_register"].extend(result.get("formula_gap_findings", []))
+    for item in result.get("security_scan", []):
+        result["review_register"].append({
+            "Severity": "High",
+            "Sheet": item["Sheet"],
+            "Field": item["Field"],
+            "Issue": "Potential secret/security exposure",
+            "Evidence": f"{item['Indicator']}: {item['Matches']:,} match(es).",
+            "Recommended action": item["Action"],
+        })
     result["source_fidelity"] = _excel_source_fidelity(result.get("_raw_bytes", b""), result.get("filename", ""))
+    result["unit_catalog"] = [
+        {"Sheet": sheet, "Field": str(col), "Detected unit": _excel_unit_token(str(col)),
+         "Convertible targets": ", ".join(sorted(
+             [u for u in _EXCEL_UNIT_FACTORS if _EXCEL_UNIT_FACTORS[u][0] == _EXCEL_UNIT_FACTORS.get(_excel_unit_token(str(col)), ("", 0))[0]]
+         ))}
+        for sheet, frame in cleaned.items() for col in frame.columns if _excel_unit_token(str(col))
+    ]
     reviews = list(result.get("review_register", []))
     reviews.extend(result["extended_outliers"])
     reviews.extend(result["engineering_limit_findings"])
