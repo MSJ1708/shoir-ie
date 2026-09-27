@@ -44,3 +44,106 @@ def test_process_uploaded_workbook_assembles_traceable_xlsx():
     assert raw_sheets and workbook[raw_sheets[0]].sheet_state == "hidden"
     assert workbook["START HERE"]["A1"].value.startswith("Shoir-IE")
     assert result["bundle"][:2] == b"PK"
+
+
+def test_excel_studio_normalizes_missing_tokens_but_protects_identifiers():
+    table = pd.DataFrame({
+        "SKU": ["NA", "A-02"],
+        "Description": ["N/A", "NULL"],
+        "Qty": ["10", "-"],
+    })
+    cleaned, audit = __import__("shoir_excel_studio").clean_dataframe(table)
+    assert cleaned["SKU"].tolist() == ["NA", "A-02"]
+    assert cleaned["Description"].isna().all()
+    assert cleaned["Qty"].iloc[0] == 10
+    assert pd.isna(cleaned["Qty"].iloc[1])
+    assert any("missing-value" in item["Action"] for item in audit)
+
+
+def test_excel_studio_profile_flags_duplicate_keys_and_outliers():
+    table = pd.DataFrame({
+        "Asset ID": ["A-1", "A-1", "A-2", "A-3", "A-4", "A-5", "A-6", "A-7", "A-8", "A-9"],
+        "Temperature": [10, 10, 10, 10, 10, 10, 10, 10, 10, 100],
+    })
+    from shoir_excel_studio import profile_dataframe
+    profile = profile_dataframe(table)
+    assert profile["Duplicate identifier occurrences"] == 1
+    assert profile["Potential outliers"] >= 1
+    assert profile["Schema fingerprint"]
+    assert profile["Readiness"] in {"READY WITH REVIEW", "REVIEW REQUIRED"}
+
+
+def test_excel_studio_quality_export_contains_governance_layers_and_inert_text():
+    table = pd.DataFrame({
+        "SKU": ["A-01", "A-02"],
+        "Qty": [10, 20],
+        "Note": ["=1+1", "Normal"],
+    })
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine="xlsxwriter") as writer:
+        table.to_excel(writer, index=False, sheet_name="Raw")
+    result = process_uploaded_workbook(buf.getvalue(), "governance.xlsx")
+    workbook = load_workbook(io.BytesIO(result["xlsx"]), data_only=False)
+    expected = {
+        "START HERE", "EXECUTIVE DASHBOARD", "DATA QUALITY CENTER",
+        "FIELD INTELLIGENCE", "VALIDATION & REVIEW", "BEFORE vs AFTER",
+        "SOURCE METADATA", "CLEANING AUDIT", "CLEAN - Raw", "RAW - Raw",
+    }
+    assert expected <= set(workbook.sheetnames)
+    clean_ws = workbook["CLEAN - Raw"]
+    note_cells = [cell for row in clean_ws.iter_rows() for cell in row if cell.value == "=1+1"]
+    assert note_cells and note_cells[0].data_type == "s"
+    assert result["source_metadata"][0]["SHA256"] == result["signature"]
+
+
+def test_excel_studio_archives_source_formulas_and_cross_sheet_map():
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine="xlsxwriter") as writer:
+        pd.DataFrame({"SKU": ["A-01"], "Qty": [10], "Cost": [2], "Total": ["=B2*C2"]}).to_excel(
+            writer, index=False, sheet_name="Orders"
+        )
+        pd.DataFrame({"SKU": ["A-01"], "Plant": ["Riyadh"]}).to_excel(
+            writer, index=False, sheet_name="Master"
+        )
+    result = process_uploaded_workbook(buf.getvalue(), "formula_map.xlsx")
+    assert result["formula_inventory"]
+    assert result["formula_inventory"][0]["Formula"] == "=B2*C2"
+    assert result["cross_sheet_map"]
+    assert any("sku" in row["Potential shared fields"] for row in result["cross_sheet_map"])
+
+
+def test_excel_studio_supports_semicolon_csv_and_clock_time_without_fake_dates():
+    raw = "SKU;Start;Qty\\nA-01;08:30;1,200\\nA-02;09:45;950\\n".encode("utf-8")
+    result = process_uploaded_workbook(raw, "schedule.csv")
+    frame = result["cleaned_sheets"]["CSV"]
+    assert "SKU" in frame.columns, f"Parsed columns: {frame.columns.tolist()}"
+    assert frame["SKU"].tolist() == ["A-01", "A-02"]
+    assert frame["Qty"].tolist() == [1200, 950]
+    assert "Clock time" in {row["Type"] for row in result["field_intelligence"] if row["Field"] == "Start"} or frame["Start"].dtype == "string"
+
+
+def test_excel_studio_governance_plus_layers_and_module_readiness():
+    from shoir_excel_studio import process_uploaded_workbook
+    raw = "SKU;Date;Demand;Defect Rate;Email\nA-01;2026-01-01;100;0.02;person@example.com\nA-02;2026-01-02;120;0.03;other@example.com\n"
+    result = process_uploaded_workbook(raw.encode("utf-8"), "governance_plus.csv")
+    assert result["data_contract"]
+    assert result["module_readiness"]
+    assert result["privacy_scan"]
+    assert "Forecasting / Planning" in {x["Recommended module"] for x in result["module_readiness"]}
+    from openpyxl import load_workbook
+    book = load_workbook(io.BytesIO(result["xlsx"]), read_only=True)
+    assert "PRIVACY SCAN" in book.sheetnames
+    assert "DATA CONTRACT" in book.sheetnames
+    book.close()
+    assert any(x["Issue"] == "Potential sensitive field" for x in result["review_register"])
+
+
+def test_excel_studio_relationship_integrity_reports_shared_key_match():
+    from shoir_excel_studio import _relationship_integrity
+    left = pd.DataFrame({"SKU": ["A-01", "A-02"], "Qty": [10, 20]})
+    right = pd.DataFrame({"SKU": ["A-01", "A-03"], "Plant": ["Riyadh", "Jeddah"]})
+    rows = _relationship_integrity({"Orders": left, "Master": right})
+    assert rows
+    assert rows[0]["Matched distinct values"] == 1
+    assert rows[0]["A unmatched values"] == 1
+    assert rows[0]["B unmatched values"] == 1
