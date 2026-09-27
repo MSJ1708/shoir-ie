@@ -59,6 +59,8 @@ _PREFIX_EXCLUDE = (
     "upgrade_clean_",
     "upgrade_reset_",
     "upgrade_uploader_",
+    # Never hydrate Streamlit button state; the global command Open button is transient.
+    "global_command_open_",
     "sx_save_",
     "sx_open_",
     "sx_job_",
