@@ -2544,3 +2544,237 @@ def process_uploaded_workbook(raw: bytes, filename: str) -> dict[str, Any]:
         source_metadata=result.get("source_metadata", []),
     )
     return result
+
+
+def _definitive_read_raw_workbook(raw: bytes, filename: str) -> dict[str, pd.DataFrame]:
+    """Single authoritative reader used by the final processing entry point."""
+    if not raw:
+        raise ValueError("The uploaded file is empty.")
+    lower = str(filename).lower()
+    if lower.endswith(".csv"):
+        decoded = None
+        for encoding in ("utf-8-sig", "utf-8", "cp1252", "latin-1"):
+            try:
+                decoded = raw.decode(encoding)
+                break
+            except UnicodeDecodeError:
+                continue
+        if decoded is None:
+            raise ValueError("CSV encoding could not be decoded safely.")
+        return {
+            "CSV": pd.read_csv(
+                io.StringIO(decoded),
+                header=None,
+                dtype=object,
+                sep=_choose_csv_delimiter(decoded),
+                keep_default_na=False,
+            )
+        }
+    if lower.endswith((".xlsx", ".xlsm")):
+        import openpyxl
+        book = openpyxl.load_workbook(io.BytesIO(raw), read_only=True, data_only=False, keep_links=False)
+        try:
+            return {
+                str(name): pd.DataFrame(list(ws.values), dtype=object)
+                for name, ws in ((ws.title, ws) for ws in book.worksheets)
+            }
+        finally:
+            book.close()
+    raise ValueError("Only .xlsx, .xlsm and .csv files are supported.")
+
+
+def _definitive_process_uploaded_workbook(raw: bytes, filename: str) -> dict[str, Any]:
+    signature = hashlib.sha256(raw).hexdigest()
+    raw_sheets = _definitive_read_raw_workbook(raw, filename)
+    cleaned: dict[str, pd.DataFrame] = {}
+    audits: dict[str, list[dict[str, str]]] = {}
+    profiles: dict[str, dict[str, Any]] = {}
+    fields: list[dict[str, Any]] = []
+    reviews: list[dict[str, Any]] = []
+    before_after: list[dict[str, Any]] = []
+    header_rows: dict[str, int] = {}
+
+    for source_name, raw_df in raw_sheets.items():
+        header_row = _enhanced_detect_header_row(raw_df)
+        header_rows[source_name] = header_row
+        if raw_df.empty:
+            table = pd.DataFrame()
+        else:
+            headers = _deduplicate_headers(raw_df.iloc[header_row].tolist())
+            table = raw_df.iloc[header_row + 1:].copy()
+            table.columns = headers
+            table = table.dropna(axis=1, how="all").dropna(axis=0, how="all")
+        cleaned_df, audit = _final_clean_dataframe(table)
+        cleaned[source_name] = cleaned_df
+        audits[source_name] = [{"Action": "Detect table header", "Details": f"Detected source header row {header_row + 1}."}] + audit
+        profiles[source_name] = _enhanced_profile_dataframe(cleaned_df)
+        fields.extend(_field_intelligence_rows(cleaned_df, source_name))
+        reviews.extend(_quality_review_register(cleaned_df, source_name))
+        before_after.append({
+            "Sheet": source_name,
+            "Source rows": int(len(table)),
+            "Clean rows": int(len(cleaned_df)),
+            "Rows removed": int(max(0, len(table) - len(cleaned_df))),
+            "Source columns": int(len(table.columns)),
+            "Clean columns": int(len(cleaned_df.columns)),
+            "Columns removed": int(max(0, len(table.columns) - len(cleaned_df.columns))),
+            "Missing before": int(table.isna().sum().sum()) if not table.empty else 0,
+            "Missing after": int(cleaned_df.isna().sum().sum()) if not cleaned_df.empty else 0,
+            "Duplicate rows removed": int(table.duplicated().sum() - cleaned_df.duplicated().sum()) if not table.empty else 0,
+            "Schema fingerprint": profiles[source_name].get("Schema fingerprint", "—"),
+        })
+
+    source_metadata, formula_inventory = _extract_source_metadata(raw, filename, raw_sheets, header_rows)
+    cross_map = _cross_sheet_map(cleaned)
+    result = {
+        "signature": signature,
+        "filename": filename,
+        "raw_sheets": raw_sheets,
+        "cleaned_sheets": cleaned,
+        "audits": audits,
+        "profiles": profiles,
+        "field_intelligence": fields,
+        "review_register": reviews,
+        "before_after": before_after,
+        "source_metadata": source_metadata,
+        "formula_inventory": formula_inventory,
+        "cross_sheet_map": cross_map,
+    }
+    result["xlsx"] = build_ultimate_workbook(
+        f"Shoir-IE — {filename}", cleaned, raw_sheets, audits, profiles,
+        source_metadata=source_metadata, field_intelligence=fields,
+        review_register=reviews, before_after=before_after,
+        formula_inventory=formula_inventory, cross_sheet_map=cross_map,
+    )
+    return result
+
+
+def _multi_module_readiness(cleaned: dict[str, pd.DataFrame]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for sheet, df in cleaned.items():
+        names = {str(c).casefold() for c in df.columns}
+        normalized = {re.sub(r"[^a-z0-9]+", "", x) for x in names}
+        candidates: list[tuple[str, str, str, str]] = []
+        if {"availability", "performance", "quality"} <= names:
+            candidates.append(("OEE", "Availability + Performance + Quality", "High", "Run OEE analysis and trend/Pareto views."))
+        if any("defect" in x or "scrap" in x or "fpy" in x or "yield" in x for x in names):
+            candidates.append(("Quality", "Defect / scrap / yield signal", "High", "Run Pareto, SPC or capability analysis."))
+        if any("asset" in x or "machine" in x for x in names) and any("failure" in x or "downtime" in x or "mtbf" in x or "mttr" in x for x in names):
+            candidates.append(("Maintenance", "Asset + failure/downtime signal", "High", "Run reliability, downtime and anomaly analysis."))
+        if any("sku" in x or "inventory" in x or "stock" in x for x in names) and any("demand" in x or "usage" in x for x in names):
+            candidates.append(("Inventory / Supply Chain", "SKU + demand/inventory signal", "High", "Run ABC, reorder, safety-stock or forecasting analysis."))
+        if any("date" in x or "month" in x or "timestamp" in x for x in names) and any(x in normalized for x in ("demand", "output", "qty", "quantity", "volume")):
+            candidates.append(("Forecasting / Planning", "Time axis + measurable demand/output", "High", "Run trend, forecast and scenario analysis."))
+        if any("cost" in x or "price" in x for x in names) and any(x in normalized for x in ("quantity", "qty", "demand", "output")):
+            candidates.append(("Economics / Optimization", "Cost + operational quantity", "Medium", "Build cost scenarios or optimization inputs."))
+        if not candidates:
+            candidates.append(("Data Intelligence", f"{len(df.columns):,} mapped fields", "Medium", "Use the Universal Visualization and Query layers."))
+        for module, evidence, confidence, next_step in candidates:
+            rows.append({
+                "Sheet": sheet,
+                "Recommended module": module,
+                "Evidence": evidence,
+                "Confidence": confidence,
+                "Recommended next step": next_step,
+            })
+    return rows
+
+
+def _reconcile_clean_sheet_payload(xlsx_bytes: bytes, cleaned: dict[str, pd.DataFrame]) -> bytes:
+    """Guarantee the exported CLEAN sheets contain the exact cleaned values."""
+    try:
+        import openpyxl
+        book = openpyxl.load_workbook(io.BytesIO(xlsx_bytes), data_only=False)
+        clean_ws = [ws for ws in book.worksheets if ws.title.startswith("CLEAN - ")]
+        for source_name, frame in cleaned.items():
+            candidates = [
+                ws for ws in clean_ws
+                if ws.title.replace("CLEAN - ", "", 1).strip() == str(source_name).strip()
+            ]
+            if not candidates:
+                continue
+            ws = candidates[0]
+            header_row = 5  # zero-based; row 6 in the workbook.
+            for j, col in enumerate(frame.columns):
+                cell = ws.cell(header_row + 1, j + 1)
+                cell._value = str(col)
+                cell.data_type = "s"
+            for i, row in enumerate(frame.itertuples(index=False, name=None), header_row + 2):
+                for j, value in enumerate(row, 1):
+                    cell = ws.cell(i, j, None)
+                    if _cell_is_na(value):
+                        cell._value = None
+                        cell.data_type = "n"
+                    elif isinstance(value, (pd.Timestamp,)):
+                        cell._value = value.to_pydatetime()
+                        cell.data_type = "d"
+                    elif isinstance(value, (bool, np.bool_)):
+                        cell._value = bool(value)
+                        cell.data_type = "b"
+                    elif isinstance(value, (int, float, np.integer, np.floating)) and not isinstance(value, bool):
+                        try:
+                            number = float(value)
+                            if math.isfinite(number):
+                                cell._value = int(value) if float(number).is_integer() else number
+                                cell.data_type = "n"
+                            else:
+                                cell._value = str(value)
+                                cell.data_type = "s"
+                        except Exception:
+                            cell._value = str(value)
+                            cell.data_type = "s"
+                    else:
+                        cell._value = str(value)
+                        cell.data_type = "s"
+        out = io.BytesIO()
+        book.save(out)
+        book.close()
+        return out.getvalue()
+    except Exception:
+        return xlsx_bytes
+
+
+def process_uploaded_workbook(raw: bytes, filename: str) -> dict[str, Any]:
+    result = _definitive_process_uploaded_workbook(raw, filename)
+    result["module_readiness"] = _multi_module_readiness(result["cleaned_sheets"])
+    result["duplicate_candidates"] = [item for sheet, frame in result["cleaned_sheets"].items() for item in _normalised_duplicate_candidates(frame, sheet)]
+    result["privacy_scan"] = _privacy_scan(result["cleaned_sheets"])
+    result["relationship_integrity"] = _relationship_integrity(result["cleaned_sheets"])
+    result["formula_quality"] = _formula_quality_inventory(result.get("formula_inventory", []))
+    result["data_contract"] = _data_contract(result["cleaned_sheets"], result.get("field_intelligence", []))
+    result["review_register"] = [
+        issue for sheet, frame in result["cleaned_sheets"].items() for issue in _quality_review_register(frame, sheet)
+    ]
+    for meta in result.get("source_metadata", []):
+        blocks = int(meta.get("Detected table blocks", 1) or 1)
+        if blocks > 1:
+            result["review_register"].append({
+                "Severity":"Medium","Sheet":str(meta.get("Source sheet","")),"Field":"Sheet structure",
+                "Issue":"Multiple table blocks detected","Evidence":f"{blocks:,} non-empty table region(s) inferred.",
+                "Recommended action":"Verify the regions belong to one analytical table."
+            })
+    for item in result["duplicate_candidates"]:
+        result["review_register"].append({
+            "Severity":"Medium","Sheet":item["Sheet"],"Field":item["Field"],
+            "Issue":item["Review"],"Evidence":f"{item['Occurrences']:,} occurrence(s): {item['Source variants']}",
+            "Recommended action":item["Recommended action"]
+        })
+    for item in result["privacy_scan"]:
+        result["review_register"].append({
+            "Severity":"High","Sheet":item["Sheet"],"Field":item["Field"],
+            "Issue":"Potential sensitive field",
+            "Evidence":f"Indicator: {item['Indicator']}; estimated matches: {item['Estimated matches']:,}.",
+            "Recommended action":item["Action"]
+        })
+    result["xlsx"] = _append_governance_plus_to_workbook(result["xlsx"], result)
+    result["xlsx"] = _postprocess_export_guardrails(result["xlsx"])
+    result["xlsx"] = _reconcile_clean_sheet_payload(result["xlsx"], result["cleaned_sheets"])
+    result["bundle"] = build_ultimate_bundle(
+        f"Shoir-IE — {result['filename']}",
+        result["xlsx"], result["audits"], result["profiles"],
+        cleaned_sheets=result["cleaned_sheets"], raw_sheets=result["raw_sheets"],
+        field_intelligence=result.get("field_intelligence", []),
+        review_register=result["review_register"],
+        source_metadata=result.get("source_metadata", []),
+    )
+    return result
