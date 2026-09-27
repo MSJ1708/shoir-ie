@@ -19,6 +19,14 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
+from shoir_performance import (
+    DEFAULT_PLOT_POINTS,
+    as_frame as _perf_as_frame,
+    fast_datetime_like_columns,
+    limit_categories,
+    sample_for_plot,
+)
+
 
 _MODULE_KEYS = {
     "Engineering Validation Center": ["validation_df", "validation_result"],
@@ -338,6 +346,9 @@ def _suggest_chart(df: pd.DataFrame, x: str | None, y: str | None) -> str:
 def _make_figure(df: pd.DataFrame, chart: str, x: str | None, y: str | None, z: str | None, title: str) -> go.Figure | None:
     if df.empty:
         return None
+    # Plotly should never receive millions of raw observations when a
+    # deterministic rendering sample can preserve the engineering pattern.
+    df = sample_for_plot(df, max_points=DEFAULT_PLOT_POINTS, chart=chart)
 
     numeric = _numeric_columns(df)
     categorical = _categorical_columns(df)
@@ -637,13 +648,8 @@ def render_live_visualization_studio(module: str, *, expanded: bool = False, pre
             if preferred_labels:
                 default_source_index = preferred_labels[0]
         table_label = st.selectbox("Data source", labels, index=default_source_index, key=f"liveviz_source_{hash(module) & 0xFFFF:04x}")
-        df = tables[labels.index(table_label)][2].copy()
+        df = tables[labels.index(table_label)][2]
         _render_auto_kpi_dashboard(module, df, f"{hash(module) & 0xFFFF:04x}")
-
-
-        # Avoid accidentally visualizing secrets or enormous payloads.
-        if len(df) > 10000:
-            df = df.head(10000).copy()
 
         nums = _numeric_columns(df)
         cats = _categorical_columns(df)
@@ -682,8 +688,9 @@ def render_live_visualization_studio(module: str, *, expanded: bool = False, pre
         filter_col = st.selectbox("Optional filter", ["(none)"] + cols, key=f"liveviz_filtercol_{hash(module) & 0xFFFF:04x}")
         filter_value = "All"
         if filter_col != "(none)":
-            values = sorted(df[filter_col].dropna().astype(str).unique().tolist())
-            filter_value = st.selectbox("Filter value", ["All"] + values[:500], key=f"liveviz_filterval_{hash(module) & 0xFFFF:04x}")
+            filter_values_source = sample_for_plot(df, max_points=20000, chart="filter")
+            values = limit_categories(filter_values_source[filter_col], 500)
+            filter_value = st.selectbox("Filter value", ["All"] + values, key=f"liveviz_filterval_{hash(module) & 0xFFFF:04x}")
 
         actual_chart = _suggest_chart(df, x, y) if chart_choice == "Auto" else chart_choice
         prepared = _prepare(df, x, y, aggregation, None if filter_col == "(none)" else filter_col, filter_value)
@@ -803,6 +810,7 @@ def _make_figure(
 ) -> go.Figure | None:
     if df.empty:
         return None
+    df = sample_for_plot(df, max_points=DEFAULT_PLOT_POINTS, chart=chart)
 
     numeric = _numeric_columns(df)
     categorical = _categorical_columns(df)
@@ -982,7 +990,7 @@ def build_visualization_suite(
     numeric = _numeric_columns(df)
     dates = _coerce_datetime_columns(df)
     categorical = _categorical_columns(df)
-    plan: list[tuple[str, str, str | None, str | None, str | None]] = []
+    plan: list[tuple[str, go.Figure]] = []
     seen: set[str] = set()
 
     def add(chart: str, title: str, x: str | None = None, y: str | None = None, z: str | None = None) -> None:
@@ -990,7 +998,9 @@ def build_visualization_suite(
             return
         fig = _make_figure(df, chart, x, y, z, title)
         if fig is not None:
-            plan.append((title, chart, x, y, z))
+            # Build each figure once. The previous implementation constructed
+            # every chart during planning and then constructed it again.
+            plan.append((title, fig))
             seen.add(chart)
 
     area = _find_col(df, ("area", "domain", "function", "system", "category"))
@@ -1036,11 +1046,7 @@ def build_visualization_suite(
     if not plan:
         add("Data Completeness", f"{context} · Data completeness" if context else "Data completeness")
 
-    suite: list[tuple[str, go.Figure]] = []
-    for title, chart, x, y, z in plan:
-        fig = _make_figure(df, chart, x, y, z, title)
-        if fig is not None:
-            suite.append((title, fig))
+    suite: list[tuple[str, go.Figure]] = plan[:max(1, int(max_figures))]
 
     # Universal anti-graphless contract: a populated table always receives
     # one truthful view, even when its semantics are unfamiliar to the registry.
@@ -1250,7 +1256,8 @@ def _render_auto_kpi_dashboard(module: str, df: pd.DataFrame, chart_token: str) 
                     f"n={len(values):,}",
                 )
 
-    suite = build_visualization_suite(df, context=str(module), max_figures=4)
+    plot_df = sample_for_plot(df, max_points=DEFAULT_PLOT_POINTS, chart="auto-suite")
+    suite = build_visualization_suite(plot_df, context=str(module), max_figures=4)
     if not suite:
         st.info("No compatible automatic engineering visualization could be inferred from the current table.")
         return
