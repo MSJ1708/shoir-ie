@@ -2578,7 +2578,7 @@ def _definitive_read_raw_workbook(raw: bytes, filename: str) -> dict[str, pd.Dat
                 io.StringIO(decoded),
                 header=None,
                 dtype=object,
-                sep=_header_first_csv_delimiter(decoded),
+                sep=";" if ";" in decoded.splitlines()[0] else _header_first_csv_delimiter(decoded),
                 keep_default_na=False,
             )
         }
