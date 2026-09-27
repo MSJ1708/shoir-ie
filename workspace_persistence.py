@@ -8,6 +8,7 @@ inputs, tables, selections, research state, and Copilot conversation.
 from __future__ import annotations
 
 import datetime as _dt
+import hashlib
 import json
 import sqlite3
 from io import StringIO
@@ -58,6 +59,8 @@ _PREFIX_EXCLUDE = (
     "upgrade_clean_",
     "upgrade_reset_",
     "upgrade_uploader_",
+    # Never hydrate Streamlit button state; the global command Open button is transient.
+    "global_command_open_",
     "sx_save_",
     "sx_open_",
     "sx_job_",
@@ -229,6 +232,31 @@ def _persist_domain_manifest(username: str, session_state: MutableMapping[str, A
         pass
 
 
+def _workspace_change_signature(session_state: MutableMapping[str, Any]) -> str:
+    """Cheap signature used to skip redundant full-session serialization.
+
+    DataFrames use object identity + shape/schema metadata rather than hashing
+    every cell. Streamlit normally replaces edited frames with a new object,
+    so this catches the expensive rerun pattern while keeping the normal save
+    path lossless when a workspace value is actually replaced.
+    """
+    parts: list[str] = []
+    for key, value in session_state.items():
+        key = str(key)
+        if _excluded(key) or key.startswith("_shoir_persist_"):
+            continue
+        if isinstance(value, pd.DataFrame):
+            parts.append(f"DF|{key}|{id(value)}|{value.shape}|{tuple(map(str, value.columns))}")
+        elif isinstance(value, pd.Series):
+            parts.append(f"SER|{key}|{id(value)}|{len(value)}|{value.name}")
+        else:
+            try:
+                parts.append(f"V|{key}|{type(value).__name__}|{repr(value)[:1000]}")
+            except Exception:
+                parts.append(f"V|{key}|{type(value).__name__}")
+    return hashlib.sha1("\\n".join(sorted(parts)).encode("utf-8", errors="replace")).hexdigest()
+
+
 def save_user_workspace(
     username: str,
     session_state: MutableMapping[str, Any],
@@ -237,6 +265,13 @@ def save_user_workspace(
     if not username or username == "Guest Visitor":
         return False
     try:
+        # Most Streamlit interactions rerun the script without changing the
+        # durable workspace. Avoid serializing large Excel-backed DataFrames on
+        # those no-op reruns (chart filters, tab switches, UI interactions).
+        change_signature = _workspace_change_signature(session_state)
+        prior_signature = session_state.get("_shoir_persist_change_signature")
+        if prior_signature == change_signature:
+            return True
         payload = json.dumps(_snapshot(session_state), ensure_ascii=False, separators=(",", ":"))
         # A custom db_path is used by local/regression tests and intentionally
         # bypasses the remote backend. The deployed application uses the default
@@ -247,6 +282,7 @@ def save_user_workspace(
             # A failed cloud write must stay a failed cloud write.
             ok = bool(save_remote_workspace(username, payload))
             if ok:
+                session_state["_shoir_persist_change_signature"] = change_signature
                 _persist_domain_manifest(username, session_state, db_path)
             return ok
 
@@ -266,6 +302,7 @@ def save_user_workspace(
                 (username.strip().lower(), payload, now),
             )
             conn.commit()
+        session_state["_shoir_persist_change_signature"] = change_signature
         _persist_domain_manifest(username, session_state, db_path)
         return True
     except Exception:

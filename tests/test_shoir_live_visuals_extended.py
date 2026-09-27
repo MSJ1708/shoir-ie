@@ -129,3 +129,22 @@ def test_universal_fallback_visualizations_render():
     date_only = pd.DataFrame({"Timestamp": pd.date_range("2026-01-01", periods=4, freq="h")})
     date_suite = build_visualization_suite(date_only, context="Time", max_figures=3)
     assert date_suite
+
+
+import pandas as pd
+
+from shoir_live_visuals import ensure_visualization_suite, visualization_contract_report
+
+
+def test_universal_visualization_suite_falls_back_for_unknown_semantics():
+    df = pd.DataFrame({"Unusual Field": [1, 2, 3], "Another Value": [4, 5, 6]})
+    suite = ensure_visualization_suite(df, "Unknown Engineering Table", max_figures=2)
+    assert suite
+    assert suite[0][1].data
+
+
+def test_visualization_contract_report_requires_no_cross_module_data():
+    report = visualization_contract_report("Industrial Workbook")
+    assert list(report.columns) == [
+        "Module", "Table", "State Key", "Rows", "Columns", "Graphs", "Status", "Primary Chart"
+    ]

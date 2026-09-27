@@ -198,13 +198,18 @@ def apply_excel_function(df: pd.DataFrame, function_name: str, **kwargs) -> Tupl
     raise ValueError(f"Unsupported Excel function: {function_name}")
 
 def read_uploaded_workbook(raw: bytes, filename: str) -> dict[str,pd.DataFrame]:
-    if not raw: raise ValueError("The uploaded file is empty.")
+    """Read uploaded spreadsheets with one workbook parse for multi-sheet XLSX files."""
+    if not raw:
+        raise ValueError("The uploaded file is empty.")
     lower=filename.lower()
     if lower.endswith(".csv"):
         return {"CSV":pd.read_csv(io.BytesIO(raw))}
     if lower.endswith(".xlsx"):
+        # Reuse the parsed ExcelFile instead of rebuilding a workbook parser
+        # for every sheet. This materially reduces first-import latency on
+        # multi-sheet and larger XLSX workbooks.
         book=pd.ExcelFile(io.BytesIO(raw))
-        return {sheet:pd.read_excel(io.BytesIO(raw),sheet_name=sheet) for sheet in book.sheet_names}
+        return {sheet:pd.read_excel(book,sheet_name=sheet) for sheet in book.sheet_names}
     raise ValueError("Upload an .xlsx or .csv file.")
 
 def _excel_safe_name(raw_name: Any, used: set[str], fallback: str) -> str:

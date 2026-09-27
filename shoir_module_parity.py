@@ -23,6 +23,17 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
+from shoir_performance import (
+    DEFAULT_PREVIEW_ROWS,
+    as_frame as _perf_as_frame,
+    cached_bytes_sha256,
+    cached_workbook_read,
+    lightweight_frame_signature,
+    sample_preview,
+)
+
+LARGE_TABLE_ROWS = 50_000
+
 
 def module_token(module: str) -> str:
     return hashlib.sha1(str(module).encode("utf-8")).hexdigest()[:12]
@@ -304,22 +315,24 @@ def _init_state(module: str) -> dict[str, str]:
 
 
 def _import_workbook(uploaded: Any) -> tuple[dict[str, pd.DataFrame], str]:
-    from shoir_upgrade import read_uploaded_workbook
-    books = read_uploaded_workbook(uploaded.getvalue(), uploaded.name)
+    raw = uploaded.getvalue()
+    signature = cached_bytes_sha256(raw)
+    books = cached_workbook_read(raw, uploaded.name)
     if not books:
         raise ValueError("The uploaded workbook contains no readable sheets.")
-    return books, hashlib.sha256(uploaded.getvalue()).hexdigest()
+    return books, signature
 
 
 def _store_import(module: str, raw_df: pd.DataFrame, filename: str, sheet: str, signature: str) -> None:
     keys = parity_keys(module)
-    raw = raw_df.copy(deep=True)
-    st.session_state[keys["data"]] = raw
-    st.session_state[keys["original"]] = raw.copy(deep=True)
+    # One immutable imported snapshot is enough; avoid keeping two full deep
+    # copies of a potentially very large workbook in session state.
+    st.session_state[keys["data"]] = raw_df
+    st.session_state[keys["original"]] = raw_df.copy(deep=True)
     st.session_state[keys["signature"]] = signature
     st.session_state[keys["clean_audit"]] = []
-    st.session_state[keys["validation"]] = validate_module_dataframe(raw)
-    st.session_state[keys["results"]] = summarize_module_dataframe(raw)
+    st.session_state[keys["validation"]] = validate_module_dataframe(raw_df)
+    st.session_state[keys["results"]] = summarize_module_dataframe(raw_df)
     st.session_state[keys["meta"]] = {
         "source": filename,
         "source_sheet": sheet,
@@ -440,6 +453,19 @@ def _render_prepare(module: str, keys: dict[str, str]) -> None:
 
     if df.empty:
         st.info("No module dataset is loaded yet. Import an Excel/CSV file above to activate validation, live graphs and evidence exports.")
+        current_validation = validate_module_dataframe(df)
+    elif len(df) >= LARGE_TABLE_ROWS:
+        st.info(
+            f"Large dataset detected ({len(df):,} rows). Shoir-IE keeps the full dataset for analysis, "
+            "but uses a bounded preview instead of loading every row into the browser editor."
+        )
+        st.dataframe(sample_preview(df, DEFAULT_PREVIEW_ROWS), use_container_width=True, hide_index=True)
+        current_validation = st.session_state.get(keys["validation"])
+        if not isinstance(current_validation, dict):
+            current_validation = validate_module_dataframe(df)
+            st.session_state[keys["validation"]] = current_validation
+        if not isinstance(st.session_state.get(keys["results"]), dict):
+            st.session_state[keys["results"]] = summarize_module_dataframe(df)
     else:
         edited = st.data_editor(
             df,
@@ -448,11 +474,14 @@ def _render_prepare(module: str, keys: dict[str, str]) -> None:
             key=f"module_parity_editor_{token}",
         )
         _apply_module_edit(module, edited)
-        df = edited.copy(deep=True)
+        df = edited
+        current_validation = st.session_state[keys["validation"]]
 
-    current_validation = validate_module_dataframe(df)
-    st.session_state[keys["validation"]] = current_validation
-    st.session_state[keys["results"]] = summarize_module_dataframe(df)
+    if not isinstance(current_validation, dict):
+        current_validation = validate_module_dataframe(df)
+        st.session_state[keys["validation"]] = current_validation
+    if not isinstance(st.session_state.get(keys["results"]), dict):
+        st.session_state[keys["results"]] = summarize_module_dataframe(df)
     _render_validation_card(current_validation)
 
     c1, c2, c3 = st.columns(3)
@@ -537,7 +566,7 @@ def _render_results(module: str, keys: dict[str, str]) -> None:
         for label, state_key, candidate in discover_visual_tables(module):
             if state_key in seen:
                 continue
-            result_options.append((label, state_key, candidate.copy(deep=True)))
+            result_options.append((label, state_key, candidate))
             seen.add(state_key)
     except Exception:
         pass
@@ -546,8 +575,18 @@ def _render_results(module: str, keys: dict[str, str]) -> None:
     selected_label = st.selectbox("Result dataset", labels, key=f"module_parity_result_source_{token}")
     result_df = result_options[labels.index(selected_label)][2]
 
-    summary = summarize_module_dataframe(result_df)
-    validation = validate_module_dataframe(result_df)
+    result_state_key = result_options[labels.index(selected_label)][1]
+    result_cache = st.session_state.setdefault(f"module_parity_result_cache_{token}", {})
+    result_signature = f"{result_state_key}:{id(result_df)}:{lightweight_frame_signature(result_df)}"
+    cached_result = result_cache.get(result_signature)
+    if isinstance(cached_result, dict) and isinstance(cached_result.get("summary"), dict) and isinstance(cached_result.get("validation"), dict):
+        summary = cached_result["summary"]
+        validation = cached_result["validation"]
+    else:
+        summary = summarize_module_dataframe(result_df)
+        validation = validate_module_dataframe(result_df)
+        result_cache.clear()
+        result_cache[result_signature] = {"summary": summary, "validation": validation}
     st.session_state[keys["results"]] = summary
     st.session_state[keys["validation"]] = validation
 
@@ -585,51 +624,80 @@ def _render_results(module: str, keys: dict[str, str]) -> None:
         except Exception:
             figure = None
 
-    xlsx_bytes: bytes | None = None
-    if not result_df.empty:
-        try:
-            xlsx_bytes = _build_export_xlsx(module, result_df, validation, summary, figure)
-        except Exception as exc:
-            st.warning(f"Workbook export could not be generated for this result set: {exc}")
+    xlsx_key = f"module_parity_xlsx_bytes_{token}"
+    zip_key = f"module_parity_zip_bytes_{token}"
+    csv_key = f"module_parity_csv_bytes_{token}"
 
     st.markdown("### 📤 Export & Evidence")
     ea, eb, ec = st.columns(3)
-    with ea:
-        if xlsx_bytes is not None:
-            st.download_button(
-                "📥 Download Excel evidence",
-                data=xlsx_bytes,
-                file_name=f"shoir_ie_{_slug(module)}_parity.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True,
-                key=f"module_parity_xlsx_{token}",
-            )
-    with eb:
-        st.download_button(
-            "📄 Download CSV results",
-            data=result_df.to_csv(index=False).encode("utf-8"),
-            file_name=f"shoir_ie_{_slug(module)}_results.csv",
-            mime="text/csv",
-            use_container_width=True,
-            key=f"module_parity_csv_{token}",
-        )
-    with ec:
-        zip_bytes = _build_export_zip(
-            module,
-            result_df,
-            validation,
-            summary,
-            xlsx_bytes or b"",
-            figure_json if isinstance(figure_json, str) else None,
-        )
-        st.download_button(
-            "🗂️ Download evidence bundle",
-            data=zip_bytes,
-            file_name=f"shoir_ie_{_slug(module)}_evidence.zip",
-            mime="application/zip",
-            use_container_width=True,
-            key=f"module_parity_zip_{token}",
-        )
+    if len(result_df) >= LARGE_TABLE_ROWS:
+        st.caption("Large-result optimization: export files are generated only when requested, so analysis results do not wait on workbook/ZIP serialization.")
+        with ea:
+            if st.button("📦 Prepare Excel evidence", use_container_width=True, key=f"module_parity_prepare_xlsx_{token}"):
+                try:
+                    st.session_state[xlsx_key] = _build_export_xlsx(module, result_df, validation, summary, figure)
+                    st.session_state.pop(zip_key, None)
+                    st.session_state.pop(csv_key, None)
+                except Exception as exc:
+                    st.error(f"Workbook export could not be generated: {exc}")
+            if isinstance(st.session_state.get(xlsx_key), (bytes, bytearray)):
+                st.download_button(
+                    "📥 Download Excel evidence",
+                    data=st.session_state[xlsx_key],
+                    file_name=f"shoir_ie_{_slug(module)}_parity.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True,
+                    key=f"module_parity_xlsx_{token}",
+                )
+        with eb:
+            if st.button("📄 Prepare CSV", use_container_width=True, key=f"module_parity_prepare_csv_{token}"):
+                st.session_state[csv_key] = result_df.to_csv(index=False).encode("utf-8")
+            if isinstance(st.session_state.get(csv_key), (bytes, bytearray)):
+                st.download_button(
+                    "📄 Download CSV results",
+                    data=st.session_state[csv_key],
+                    file_name=f"shoir_ie_{_slug(module)}_results.csv",
+                    mime="text/csv",
+                    use_container_width=True,
+                    key=f"module_parity_csv_{token}",
+                )
+        with ec:
+            if st.button("🗂️ Prepare evidence bundle", use_container_width=True, key=f"module_parity_prepare_zip_{token}"):
+                try:
+                    xlsx_for_zip = st.session_state.get(xlsx_key)
+                    if not isinstance(xlsx_for_zip, (bytes, bytearray)):
+                        xlsx_for_zip = _build_export_xlsx(module, result_df, validation, summary, figure)
+                        st.session_state[xlsx_key] = xlsx_for_zip
+                    st.session_state[zip_key] = _build_export_zip(
+                        module, result_df, validation, summary, xlsx_for_zip,
+                        figure_json if isinstance(figure_json, str) else None,
+                    )
+                except Exception as exc:
+                    st.error(f"Evidence bundle could not be generated: {exc}")
+            if isinstance(st.session_state.get(zip_key), (bytes, bytearray)):
+                st.download_button(
+                    "🗂️ Download evidence bundle",
+                    data=st.session_state[zip_key],
+                    file_name=f"shoir_ie_{_slug(module)}_evidence.zip",
+                    mime="application/zip",
+                    use_container_width=True,
+                    key=f"module_parity_zip_{token}",
+                )
+    else:
+        # Preserve the existing one-click behavior for normal-sized results.
+        try:
+            xlsx_bytes = _build_export_xlsx(module, result_df, validation, summary, figure) if not result_df.empty else None
+        except Exception as exc:
+            xlsx_bytes = None
+            st.warning(f"Workbook export could not be generated for this result set: {exc}")
+        with ea:
+            if xlsx_bytes is not None:
+                st.download_button("📥 Download Excel evidence", data=xlsx_bytes, file_name=f"shoir_ie_{_slug(module)}_parity.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True, key=f"module_parity_xlsx_{token}")
+        with eb:
+            st.download_button("📄 Download CSV results", data=result_df.to_csv(index=False).encode("utf-8"), file_name=f"shoir_ie_{_slug(module)}_results.csv", mime="text/csv", use_container_width=True, key=f"module_parity_csv_{token}")
+        with ec:
+            zip_bytes = _build_export_zip(module, result_df, validation, summary, xlsx_bytes or b"", figure_json if isinstance(figure_json, str) else None)
+            st.download_button("🗂️ Download evidence bundle", data=zip_bytes, file_name=f"shoir_ie_{_slug(module)}_evidence.zip", mime="application/zip", use_container_width=True, key=f"module_parity_zip_{token}")
 
     st.caption("Persistence: the parity dataset, validation snapshot and results summary live in workspace state and are captured by Shoir-IE autosave; the configured durable backend remains authoritative in managed deployments.")
 

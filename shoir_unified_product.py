@@ -39,6 +39,7 @@ COMMAND_ACTIONS = [
     "Automate",
     "Trust & Explain",
     "Open Unified Study Center",
+    "Open Universal Industrial Engine",
     "Check Data Readiness",
     "Create Decision Card",
     "Open Implementation Tracker",
@@ -631,6 +632,8 @@ def render_global_product_dock(module: str, tier: str, username: str) -> None:
 
     ensure_unified_db()
     key = _key(module)
+    # Button state is transient and must never be restored from durable workspace data.
+    st.session_state.pop("global_command_open_" + key, None)
     study_id = st.session_state.get("unified_study_id")
     readiness = float(st.session_state.get("unified_readiness_score", 0.0))
     st.markdown(
@@ -654,6 +657,7 @@ def render_global_product_dock(module: str, tier: str, username: str) -> None:
                 "Automate": "adoption_automate",
                 "Trust & Explain": "adoption_trust",
                 "Open Unified Study Center": "open",
+                "Open Universal Industrial Engine": "universal",
                 "Check Data Readiness": "readiness",
                 "Create Decision Card": "decision",
                 "Open Implementation Tracker": "implementation",
@@ -682,6 +686,9 @@ def render_global_product_dock(module: str, tier: str, username: str) -> None:
 
     action = st.session_state.pop("global_command_action", None)
     if action and action != "open":
+        if action == "universal":
+            st.session_state["force_universal_engine"] = True
+            st.rerun()
         with st.expander("⌘ Quick workspace action", expanded=True):
             if action == "readiness":
                 data = st.session_state.get("unified_data", _starter_for_module(module))
@@ -744,19 +751,27 @@ def copilot_context() -> str:
         "Universal Evidence Export",
         "Industrial Home",
         "Industrial Workbook",
-        "Industrial Pivot",
         "Quick Analyze",
+        "Industrial Pivot",
         "Shoir Script automation",
         "Engineering Formula Library",
         "Workbook version history and cell comments",
         "Formula dependency graph and Explain This Number",
         "Capability-aware analytical runtime",
         "Command Palette",
+        "Universal Industrial Engine",
+        "Explain & Trace",
+        "Automation replay",
+        "Trust Center",
+        "Industrial Engineering Operating System",
+        "Resource efficiency",
+        "Scenario trade-offs and expected-vs-actual verification",
+        "IE method library and persona views",
         "cross-module recommendations",
     ]
     return (
         "Shoir-IE now operates as one unified industrial product. "
-        "Its shared workflow is Workbook/Data → Validate → Analyze → Visualize → Simulate/Optimize → Scenario → Decision → Implementation → Outcome → Learn. "
+        "Its shared workflow is Workbook/Data → Validate → Analyze → Visualize → Simulate/Optimize → Scenario → Decision → Implement → Verify → Learn. "
         "Available cross-cutting experience surfaces: " + ", ".join(capabilities) + ". "
         "Use evidence-first language, never invent values, clearly separate measured results from assumptions, "
         "and prefer preview/approval before any destructive action."
