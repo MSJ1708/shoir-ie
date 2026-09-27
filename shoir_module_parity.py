@@ -28,6 +28,7 @@ from shoir_performance import (
     as_frame as _perf_as_frame,
     cached_bytes_sha256,
     cached_workbook_read,
+    lightweight_frame_signature,
     sample_preview,
 )
 
@@ -330,8 +331,8 @@ def _store_import(module: str, raw_df: pd.DataFrame, filename: str, sheet: str, 
     st.session_state[keys["original"]] = raw_df.copy(deep=True)
     st.session_state[keys["signature"]] = signature
     st.session_state[keys["clean_audit"]] = []
-    st.session_state[keys["validation"]] = validate_module_dataframe(raw)
-    st.session_state[keys["results"]] = summarize_module_dataframe(raw)
+    st.session_state[keys["validation"]] = validate_module_dataframe(raw_df)
+    st.session_state[keys["results"]] = summarize_module_dataframe(raw_df)
     st.session_state[keys["meta"]] = {
         "source": filename,
         "source_sheet": sheet,
@@ -574,8 +575,18 @@ def _render_results(module: str, keys: dict[str, str]) -> None:
     selected_label = st.selectbox("Result dataset", labels, key=f"module_parity_result_source_{token}")
     result_df = result_options[labels.index(selected_label)][2]
 
-    summary = summarize_module_dataframe(result_df)
-    validation = validate_module_dataframe(result_df)
+    result_state_key = result_options[labels.index(selected_label)][1]
+    result_cache = st.session_state.setdefault(f"module_parity_result_cache_{token}", {})
+    result_signature = f"{result_state_key}:{id(result_df)}:{lightweight_frame_signature(result_df)}"
+    cached_result = result_cache.get(result_signature)
+    if isinstance(cached_result, dict) and isinstance(cached_result.get("summary"), dict) and isinstance(cached_result.get("validation"), dict):
+        summary = cached_result["summary"]
+        validation = cached_result["validation"]
+    else:
+        summary = summarize_module_dataframe(result_df)
+        validation = validate_module_dataframe(result_df)
+        result_cache.clear()
+        result_cache[result_signature] = {"summary": summary, "validation": validation}
     st.session_state[keys["results"]] = summary
     st.session_state[keys["validation"]] = validation
 
