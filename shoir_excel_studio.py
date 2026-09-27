@@ -3246,7 +3246,7 @@ def _excel_detect_locale(text: str) -> dict[str, Any]:
 def _excel_detect_table_blocks(raw_df: pd.DataFrame, header_row: int) -> list[dict[str, Any]]:
     if raw_df.empty:
         return []
-    body_start = max(0, header_row)
+    # Scan the whole worksheet. A title/report header before the first table\n    # must not cause earlier table blocks to be skipped.\n    body_start = 0
     blocks = []
     nonblank = ~raw_df.isna().all(axis=1)
     start = None
@@ -3589,6 +3589,15 @@ def _excel_refresh_governance(result: dict[str, Any]) -> dict[str, Any]:
         })
     for issue in result["extended_outliers"] + result["engineering_limit_findings"]:
         base_reviews.append(issue)
+    for item in result.get("privacy_scan", []):
+        base_reviews.append({
+            "Severity": "High",
+            "Sheet": item["Sheet"],
+            "Field": item["Field"],
+            "Issue": "Potential sensitive field",
+            "Evidence": f"Indicator: {item['Indicator']}; estimated matches: {item['Estimated matches']:,}.",
+            "Recommended action": item["Action"],
+        })
     for item in result["formula_gap_findings"]:
         base_reviews.append(item)
     for item in result["validation_results"]:
