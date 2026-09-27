@@ -2220,3 +2220,320 @@ clean_dataframe = _final_clean_dataframe
 
 # Rebind public names one last time so imports from the module use the hardened
 # versions rather than the pre-upgrade implementations.
+
+
+# ---------------------------------------------------------------------------
+# Governance++: repeatable contracts, privacy review, relationship integrity,
+# formula consistency and module-readiness intelligence.
+# ---------------------------------------------------------------------------
+
+def _normalised_duplicate_candidates(df: pd.DataFrame, sheet: str) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for col in df.columns:
+        if not _is_identifier(str(col), df[col]):
+            continue
+        values = df[col].dropna().astype(str)
+        groups: dict[str, list[str]] = {}
+        for value in values.tolist():
+            key = re.sub(r"[^a-z0-9]+", "", value.casefold())
+            if not key:
+                continue
+            groups.setdefault(key, []).append(value)
+        for key, raw_values in groups.items():
+            distinct = sorted(set(raw_values))
+            if len(distinct) > 1:
+                rows.append({
+                    "Sheet": sheet,
+                    "Field": str(col),
+                    "Normalized key": key,
+                    "Source variants": " | ".join(distinct[:8]),
+                    "Occurrences": len(raw_values),
+                    "Review": "Potential identifier formatting duplicates",
+                    "Recommended action": "Confirm whether variants refer to one master entity before joins or aggregation.",
+                })
+    return rows
+
+
+def _privacy_scan(cleaned: dict[str, pd.DataFrame]) -> list[dict[str, Any]]:
+    rules = [
+        ("Email address", re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")),
+        ("Phone-like value", re.compile(r"^\+?[0-9][0-9\s().-]{7,}$")),
+        ("Government-ID-like", re.compile(r"^\d{9,12}$")),
+    ]
+    name_hints = {
+        "email": "Email field name",
+        "phone": "Phone field name",
+        "mobile": "Phone field name",
+        "national id": "Government-ID field name",
+        "passport": "Government-ID field name",
+        "ssn": "Government-ID field name",
+    }
+    results: list[dict[str, Any]] = []
+    for sheet, df in cleaned.items():
+        for col in df.columns:
+            name = str(col).casefold()
+            series = df[col].dropna().astype(str).str.strip()
+            indicator = None
+            for hint, label in name_hints.items():
+                if hint in name:
+                    indicator = label
+                    break
+            match_count = 0
+            if indicator is None and not series.empty:
+                sample = series.head(5000)
+                for label, regex in rules:
+                    hits = int(sample.map(lambda v: bool(regex.fullmatch(v))).sum())
+                    if hits >= max(2, int(len(sample) * 0.10)):
+                        indicator = label
+                        match_count = int(round(hits / max(1, len(sample)) * len(series)))
+                        break
+            if indicator:
+                results.append({
+                    "Sheet": sheet,
+                    "Field": str(col),
+                    "Indicator": indicator,
+                    "Estimated matches": match_count if match_count else int(len(series)),
+                    "Action": "Review access, masking and downstream export requirements before distribution.",
+                    "Data exposed in scan": "No raw values retained",
+                })
+    return results
+
+
+def _relationship_integrity(cleaned: dict[str, pd.DataFrame]) -> list[dict[str, Any]]:
+    names = list(cleaned)
+    rows: list[dict[str, Any]] = []
+    for i, left_name in enumerate(names):
+        left = cleaned[left_name]
+        left_norm = {re.sub(r"[^a-z0-9]+", "", str(c).casefold()): str(c) for c in left.columns}
+        for right_name in names[i + 1:]:
+            right = cleaned[right_name]
+            right_norm = {re.sub(r"[^a-z0-9]+", "", str(c).casefold()): str(c) for c in right.columns}
+            shared_norm = sorted(set(left_norm) & set(right_norm))
+            for norm_key in shared_norm[:12]:
+                lcol, rcol = left_norm[norm_key], right_norm[norm_key]
+                lv = left[lcol].dropna().astype(str).map(lambda x: re.sub(r"\s+", " ", x.strip().casefold()))
+                rv = right[rcol].dropna().astype(str).map(lambda x: re.sub(r"\s+", " ", x.strip().casefold()))
+                lset, rset = set(lv), set(rv)
+                matched = len(lset & rset)
+                unmatched_l = len(lset - rset)
+                unmatched_r = len(rset - lset)
+                l_unique = int(lv.is_unique)
+                r_unique = int(rv.is_unique)
+                readiness = (
+                    "Strong candidate"
+                    if matched and (unmatched_l == 0 or unmatched_r == 0)
+                    else "Review before join"
+                )
+                rows.append({
+                    "Sheet A": left_name,
+                    "Sheet B": right_name,
+                    "Field A": lcol,
+                    "Field B": rcol,
+                    "Unique A": "Yes" if l_unique else "No",
+                    "Unique B": "Yes" if r_unique else "No",
+                    "Matched distinct values": matched,
+                    "A unmatched values": unmatched_l,
+                    "B unmatched values": unmatched_r,
+                    "Join readiness": readiness,
+                })
+    return rows
+
+
+def _formula_quality_inventory(formula_inventory: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if not formula_inventory:
+        return []
+    buckets: dict[tuple[str, str], list[str]] = {}
+    for row in formula_inventory:
+        cell = str(row.get("Cell", ""))
+        col = re.match(r"[A-Za-z]+", cell)
+        key = (str(row.get("Sheet", "")), col.group(0) if col else "—")
+        formula = str(row.get("Formula", ""))
+        normalized = re.sub(r"\$?[A-Za-z]{1,3}\$?\d+", "<REF>", formula)
+        buckets.setdefault(key, []).append(normalized)
+    results: list[dict[str, Any]] = []
+    for (sheet, col), formulas in buckets.items():
+        counts = pd.Series(formulas).value_counts()
+        dominant = str(counts.index[0]) if not counts.empty else ""
+        inconsistent = int(sum(1 for f in formulas if f != dominant))
+        results.append({
+            "Sheet": sheet,
+            "Formula column": col,
+            "Formula cells": len(formulas),
+            "Distinct formula patterns": len(counts),
+            "Dominant pattern": dominant,
+            "Inconsistent cells": inconsistent,
+            "Review": "Review fill/copy logic" if inconsistent else "Consistent pattern",
+        })
+    return results
+
+
+def _module_readiness(cleaned: dict[str, pd.DataFrame]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for sheet, df in cleaned.items():
+        names = {str(c).casefold() for c in df.columns}
+        normalized = {re.sub(r"[^a-z0-9]+", "", x) for x in names}
+        signals = []
+        module = "Data Intelligence"
+        next_step = "Use the Universal Visualization and Query layers."
+        if {"availability", "performance", "quality"} <= names:
+            module = "OEE"; signals.append("Availability + Performance + Quality"); next_step = "Run OEE analysis and trend/ Pareto views."
+        elif any("defect" in x or "scrap" in x or "fpy" in x or "yield" in x for x in names):
+            module = "Quality"; signals.append("Defect / scrap / yield field"); next_step = "Run Pareto, SPC or capability analysis."
+        elif any("asset" in x or "machine" in x for x in names) and any("failure" in x or "downtime" in x or "mtbf" in x for x in names):
+            module = "Maintenance"; signals.append("Asset + failure/downtime signal"); next_step = "Run maintenance reliability and anomaly analysis."
+        elif any("sku" in x or "inventory" in x or "stock" in x for x in names) and any("demand" in x or "usage" in x for x in names):
+            module = "Inventory / Supply Chain"; signals.append("SKU + demand/inventory signal"); next_step = "Run ABC, reorder/safety-stock or forecasting analysis."
+        elif any("date" in x or "month" in x or "timestamp" in x for x in names) and any(x in normalized for x in ("demand","output","qty","quantity","volume")):
+            module = "Forecasting / Planning"; signals.append("Time axis + measurable demand/output"); next_step = "Run trend, forecast and scenario analysis."
+        elif any("cost" in x or "price" in x for x in names) and any(x in normalized for x in ("quantity","qty","demand","output")):
+            module = "Economics / Optimization"; signals.append("Cost + operational quantity"); next_step = "Build cost scenarios or optimization inputs."
+        else:
+            signals.append(f"{len(df.columns):,} mapped fields")
+        rows.append({
+            "Sheet": sheet,
+            "Recommended module": module,
+            "Evidence": " · ".join(signals),
+            "Confidence": "High" if len(signals) > 1 or module != "Data Intelligence" else "Medium",
+            "Recommended next step": next_step,
+        })
+    return rows
+
+
+def _data_contract(cleaned: dict[str, pd.DataFrame], field_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    contract = []
+    for row in field_rows:
+        role = str(row.get("Role", ""))
+        contract.append({
+            "Sheet": row.get("Sheet", ""),
+            "Field": row.get("Field", ""),
+            "Expected role": role,
+            "Inferred type": row.get("Inferred type", ""),
+            "Type confidence": row.get("Type confidence", ""),
+            "Canonical entity": row.get("Canonical entity", "—"),
+            "Unit hint": row.get("Unit hint", "—"),
+            "Required candidate": "Yes" if role == "Identifier" else "No",
+            "Unique candidate": "Yes" if role == "Identifier" else "No",
+            "Missing %": row.get("Missing %", 0),
+            "Rule status": "Review" if float(row.get("Missing %", 0) or 0) > 20 else "Ready",
+        })
+    return contract
+
+
+_CLEAN_RECIPE = [
+    ("Header detection", "Detect a schema row rather than trusting row 1", "Automatic", "Prevents report titles and notes from becoming headers."),
+    ("Header normalization", "Trim, normalize and deduplicate column names", "Automatic", "Creates stable field names for downstream modules."),
+    ("Blank row/column cleanup", "Remove purely empty presentation noise", "Automatic", "Keeps analytical tables compact."),
+    ("Missing-value normalization", "Normalize common null tokens while protecting identifiers", "Automatic", "Makes missingness measurable without corrupting keys."),
+    ("Accounting normalization", "Interpret parenthesized negatives as numeric negatives", "Automatic", "Preserves common finance/operations exports."),
+    ("Identifier preservation", "Keep IDs as text and report duplicate keys", "Automatic + Review", "Protects leading zeros and master-data identity."),
+    ("Type inference", "Infer date, time, number, percentage, boolean and text", "Automatic + Review", "Prepares fields for safe analysis."),
+    ("Outlier detection", "Flag IQR/robust outliers; never silently delete", "Review", "Industrial observations can be real events."),
+    ("Date sanity", "Flag dates outside the defined review window", "Review", "Prevents obvious temporal corruption."),
+    ("Range/ratio checks", "Flag percentage/ratio violations", "Review", "Avoids mixing 95 and 0.95 without intent."),
+    ("Provenance", "Hash source bytes and archive source metadata", "Automatic", "Supports reproducibility and evidence."),
+    ("Formula archive", "Capture source formulas as inert evidence", "Automatic", "Retains lineage without executing source formulas."),
+    ("Relationship checks", "Compare shared fields across sheets", "Review", "Prevents unsafe blind joins."),
+    ("Privacy scan", "Identify likely sensitive fields without retaining raw values", "Review", "Reduces accidental exposure in exports."),
+]
+
+
+def _append_governance_plus_to_workbook(xlsx_bytes: bytes, result: dict[str, Any]) -> bytes:
+    try:
+        import openpyxl
+        from openpyxl.styles import Font, PatternFill, Alignment
+        book = openpyxl.load_workbook(io.BytesIO(xlsx_bytes), data_only=False)
+        frames = {
+            "DATA CONTRACT": pd.DataFrame(result.get("data_contract", [])),
+            "RELATIONSHIP INTEGRITY": pd.DataFrame(result.get("relationship_integrity", [])),
+            "PRIVACY SCAN": pd.DataFrame(result.get("privacy_scan", [])),
+            "FORMULA QUALITY": pd.DataFrame(result.get("formula_quality", [])),
+            "DUPLICATE CANDIDATES": pd.DataFrame(result.get("duplicate_candidates", [])),
+            "MODULE READINESS": pd.DataFrame(result.get("module_readiness", [])),
+            "CLEANING RECIPE": pd.DataFrame([
+                {"Rule": a, "Behavior": b, "Mode": c, "Reason": d}
+                for a,b,c,d in _CLEAN_RECIPE
+            ]),
+        }
+        for name, frame in frames.items():
+            if name in book.sheetnames:
+                del book[name]
+            ws = book.create_sheet(name)
+            ws.freeze_panes = "A2"
+            ws.sheet_view.showGridLines = False
+            if frame.empty:
+                frame = pd.DataFrame([{"Status": "No automated findings for this workbook."}])
+            for c_idx, col in enumerate(frame.columns, 1):
+                cell = ws.cell(1, c_idx, str(col))
+                cell.font = Font(bold=True, color="FFFFFF")
+                cell.fill = PatternFill("solid", fgColor="163A5F")
+                cell.alignment = Alignment(vertical="center")
+            for r_idx, row in enumerate(frame.itertuples(index=False, name=None), 2):
+                for c_idx, value in enumerate(row, 1):
+                    cell = ws.cell(r_idx, c_idx, None if _cell_is_na(value) else value)
+                    cell.alignment = Alignment(vertical="top", wrap_text=True)
+            ws.auto_filter.ref = ws.dimensions
+            for col_cells in ws.columns:
+                letter = col_cells[0].column_letter
+                width = min(70, max(12, max(len(str(c.value or "")) for c in col_cells[:40]) + 2))
+                ws.column_dimensions[letter].width = width
+        out = io.BytesIO()
+        book.save(out)
+        try:
+            book.close()
+        except Exception:
+            pass
+        return out.getvalue()
+    except Exception:
+        return xlsx_bytes
+
+
+_BASE_PROCESS_GOVERNANCE = process_uploaded_workbook
+
+
+def process_uploaded_workbook(raw: bytes, filename: str) -> dict[str, Any]:
+    result = _BASE_PROCESS_GOVERNANCE(raw, filename)
+    cleaned = result.get("cleaned_sheets", {})
+    result["duplicate_candidates"] = [
+        item
+        for sheet, frame in cleaned.items()
+        for item in _normalised_duplicate_candidates(frame, sheet)
+    ]
+    result["privacy_scan"] = _privacy_scan(cleaned)
+    result["relationship_integrity"] = _relationship_integrity(cleaned)
+    result["formula_quality"] = _formula_quality_inventory(result.get("formula_inventory", []))
+    result["module_readiness"] = _module_readiness(cleaned)
+    result["data_contract"] = _data_contract(cleaned, result.get("field_intelligence", []))
+    # Promote candidate duplicates/privacy findings into the review register.
+    result["review_register"] = list(result.get("review_register", []))
+    for item in result["duplicate_candidates"]:
+        result["review_register"].append({
+            "Severity": "Medium",
+            "Sheet": item["Sheet"],
+            "Field": item["Field"],
+            "Issue": item["Review"],
+            "Evidence": f"{item['Occurrences']:,} occurrence(s) across source variants: {item['Source variants']}",
+            "Recommended action": item["Recommended action"],
+        })
+    for item in result["privacy_scan"]:
+        result["review_register"].append({
+            "Severity": "High",
+            "Sheet": item["Sheet"],
+            "Field": item["Field"],
+            "Issue": "Potential sensitive field",
+            "Evidence": f"Detected indicator: {item['Indicator']}; estimated matches: {item['Estimated matches']:,}.",
+            "Recommended action": item["Action"],
+        })
+    result["xlsx"] = _append_governance_plus_to_workbook(result["xlsx"], result)
+    result["xlsx"] = _postprocess_export_guardrails(result["xlsx"])
+    result["bundle"] = build_ultimate_bundle(
+        f"Shoir-IE — {result['filename']}",
+        result["xlsx"],
+        result["audits"],
+        result["profiles"],
+        cleaned_sheets=cleaned,
+        raw_sheets=result.get("raw_sheets", {}),
+        field_intelligence=result.get("field_intelligence", []),
+        review_register=result.get("review_register", []),
+        source_metadata=result.get("source_metadata", []),
+    )
+    return result
