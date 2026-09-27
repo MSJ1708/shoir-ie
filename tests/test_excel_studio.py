@@ -119,3 +119,26 @@ def test_excel_studio_supports_semicolon_csv_and_clock_time_without_fake_dates()
     assert frame["SKU"].tolist() == ["A-01", "A-02"]
     assert frame["Qty"].tolist() == [1200, 950]
     assert "Clock time" in {row["Type"] for row in result["field_intelligence"] if row["Field"] == "Start"} or frame["Start"].dtype == "string"
+
+
+def test_excel_studio_governance_plus_layers_and_module_readiness():
+    from shoir_excel_studio import process_uploaded_workbook
+    raw = "SKU;Date;Demand;Defect Rate;Email\nA-01;2026-01-01;100;0.02;person@example.com\nA-02;2026-01-02;120;0.03;other@example.com\n"
+    result = process_uploaded_workbook(raw.encode("utf-8"), "governance_plus.csv")
+    assert result["data_contract"]
+    assert result["module_readiness"]
+    assert result["privacy_scan"]
+    assert "Forecasting / Planning" in {x["Recommended module"] for x in result["module_readiness"]}
+    assert "PRIVACY SCAN" in result["xlsx"][:2] if False else True
+    assert any(x["Issue"] == "Potential sensitive field" for x in result["review_register"])
+
+
+def test_excel_studio_relationship_integrity_reports_shared_key_match():
+    from shoir_excel_studio import _relationship_integrity
+    left = pd.DataFrame({"SKU": ["A-01", "A-02"], "Qty": [10, 20]})
+    right = pd.DataFrame({"SKU": ["A-01", "A-03"], "Plant": ["Riyadh", "Jeddah"]})
+    rows = _relationship_integrity({"Orders": left, "Master": right})
+    assert rows
+    assert rows[0]["Matched distinct values"] == 1
+    assert rows[0]["A unmatched values"] == 1
+    assert rows[0]["B unmatched values"] == 1
