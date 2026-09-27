@@ -4260,6 +4260,40 @@ def _excel_render_v2(tier: str, username: str) -> None:
                     st.session_state["excel_studio_result"] = result
                     _excel_persist_result(username, result)
                     st.success("Engineering limits saved and violations recalculated.")
+        with st.expander("Dataset contracts & activation gates", expanded=True):
+            contracts = pd.DataFrame(result.get("dataset_contracts", []))
+            st.dataframe(
+                contracts[[c for c in ["Dataset ID", "Dataset key", "Contract version", "Status", "Blocking failures", "Activation policy", "Approved exception"] if c in contracts.columns]],
+                use_container_width=True,
+                hide_index=True,
+            )
+            for contract in result.get("dataset_contracts", []):
+                if contract.get("Status") == "BLOCKED":
+                    key = str(contract.get("Dataset key", ""))
+                    approve_key = "excel_studio_contract_exception_" + hashlib.sha1(key.encode()).hexdigest()[:10]
+                    acknowledged = st.checkbox(
+                        "I reviewed the blocking contract exception for " + key,
+                        key=approve_key + "_ack",
+                    )
+                    if st.button("Approve documented exception · " + key, key=approve_key, disabled=not acknowledged):
+                        try:
+                            from shoir_excel_foundation import approve_contract_exception
+                            approve_contract_exception(result, key, username)
+                            _excel_refresh_governance(result)
+                            result["lineage_manifest"] = _excel_build_lineage_manifest(result)
+                            try:
+                                from shoir_excel_foundation import refresh_version_state
+                                refresh_version_state(result)
+                            except Exception:
+                                pass
+                            _rebuild_excel_result(result)
+                            st.session_state["excel_studio_result"] = result
+                            _excel_persist_result(username, result)
+                            st.success("Contract exception approved and recorded.")
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(f"Contract exception could not be recorded: {type(exc).__name__}: {exc}")
+
         with st.expander("Security and formula review"):
             st.dataframe(pd.DataFrame(result.get("security_scan", [])), use_container_width=True, hide_index=True)
             st.dataframe(pd.DataFrame(result.get("formula_gap_findings", [])), use_container_width=True, hide_index=True)
@@ -4377,6 +4411,10 @@ def _excel_render_v2(tier: str, username: str) -> None:
         st.subheader("Activate once, use across Shoir-IE")
         for name in list(frames)[:20]:
             if st.button(f"Activate {name}", key="excel_studio_activate_final_" + hashlib.sha1(str(name).encode()).hexdigest()[:10], use_container_width=True):
+                gate = result.get("activation_gate_by_dataset", {}).get(str(name), {"allowed": True, "status": "UNCONTRACTED", "reason": ""})
+                if not gate.get("allowed", True):
+                    st.error(f"Activation blocked for {name}: {gate.get('reason', 'contract review required.')}")
+                    continue
                 frame = frames[name].copy(deep=True)
                 st.session_state["excel_studio_active_dataset"] = name
                 st.session_state["excel_studio_active_dataset_df"] = frame
@@ -4432,3 +4470,45 @@ def _excel_render_v2(tier: str, username: str) -> None:
 
 # Final application surface binding.
 render_excel_data_cleaning_studio = _excel_render_v2
+
+
+# ---------------------------------------------------------------------------
+# Excel Studio Foundation hardening
+# ---------------------------------------------------------------------------
+try:
+    from shoir_excel_foundation import (
+        enrich_result as _excel_foundation_enrich_result,
+        scalable_text_reader as _excel_foundation_scalable_text_reader,
+        persist_versions as _excel_foundation_persist_versions,
+        augment_evidence_bundle as _excel_foundation_augment_evidence_bundle,
+    )
+except Exception:
+    _excel_foundation_enrich_result = None
+    _excel_foundation_scalable_text_reader = None
+    _excel_foundation_persist_versions = None
+    _excel_foundation_augment_evidence_bundle = None
+
+if _excel_foundation_enrich_result is not None:
+    _EXCEL_FOUNDATION_BASE_PROCESS = process_uploaded_workbook
+    _EXCEL_FOUNDATION_BASE_READER = _excel_engine_read
+    _EXCEL_FOUNDATION_BASE_PERSIST = _excel_persist_result
+
+    def _excel_foundation_reader(raw: bytes, filename: str) -> dict[str, pd.DataFrame]:
+        if str(filename).lower().endswith((".csv", ".tsv", ".txt")) and _excel_foundation_scalable_text_reader is not None:
+            return _excel_foundation_scalable_text_reader(raw, filename)
+        return _EXCEL_FOUNDATION_BASE_READER(raw, filename)
+
+    def process_uploaded_workbook(raw: bytes, filename: str) -> dict[str, Any]:
+        result = _EXCEL_FOUNDATION_BASE_PROCESS(raw, filename)
+        result = _excel_foundation_enrich_result(result, raw, filename)
+        if _excel_foundation_augment_evidence_bundle is not None:
+            result["bundle"] = _excel_foundation_augment_evidence_bundle(result, raw, filename)
+        return result
+
+    def _excel_persist_result(username: str, result: dict[str, Any]) -> bool:
+        ok = _EXCEL_FOUNDATION_BASE_PERSIST(username, result)
+        if ok and _excel_foundation_persist_versions is not None:
+            _excel_foundation_persist_versions(username, result)
+        return ok
+
+    _excel_engine_read = _excel_foundation_reader
