@@ -2546,6 +2546,18 @@ def process_uploaded_workbook(raw: bytes, filename: str) -> dict[str, Any]:
     return result
 
 
+def _header_first_csv_delimiter(text: str) -> str:
+    import csv
+    lines = [line for line in str(text).splitlines() if line.strip()]
+    if not lines:
+        return ","
+    header = lines[0]
+    candidates = [",", ";", "\t", "|"]
+    counts = {delimiter: header.count(delimiter) for delimiter in candidates}
+    best = max(counts, key=counts.get)
+    if counts[best] > 0:
+        return best
+    return _choose_csv_delimiter(text)
 def _definitive_read_raw_workbook(raw: bytes, filename: str) -> dict[str, pd.DataFrame]:
     """Single authoritative reader used by the final processing entry point."""
     if not raw:
@@ -2566,7 +2578,7 @@ def _definitive_read_raw_workbook(raw: bytes, filename: str) -> dict[str, pd.Dat
                 io.StringIO(decoded),
                 header=None,
                 dtype=object,
-                sep=_choose_csv_delimiter(decoded),
+                sep=_header_first_csv_delimiter(decoded),
                 keep_default_na=False,
             )
         }
