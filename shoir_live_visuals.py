@@ -605,6 +605,9 @@ def _render_auto_kpi_dashboard(module: str, df: pd.DataFrame, chart_token: str) 
         st.info("No compatible automatic visualization could be inferred from the current table. Use Custom Engineering Views below.")
 
 
+_FRAGMENT = getattr(st, "fragment", lambda fn: fn)
+
+@_FRAGMENT
 def render_live_visualization_studio(module: str, *, expanded: bool = False, preferred_key: str | None = None) -> None:
     """Render the live chart studio beneath an active module."""
     tables = discover_visual_tables(module, preferred_key=preferred_key)
