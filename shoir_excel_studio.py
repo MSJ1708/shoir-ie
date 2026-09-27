@@ -827,7 +827,18 @@ def _normalise_accounting_numbers(df: pd.DataFrame) -> tuple[pd.DataFrame, int]:
 def _enhanced_clean_dataframe(df: pd.DataFrame) -> tuple[pd.DataFrame, list[dict[str, str]]]:
     prepared, missing_changes = _enhanced_null_normalise(df)
     prepared, accounting_changes = _normalise_accounting_numbers(prepared)
+    preserved_blank_columns = [
+        str(col) for col in df.columns
+        if int(df[col].notna().sum()) > 0 and int(prepared[col].notna().sum()) == 0
+    ]
     cleaned, audit = _BASE_CLEAN_DATAFRAME(prepared)
+    for col in preserved_blank_columns:
+        if col not in cleaned.columns:
+            cleaned[col] = pd.Series(pd.NA, index=cleaned.index, dtype="string")
+            audit.append({
+                "Action": "Preserve source field after missing-value normalization",
+                "Details": f"Retained source field '{col}' as an explicit blank review field rather than silently dropping it.",
+            })
     if missing_changes:
         audit.insert(0, {
             "Action": "Normalize common missing-value tokens",
@@ -905,14 +916,22 @@ def _potential_outlier_count(series: pd.Series) -> int:
     if not pd.api.types.is_numeric_dtype(series) or pd.api.types.is_bool_dtype(series):
         return 0
     values = pd.to_numeric(series, errors="coerce").dropna()
-    if len(values) < 8:
+    if len(values) < 8 or values.nunique() < 2:
         return 0
     q1, q3 = values.quantile([0.25, 0.75])
     iqr = float(q3 - q1)
-    if iqr <= 0:
+    if iqr > 0:
+        low, high = float(q1 - 1.5 * iqr), float(q3 + 1.5 * iqr)
+        return int(((values < low) | (values > high)).sum())
+    median = float(values.median())
+    mad = float((values - median).abs().median())
+    if mad > 0:
+        robust_z = 0.6745 * (values - median) / mad
+        return int(robust_z.abs().gt(3.5).sum())
+    spread = float(values.max() - values.min())
+    if spread <= 0:
         return 0
-    low, high = float(q1 - 1.5 * iqr), float(q3 + 1.5 * iqr)
-    return int(((values < low) | (values > high)).sum())
+    return int((values != median).sum())
 
 
 def _date_sanity_count(series: pd.Series) -> int:
@@ -1276,6 +1295,23 @@ def _enhanced_detect_header_row(raw: pd.DataFrame, scan_rows: int = 25) -> int:
     if raw.empty:
         return 0
     limit = min(scan_rows, len(raw))
+    if len(raw) >= 2:
+        first = [_normalise_text(v) for v in raw.iloc[0].tolist()]
+        second = [_normalise_text(v) for v in raw.iloc[1].tolist()]
+        first_nonblank = [v for v in first if v]
+        second_nonblank = [v for v in second if v]
+        if first_nonblank and len(first_nonblank) >= 2:
+            first_is_schema = all(
+                bool(re.search(r"[A-Za-z]", v))
+                and not bool(re.fullmatch(r"[-+]?\d+(?:\.\d+)?", v))
+                for v in first_nonblank
+            )
+            second_has_data_signal = any(
+                bool(re.search(r"\d", v)) or bool(re.search(r"[-/:]", v))
+                for v in second_nonblank
+            )
+            if first_is_schema and second_has_data_signal:
+                return 0
     candidates: list[tuple[float, int]] = []
     for i in range(limit):
         row = raw.iloc[i]
