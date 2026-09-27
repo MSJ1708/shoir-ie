@@ -1175,7 +1175,7 @@ def _field_intelligence_rows(df: pd.DataFrame, sheet: str) -> list[dict[str, Any
             else "Clock time" if (
                 pd.api.types.is_string_dtype(series)
                 and float(
-                    series.dropna().astype("string").str.fullmatch(r"\\d{1,2}:\\d{2}(?::\\d{2})?").mean()
+                    series.dropna().astype("string").str.fullmatch(r"\d{1,2}:\d{2}(?::\d{2})?").mean()
                 ) >= 0.75
             )
             else "Text"
