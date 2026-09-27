@@ -130,6 +130,11 @@ def _read_raw_workbook(raw: bytes, filename: str) -> dict[str, pd.DataFrame]:
     lower = str(filename).lower()
     if lower.endswith((".csv", ".txt", ".tsv")):
         text, encoding = _decode_text_bytes(raw)
+        # Some industrial export pipelines serialize line breaks as literal
+        # backslash-n sequences. Only expand them when the decoded payload has
+        # no real row breaks; otherwise preserve literal field content exactly.
+        if "\\n" in text and "\n" not in text and "\r" not in text:
+            text = text.replace("\\r\\n", "\n").replace("\\n", "\n")
         delimiter = _detect_csv_delimiter(text)
         frame = pd.read_csv(
             io.StringIO(text),
