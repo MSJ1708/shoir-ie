@@ -3618,14 +3618,12 @@ def _excel_engine_read(raw: bytes, filename: str) -> dict[str, pd.DataFrame]:
             delimiter = "\t"
         else:
             delimiter = _choose_csv_delimiter(text)
-        frame = pd.read_csv(
-            io.StringIO(text),
-            header=None,
+        import csv
+        rows = list(csv.reader(io.StringIO(text), delimiter=delimiter))
+        width = max((len(row) for row in rows), default=0)
+        frame = pd.DataFrame(
+            [list(row) + [""] * (width - len(row)) for row in rows],
             dtype=object,
-            sep=delimiter,
-            keep_default_na=False,
-            na_filter=False,
-            engine="python",
         )
         frame.attrs["source_encoding"] = encoding
         frame.attrs["source_delimiter"] = delimiter
