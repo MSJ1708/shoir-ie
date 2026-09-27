@@ -3246,12 +3246,12 @@ def _excel_detect_locale(text: str) -> dict[str, Any]:
 def _excel_detect_table_blocks(raw_df: pd.DataFrame, header_row: int) -> list[dict[str, Any]]:
     if raw_df.empty:
         return []
-    # Scan the whole worksheet. A title/report header before the first table\n    # must not cause earlier table blocks to be skipped.\n    body_start = 0
+    # Scan the whole worksheet so title/report rows cannot hide earlier tables.
     blocks = []
     nonblank = ~raw_df.isna().all(axis=1)
     start = None
     blank_streak = 0
-    for idx in range(body_start, len(raw_df)):
+    for idx in range(0, len(raw_df)):
         if bool(nonblank.iloc[idx]):
             if start is None:
                 start = idx
