@@ -2626,6 +2626,11 @@ def _definitive_read_raw_workbook(raw: bytes, filename: str) -> dict[str, pd.Dat
                 continue
         if decoded is None:
             raise ValueError("CSV encoding could not be decoded safely.")
+        # Handle serialized CSV payloads where row breaks were escaped as
+        # literal backslash-n characters. Do this only when no real row
+        # separators exist, so legitimate backslash-n field content is kept.
+        if "\\n" in decoded and "\n" not in decoded and "\r" not in decoded:
+            decoded = decoded.replace("\\r\\n", "\n").replace("\\n", "\n")
         return {
             "CSV": pd.read_csv(
                 io.StringIO(decoded),
