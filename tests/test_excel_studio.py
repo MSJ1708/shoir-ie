@@ -129,7 +129,11 @@ def test_excel_studio_governance_plus_layers_and_module_readiness():
     assert result["module_readiness"]
     assert result["privacy_scan"]
     assert "Forecasting / Planning" in {x["Recommended module"] for x in result["module_readiness"]}
-    assert "PRIVACY SCAN" in result["xlsx"][:2] if False else True
+    from openpyxl import load_workbook
+    book = load_workbook(io.BytesIO(result["xlsx"]), read_only=True)
+    assert "PRIVACY SCAN" in book.sheetnames
+    assert "DATA CONTRACT" in book.sheetnames
+    book.close()
     assert any(x["Issue"] == "Potential sensitive field" for x in result["review_register"])
 
 
