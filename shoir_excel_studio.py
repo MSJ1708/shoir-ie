@@ -1812,7 +1812,7 @@ def render_excel_data_cleaning_studio(tier: str, username: str) -> None:
     m4.metric("Review items", f"{len(result.get('review_register', [])):,}")
     m5.metric("High priority", high_reviews)
 
-    tabs = st.tabs(["Overview", "Clean Data", "Quality Center", "Field Intelligence", "Export"])
+    tabs = st.tabs(["Overview", "Clean Data", "Quality Center", "Field Intelligence", "Governance", "Export"])
 
     with tabs[0]:
         st.dataframe(profile_frame, use_container_width=True, hide_index=True)
@@ -1823,6 +1823,9 @@ def render_excel_data_cleaning_studio(tier: str, username: str) -> None:
         if result.get("cross_sheet_map"):
             st.markdown("### Potential cross-sheet relationships")
             st.dataframe(pd.DataFrame(result["cross_sheet_map"]), use_container_width=True, hide_index=True)
+        if result.get("module_readiness"):
+            st.markdown("### Recommended Shoir-IE workflows")
+            st.dataframe(pd.DataFrame(result["module_readiness"]), use_container_width=True, hide_index=True)
 
     with tabs[1]:
         sheet = st.selectbox("Clean sheet", list(cleaned), key="excel_studio_sheet")
@@ -1842,7 +1845,7 @@ def render_excel_data_cleaning_studio(tier: str, username: str) -> None:
             result["audits"][sheet].extend(new_audit)
             result["profiles"][sheet] = _enhanced_profile_dataframe(cleaned_df)
             result["field_intelligence"] = [x for x in result["field_intelligence"] if x.get("Sheet") != sheet] + _field_intelligence_rows(cleaned_df, sheet)
-            result["review_register"] = [x for x in result["review_register"] if x.get("Sheet") != sheet] + _quality_review_register(cleaned_df, sheet)
+            _refresh_excel_governance(result)
             result["xlsx"] = build_ultimate_workbook(
                 f"Shoir-IE — {result['filename']}", result["cleaned_sheets"], result["raw_sheets"], result["audits"], result["profiles"],
                 source_metadata=result.get("source_metadata"), field_intelligence=result.get("field_intelligence"),
@@ -1859,7 +1862,8 @@ def render_excel_data_cleaning_studio(tier: str, username: str) -> None:
             st.rerun()
         if c2.button("↩ Restore from preserved RAW", key="excel_studio_restore", use_container_width=True):
             raw_df = result["raw_sheets"][sheet]
-            header_row = int(result.get("source_metadata", [{}])[0].get("Detected header row", 1)) - 1 if result.get("source_metadata") else detect_header_row(raw_df)
+            meta_by_sheet = {str(m.get("Source sheet", "")): m for m in result.get("source_metadata", [])}
+            header_row = int(meta_by_sheet.get(sheet, {}).get("Detected header row", 1)) - 1 if meta_by_sheet.get(sheet) else detect_header_row(raw_df)
             header_row = max(0, min(header_row, max(0, len(raw_df) - 1)))
             table = raw_df.iloc[header_row + 1:].copy()
             table.columns = _deduplicate_headers(raw_df.iloc[header_row].tolist())
@@ -1868,6 +1872,8 @@ def render_excel_data_cleaning_studio(tier: str, username: str) -> None:
             result["cleaned_sheets"][sheet] = restored
             result["audits"][sheet] = [{"Action": "Restore", "Details": "Restored from preserved RAW values and re-applied governed cleaning."}] + restore_audit
             result["profiles"][sheet] = _enhanced_profile_dataframe(restored)
+            result["field_intelligence"] = [x for x in result.get("field_intelligence", []) if x.get("Sheet") != sheet] + _field_intelligence_rows(restored, sheet)
+            _refresh_excel_governance(result)
             st.session_state["excel_studio_result"] = result
             st.rerun()
 
@@ -1889,6 +1895,16 @@ def render_excel_data_cleaning_studio(tier: str, username: str) -> None:
                 st.dataframe(pd.DataFrame(result["formula_inventory"]), use_container_width=True, hide_index=True)
 
     with tabs[4]:
+        st.markdown("### Governance intelligence")
+        governance_sets = [("Data contract", "data_contract"), ("Relationship integrity", "relationship_integrity"), ("Potential duplicate candidates", "duplicate_candidates"), ("Privacy scan", "privacy_scan"), ("Formula quality", "formula_quality")]
+        for label, key in governance_sets:
+            st.markdown("#### " + label)
+            st.dataframe(pd.DataFrame(result.get(key, [])), use_container_width=True, hide_index=True)
+        st.markdown("#### Cleaning recipe")
+        st.dataframe(pd.DataFrame([{"Rule": a, "Behavior": b, "Mode": c, "Reason": d} for a, b, c, d in _CLEAN_RECIPE]), use_container_width=True, hide_index=True)
+        st.caption("Privacy scanning reports indicators and counts only; raw sensitive values are never copied into governance tables.")
+
+    with tabs[5]:
         safe_name = re.sub(r"[^A-Za-z0-9]+", "_", result["filename"]).strip("_").lower()
         st.download_button(
             "📥 Download Industrial Excel Intelligence Workbook",
@@ -2492,37 +2508,7 @@ _BASE_PROCESS_GOVERNANCE = process_uploaded_workbook
 
 def process_uploaded_workbook(raw: bytes, filename: str) -> dict[str, Any]:
     result = _BASE_PROCESS_GOVERNANCE(raw, filename)
-    cleaned = result.get("cleaned_sheets", {})
-    result["duplicate_candidates"] = [
-        item
-        for sheet, frame in cleaned.items()
-        for item in _normalised_duplicate_candidates(frame, sheet)
-    ]
-    result["privacy_scan"] = _privacy_scan(cleaned)
-    result["relationship_integrity"] = _relationship_integrity(cleaned)
-    result["formula_quality"] = _formula_quality_inventory(result.get("formula_inventory", []))
-    result["module_readiness"] = _module_readiness(cleaned)
-    result["data_contract"] = _data_contract(cleaned, result.get("field_intelligence", []))
-    # Promote candidate duplicates/privacy findings into the review register.
-    result["review_register"] = list(result.get("review_register", []))
-    for item in result["duplicate_candidates"]:
-        result["review_register"].append({
-            "Severity": "Medium",
-            "Sheet": item["Sheet"],
-            "Field": item["Field"],
-            "Issue": item["Review"],
-            "Evidence": f"{item['Occurrences']:,} occurrence(s) across source variants: {item['Source variants']}",
-            "Recommended action": item["Recommended action"],
-        })
-    for item in result["privacy_scan"]:
-        result["review_register"].append({
-            "Severity": "High",
-            "Sheet": item["Sheet"],
-            "Field": item["Field"],
-            "Issue": "Potential sensitive field",
-            "Evidence": f"Detected indicator: {item['Indicator']}; estimated matches: {item['Estimated matches']:,}.",
-            "Recommended action": item["Action"],
-        })
+    _refresh_excel_governance(result)
     result["xlsx"] = _append_governance_plus_to_workbook(result["xlsx"], result)
     result["xlsx"] = _postprocess_export_guardrails(result["xlsx"])
     result["bundle"] = build_ultimate_bundle(
@@ -2530,7 +2516,7 @@ def process_uploaded_workbook(raw: bytes, filename: str) -> dict[str, Any]:
         result["xlsx"],
         result["audits"],
         result["profiles"],
-        cleaned_sheets=cleaned,
+        cleaned_sheets=result.get("cleaned_sheets", {}),
         raw_sheets=result.get("raw_sheets", {}),
         field_intelligence=result.get("field_intelligence", []),
         review_register=result.get("review_register", []),
