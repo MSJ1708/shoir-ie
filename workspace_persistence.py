@@ -8,6 +8,7 @@ inputs, tables, selections, research state, and Copilot conversation.
 from __future__ import annotations
 
 import datetime as _dt
+import hashlib
 import json
 import sqlite3
 from io import StringIO
