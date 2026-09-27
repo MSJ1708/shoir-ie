@@ -4032,3 +4032,358 @@ def _excel_render_professional(tier: str, username: str) -> None:
 
 # Final UI binding for the application import surface.
 render_excel_data_cleaning_studio = _excel_render_professional
+
+
+def _excel_render_v2(tier: str, username: str) -> None:
+    import streamlit as st
+    from shoir_tier_capabilities import tier_allows
+    if not tier_allows(tier, "Starter"):
+        st.warning("This workspace is not included in your current package.")
+        return
+
+    result = st.session_state.get("excel_studio_result")
+    st.markdown("## 📊 Excel Intelligence & Data Cleaning Studio")
+    st.caption("Import → Understand → Clean → Validate → Map → Remediate → Visualize → Activate → Export.")
+    if not isinstance(result, dict):
+        left, right = st.columns([5, 1])
+        upload = left.file_uploader(
+            "Drop an Excel / XLSM / XLS / CSV / TSV / TXT file",
+            type=["xlsx", "xlsm", "xls", "csv", "tsv", "txt"],
+            key="excel_studio_upload_v2",
+            help="Messy reports, industrial exports, legacy spreadsheets and delimited text are supported.",
+        )
+        right.caption("Safe by default")
+        if upload is not None:
+            raw = upload.getvalue()
+            try:
+                with st.spinner("Profiling, cleaning and governing the file…"):
+                    result = process_uploaded_workbook(raw, upload.name)
+                st.session_state["excel_studio_result"] = result
+                st.session_state["excel_studio_signature"] = result["signature"]
+                versions = st.session_state.setdefault("excel_studio_versions", [])
+                previous = versions[-1] if versions else None
+                snapshot = {
+                    "dataset_id": result["lineage_manifest"]["dataset_id"],
+                    "version": len(versions) + 1,
+                    "filename": upload.name,
+                    "sha256": result["signature"],
+                    "schema": {k: v.get("Schema fingerprint", "") for k, v in result["profiles"].items()},
+                    "columns": {k: [str(col) for col in frame.columns] for k, frame in result["cleaned_sheets"].items()},
+                    "imported_utc": datetime.now(timezone.utc).isoformat(),
+                    "schema_drift": {},
+                }
+                if previous:
+                    snapshot["schema_drift"] = {
+                        sheet: _excel_schema_drift(
+                            pd.DataFrame(columns=previous.get("columns", {}).get(sheet, [])),
+                            pd.DataFrame(columns=[str(col) for col in frame.columns]),
+                        )
+                        for sheet, frame in result["cleaned_sheets"].items()
+                    }
+                versions.append(snapshot)
+                st.session_state["excel_studio_versions"] = versions[-25:]
+                result["dataset_version"] = snapshot["version"]
+                result["schema_drift"] = snapshot["schema_drift"]
+                result["validation_rules"] = st.session_state.setdefault("excel_studio_validation_rules", list(_EXCEL_DEFAULT_RULES))
+                result["engineering_limits"] = st.session_state.setdefault("excel_studio_engineering_limits", {})
+                _excel_refresh_governance(result)
+                result["lineage_manifest"] = _excel_build_lineage_manifest(result)
+                _rebuild_excel_result(result)
+                st.session_state["excel_studio_result"] = result
+                persisted = _excel_persist_result(username, result)
+                st.success(
+                    f"Processed {len(result.get('cleaned_sheets', {})):,} sheet(s), "
+                    f"discovered {len(result.get('table_catalog', [])):,} table(s), "
+                    f"and recorded {len(result.get('review_register', [])):,} review item(s)."
+                )
+                if not persisted:
+                    st.info("Dataset is active in this session. Durable workspace persistence is not currently available.")
+            except Exception as exc:
+                st.error(f"Import failed safely: {type(exc).__name__}: {exc}")
+        st.stop()
+
+    cleaned = result.get("cleaned_sheets", {})
+    frames = result.get("table_datasets", {}) or cleaned
+    profiles = result.get("profiles", {})
+    review = result.get("review_register", [])
+    failures = [x for x in result.get("validation_results", []) if x.get("Status") == "FAIL"]
+    high = sum(1 for x in review if x.get("Severity") == "High")
+    cards = st.columns(6)
+    cards[0].metric("Datasets", len(frames))
+    cards[1].metric("Rows", f"{sum(len(v) for v in cleaned.values()):,}")
+    cards[2].metric("Avg quality", f"{float(np.mean([float(v.get('Quality score',0)) for v in profiles.values()])):.1f}%" if profiles else "—")
+    cards[3].metric("Review", len(review))
+    cards[4].metric("High priority", high)
+    cards[5].metric("Validation fails", len(failures))
+
+    chosen_key = st.session_state.get("excel_studio_active_dataset")
+    if chosen_key not in frames:
+        chosen_key = next(iter(frames), None)
+    active = frames[chosen_key].copy(deep=True) if chosen_key in frames else pd.DataFrame()
+    if not active.empty:
+        result["active_table_df"] = active.copy(deep=True)
+        result["active_table_id"] = chosen_key
+        st.session_state["excel_studio_visual_df"] = active.copy(deep=True)
+
+    tabs = st.tabs([
+        "1 · Import", "2 · Structure", "3 · Quality", "4 · Map", "5 · Remediate",
+        "6 · Visualize", "7 · Activate", "8 · Version & Export"
+    ])
+
+    with tabs[0]:
+        st.subheader("Import diagnostics")
+        st.dataframe(pd.DataFrame([result.get("import_diagnostics", {})]), use_container_width=True, hide_index=True)
+        guard = result.get("ingest_guardrails", {})
+        if guard.get("Very large file"):
+            st.warning("Very large upload detected. Keep plots bounded and prefer the table preview rather than loading every point into a chart.")
+        elif guard.get("Large file"):
+            st.info("Large upload detected. Shoir-IE bounds visualization to sampled observations while preserving the cleaned table.")
+        if result.get("source_fidelity"):
+            with st.expander("Workbook fidelity / preservation facts"):
+                st.dataframe(pd.DataFrame(result["source_fidelity"]), use_container_width=True, hide_index=True)
+        st.markdown("### Safety model")
+        st.success("Source values are preserved in RAW sheets. Statistical outliers are review flags, not automatic deletions.")
+        st.caption("XLSM note: macro-bearing sources are inspected with macro awareness, but the governed cleaned export is intentionally a data workbook; verify macro preservation before operational use.")
+        if st.button("Reset Excel Studio", key="excel_studio_reset_v2"):
+            for key in ["excel_studio_result", "excel_studio_signature", "excel_studio_active_dataset", "excel_studio_visual_df"]:
+                st.session_state.pop(key, None)
+            st.rerun()
+
+    with tabs[1]:
+        st.subheader("Structure discovery")
+        st.dataframe(pd.DataFrame(result.get("table_catalog", [])), use_container_width=True, hide_index=True)
+        if frames:
+            chosen = st.selectbox("Preview discovered dataset", list(frames), index=list(frames).index(chosen_key) if chosen_key in frames else 0, key="excel_studio_structure_dataset")
+            st.dataframe(frames[chosen].head(1500), use_container_width=True, hide_index=True)
+            result["active_table_id"] = chosen
+            result["active_table_df"] = frames[chosen].copy(deep=True)
+            if st.button("Set as active", key="excel_studio_structure_activate", type="primary"):
+                st.session_state["excel_studio_active_dataset"] = chosen
+                st.session_state["excel_studio_result"] = result
+                _excel_persist_result(username, result)
+                st.success("Active dataset updated.")
+        st.caption("Independent table blocks are exposed as datasets instead of being merged blindly.")
+
+    with tabs[2]:
+        st.subheader("Quality center")
+        ql, qr = st.columns(2)
+        with ql:
+            st.markdown("#### Validation")
+            st.dataframe(pd.DataFrame(result.get("validation_results", [])), use_container_width=True, hide_index=True)
+            st.markdown("#### Missingness patterns")
+            st.dataframe(pd.DataFrame(result.get("missingness_patterns", [])), use_container_width=True, hide_index=True)
+        with qr:
+            st.markdown("#### Duplicate intelligence")
+            st.dataframe(pd.DataFrame(result.get("duplicate_intelligence", [])), use_container_width=True, hide_index=True)
+            st.markdown("#### Outlier intelligence")
+            st.dataframe(pd.DataFrame(result.get("extended_outliers", [])), use_container_width=True, hide_index=True)
+        with st.expander("Quality rules", expanded=False):
+            rule_frame = pd.DataFrame(result.get("validation_rules", _EXCEL_DEFAULT_RULES))
+            edited_rules = st.data_editor(rule_frame, use_container_width=True, hide_index=True, num_rows="dynamic", key="excel_studio_rules_editor")
+            if st.button("Save quality rules", key="excel_studio_save_rules"):
+                result["validation_rules"] = edited_rules.to_dict("records")
+                st.session_state["excel_studio_validation_rules"] = result["validation_rules"]
+                _excel_refresh_governance(result)
+                result["lineage_manifest"] = _excel_build_lineage_manifest(result)
+                _rebuild_excel_result(result)
+                st.session_state["excel_studio_result"] = result
+                _excel_persist_result(username, result)
+                st.success("Quality rules saved and re-evaluated.")
+        with st.expander("Engineering limits", expanded=False):
+            if active.empty:
+                st.info("No active numeric dataset.")
+            else:
+                numeric_cols = [str(c) for c in active.columns if pd.api.types.is_numeric_dtype(active[c]) and not pd.api.types.is_bool_dtype(active[c])]
+                limits_rows = []
+                stored_limits = result.get("engineering_limits", {})
+                for col in numeric_cols:
+                    cfg = stored_limits.get(col, {}) if isinstance(stored_limits, dict) else {}
+                    limits_rows.append({"Field": col, "Minimum": cfg.get("min"), "Maximum": cfg.get("max")})
+                lim_frame = st.data_editor(pd.DataFrame(limits_rows), use_container_width=True, hide_index=True, key="excel_studio_limits_editor")
+                if st.button("Save engineering limits", key="excel_studio_save_limits"):
+                    new_limits = {}
+                    for row in lim_frame.to_dict("records"):
+                        if row.get("Field"):
+                            low, high = row.get("Minimum"), row.get("Maximum")
+                            if low not in ("", None) or high not in ("", None):
+                                new_limits[str(row["Field"])] = {"min": low, "max": high}
+                    result["engineering_limits"] = new_limits
+                    st.session_state["excel_studio_engineering_limits"] = new_limits
+                    _excel_refresh_governance(result)
+                    result["lineage_manifest"] = _excel_build_lineage_manifest(result)
+                    _rebuild_excel_result(result)
+                    st.session_state["excel_studio_result"] = result
+                    _excel_persist_result(username, result)
+                    st.success("Engineering limits saved and violations recalculated.")
+        with st.expander("Security and formula review"):
+            st.dataframe(pd.DataFrame(result.get("security_scan", [])), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(result.get("formula_gap_findings", [])), use_container_width=True, hide_index=True)
+
+    with tabs[3]:
+        st.subheader("Data Mapper")
+        mapping = pd.DataFrame(result.get("semantic_mapping") or _excel_semantic_mapping(active))
+        if not mapping.empty:
+            edited = st.data_editor(mapping, use_container_width=True, hide_index=True, key="excel_studio_mapper_editor")
+            if st.button("Save approved mapping", key="excel_studio_save_mapping", type="primary"):
+                result["semantic_mapping"] = edited.to_dict("records")
+                result["mapping_version"] = int(result.get("mapping_version", 0)) + 1
+                result["lineage_manifest"] = _excel_build_lineage_manifest(result)
+                _rebuild_excel_result(result)
+                st.session_state["excel_studio_result"] = result
+                _excel_persist_result(username, result)
+                st.success("Mapping saved. The active dataset can now be activated without re-uploading.")
+        st.markdown("### Unit intelligence")
+        unit_frame = pd.DataFrame(result.get("unit_catalog", []))
+        st.dataframe(unit_frame, use_container_width=True, hide_index=True)
+        if not unit_frame.empty and not active.empty:
+            unit_choices = [x for x in unit_frame["Field"].tolist() if x in active.columns]
+            if unit_choices:
+                field = st.selectbox("Convert unit field", unit_choices, key="excel_studio_unit_field")
+                source_unit = _excel_unit_token(field)
+                if source_unit:
+                    compatible = [u for u in _EXCEL_UNIT_FACTORS if _EXCEL_UNIT_FACTORS[u][0] == _EXCEL_UNIT_FACTORS[source_unit][0]]
+                    target = st.selectbox("Target unit", compatible, key="excel_studio_unit_target")
+                    st.caption(f"Detected {source_unit}. Conversion is explicit; Shoir-IE never silently changes physical units.")
+                    if target != source_unit and st.button("Preview unit conversion", key="excel_studio_preview_unit"):
+                        try:
+                            converted, changed = _excel_convert_unit_values(active[field], source_unit, target)
+                            preview = active.copy(deep=True)
+                            preview[field] = converted
+                            st.dataframe(pd.DataFrame({"Before": active[field].head(20), "After": preview[field].head(20)}), use_container_width=True, hide_index=True)
+                            if st.button("Apply unit conversion", key="excel_studio_apply_unit", type="primary"):
+                                if chosen_key in result.get("table_datasets", {}):
+                                    result["table_datasets"][chosen_key] = preview
+                                elif chosen_key in result.get("cleaned_sheets", {}):
+                                    result["cleaned_sheets"][chosen_key] = preview
+                                result["active_table_df"] = preview.copy(deep=True)
+                                result["unit_conversion_log"] = result.get("unit_conversion_log", []) + [{
+                                    "Field": field, "From": source_unit, "To": target, "Values converted": changed,
+                                    "Applied UTC": datetime.now(timezone.utc).isoformat(), "Reviewer": username,
+                                }]
+                                _excel_refresh_governance(result)
+                                result["lineage_manifest"] = _excel_build_lineage_manifest(result)
+                                _rebuild_excel_result(result)
+                                st.session_state["excel_studio_result"] = result
+                                _excel_persist_result(username, result)
+                                st.success("Unit conversion applied with audit evidence.")
+                        except Exception as exc:
+                            st.error(f"Unit conversion could not be applied: {exc}")
+
+    with tabs[4]:
+        st.subheader("Guided remediation")
+        if active.empty:
+            st.info("No active dataset.")
+        else:
+            action = st.selectbox("Safe transformation", ["Trim text", "Normalize missing tokens", "Remove exact duplicate rows", "Numeric coercion"], key="excel_studio_remediation_action_v2")
+            field = st.selectbox("Field", ["All"] + [str(c) for c in active.columns], key="excel_studio_remediation_field_v2")
+            target = "" if field == "All" else field
+            preview = _excel_remediation_preview(active, action, target)
+            st.write(f"Preview: {len(active):,} → {len(preview):,} rows")
+            st.dataframe(preview.head(250), use_container_width=True, hide_index=True)
+            approve = st.checkbox("I reviewed the preview and approve this transformation", key="excel_studio_remediation_approval")
+            if st.button("Apply approved transformation", key="excel_studio_apply_remediation_v2", type="primary", disabled=not approve):
+                if chosen_key in result.get("table_datasets", {}):
+                    result["table_datasets"][chosen_key] = preview.copy(deep=True)
+                elif chosen_key in result.get("cleaned_sheets", {}):
+                    result["cleaned_sheets"][chosen_key] = preview.copy(deep=True)
+                result.setdefault("remediation_log", []).append({
+                    "Action": action, "Field": target or "All",
+                    "Rows before": len(active), "Rows after": len(preview),
+                    "Reviewer": username, "Applied UTC": datetime.now(timezone.utc).isoformat(),
+                })
+                result["active_table_df"] = preview.copy(deep=True)
+                _excel_refresh_governance(result)
+                result["lineage_manifest"] = _excel_build_lineage_manifest(result)
+                _rebuild_excel_result(result)
+                st.session_state["excel_studio_result"] = result
+                _excel_persist_result(username, result)
+                st.success("Transformation applied, logged and re-profiled.")
+                st.rerun()
+            st.markdown("#### Transformation history")
+            st.dataframe(pd.DataFrame(result.get("remediation_log", [])), use_container_width=True, hide_index=True)
+
+    with tabs[5]:
+        st.subheader("Universal visualization")
+        if active.empty:
+            st.info("No active data to visualize.")
+        else:
+            try:
+                from shoir_universal_engine import guaranteed_figure
+                fig = guaranteed_figure(active, "Excel Studio · Universal Industrial Visualization")
+                if fig is not None:
+                    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False, "responsive": True})
+            except Exception as exc:
+                st.caption(f"Universal renderer unavailable; using local bounded charts. {type(exc).__name__}")
+            numeric = [str(c) for c in active.columns if pd.api.types.is_numeric_dtype(active[c]) and not pd.api.types.is_bool_dtype(active[c])]
+            categorical = [str(c) for c in active.columns if str(c) not in numeric]
+            if numeric:
+                metric = st.selectbox("Metric", numeric, key="excel_studio_visual_metric_v2")
+                hist = px.histogram(active, x=metric, nbins=30, title=f"{metric} distribution")
+                st.plotly_chart(hist, use_container_width=True, config={"displayModeBar": False, "responsive": True})
+                if categorical:
+                    group = st.selectbox("Group", categorical, key="excel_studio_visual_group_v2")
+                    grouped = active.groupby(group, dropna=False)[metric].mean().reset_index().head(60)
+                    bar = px.bar(grouped, x=group, y=metric, title=f"{metric} by {group}")
+                    st.plotly_chart(bar, use_container_width=True, config={"displayModeBar": False, "responsive": True})
+            if len(active.columns) >= 2:
+                st.caption("The universal renderer is the guaranteed baseline; additional charts remain data-driven and never invent observations.")
+
+    with tabs[6]:
+        st.subheader("Activate once, use across Shoir-IE")
+        for name in list(frames)[:20]:
+            if st.button(f"Activate {name}", key="excel_studio_activate_final_" + hashlib.sha1(str(name).encode()).hexdigest()[:10], use_container_width=True):
+                frame = frames[name].copy(deep=True)
+                st.session_state["excel_studio_active_dataset"] = name
+                st.session_state["excel_studio_active_dataset_df"] = frame
+                st.session_state["universal_active_dataset"] = frame
+                st.session_state["industrial_workbook_current_df"] = frame
+                st.session_state["data_platform_latest_df"] = frame
+                st.session_state["excel_studio_result"] = result
+                result["active_table_id"] = name
+                result["active_table_df"] = frame
+                result["activation_contract"] = {
+                    "dataset_id": result.get("lineage_manifest", {}).get("dataset_id", ""),
+                    "table": name,
+                    "rows": int(len(frame)),
+                    "columns": int(len(frame.columns)),
+                    "schema": _schema_fingerprint(frame),
+                    "activated_utc": datetime.now(timezone.utc).isoformat(),
+                    "actor": username,
+                    "handoff": "Universal Engine / Industrial Workbook / Data Platform",
+                }
+                _excel_persist_result(username, result)
+                st.success(f"{name} is now the active Shoir-IE dataset.")
+        st.markdown("### Module recommendations")
+        st.dataframe(pd.DataFrame(result.get("module_readiness", [])), use_container_width=True, hide_index=True)
+        st.info("Activation writes common workspace keys used by the Universal Engine, Industrial Workbook and Data Platform so downstream modules can consume the cleaned dataset without another upload.")
+
+    with tabs[7]:
+        st.subheader("Version history & schema drift")
+        versions = st.session_state.get("excel_studio_versions", [])
+        st.dataframe(pd.DataFrame(versions), use_container_width=True, hide_index=True)
+        if result.get("schema_drift"):
+            st.markdown("#### Current vs previous schema")
+            drift_rows = []
+            for sheet, info in result["schema_drift"].items():
+                drift_rows.append({
+                    "Sheet": sheet,
+                    "Compatible": info.get("Compatible"),
+                    "Added": ", ".join(info.get("Added fields", [])),
+                    "Removed": ", ".join(info.get("Removed fields", [])),
+                    "Type changes": len(info.get("Type changes", [])),
+                    "Rename candidates": len(info.get("Renamed field candidates", [])),
+                })
+            st.dataframe(pd.DataFrame(drift_rows), use_container_width=True, hide_index=True)
+        if st.button("Persist current dataset", key="excel_studio_persist_now", type="primary"):
+            ok = _excel_persist_result(username, result)
+            st.success("Dataset workspace snapshot saved.") if ok else st.warning("Durable persistence is not available; dataset remains active for this session.")
+        st.download_button("Export lineage JSON", _excel_export_json(result), "shoir_ie_excel_lineage.json", "application/json", use_container_width=True)
+        st.download_button("Export clean CSV", _excel_export_clean_csv(result), "shoir_ie_excel_clean.csv", "text/csv", use_container_width=True)
+        parquet = _excel_export_parquet(result)
+        if parquet:
+            st.download_button("Export Parquet", parquet, "shoir_ie_excel_clean.parquet", "application/octet-stream", use_container_width=True)
+        st.download_button("Download Industrial XLSX", result["xlsx"], "shoir_ie_industrial_clean.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", type="primary", use_container_width=True)
+        st.download_button("Download Evidence ZIP", result["bundle"], "shoir_ie_excel_evidence.zip", "application/zip", use_container_width=True)
+
+# Final application surface binding.
+render_excel_data_cleaning_studio = _excel_render_v2
