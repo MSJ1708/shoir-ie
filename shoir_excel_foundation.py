@@ -223,6 +223,7 @@ def build_contracts(result: Mapping[str, Any]) -> list[dict[str, Any]]:
             },
         ]
         frame = (result.get("table_datasets") or result.get("cleaned_sheets") or {}).get(key)
+        source_sheet = str(ds.get("Source sheet") or key.split("::")[0])
         if isinstance(frame, pd.DataFrame):
             for item in required:
                 series = frame[item["Field"]]
@@ -234,12 +235,47 @@ def build_contracts(result: Mapping[str, Any]) -> list[dict[str, Any]]:
                     "passed": passed,
                     "evidence": f"{int(series.isna().sum()):,} missing value(s).",
                 })
-        blocked = [r for r in rules if not r["passed"] and r["severity"] == "High"]
+        inherited = []
+        for issue in result.get("validation_results", []):
+            if str(issue.get("Sheet", "")) not in {key, source_sheet}:
+                continue
+            if str(issue.get("Status", "")).upper() == "FAIL":
+                inherited.append({
+                    "id": "VAL-" + _norm(issue.get("Rule", "validation"))[:24].upper(),
+                    "name": str(issue.get("Rule", "Validation rule failed")),
+                    "severity": str(issue.get("Severity", "High")),
+                    "passed": False,
+                    "evidence": str(issue.get("Evidence", "Validation failure detected.")),
+                })
+        for issue in result.get("engineering_limit_findings", []):
+            if str(issue.get("Sheet", "")) in {key, source_sheet}:
+                inherited.append({
+                    "id": "ENG-" + _norm(issue.get("Field", "limit"))[:20].upper(),
+                    "name": str(issue.get("Issue", "Engineering limit violation")),
+                    "severity": str(issue.get("Severity", "High")),
+                    "passed": False,
+                    "evidence": str(issue.get("Evidence", "Engineering limit violation detected.")),
+                })
+        for issue in result.get("security_scan", []):
+            if str(issue.get("Sheet", "")) in {key, source_sheet}:
+                inherited.append({
+                    "id": "SEC-" + _norm(issue.get("Indicator", "security"))[:20].upper(),
+                    "name": "Potential secret/security exposure",
+                    "severity": "High",
+                    "passed": False,
+                    "evidence": f"{issue.get('Indicator', 'security')}: {issue.get('Matches', 0)} match(es).",
+                })
+        rules.extend(inherited)
+        blocked = [r for r in rules if not r["passed"] and str(r["severity"]).casefold() == "high"]
+        contract_payload = f"{ds['Dataset ID']}|{key}|{json.dumps(rules, sort_keys=True, default=str)}"
+        contract_hash = hashlib.sha256(contract_payload.encode("utf-8")).hexdigest()[:24].upper()
         status = "BLOCKED" if blocked else "PASS"
         contracts.append({
+            "Contract ID": "CTR-" + contract_hash[:16],
             "Dataset ID": ds["Dataset ID"],
             "Dataset key": key,
             "Contract version": 1,
+            "Contract hash": contract_hash,
             "Status": status,
             "Activation policy": "BLOCK on high-severity failures; explicit exception approval required.",
             "Blocking failures": len(blocked),
@@ -289,6 +325,8 @@ def fidelity_report(raw: bytes, filename: str) -> dict[str, Any]:
         "Data validations present": False,
         "Conditional formatting present": False,
         "Fidelity warning": "",
+        "Source preserved in evidence package": True,
+        "Cleaned export fidelity status": "Data-focused governed export; verify non-tabular workbook features before operational use.",
     }
     if not lower.endswith((".xlsx", ".xlsm")):
         report["Fidelity warning"] = "Delimited text has no workbook presentation layer to preserve."
@@ -337,6 +375,7 @@ def build_scalable_ingestion_profile(raw: bytes, filename: str) -> dict[str, Any
         "Very large file": size >= 100 * 1024 * 1024,
         "Peak-memory strategy": "Chunk parse + concatenate" if mode == "chunked-delimited" else "read-only worksheet iteration",
         "Visualization policy": "Bounded/sample-based rendering for large datasets.",
+        "Malformed-row policy": "Fail closed; source records are never silently skipped.",
     }
 
 
@@ -374,7 +413,7 @@ def scalable_text_reader(raw: bytes, filename: str) -> dict[str, pd.DataFrame]:
         sep=delimiter,
         keep_default_na=False,
         low_memory=True,
-        on_bad_lines="warn",
+        on_bad_lines="error",
     )
     if chunked:
         chunks = list(pd.read_csv(io.StringIO(text), chunksize=100_000, **common))

@@ -3918,6 +3918,21 @@ def _excel_render_professional(tier: str, username: str) -> None:
     with tabs[0]:
         st.subheader("Import diagnostics")
         st.dataframe(pd.DataFrame([result.get("import_diagnostics", {})]), use_container_width=True, hide_index=True)
+        if result.get("fidelity_report"):
+            st.markdown("### Workbook fidelity assessment")
+            st.dataframe(pd.DataFrame([result["fidelity_report"]]), use_container_width=True, hide_index=True)
+        if result.get("scalable_ingestion"):
+            st.markdown("### Ingestion scalability")
+            st.dataframe(pd.DataFrame([result["scalable_ingestion"]]), use_container_width=True, hide_index=True)
+        if result.get("dataset_registry"):
+            st.markdown("### Dataset-first registry")
+            st.dataframe(
+                pd.DataFrame(result["dataset_registry"])[
+                    [c for c in ["Dataset ID", "Dataset key", "Version", "Source sheet", "Table ID", "Rows", "Columns", "Schema hash", "Content hash", "Semantic coverage %", "Status"] if c in result["dataset_registry"][0]]
+                ],
+                use_container_width=True,
+                hide_index=True,
+            )
         st.markdown("### What will happen")
         st.write("The original source is retained. Cleaning is conservative. Statistical outliers are flagged, not deleted. Sensitive-field scans retain indicators, not raw values.")
         if result.get("ingest_guardrails", {}).get("Large file"):
@@ -4197,6 +4212,10 @@ def _excel_render_v2(tier: str, username: str) -> None:
     with tabs[1]:
         st.subheader("Structure discovery")
         st.dataframe(pd.DataFrame(result.get("table_catalog", [])), use_container_width=True, hide_index=True)
+        st.markdown("### First-class datasets")
+        dataset_frame = pd.DataFrame(result.get("dataset_registry", []))
+        if not dataset_frame.empty:
+            st.dataframe(dataset_frame, use_container_width=True, hide_index=True)
         if frames:
             chosen = st.selectbox("Preview discovered dataset", list(frames), index=list(frames).index(chosen_key) if chosen_key in frames else 0, key="excel_studio_structure_dataset")
             st.dataframe(frames[chosen].head(1500), use_container_width=True, hide_index=True)
@@ -4300,6 +4319,10 @@ def _excel_render_v2(tier: str, username: str) -> None:
 
     with tabs[3]:
         st.subheader("Data Mapper")
+        industrial_semantics = pd.DataFrame(result.get("industrial_semantics", []))
+        if not industrial_semantics.empty:
+            st.markdown("### Industrial semantic layer")
+            st.dataframe(industrial_semantics, use_container_width=True, hide_index=True)
         mapping = pd.DataFrame(result.get("semantic_mapping") or _excel_semantic_mapping(active))
         if not mapping.empty:
             edited = st.data_editor(mapping, use_container_width=True, hide_index=True, key="excel_studio_mapper_editor")
@@ -4442,6 +4465,11 @@ def _excel_render_v2(tier: str, username: str) -> None:
 
     with tabs[7]:
         st.subheader("Version history & schema drift")
+        st.markdown("### Durable dataset version manifests")
+        durable_versions = pd.DataFrame(result.get("dataset_versions_history", []))
+        if not durable_versions.empty:
+            st.dataframe(durable_versions, use_container_width=True, hide_index=True)
+        st.markdown("### Session schema drift history")
         versions = st.session_state.get("excel_studio_versions", [])
         st.dataframe(pd.DataFrame(versions), use_container_width=True, hide_index=True)
         if result.get("schema_drift"):

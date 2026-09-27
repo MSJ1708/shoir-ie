@@ -145,3 +145,38 @@ def test_evidence_bundle_contains_exact_source_bytes_after_integration():
     with zipfile.ZipFile(io.BytesIO(bundle), "r") as zf:
         assert zf.read("SOURCE_ORIGINAL/source.csv") == source
         assert b"DS-1" in zf.read("governance/foundation_manifest.json")
+
+def test_contract_inherits_existing_high_severity_validation_failures():
+    df = pd.DataFrame({"Asset ID": ["A1", None], "Temp": [80, 120]})
+    result = {
+        "dataset_registry": build_dataset_registry(_result({"Ops::T001": df})),
+        "industrial_semantics": build_industrial_semantics({"table_datasets": {"Ops::T001": df}}),
+        "table_datasets": {"Ops::T001": df},
+        "cleaned_sheets": {"Ops": df},
+        "validation_results": [{
+            "Sheet": "Ops",
+            "Rule": "Required identifier non-null",
+            "Status": "FAIL",
+            "Severity": "High",
+            "Evidence": "1 missing identifier",
+        }],
+        "engineering_limit_findings": [],
+        "security_scan": [],
+    }
+    contracts = build_contracts(result)
+    assert contracts[0]["Status"] == "BLOCKED"
+    assert contracts[0]["Blocking failures"] >= 1
+
+
+def test_processed_excel_result_exposes_foundation_objects_and_original_source():
+    from shoir_excel_studio import process_uploaded_workbook
+    raw = b"SKU,Qty\nA1,10\nA2,20\n"
+    result = process_uploaded_workbook(raw, "foundation.csv")
+    assert result["foundation_version"]
+    assert result["dataset_registry"]
+    assert result["dataset_contracts"]
+    assert result["industrial_semantics"]
+    assert result["fidelity_report"]["Source SHA256"] == result["signature"]
+    assert result["scalable_ingestion"]["Malformed-row policy"] == "Fail closed; source records are never silently skipped."
+    with zipfile.ZipFile(io.BytesIO(result["bundle"]), "r") as zf:
+        assert zf.read("SOURCE_ORIGINAL/foundation.csv") == raw
