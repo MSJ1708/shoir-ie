@@ -3248,7 +3248,9 @@ def _excel_detect_table_blocks(raw_df: pd.DataFrame, header_row: int) -> list[di
         return []
     # Scan the whole worksheet so title/report rows cannot hide earlier tables.
     blocks = []
-    # Delimited readers preserve blank lines as empty strings; treat both\n    # empty strings and NaN values as structural blanks.\n    structural = raw_df.replace(r"^\s*$", np.nan, regex=True)
+    # Delimited readers preserve blank lines as empty strings; treat both
+    # empty strings and NaN values as structural blanks.
+    structural = raw_df.replace(r"^\s*$", np.nan, regex=True)
     nonblank = ~structural.isna().all(axis=1)
     start = None
     blank_streak = 0
