@@ -670,7 +670,8 @@ MODULE_CATALOG = [
     # ---------------- RESEARCH PACK ($30 add-on) adds ----------------
     {"tier": "Research Pack", "category": "Research AI", "name": "Research AI",
      "when": "You need a research-focused assistant for protocols, hypotheses, statistical planning, reproducibility, manuscript structure and peer-review preparation.",
-     "example": "Ask Research AI to inspect your study design, identify the appropriate analysis plan, review reproducibility risks, and structure reviewer-facing evidence without inventing results or citations."},\n    {"tier": "Research Pack", "category": "Research Authoring", "name": "Statistical Hypothesis Testing",
+     "example": "Ask Research AI to inspect your study design, identify the appropriate analysis plan, review reproducibility risks, and structure reviewer-facing evidence without inventing results or citations."},
+    {"tier": "Research Pack", "category": "Research Authoring", "name": "Statistical Hypothesis Testing",
      "when": "You're writing a paper and need a properly-run t-test, ANOVA, or chi-square test with the actual statistics, not a claimed result.",
      "example": "Test whether your new layout's cycle times are significantly faster than the baseline: get the test statistic, p-value, and a plain-language verdict - \"p = 0.031, reject H0 at α = 0.05\" - ready to cite."},
     {"tier": "Research Pack", "category": "Research Authoring", "name": "LaTeX Document Formatter",
