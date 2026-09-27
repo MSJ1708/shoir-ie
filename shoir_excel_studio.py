@@ -1595,6 +1595,22 @@ def build_ultimate_workbook(
                     chart.set_title({"name": f"{y} by {x}"}); chart.set_legend({"none": True}); chart.set_size({"width": 720, "height": 330})
                     ws.insert_chart("A" + str(8), chart)
 
+        # Backward-compatible aliases for downstream consumers that still look
+        # for the original workbook sheet names.
+        for legacy_name, target, description in [
+            ("EXECUTIVE SUMMARY", "EXECUTIVE DASHBOARD", "Legacy navigation alias. Use EXECUTIVE DASHBOARD for the full view."),
+            ("DATA DICTIONARY", "FIELD INTELLIGENCE", "Legacy navigation alias. Use FIELD INTELLIGENCE for richer field profiling."),
+            ("QUALITY CHECKS", "DATA QUALITY CENTER", "Legacy navigation alias. Use DATA QUALITY CENTER for the governed quality view."),
+        ]:
+            if legacy_name not in used:
+                legacy = workbook.add_worksheet(legacy_name)
+                used.add(legacy_name)
+                legacy.hide_gridlines(2)
+                legacy.write("A1", legacy_name, title_fmt)
+                legacy.write("A3", description, subtitle_fmt)
+                legacy.write_url("A5", f"internal:'{target}'!A1", string=f"Open {target}")
+                legacy.set_column("A:A", 72)
+
     return buf.getvalue()
 
 
