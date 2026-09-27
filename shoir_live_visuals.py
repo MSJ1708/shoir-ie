@@ -21,6 +21,7 @@ import streamlit as st
 
 from shoir_performance import (
     DEFAULT_PLOT_POINTS,
+    DEFAULT_PREVIEW_ROWS,
     as_frame as _perf_as_frame,
     fast_datetime_like_columns,
     limit_categories,
@@ -547,13 +548,15 @@ def _render_auto_kpi_dashboard(module: str, df: pd.DataFrame, chart_token: str) 
     if not isinstance(df, pd.DataFrame) or df.empty:
         return
     st.markdown("### ⚡ Auto-Generated KPI Dashboard")
-    numeric = _numeric_columns(df)
-    missing_pct = float(df.isna().mean().mean() * 100) if len(df.columns) else 100.0
+    metric_frame = sample_for_plot(df, max_points=20_000, chart="metrics") if len(df) >= 50_000 else df
+    numeric = _numeric_columns(metric_frame)
+    missing_pct = float(metric_frame.isna().mean().mean() * 100) if len(metric_frame.columns) else 100.0
+    metric_note = f"sampled n={len(metric_frame):,}" if len(metric_frame) < len(df) else "full dataset"
     cards = [
         ("Rows", f"{len(df):,}", "dataset"),
         ("Columns", f"{len(df.columns):,}", "schema"),
-        ("Missing", f"{missing_pct:.1f}%", "data quality"),
-        ("Numeric KPIs", f"{len(numeric):,}", "measures"),
+        ("Missing", f"{missing_pct:.1f}%", metric_note),
+        ("Numeric KPIs", f"{len(numeric):,}", metric_note),
     ]
     cols = st.columns(4)
     for col, (label, value, detail) in zip(cols, cards):
@@ -739,28 +742,51 @@ def render_live_visualization_studio(module: str, *, expanded: bool = False, pre
             pass
 
         left, right = st.columns(2)
+        chart_token = hashlib.sha1(str(module).encode("utf-8")).hexdigest()[:12]
+        html_key = f"liveviz_html_bytes_{chart_token}"
+        csv_key = f"liveviz_csv_bytes_{chart_token}"
         with left:
-            try:
-                html_bytes = fig.to_html(full_html=True, include_plotlyjs="cdn").encode("utf-8")
-                st.download_button(
-                    "📥 Download interactive chart (HTML)",
-                    data=html_bytes,
-                    file_name=f"shoir_ie_{re.sub(r'[^A-Za-z0-9]+','_',module).lower()}_chart.html",
-                    mime="text/html",
-                    use_container_width=True,
-                    key=f"liveviz_html_{hash(module) & 0xFFFF:04x}",
-                )
-            except Exception as exc:
-                st.caption(f"Interactive export unavailable: {exc}")
+            if len(prepared) >= 50_000:
+                if st.button("📦 Prepare interactive chart (HTML)", use_container_width=True, key=f"liveviz_prepare_html_{chart_token}"):
+                    try:
+                        st.session_state[html_key] = fig.to_html(full_html=True, include_plotlyjs="cdn").encode("utf-8")
+                    except Exception as exc:
+                        st.error(f"Interactive export unavailable: {exc}")
+                if isinstance(st.session_state.get(html_key), (bytes, bytearray)):
+                    st.download_button(
+                        "📥 Download interactive chart (HTML)",
+                        data=st.session_state[html_key],
+                        file_name=f"shoir_ie_{re.sub(r'[^A-Za-z0-9]+','_',module).lower()}_chart.html",
+                        mime="text/html",
+                        use_container_width=True,
+                        key=f"liveviz_html_{chart_token}",
+                    )
+            else:
+                try:
+                    html_bytes = fig.to_html(full_html=True, include_plotlyjs="cdn").encode("utf-8")
+                    st.download_button(
+                        "📥 Download interactive chart (HTML)", data=html_bytes,
+                        file_name=f"shoir_ie_{re.sub(r'[^A-Za-z0-9]+','_',module).lower()}_chart.html",
+                        mime="text/html", use_container_width=True, key=f"liveviz_html_{chart_token}",
+                    )
+                except Exception as exc:
+                    st.caption(f"Interactive export unavailable: {exc}")
         with right:
-            st.download_button(
-                "📄 Download chart data (CSV)",
-                data=prepared.to_csv(index=False).encode("utf-8"),
-                file_name=f"shoir_ie_{re.sub(r'[^A-Za-z0-9]+','_',module).lower()}_chart_data.csv",
-                mime="text/csv",
-                use_container_width=True,
-                key=f"liveviz_csv_{hash(module) & 0xFFFF:04x}",
-            )
+            if len(prepared) >= 50_000:
+                if st.button("📄 Prepare chart data (CSV)", use_container_width=True, key=f"liveviz_prepare_csv_{chart_token}"):
+                    st.session_state[csv_key] = prepared.to_csv(index=False).encode("utf-8")
+                if isinstance(st.session_state.get(csv_key), (bytes, bytearray)):
+                    st.download_button(
+                        "📄 Download chart data (CSV)", data=st.session_state[csv_key],
+                        file_name=f"shoir_ie_{re.sub(r'[^A-Za-z0-9]+','_',module).lower()}_chart_data.csv",
+                        mime="text/csv", use_container_width=True, key=f"liveviz_csv_{chart_token}",
+                    )
+            else:
+                st.download_button(
+                    "📄 Download chart data (CSV)", data=prepared.to_csv(index=False).encode("utf-8"),
+                    file_name=f"shoir_ie_{re.sub(r'[^A-Za-z0-9]+','_',module).lower()}_chart_data.csv",
+                    mime="text/csv", use_container_width=True, key=f"liveviz_csv_{chart_token}",
+                )
 
 
 # ---------------------------------------------------------------------------
