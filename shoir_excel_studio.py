@@ -1971,7 +1971,7 @@ def _enhanced_coerce_series(series: pd.Series, name: str) -> tuple[pd.Series, st
         if float(converted.notna().mean()) >= 0.94:
             aligned = pd.Series(pd.NA, index=s.index, dtype="Float64")
             for idx, value in converted.items():
-                aligned.loc[nonblank.index[idx]] = value
+                aligned.loc[idx] = value
             return aligned, "Number"
 
     return s.astype("string"), "Text"
