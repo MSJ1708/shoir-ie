@@ -160,6 +160,30 @@ def cached_bytes_sha256(raw: bytes) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
+def quick_readiness(df: pd.DataFrame, sample_rows: int = 5000) -> dict[str, Any]:
+    """Fast, explicitly sampled readiness telemetry for interactive UI surfaces."""
+    if not isinstance(df, pd.DataFrame):
+        return {"rows": 0, "columns": 0, "missing_cells": 0, "duplicate_rows": 0, "score": 0.0, "ready": False, "approximate": True}
+    sample = sample_preview(df, sample_rows)
+    rows, cols = df.shape
+    missing = int(sample.isna().sum().sum()) if not sample.empty else 0
+    duplicate_rows = int(sample.duplicated().sum()) if not sample.empty else 0
+    cells = max(1, len(sample) * max(1, cols))
+    sample_missing_pct = missing / cells * 100.0
+    sample_duplicate_pct = duplicate_rows / max(1, len(sample)) * 100.0
+    score = max(0.0, min(100.0, 100.0 - min(25.0, sample_missing_pct) - min(25.0, sample_duplicate_pct)))
+    return {
+        "rows": int(rows),
+        "columns": int(cols),
+        "missing_cells": missing,
+        "duplicate_rows": duplicate_rows,
+        "score": round(score, 1),
+        "ready": bool(rows > 0 and score >= 85.0),
+        "approximate": bool(len(sample) < rows),
+        "sample_rows": int(len(sample)),
+    }
+
+
 def chart_budget(chart: str) -> int:
     name = str(chart).lower()
     if "gantt" in name or "timeline" in name:
