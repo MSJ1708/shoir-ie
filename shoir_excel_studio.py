@@ -2943,7 +2943,7 @@ def _excel_convert_unit_values(series: pd.Series, source_unit: str, target_unit:
     out = numeric * src_factor / dst_factor
     return out.astype("Float64"), int(numeric.notna().sum())
 
-def _excel_missingness_patterns(df: pd.DataFrame) -> list[dict[str, Any]]:
+def _excel_missingness_patterns(df: pd.DataFrame, sheet: str = "") -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     if df.empty:
         return rows
@@ -2979,7 +2979,7 @@ def _excel_missingness_patterns(df: pd.DataFrame) -> list[dict[str, Any]]:
             else:
                 pattern = "Isolated / low missingness"
         rows.append({
-            "Sheet": "",
+            "Sheet": str(sheet),
             "Field": str(col),
             "Missing %": round(pct, 2),
             "Missing count": int(missing_mask.sum()),
@@ -3100,9 +3100,9 @@ def _excel_extended_outlier_findings(df: pd.DataFrame, sheet: str) -> list[dict[
             })
     return findings
 
-def _excel_engineering_limits(df: pd.DataFrame, sheet: str) -> list[dict[str, Any]]:
+def _excel_engineering_limits(df: pd.DataFrame, sheet: str, limits: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     findings = []
-    limits = st.session_state.get("excel_studio_engineering_limits", {}) if "st" in globals() else {}
+    limits = limits or {}
     for col, config in limits.items() if isinstance(limits, dict) else []:
         if col not in df.columns or not isinstance(config, dict):
             continue
@@ -3342,7 +3342,7 @@ def _excel_schema_drift(old_df: pd.DataFrame, new_df: pd.DataFrame) -> dict[str,
         "Compatible": not removed and not type_changed,
     }
 
-def _excel_apply_validation_rules(df: pd.DataFrame, rules: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
+def _excel_apply_validation_rules(df: pd.DataFrame, rules: list[dict[str, Any]] | None = None, sheet: str = "") -> list[dict[str, Any]]:
     active = [r for r in (rules or _EXCEL_DEFAULT_RULES) if r.get("enabled", True)]
     results = []
     for rule in active:
@@ -3353,7 +3353,7 @@ def _excel_apply_validation_rules(df: pd.DataFrame, rules: list[dict[str, Any]] 
                 if _is_identifier(str(col), df[col]):
                     count = int(df[col].isna().sum())
                     if count:
-                        results.append({"Rule": rule.get("rule"), "Field": str(col), "Status": "FAIL", "Severity": severity, "Violations": count, "Evidence": f"{count:,} identifier value(s) missing."})
+                        results.append({"Rule": rule.get("rule"), "Sheet": str(sheet), "Field": str(col), "Status": "FAIL", "Severity": severity, "Violations": count, "Evidence": f"{count:,} identifier value(s) missing."})
         elif kind == "numeric_integrity":
             for col in df.columns:
                 if _column_role(str(col), df[col]) == "Measure":
@@ -3516,14 +3516,14 @@ def _excel_persist_result(username: str, result: dict[str, Any]) -> bool:
 def _excel_refresh_governance(result: dict[str, Any]) -> dict[str, Any]:
     cleaned = result.get("cleaned_sheets", {})
     result["field_profile"] = [row for sheet, df in cleaned.items() for row in _excel_profile_enrichment(df, sheet)]
-    result["missingness_patterns"] = [row for sheet, df in cleaned.items() for row in _excel_missingness_patterns(df)]
+    result["missingness_patterns"] = [row for sheet, df in cleaned.items() for row in _excel_missingness_patterns(df, sheet)]
     for row in result["missingness_patterns"]:
         row["Sheet"] = next((s for s, df in cleaned.items() if row["Field"] in [str(c) for c in df.columns]), row.get("Sheet", ""))
     result["duplicate_intelligence"] = [item for sheet, df in cleaned.items() for item in _excel_duplicate_intelligence(df, sheet)]
     result["extended_outliers"] = [item for sheet, df in cleaned.items() for item in _excel_extended_outlier_findings(df, sheet)]
-    result["engineering_limit_findings"] = [item for sheet, df in cleaned.items() for item in _excel_engineering_limits(df, sheet)]
+    result["engineering_limit_findings"] = [item for sheet, df in cleaned.items() for item in _excel_engineering_limits(df, sheet, result.get("engineering_limits", {}))]
     result["semantic_mapping"] = [item for sheet, df in cleaned.items() for item in _excel_semantic_mapping(df)]
-    result["validation_results"] = [item for sheet, df in cleaned.items() for item in _excel_apply_validation_rules(df)]
+    result["validation_results"] = [item for sheet, df in cleaned.items() for item in _excel_apply_validation_rules(df, result.get("validation_rules", _EXCEL_DEFAULT_RULES), sheet)]
     result["formula_dependencies"] = _excel_formula_dependencies(result.get("formula_inventory", []))
     result["source_fidelity"] = _excel_source_fidelity(result.get("_raw_bytes", b""), result.get("filename", ""))
     reviews = list(result.get("review_register", []))
@@ -3542,7 +3542,7 @@ def _excel_refresh_governance(result: dict[str, Any]) -> dict[str, Any]:
         if item["Status"] == "FAIL":
             reviews.append({
                 "Severity": item.get("Severity", "High"),
-                "Sheet": item.get("Field", ""),
+                "Sheet": item.get("Sheet", ""),
                 "Field": item.get("Field", ""),
                 "Issue": f"Validation rule failed: {item.get('Rule', '')}",
                 "Evidence": item.get("Evidence", ""),
@@ -3690,12 +3690,20 @@ def _excel_render_professional(tier: str, username: str) -> None:
                     "filename": upload.name,
                     "sha256": signature,
                     "schema": {k: v.get("Schema fingerprint", "") for k, v in result["profiles"].items()},
+                    "columns": {k: [str(col) for col in frame.columns] for k, frame in result["cleaned_sheets"].items()},
                     "imported_utc": datetime.now(timezone.utc).isoformat(),
                 }
                 if previous:
-                    current_snapshot["schema_drift"] = _excel_schema_drift(
-                        pd.DataFrame(), pd.DataFrame()
-                    )
+                    old_columns = previous.get("columns", {})
+                    current_dfs = result.get("cleaned_sheets", {})
+                    current_snapshot["schema_drift"] = {
+                        sheet: _excel_schema_drift(
+                            pd.DataFrame(columns=list(old_columns.get(sheet, []))),
+                            pd.DataFrame(columns=[str(col) for col in frame.columns]),
+                        )
+                        for sheet, frame in current_dfs.items()
+                        if sheet in old_columns
+                    }
                 versions.append(current_snapshot)
                 st.session_state["excel_studio_versions"] = versions[-25:]
                 _excel_persist_result(username, result)
