@@ -3651,6 +3651,131 @@ def _excel_process(raw: bytes, filename: str) -> dict[str, Any]:
 def process_uploaded_workbook(raw: bytes, filename: str) -> dict[str, Any]:
     return _excel_process(raw, filename)
 
+
+def _excel_formula_gap_scan(formula_inventory: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    findings: list[dict[str, Any]] = []
+    groups: dict[tuple[str, str], list[int]] = {}
+    for item in formula_inventory:
+        cell = str(item.get("Cell", ""))
+        match = re.fullmatch(r"([A-Za-z]{1,3})(\d+)", cell)
+        if match:
+            groups.setdefault((str(item.get("Sheet", "")), match.group(1).upper()), []).append(int(match.group(2)))
+    for (sheet, col), rows in groups.items():
+        rows = sorted(set(rows))
+        if len(rows) < 4:
+            continue
+        gaps: list[int] = []
+        for left, right in zip(rows, rows[1:]):
+            if right - left > 1:
+                gaps.extend(range(left + 1, right))
+        if gaps:
+            findings.append({
+                "Severity": "Medium",
+                "Sheet": sheet,
+                "Field": col,
+                "Issue": "Potential formula gap",
+                "Evidence": f"{len(gaps):,} row(s) sit between formula cells in column {col}.",
+                "Affected rows": ", ".join(str(x) for x in gaps[:25]),
+                "Recommended action": "Check whether missing cells should contain copied formulas or intentional blanks.",
+            })
+    return findings
+
+def _excel_security_scan(cleaned: dict[str, pd.DataFrame]) -> list[dict[str, Any]]:
+    results: list[dict[str, Any]] = []
+    for sheet, frame in cleaned.items():
+        for col in frame.columns:
+            values = frame[col].dropna().astype(str).head(5000)
+            for label, pattern in _EXCEL_SECRET_PATTERNS:
+                hits = int(values.map(lambda value: bool(pattern.search(value))).sum())
+                if hits:
+                    results.append({
+                        "Sheet": sheet,
+                        "Field": str(col),
+                        "Indicator": label,
+                        "Matches": hits,
+                        "Action": "Mask/remove secrets before sharing or exporting this dataset.",
+                    })
+                    break
+    return results
+
+def _excel_custom_rule_results(df: pd.DataFrame, rules: list[dict[str, Any]], sheet: str) -> list[dict[str, Any]]:
+    results: list[dict[str, Any]] = []
+    for rule in rules:
+        if not rule.get("enabled", True):
+            continue
+        field = str(rule.get("field", ""))
+        operator = str(rule.get("operator", ""))
+        value = rule.get("value")
+        if field not in df.columns:
+            results.append({
+                "Rule": rule.get("name", "Custom rule"),
+                "Sheet": sheet,
+                "Field": field,
+                "Status": "FAIL",
+                "Severity": rule.get("severity", "High"),
+                "Violations": len(df),
+                "Evidence": f"Configured field '{field}' does not exist.",
+            })
+            continue
+        series = df[field]
+        if operator in {">", ">=", "<", "<=", "==", "!="}:
+            numeric = pd.to_numeric(series, errors="coerce")
+            try:
+                target = float(value)
+                if operator == ">": mask = numeric <= target
+                elif operator == ">=": mask = numeric < target
+                elif operator == "<": mask = numeric >= target
+                elif operator == "<=": mask = numeric > target
+                elif operator == "==": mask = numeric != target
+                else: mask = numeric == target
+            except Exception:
+                mask = pd.Series(True, index=df.index)
+        elif operator == "is not null":
+            mask = series.isna()
+        elif operator == "is null":
+            mask = series.notna()
+        elif operator == "in":
+            allowed = {x.strip().casefold() for x in str(value).split(",") if x.strip()}
+            mask = ~series.astype("string").fillna("").str.casefold().isin(allowed)
+        elif operator == "not in":
+            denied = {x.strip().casefold() for x in str(value).split(",") if x.strip()}
+            mask = series.astype("string").fillna("").str.casefold().isin(denied)
+        elif operator == "regex":
+            try:
+                mask = ~series.astype("string").fillna("").str.contains(str(value), regex=True, na=False)
+            except Exception:
+                mask = pd.Series(True, index=df.index)
+        else:
+            continue
+        violations = int(mask.sum())
+        results.append({
+            "Rule": rule.get("name", "Custom rule"),
+            "Sheet": sheet,
+            "Field": field,
+            "Status": "FAIL" if violations else "PASS",
+            "Severity": rule.get("severity", "Medium"),
+            "Violations": violations,
+            "Evidence": f"{violations:,} row(s) violate the rule." if violations else "No violations.",
+        })
+    return results
+
+def _excel_reference_check(clean_df: pd.DataFrame, reference_df: pd.DataFrame, key: str) -> dict[str, Any]:
+    if key not in clean_df.columns or key not in reference_df.columns:
+        return {"Status": "FAIL", "Reason": f"Key '{key}' must exist in both datasets."}
+    left = set(clean_df[key].dropna().astype("string").str.strip())
+    right = set(reference_df[key].dropna().astype("string").str.strip())
+    unmatched = sorted(left - right)
+    return {
+        "Status": "PASS" if not unmatched else "REVIEW",
+        "Key": key,
+        "Input distinct keys": len(left),
+        "Reference distinct keys": len(right),
+        "Matched keys": len(left & right),
+        "Unmatched input keys": len(unmatched),
+        "Reference coverage %": round(100.0 * len(left & right) / max(1, len(left)), 2),
+        "Sample unmatched": " | ".join(unmatched[:20]),
+    }
+
 def _excel_render_professional(tier: str, username: str) -> None:
     import streamlit as st
     from shoir_tier_capabilities import tier_allows
