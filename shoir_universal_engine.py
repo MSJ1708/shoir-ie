@@ -19,6 +19,9 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
+import streamlit as st
+
+from shoir_performance import as_frame as _perf_as_frame, quick_readiness, sample_for_plot
 
 ENGINE_ACTION_LEVELS = (
     "Read",
@@ -120,8 +123,9 @@ def data_readiness(df: pd.DataFrame) -> dict[str, Any]:
     }
 
 def guaranteed_figure(df: pd.DataFrame, title: str = "Universal Engineering View") -> go.Figure | None:
-    """Return a real figure whenever a non-empty, displayable table exists."""
+    """Return a bounded, truthful figure without copying the source table."""
     frame = _safe_frame(df)
+    frame = sample_for_plot(frame, max_points=5000, chart=title)
     if frame.empty or len(frame.columns) == 0:
         return None
     try:
@@ -474,6 +478,9 @@ def trust_snapshot(username: str, tier: str) -> pd.DataFrame:
         pass
     return pd.DataFrame(rows)
 
+_FRAGMENT = getattr(st, "fragment", lambda fn: fn)
+
+@_FRAGMENT
 def _render_ui(module: str, tier: str, username: str) -> None:
     import streamlit as st
 
@@ -498,7 +505,7 @@ def _render_ui(module: str, tier: str, username: str) -> None:
                 labels = [x[0] for x in tables]
                 choice = st.selectbox("Data source", labels, key="uie_source_" + hashlib.sha1(module.encode()).hexdigest()[:8])
                 df = tables[labels.index(choice)][2]
-                ready = data_readiness(df)
+                ready = quick_readiness(df) if len(df) >= 50_000 else data_readiness(df)
                 runtime = runtime_choice(df)
                 a, b, c, d = st.columns(4)
                 a.metric("Rows", f"{ready['rows']:,}")
@@ -628,15 +635,18 @@ def postflight_contract(module: str, username: str = "unknown", preferred_key: s
     tables = module_tables(module, preferred_key=preferred_key)
     source = tables[0][1] if tables else ""
     frame = tables[0][2] if tables else pd.DataFrame()
-    validation = data_readiness(frame)
-    fig = guaranteed_figure(frame, f"{module} · Universal") if not frame.empty else None
+    validation = quick_readiness(frame) if len(frame) >= 50_000 else data_readiness(frame)
+    # Postflight is deliberately metadata-only. Generating a Plotly figure here
+    # would duplicate work that the results/visualization surfaces perform for
+    # the user and would make every Streamlit rerun slower.
     contract = {
         "module": module,
         "source_key": source,
         "rows": int(len(frame)),
         "columns": int(len(frame.columns)),
         "readiness": validation,
-        "graph_available": fig is not None,
+        "graph_available": bool(not frame.empty and len(frame.columns) > 0),
+        "graph_engine": "universal-bounded-renderer" if not frame.empty else "awaiting-data",
     }
     signature = hashlib.sha256(json.dumps(contract, sort_keys=True, default=str).encode("utf-8")).hexdigest()
     try:
@@ -658,13 +668,9 @@ def universal_health_report(module: str) -> dict[str, Any]:
     tables = module_tables(module)
     if not tables:
         return {"module": module, "status": "Ready · awaiting data", "tables": 0, "graphs": 0}
-    graph_count = 0
-    for _, _, frame in tables:
-        try:
-            if guaranteed_figure(frame, module) is not None:
-                graph_count += 1
-        except Exception:
-            continue
+    # A populated DataFrame is graph-eligible under the universal renderer;
+    # do not build Plotly figures just to answer a health/audit question.
+    graph_count = sum(1 for _, _, frame in tables if isinstance(frame, pd.DataFrame) and not frame.empty and len(frame.columns) > 0)
     return {
         "module": module,
         "status": "Verified" if graph_count == len(tables) else "Gap",

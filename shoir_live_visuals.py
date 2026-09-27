@@ -19,6 +19,15 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
+from shoir_performance import (
+    DEFAULT_PLOT_POINTS,
+    DEFAULT_PREVIEW_ROWS,
+    as_frame as _perf_as_frame,
+    fast_datetime_like_columns,
+    limit_categories,
+    sample_for_plot,
+)
+
 
 _MODULE_KEYS = {
     "Engineering Validation Center": ["validation_df", "validation_result"],
@@ -338,6 +347,9 @@ def _suggest_chart(df: pd.DataFrame, x: str | None, y: str | None) -> str:
 def _make_figure(df: pd.DataFrame, chart: str, x: str | None, y: str | None, z: str | None, title: str) -> go.Figure | None:
     if df.empty:
         return None
+    # Plotly should never receive millions of raw observations when a
+    # deterministic rendering sample can preserve the engineering pattern.
+    df = sample_for_plot(df, max_points=DEFAULT_PLOT_POINTS, chart=chart)
 
     numeric = _numeric_columns(df)
     categorical = _categorical_columns(df)
@@ -536,13 +548,15 @@ def _render_auto_kpi_dashboard(module: str, df: pd.DataFrame, chart_token: str) 
     if not isinstance(df, pd.DataFrame) or df.empty:
         return
     st.markdown("### ⚡ Auto-Generated KPI Dashboard")
-    numeric = _numeric_columns(df)
-    missing_pct = float(df.isna().mean().mean() * 100) if len(df.columns) else 100.0
+    metric_frame = sample_for_plot(df, max_points=20_000, chart="metrics") if len(df) >= 50_000 else df
+    numeric = _numeric_columns(metric_frame)
+    missing_pct = float(metric_frame.isna().mean().mean() * 100) if len(metric_frame.columns) else 100.0
+    metric_note = f"sampled n={len(metric_frame):,}" if len(metric_frame) < len(df) else "full dataset"
     cards = [
         ("Rows", f"{len(df):,}", "dataset"),
         ("Columns", f"{len(df.columns):,}", "schema"),
-        ("Missing", f"{missing_pct:.1f}%", "data quality"),
-        ("Numeric KPIs", f"{len(numeric):,}", "measures"),
+        ("Missing", f"{missing_pct:.1f}%", metric_note),
+        ("Numeric KPIs", f"{len(numeric):,}", metric_note),
     ]
     cols = st.columns(4)
     for col, (label, value, detail) in zip(cols, cards):
@@ -594,6 +608,9 @@ def _render_auto_kpi_dashboard(module: str, df: pd.DataFrame, chart_token: str) 
         st.info("No compatible automatic visualization could be inferred from the current table. Use Custom Engineering Views below.")
 
 
+_FRAGMENT = getattr(st, "fragment", lambda fn: fn)
+
+@_FRAGMENT
 def render_live_visualization_studio(module: str, *, expanded: bool = False, preferred_key: str | None = None) -> None:
     """Render the live chart studio beneath an active module."""
     tables = discover_visual_tables(module, preferred_key=preferred_key)
@@ -637,13 +654,8 @@ def render_live_visualization_studio(module: str, *, expanded: bool = False, pre
             if preferred_labels:
                 default_source_index = preferred_labels[0]
         table_label = st.selectbox("Data source", labels, index=default_source_index, key=f"liveviz_source_{hash(module) & 0xFFFF:04x}")
-        df = tables[labels.index(table_label)][2].copy()
+        df = tables[labels.index(table_label)][2]
         _render_auto_kpi_dashboard(module, df, f"{hash(module) & 0xFFFF:04x}")
-
-
-        # Avoid accidentally visualizing secrets or enormous payloads.
-        if len(df) > 10000:
-            df = df.head(10000).copy()
 
         nums = _numeric_columns(df)
         cats = _categorical_columns(df)
@@ -682,8 +694,9 @@ def render_live_visualization_studio(module: str, *, expanded: bool = False, pre
         filter_col = st.selectbox("Optional filter", ["(none)"] + cols, key=f"liveviz_filtercol_{hash(module) & 0xFFFF:04x}")
         filter_value = "All"
         if filter_col != "(none)":
-            values = sorted(df[filter_col].dropna().astype(str).unique().tolist())
-            filter_value = st.selectbox("Filter value", ["All"] + values[:500], key=f"liveviz_filterval_{hash(module) & 0xFFFF:04x}")
+            filter_values_source = sample_for_plot(df, max_points=20000, chart="filter")
+            values = limit_categories(filter_values_source[filter_col], 500)
+            filter_value = st.selectbox("Filter value", ["All"] + values, key=f"liveviz_filterval_{hash(module) & 0xFFFF:04x}")
 
         actual_chart = _suggest_chart(df, x, y) if chart_choice == "Auto" else chart_choice
         prepared = _prepare(df, x, y, aggregation, None if filter_col == "(none)" else filter_col, filter_value)
@@ -729,28 +742,51 @@ def render_live_visualization_studio(module: str, *, expanded: bool = False, pre
             pass
 
         left, right = st.columns(2)
+        chart_token = hashlib.sha1(str(module).encode("utf-8")).hexdigest()[:12]
+        html_key = f"liveviz_html_bytes_{chart_token}"
+        csv_key = f"liveviz_csv_bytes_{chart_token}"
         with left:
-            try:
-                html_bytes = fig.to_html(full_html=True, include_plotlyjs="cdn").encode("utf-8")
-                st.download_button(
-                    "📥 Download interactive chart (HTML)",
-                    data=html_bytes,
-                    file_name=f"shoir_ie_{re.sub(r'[^A-Za-z0-9]+','_',module).lower()}_chart.html",
-                    mime="text/html",
-                    use_container_width=True,
-                    key=f"liveviz_html_{hash(module) & 0xFFFF:04x}",
-                )
-            except Exception as exc:
-                st.caption(f"Interactive export unavailable: {exc}")
+            if len(prepared) >= 50_000:
+                if st.button("📦 Prepare interactive chart (HTML)", use_container_width=True, key=f"liveviz_prepare_html_{chart_token}"):
+                    try:
+                        st.session_state[html_key] = fig.to_html(full_html=True, include_plotlyjs="cdn").encode("utf-8")
+                    except Exception as exc:
+                        st.error(f"Interactive export unavailable: {exc}")
+                if isinstance(st.session_state.get(html_key), (bytes, bytearray)):
+                    st.download_button(
+                        "📥 Download interactive chart (HTML)",
+                        data=st.session_state[html_key],
+                        file_name=f"shoir_ie_{re.sub(r'[^A-Za-z0-9]+','_',module).lower()}_chart.html",
+                        mime="text/html",
+                        use_container_width=True,
+                        key=f"liveviz_html_{chart_token}",
+                    )
+            else:
+                try:
+                    html_bytes = fig.to_html(full_html=True, include_plotlyjs="cdn").encode("utf-8")
+                    st.download_button(
+                        "📥 Download interactive chart (HTML)", data=html_bytes,
+                        file_name=f"shoir_ie_{re.sub(r'[^A-Za-z0-9]+','_',module).lower()}_chart.html",
+                        mime="text/html", use_container_width=True, key=f"liveviz_html_{chart_token}",
+                    )
+                except Exception as exc:
+                    st.caption(f"Interactive export unavailable: {exc}")
         with right:
-            st.download_button(
-                "📄 Download chart data (CSV)",
-                data=prepared.to_csv(index=False).encode("utf-8"),
-                file_name=f"shoir_ie_{re.sub(r'[^A-Za-z0-9]+','_',module).lower()}_chart_data.csv",
-                mime="text/csv",
-                use_container_width=True,
-                key=f"liveviz_csv_{hash(module) & 0xFFFF:04x}",
-            )
+            if len(prepared) >= 50_000:
+                if st.button("📄 Prepare chart data (CSV)", use_container_width=True, key=f"liveviz_prepare_csv_{chart_token}"):
+                    st.session_state[csv_key] = prepared.to_csv(index=False).encode("utf-8")
+                if isinstance(st.session_state.get(csv_key), (bytes, bytearray)):
+                    st.download_button(
+                        "📄 Download chart data (CSV)", data=st.session_state[csv_key],
+                        file_name=f"shoir_ie_{re.sub(r'[^A-Za-z0-9]+','_',module).lower()}_chart_data.csv",
+                        mime="text/csv", use_container_width=True, key=f"liveviz_csv_{chart_token}",
+                    )
+            else:
+                st.download_button(
+                    "📄 Download chart data (CSV)", data=prepared.to_csv(index=False).encode("utf-8"),
+                    file_name=f"shoir_ie_{re.sub(r'[^A-Za-z0-9]+','_',module).lower()}_chart_data.csv",
+                    mime="text/csv", use_container_width=True, key=f"liveviz_csv_{chart_token}",
+                )
 
 
 # ---------------------------------------------------------------------------
@@ -803,6 +839,7 @@ def _make_figure(
 ) -> go.Figure | None:
     if df.empty:
         return None
+    df = sample_for_plot(df, max_points=DEFAULT_PLOT_POINTS, chart=chart)
 
     numeric = _numeric_columns(df)
     categorical = _categorical_columns(df)
@@ -982,7 +1019,7 @@ def build_visualization_suite(
     numeric = _numeric_columns(df)
     dates = _coerce_datetime_columns(df)
     categorical = _categorical_columns(df)
-    plan: list[tuple[str, str, str | None, str | None, str | None]] = []
+    plan: list[tuple[str, go.Figure]] = []
     seen: set[str] = set()
 
     def add(chart: str, title: str, x: str | None = None, y: str | None = None, z: str | None = None) -> None:
@@ -990,7 +1027,9 @@ def build_visualization_suite(
             return
         fig = _make_figure(df, chart, x, y, z, title)
         if fig is not None:
-            plan.append((title, chart, x, y, z))
+            # Build each figure once. The previous implementation constructed
+            # every chart during planning and then constructed it again.
+            plan.append((title, fig))
             seen.add(chart)
 
     area = _find_col(df, ("area", "domain", "function", "system", "category"))
@@ -1036,11 +1075,7 @@ def build_visualization_suite(
     if not plan:
         add("Data Completeness", f"{context} · Data completeness" if context else "Data completeness")
 
-    suite: list[tuple[str, go.Figure]] = []
-    for title, chart, x, y, z in plan:
-        fig = _make_figure(df, chart, x, y, z, title)
-        if fig is not None:
-            suite.append((title, fig))
+    suite: list[tuple[str, go.Figure]] = plan[:max(1, int(max_figures))]
 
     # Universal anti-graphless contract: a populated table always receives
     # one truthful view, even when its semantics are unfamiliar to the registry.
@@ -1250,7 +1285,8 @@ def _render_auto_kpi_dashboard(module: str, df: pd.DataFrame, chart_token: str) 
                     f"n={len(values):,}",
                 )
 
-    suite = build_visualization_suite(df, context=str(module), max_figures=4)
+    plot_df = sample_for_plot(df, max_points=DEFAULT_PLOT_POINTS, chart="auto-suite")
+    suite = build_visualization_suite(plot_df, context=str(module), max_figures=4)
     if not suite:
         st.info("No compatible automatic engineering visualization could be inferred from the current table.")
         return

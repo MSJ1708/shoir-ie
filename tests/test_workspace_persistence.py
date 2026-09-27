@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from workspace_persistence import load_user_workspace, save_user_workspace
+from workspace_persistence import load_user_workspace, save_user_workspace, _workspace_change_signature
 
 
 def test_workspace_round_trip_and_secret_exclusion(tmp_path: Path):
@@ -68,3 +68,14 @@ def test_workspace_does_not_restore_streamlit_action_widget_keys(tmp_path: Path)
     assert "btn_confirm_pay" not in restored
     assert restored["enterprise_module_selector"] == "Inventory · EOQ"
     assert restored["research_title"] == "My Study"
+
+
+def test_workspace_change_signature_is_stable_for_unchanged_large_frame():
+    df = pd.DataFrame({"value": range(100_000)})
+    state = {"current_user": "Alice", "large": df}
+    first = _workspace_change_signature(state)
+    second = _workspace_change_signature(state)
+    assert first == second
+    state["large"] = df.copy()
+    third = _workspace_change_signature(state)
+    assert third != first
