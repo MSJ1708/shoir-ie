@@ -1046,7 +1046,7 @@ def _quality_review_register(df: pd.DataFrame, sheet: str) -> list[dict[str, Any
             })
     if len(df.columns):
         first = df.iloc[:, 0].astype("string").str.casefold()
-        subtotal = first.str.contains(r"^(grand\s+)?sub(total|total)$", regex=True, na=False)
+        subtotal = first.str.contains(r"^(?:grand\s+)?(?:sub)?total$", regex=True, na=False)
         if int(subtotal.sum()):
             issues.append({
                 "Severity": "Low", "Sheet": sheet, "Field": str(df.columns[0]),
@@ -1763,7 +1763,7 @@ def render_excel_data_cleaning_studio(tier: str, username: str) -> None:
     left, right = st.columns([5, 1])
     upload = left.file_uploader(
         "Upload raw Excel / CSV",
-        type=["xlsx", "csv"],
+        type=["xlsx", "xlsm", "csv"],
         key="excel_studio_upload",
         help="Messy exports, title rows and multi-sheet Excel workbooks are supported.",
     )
@@ -2030,7 +2030,7 @@ def _enhanced_coerce_series(series: pd.Series, name: str) -> tuple[pd.Series, st
 
 
 def _rebuild_excel_result(result: dict[str, Any]) -> dict[str, Any]:
-    result["xlsx"] = build_ultimate_workbook(
+    result["xlsx"] = _postprocess_export_guardrails(build_ultimate_workbook(
         f"Shoir-IE — {result['filename']}",
         result["cleaned_sheets"],
         result["raw_sheets"],
@@ -2042,7 +2042,7 @@ def _rebuild_excel_result(result: dict[str, Any]) -> dict[str, Any]:
         before_after=result.get("before_after"),
         formula_inventory=result.get("formula_inventory"),
         cross_sheet_map=result.get("cross_sheet_map"),
-    )
+    ))
     result["bundle"] = build_ultimate_bundle(
         f"Shoir-IE — {result['filename']}",
         result["xlsx"],
@@ -2081,6 +2081,142 @@ def process_uploaded_workbook(raw: bytes, filename: str) -> dict[str, Any]:
         # Rebuild only after structure review flags have been added.
         _rebuild_excel_result(result)
     return result
+
+
+def _choose_csv_delimiter(text: str) -> str:
+    import csv
+    candidates = [",", ";", "\t", "|"]
+    lines = [line for line in str(text).splitlines() if line.strip()][:40]
+    if len(lines) < 2:
+        return ","
+    scored: list[tuple[float, str]] = []
+    for delim in candidates:
+        counts = []
+        for line in lines:
+            try:
+                row = next(csv.reader([line], delimiter=delim))
+            except Exception:
+                row = line.split(delim)
+            counts.append(len(row))
+        meaningful = [c for c in counts if c > 1]
+        if not meaningful:
+            continue
+        median = float(np.median(meaningful))
+        consistency = float(sum(c == meaningful[0] for c in meaningful) / len(meaningful))
+        # A delimiter that creates the same 3-column shape across records beats
+        # a comma embedded inside a value such as "1,200".
+        score = median * 5.0 + consistency * 4.0 + (2.0 if len(set(meaningful)) == 1 else 0.0)
+        scored.append((score, delim))
+    return max(scored)[1] if scored else ","
+
+
+def _final_read_raw_workbook(raw: bytes, filename: str) -> dict[str, pd.DataFrame]:
+    if not raw:
+        raise ValueError("The uploaded file is empty.")
+    lower = str(filename).lower()
+    if lower.endswith(".csv"):
+        decoded = None
+        for encoding in ("utf-8-sig", "utf-8", "cp1252", "latin-1"):
+            try:
+                decoded = raw.decode(encoding)
+                break
+            except UnicodeDecodeError:
+                continue
+        if decoded is None:
+            raise ValueError("CSV encoding could not be decoded safely.")
+        delimiter = _choose_csv_delimiter(decoded)
+        return {
+            "CSV": pd.read_csv(
+                io.StringIO(decoded),
+                header=None,
+                dtype=object,
+                sep=delimiter,
+                keep_default_na=False,
+            )
+        }
+    if lower.endswith((".xlsx", ".xlsm")):
+        book = pd.ExcelFile(io.BytesIO(raw), engine="openpyxl")
+        try:
+            return {
+                str(sheet): pd.read_excel(book, sheet_name=sheet, header=None, dtype=object)
+                for sheet in book.sheet_names
+            }
+        finally:
+            try:
+                book.close()
+            except Exception:
+                pass
+    raise ValueError("Only .xlsx, .xlsm and .csv files are supported.")
+
+
+def _final_clean_dataframe(df: pd.DataFrame) -> tuple[pd.DataFrame, list[dict[str, str]]]:
+    cleaned, audit = _enhanced_clean_dataframe(df)
+    # Tight numeric inference after sentinel normalization: values such as
+    # ["10", "-"] should become [10, NA] rather than remaining text.
+    for col in list(cleaned.columns):
+        series = cleaned[col]
+        if _is_identifier(str(col), series) or pd.api.types.is_datetime64_any_dtype(series) or pd.api.types.is_numeric_dtype(series) or pd.api.types.is_bool_dtype(series):
+            continue
+        numeric = pd.to_numeric(series, errors="coerce")
+        non_null = int(series.notna().sum())
+        if non_null and int(numeric.notna().sum()) == non_null:
+            cleaned[col] = numeric
+            audit.append({
+                "Action": "Finalize numeric inference",
+                "Details": f"Converted field '{col}' to numeric after missing-value normalization.",
+            })
+    return cleaned, audit
+
+
+def _postprocess_export_guardrails(xlsx_bytes: bytes) -> bytes:
+    """Final XLSX safety pass: aliases + inert source-formula text."""
+    try:
+        import openpyxl
+        book = openpyxl.load_workbook(io.BytesIO(xlsx_bytes), data_only=False)
+        if "EXECUTIVE SUMMARY" not in book.sheetnames:
+            ws = book.create_sheet("EXECUTIVE SUMMARY")
+            ws["A1"] = "EXECUTIVE SUMMARY"
+            ws["A3"] = "Legacy navigation alias. Use EXECUTIVE DASHBOARD for the full view."
+            ws["A5"] = "Open EXECUTIVE DASHBOARD"
+            ws["A5"].hyperlink = "#'EXECUTIVE DASHBOARD'!A1"
+        if "DATA DICTIONARY" not in book.sheetnames:
+            ws = book.create_sheet("DATA DICTIONARY")
+            ws["A1"] = "DATA DICTIONARY"
+            ws["A3"] = "Legacy navigation alias. Use FIELD INTELLIGENCE for richer field profiling."
+            ws["A5"] = "Open FIELD INTELLIGENCE"
+            ws["A5"].hyperlink = "#'FIELD INTELLIGENCE'!A1"
+        if "QUALITY CHECKS" not in book.sheetnames:
+            ws = book.create_sheet("QUALITY CHECKS")
+            ws["A1"] = "QUALITY CHECKS"
+            ws["A3"] = "Legacy navigation alias. Use DATA QUALITY CENTER for the governed quality view."
+            ws["A5"] = "Open DATA QUALITY CENTER"
+            ws["A5"].hyperlink = "#'DATA QUALITY CENTER'!A1"
+
+        for ws in book.worksheets:
+            if not ws.title.startswith("CLEAN - "):
+                continue
+            for row in ws.iter_rows():
+                for cell in row:
+                    if cell.data_type == "f" or (isinstance(cell.value, str) and cell.value.startswith("=")):
+                        value = str(cell.value)
+                        cell._value = value
+                        cell.data_type = "s"
+        out = io.BytesIO()
+        book.save(out)
+        try:
+            book.close()
+        except Exception:
+            pass
+        return out.getvalue()
+    except Exception:
+        # Export safety should never make the import unusable; the primary
+        # XlsxWriter output remains available if the optional final pass fails.
+        return xlsx_bytes
+
+
+_read_raw_workbook = _final_read_raw_workbook
+clean_dataframe = _final_clean_dataframe
+
 
 # Rebind public names one last time so imports from the module use the hardened
 # versions rather than the pre-upgrade implementations.
