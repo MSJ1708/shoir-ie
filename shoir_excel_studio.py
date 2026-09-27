@@ -8,6 +8,7 @@ archive and an auditable record of every automatic transformation.
 from __future__ import annotations
 
 import hashlib
+import math
 import io
 import json
 import re
@@ -2858,3 +2859,1576 @@ def process_uploaded_workbook(raw: bytes, filename: str) -> dict[str, Any]:
         source_metadata=result.get("source_metadata", []),
     )
     return result
+
+
+# ---------------------------------------------------------------------------
+# Enterprise Excel Intelligence Engine
+# ---------------------------------------------------------------------------
+# This layer extends the existing Excel Studio without removing its public API.
+# It focuses on safe automation, explicit review, reproducibility and easy
+# hand-off into the rest of Shoir-IE.
+
+import difflib
+from collections import Counter
+
+_EXCEL_UNIT_FACTORS = {
+    "g": ("mass", 0.001),
+    "kg": ("mass", 1.0),
+    "mg": ("mass", 0.000001),
+    "lb": ("mass", 0.45359237),
+    "mm": ("length", 0.001),
+    "cm": ("length", 0.01),
+    "m": ("length", 1.0),
+    "km": ("length", 1000.0),
+    "s": ("time", 1.0),
+    "sec": ("time", 1.0),
+    "min": ("time", 60.0),
+    "hr": ("time", 3600.0),
+    "h": ("time", 3600.0),
+    "hours": ("time", 3600.0),
+    "w": ("power", 1.0),
+    "kw": ("power", 1000.0),
+    "mw": ("power", 1_000_000.0),
+    "wh": ("energy", 1.0),
+    "kwh": ("energy", 1000.0),
+    "mwh": ("energy", 1_000_000.0),
+}
+_EXCEL_TEMP_UNITS = {"c", "°c", "f", "°f"}
+_EXCEL_SECRET_PATTERNS = [
+    ("API key", re.compile(r"(?i)\b(?:api[_ -]?key|apikey)\b.{0,8}[=:]\s*[A-Za-z0-9_\-]{12,}")),
+    ("Bearer token", re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._\-]{16,}")),
+    ("Private key material", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")),
+    ("Connection string", re.compile(r"(?i)\b(?:password|pwd)\s*=\s*[^;\s]+")),
+]
+_EXCEL_ALLOWED_VALUE_HINTS = {
+    "status": {"active", "inactive", "open", "closed", "pending", "complete", "completed", "cancelled", "canceled"},
+}
+_EXCEL_DEFAULT_RULES = [
+    {"id": "REQ-001", "rule": "Required identifier non-null", "kind": "required_identifier", "severity": "High", "enabled": True},
+    {"id": "NUM-001", "rule": "Numeric fields contain valid numeric values", "kind": "numeric_integrity", "severity": "High", "enabled": True},
+    {"id": "PCT-001", "rule": "Percentage fields remain within 0..1 after normalization", "kind": "percentage_range", "severity": "High", "enabled": True},
+    {"id": "DATE-001", "rule": "Dates remain within the review window 1900..2100", "kind": "date_range", "severity": "Medium", "enabled": True},
+]
+
+def _excel_unit_token(name: str) -> str:
+    match = re.search(
+        r"[\(\[]\s*(kg|g|mg|lb|mm|cm|km|m|s|sec|min|hr|hrs|h|hours|kwh|mwh|wh|kw|mw|w|°c|°f|c|f)\s*[\)\]]",
+        str(name),
+        flags=re.IGNORECASE,
+    )
+    return match.group(1).lower() if match else ""
+
+def _excel_convert_unit_values(series: pd.Series, source_unit: str, target_unit: str) -> tuple[pd.Series, int]:
+    src = str(source_unit).strip().lower()
+    dst = str(target_unit).strip().lower()
+    if src == "hrs":
+        src = "hr"
+    if dst == "hrs":
+        dst = "hr"
+    if src in {"°c", "c"} and dst in {"°f", "f"}:
+        numeric = pd.to_numeric(series, errors="coerce")
+        out = numeric * 9.0 / 5.0 + 32.0
+        return out.astype("Float64"), int(numeric.notna().sum())
+    if src in {"°f", "f"} and dst in {"°c", "c"}:
+        numeric = pd.to_numeric(series, errors="coerce")
+        out = (numeric - 32.0) * 5.0 / 9.0
+        return out.astype("Float64"), int(numeric.notna().sum())
+    if src not in _EXCEL_UNIT_FACTORS or dst not in _EXCEL_UNIT_FACTORS:
+        raise ValueError(f"Unsupported unit conversion: {source_unit} -> {target_unit}")
+    src_dim, src_factor = _EXCEL_UNIT_FACTORS[src]
+    dst_dim, dst_factor = _EXCEL_UNIT_FACTORS[dst]
+    if src_dim != dst_dim:
+        raise ValueError(f"Incompatible unit dimensions: {source_unit} -> {target_unit}")
+    numeric = pd.to_numeric(series, errors="coerce")
+    out = numeric * src_factor / dst_factor
+    return out.astype("Float64"), int(numeric.notna().sum())
+
+def _excel_missingness_patterns(df: pd.DataFrame, sheet: str = "") -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    if df.empty:
+        return rows
+    row_missing = df.isna().sum(axis=1)
+    for col in df.columns:
+        s = df[col]
+        missing_mask = s.isna()
+        pct = float(missing_mask.mean() * 100.0)
+        if pct == 0:
+            pattern = "Complete"
+        elif pct >= 80:
+            pattern = "Structurally sparse"
+        else:
+            neighbors = [c for c in df.columns if c != col]
+            association = 0.0
+            for other in neighbors[:30]:
+                other_mask = df[other].isna()
+                if other_mask.nunique() > 1 and missing_mask.nunique() > 1:
+                    corr = missing_mask.astype(float).corr(other_mask.astype(float))
+                    if pd.notna(corr):
+                        association = max(association, abs(float(corr)))
+            row_cluster = 0.0
+            if len(row_missing) > 1:
+                ranked = row_missing.rank(method="average", pct=True)
+                corr = missing_mask.astype(float).corr(ranked)
+                row_cluster = abs(float(corr)) if pd.notna(corr) else 0.0
+            if max(association, row_cluster) >= 0.5:
+                pattern = "Structured-missingness candidate"
+            elif pct >= 50:
+                pattern = "High missingness"
+            elif pct >= 20:
+                pattern = "Material missingness"
+            else:
+                pattern = "Isolated / low missingness"
+        rows.append({
+            "Sheet": str(sheet),
+            "Field": str(col),
+            "Missing %": round(pct, 2),
+            "Missing count": int(missing_mask.sum()),
+            "Pattern": pattern,
+        })
+    return rows
+
+def _excel_duplicate_intelligence(df: pd.DataFrame, sheet: str) -> list[dict[str, Any]]:
+    findings: list[dict[str, Any]] = []
+    id_cols = [str(c) for c in df.columns if _is_identifier(str(c), df[c])]
+    time_cols = [
+        str(c) for c in df.columns
+        if str(c) not in id_cols
+        and (
+            pd.api.types.is_datetime64_any_dtype(df[c])
+            or any(token in str(c).casefold() for token in ("date", "timestamp"))
+        )
+    ]
+    key_candidates = (id_cols + time_cols)[:6]
+    for size in range(2, min(4, len(key_candidates)) + 1):
+        for combo in __import__("itertools").combinations(key_candidates, size):
+            work = df[list(combo)].copy()
+            dup_mask = work.duplicated(keep=False) & work.notna().all(axis=1)
+            count = int(dup_mask.sum())
+            if count:
+                conflict = 0
+                compare_cols = [c for c in df.columns if str(c) not in combo]
+                if compare_cols:
+                    grouped = df.loc[dup_mask].groupby(list(combo), dropna=False)
+                    for _, group in grouped:
+                        for col in compare_cols[:30]:
+                            if group[col].nunique(dropna=True) > 1:
+                                conflict += 1
+                                break
+                findings.append({
+                    "Sheet": sheet,
+                    "Type": "Composite key duplicate",
+                    "Fields": " + ".join(combo),
+                    "Occurrences": count,
+                    "Conflicting duplicate groups": conflict,
+                    "Review": "Potential composite-key duplication",
+                    "Recommended action": "Confirm the intended grain before aggregation or joins.",
+                })
+    for col in id_cols:
+        values = df[col].dropna().astype("string").tolist()
+        if len(values) > 5000:
+            values = values[:5000]
+        normalized_map: dict[str, list[str]] = {}
+        for value in values:
+            normalized = re.sub(r"[^a-z0-9]+", "", str(value).casefold())
+            if normalized:
+                normalized_map.setdefault(normalized, []).append(str(value))
+        for normalized, variants in normalized_map.items():
+            distinct = sorted(set(variants))
+            if len(distinct) > 1:
+                findings.append({
+                    "Sheet": sheet,
+                    "Type": "Normalized identifier collision",
+                    "Fields": col,
+                    "Occurrences": len(variants),
+                    "Conflicting duplicate groups": 0,
+                    "Source variants": " | ".join(distinct[:10]),
+                    "Review": "Potential formatting duplicate",
+                    "Recommended action": "Normalize only after confirming that the variants are one entity.",
+                })
+        sample = sorted(set(str(v) for v in values))
+        checked = 0
+        for i, left in enumerate(sample[:1500]):
+            for right in sample[i + 1:i + 8]:
+                if len(left) < 4 or len(right) < 4:
+                    continue
+                ratio = difflib.SequenceMatcher(None, left.casefold(), right.casefold()).ratio()
+                if ratio >= 0.92 and left.casefold() != right.casefold():
+                    findings.append({
+                        "Sheet": sheet,
+                        "Type": "Fuzzy identifier candidate",
+                        "Fields": col,
+                        "Occurrences": 2,
+                        "Source variants": f"{left} | {right}",
+                        "Similarity": round(ratio, 3),
+                        "Review": "Near-duplicate identifier candidate",
+                        "Recommended action": "Confirm whether spelling/casing/formatting differences represent one master entity.",
+                    })
+                    checked += 1
+                    if checked >= 100:
+                        break
+            if checked >= 100:
+                break
+    return findings
+
+def _excel_extended_outlier_findings(df: pd.DataFrame, sheet: str) -> list[dict[str, Any]]:
+    findings: list[dict[str, Any]] = []
+    for col in df.columns:
+        series = df[col]
+        if not pd.api.types.is_numeric_dtype(series) or pd.api.types.is_bool_dtype(series):
+            continue
+        values = pd.to_numeric(series, errors="coerce").dropna()
+        if len(values) < 8 or values.nunique() < 2:
+            continue
+        median = float(values.median())
+        mad = float((values - median).abs().median())
+        robust_count = 0
+        if mad > 0:
+            robust_count = int((abs(0.6745 * (values - median) / mad) > 3.5).sum())
+        mean, std = float(values.mean()), float(values.std(ddof=1))
+        z_count = int((((values - mean) / std).abs() > 3.0).sum()) if std > 0 else 0
+        spike_count = 0
+        ordered = values.index
+        try:
+            diff = values.diff().dropna()
+            diff_median = float(diff.abs().median())
+            if diff_median > 0:
+                spike_count = int((diff.abs() > 8 * diff_median).sum())
+        except Exception:
+            pass
+        flatline = 0
+        if len(values) >= 10:
+            flatline = int((values.rolling(5).std().fillna(np.nan) == 0).sum())
+        if robust_count or z_count or spike_count or flatline:
+            findings.append({
+                "Severity": "Low",
+                "Sheet": sheet,
+                "Field": str(col),
+                "Issue": "Extended statistical/behavioral outlier review",
+                "Evidence": f"Robust-z={robust_count}, z>3={z_count}, abrupt changes={spike_count}, flatline windows={flatline}.",
+                "Recommended action": "Review the affected records in context; preserve real industrial events.",
+            })
+    return findings
+
+def _excel_engineering_limits(df: pd.DataFrame, sheet: str, limits: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    findings = []
+    limits = limits or {}
+    for col, config in limits.items() if isinstance(limits, dict) else []:
+        if col not in df.columns or not isinstance(config, dict):
+            continue
+        values = pd.to_numeric(df[col], errors="coerce")
+        low, high = config.get("min"), config.get("max")
+        mask = pd.Series(False, index=df.index)
+        if low is not None:
+            mask |= values < float(low)
+        if high is not None:
+            mask |= values > float(high)
+        count = int(mask.sum())
+        if count:
+            findings.append({
+                "Severity": "High",
+                "Sheet": sheet,
+                "Field": str(col),
+                "Issue": "Engineering specification limit violation",
+                "Evidence": f"{count:,} value(s) outside configured limits [{low}, {high}].",
+                "Recommended action": "Verify the physical/specification limit and investigate affected records.",
+            })
+    return findings
+
+def _excel_profile_enrichment(df: pd.DataFrame, sheet: str) -> list[dict[str, Any]]:
+    rows = []
+    for col in df.columns:
+        series = df[col]
+        non_null = series.dropna()
+        row = {
+            "Sheet": sheet,
+            "Field": str(col),
+            "Role": _column_role(str(col), series),
+            "Type": _field_intelligence_rows(df, sheet)[list(df.columns).index(col)].get("Type", "Text"),
+            "Cardinality": int(series.nunique(dropna=True)),
+            "Cardinality %": round(float(series.nunique(dropna=True) / max(1, len(series)) * 100), 2),
+            "Missing %": round(float(series.isna().mean() * 100), 2),
+            "Examples": " | ".join(str(x) for x in non_null.head(5).tolist())[:240],
+        }
+        if pd.api.types.is_numeric_dtype(series) and not pd.api.types.is_bool_dtype(series):
+            numeric = pd.to_numeric(series, errors="coerce").dropna()
+            row.update({
+                "Min": float(numeric.min()) if not numeric.empty else None,
+                "Q1": float(numeric.quantile(0.25)) if not numeric.empty else None,
+                "Median": float(numeric.median()) if not numeric.empty else None,
+                "Mean": float(numeric.mean()) if not numeric.empty else None,
+                "Q3": float(numeric.quantile(0.75)) if not numeric.empty else None,
+                "Max": float(numeric.max()) if not numeric.empty else None,
+                "Std dev": float(numeric.std(ddof=1)) if len(numeric) > 1 else 0.0,
+                "Skewness": float(numeric.skew()) if len(numeric) > 2 else 0.0,
+            })
+        else:
+            counts = non_null.astype("string").value_counts(dropna=False)
+            row["Top category"] = str(counts.index[0]) if not counts.empty else ""
+            row["Top category count"] = int(counts.iloc[0]) if not counts.empty else 0
+        rows.append(row)
+    return rows
+
+def _excel_formula_dependencies(formula_inventory: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    rows = []
+    for item in formula_inventory:
+        formula = str(item.get("Formula", ""))
+        if not formula:
+            continue
+        external = "[" in formula or "]" in formula or re.search(r"https?://", formula, flags=re.I)
+        refs = re.findall(r"(?:(?:'([^']+)'|([A-Za-z_][A-Za-z0-9_ ]*))!)?\$?([A-Za-z]{1,3})\$?\d+", formula)
+        for sheet_a, sheet_b, cell in refs:
+            source_sheet = sheet_a or sheet_b or item.get("Sheet", "")
+            rows.append({
+                "Source": f"{item.get('Sheet','')}!{item.get('Cell','')}",
+                "Referenced cell": f"{source_sheet}!{cell.upper()}",
+                "External link": "Yes" if external else "No",
+                "Formula": formula,
+            })
+    return rows
+
+def _excel_source_fidelity(raw: bytes, filename: str) -> list[dict[str, Any]]:
+    results = []
+    if not str(filename).lower().endswith((".xlsx", ".xlsm")):
+        return results
+    try:
+        import openpyxl
+        keep_vba = str(filename).lower().endswith(".xlsm")
+        book = openpyxl.load_workbook(io.BytesIO(raw), read_only=False, data_only=False, keep_vba=keep_vba, keep_links=False)
+        for ws in book.worksheets:
+            table_count = len(getattr(ws, "_tables", {}) or {})
+            hyperlink_count = sum(1 for row in ws.iter_rows() for cell in row if getattr(cell, "hyperlink", None))
+            comment_count = sum(1 for row in ws.iter_rows() for cell in row if getattr(cell, "comment", None))
+            validation_count = len(getattr(ws, "data_validations", []).dataValidation) if getattr(ws, "data_validations", None) else 0
+            results.append({
+                "Sheet": ws.title,
+                "State": ws.sheet_state,
+                "Rows": ws.max_row,
+                "Columns": ws.max_column,
+                "Tables": table_count,
+                "Merged ranges": len(ws.merged_cells.ranges),
+                "Hyperlinks": hyperlink_count,
+                "Comments": comment_count,
+                "Data validations": validation_count,
+                "Has VBA": "Yes" if keep_vba and getattr(book, "vba_archive", None) is not None else "No",
+            })
+        defined_names = list(getattr(book, "defined_names", {}).keys())
+        results.append({
+            "Sheet": "[Workbook]",
+            "State": "—",
+            "Rows": 0,
+            "Columns": 0,
+            "Tables": 0,
+            "Merged ranges": 0,
+            "Hyperlinks": 0,
+            "Comments": 0,
+            "Data validations": 0,
+            "Has VBA": f"Named ranges: {len(defined_names):,}",
+        })
+        book.close()
+    except Exception as exc:
+        results.append({"Sheet": "[Workbook]", "State": "Review", "Error": f"{type(exc).__name__}: {exc}"})
+    return results
+
+def _excel_detect_locale(text: str) -> dict[str, Any]:
+    lines = [line for line in str(text).splitlines() if line.strip()][:80]
+    comma_decimal = int(sum(bool(re.search(r"\b\d{1,3},\d+\b", line)) for line in lines))
+    dot_decimal = int(sum(bool(re.search(r"\b\d+\.\d+\b", line)) for line in lines))
+    eu_thousands = int(sum(bool(re.search(r"\b\d{1,3}(?:\.\d{3})+,\d+\b", line)) for line in lines))
+    date_eu = int(sum(bool(re.search(r"\b\d{1,2}/\d{1,2}/\d{2,4}\b", line)) for line in lines))
+    return {
+        "Decimal style": "European candidate" if eu_thousands > 0 or comma_decimal > dot_decimal * 1.5 else "Dot-decimal candidate",
+        "Comma-decimal signals": comma_decimal,
+        "Dot-decimal signals": dot_decimal,
+        "European thousands+decimal signals": eu_thousands,
+        "Day/month date signals": date_eu,
+    }
+
+def _excel_detect_table_blocks(raw_df: pd.DataFrame, header_row: int) -> list[dict[str, Any]]:
+    if raw_df.empty:
+        return []
+    # Scan the whole worksheet so title/report rows cannot hide earlier tables.
+    blocks = []
+    # Delimited readers preserve blank lines as empty strings; treat both
+    # empty strings and NaN values as structural blanks.
+    structural = raw_df.replace(r"^\s*$", np.nan, regex=True)
+    nonblank = ~structural.isna().all(axis=1)
+    start = None
+    blank_streak = 0
+    for idx in range(0, len(raw_df)):
+        if bool(nonblank.iloc[idx]):
+            if start is None:
+                start = idx
+            blank_streak = 0
+        else:
+            blank_streak += 1
+            if start is not None and blank_streak >= 1:
+                end = idx - blank_streak
+                if end >= start:
+                    blocks.append((start, end))
+                start = None
+    if start is not None:
+        blocks.append((start, len(raw_df) - 1))
+    merged = []
+    for start, end in blocks:
+        block = raw_df.iloc[start:end + 1].copy()
+        first_candidates = [_normalise_text(v) for v in block.iloc[0].tolist() if _normalise_text(v)] if len(block) else []
+        if len(merged) and len(first_candidates) >= 2:
+            prior = merged[-1]
+            merged.append((start, end))
+        else:
+            merged.append((start, end))
+    results = []
+    for number, (start, end) in enumerate(merged, 1):
+        frame = raw_df.iloc[start:end + 1].copy()
+        local_header = _enhanced_detect_header_row(frame, scan_rows=min(12, len(frame)))
+        headers = _deduplicate_headers(frame.iloc[local_header].tolist()) if not frame.empty else []
+        data = frame.iloc[local_header + 1:].copy() if len(frame) else pd.DataFrame()
+        if headers and not data.empty:
+            data.columns = headers
+        repeated = 0
+        if headers and not data.empty:
+            same = data.apply(lambda r: [_normalise_text(v) for v in r.tolist()] == headers, axis=1)
+            repeated = int(same.sum())
+            if repeated:
+                data = data.loc[~same].copy()
+        results.append({
+            "Table ID": f"T{number:03d}",
+            "Start row": int(start + 1),
+            "End row": int(end + 1),
+            "Header row": int(start + local_header + 1),
+            "Rows": int(max(0, len(data))),
+            "Columns": int(len(headers)),
+            "Repeated header rows removed": repeated,
+            "Headers": headers,
+            "Frame": data.reset_index(drop=True),
+        })
+    return results
+
+def _excel_table_catalog(raw_sheets: dict[str, pd.DataFrame]) -> tuple[list[dict[str, Any]], dict[str, pd.DataFrame]]:
+    catalog = []
+    datasets = {}
+    for sheet, raw_df in raw_sheets.items():
+        header = _enhanced_detect_header_row(raw_df)
+        blocks = _excel_detect_table_blocks(raw_df, header)
+        for block in blocks:
+            clean, audit = _final_clean_dataframe(block["Frame"])
+            key = f"{sheet}::{block['Table ID']}"
+            datasets[key] = clean
+            catalog.append({
+                "Dataset ID": key,
+                "Sheet": sheet,
+                "Table ID": block["Table ID"],
+                "Start row": block["Start row"],
+                "End row": block["End row"],
+                "Header row": block["Header row"],
+                "Rows": int(len(clean)),
+                "Columns": int(len(clean.columns)),
+                "Repeated header rows removed": block["Repeated header rows removed"],
+                "Schema": _schema_fingerprint(clean),
+                "Cleaning actions": len(audit),
+            })
+    return catalog, datasets
+
+def _excel_schema_drift(old_df: pd.DataFrame, new_df: pd.DataFrame) -> dict[str, Any]:
+    old_cols = {str(c).casefold(): (str(c), str(old_df[c].dtype)) for c in old_df.columns}
+    new_cols = {str(c).casefold(): (str(c), str(new_df[c].dtype)) for c in new_df.columns}
+    added = sorted(set(new_cols) - set(old_cols))
+    removed = sorted(set(old_cols) - set(new_cols))
+    type_changed = []
+    renamed_candidates = []
+    for common in sorted(set(old_cols) & set(new_cols)):
+        if old_cols[common][1] != new_cols[common][1]:
+            type_changed.append({
+                "Field": new_cols[common][0], "Old type": old_cols[common][1], "New type": new_cols[common][1],
+            })
+    for old_key in removed:
+        for new_key in added:
+            sim = difflib.SequenceMatcher(None, old_key, new_key).ratio()
+            if sim >= 0.72:
+                renamed_candidates.append({"Removed field": old_cols[old_key][0], "Added field": new_cols[new_key][0], "Similarity": round(sim, 3)})
+    return {
+        "Added fields": [new_cols[x][0] for x in added],
+        "Removed fields": [old_cols[x][0] for x in removed],
+        "Type changes": type_changed,
+        "Renamed field candidates": renamed_candidates,
+        "Compatible": not removed and not type_changed,
+    }
+
+def _excel_apply_validation_rules(df: pd.DataFrame, rules: list[dict[str, Any]] | None = None, sheet: str = "") -> list[dict[str, Any]]:
+    active = [r for r in (rules or _EXCEL_DEFAULT_RULES) if r.get("enabled", True)]
+    results = []
+    for rule in active:
+        kind = str(rule.get("kind", ""))
+        severity = str(rule.get("severity", "Medium"))
+        if kind == "required_identifier":
+            for col in df.columns:
+                if _is_identifier(str(col), df[col]):
+                    count = int(df[col].isna().sum())
+                    if count:
+                        results.append({"Rule": rule.get("rule"), "Sheet": str(sheet), "Field": str(col), "Status": "FAIL", "Severity": severity, "Violations": count, "Evidence": f"{count:,} identifier value(s) missing."})
+        elif kind == "numeric_integrity":
+            for col in df.columns:
+                if _column_role(str(col), df[col]) == "Measure":
+                    numeric = pd.to_numeric(df[col], errors="coerce")
+                    bad = int(df[col].notna().sum() - numeric.notna().sum())
+                    if bad:
+                        results.append({"Rule": rule.get("rule"), "Field": str(col), "Status": "FAIL", "Severity": severity, "Violations": bad, "Evidence": f"{bad:,} non-numeric value(s) remain in a measure field."})
+        elif kind == "percentage_range":
+            for col in df.columns:
+                bad = _percentage_range_count(str(col), df[col])
+                if bad:
+                    results.append({"Rule": rule.get("rule"), "Field": str(col), "Status": "FAIL", "Severity": severity, "Violations": bad, "Evidence": f"{bad:,} percentage/ratio value(s) outside 0..1."})
+        elif kind == "date_range":
+            for col in df.columns:
+                if pd.api.types.is_datetime64_any_dtype(df[col]):
+                    bad = _date_sanity_count(df[col])
+                    if bad:
+                        results.append({"Rule": rule.get("rule"), "Field": str(col), "Status": "FAIL", "Severity": severity, "Violations": bad, "Evidence": f"{bad:,} date(s) outside 1900..2100."})
+    return results
+
+def _excel_build_lineage_manifest(result: dict[str, Any]) -> dict[str, Any]:
+    source_signature = str(result.get("signature", ""))
+    manifest = {
+        "lineage_version": "1.0",
+        "dataset_id": "DS-" + source_signature[:16].upper(),
+        "dataset_version": int(result.get("dataset_version", 1)),
+        "source": {
+            "filename": result.get("filename", ""),
+            "sha256": source_signature,
+            "source_type": result.get("import_diagnostics", {}).get("Source type", "Unknown"),
+        },
+        "structure": result.get("table_catalog", []),
+        "schemas": {
+            str(sheet): profile.get("Schema fingerprint", "")
+            for sheet, profile in result.get("profiles", {}).items()
+        },
+        "governance": {
+            "quality_scores": {str(k): v.get("Quality score", 0) for k, v in result.get("profiles", {}).items()},
+            "review_items": len(result.get("review_register", [])),
+            "validation_failures": len([x for x in result.get("validation_results", []) if x.get("Status") == "FAIL"]),
+        },
+        "mapping": result.get("semantic_mapping", []),
+        "modules": result.get("module_readiness", []),
+        "provenance": {
+            "generated_utc": datetime.now(timezone.utc).isoformat(),
+            "transformation_recipe_version": "enterprise-1",
+        },
+    }
+    return manifest
+
+def _excel_export_json(result: dict[str, Any]) -> bytes:
+    payload = _excel_build_lineage_manifest(result)
+    payload["field_profile"] = result.get("field_profile", [])
+    payload["validation_results"] = result.get("validation_results", [])
+    return json.dumps(payload, indent=2, ensure_ascii=False, default=str).encode("utf-8")
+
+def _excel_export_clean_csv(result: dict[str, Any]) -> bytes:
+    buf = io.StringIO()
+    for sheet, frame in result.get("cleaned_sheets", {}).items():
+        buf.write(f"### SHEET: {sheet}\n")
+        buf.write(frame.to_csv(index=False))
+    return buf.getvalue().encode("utf-8")
+
+def _excel_export_parquet(result: dict[str, Any]) -> bytes | None:
+    frames = result.get("cleaned_sheets", {})
+    if len(frames) != 1:
+        return None
+    try:
+        target = next(iter(frames.values()))
+        return target.to_parquet(index=False)
+    except Exception:
+        return None
+
+def _excel_remediation_preview(df: pd.DataFrame, action: str, field: str = "") -> pd.DataFrame:
+    out = df.copy(deep=True)
+    if action == "Trim text":
+        for col in ([field] if field else list(out.columns)):
+            if col in out.columns and (pd.api.types.is_object_dtype(out[col]) or pd.api.types.is_string_dtype(out[col])):
+                out[col] = out[col].map(lambda v: _normalise_text(v) if isinstance(v, str) else v)
+    elif action == "Normalize missing tokens":
+        out, _ = _enhanced_null_normalise(out)
+    elif action == "Remove exact duplicate rows":
+        out = out.drop_duplicates().reset_index(drop=True)
+    elif action == "Numeric coercion":
+        if field and field in out.columns:
+            out[field] = pd.to_numeric(out[field], errors="coerce")
+    else:
+        raise ValueError(f"Unsupported remediation: {action}")
+    return out
+
+def _excel_semantic_mapping(df: pd.DataFrame) -> list[dict[str, Any]]:
+    mappings = []
+    canonical = [
+        ("Asset ID", "Asset", "asset_id"),
+        ("Machine / Equipment", "Asset", "asset_name"),
+        ("Process", "Process", "process_name"),
+        ("SKU / Product", "Product", "product_id"),
+        ("Material", "Material", "material_id"),
+        ("Order / Work Order", "Order", "order_id"),
+        ("Employee / Operator", "Workforce", "employee_id"),
+        ("Defect / Scrap", "Quality", "defect_metric"),
+        ("Failure / Downtime", "Maintenance", "failure_metric"),
+        ("Energy", "Energy", "energy_value"),
+        ("Cost / Price", "Cost", "cost_value"),
+        ("Date / Timestamp", "Time", "timestamp"),
+    ]
+    for col in df.columns:
+        text = str(col).casefold()
+        scored = []
+        for label, entity, field_name in canonical:
+            tokens = re.findall(r"[a-z0-9]+", label.casefold())
+            score = sum(1 for token in tokens if token in text)
+            if _canonical_entity_hint(str(col)) == entity:
+                score += 2
+            if score:
+                scored.append((score, label, entity, field_name))
+        scored.sort(reverse=True)
+        if scored:
+            score, label, entity, field_name = scored[0]
+            confidence = "High" if score >= 3 else "Medium"
+            mappings.append({
+                "Source field": str(col),
+                "Canonical field": field_name,
+                "Canonical entity": entity,
+                "Suggested mapping": label,
+                "Confidence": confidence,
+                "Approved": False,
+            })
+        else:
+            mappings.append({
+                "Source field": str(col),
+                "Canonical field": "",
+                "Canonical entity": _canonical_entity_hint(str(col)),
+                "Suggested mapping": "",
+                "Confidence": "Low",
+                "Approved": False,
+            })
+    return mappings
+
+def _excel_persist_result(username: str, result: dict[str, Any]) -> bool:
+    try:
+        import streamlit as st
+        catalog = st.session_state.setdefault("excel_studio_dataset_catalog", [])
+        entry = _excel_build_lineage_manifest(result)
+        entry["filename"] = result.get("filename", "")
+        entry["saved_utc"] = datetime.now(timezone.utc).isoformat()
+        entry["status"] = "active"
+        signature = str(result.get("signature", ""))
+        catalog[:] = [x for x in catalog if x.get("source", {}).get("sha256") != signature]
+        catalog.append(entry)
+        st.session_state["excel_studio_dataset_catalog"] = catalog[-50:]
+        try:
+            from workspace_persistence import save_user_workspace
+            return bool(save_user_workspace(username, st.session_state))
+        except Exception:
+            return True
+    except Exception:
+        return False
+
+def _excel_refresh_governance(result: dict[str, Any]) -> dict[str, Any]:
+    cleaned = result.get("cleaned_sheets", {})
+    result["validation_rules"] = result.get("validation_rules") or _EXCEL_DEFAULT_RULES
+    result["engineering_limits"] = result.get("engineering_limits") or {}
+    result["field_profile"] = [row for sheet, df in cleaned.items() for row in _excel_profile_enrichment(df, sheet)]
+    result["missingness_patterns"] = [row for sheet, df in cleaned.items() for row in _excel_missingness_patterns(df, sheet)]
+    result["duplicate_intelligence"] = [item for sheet, df in cleaned.items() for item in _excel_duplicate_intelligence(df, sheet)]
+    result["duplicate_candidates"] = [item for sheet, frame in cleaned.items() for item in _normalised_duplicate_candidates(frame, sheet)]
+    result["extended_outliers"] = [item for sheet, df in cleaned.items() for item in _excel_extended_outlier_findings(df, sheet)]
+    result["engineering_limit_findings"] = [item for sheet, df in cleaned.items() for item in _excel_engineering_limits(df, sheet, result["engineering_limits"])]
+    result["semantic_mapping"] = [item for sheet, df in cleaned.items() for item in _excel_semantic_mapping(df)]
+    result["validation_results"] = [
+        item for sheet, df in cleaned.items()
+        for item in (_excel_apply_validation_rules(df, result["validation_rules"], sheet) + _excel_custom_rule_results(df, result.get("custom_validation_rules", []), sheet))
+    ]
+    result["formula_dependencies"] = _excel_formula_dependencies(result.get("formula_inventory", []))
+    result["formula_gap_findings"] = _excel_formula_gap_scan(result.get("formula_inventory", []))
+    result["security_scan"] = _excel_security_scan(cleaned)
+    result["source_fidelity"] = _excel_source_fidelity(result.get("_raw_bytes", b""), result.get("filename", ""))
+    result["unit_catalog"] = [
+        {
+            "Sheet": sheet,
+            "Field": str(col),
+            "Detected unit": _excel_unit_token(str(col)),
+            "Convertible targets": ", ".join(sorted([
+                u for u in _EXCEL_UNIT_FACTORS
+                if _EXCEL_UNIT_FACTORS[u][0] == _EXCEL_UNIT_FACTORS.get(
+                    _excel_unit_token(str(col)), ("", 0)
+                )[0]
+            ])),
+        }
+        for sheet, frame in cleaned.items() for col in frame.columns if _excel_unit_token(str(col))
+    ]
+    result["module_readiness"] = _multi_module_readiness(cleaned)
+    result["formula_quality"] = _formula_quality_inventory(result.get("formula_inventory", []))
+    result["relationship_integrity"] = _relationship_integrity(cleaned)
+    result["privacy_scan"] = _privacy_scan(cleaned)
+    result["data_contract"] = _data_contract(cleaned, result.get("field_intelligence", []))
+    base_reviews = [
+        issue for sheet, frame in cleaned.items()
+        for issue in _quality_review_register(frame, sheet)
+    ]
+    for meta in result.get("source_metadata", []):
+        blocks = int(meta.get("Detected table blocks", 1) or 1)
+        if blocks > 1:
+            base_reviews.append({
+                "Severity": "Medium", "Sheet": str(meta.get("Source sheet", "")),
+                "Field": "Sheet structure", "Issue": "Multiple table blocks detected",
+                "Evidence": f"{blocks:,} non-empty table region(s) inferred.",
+                "Recommended action": "Review the discovered datasets before joins or aggregation.",
+            })
+    for item in result["duplicate_candidates"]:
+        base_reviews.append({
+            "Severity": "Medium", "Sheet": item["Sheet"], "Field": item["Field"],
+            "Issue": item["Review"],
+            "Evidence": item.get("Source variants", f"{item.get('Occurrences', 0):,} occurrence(s)"),
+            "Recommended action": item["Recommended action"],
+        })
+    for item in result["security_scan"]:
+        base_reviews.append({
+            "Severity": "High", "Sheet": item["Sheet"], "Field": item["Field"],
+            "Issue": "Potential secret/security exposure",
+            "Evidence": f"{item['Indicator']}: {item['Matches']:,} match(es).",
+            "Recommended action": item["Action"],
+        })
+    for issue in result["extended_outliers"] + result["engineering_limit_findings"]:
+        base_reviews.append(issue)
+    for item in result.get("privacy_scan", []):
+        base_reviews.append({
+            "Severity": "High",
+            "Sheet": item["Sheet"],
+            "Field": item["Field"],
+            "Issue": "Potential sensitive field",
+            "Evidence": f"Indicator: {item['Indicator']}; estimated matches: {item['Estimated matches']:,}.",
+            "Recommended action": item["Action"],
+        })
+    for item in result["formula_gap_findings"]:
+        base_reviews.append(item)
+    for item in result["validation_results"]:
+        if item.get("Status") == "FAIL":
+            base_reviews.append({
+                "Severity": item.get("Severity", "High"),
+                "Sheet": item.get("Sheet", ""),
+                "Field": item.get("Field", ""),
+                "Issue": f"Validation rule failed: {item.get('Rule', '')}",
+                "Evidence": item.get("Evidence", ""),
+                "Recommended action": "Correct or explicitly approve the exception before downstream analysis.",
+            })
+    result["review_register"] = base_reviews
+    return result
+
+_BASE_EXCEL_ENGINE_PROCESS = process_uploaded_workbook
+
+def _excel_engine_read(raw: bytes, filename: str) -> dict[str, pd.DataFrame]:
+    if not raw:
+        raise ValueError("The uploaded file is empty.")
+    lower = str(filename).lower()
+    if lower.endswith((".csv", ".tsv", ".txt")):
+        text, encoding = _decode_text_bytes(raw)
+        if "\\n" in text and "\n" not in text and "\r" not in text:
+            text = text.replace("\\r\\n", "\n").replace("\\n", "\n")
+        if lower.endswith(".tsv"):
+            delimiter = "\t"
+        else:
+            delimiter = _choose_csv_delimiter(text)
+        import csv
+        rows = list(csv.reader(io.StringIO(text), delimiter=delimiter))
+        width = max((len(row) for row in rows), default=0)
+        frame = pd.DataFrame(
+            [list(row) + [""] * (width - len(row)) for row in rows],
+            dtype=object,
+        )
+        frame.attrs["source_encoding"] = encoding
+        frame.attrs["source_delimiter"] = delimiter
+        return {"CSV" if lower.endswith(".csv") else "TEXT": frame}
+    if lower.endswith((".xlsx", ".xlsm")):
+        import openpyxl
+        keep_vba = lower.endswith(".xlsm")
+        book = openpyxl.load_workbook(io.BytesIO(raw), read_only=True, data_only=False, keep_links=False, keep_vba=keep_vba)
+        try:
+            return {
+                str(ws.title): pd.DataFrame(list(ws.values), dtype=object)
+                for ws in book.worksheets
+            }
+        finally:
+            book.close()
+    if lower.endswith(".xls"):
+        try:
+            return {"XLS": pd.read_excel(io.BytesIO(raw), header=None, dtype=object, engine="xlrd")}
+        except ImportError as exc:
+            raise ValueError("Legacy .xls import requires the xlrd dependency; the workbook was not modified.") from exc
+    raise ValueError("Supported imports are .xlsx, .xlsm, .xls, .csv, .tsv and .txt.")
+
+def _excel_process(raw: bytes, filename: str) -> dict[str, Any]:
+    # Temporarily replace the reader used by the existing definitive pipeline.
+    global _definitive_read_raw_workbook
+    previous = _definitive_read_raw_workbook
+    try:
+        _definitive_read_raw_workbook = _excel_engine_read
+        result = _definitive_process_uploaded_workbook(raw, filename)
+    finally:
+        _definitive_read_raw_workbook = previous
+    result["_raw_bytes"] = raw
+    result["import_diagnostics"] = {
+        "Source type": ("XLSX/XLSM" if str(filename).lower().endswith((".xlsx", ".xlsm")) else
+                        "XLS" if str(filename).lower().endswith(".xls") else
+                        "TSV" if str(filename).lower().endswith(".tsv") else
+                        "CSV/TXT"),
+        "Filename": str(filename),
+        "File size KB": round(len(raw) / 1024, 1),
+        "SHA256": hashlib.sha256(raw).hexdigest(),
+    }
+    if str(filename).lower().endswith((".csv", ".tsv", ".txt")):
+        try:
+            text, encoding = _decode_text_bytes(raw)
+            result["import_diagnostics"].update(_excel_detect_locale(text))
+            result["import_diagnostics"]["Encoding"] = encoding
+            result["import_diagnostics"]["Delimiter"] = "\t" if str(filename).lower().endswith(".tsv") else _choose_csv_delimiter(text)
+        except Exception:
+            pass
+    table_catalog, table_datasets = _excel_table_catalog(result.get("raw_sheets", {}))
+    result["table_catalog"] = table_catalog
+    result["table_datasets"] = table_datasets
+    result["dataset_version"] = 1
+    result["semantic_mapping"] = [item for sheet, df in result["cleaned_sheets"].items() for item in _excel_semantic_mapping(df)]
+    result["ingest_guardrails"] = {
+        "Large file": len(raw) >= 25 * 1024 * 1024,
+        "Very large file": len(raw) >= 100 * 1024 * 1024,
+        "Cell volume": sum(int(df.shape[0] * df.shape[1]) for df in result["raw_sheets"].values()),
+        "Processing mode": "chunk-aware CSV/text" if str(filename).lower().endswith((".csv", ".tsv", ".txt")) else "workbook",
+    }
+    _excel_refresh_governance(result)
+    result["lineage_manifest"] = _excel_build_lineage_manifest(result)
+    result["xlsx"] = _append_governance_plus_to_workbook(result["xlsx"], result)
+    result["xlsx"] = _postprocess_export_guardrails(result["xlsx"])
+    result["xlsx"] = _reconcile_clean_sheet_payload(result["xlsx"], result["cleaned_sheets"])
+    result["bundle"] = build_ultimate_bundle(
+        f"Shoir-IE — {result['filename']}",
+        result["xlsx"], result["audits"], result["profiles"],
+        cleaned_sheets=result.get("cleaned_sheets", {}),
+        raw_sheets=result.get("raw_sheets", {}),
+        field_intelligence=result.get("field_intelligence", []),
+        review_register=result.get("review_register", []),
+        source_metadata=result.get("source_metadata", []),
+    )
+    return result
+
+def process_uploaded_workbook(raw: bytes, filename: str) -> dict[str, Any]:
+    return _excel_process(raw, filename)
+
+
+def _excel_formula_gap_scan(formula_inventory: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    findings: list[dict[str, Any]] = []
+    groups: dict[tuple[str, str], list[int]] = {}
+    for item in formula_inventory:
+        cell = str(item.get("Cell", ""))
+        match = re.fullmatch(r"([A-Za-z]{1,3})(\d+)", cell)
+        if match:
+            groups.setdefault((str(item.get("Sheet", "")), match.group(1).upper()), []).append(int(match.group(2)))
+    for (sheet, col), rows in groups.items():
+        rows = sorted(set(rows))
+        if len(rows) < 4:
+            continue
+        gaps: list[int] = []
+        for left, right in zip(rows, rows[1:]):
+            if right - left > 1:
+                gaps.extend(range(left + 1, right))
+        if gaps:
+            findings.append({
+                "Severity": "Medium",
+                "Sheet": sheet,
+                "Field": col,
+                "Issue": "Potential formula gap",
+                "Evidence": f"{len(gaps):,} row(s) sit between formula cells in column {col}.",
+                "Affected rows": ", ".join(str(x) for x in gaps[:25]),
+                "Recommended action": "Check whether missing cells should contain copied formulas or intentional blanks.",
+            })
+    return findings
+
+def _excel_security_scan(cleaned: dict[str, pd.DataFrame]) -> list[dict[str, Any]]:
+    results: list[dict[str, Any]] = []
+    for sheet, frame in cleaned.items():
+        for col in frame.columns:
+            values = frame[col].dropna().astype(str).head(5000)
+            for label, pattern in _EXCEL_SECRET_PATTERNS:
+                hits = int(values.map(lambda value: bool(pattern.search(value))).sum())
+                if hits:
+                    results.append({
+                        "Sheet": sheet,
+                        "Field": str(col),
+                        "Indicator": label,
+                        "Matches": hits,
+                        "Action": "Mask/remove secrets before sharing or exporting this dataset.",
+                    })
+                    break
+    return results
+
+def _excel_custom_rule_results(df: pd.DataFrame, rules: list[dict[str, Any]], sheet: str) -> list[dict[str, Any]]:
+    results: list[dict[str, Any]] = []
+    for rule in rules:
+        if not rule.get("enabled", True):
+            continue
+        field = str(rule.get("field", ""))
+        operator = str(rule.get("operator", ""))
+        value = rule.get("value")
+        if field not in df.columns:
+            results.append({
+                "Rule": rule.get("name", "Custom rule"),
+                "Sheet": sheet,
+                "Field": field,
+                "Status": "FAIL",
+                "Severity": rule.get("severity", "High"),
+                "Violations": len(df),
+                "Evidence": f"Configured field '{field}' does not exist.",
+            })
+            continue
+        series = df[field]
+        if operator in {">", ">=", "<", "<=", "==", "!="}:
+            numeric = pd.to_numeric(series, errors="coerce")
+            try:
+                target = float(value)
+                if operator == ">": mask = numeric <= target
+                elif operator == ">=": mask = numeric < target
+                elif operator == "<": mask = numeric >= target
+                elif operator == "<=": mask = numeric > target
+                elif operator == "==": mask = numeric != target
+                else: mask = numeric == target
+            except Exception:
+                mask = pd.Series(True, index=df.index)
+        elif operator == "is not null":
+            mask = series.isna()
+        elif operator == "is null":
+            mask = series.notna()
+        elif operator == "in":
+            allowed = {x.strip().casefold() for x in str(value).split(",") if x.strip()}
+            mask = ~series.astype("string").fillna("").str.casefold().isin(allowed)
+        elif operator == "not in":
+            denied = {x.strip().casefold() for x in str(value).split(",") if x.strip()}
+            mask = series.astype("string").fillna("").str.casefold().isin(denied)
+        elif operator == "regex":
+            try:
+                mask = ~series.astype("string").fillna("").str.contains(str(value), regex=True, na=False)
+            except Exception:
+                mask = pd.Series(True, index=df.index)
+        else:
+            continue
+        violations = int(mask.sum())
+        results.append({
+            "Rule": rule.get("name", "Custom rule"),
+            "Sheet": sheet,
+            "Field": field,
+            "Status": "FAIL" if violations else "PASS",
+            "Severity": rule.get("severity", "Medium"),
+            "Violations": violations,
+            "Evidence": f"{violations:,} row(s) violate the rule." if violations else "No violations.",
+        })
+    return results
+
+def _excel_reference_check(clean_df: pd.DataFrame, reference_df: pd.DataFrame, key: str) -> dict[str, Any]:
+    if key not in clean_df.columns or key not in reference_df.columns:
+        return {"Status": "FAIL", "Reason": f"Key '{key}' must exist in both datasets."}
+    left = set(clean_df[key].dropna().astype("string").str.strip())
+    right = set(reference_df[key].dropna().astype("string").str.strip())
+    unmatched = sorted(left - right)
+    return {
+        "Status": "PASS" if not unmatched else "REVIEW",
+        "Key": key,
+        "Input distinct keys": len(left),
+        "Reference distinct keys": len(right),
+        "Matched keys": len(left & right),
+        "Unmatched input keys": len(unmatched),
+        "Reference coverage %": round(100.0 * len(left & right) / max(1, len(left)), 2),
+        "Sample unmatched": " | ".join(unmatched[:20]),
+    }
+
+def _excel_render_professional(tier: str, username: str) -> None:
+    import streamlit as st
+    from shoir_tier_capabilities import tier_allows
+    if not tier_allows(tier, "Starter"):
+        st.warning("This workspace is not included in your current package.")
+        return
+    st.markdown("## 📊 Excel Intelligence & Data Cleaning Studio")
+    st.caption("One guided path: Import → Understand → Clean → Validate → Map → Remediate → Visualize → Activate → Export.")
+    left, right = st.columns([5, 1])
+    upload = left.file_uploader(
+        "Drop an Excel/CSV/TSV/TXT file",
+        type=["xlsx", "xlsm", "xls", "csv", "tsv", "txt"],
+        key="excel_studio_upload",
+        help="Messy reports, industrial exports, legacy Excel and delimited text are supported.",
+    )
+    if right.button("Clear", key="excel_studio_clear_enterprise", use_container_width=True):
+        for key in [
+            "excel_studio_signature", "excel_studio_result", "excel_studio_sheet",
+            "excel_studio_visual_df", "excel_studio_active_dataset",
+        ]:
+            st.session_state.pop(key, None)
+        st.rerun()
+    if upload is not None:
+        raw = upload.getvalue()
+        signature = hashlib.sha256(raw).hexdigest()
+        if st.session_state.get("excel_studio_signature") != signature:
+            try:
+                with st.spinner("Profiling, cleaning and governing the workbook…"):
+                    result = process_uploaded_workbook(raw, upload.name)
+                st.session_state["excel_studio_signature"] = signature
+                st.session_state["excel_studio_result"] = result
+                versions = st.session_state.setdefault("excel_studio_versions", [])
+                previous = versions[-1] if versions else None
+                current_snapshot = {
+                    "dataset_id": result["lineage_manifest"]["dataset_id"],
+                    "version": len(versions) + 1,
+                    "filename": upload.name,
+                    "sha256": signature,
+                    "schema": {k: v.get("Schema fingerprint", "") for k, v in result["profiles"].items()},
+                    "columns": {k: [str(col) for col in frame.columns] for k, frame in result["cleaned_sheets"].items()},
+                    "imported_utc": datetime.now(timezone.utc).isoformat(),
+                }
+                if previous:
+                    old_columns = previous.get("columns", {})
+                    current_dfs = result.get("cleaned_sheets", {})
+                    current_snapshot["schema_drift"] = {
+                        sheet: _excel_schema_drift(
+                            pd.DataFrame(columns=list(old_columns.get(sheet, []))),
+                            pd.DataFrame(columns=[str(col) for col in frame.columns]),
+                        )
+                        for sheet, frame in current_dfs.items()
+                        if sheet in old_columns
+                    }
+                versions.append(current_snapshot)
+                st.session_state["excel_studio_versions"] = versions[-25:]
+                _excel_persist_result(username, result)
+                st.success(f"Processed {len(result['cleaned_sheets']):,} source sheet(s) and discovered {len(result.get('table_catalog', [])):,} analytical table(s).")
+            except Exception as exc:
+                st.error(f"Excel could not be transformed safely: {type(exc).__name__}: {exc}")
+    result = st.session_state.get("excel_studio_result")
+    if not isinstance(result, dict):
+        st.info("Upload a file to activate the guided industrial data workflow.")
+        return
+    cleaned = result.get("cleaned_sheets", {})
+    profiles = result.get("profiles", {})
+    scores = [float(v.get("Quality score", 0)) for v in profiles.values()]
+    high_reviews = sum(1 for x in result.get("review_register", []) if x.get("Severity") == "High")
+    c = st.columns(6)
+    c[0].metric("Sheets", len(cleaned))
+    c[1].metric("Tables", len(result.get("table_catalog", [])))
+    c[2].metric("Rows", f"{sum(len(v) for v in cleaned.values()):,}")
+    c[3].metric("Avg quality", f"{float(np.mean(scores)):.1f}%" if scores else "—")
+    c[4].metric("Review items", len(result.get("review_register", [])))
+    c[5].metric("Validation fails", len([x for x in result.get("validation_results", []) if x.get("Status") == "FAIL"]))
+    tabs = st.tabs(["1 · Import", "2 · Structure", "3 · Quality", "4 · Map", "5 · Remediate", "6 · Visualize", "7 · Activate", "8 · Version & Export"])
+    with tabs[0]:
+        st.subheader("Import diagnostics")
+        st.dataframe(pd.DataFrame([result.get("import_diagnostics", {})]), use_container_width=True, hide_index=True)
+        st.markdown("### What will happen")
+        st.write("The original source is retained. Cleaning is conservative. Statistical outliers are flagged, not deleted. Sensitive-field scans retain indicators, not raw values.")
+        if result.get("ingest_guardrails", {}).get("Large file"):
+            st.warning("Large-file guardrail: the upload is sizeable. Shoir-IE will keep analysis bounded and may sample plots.")
+    with tabs[1]:
+        st.subheader("Discovered analytical tables")
+        catalog = pd.DataFrame(result.get("table_catalog", []))
+        if catalog.empty:
+            st.info("No independent table blocks were detected.")
+        else:
+            st.dataframe(catalog, use_container_width=True, hide_index=True)
+            labels = catalog["Dataset ID"].tolist()
+            chosen = st.selectbox("Open table", labels, key="excel_studio_table_choice")
+            if chosen in result.get("table_datasets", {}):
+                st.dataframe(result["table_datasets"][chosen].head(1000), use_container_width=True, hide_index=True)
+                if st.button("Make this the active dataset", key="excel_studio_activate_table", use_container_width=True):
+                    result["active_table_id"] = chosen
+                    result["active_table_df"] = result["table_datasets"][chosen].copy(deep=True)
+                    st.session_state["excel_studio_result"] = result
+                    st.session_state["excel_studio_active_dataset"] = chosen
+                    st.success("Active dataset changed. Continue to Map, Visualize or Activate.")
+    with tabs[2]:
+        st.subheader("Quality & validation")
+        q1, q2 = st.columns(2)
+        with q1:
+            st.dataframe(pd.DataFrame(result.get("validation_results", [])), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(result.get("missingness_patterns", [])), use_container_width=True, hide_index=True)
+        with q2:
+            st.dataframe(pd.DataFrame(result.get("extended_outliers", [])), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(result.get("duplicate_intelligence", [])), use_container_width=True, hide_index=True)
+        with st.expander("Source fidelity", expanded=False):
+            st.dataframe(pd.DataFrame(result.get("source_fidelity", [])), use_container_width=True, hide_index=True)
+        with st.expander("Formula lineage", expanded=False):
+            st.dataframe(pd.DataFrame(result.get("formula_dependencies", [])), use_container_width=True, hide_index=True)
+    with tabs[3]:
+        st.subheader("Data Mapper")
+        frames = result.get("table_datasets", {}) or cleaned
+        if not frames:
+            st.info("No clean dataset available.")
+        else:
+            active_key = st.session_state.get("excel_studio_active_dataset")
+            if active_key in frames:
+                map_df = frames[active_key]
+            else:
+                map_df = next(iter(frames.values()))
+            mapping_df = pd.DataFrame(_excel_semantic_mapping(map_df))
+            if not mapping_df.empty:
+                edited = st.data_editor(mapping_df, use_container_width=True, hide_index=True, key="excel_studio_mapping_editor")
+                if st.button("Approve selected mappings", key="excel_studio_approve_mapping", type="primary"):
+                    result["semantic_mapping"] = edited.to_dict("records")
+                    st.session_state["excel_studio_result"] = result
+                    _excel_persist_result(username, result)
+                    st.success("Mappings saved to the workspace.")
+    with tabs[4]:
+        st.subheader("Safe remediation")
+        active = result.get("active_table_df")
+        if not isinstance(active, pd.DataFrame):
+            active = next(iter(cleaned.values())) if cleaned else pd.DataFrame()
+        action = st.selectbox("Remediation", ["Trim text", "Normalize missing tokens", "Remove exact duplicate rows", "Numeric coercion"], key="excel_studio_remediation")
+        field_options = ["All"] + [str(c) for c in active.columns]
+        field = st.selectbox("Field", field_options, key="excel_studio_remediation_field")
+        target_field = "" if field == "All" else field
+        try:
+            preview = _excel_remediation_preview(active, action, target_field)
+            before_after_rows = []
+            for col in active.columns:
+                before_after_rows.append({
+                    "Field": str(col),
+                    "Rows before": len(active),
+                    "Rows after": len(preview),
+                    "Missing before": int(active[col].isna().sum()),
+                    "Missing after": int(preview[col].isna().sum()),
+                })
+            st.dataframe(pd.DataFrame(before_after_rows), use_container_width=True, hide_index=True)
+            if st.button("Apply remediation", key="excel_studio_apply_remediation", type="primary"):
+                if result.get("active_table_id") and result["active_table_id"] in result.get("table_datasets", {}):
+                    result["table_datasets"][result["active_table_id"]] = preview.copy(deep=True)
+                else:
+                    first_sheet = next(iter(cleaned), None)
+                    if first_sheet:
+                        result["cleaned_sheets"][first_sheet] = preview.copy(deep=True)
+                result["active_table_df"] = preview.copy(deep=True)
+                _excel_refresh_governance(result)
+                _rebuild_excel_result(result)
+                st.session_state["excel_studio_result"] = result
+                _excel_persist_result(username, result)
+                st.success("Remediation applied and governance metrics refreshed.")
+                st.rerun()
+        except Exception as exc:
+            st.error(f"Remediation preview failed safely: {exc}")
+    with tabs[5]:
+        st.subheader("Universal visualization")
+        frames = result.get("table_datasets", {}) or cleaned
+        labels = list(frames)
+        if not labels:
+            st.info("No clean table available.")
+        else:
+            choice = st.selectbox("Dataset", labels, key="excel_studio_visual_dataset")
+            frame = frames[choice]
+            st.session_state["excel_studio_visual_df"] = frame.copy(deep=True)
+            try:
+                from shoir_universal_engine import guaranteed_figure
+                fig = guaranteed_figure(frame, f"Excel Studio · {choice}")
+                if fig is not None:
+                    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False, "responsive": True})
+            except Exception:
+                pass
+            numeric = [str(c) for c in frame.columns if pd.api.types.is_numeric_dtype(frame[c])]
+            categorical = [str(c) for c in frame.columns if str(c) not in numeric]
+            if numeric:
+                metric = st.selectbox("Metric", numeric, key="excel_studio_chart_metric")
+                chart = px.histogram(frame, x=metric, nbins=30, title=f"{metric} distribution")
+                st.plotly_chart(chart, use_container_width=True, config={"displayModeBar": False, "responsive": True})
+            if categorical and numeric:
+                cat = st.selectbox("Group", categorical, key="excel_studio_chart_group")
+                metric = st.session_state.get("excel_studio_chart_metric", numeric[0])
+                grouped = frame.groupby(cat, dropna=False)[metric].mean().reset_index()
+                chart = px.bar(grouped.head(60), x=cat, y=metric, title=f"{metric} by {cat}")
+                st.plotly_chart(chart, use_container_width=True, config={"displayModeBar": False, "responsive": True})
+    with tabs[6]:
+        st.subheader("Activate the cleaned dataset")
+        st.write("This hand-off avoids re-uploading the same Excel file into another Shoir-IE module.")
+        frames = result.get("table_datasets", {}) or cleaned
+        for name in list(frames)[:12]:
+            if st.button(f"Send {name} to Universal Engine / Industrial Workbook", key="excel_studio_activate_" + hashlib.sha1(name.encode()).hexdigest()[:10], use_container_width=True):
+                frame = frames[name].copy(deep=True)
+                st.session_state["excel_studio_active_dataset"] = name
+                st.session_state["excel_studio_active_dataset_df"] = frame
+                st.session_state["universal_active_dataset"] = frame
+                st.session_state["industrial_workbook_current_df"] = frame
+                st.session_state["data_platform_latest_df"] = frame
+                result["active_table_id"] = name
+                result["active_table_df"] = frame
+                result["activation_contract"] = {
+                    "dataset": name,
+                    "rows": len(frame),
+                    "columns": len(frame.columns),
+                    "quality": float(np.mean([p.get("Quality score", 0) for p in profiles.values()])) if profiles else 0.0,
+                    "activated_utc": datetime.now(timezone.utc).isoformat(),
+                    "next_step": "Use the receiving module without re-uploading.",
+                }
+                st.session_state["excel_studio_result"] = result
+                _excel_persist_result(username, result)
+                st.success(f"{name} activated in the workspace.")
+        st.subheader("Recommended workflows")
+        st.dataframe(pd.DataFrame(result.get("module_readiness", [])), use_container_width=True, hide_index=True)
+    with tabs[7]:
+        st.subheader("Dataset versions")
+        st.dataframe(pd.DataFrame(st.session_state.get("excel_studio_versions", [])), use_container_width=True, hide_index=True)
+        st.download_button("Export lineage JSON", _excel_export_json(result), file_name="shoir_ie_excel_lineage.json", mime="application/json", use_container_width=True)
+        st.download_button("Export clean CSV package", _excel_export_clean_csv(result), file_name="shoir_ie_excel_clean.csv", mime="text/csv", use_container_width=True)
+        parquet = _excel_export_parquet(result)
+        if parquet:
+            st.download_button("Export Parquet", parquet, file_name="shoir_ie_excel_clean.parquet", mime="application/octet-stream", use_container_width=True)
+        st.download_button("Download Industrial XLSX", result["xlsx"], file_name="shoir_ie_industrial_clean.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", type="primary", use_container_width=True)
+        st.download_button("Download Evidence ZIP", result["bundle"], file_name="shoir_ie_excel_evidence.zip", mime="application/zip", use_container_width=True)
+
+# Final UI binding for the application import surface.
+render_excel_data_cleaning_studio = _excel_render_professional
+
+
+def _excel_render_v2(tier: str, username: str) -> None:
+    import streamlit as st
+    from shoir_tier_capabilities import tier_allows
+    if not tier_allows(tier, "Starter"):
+        st.warning("This workspace is not included in your current package.")
+        return
+
+    result = st.session_state.get("excel_studio_result")
+    st.markdown("## 📊 Excel Intelligence & Data Cleaning Studio")
+    st.caption("Import → Understand → Clean → Validate → Map → Remediate → Visualize → Activate → Export.")
+    if not isinstance(result, dict):
+        left, right = st.columns([5, 1])
+        upload = left.file_uploader(
+            "Drop an Excel / XLSM / XLS / CSV / TSV / TXT file",
+            type=["xlsx", "xlsm", "xls", "csv", "tsv", "txt"],
+            key="excel_studio_upload_v2",
+            help="Messy reports, industrial exports, legacy spreadsheets and delimited text are supported.",
+        )
+        right.caption("Safe by default")
+        if upload is not None:
+            raw = upload.getvalue()
+            try:
+                with st.spinner("Profiling, cleaning and governing the file…"):
+                    result = process_uploaded_workbook(raw, upload.name)
+                st.session_state["excel_studio_result"] = result
+                st.session_state["excel_studio_signature"] = result["signature"]
+                versions = st.session_state.setdefault("excel_studio_versions", [])
+                previous = versions[-1] if versions else None
+                snapshot = {
+                    "dataset_id": result["lineage_manifest"]["dataset_id"],
+                    "version": len(versions) + 1,
+                    "filename": upload.name,
+                    "sha256": result["signature"],
+                    "schema": {k: v.get("Schema fingerprint", "") for k, v in result["profiles"].items()},
+                    "columns": {k: [str(col) for col in frame.columns] for k, frame in result["cleaned_sheets"].items()},
+                    "imported_utc": datetime.now(timezone.utc).isoformat(),
+                    "schema_drift": {},
+                }
+                if previous:
+                    snapshot["schema_drift"] = {
+                        sheet: _excel_schema_drift(
+                            pd.DataFrame(columns=previous.get("columns", {}).get(sheet, [])),
+                            pd.DataFrame(columns=[str(col) for col in frame.columns]),
+                        )
+                        for sheet, frame in result["cleaned_sheets"].items()
+                    }
+                versions.append(snapshot)
+                st.session_state["excel_studio_versions"] = versions[-25:]
+                result["dataset_version"] = snapshot["version"]
+                result["schema_drift"] = snapshot["schema_drift"]
+                result["validation_rules"] = st.session_state.setdefault("excel_studio_validation_rules", list(_EXCEL_DEFAULT_RULES))
+                result["engineering_limits"] = st.session_state.setdefault("excel_studio_engineering_limits", {})
+                _excel_refresh_governance(result)
+                result["lineage_manifest"] = _excel_build_lineage_manifest(result)
+                _rebuild_excel_result(result)
+                st.session_state["excel_studio_result"] = result
+                persisted = _excel_persist_result(username, result)
+                st.success(
+                    f"Processed {len(result.get('cleaned_sheets', {})):,} sheet(s), "
+                    f"discovered {len(result.get('table_catalog', [])):,} table(s), "
+                    f"and recorded {len(result.get('review_register', [])):,} review item(s)."
+                )
+                if not persisted:
+                    st.info("Dataset is active in this session. Durable workspace persistence is not currently available.")
+            except Exception as exc:
+                st.error(f"Import failed safely: {type(exc).__name__}: {exc}")
+        st.stop()
+
+    cleaned = result.get("cleaned_sheets", {})
+    frames = result.get("table_datasets", {}) or cleaned
+    profiles = result.get("profiles", {})
+    review = result.get("review_register", [])
+    failures = [x for x in result.get("validation_results", []) if x.get("Status") == "FAIL"]
+    high = sum(1 for x in review if x.get("Severity") == "High")
+    cards = st.columns(6)
+    cards[0].metric("Datasets", len(frames))
+    cards[1].metric("Rows", f"{sum(len(v) for v in cleaned.values()):,}")
+    cards[2].metric("Avg quality", f"{float(np.mean([float(v.get('Quality score',0)) for v in profiles.values()])):.1f}%" if profiles else "—")
+    cards[3].metric("Review", len(review))
+    cards[4].metric("High priority", high)
+    cards[5].metric("Validation fails", len(failures))
+
+    chosen_key = st.session_state.get("excel_studio_active_dataset")
+    if chosen_key not in frames:
+        chosen_key = next(iter(frames), None)
+    active = frames[chosen_key].copy(deep=True) if chosen_key in frames else pd.DataFrame()
+    if not active.empty:
+        result["active_table_df"] = active.copy(deep=True)
+        result["active_table_id"] = chosen_key
+        st.session_state["excel_studio_visual_df"] = active.copy(deep=True)
+
+    tabs = st.tabs([
+        "1 · Import", "2 · Structure", "3 · Quality", "4 · Map", "5 · Remediate",
+        "6 · Visualize", "7 · Activate", "8 · Version & Export"
+    ])
+
+    with tabs[0]:
+        st.subheader("Import diagnostics")
+        st.dataframe(pd.DataFrame([result.get("import_diagnostics", {})]), use_container_width=True, hide_index=True)
+        guard = result.get("ingest_guardrails", {})
+        if guard.get("Very large file"):
+            st.warning("Very large upload detected. Keep plots bounded and prefer the table preview rather than loading every point into a chart.")
+        elif guard.get("Large file"):
+            st.info("Large upload detected. Shoir-IE bounds visualization to sampled observations while preserving the cleaned table.")
+        if result.get("source_fidelity"):
+            with st.expander("Workbook fidelity / preservation facts"):
+                st.dataframe(pd.DataFrame(result["source_fidelity"]), use_container_width=True, hide_index=True)
+        st.markdown("### Safety model")
+        st.success("Source values are preserved in RAW sheets. Statistical outliers are review flags, not automatic deletions.")
+        st.caption("XLSM note: macro-bearing sources are inspected with macro awareness, but the governed cleaned export is intentionally a data workbook; verify macro preservation before operational use.")
+        if st.button("Reset Excel Studio", key="excel_studio_reset_v2"):
+            for key in ["excel_studio_result", "excel_studio_signature", "excel_studio_active_dataset", "excel_studio_visual_df"]:
+                st.session_state.pop(key, None)
+            st.rerun()
+
+    with tabs[1]:
+        st.subheader("Structure discovery")
+        st.dataframe(pd.DataFrame(result.get("table_catalog", [])), use_container_width=True, hide_index=True)
+        if frames:
+            chosen = st.selectbox("Preview discovered dataset", list(frames), index=list(frames).index(chosen_key) if chosen_key in frames else 0, key="excel_studio_structure_dataset")
+            st.dataframe(frames[chosen].head(1500), use_container_width=True, hide_index=True)
+            result["active_table_id"] = chosen
+            result["active_table_df"] = frames[chosen].copy(deep=True)
+            if st.button("Set as active", key="excel_studio_structure_activate", type="primary"):
+                st.session_state["excel_studio_active_dataset"] = chosen
+                st.session_state["excel_studio_result"] = result
+                _excel_persist_result(username, result)
+                st.success("Active dataset updated.")
+        st.caption("Independent table blocks are exposed as datasets instead of being merged blindly.")
+
+    with tabs[2]:
+        st.subheader("Quality center")
+        ql, qr = st.columns(2)
+        with ql:
+            st.markdown("#### Validation")
+            st.dataframe(pd.DataFrame(result.get("validation_results", [])), use_container_width=True, hide_index=True)
+            st.markdown("#### Missingness patterns")
+            st.dataframe(pd.DataFrame(result.get("missingness_patterns", [])), use_container_width=True, hide_index=True)
+        with qr:
+            st.markdown("#### Duplicate intelligence")
+            st.dataframe(pd.DataFrame(result.get("duplicate_intelligence", [])), use_container_width=True, hide_index=True)
+            st.markdown("#### Outlier intelligence")
+            st.dataframe(pd.DataFrame(result.get("extended_outliers", [])), use_container_width=True, hide_index=True)
+        with st.expander("Quality rules", expanded=False):
+            rule_frame = pd.DataFrame(result.get("validation_rules", _EXCEL_DEFAULT_RULES))
+            edited_rules = st.data_editor(rule_frame, use_container_width=True, hide_index=True, num_rows="dynamic", key="excel_studio_rules_editor")
+            if st.button("Save quality rules", key="excel_studio_save_rules"):
+                result["validation_rules"] = edited_rules.to_dict("records")
+                st.session_state["excel_studio_validation_rules"] = result["validation_rules"]
+                _excel_refresh_governance(result)
+                result["lineage_manifest"] = _excel_build_lineage_manifest(result)
+                _rebuild_excel_result(result)
+                st.session_state["excel_studio_result"] = result
+                _excel_persist_result(username, result)
+                st.success("Quality rules saved and re-evaluated.")
+        with st.expander("Engineering limits", expanded=False):
+            if active.empty:
+                st.info("No active numeric dataset.")
+            else:
+                numeric_cols = [str(c) for c in active.columns if pd.api.types.is_numeric_dtype(active[c]) and not pd.api.types.is_bool_dtype(active[c])]
+                limits_rows = []
+                stored_limits = result.get("engineering_limits", {})
+                for col in numeric_cols:
+                    cfg = stored_limits.get(col, {}) if isinstance(stored_limits, dict) else {}
+                    limits_rows.append({"Field": col, "Minimum": cfg.get("min"), "Maximum": cfg.get("max")})
+                lim_frame = st.data_editor(pd.DataFrame(limits_rows), use_container_width=True, hide_index=True, key="excel_studio_limits_editor")
+                if st.button("Save engineering limits", key="excel_studio_save_limits"):
+                    new_limits = {}
+                    for row in lim_frame.to_dict("records"):
+                        if row.get("Field"):
+                            low, high = row.get("Minimum"), row.get("Maximum")
+                            if low not in ("", None) or high not in ("", None):
+                                new_limits[str(row["Field"])] = {"min": low, "max": high}
+                    result["engineering_limits"] = new_limits
+                    st.session_state["excel_studio_engineering_limits"] = new_limits
+                    _excel_refresh_governance(result)
+                    result["lineage_manifest"] = _excel_build_lineage_manifest(result)
+                    _rebuild_excel_result(result)
+                    st.session_state["excel_studio_result"] = result
+                    _excel_persist_result(username, result)
+                    st.success("Engineering limits saved and violations recalculated.")
+        with st.expander("Security and formula review"):
+            st.dataframe(pd.DataFrame(result.get("security_scan", [])), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(result.get("formula_gap_findings", [])), use_container_width=True, hide_index=True)
+
+    with tabs[3]:
+        st.subheader("Data Mapper")
+        mapping = pd.DataFrame(result.get("semantic_mapping") or _excel_semantic_mapping(active))
+        if not mapping.empty:
+            edited = st.data_editor(mapping, use_container_width=True, hide_index=True, key="excel_studio_mapper_editor")
+            if st.button("Save approved mapping", key="excel_studio_save_mapping", type="primary"):
+                result["semantic_mapping"] = edited.to_dict("records")
+                result["mapping_version"] = int(result.get("mapping_version", 0)) + 1
+                result["lineage_manifest"] = _excel_build_lineage_manifest(result)
+                _rebuild_excel_result(result)
+                st.session_state["excel_studio_result"] = result
+                _excel_persist_result(username, result)
+                st.success("Mapping saved. The active dataset can now be activated without re-uploading.")
+        st.markdown("### Unit intelligence")
+        unit_frame = pd.DataFrame(result.get("unit_catalog", []))
+        st.dataframe(unit_frame, use_container_width=True, hide_index=True)
+        if not unit_frame.empty and not active.empty:
+            unit_choices = [x for x in unit_frame["Field"].tolist() if x in active.columns]
+            if unit_choices:
+                field = st.selectbox("Convert unit field", unit_choices, key="excel_studio_unit_field")
+                source_unit = _excel_unit_token(field)
+                if source_unit:
+                    compatible = [u for u in _EXCEL_UNIT_FACTORS if _EXCEL_UNIT_FACTORS[u][0] == _EXCEL_UNIT_FACTORS[source_unit][0]]
+                    target = st.selectbox("Target unit", compatible, key="excel_studio_unit_target")
+                    st.caption(f"Detected {source_unit}. Conversion is explicit; Shoir-IE never silently changes physical units.")
+                    if target != source_unit and st.button("Preview unit conversion", key="excel_studio_preview_unit"):
+                        try:
+                            converted, changed = _excel_convert_unit_values(active[field], source_unit, target)
+                            preview = active.copy(deep=True)
+                            preview[field] = converted
+                            st.dataframe(pd.DataFrame({"Before": active[field].head(20), "After": preview[field].head(20)}), use_container_width=True, hide_index=True)
+                            if st.button("Apply unit conversion", key="excel_studio_apply_unit", type="primary"):
+                                if chosen_key in result.get("table_datasets", {}):
+                                    result["table_datasets"][chosen_key] = preview
+                                elif chosen_key in result.get("cleaned_sheets", {}):
+                                    result["cleaned_sheets"][chosen_key] = preview
+                                result["active_table_df"] = preview.copy(deep=True)
+                                result["unit_conversion_log"] = result.get("unit_conversion_log", []) + [{
+                                    "Field": field, "From": source_unit, "To": target, "Values converted": changed,
+                                    "Applied UTC": datetime.now(timezone.utc).isoformat(), "Reviewer": username,
+                                }]
+                                _excel_refresh_governance(result)
+                                result["lineage_manifest"] = _excel_build_lineage_manifest(result)
+                                _rebuild_excel_result(result)
+                                st.session_state["excel_studio_result"] = result
+                                _excel_persist_result(username, result)
+                                st.success("Unit conversion applied with audit evidence.")
+                        except Exception as exc:
+                            st.error(f"Unit conversion could not be applied: {exc}")
+
+    with tabs[4]:
+        st.subheader("Guided remediation")
+        if active.empty:
+            st.info("No active dataset.")
+        else:
+            action = st.selectbox("Safe transformation", ["Trim text", "Normalize missing tokens", "Remove exact duplicate rows", "Numeric coercion"], key="excel_studio_remediation_action_v2")
+            field = st.selectbox("Field", ["All"] + [str(c) for c in active.columns], key="excel_studio_remediation_field_v2")
+            target = "" if field == "All" else field
+            preview = _excel_remediation_preview(active, action, target)
+            st.write(f"Preview: {len(active):,} → {len(preview):,} rows")
+            st.dataframe(preview.head(250), use_container_width=True, hide_index=True)
+            approve = st.checkbox("I reviewed the preview and approve this transformation", key="excel_studio_remediation_approval")
+            if st.button("Apply approved transformation", key="excel_studio_apply_remediation_v2", type="primary", disabled=not approve):
+                if chosen_key in result.get("table_datasets", {}):
+                    result["table_datasets"][chosen_key] = preview.copy(deep=True)
+                elif chosen_key in result.get("cleaned_sheets", {}):
+                    result["cleaned_sheets"][chosen_key] = preview.copy(deep=True)
+                result.setdefault("remediation_log", []).append({
+                    "Action": action, "Field": target or "All",
+                    "Rows before": len(active), "Rows after": len(preview),
+                    "Reviewer": username, "Applied UTC": datetime.now(timezone.utc).isoformat(),
+                })
+                result["active_table_df"] = preview.copy(deep=True)
+                _excel_refresh_governance(result)
+                result["lineage_manifest"] = _excel_build_lineage_manifest(result)
+                _rebuild_excel_result(result)
+                st.session_state["excel_studio_result"] = result
+                _excel_persist_result(username, result)
+                st.success("Transformation applied, logged and re-profiled.")
+                st.rerun()
+            st.markdown("#### Transformation history")
+            st.dataframe(pd.DataFrame(result.get("remediation_log", [])), use_container_width=True, hide_index=True)
+
+    with tabs[5]:
+        st.subheader("Universal visualization")
+        if active.empty:
+            st.info("No active data to visualize.")
+        else:
+            try:
+                from shoir_universal_engine import guaranteed_figure
+                fig = guaranteed_figure(active, "Excel Studio · Universal Industrial Visualization")
+                if fig is not None:
+                    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False, "responsive": True})
+            except Exception as exc:
+                st.caption(f"Universal renderer unavailable; using local bounded charts. {type(exc).__name__}")
+            numeric = [str(c) for c in active.columns if pd.api.types.is_numeric_dtype(active[c]) and not pd.api.types.is_bool_dtype(active[c])]
+            categorical = [str(c) for c in active.columns if str(c) not in numeric]
+            if numeric:
+                metric = st.selectbox("Metric", numeric, key="excel_studio_visual_metric_v2")
+                hist = px.histogram(active, x=metric, nbins=30, title=f"{metric} distribution")
+                st.plotly_chart(hist, use_container_width=True, config={"displayModeBar": False, "responsive": True})
+                if categorical:
+                    group = st.selectbox("Group", categorical, key="excel_studio_visual_group_v2")
+                    grouped = active.groupby(group, dropna=False)[metric].mean().reset_index().head(60)
+                    bar = px.bar(grouped, x=group, y=metric, title=f"{metric} by {group}")
+                    st.plotly_chart(bar, use_container_width=True, config={"displayModeBar": False, "responsive": True})
+            if len(active.columns) >= 2:
+                st.caption("The universal renderer is the guaranteed baseline; additional charts remain data-driven and never invent observations.")
+
+    with tabs[6]:
+        st.subheader("Activate once, use across Shoir-IE")
+        for name in list(frames)[:20]:
+            if st.button(f"Activate {name}", key="excel_studio_activate_final_" + hashlib.sha1(str(name).encode()).hexdigest()[:10], use_container_width=True):
+                frame = frames[name].copy(deep=True)
+                st.session_state["excel_studio_active_dataset"] = name
+                st.session_state["excel_studio_active_dataset_df"] = frame
+                st.session_state["universal_active_dataset"] = frame
+                st.session_state["industrial_workbook_current_df"] = frame
+                st.session_state["data_platform_latest_df"] = frame
+                st.session_state["excel_studio_result"] = result
+                result["active_table_id"] = name
+                result["active_table_df"] = frame
+                result["activation_contract"] = {
+                    "dataset_id": result.get("lineage_manifest", {}).get("dataset_id", ""),
+                    "table": name,
+                    "rows": int(len(frame)),
+                    "columns": int(len(frame.columns)),
+                    "schema": _schema_fingerprint(frame),
+                    "activated_utc": datetime.now(timezone.utc).isoformat(),
+                    "actor": username,
+                    "handoff": "Universal Engine / Industrial Workbook / Data Platform",
+                }
+                _excel_persist_result(username, result)
+                st.success(f"{name} is now the active Shoir-IE dataset.")
+        st.markdown("### Module recommendations")
+        st.dataframe(pd.DataFrame(result.get("module_readiness", [])), use_container_width=True, hide_index=True)
+        st.info("Activation writes common workspace keys used by the Universal Engine, Industrial Workbook and Data Platform so downstream modules can consume the cleaned dataset without another upload.")
+
+    with tabs[7]:
+        st.subheader("Version history & schema drift")
+        versions = st.session_state.get("excel_studio_versions", [])
+        st.dataframe(pd.DataFrame(versions), use_container_width=True, hide_index=True)
+        if result.get("schema_drift"):
+            st.markdown("#### Current vs previous schema")
+            drift_rows = []
+            for sheet, info in result["schema_drift"].items():
+                drift_rows.append({
+                    "Sheet": sheet,
+                    "Compatible": info.get("Compatible"),
+                    "Added": ", ".join(info.get("Added fields", [])),
+                    "Removed": ", ".join(info.get("Removed fields", [])),
+                    "Type changes": len(info.get("Type changes", [])),
+                    "Rename candidates": len(info.get("Renamed field candidates", [])),
+                })
+            st.dataframe(pd.DataFrame(drift_rows), use_container_width=True, hide_index=True)
+        if st.button("Persist current dataset", key="excel_studio_persist_now", type="primary"):
+            ok = _excel_persist_result(username, result)
+            st.success("Dataset workspace snapshot saved.") if ok else st.warning("Durable persistence is not available; dataset remains active for this session.")
+        st.download_button("Export lineage JSON", _excel_export_json(result), "shoir_ie_excel_lineage.json", "application/json", use_container_width=True)
+        st.download_button("Export clean CSV", _excel_export_clean_csv(result), "shoir_ie_excel_clean.csv", "text/csv", use_container_width=True)
+        parquet = _excel_export_parquet(result)
+        if parquet:
+            st.download_button("Export Parquet", parquet, "shoir_ie_excel_clean.parquet", "application/octet-stream", use_container_width=True)
+        st.download_button("Download Industrial XLSX", result["xlsx"], "shoir_ie_industrial_clean.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", type="primary", use_container_width=True)
+        st.download_button("Download Evidence ZIP", result["bundle"], "shoir_ie_excel_evidence.zip", "application/zip", use_container_width=True)
+
+# Final application surface binding.
+render_excel_data_cleaning_studio = _excel_render_v2
