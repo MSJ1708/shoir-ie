@@ -2503,6 +2503,27 @@ def _append_governance_plus_to_workbook(xlsx_bytes: bytes, result: dict[str, Any
         return xlsx_bytes
 
 
+
+def _refresh_excel_governance(result: dict[str, Any]) -> dict[str, Any]:
+    cleaned = result.get("cleaned_sheets", {})
+    result["duplicate_candidates"] = [item for sheet, frame in cleaned.items() for item in _normalised_duplicate_candidates(frame, sheet)]
+    result["privacy_scan"] = _privacy_scan(cleaned)
+    result["relationship_integrity"] = _relationship_integrity(cleaned)
+    result["formula_quality"] = _formula_quality_inventory(result.get("formula_inventory", []))
+    result["module_readiness"] = _module_readiness(cleaned)
+    result["data_contract"] = _data_contract(cleaned, result.get("field_intelligence", []))
+    reviews = [issue for sheet, frame in cleaned.items() for issue in _quality_review_register(frame, sheet)]
+    for meta in result.get("source_metadata", []):
+        blocks = int(meta.get("Detected table blocks", 1) or 1)
+        if blocks > 1:
+            reviews.append({"Severity":"Medium","Sheet":str(meta.get("Source sheet","")),"Field":"Sheet structure","Issue":"Multiple table blocks detected","Evidence":f"{blocks:,} non-empty table region(s) inferred.","Recommended action":"Verify the regions belong to one analytical table."})
+    for item in result["duplicate_candidates"]:
+        reviews.append({"Severity":"Medium","Sheet":item["Sheet"],"Field":item["Field"],"Issue":item["Review"],"Evidence":f"{item['Occurrences']:,} occurrence(s): {item['Source variants']}","Recommended action":item["Recommended action"]})
+    for item in result["privacy_scan"]:
+        reviews.append({"Severity":"High","Sheet":item["Sheet"],"Field":item["Field"],"Issue":"Potential sensitive field","Evidence":f"Indicator: {item['Indicator']}; estimated matches: {item['Estimated matches']:,}.","Recommended action":item["Action"]})
+    result["review_register"] = reviews
+    return result
+
 _BASE_PROCESS_GOVERNANCE = process_uploaded_workbook
 
 
