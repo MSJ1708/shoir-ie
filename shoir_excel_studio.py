@@ -640,6 +640,14 @@ def render_excel_data_cleaning_studio(tier: str, username: str) -> None:
     audits = result["audits"]
     profile_frame = pd.DataFrame([{"Sheet": k, **v} for k, v in profiles.items()])
 
+    # Feed the selected clean table into the universal visualization layer so
+    # this module is never graph-less after a successful import.
+    if cleaned:
+        default_visual_sheet = st.session_state.get("excel_studio_sheet")
+        if default_visual_sheet not in cleaned:
+            default_visual_sheet = next(iter(cleaned))
+        st.session_state["excel_studio_visual_df"] = cleaned[default_visual_sheet].copy(deep=True)
+
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("Sheets", len(cleaned))
     m2.metric("Rows", f"{sum(len(v) for v in cleaned.values()):,}")
@@ -656,6 +664,7 @@ def render_excel_data_cleaning_studio(tier: str, username: str) -> None:
     with tab2:
         sheet = st.selectbox("Clean sheet", list(cleaned), key="excel_studio_sheet")
         df = cleaned[sheet]
+        st.session_state["excel_studio_visual_df"] = df.copy(deep=True)
         st.dataframe(df.head(1000), use_container_width=True, hide_index=True)
         a, b = st.columns(2)
         with a:
