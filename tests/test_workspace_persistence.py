@@ -66,6 +66,7 @@ def test_workspace_does_not_restore_streamlit_action_widget_keys(tmp_path: Path)
 
     assert "sidebar_edit_acc" not in restored
     assert "btn_confirm_pay" not in restored
+    assert "global_command_open_inventory" not in restored
     assert restored["enterprise_module_selector"] == "Inventory · EOQ"
     assert restored["research_title"] == "My Study"
 

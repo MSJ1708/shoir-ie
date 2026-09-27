@@ -37,6 +37,13 @@ from shoir_engine_studio import (
 )
 
 PLATFORM_CATALOG = [
+    {"tier":"Starter","category":"AI & Automation","name":"Excel Data Cleaning & Import",
+     "when":"Turn raw Excel/CSV exports into structured, traceable and presentation-ready engineering workbooks.",
+     "example":"Upload a messy multi-sheet workbook and receive CLEAN working sheets, a START HERE map, quality checks, data dictionary, cleaning audit and hidden RAW archives."},
+    {"tier":"Research Pack","category":"Research AI","name":"Research AI",
+     "when":"Use a research-focused assistant for protocols, hypotheses, statistical planning, reproducibility and peer-review preparation.",
+     "example":"Load a study and dataset, then ask Research AI to structure the analysis plan and identify evidence gaps without inventing results or citations."},
+
     {"tier":"Starter","category":"Core Platform","name":"Industrial Workbook","when":"Work with engineering data in an editable Excel-like workspace that connects formulas, analysis, templates and the Digital Thread.","example":"Import an existing workbook, edit cells, calculate engineering formulas, clean data, analyze results and send the evidence into Shoir-IE workflows."},
     {"tier":"Enterprise","category":"Platform","name":"Industrial Operating System","when":"Unified KPI, method, scenario, process, model-health, improvement and decision-verification workspace.","example":"Connect engineering analysis outputs through one governed decision layer with reusable templates and exports."},
     {"tier":"Enterprise","category":"Project & Traceability","name":"Global Project & Digital Thread","when":"Connect datasets, assets, processes, KPIs, models, experiments, decisions and outcomes across the entire Shoir-IE workspace.","example":"Trace a KPI from its source dataset and asset through the model and experiment that informed a decision, then track the verified outcome."},
@@ -72,7 +79,7 @@ PLATFORM_CATALOG = [
 ]
 
 TIER_FEATURES = {
-    "Starter": ["Engineering Validation Center", "Excel Data Cleaning & Import"],
+    "Starter": ["Engineering Validation Center", "Excel Data Cleaning & Import", "AI Copilot"],
     "Mid-Tier Pro": [
         "Industrial Data Model & Digital Thread",
         "Engineering Validation Center",
@@ -118,9 +125,10 @@ def normalize_tier(value: str) -> str:
     return "Starter"
 
 def tier_allows(current: str, required: str) -> bool:
-    c=normalize_tier(current); r=normalize_tier(required)
-    if c=="Research Pack": c="Enterprise Plus"
-    if r=="Research Pack": r="Enterprise Plus"
+    # Research Pack is a distinct cumulative tier; never downgrade it to
+    # Enterprise Plus because that would unlock research tools incorrectly.
+    c=normalize_tier(current)
+    r=normalize_tier(required)
     return TIER_ORDER.index(c) >= TIER_ORDER.index(r)
 
 def init_platform_db(db_path: str="enterprise_full_workspace.db") -> bool:
@@ -786,6 +794,22 @@ def render_module(module: str, tier: str, username: str):
     import plotly.express as px
     init_platform_db()
     sanitize_module_session_state(st)
+
+    required=next((x["tier"] for x in PLATFORM_CATALOG if x["name"]==module),None)
+    if required and not tier_allows(tier,required):
+        st.warning(f"🔒 {module} requires {required}. Your current tier is {tier}. Open Subscriptions to review upgrade options.")
+        return
+
+    if module=="Excel Data Cleaning & Import":
+        from shoir_excel_studio import render_excel_data_cleaning_studio
+        render_excel_data_cleaning_studio(tier, username)
+        return
+
+    if module=="Research AI":
+        from shoir_research_ai import render_research_ai
+        render_research_ai(tier, username)
+        return
+
     with sqlite3.connect("enterprise_full_workspace.db") as _usage_conn:
         _usage_conn.execute(
             "INSERT INTO platform_usage_events(username,module,event_time) VALUES(?,?,?)",
@@ -797,10 +821,6 @@ def render_module(module: str, tier: str, username: str):
         render_industrial_workbook(tier, username)
         return
     render_module_data_exchange(module, st, tier, username)
-    required=next((x["tier"] for x in PLATFORM_CATALOG if x["name"]==module),None)
-    if required and not tier_allows(tier,required):
-        st.warning(f"🔒 {module} requires {required}. Your current tier is {tier}. Open Subscriptions to review upgrade options.")
-        return
     render_experience_shell(module, tier, username)
     if module == "Experiment Lab":
         # Experiment Lab is a dedicated research workspace. Its UI and

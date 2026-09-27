@@ -630,9 +630,9 @@ MODULE_CATALOG = [
      "example": "Compare buying a $180,000 automated conveyor vs. staying manual: get NPV, IRR, and payback period side by side, so the capex request to leadership comes with numbers, not just a recommendation."},
 
     # ---------------- ENTERPRISE ($199) adds ----------------
-    {"tier": "Enterprise", "category": "AI & Automation", "name": "AI Copilot",
-     "when": "You want to ask a question in plain language instead of clicking through five menus to find the right module.",
-     "example": "Type \"run the optimization\" or \"what's my current tier\" directly in chat and get answered immediately, with the copilot pulling from your real workspace data - not a canned script."},
+    {"tier": "Starter", "category": "AI & Automation", "name": "AI Copilot",
+     "when": "You want a plain-language engineering assistant that works inside the tools included in your package.",
+     "example": "Ask Shoir-IE to clean a workbook, explain an IE method, inspect your available data, or run a Starter-tier action; package-gated tools remain locked."},
     {"tier": "Enterprise", "category": "Platform", "name": "FastAPI Gateway",
      "when": "You want to see how your operations data could be exposed as an API for other systems to consume.",
      "example": "Review a simulated live-traffic dashboard showing request volume and latency for the kind of endpoints (e.g. GET /optimize, GET /inventory) a real integration would use."},
@@ -668,6 +668,9 @@ MODULE_CATALOG = [
      "example": "Compare two process redesigns on energy use and waste generation alongside cost and cycle time, in the same view - so sustainability is a design input, not a separate audit."},
 
     # ---------------- RESEARCH PACK ($30 add-on) adds ----------------
+    {"tier": "Research Pack", "category": "Research AI", "name": "Research AI",
+     "when": "You need a research-focused assistant for protocols, hypotheses, statistical planning, reproducibility, manuscript structure and peer-review preparation.",
+     "example": "Ask Research AI to inspect your study design, identify the appropriate analysis plan, review reproducibility risks, and structure reviewer-facing evidence without inventing results or citations."},
     {"tier": "Research Pack", "category": "Research Authoring", "name": "Statistical Hypothesis Testing",
      "when": "You're writing a paper and need a properly-run t-test, ANOVA, or chi-square test with the actual statistics, not a claimed result.",
      "example": "Test whether your new layout's cycle times are significantly faster than the baseline: get the test statistic, p-value, and a plain-language verdict - \"p = 0.031, reject H0 at α = 0.05\" - ready to cite."},
@@ -782,6 +785,15 @@ if not any(x.get("name") == _IOS_CATALOG_ENTRY["name"] for x in MODULE_CATALOG):
 #      doesn't have something to check, instead of inventing an answer.
 # =====================================================================
 def get_copilot_response(prompt, history):
+    # Package policy is evaluated before any model call or executable fallback.
+    from shoir_tier_capabilities import copilot_capabilities, copilot_gate, normalize_tier
+    current_tier = normalize_tier(st.session_state.get("user_tier", "Starter Tier"))
+    allowed = globals().get("allowed_modules", [])
+    capabilities = copilot_capabilities(current_tier, allowed)
+    gate = copilot_gate(prompt, current_tier)
+    if gate:
+        return gate["message"]
+
     try:
         api_key = st.secrets["anthropic"]["api_key"]
         import anthropic
@@ -795,8 +807,11 @@ def get_copilot_response(prompt, history):
             "Use the shared Platform Excellence layer as part of your operating context. " + copilot_context() + " Available governed Copilot tools are: " + ", ".join(t[0] for t in COPILOT_TOOLS) + ". " 
             "Recommend the most relevant existing module or workflow from the live platform catalog. "
             "Prefer validation, explainability, scenario analysis and auditable exports before action. "
-            "Be concise and concrete. If asked to run something you can't execute directly, name the exact "
-            "module to use. Never invent numbers, connectivity, model results or data you don't have."
+            "Be concise and concrete. You may explain general concepts across industrial engineering, but you "
+            "must not claim to execute a package-gated capability. Only recommend or execute workflows available "
+            "to the current package. Current package: " + capabilities["tier"] + ". Package-available modules: " +
+            ", ".join(capabilities["modules"]) + ". Research AI is enabled only when can_research is true. "
+            "Never invent numbers, connectivity, model results, citations or data you don't have."
         )
         msgs = [{"role": m["role"], "content": m["content"]} for m in history if m["role"] in ("user", "assistant")]
         msgs.append({"role": "user", "content": prompt})
@@ -1444,7 +1459,7 @@ st.sidebar.markdown("---")
 tier_val = st.session_state.user_tier
 is_admin = (st.session_state.current_user == "sho")
 
-tier1_features = ["MILP Solvers", "Inventory Playback", "Core IE Tools", "Subscriptions", "Persistence", "Facility Layout & Warehousing", "Enterprise Integration & Collaboration", "Engineering Validation Center", "Excel Data Cleaning & Import", "Industrial Workbook"]
+tier1_features = ["MILP Solvers", "Inventory Playback", "Core IE Tools", "Subscriptions", "Persistence", "Facility Layout & Warehousing", "Enterprise Integration & Collaboration", "Engineering Validation Center", "Excel Data Cleaning & Import", "Industrial Workbook", "AI Copilot"]
 tier2_features = tier1_features + ["Carbon Accounting", "IoT Digital Twin", "MEIO Matrix", "Slotting & Gantt", "Fleet Routing", "Warehouse Heatmap", "Supplier Risk Matrix", "Scenarios", "AGV Fleet Dispatcher", "Geospatial Network Designer", "Production Planning & Control (PPC)", "Lean Manufacturing & Shop Floor Operations", "Quality Control, Six Sigma & Reliability", "Engineering Economics & Finance", "Industrial Data Model & Digital Thread"]
 professional_features = tier2_features + ["Advanced Planning & Scheduling", "Quality Engineering & Reliability", "Capital Investment & Engineering Economics", "Workforce Engineering", "Industrial Sustainability & LCA", "Benchmarking & Engineering Standards", "Scenario Versioning & Comparison", "Localization & Multi-Currency"]
 tier3_features = professional_features + ["AI Copilot", "FastAPI Gateway", "Monte Carlo Sim", "Sensitivity Analysis", "Webhook Alerts", "Agentic Workflows", "Control Tower", "Cryptographic Ledger", "Predictive Maintenance Hub", "Human Factors & Ergonomics (NIOSH)", "Digital Twin & Discrete-Event Simulation", "Green IE & Sustainability", "Manufacturing Execution System", "Industrial Simulation Lab", "3D Factory Designer", "Industrial Connectivity Hub", "Multi-Objective Optimization", "Robust & Resilient Optimization", "Engineering Model Registry", "Experiment Lab", "Experiment Engine", "Industrial Control Center", "Engineering Decision Center", "Advanced ML Demand Forecasting", "Team Workspaces & RBAC", "Executive Report Center", "Global Project & Digital Thread"]
@@ -1454,6 +1469,7 @@ tier4_features = tier3_features + ["Industrial Data Platform", "Advanced Enginee
 # concatenates adjacent string literals into one garbled string instead of
 # separate list items, and duplicated several Starter-tier names by accident.
 research_pack_features = tier3_features + [
+    "Research AI",
     "Statistical Hypothesis Testing",
     "Evidence Degradation & Decision-Readiness Lab",
     "LaTeX Document Formatter",
@@ -8999,6 +9015,10 @@ else:
                 st.markdown("- AI Copilot\n- FastAPI Gateway\n- Agentic Workflows & Ledger")
                 
     elif mod == "AI Copilot":
+        from shoir_tier_capabilities import tier_allows
+        if not tier_allows(tier_val, "Starter"):
+            st.warning("🔒 AI Copilot is not included in this package.")
+            st.stop()
         st.header("🤖 Natural Language AI Copilot")
         st.caption("Upload a workbook, ask Copilot to clean or analyze it, apply Excel-style transformations, and download the improved workbook. Recommendations are grounded in the available modules and your current tier.")
 

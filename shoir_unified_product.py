@@ -632,6 +632,8 @@ def render_global_product_dock(module: str, tier: str, username: str) -> None:
 
     ensure_unified_db()
     key = _key(module)
+    # Button state is transient and must never be restored from durable workspace data.
+    st.session_state.pop("global_command_open_" + key, None)
     study_id = st.session_state.get("unified_study_id")
     readiness = float(st.session_state.get("unified_readiness_score", 0.0))
     st.markdown(

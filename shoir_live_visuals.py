@@ -79,6 +79,8 @@ _MODULE_KEYS = {
     "Cryptographic Ledger": ["ledger_history"],
     "Carbon Accounting": ["carbon_latest_df"],
     "Industrial Workbook": ["industrial_workbook_current_df", "industrial_workbook_query_result_df", "industrial_workbook_analysis_df", "industrial_workbook_formula_audit_df", "industrial_workbook_semantic_map_df"],
+    "Excel Data Cleaning & Import": ["excel_studio_visual_df", "excel_studio_result"],
+    "Research AI": ["research_ai_dataset"],
 }
 
 # Conflict-resolution registry: richer enterprise result aliases are additive.
