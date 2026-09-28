@@ -7,6 +7,7 @@ It deliberately reuses existing specialist modules instead of replacing them.
 
 from __future__ import annotations
 
+import html
 import json
 import math
 import sqlite3
@@ -344,15 +345,20 @@ def render_application_header(username: str, tier: str, module: str) -> None:
         or st.session_state.get("last_run_id")
         or "No active run"
     )
+    project_safe = html.escape(str(project))
+    dataset_safe = html.escape(str(dataset))
+    username_safe = html.escape(str(username))
+    run_safe = html.escape(str(run_id))
+    tier_safe = html.escape(str(tier))
     st.markdown(
         f"""
 <div class="shoir-shell-top">
-  <div class="shoir-shell-cell"><div class="shoir-shell-label">Shoir-IE Workspace</div><div class="shoir-shell-value">{project} · {username}</div></div>
-  <div class="shoir-shell-cell"><div class="shoir-shell-label">Dataset</div><div class="shoir-shell-value">{dataset}</div></div>
+  <div class="shoir-shell-cell"><div class="shoir-shell-label">Shoir-IE Workspace</div><div class="shoir-shell-value">{project_safe} · {username_safe}</div></div>
+  <div class="shoir-shell-cell"><div class="shoir-shell-label">Dataset</div><div class="shoir-shell-value">{dataset_safe}</div></div>
   <div class="shoir-shell-cell"><div class="shoir-shell-label">Readiness</div><div class="shoir-shell-value">{ready['score']:.0f}%</div></div>
   <div class="shoir-shell-cell"><div class="shoir-shell-label">State</div><div class="shoir-shell-value">{provenance}</div></div>
-  <div class="shoir-shell-cell"><div class="shoir-shell-label">Run</div><div class="shoir-shell-value">{run_id}</div></div>
-  <div class="shoir-shell-cell"><div class="shoir-shell-label">Tier</div><div class="shoir-shell-value">{tier}</div></div>
+  <div class="shoir-shell-cell"><div class="shoir-shell-label">Run</div><div class="shoir-shell-value">{run_safe}</div></div>
+  <div class="shoir-shell-cell"><div class="shoir-shell-label">Tier</div><div class="shoir-shell-value">{tier_safe}</div></div>
 </div>
 """,
         unsafe_allow_html=True,
@@ -438,7 +444,7 @@ def render_inspector(module: str, username: str, tier: str) -> None:
 
     popover = getattr(st, "popover", None)
     if callable(popover):
-        with popover("🔎 Inspector", use_container_width=False):
+        with popover("🔎 Inspector"):
             body()
     else:
         with st.expander("🔎 Inspector", expanded=False):
@@ -492,10 +498,13 @@ def render_application_shell(
         recent_choice = "—"
         if recent:
             st.caption("Recent")
+            recent_key = f"shoir_shell_recent_{section}"
+            if st.session_state.get(recent_key) not in ["—"] + recent:
+                st.session_state.pop(recent_key, None)
             recent_choice = st.selectbox(
                 "Recent modules",
                 ["—"] + recent,
-                key="shoir_shell_recent",
+                key=recent_key,
                 label_visibility="collapsed",
             )
 
@@ -509,12 +518,15 @@ def render_application_shell(
 
         default_index = choices.index(default_module) if default_module in choices else 0
         labels = {str(module): f"{module_group(str(module))} · {str(module)}" for module in choices}
+        selector_key = f"shoir_shell_module_selector_{section}"
+        if st.session_state.get(selector_key) not in choices:
+            st.session_state.pop(selector_key, None)
         selected_label = st.selectbox(
             "Select module",
             list(choices),
             index=default_index,
             format_func=lambda x: labels.get(str(x), str(x)),
-            key="shoir_shell_module_selector",
+            key=selector_key,
             label_visibility="collapsed",
         )
         remember_module(selected_label)
@@ -827,7 +839,7 @@ def render_trust_center(username: str, tier: str) -> None:
 
 
 def render_presentation_mode(username: str, tier: str, module: str) -> None:
-    st.markdown('<div class="shoir-presentation">', unsafe_allow_html=True)
+    st.markdown("<style>section[data-testid='stSidebar']{display:none !important;} .block-container{max-width:1450px !important;}</style>", unsafe_allow_html=True)
     df, source_key = _first_dataframe()
     provenance = infer_provenance()
     ready = data_readiness(df)
