@@ -37,7 +37,9 @@ def test_provenance_contract_is_explicit():
 
 
 def test_profile_is_deterministic_and_cached():
-    df = pd.DataFrame({"Asset": ["A", "B", "B"], "Qty": [10, None, 10]})
+    # Keep both quality signals in the same fixture: the final row is a
+    # duplicate of the preceding row while the middle row contains a null.
+    df = pd.DataFrame({"Asset": ["A", "B", "B"], "Qty": [10, None, None]})
     first = cached_profile(df)
     second = cached_profile(df)
     assert first["fingerprint"] == second["fingerprint"] == dataset_hash(df)
