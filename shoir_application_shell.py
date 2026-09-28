@@ -517,6 +517,11 @@ def render_application_shell(
     is_admin: bool = False,
 ) -> tuple[str, str | None]:
     ensure_shell_schema()
+    try:
+        from shoir_universal_platform_kernel import install_visualization_contract
+        install_visualization_contract()
+    except Exception:
+        pass
     render_shell_css()
 
     nav_labels = list(NAV_GROUPS.keys())
