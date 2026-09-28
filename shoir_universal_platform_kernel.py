@@ -330,6 +330,24 @@ def render_universal_workflow(module: str, ctx: Mapping[str, Any]) -> None:
         st.success("Verification stage reached. Exported evidence and decision records can be audited from the shell.")
 
 
+def _captured_source_bytes() -> tuple[str, bytes]:
+    for key, value in list(st.session_state.items()):
+        name = str(key).lower()
+        if not any(token in name for token in ("upload", "workbook", "raw")):
+            continue
+        try:
+            if isinstance(value, (bytes, bytearray)) and value:
+                return str(key), bytes(value)
+            getter = getattr(value, "getvalue", None)
+            if callable(getter):
+                raw = getter()
+                if isinstance(raw, (bytes, bytearray)) and raw:
+                    return str(key), bytes(raw)
+        except Exception:
+            continue
+    return "", b""
+
+
 def _evidence_payload(module: str, ctx: Mapping[str, Any], figure_count: int = 0) -> dict[str, Any]:
     df, source_key = active_dataframe()
     profile = ctx.get("readiness") or readiness_snapshot(df)
@@ -350,6 +368,8 @@ def _evidence_payload(module: str, ctx: Mapping[str, Any], figure_count: int = 0
         },
         "workflow": workflow_state(module),
         "run_id": st.session_state.get("shoir_latest_run_id") or st.session_state.get("last_run_id"),
+        "copilot_prompt": str(st.session_state.get("shoir_universal_copilot_prompt") or st.session_state.get("os160_prompt") or ""),
+        "figure_provenance": dict(st.session_state.get("shoir_last_figure_provenance") or {}),
         "figures_captured": int(figure_count),
         "assumptions": _jsonable(st.session_state.get("shoir_assumptions", [])),
         "software": {
@@ -372,7 +392,16 @@ def build_reproduction_package(module: str, ctx: Mapping[str, Any], results: Any
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("manifest.json", json.dumps(evidence, indent=2, default=str))
         zf.writestr("dataset.csv", raw_csv)
+        source_key, source_bytes = _captured_source_bytes()
+        if source_bytes:
+            zf.writestr(f"source/{source_key}.bin", source_bytes)
         zf.writestr("dataset_profile.json", json.dumps(profile, indent=2, default=str))
+        audit = st.session_state.get("shoir_excel_cleaning_audit") or st.session_state.get("os160_clean_audit")
+        if audit:
+            zf.writestr("cleaning_audit.json", json.dumps(_jsonable(audit), indent=2, default=str))
+        fig = st.session_state.get("shoir_last_figure")
+        if fig is not None and hasattr(fig, "to_json"):
+            zf.writestr("figures/last_figure.json", fig.to_json())
         zf.writestr(
             "workflow_history.json",
             json.dumps(workflow_state(module).get("history", []), indent=2, default=str),
@@ -391,7 +420,7 @@ def register_reproduction_package(module: str, ctx: Mapping[str, Any], results: 
 
 def render_reproduction_controls(module: str, ctx: Mapping[str, Any]) -> None:
     with st.expander("Reproducibility & Evidence", expanded=False):
-        st.caption("Immutable-at-capture package: dataset snapshot, profile, workflow history, parameters and provenance.")
+        st.caption("Captured package: dataset snapshot, provenance, workflow history, parameters, cleaning audit and available figure evidence.")
         if st.button("Create reproduction package", key=f"shoir_repro_create_{module}"):
             register_reproduction_package(module, ctx)
             st.success("Reproduction package captured from the current workflow state.")
@@ -407,6 +436,35 @@ def render_reproduction_controls(module: str, ctx: Mapping[str, Any]) -> None:
             )
         manifest = st.session_state.get("shoir_last_reproduction_manifest")
         if manifest:
+            prompt = str(manifest.get("copilot_prompt") or "").strip()
+            if prompt and not st.session_state.get("shoir_reproduction_result"):
+                if st.button("Reproduce captured workflow", key=f"shoir_repro_run_{module}", use_container_width=True):
+                    try:
+                        df, _ = active_dataframe()
+                        if df.empty:
+                            raise ValueError("The captured workflow has no active dataset to reproduce.")
+                        from shoir_copilot_orchestrator import run_orchestration
+                        reproduction = run_orchestration(
+                            prompt,
+                            str(module),
+                            df.copy(deep=True),
+                            context={
+                                "actor": st.session_state.get("current_user", "unknown"),
+                                "workspace": st.session_state.get("workspace", "default"),
+                            },
+                        )
+                        st.session_state["shoir_reproduction_result"] = reproduction
+                        st.success("Captured workflow reproduced from the current dataset snapshot.")
+                    except Exception as exc:
+                        st.error(f"Reproduction could not be completed safely: {type(exc).__name__}: {exc}")
+            repro = st.session_state.get("shoir_reproduction_result")
+            if isinstance(repro, Mapping):
+                st.markdown("**Reproduction result**")
+                st.write({
+                    "run_id": repro.get("run_id"),
+                    "module": repro.get("module"),
+                    "status": repro.get("status") or repro.get("analysis_meta", {}).get("status"),
+                })
             st.json(manifest)
 
 
@@ -482,6 +540,16 @@ def render_global_copilot_bar(allowed_modules: Sequence[str] | None = None) -> N
 def install_visualization_contract() -> None:
     if st.session_state.get(_KERNEL_FLAG):
         return
+    st.markdown(
+        """<style>
+        [data-testid="stMetric"]{border:1px solid #dbe4ef;border-radius:14px;padding:10px 12px;background:#fff;box-shadow:0 5px 16px rgba(15,23,42,.035)}
+        [data-testid="stButton"]>button{border-radius:10px;font-weight:750}
+        [data-testid="stTextInput"] input,[data-testid="stTextArea"] textarea,[data-testid="stSelectbox"]>div{border-radius:10px}
+        .stExpander{border-radius:14px}
+        h1,h2,h3{letter-spacing:-.02em}
+        </style>""",
+        unsafe_allow_html=True,
+    )
     original = st.plotly_chart
 
     def contracted_plotly_chart(figure: Any, *args: Any, **kwargs: Any) -> Any:
@@ -601,6 +669,26 @@ def evidence_manifest(module: str = "") -> dict[str, Any]:
     return _evidence_payload(target, ctx)
 
 
+def submit_universal_background_job(
+    username: str,
+    module: str,
+    job_type: str,
+    payload: Mapping[str, Any],
+    task: Callable[[], Any],
+    workspace: str = "default",
+) -> str:
+    """Route expensive domain work through the enterprise background-job service."""
+    from shoir_enterprise_layer import submit_background_job
+    return submit_background_job(
+        str(username),
+        str(module),
+        str(job_type),
+        dict(payload),
+        task,
+        workspace=str(workspace),
+    )
+
+
 def platform_snapshot(module: str = "") -> dict[str, Any]:
     df, source_key = active_dataframe()
     profile = cached_profile(df) if not df.empty else readiness_snapshot(df)
@@ -649,6 +737,7 @@ __all__ = [
     "install_visualization_contract",
     "domain_engine_metadata",
     "domain_engine_run",
+    "submit_universal_background_job",
     "platform_snapshot",
     "finalize_module_contract",
     "evidence_manifest",
