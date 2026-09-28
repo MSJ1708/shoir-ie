@@ -11732,3 +11732,12 @@ if st.session_state.get("authenticated") and st.session_state.get("current_user"
         save_user_workspace(st.session_state["current_user"], st.session_state)
     except Exception:
         pass
+
+
+# Finalize the universal platform contract after specialist rendering.
+if st.session_state.get("authenticated") and st.session_state.get("current_user") and "selected_module" in globals():
+    try:
+        from shoir_universal_platform_kernel import finalize_module_contract
+        finalize_module_contract(str(selected_module))
+    except Exception:
+        pass
