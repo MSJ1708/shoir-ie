@@ -48,6 +48,7 @@ from shoir_enterprise_layer import (
     build_research_paper_bundle,
 )
 from shoir_unified_product import render_unified_workspace, render_global_product_dock, copilot_context
+from shoir_application_shell import render_application_shell, render_shell_surface, render_post_module_context, shell_health_snapshot
 from shoir_adoption_engine import render_adoption_center
 from shoir_universal_engine import render_universal_engine_surface, postflight_contract
 from shoir_commercial import render_module_enrichment
@@ -68,7 +69,8 @@ from shoir_enterprise_ops import (
 st.set_page_config(
     page_title="shoir",
     page_icon="⚡",
-    layout="wide"
+    layout="wide",
+    initial_sidebar_state="collapsed"
 )
 
 st.markdown("""
@@ -1424,38 +1426,12 @@ if not st.session_state.get("user_affiliate"):
 
 
 # =====================================================================
-# SIDEBAR NAVIGATION & PROFILE DRAWER (Three-line Hamburger Menu)
+# UNIFIED APPLICATION SHELL
+# ---------------------------------------------------------------------
+# The shell is the single navigation/workspace surface. Existing specialist
+# renderers remain intact underneath it. Legacy deep-link flags are consumed
+# here so older modules can continue requesting workbook/unified views.
 # =====================================================================
-st.sidebar.markdown(f"### ≡ AEGIS Enterprise Suite")
-with st.sidebar.expander(f"👤 {st.session_state.current_user} ({st.session_state.user_tier})", expanded=False):
-    st.markdown(f"**Email:** {st.session_state.get('user_email', 'N/A')}")
-    st.markdown(f"**Role:** {st.session_state.user_role}")
-    if st.button("Edit Account / Profile Setup", key="sidebar_edit_acc"):
-        st.session_state.selected_nav = "Edit Account"
-        st.rerun()
-
-st.sidebar.markdown("---")
-
-# =====================================================================
-# VALUE BOOSTER 1: SIDEBAR INTERACTIVE ROI CALCULATOR
-# =====================================================================
-st.sidebar.header("💰 Logistics Savings Estimator")
-monthly_shipments = st.sidebar.number_input("Monthly Shipments", min_value=100, max_value=100000, value=2500, step=100)
-avg_transport_cost = st.sidebar.number_input("Avg Cost per Shipment ($)", min_value=10, max_value=1000, value=120, step=5)
-estimated_savings = monthly_shipments * avg_transport_cost * 0.12
-
-st.sidebar.markdown(
-    f"""
-    <div style='background-color: #e6f4ea; padding: 12px; border-radius: 6px; border-left: 5px solid #34a853; margin-top: 5px;'>
-        <h4 style='margin: 0; color: #137333; font-size: 14px;'>Projected Monthly Savings</h4>
-        <p style='font-size: 22px; font-weight: bold; margin: 5px 0 0 0; color: #137333;'>${estimated_savings:,.2f}</p>
-        <p style='font-size: 10px; color: #5f6368; margin: 3px 0 0 0;'>Based on standard MILP route optimization benchmarks.</p>
-    </div>
-    """,
-    unsafe_allow_html=True
-)
-st.sidebar.markdown("---")
-
 tier_val = st.session_state.user_tier
 is_admin = (st.session_state.current_user == "sho")
 
@@ -1464,139 +1440,20 @@ tier2_features = tier1_features + ["Carbon Accounting", "IoT Digital Twin", "MEI
 professional_features = tier2_features + ["Advanced Planning & Scheduling", "Quality Engineering & Reliability", "Capital Investment & Engineering Economics", "Workforce Engineering", "Industrial Sustainability & LCA", "Benchmarking & Engineering Standards", "Scenario Versioning & Comparison", "Localization & Multi-Currency"]
 tier3_features = professional_features + ["AI Copilot", "FastAPI Gateway", "Monte Carlo Sim", "Sensitivity Analysis", "Webhook Alerts", "Agentic Workflows", "Control Tower", "Cryptographic Ledger", "Predictive Maintenance Hub", "Human Factors & Ergonomics (NIOSH)", "Digital Twin & Discrete-Event Simulation", "Green IE & Sustainability", "Manufacturing Execution System", "Industrial Simulation Lab", "3D Factory Designer", "Industrial Connectivity Hub", "Multi-Objective Optimization", "Robust & Resilient Optimization", "Engineering Model Registry", "Experiment Lab", "Experiment Engine", "Industrial Control Center", "Engineering Decision Center", "Advanced ML Demand Forecasting", "Team Workspaces & RBAC", "Executive Report Center", "Global Project & Digital Thread"]
 tier4_features = tier3_features + ["Industrial Data Platform", "Advanced Engineering Copilot", "Live Industrial Digital Twin", "Enterprise Security & Governance", "Predictive Maintenance Digital Twin"]
-# FIX (recurring from an earlier upload of this file - reapplied): this list
-# was missing commas between most entries, which in Python silently
-# concatenates adjacent string literals into one garbled string instead of
-# separate list items, and duplicated several Starter-tier names by accident.
 research_pack_features = tier3_features + [
-    "Research AI",
-    "Statistical Hypothesis Testing",
-    "Evidence Degradation & Decision-Readiness Lab",
-    "LaTeX Document Formatter",
-    "Literature & Citation Matrix",
-    "Advanced Regression Analysis",
-    "Paper-to-Simulation Auto-Engine",
-    "Adversarial AI Peer-Review Swarm",
-    "Live Reproducible Paper Canvas",
-    "Adversarial Chaos & Shock Injector",
-    "Adversarially Stressed Synthetic Industrial Twins",
-    "Automated Theory-to-Code Formalizer",
-    "Real-Time Quantum-Classical Hybrid Optimization Router",
-    "Automated Code-to-Formal-Proof Verifier",
-    "Decentralized Cryptographic Reproducibility Vault",
-    "Autonomous Parametric Surrogate Swarm",
-    "🔌 Edge-Connected IoT Digital Twin Bridge",
+    "Research AI", "Statistical Hypothesis Testing", "Evidence Degradation & Decision-Readiness Lab",
+    "LaTeX Document Formatter", "Literature & Citation Matrix", "Advanced Regression Analysis",
+    "Paper-to-Simulation Auto-Engine", "Adversarial AI Peer-Review Swarm", "Live Reproducible Paper Canvas",
+    "Adversarial Chaos & Shock Injector", "Adversarially Stressed Synthetic Industrial Twins",
+    "Automated Theory-to-Code Formalizer", "Real-Time Quantum-Classical Hybrid Optimization Router",
+    "Automated Code-to-Formal-Proof Verifier", "Decentralized Cryptographic Reproducibility Vault",
+    "Autonomous Parametric Surrogate Swarm", "🔌 Edge-Connected IoT Digital Twin Bridge",
     "🔌 Universal Cross-Domain Mathematical Isomorphism Engine (UCMIE)",
     "🔄 Autonomous Epistemic Cross-Disciplinary Falsification Matrix (AE-FRESM)",
-    "Autonomous Cognitive Operations & Zero-Knowledge Mesh (ACO-ZKMS)",
-    "⚡ ACO-ZKMS Master Engine"
+    "Autonomous Cognitive Operations & Zero-Knowledge Mesh (ACO-ZKMS)", "⚡ ACO-ZKMS Master Engine"
 ]
 if is_admin:
     tier3_features.append("Admin Panel")
-
-def _render_post_module_layers(module_name: str) -> None:
-    """Run one governed post-module pipeline and synchronize canonical state."""
-    username = st.session_state.get("current_user", "unknown")
-    module_name = str(module_name)
-    workspace = str(
-        st.session_state.get("shoir_workspace_name")
-        or st.session_state.get("workspace")
-        or st.session_state.get("active_workspace_name")
-        or "default"
-    )
-
-    # Synchronize the canonical Digital Thread BEFORE dependent overlays render.
-    # This makes the thread the cross-domain source of truth while preserving
-    # each native module's measured calculations as the source of operational
-    # signals.
-    try:
-        from shoir_digital_thread import sync_workspace_to_thread
-        sync_workspace_to_thread(username, active_module=module_name)
-    except Exception as exc:
-        st.warning("Digital Thread synchronization is temporarily unavailable; dependent overlays will use their last verified state.")
-        with st.expander("Digital Thread diagnostic", expanded=False):
-            st.code(f"{type(exc).__name__}: {exc}")
-
-    # Existing specialized integrations remain attached to their established modules.
-    try:
-        if module_name in {"Digital Twin & Discrete-Event Simulation", "Live Industrial Digital Twin"}:
-            render_digital_twin_extension(username)
-            render_realtime_monitoring_extension(st.session_state.get("iot_sensors", []), module_name)
-            frame = st.session_state.get("digital_twin_state_snapshot")
-            if isinstance(frame, pd.DataFrame) and not frame.empty:
-                render_data_intelligence_extension(module_name, frame, frame)
-        elif module_name in {"Industrial Control Center", "Control Tower"}:
-            render_control_tower_extension()
-        elif module_name == "Industrial Connectivity Hub":
-            render_connectivity_extension()
-        elif module_name in {"Enterprise Integration & Collaboration", "Enterprise Security & Governance"}:
-            render_collaboration_extension(username)
-            render_security_extension()
-        elif module_name == "Persistence":
-            render_persistence_extension(username)
-        elif module_name in {"Engineering Economics & Finance", "Capital Investment & Engineering Economics"}:
-            render_economics_extension(username)
-        elif module_name in {"Green IE & Sustainability", "Industrial Sustainability & LCA"}:
-            render_sustainability_extension(username)
-        elif module_name == "Human Factors & Ergonomics (NIOSH)":
-            render_human_factors_extension(username)
-        elif module_name == "Geospatial Network Designer":
-            render_geospatial_extension(username)
-        elif module_name == "AI Copilot":
-            render_knowledge_extension(username)
-        elif module_name == "Benchmarking & Engineering Standards":
-            from shoir_enterprise_ops import render_benchmarking_evidence
-            render_benchmarking_evidence(username)
-    except Exception as exc:
-        st.warning("Specialized enterprise extension could not render; native results remain available.")
-        with st.expander("Enterprise extension diagnostic", expanded=False):
-            st.code(f"{type(exc).__name__}: {exc}")
-
-    # Use the compatibility bridge only for modules that do not already
-    # own a richer enterprise integration surface. This prevents duplicate
-    # Digital Twin / Control Tower / Connector / Security UI.
-    specialized_modules = {
-        "Digital Twin & Discrete-Event Simulation", "Live Industrial Digital Twin",
-        "Industrial Control Center", "Control Tower", "Industrial Connectivity Hub",
-        "Enterprise Integration & Collaboration", "Enterprise Security & Governance",
-        "Persistence", "Engineering Economics & Finance",
-        "Capital Investment & Engineering Economics", "Green IE & Sustainability",
-        "Industrial Sustainability & LCA", "Human Factors & Ergonomics (NIOSH)",
-        "Geospatial Network Designer", "AI Copilot", "Benchmarking & Engineering Standards",
-        "Experiment Engine", "Experiment Lab",
-    }
-    if module_name not in specialized_modules:
-        try:
-            render_enterprise_bridge(module_name, tier_val, username)
-        except Exception as exc:
-            st.warning("Enterprise governance layer could not render; native results remain available.")
-            with st.expander("Governance diagnostic", expanded=False):
-                st.code(f"{type(exc).__name__}: {exc}")
-
-    try:
-        render_universal_module_parity(module_name, phase="results")
-    except Exception as exc:
-        st.warning("Universal Module Studio could not render; native results remain available.")
-        with st.expander("Visualization diagnostic", expanded=False):
-            st.code(f"{type(exc).__name__}: {exc}")
-
-    if username != "unknown":
-        try:
-            save_user_workspace(username, st.session_state)
-        except Exception:
-            # Persistence failures must never discard in-session engineering results.
-            pass
-
-
-st.sidebar.markdown("### 🧭 Navigation Menu")
-menu_choice = st.sidebar.radio("Go to Section", ["Dashboard", "🚀 160 Operating System", "✨ Excellence Hub", "Become an affiliate", "Feedback", "Edit Account"], label_visibility="collapsed")
-if menu_choice != "Dashboard":
-    st.session_state.selected_nav = menu_choice
-else:
-    st.session_state.selected_nav = "Dashboard"
-
-st.sidebar.markdown("---")
-st.sidebar.markdown("### 🛠️ Enterprise Modules")
 
 if "Research" in tier_val:
     allowed_modules = research_pack_features
@@ -1610,63 +1467,89 @@ elif "Pro" in tier_val or "Trial" in tier_val:
     allowed_modules = tier2_features
 else:
     allowed_modules = tier1_features
-_module_catalog_by_name = {str(m.get("name")): m for m in PLATFORM_CATALOG if isinstance(m, dict)}
-_module_labels=[]
-for _m in allowed_modules:
-    _meta=_module_catalog_by_name.get(str(_m),{})
-    _cat=str(_meta.get("category","Industrial Engineering"))
-    _module_labels.append(f"{_cat} · {_m}" if _meta else str(_m))
-_module_label_map=dict(zip(_module_labels,allowed_modules))
 
-# Consume navigation requests BEFORE instantiating the sidebar selectbox.
-# This avoids Streamlit's "WidgetAlreadyInstantiated" error when a button
-# inside a rendered module requests navigation to another module.
-if st.session_state.pop("open_research_lab_requested", False):
-    _research_label = "Experimentation · Experiment Lab"
-    if _research_label in _module_label_map:
-        st.session_state["enterprise_module_selector"] = _research_label
-
-_selected_label=st.sidebar.selectbox("Select Module",_module_labels,key="enterprise_module_selector")
-selected_module=_module_label_map[_selected_label]
-render_global_product_dock(
-    selected_module,
-    str(st.session_state.get("user_tier", "Starter Tier")),
-    st.session_state.get("current_user", "unknown"),
-)
+# Deep-link compatibility from the existing global product dock.
 if st.session_state.pop("force_workbook_module", False):
-    _wb_label = next((label for label, name in _module_label_map.items() if name == "Industrial Workbook"), None)
-    if _wb_label:
-        st.session_state["enterprise_module_selector"] = _wb_label
-        st.rerun()
-    else:
-        st.warning("Industrial Workbook is not available in the current tier.")
+    wb = "Industrial Workbook"
+    if wb in allowed_modules:
+        st.session_state["_shoir_requested_module"] = wb
 if st.session_state.pop("force_adoption_center", False):
-    try:
-        render_adoption_center(
-            st.session_state.get("current_user", "unknown"),
-            str(st.session_state.get("user_tier", "Starter Tier")),
-            initial_tab=st.session_state.pop("adoption_tab_request", "Home"),
-        )
-    except Exception as exc:
-        st.error("Industrial Home could not render the productivity workspace safely.")
-        with st.expander("Adoption engine diagnostic", expanded=False):
-            st.code(f"{type(exc).__name__}: {exc}")
-    st.stop()
+    st.session_state["shoir_shell_surface"] = "workbench"
 if st.session_state.pop("force_unified_workspace", False):
-    render_unified_workspace(
-        selected_module,
-        str(st.session_state.get("user_tier", "Starter Tier")),
+    st.session_state["shoir_shell_surface"] = "unified"
+if st.session_state.pop("force_universal_engine", False):
+    st.session_state["shoir_shell_surface"] = "universal"
+
+_current_module = st.session_state.get("_shoir_requested_module") or st.session_state.get("selected_module")
+selected_module, _shell_surface = render_application_shell(
+    username=st.session_state.get("current_user", "unknown"),
+    tier=str(tier_val),
+    allowed_modules=allowed_modules,
+    current_module=str(_current_module) if _current_module else None,
+    is_admin=is_admin,
+)
+st.session_state.pop("_shoir_requested_module", None)
+st.session_state["selected_module"] = selected_module
+
+# Consolidated platform surfaces remain inside the same application shell.
+if _shell_surface:
+    if _shell_surface == "unified":
+        render_unified_workspace(
+            selected_module,
+            str(st.session_state.get("user_tier", "Starter Tier")),
+            st.session_state.get("current_user", "unknown"),
+        )
+        st.stop()
+    if _shell_surface == "universal":
+        from shoir_universal_engine import render_universal_engine_surface
+        render_universal_engine_surface(
+            selected_module,
+            str(st.session_state.get("user_tier", "Starter Tier")),
+            st.session_state.get("current_user", "unknown"),
+        )
+        st.stop()
+    render_shell_surface(
+        _shell_surface,
         st.session_state.get("current_user", "unknown"),
+        str(tier_val),
+        selected_module,
+        allowed_modules,
+        is_admin=is_admin,
     )
-    st.stop()
-_meta=_module_catalog_by_name.get(str(selected_module))
-if _meta:
-    st.sidebar.markdown(
-        f"<div class='module-card'><div class='kicker'>{html.escape(str(_meta.get('category','Industrial Engineering')))}</div>"
-        f"<div style='font-size:15px;font-weight:800;color:#0f172a;margin-top:4px'>{html.escape(str(selected_module))}</div>"
-        f"<div style='font-size:11px;color:#64748b;margin-top:4px'>{html.escape(str(_meta.get('when','Engineering workflow')))}</div></div>",
-        unsafe_allow_html=True,
+    if _shell_surface == "edit_account":
+        # Fall through to the existing, fully tested profile editor below.
+        pass
+    else:
+        st.stop()
+
+# Platform-surface fallbacks kept for old session state/deep links.
+if st.session_state.get("selected_nav") == "Edit Account":
+    current_view = "Edit Account"
+else:
+    current_view = "Dashboard"
+
+# Shared status/workflow context is now the first layer above every specialist module.
+try:
+    render_post_module_context(
+        selected_module,
+        st.session_state.get("current_user", "unknown"),
+        str(tier_val),
     )
+except Exception as _shell_context_error:
+    st.warning("Unified workspace context is temporarily unavailable; the specialist module remains available.")
+    with st.expander("Shell diagnostic", expanded=False):
+        st.code(f"{type(_shell_context_error).__name__}: {_shell_context_error}")
+
+# The ROI estimator moved out of the sidebar; keep its calculation available to
+# economics modules through a non-UI session value for compatibility.
+try:
+    st.session_state["shoir_roi_estimate"] = float(
+        st.session_state.get("monthly_shipments", 2500)
+        * st.session_state.get("avg_transport_cost", 120)
+        * 0.12
+    )
+except Exception:
+    st.session_state["shoir_roi_estimate"] = None
 
 def _render_pretty_result(value, title="Result", key_prefix="result"):
     """Present structured engineering output as cards/tables/charts instead of raw JSON."""
