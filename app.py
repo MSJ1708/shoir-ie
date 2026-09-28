@@ -1490,6 +1490,11 @@ selected_module, _shell_surface = render_application_shell(
     is_admin=is_admin,
 )
 st.session_state.pop("_shoir_requested_module", None)
+# Compatibility contract retained for existing smoke tests and legacy integrations.
+# IMPORTANT: this is state only; it is intentionally NOT reused as a Streamlit widget key,
+# avoiding the historical widget-instantiation conflict while preserving the old selector name.
+LEGACY_MODULE_SELECTOR_KEY = "enterprise_module_selector"
+st.session_state[LEGACY_MODULE_SELECTOR_KEY] = selected_module
 st.session_state["selected_module"] = selected_module
 
 # Consolidated platform surfaces remain inside the same application shell.
