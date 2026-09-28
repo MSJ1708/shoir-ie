@@ -14,6 +14,8 @@ import hashlib
 import io
 import json
 import math
+import re
+import sqlite3
 import time
 import zipfile
 from contextlib import contextmanager
@@ -478,6 +480,54 @@ def render_universal_inspector(module: str, ctx: Mapping[str, Any]) -> None:
     project = st.session_state.get("shoir_project_name") or st.session_state.get("active_workspace_name") or "No active project"
     warnings = profile.get("warnings") or []
 
+    trace_rows = []
+    try:
+        with sqlite3.connect("enterprise_full_workspace.db", timeout=5) as conn:
+            entity_rows = conn.execute(
+                "SELECT entity_type,name,status FROM os160_entities ORDER BY updated_at DESC LIMIT 100"
+            ).fetchall()
+        trace_rows = [{"type": str(row[0]), "name": str(row[1]), "status": str(row[2])} for row in entity_rows]
+    except Exception:
+        trace_rows = []
+    trace_summary = " → ".join(
+        str(x) for x in (
+            "Dataset",
+            "Process",
+            "KPI",
+            "Scenario",
+            "Run",
+            "Decision",
+            "Outcome",
+        )
+    )
+    timing = st.session_state.get("shoir_last_engine_timing", {})
+    try:
+        timing_text = f"{float(timing.get('duration_ms', 0.0)):.0f} ms"
+    except Exception:
+        timing_text = "not recorded"
+
+    # A compact interactive Trace/Evidence control sits above the persistent right drawer.
+    tc1, tc2 = st.columns([1, 1])
+    with tc1:
+        show_trace = st.toggle("Trace context", value=False, key=f"shoir_trace_toggle_{module}")
+    with tc2:
+        manifest = _evidence_payload(module, ctx)
+        st.download_button(
+            "Evidence manifest",
+            data=json.dumps(manifest, indent=2, default=str).encode("utf-8"),
+            file_name=f"shoir_{hashlib.sha256(str(module).encode()).hexdigest()[:10]}_evidence.json",
+            mime="application/json",
+            key=f"shoir_evidence_manifest_{module}",
+            use_container_width=True,
+        )
+    if show_trace:
+        st.markdown("**Digital Thread trace**")
+        st.caption(trace_summary)
+        if trace_rows:
+            st.dataframe(pd.DataFrame(trace_rows), use_container_width=True, hide_index=True, height=190)
+        else:
+            st.info("No persisted canonical entity records are available yet; the trace contract remains active for this module.")
+
     html = f"""
 <style>
 #shoir-universal-inspector {{
@@ -499,7 +549,8 @@ box-shadow:0 18px 50px rgba(15,23,42,.16);padding:14px;font-family:Inter,system-
   <div class="label">SHA-256</div><div class="value">{digest}</div>
   <div class="label">Readiness</div><div class="value">{float(profile.get('score',0.0)):.1f}% · {int(profile.get('rows',0)):,} × {int(profile.get('columns',0)):,}</div>
   <div class="label">Run</div><div class="value">{run_id}</div>
-  <div class="label">Workflow</div><div class="value">{workflow_state()['stage']}</div>
+  <div class="label">Workflow</div><div class="value">{workflow_state(module)['stage']} · {len(workflow_state(module)['history'])} recorded transitions</div>
+  <div class="label">Execution</div><div class="value">{timing_text}</div>
   <div class="label">Why this number?</div>
   <div style="font-size:10px;color:#475569;line-height:1.45">
     Values are derived from the active dataset and the recorded workflow state.
