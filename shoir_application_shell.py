@@ -734,7 +734,12 @@ def render_run_center(username: str, tier: str) -> None:
     if not one.empty:
         row = one.iloc[0]
         with st.expander("Run evidence & replay context", expanded=True):
-            st.json({
+            try:
+                payload = json.loads(row["payload_json"]) if row["payload_json"] else {}
+            except Exception:
+                payload = {"raw_payload": str(row["payload_json"])}
+            manifest = {
+                "shell_version": SHELL_VERSION,
                 "run_id": str(row["run_id"]),
                 "module": str(row["module"]),
                 "job_type": str(row["job_type"]),
@@ -745,7 +750,21 @@ def render_run_center(username: str, tier: str) -> None:
                 "owner": str(row["owner"]),
                 "created_at": str(row["created_at"]),
                 "updated_at": str(row["updated_at"]),
-            })
+                "data_state": infer_provenance(),
+                "data_source": st.session_state.get("shoir_data_source"),
+                "data_version": st.session_state.get("shoir_data_version"),
+                "data_hash": st.session_state.get("shoir_data_hash"),
+                "payload": payload,
+            }
+            st.json(manifest)
+            st.download_button(
+                "📦 Download reproducibility manifest",
+                data=json.dumps(manifest, indent=2, default=str).encode("utf-8"),
+                file_name=f"shoir_{row['run_id']}_reproducibility.json",
+                mime="application/json",
+                use_container_width=True,
+                key=f"shoir_run_manifest_{row['run_id']}",
+            )
 
 
 def _parse_json_object(text_value: str) -> dict[str, Any]:
