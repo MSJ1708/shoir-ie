@@ -406,21 +406,36 @@ def scalable_text_reader(raw: bytes, filename: str) -> dict[str, pd.DataFrame]:
         except Exception:
             delimiter = ","
 
+    # Use Python's csv reader for both small and large inputs. Unlike the
+    # pandas C parser, it preserves the earlier Excel Studio contract that
+    # irregular-width rows are padded rather than silently discarded or
+    # mis-tokenized. Large files are accumulated in bounded row chunks so the
+    # downstream dataframe construction remains predictable.
     chunked = len(raw) >= 8 * 1024 * 1024
-    common = dict(
-        header=None,
-        dtype=object,
-        sep=delimiter,
-        keep_default_na=False,
-        low_memory=True,
-        on_bad_lines="error",
-    )
-    if chunked:
-        chunks = list(pd.read_csv(io.StringIO(text), chunksize=100_000, **common))
-        frame = pd.concat(chunks, ignore_index=True) if chunks else pd.DataFrame()
+    chunk_rows = 100_000
+    rows = csv.reader(io.StringIO(text), delimiter=delimiter)
+    chunks: list[list[list[str]]] = []
+    current: list[list[str]] = []
+    width = 0
+    for row in rows:
+        current.append(row)
+        width = max(width, len(row))
+        if len(current) >= chunk_rows and chunked:
+            chunks.append(current)
+            current = []
+    if current:
+        chunks.append(current)
+    if not chunks:
+        frame = pd.DataFrame()
     else:
-        frame = pd.read_csv(io.StringIO(text), **common)
+        padded_chunks = [
+            pd.DataFrame([r + [""] * (width - len(r)) for r in chunk], dtype=object)
+            for chunk in chunks
+        ]
+        frame = pd.concat(padded_chunks, ignore_index=True) if padded_chunks else pd.DataFrame()
     frame.attrs["source_encoding"] = encoding
+    frame.attrs["source_delimiter"] = delimiter
+    frame.attrs["ingestion_chunk_rows"] = chunk_rows if chunked else len(frame)
     frame.attrs["source_delimiter"] = delimiter
     return {"CSV" if str(filename).lower().endswith(".csv") else "TEXT": frame}
 
