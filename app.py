@@ -73,13 +73,14 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-st.markdown("""
-<div class="hero-card shoir-live-pulse">
-  <div class="kicker">Industrial Decision Platform • Engineering Intelligence</div>
-  <div class="hero-title">🏭 Shoir-IE Industrial Engineering Command Center</div>
-  <div class="hero-copy">Turn industrial data into defensible decisions — analyze, simulate, optimize, compare, explain, and export from one workspace.</div>
-</div>
-""", unsafe_allow_html=True)
+if not st.session_state.get("authenticated"):
+    st.markdown("""
+    <div class="hero-card shoir-live-pulse">
+      <div class="kicker">Industrial Decision Platform • Engineering Intelligence</div>
+      <div class="hero-title">🏭 Shoir-IE Industrial Engineering Command Center</div>
+      <div class="hero-copy">Turn industrial data into defensible decisions — analyze, simulate, optimize, compare, explain, and export from one workspace.</div>
+    </div>
+    """, unsafe_allow_html=True)
 
 st.markdown("""
 <style>
