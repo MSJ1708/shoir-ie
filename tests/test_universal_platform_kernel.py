@@ -1,4 +1,4 @@
-import hashlib
+from pathlib import Path
 
 import pandas as pd
 
@@ -24,6 +24,12 @@ def test_universal_workflow_contract_is_complete():
 def test_grouped_160_navigation_has_four_workspaces():
     assert tuple(GROUPED_160_VIEWS) == ("Work", "Intelligence", "Governance", "Platform")
     assert sum(len(v) for v in GROUPED_160_VIEWS.values()) == 10
+
+
+def test_160_renderer_uses_grouped_navigation():
+    source = Path("shoir_160.py").read_text(encoding="utf-8")
+    assert "Compact navigation: four grouped workspaces" in source
+    assert 'tabs=st.tabs(["⚡ Command Center"' not in source
 
 
 def test_provenance_contract_is_explicit():
