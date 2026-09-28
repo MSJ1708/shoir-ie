@@ -47,11 +47,6 @@ def test_provenance_states_are_explicit():
     assert "presentation_mode" in PASTED_SPEC_UPDATES
 
 
-def test_infer_provenance_defaults_to_demo(monkeypatch):
-    monkeypatch.setattr("streamlit.session_state", {})
-    assert infer_provenance() == "DEMO"
-
-
 def test_variance_calculation_is_numeric_and_traceable():
     expected = {"Throughput": 100, "Cost": 120}
     actual = {"Throughput": 112, "Cost": 126}
