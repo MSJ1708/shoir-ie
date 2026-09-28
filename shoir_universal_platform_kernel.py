@@ -197,25 +197,33 @@ def init_module_contract(module: str) -> dict[str, Any]:
         "started_monotonic": time.perf_counter(),
     }
     st.session_state["shoir_universal_module_contract"] = ctx
-    st.session_state.setdefault("shoir_universal_workflow_stage", "DATA")
-    st.session_state.setdefault("shoir_universal_workflow_history", [])
+    stage_map = dict(st.session_state.get("shoir_universal_workflow_stage_by_module", {}))
+    history_map = dict(st.session_state.get("shoir_universal_workflow_history_by_module", {}))
+    stage_map.setdefault(str(module), "DATA")
+    history_map.setdefault(str(module), [])
+    st.session_state["shoir_universal_workflow_stage_by_module"] = stage_map
+    st.session_state["shoir_universal_workflow_history_by_module"] = history_map
     return ctx
 
 
-def workflow_state() -> dict[str, Any]:
-    stage = str(st.session_state.get("shoir_universal_workflow_stage", "DATA"))
+def workflow_state(module: str | None = None) -> dict[str, Any]:
+    target = str(module or (st.session_state.get("shoir_universal_module_contract") or {}).get("module") or "Engineering")
+    stage_map = dict(st.session_state.get("shoir_universal_workflow_stage_by_module", {}))
+    history_map = dict(st.session_state.get("shoir_universal_workflow_history_by_module", {}))
+    stage = str(stage_map.get(target, "DATA"))
     if stage not in WORKFLOW_STEPS:
         stage = "DATA"
     return {
+        "module": target,
         "stage": stage,
         "index": WORKFLOW_STEPS.index(stage),
-        "history": list(st.session_state.get("shoir_universal_workflow_history", [])),
+        "history": list(history_map.get(target, [])),
     }
 
 
 def _stage_ready(stage: str, ctx: Mapping[str, Any]) -> tuple[bool, str]:
     idx = WORKFLOW_STEPS.index(stage)
-    current = workflow_state()["index"]
+    current = workflow_state(str(ctx.get("module") or "Engineering"))["index"]
     profile = ctx.get("readiness") or {}
     has_data = int(profile.get("rows", 0)) > 0
     run_id = bool(ctx.get("run_id") or st.session_state.get("shoir_latest_run_id") or st.session_state.get("last_run_id"))
@@ -251,10 +259,15 @@ def advance_workflow(target: str, ctx: Mapping[str, Any]) -> tuple[bool, str]:
     ready, reason = _stage_ready(target, ctx)
     if not ready:
         return False, reason
-    st.session_state["shoir_universal_workflow_stage"] = target
-    history = list(st.session_state.get("shoir_universal_workflow_history", []))
-    history.append({"stage": target, "timestamp": now_iso(), "module": ctx.get("module")})
-    st.session_state["shoir_universal_workflow_history"] = history[-30:]
+    module = str(ctx.get("module") or "Engineering")
+    stage_map = dict(st.session_state.get("shoir_universal_workflow_stage_by_module", {}))
+    history_map = dict(st.session_state.get("shoir_universal_workflow_history_by_module", {}))
+    stage_map[module] = target
+    history = list(history_map.get(module, []))
+    history.append({"stage": target, "timestamp": now_iso(), "module": module})
+    history_map[module] = history[-30:]
+    st.session_state["shoir_universal_workflow_stage_by_module"] = stage_map
+    st.session_state["shoir_universal_workflow_history_by_module"] = history_map
     return True, f"Workflow moved to {target}."
 
 
@@ -280,7 +293,7 @@ def _badge(state: str) -> str:
 
 
 def render_universal_workflow(module: str, ctx: Mapping[str, Any]) -> None:
-    state = workflow_state()
+    state = workflow_state(module)
     st.markdown("### Universal Engineering Workflow")
     chips = []
     for i, step in enumerate(WORKFLOW_STEPS):
@@ -335,7 +348,7 @@ def _evidence_payload(module: str, ctx: Mapping[str, Any], figure_count: int = 0
             "columns": int(len(df.columns)),
             "missing_cells": int(df.isna().sum().sum()) if not df.empty else 0,
         },
-        "workflow": workflow_state(),
+        "workflow": workflow_state(module),
         "run_id": st.session_state.get("shoir_latest_run_id") or st.session_state.get("last_run_id"),
         "figures_captured": int(figure_count),
         "assumptions": _jsonable(st.session_state.get("shoir_assumptions", [])),
@@ -362,7 +375,7 @@ def build_reproduction_package(module: str, ctx: Mapping[str, Any], results: Any
         zf.writestr("dataset_profile.json", json.dumps(profile, indent=2, default=str))
         zf.writestr(
             "workflow_history.json",
-            json.dumps(st.session_state.get("shoir_universal_workflow_history", []), indent=2, default=str),
+            json.dumps(workflow_state(module).get("history", []), indent=2, default=str),
         )
         zf.writestr(
             "session_parameters.json",
@@ -553,6 +566,27 @@ def finalize_module_contract(module: str) -> dict[str, Any]:
     ctx["readiness"] = profile
     ctx["run_id"] = st.session_state.get("shoir_latest_run_id") or st.session_state.get("last_run_id")
     st.session_state["shoir_universal_module_contract"] = ctx
+    # Reconcile runtime observations into the governed workflow state.
+    state = workflow_state(module)
+    observed_index = state["index"]
+    if ctx.get("run_id"):
+        observed_index = max(observed_index, WORKFLOW_STEPS.index("RUN"))
+    if st.session_state.get("shoir_last_figure_provenance"):
+        observed_index = max(observed_index, WORKFLOW_STEPS.index("VISUALIZE"))
+    if st.session_state.get("os160_last_decision") or st.session_state.get("shoir_latest_decision_id"):
+        observed_index = max(observed_index, WORKFLOW_STEPS.index("DECIDE"))
+    if st.session_state.get("shoir_latest_outcome_id"):
+        observed_index = max(observed_index, WORKFLOW_STEPS.index("VERIFY"))
+    if observed_index != state["index"]:
+        stage_map = dict(st.session_state.get("shoir_universal_workflow_stage_by_module", {}))
+        history_map = dict(st.session_state.get("shoir_universal_workflow_history_by_module", {}))
+        stage = WORKFLOW_STEPS[observed_index]
+        stage_map[str(module)] = stage
+        history = list(history_map.get(str(module), []))
+        history.append({"stage": stage, "timestamp": now_iso(), "module": str(module), "source": "runtime-observation"})
+        history_map[str(module)] = history[-30:]
+        st.session_state["shoir_universal_workflow_stage_by_module"] = stage_map
+        st.session_state["shoir_universal_workflow_history_by_module"] = history_map
     st.session_state["shoir_last_module_contract"] = {**domain_engine_metadata(module), "timing_ms": ctx["duration_ms"], "completed_at": ctx["completed_at"]}
     st.session_state["shoir_last_evidence_manifest"] = _evidence_payload(module, ctx)
     return ctx
