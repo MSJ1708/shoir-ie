@@ -194,6 +194,7 @@ def init_module_contract(module: str) -> dict[str, Any]:
         "readiness": profile,
         "run_id": st.session_state.get("shoir_latest_run_id") or st.session_state.get("last_run_id"),
         "started_at": now_iso(),
+        "started_monotonic": time.perf_counter(),
     }
     st.session_state["shoir_universal_module_contract"] = ctx
     st.session_state.setdefault("shoir_universal_workflow_stage", "DATA")
@@ -534,6 +535,38 @@ def domain_engine_run(module: str):
         st.session_state["shoir_last_engine_contract"] = domain_engine_metadata(module)
 
 
+def finalize_module_contract(module: str) -> dict[str, Any]:
+    """Finalize cross-module timing/evidence metadata after the renderer executes."""
+    ctx = dict(st.session_state.get("shoir_universal_module_contract", {}))
+    ctx["module"] = str(module)
+    ctx["completed_at"] = now_iso()
+    started = ctx.get("started_monotonic")
+    if isinstance(started, (int, float)):
+        ctx["duration_ms"] = round((time.perf_counter() - started) * 1000.0, 2)
+    else:
+        ctx["duration_ms"] = None
+    df, source_key = active_dataframe()
+    profile = cached_profile(df) if not df.empty else readiness_snapshot(df)
+    ctx["dataset_key"] = source_key
+    ctx["dataset_hash"] = st.session_state.get("shoir_data_hash") or profile.get("fingerprint") or dataset_hash(df)
+    ctx["provenance"] = provenance()
+    ctx["readiness"] = profile
+    ctx["run_id"] = st.session_state.get("shoir_latest_run_id") or st.session_state.get("last_run_id")
+    st.session_state["shoir_universal_module_contract"] = ctx
+    st.session_state["shoir_last_module_contract"] = {**domain_engine_metadata(module), "timing_ms": ctx["duration_ms"], "completed_at": ctx["completed_at"]}
+    st.session_state["shoir_last_evidence_manifest"] = _evidence_payload(module, ctx)
+    return ctx
+
+
+def evidence_manifest(module: str = "") -> dict[str, Any]:
+    current = st.session_state.get("shoir_last_evidence_manifest")
+    if isinstance(current, Mapping):
+        return dict(current)
+    target = module or str(st.session_state.get("selected_module", "Engineering"))
+    ctx = init_module_contract(target)
+    return _evidence_payload(target, ctx)
+
+
 def platform_snapshot(module: str = "") -> dict[str, Any]:
     df, source_key = active_dataframe()
     profile = cached_profile(df) if not df.empty else readiness_snapshot(df)
@@ -583,5 +616,7 @@ __all__ = [
     "domain_engine_metadata",
     "domain_engine_run",
     "platform_snapshot",
+    "finalize_module_contract",
+    "evidence_manifest",
     "install_and_render_module_context",
 ]
