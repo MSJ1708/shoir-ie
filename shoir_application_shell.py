@@ -675,6 +675,27 @@ def render_data_catalog(username: str, tier: str) -> None:
         """SELECT dataset_id,name,source,fingerprint,owner,created_at,updated_at
            FROM os160_datasets ORDER BY updated_at DESC LIMIT 500"""
     )
+    excel_catalog = st.session_state.get("excel_studio_dataset_catalog", [])
+    if isinstance(excel_catalog, list) and excel_catalog:
+        excel_rows = []
+        for item in excel_catalog[-100:]:
+            if isinstance(item, Mapping):
+                source = item.get("source", {}) if isinstance(item.get("source"), Mapping) else {}
+                excel_rows.append({
+                    "dataset_id": item.get("dataset_id") or item.get("key") or item.get("filename") or "excel-session",
+                    "name": item.get("filename") or item.get("dataset_id") or "Excel Studio dataset",
+                    "source": item.get("filename") or source.get("name") or "Excel Studio",
+                    "fingerprint": source.get("sha256") or item.get("signature") or "",
+                    "owner": username,
+                    "created_at": item.get("saved_utc") or item.get("created_at") or "",
+                    "updated_at": item.get("saved_utc") or item.get("updated_at") or "",
+                })
+        if excel_rows:
+            session_df = pd.DataFrame(excel_rows)
+            if df.empty:
+                df = session_df
+            else:
+                df = pd.concat([df, session_df], ignore_index=True).drop_duplicates(subset=["dataset_id"], keep="first")
     active, source_key = _first_dataframe()
     if not df.empty:
         search = st.text_input("Search datasets", placeholder="production, maintenance, SKU…", key="shoir_catalog_search")
