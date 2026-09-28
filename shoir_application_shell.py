@@ -47,7 +47,7 @@ MODULE_GROUP_RULES = (
     ("Research", ("research", "experiment", "hypothesis", "regression", "paper", "latex", "literature", "falsification", "isomorphism", "zero-knowledge", "quantum-classical")),
     ("AI & Automation", ("copilot", "agentic", "automation", "ai")),
     ("Operations", ("control center", "control tower", "execution", "mes", "connectivity", "iot", "telemetry")),
-    ("Platform & Governance", ("security", "governance", "persistence", "rbac", "benchmark", "digital thread", "decision")),
+    ("Platform & Governance", ("admin", "security", "governance", "persistence", "rbac", "benchmark", "digital thread", "decision")),
 )
 
 PROVENANCE_STATES = ("LIVE", "IMPORTED", "SIMULATED", "DEMO")
@@ -239,6 +239,63 @@ def remember_module(module: str) -> None:
     module = str(module)
     recent = [module] + [str(x) for x in st.session_state.get("shoir_recent_modules", []) if str(x) != module]
     st.session_state["shoir_recent_modules"] = recent[:8]
+
+
+def render_global_search(allowed_modules: Sequence[str]) -> None:
+    """Search modules and durable engineering objects from the same shell."""
+    query = st.text_input(
+        "⌘ Search Shoir-IE",
+        placeholder="Search modules, datasets, runs, decisions…",
+        key="shoir_shell_global_search",
+    )
+    if not query.strip():
+        return
+    term = query.strip().lower()
+    module_hits = [m for m in allowed_modules if term in str(m).lower() or term in module_group(str(m)).lower()]
+    dataset_hits = _query_df(
+        """SELECT dataset_id,name,source,owner,updated_at
+           FROM os160_datasets ORDER BY updated_at DESC LIMIT 500"""
+    )
+    run_hits = _query_df(
+        """SELECT run_id,module,job_type,status,created_at
+           FROM os160_runs ORDER BY created_at DESC LIMIT 500"""
+    )
+    decision_hits = _query_df(
+        """SELECT decision_id,title,module,status,updated_at
+           FROM os160_decisions ORDER BY updated_at DESC LIMIT 500"""
+    )
+    if not dataset_hits.empty:
+        dataset_hits = dataset_hits[dataset_hits.astype(str).apply(
+            lambda col: col.str.lower().str.contains(term, regex=False)
+        ).any(axis=1)]
+    if not run_hits.empty:
+        run_hits = run_hits[run_hits.astype(str).apply(
+            lambda col: col.str.lower().str.contains(term, regex=False)
+        ).any(axis=1)]
+    if not decision_hits.empty:
+        decision_hits = decision_hits[decision_hits.astype(str).apply(
+            lambda col: col.str.lower().str.contains(term, regex=False)
+        ).any(axis=1)]
+
+    with st.expander("⌘ Search results", expanded=True):
+        if module_hits:
+            st.markdown("**Modules**")
+            for idx, name in enumerate(module_hits[:12]):
+                if st.button(f"Open · {name}", key=f"shoir_global_module_{idx}", use_container_width=True):
+                    st.session_state["_shoir_requested_module"] = str(name)
+                    st.session_state["shoir_shell_global_search"] = ""
+                    st.rerun()
+        if not dataset_hits.empty:
+            st.markdown("**Datasets**")
+            st.dataframe(dataset_hits.head(20), use_container_width=True, hide_index=True)
+        if not run_hits.empty:
+            st.markdown("**Runs**")
+            st.dataframe(run_hits.head(20), use_container_width=True, hide_index=True)
+        if not decision_hits.empty:
+            st.markdown("**Decisions**")
+            st.dataframe(decision_hits.head(20), use_container_width=True, hide_index=True)
+        if not module_hits and dataset_hits.empty and run_hits.empty and decision_hits.empty:
+            st.info("No matching engineering objects were found.")
 
 
 def _module_choices(allowed_modules: Sequence[str], section: str, search: str) -> list[str]:
@@ -600,6 +657,7 @@ def render_application_shell(
         surface = "logout"
 
     render_application_header(username, tier, selected_module)
+    render_global_search(allowed_modules)
     return selected_module, surface
 
 
@@ -701,7 +759,9 @@ def _parse_json_object(text_value: str) -> dict[str, Any]:
 
 def record_decision_outcome(decision_id: str, actual_metrics: Mapping[str, Any], owner: str, status: str = "Observed", notes: str = "") -> str:
     ensure_shell_schema()
-    outcome_id = "OUT-" + datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S") + "-" + str(abs(hash((decision_id, owner, _now()))))[-6:]
+    import hashlib
+    fingerprint = hashlib.sha256(f"{decision_id}|{owner}|{_now()}".encode("utf-8")).hexdigest()[:10].upper()
+    outcome_id = "OUT-" + datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S") + "-" + fingerprint
     with _db() as conn:
         conn.execute(
             """INSERT INTO shoir_shell_decision_outcomes
