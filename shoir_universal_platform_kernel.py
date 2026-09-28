@@ -396,7 +396,8 @@ def build_reproduction_package(module: str, ctx: Mapping[str, Any], results: Any
         zf.writestr("dataset.csv", raw_csv)
         source_key, source_bytes = _captured_source_bytes()
         if source_bytes:
-            zf.writestr(f"source/{source_key}.bin", source_bytes)
+            safe_key = re.sub(r"[^A-Za-z0-9._-]+", "_", str(source_key)).strip("._") or "captured_source"
+            zf.writestr(f"source/{safe_key}.bin", source_bytes)
         zf.writestr("dataset_profile.json", json.dumps(profile, indent=2, default=str))
         audit = st.session_state.get("shoir_excel_cleaning_audit") or st.session_state.get("os160_clean_audit")
         if audit:
@@ -509,7 +510,7 @@ def render_universal_inspector(module: str, ctx: Mapping[str, Any]) -> None:
     # A compact interactive Trace/Evidence control sits above the persistent right drawer.
     tc1, tc2 = st.columns([1, 1])
     with tc1:
-        show_trace = st.toggle("Trace context", value=False, key=f"shoir_trace_toggle_{module}")
+        show_trace = st.checkbox("Trace context", value=False, key=f"shoir_trace_toggle_{module}")
     with tc2:
         manifest = _evidence_payload(module, ctx)
         st.download_button(
