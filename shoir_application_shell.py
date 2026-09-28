@@ -1079,9 +1079,17 @@ def render_shell_surface(surface: str, username: str, tier: str, module: str, al
 
 
 def render_post_module_context(module: str, username: str, tier: str) -> None:
-    provenance = infer_provenance()
-    render_module_workflow(module, provenance)
-    render_inspector(module, username, tier)
+    """Apply the universal platform kernel before every specialist renderer."""
+    try:
+        from shoir_universal_platform_kernel import install_and_render_module_context
+        install_and_render_module_context(str(module), show_copilot=True)
+    except Exception as _kernel_error:
+        # Preserve the existing shell context if the additive kernel is unavailable.
+        provenance = infer_provenance()
+        render_module_workflow(module, provenance)
+        render_inspector(module, username, tier)
+        with st.expander("Universal platform kernel diagnostic", expanded=False):
+            st.code(f"{type(_kernel_error).__name__}: {_kernel_error}")
 
 
 def shell_health_snapshot() -> dict[str, Any]:
