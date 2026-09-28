@@ -539,6 +539,14 @@ def render_application_shell(
             if st.button("⌘ Copilot", use_container_width=True, key="shoir_shell_copilot"):
                 st.session_state["shoir_shell_surface"] = "copilot"
 
+        platform = st.columns(2)
+        with platform[0]:
+            if st.button("⚡ Operating System", use_container_width=True, key="shoir_shell_os"):
+                st.session_state["shoir_shell_surface"] = "os"
+        with platform[1]:
+            if st.button("✨ Excellence Hub", use_container_width=True, key="shoir_shell_excellence"):
+                st.session_state["shoir_shell_surface"] = "excellence"
+
         st.markdown("---")
         with st.expander(f"👤 {username}", expanded=False):
             st.markdown(f"**Tier:** {tier}")
@@ -557,7 +565,11 @@ def render_application_shell(
     selected_module = str(selected_label or current_module or (list(allowed_modules)[0] if allowed_modules else "MILP Solvers"))
     surface = st.session_state.pop("shoir_shell_surface", None)
 
-    st.session_state["selected_nav"] = "Dashboard"
+    if surface == "edit_account":
+        st.session_state["selected_nav"] = "Edit Account"
+        surface = None
+    else:
+        st.session_state["selected_nav"] = "Dashboard"
 
     if section == "WORKBENCH":
         surface = surface or "workbench"
@@ -926,6 +938,18 @@ def render_shell_surface(surface: str, username: str, tier: str, module: str, al
                     st.caption("State-changing operations remain approval-gated by the existing Copilot/runtime controls.")
         except Exception as exc:
             st.warning(f"Copilot shell could not render: {exc}")
+    elif surface == "os":
+        try:
+            from shoir_160 import render_160_command_center
+            render_160_command_center(username, tier)
+        except Exception as exc:
+            st.error(f"Industrial Operating System could not render safely: {exc}")
+    elif surface == "excellence":
+        try:
+            from industrial_excellence_hub import render_platform_excellence_hub
+            render_platform_excellence_hub(username, tier)
+        except Exception as exc:
+            st.error(f"Excellence Hub could not render safely: {exc}")
     elif surface == "admin" and is_admin:
         st.info("Administrative capabilities remain in the existing Admin Panel. The application shell keeps them visually separate from engineering workflows.")
     elif surface == "edit_account":
