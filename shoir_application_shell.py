@@ -648,8 +648,6 @@ def render_application_shell(
         surface = surface or "decisions"
     elif section == "KNOWLEDGE":
         surface = surface or "trust"
-    if section == "OPERATIONS" and is_admin and str(selected_module).lower().startswith("admin"):
-        surface = surface or "admin"
 
     if st.session_state.pop("shoir_new_study_requested", False):
         surface = "new_study"
