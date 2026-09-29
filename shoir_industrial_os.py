@@ -31,6 +31,13 @@ from typing import Any, Iterable, Mapping, Sequence
 
 import numpy as np
 import pandas as pd
+from shoir_platform_core import (
+    capability_ledger as core_capability_ledger,
+    render_platform_completion as render_core_completion,
+    render_engineering_canvas as render_core_canvas,
+    db_backend as core_db_backend,
+    ensure_core_schema,
+)
 import plotly.express as px
 import streamlit as st
 
@@ -1413,7 +1420,7 @@ def render_modes_and_localization() -> None:
         st.caption("Engineer exposes the full workflow; Manager emphasizes KPI/scenario/decision; Executive emphasizes impact/risk/status. Arabic applies RTL to the platform surface; specialist text is shown in its authored language unless separately localized.")
 
 def render_capability_status() -> None:
-    df = capability_maturity()
+    df = core_capability_ledger()
     if df.empty:
         st.info("Capability matrix is not loaded.")
         return
@@ -1824,6 +1831,16 @@ def render_platform_os_surface(module: str, allowed_modules: Sequence[str]) -> N
         with st.expander("Formula + KPI Registry", expanded=True):
             st.dataframe(kpi_registry(), use_container_width=True, hide_index=True)
             st.dataframe(pd.DataFrame(formula_registry()), use_container_width=True, hide_index=True)
+
+
+    # Deep platform-completion console: evidence ledger, full DOE, forecasting,
+    # connector execution, decision memory, diagnostics and browser-movable canvas.
+    try:
+        ensure_core_schema()
+        render_core_canvas()
+        render_core_completion(str(module), active_dataframe()[0], allowed_modules=allowed_modules)
+    except Exception as exc:
+        st.warning(f"Advanced platform completion surface unavailable: {type(exc).__name__}: {exc}")
 
 
 def install_css() -> None:
