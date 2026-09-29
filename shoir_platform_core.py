@@ -1,0 +1,2003 @@
+"""Shoir-IE Platform Core.
+
+This module provides the production-facing orchestration layer for the Industrial
+Engineering Operating System. Specialist modules remain calculation owners while
+this package owns governance, persistence routing, workflow enforcement,
+lineage, uncertainty, experiments, forecasting, visualization contracts,
+replay, connectors, job orchestration, decision memory and platform diagnostics.
+
+The implementation is deliberately evidence-first:
+- a capability is not marked Verified without executable evidence;
+- integrations are shown as configured/connected only when a runtime check says so;
+- replay records a real executable entry point and refuses ambiguous replay;
+- local SQLite is a compatibility/offline fallback, while PostgreSQL is preferred
+when a trusted DATABASE_URL is configured.
+"""
+from __future__ import annotations
+
+import ast
+import base64
+import hashlib
+import importlib
+import io
+import json
+import math
+import os
+import platform
+import re
+import sqlite3
+import statistics
+import time
+import traceback
+import uuid
+from concurrent.futures import Future, ThreadPoolExecutor
+from contextlib import contextmanager
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from ftplib import FTP
+from typing import Any, Callable, Iterable, Mapping, Sequence
+from urllib.parse import urlparse
+
+import numpy as np
+import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
+import streamlit as st
+
+try:
+    import requests
+except Exception:  # optional connector dependency
+    requests = None
+
+try:
+    import psycopg2
+    from psycopg2.extras import Json
+except Exception:  # optional remote database dependency
+    psycopg2 = None
+    Json = None
+
+try:
+    import paho.mqtt.client as mqtt
+except Exception:  # optional connector dependency
+    mqtt = None
+
+try:
+    import oracledb
+except Exception:  # optional connector dependency
+    oracledb = None
+
+try:
+    import paramiko
+except Exception:  # optional connector dependency
+    paramiko = None
+
+
+WORKFLOW_STEPS = (
+    "DATA", "VALIDATE", "MAP", "MODEL", "RUN", "VISUALIZE",
+    "COMPARE", "EXPLAIN", "DECIDE", "EXPORT", "VERIFY",
+)
+
+ACTION_LEVELS = ("READ", "ANALYZE", "SIMULATE", "RECOMMEND", "PREPARE", "EXECUTE", "ADMIN")
+CAPABILITY_STATES = ("Verified", "Implemented", "Foundation", "Integration-ready")
+PROVENANCE_STATES = ("LIVE", "IMPORTED", "SIMULATED", "DEMO")
+SCHEMA_VERSION = "3.0"
+
+DEFAULT_DB_PATH = os.getenv("SHOIR_SQLITE_PATH", "enterprise_full_workspace.db")
+DATABASE_URL = os.getenv("DATABASE_URL") or os.getenv("SHOIR_DATABASE_URL")
+
+UNIT_DEFINITIONS: dict[str, tuple[str, float]] = {
+    "m": ("length", 1.0), "cm": ("length", 0.01), "mm": ("length", 0.001),
+    "km": ("length", 1000.0), "ft": ("length", 0.3048), "in": ("length", 0.0254),
+    "kg": ("mass", 1.0), "g": ("mass", 0.001), "lb": ("mass", 0.45359237), "t": ("mass", 1000.0),
+    "s": ("time", 1.0), "min": ("time", 60.0), "h": ("time", 3600.0), "day": ("time", 86400.0),
+    "wh": ("energy", 0.001), "kwh": ("energy", 1.0), "mwh": ("energy", 1000.0),
+    "w": ("power", 0.001), "kw": ("power", 1.0), "mw": ("power", 1000.0),
+    "ml": ("volume", 0.001), "l": ("volume", 1.0), "m3": ("volume", 1000.0),
+    "m2": ("area", 1.0), "sqm": ("area", 1.0),
+}
+BASE_CURRENCY = os.getenv("SHOIR_BASE_CURRENCY", "USD").upper()
+
+
+def now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def _jsonable(value: Any) -> Any:
+    if isinstance(value, (pd.Timestamp, datetime)):
+        return value.isoformat()
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    if isinstance(value, Mapping):
+        return {str(k): _jsonable(v) for k, v in value.items()}
+    if isinstance(value, (tuple, list, set)):
+        return [_jsonable(v) for v in value]
+    return value
+
+
+def canonical_json(value: Any) -> str:
+    return json.dumps(_jsonable(value), sort_keys=True, ensure_ascii=False, default=str)
+
+
+def stable_id(prefix: str = "REC") -> str:
+    return f"{prefix}-{uuid.uuid4().hex[:12].upper()}"
+
+
+def digest(value: Any) -> str:
+    return hashlib.sha256(canonical_json(value).encode("utf-8")).hexdigest()
+
+
+def db_backend() -> str:
+    return "postgres" if DATABASE_URL and psycopg2 is not None else "sqlite"
+
+
+def db_connect(path: str | None = None, timeout: int = 30):
+    """Single local connection gateway used by all new platform services."""
+    if db_backend() == "postgres":
+        conn = psycopg2.connect(DATABASE_URL, connect_timeout=max(5, int(timeout)))
+        conn.autocommit = False
+        return conn
+    conn = sqlite3.connect(path or DEFAULT_DB_PATH, timeout=timeout, check_same_thread=False)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    conn.execute("PRAGMA foreign_keys=ON")
+    conn.execute("PRAGMA busy_timeout=30000")
+    return conn
+
+
+def remote_persistence_configured() -> bool:
+    return db_backend() == "postgres"
+
+
+def ensure_core_schema() -> str:
+    """Create the platform-owned repository schema on the selected backend."""
+    if db_backend() == "postgres":
+        statements = [
+            """
+            CREATE TABLE IF NOT EXISTS shoir_platform_meta (
+                key TEXT PRIMARY KEY,
+                value_json JSONB NOT NULL,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS shoir_platform_records (
+                record_id TEXT PRIMARY KEY,
+                workspace_key TEXT NOT NULL DEFAULT 'default',
+                record_type TEXT NOT NULL,
+                entity_key TEXT NOT NULL,
+                payload_json JSONB NOT NULL,
+                content_hash TEXT NOT NULL,
+                version INTEGER NOT NULL DEFAULT 1,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                UNIQUE(workspace_key, record_type, entity_key)
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_shoir_records_type ON shoir_platform_records(workspace_key, record_type)",
+            "CREATE INDEX IF NOT EXISTS idx_shoir_records_hash ON shoir_platform_records(content_hash)",
+            """
+            CREATE TABLE IF NOT EXISTS shoir_platform_events (
+                event_id TEXT PRIMARY KEY,
+                workspace_key TEXT NOT NULL DEFAULT 'default',
+                event_type TEXT NOT NULL,
+                actor TEXT NOT NULL DEFAULT 'system',
+                entity_key TEXT,
+                payload_json JSONB NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_shoir_events ON shoir_platform_events(workspace_key, event_type, created_at DESC)",
+        ]
+        with db_connect() as conn:
+            with conn.cursor() as cur:
+                for statement in statements:
+                    cur.execute(statement)
+            conn.commit()
+        return "postgres"
+
+    statements = [
+        """
+        CREATE TABLE IF NOT EXISTS shoir_platform_meta (
+            key TEXT PRIMARY KEY,
+            value_json TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS shoir_platform_records (
+            record_id TEXT PRIMARY KEY,
+            workspace_key TEXT NOT NULL DEFAULT 'default',
+            record_type TEXT NOT NULL,
+            entity_key TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            content_hash TEXT NOT NULL,
+            version INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(workspace_key, record_type, entity_key)
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_shoir_records_type ON shoir_platform_records(workspace_key, record_type)",
+        "CREATE INDEX IF NOT EXISTS idx_shoir_records_hash ON shoir_platform_records(content_hash)",
+        """
+        CREATE TABLE IF NOT EXISTS shoir_platform_events (
+            event_id TEXT PRIMARY KEY,
+            workspace_key TEXT NOT NULL DEFAULT 'default',
+            event_type TEXT NOT NULL,
+            actor TEXT NOT NULL DEFAULT 'system',
+            entity_key TEXT,
+            payload_json TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_shoir_events ON shoir_platform_events(workspace_key, event_type, created_at DESC)",
+    ]
+    with db_connect() as conn:
+        for statement in statements:
+            conn.execute(statement)
+        conn.commit()
+    return "sqlite"
+
+
+def _record_upsert(
+    record_type: str,
+    entity_key: str,
+    payload: Mapping[str, Any],
+    *,
+    workspace: str = "default",
+    record_id: str | None = None,
+) -> str:
+    ensure_core_schema()
+    record_id = record_id or stable_id(record_type[:3].upper())
+    payload_json = canonical_json(payload)
+    content_hash = hashlib.sha256(payload_json.encode("utf-8")).hexdigest()
+    now = now_iso()
+    if db_backend() == "postgres":
+        sql = """
+        INSERT INTO shoir_platform_records
+        (record_id,workspace_key,record_type,entity_key,payload_json,content_hash,version,created_at,updated_at)
+        VALUES (%s,%s,%s,%s,%s,%s,1,NOW(),NOW())
+        ON CONFLICT (workspace_key,record_type,entity_key)
+        DO UPDATE SET payload_json=EXCLUDED.payload_json, content_hash=EXCLUDED.content_hash,
+                      version=shoir_platform_records.version+1, updated_at=NOW()
+        RETURNING record_id
+        """
+        with db_connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, (record_id, workspace, record_type, entity_key, Json(_jsonable(payload)) if Json else payload_json, content_hash))
+                out = cur.fetchone()[0]
+            conn.commit()
+        return str(out)
+
+    sql = """
+    INSERT INTO shoir_platform_records
+    (record_id,workspace_key,record_type,entity_key,payload_json,content_hash,version,created_at,updated_at)
+    VALUES (?,?,?,?,?,?,?,?,?)
+    ON CONFLICT(workspace_key,record_type,entity_key)
+    DO UPDATE SET payload_json=excluded.payload_json, content_hash=excluded.content_hash,
+                  version=shoir_platform_records.version+1, updated_at=excluded.updated_at
+    """
+    with db_connect() as conn:
+        conn.execute(sql, (record_id, workspace, record_type, entity_key, payload_json, content_hash, 1, now, now))
+        conn.commit()
+    return record_id
+
+
+def _record_event(
+    event_type: str,
+    *,
+    actor: str = "system",
+    entity_key: str | None = None,
+    payload: Mapping[str, Any] | None = None,
+    workspace: str = "default",
+) -> str:
+    ensure_core_schema()
+    event_id = stable_id("EVT")
+    payload_json = canonical_json(payload or {})
+    now = now_iso()
+    if db_backend() == "postgres":
+        with db_connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """INSERT INTO shoir_platform_events
+                    (event_id,workspace_key,event_type,actor,entity_key,payload_json,created_at)
+                    VALUES (%s,%s,%s,%s,%s,%s,NOW())""",
+                    (event_id, workspace, event_type, str(actor), entity_key,
+                     Json(_jsonable(payload or {})) if Json else payload_json),
+                )
+            conn.commit()
+    else:
+        with db_connect() as conn:
+            conn.execute(
+                """INSERT INTO shoir_platform_events
+                (event_id,workspace_key,event_type,actor,entity_key,payload_json,created_at)
+                VALUES (?,?,?,?,?,?)""",
+                (event_id, workspace, event_type, str(actor), entity_key, payload_json, now),
+            )
+            conn.commit()
+    return event_id
+
+
+def repository_records(record_type: str, *, workspace: str = "default", limit: int = 200) -> pd.DataFrame:
+    ensure_core_schema()
+    limit = max(1, min(int(limit), 5000))
+    if db_backend() == "postgres":
+        with db_connect() as conn:
+            return pd.read_sql_query(
+                "SELECT record_id,record_type,entity_key,payload_json,content_hash,version,created_at,updated_at "
+                "FROM shoir_platform_records WHERE workspace_key=%s AND record_type=%s ORDER BY updated_at DESC LIMIT %s",
+                conn, params=(workspace, record_type, limit),
+            )
+    with db_connect() as conn:
+        return pd.read_sql_query(
+            "SELECT record_id,record_type,entity_key,payload_json,content_hash,version,created_at,updated_at "
+            "FROM shoir_platform_records WHERE workspace_key=? AND record_type=? ORDER BY updated_at DESC LIMIT ?",
+            conn, params=(workspace, record_type, limit),
+        )
+
+
+def save_platform_record(record_type: str, entity_key: str, payload: Mapping[str, Any], *, workspace: str = "default") -> str:
+    rid = _record_upsert(record_type, entity_key, payload, workspace=workspace)
+    _record_event(f"{record_type}.saved", actor=str(st.session_state.get("current_user", "system")),
+                  entity_key=entity_key, payload={"record_id": rid, **_jsonable(payload)}, workspace=workspace)
+    return rid
+
+
+def dataframe_digest(df: pd.DataFrame) -> str:
+    if not isinstance(df, pd.DataFrame):
+        return ""
+    try:
+        data = pd.util.hash_pandas_object(df, index=True).values.tobytes()
+    except Exception:
+        data = df.to_csv(index=True).encode("utf-8", errors="replace")
+    schema = "|".join(f"{c}:{df[c].dtype}" for c in df.columns).encode("utf-8")
+    return hashlib.sha256(data + schema).hexdigest()
+
+
+def data_readiness(df: pd.DataFrame) -> dict[str, Any]:
+    if not isinstance(df, pd.DataFrame) or df.empty:
+        return {"score": 0.0, "rows": 0, "columns": 0, "missing_pct": 100.0, "duplicate_pct": 0.0, "warnings": ["No active dataset"]}
+    rows, cols = len(df), len(df.columns)
+    missing_pct = float(df.isna().mean().mean() * 100) if cols else 100.0
+    duplicate_pct = float(df.duplicated().mean() * 100) if rows else 0.0
+    warnings: list[str] = []
+    if missing_pct > 0:
+        warnings.append(f"Missingness: {missing_pct:.1f}%")
+    if duplicate_pct > 0:
+        warnings.append(f"Duplicate rows: {duplicate_pct:.1f}%")
+    if any(str(c).strip() == "" for c in df.columns):
+        warnings.append("Blank column names detected")
+    if len(set(map(str, df.columns))) != len(df.columns):
+        warnings.append("Duplicate column names detected")
+    score = max(0.0, min(100.0, 100 - 0.60 * missing_pct - 0.40 * duplicate_pct))
+    return {
+        "score": score, "rows": rows, "columns": cols,
+        "missing_pct": missing_pct, "duplicate_pct": duplicate_pct,
+        "warnings": warnings,
+        "numeric_columns": len(df.select_dtypes(include=np.number).columns),
+        "categorical_columns": len(df.select_dtypes(exclude=np.number).columns),
+        "fingerprint": dataframe_digest(df),
+    }
+
+
+def validate_dataset_contract(df: pd.DataFrame, required_fields: Sequence[str] = ()) -> dict[str, Any]:
+    result = {
+        "valid": True,
+        "rows_present": isinstance(df, pd.DataFrame) and not df.empty,
+        "unique_columns": bool(isinstance(df, pd.DataFrame) and len(set(map(str, df.columns))) == len(df.columns)),
+        "required_fields": {},
+        "errors": [],
+        "warnings": [],
+    }
+    if not result["rows_present"]:
+        result["valid"] = False
+        result["errors"].append("No active dataset is available.")
+        return result
+    if not result["unique_columns"]:
+        result["valid"] = False
+        result["errors"].append("Column names must be unique.")
+    for field in required_fields:
+        matches = [c for c in df.columns if str(c).strip().lower() == str(field).strip().lower()]
+        result["required_fields"][field] = bool(matches)
+        if not matches:
+            result["valid"] = False
+            result["errors"].append(f"Required field missing: {field}")
+    if df.shape[1] == 0:
+        result["valid"] = False
+        result["errors"].append("Dataset contains no usable columns.")
+    if df.select_dtypes(include=np.number).shape[1]:
+        numeric = df.select_dtypes(include=np.number)
+        if not np.isfinite(numeric.to_numpy(dtype=float, na_value=np.nan)).all():
+            result["warnings"].append("Numeric data contains NaN or infinite values after coercion.")
+    return result
+
+
+def canonical_map_columns(df: pd.DataFrame) -> dict[str, str]:
+    aliases = {
+        "customer_id": ("customer", "client", "sold_to"),
+        "sku": ("sku", "item", "material", "product"),
+        "demand_qty": ("demand", "qty", "quantity", "orders"),
+        "due_date": ("due", "required", "delivery"),
+        "facility": ("facility", "plant", "site", "warehouse", "dc"),
+        "machine": ("machine", "asset", "equipment", "work center"),
+        "supplier": ("supplier", "vendor"),
+        "unit_cost": ("unit cost", "unit price", "price"),
+        "currency": ("currency", "ccy"),
+        "timestamp": ("timestamp", "datetime", "event time", "date"),
+        "throughput": ("throughput", "output", "production"),
+        "defect": ("defect", "scrap", "reject"),
+        "downtime": ("downtime", "down time", "minutes down"),
+        "energy": ("energy", "kwh", "power"),
+    }
+    lowered = {str(c).strip().lower(): str(c) for c in df.columns}
+    out: dict[str, str] = {}
+    for canonical, tokens in aliases.items():
+        for raw, original in lowered.items():
+            if any(token in raw for token in tokens):
+                out[canonical] = original
+                break
+    return out
+
+
+@dataclass
+class WorkflowRuntime:
+    module: str
+    workspace: str = "default"
+    actor: str = "system"
+    stage_index: int = 0
+    provenance: str = "DEMO"
+    started_at: str = ""
+    run_id: str = ""
+    data_hash: str = ""
+    model_id: str = ""
+    scenario_id: str = ""
+
+    def __post_init__(self):
+        self.started_at = self.started_at or now_iso()
+
+    @property
+    def stage(self) -> str:
+        return WORKFLOW_STEPS[self.stage_index]
+
+    def context(self, df: pd.DataFrame | None = None) -> dict[str, Any]:
+        df = df if isinstance(df, pd.DataFrame) else pd.DataFrame()
+        readiness = data_readiness(df)
+        if readiness["fingerprint"]:
+            self.data_hash = readiness["fingerprint"]
+        return {
+            "module": self.module,
+            "workspace": self.workspace,
+            "actor": self.actor,
+            "stage": self.stage,
+            "workflow": list(WORKFLOW_STEPS),
+            "provenance": self.provenance,
+            "started_at": self.started_at,
+            "run_id": self.run_id,
+            "data_hash": self.data_hash,
+            "readiness": readiness,
+        }
+
+    def require(self, stage: str) -> None:
+        target = WORKFLOW_STEPS.index(str(stage).upper())
+        if target > self.stage_index:
+            raise RuntimeError(f"{self.module}: stage {stage} requires completion of {WORKFLOW_STEPS[self.stage_index]}.")
+        return None
+
+    def advance(self, stage: str, *, evidence: Mapping[str, Any] | None = None) -> None:
+        target = WORKFLOW_STEPS.index(str(stage).upper())
+        if target > self.stage_index + 1:
+            raise RuntimeError(f"Workflow cannot skip from {self.stage} to {stage}.")
+        self.stage_index = max(self.stage_index, target)
+        _record_event(
+            "workflow.stage",
+            actor=self.actor,
+            entity_key=self.module,
+            payload={"module": self.module, "stage": stage, "evidence": _jsonable(evidence or {})},
+            workspace=self.workspace,
+        )
+        st.session_state["shoir_workflow_stage"] = self.stage
+        st.session_state.setdefault("shoir_workflow_history", []).append({
+            "module": self.module, "stage": self.stage, "at": now_iso(),
+        })
+
+
+def begin_module(module: str, *, workspace: str = "default", actor: str = "system", df: pd.DataFrame | None = None) -> WorkflowRuntime:
+    runtime = WorkflowRuntime(str(module), workspace=workspace, actor=actor)
+    runtime.provenance = str(st.session_state.get("shoir_data_provenance", st.session_state.get("shoir_provenance", "DEMO"))).upper()
+    runtime.context(df)
+    st.session_state["shoir_active_runtime"] = runtime
+    return runtime
+
+
+@contextmanager
+def governed_module(module: str, *, workspace: str = "default", actor: str = "system", df: pd.DataFrame | None = None):
+    runtime = begin_module(module, workspace=workspace, actor=actor, df=df)
+    runtime.advance("DATA", evidence={"source": st.session_state.get("shoir_data_source", "")})
+    try:
+        yield runtime
+    except Exception as exc:
+        record_engineering_error(module, exc, workspace=workspace, actor=actor)
+        raise
+    finally:
+        st.session_state["shoir_last_runtime"] = runtime.context(df)
+        _record_event("workflow.complete", actor=actor, entity_key=module,
+                      payload=runtime.context(df), workspace=workspace)
+
+
+def run_governed_module(module: str, renderer: Callable[[], Any], *, workspace: str = "default", actor: str = "system", df: pd.DataFrame | None = None) -> Any:
+    with governed_module(module, workspace=workspace, actor=actor, df=df) as runtime:
+        # Validation and mapping gates are performed for every specialist renderer.
+        contract = validate_dataset_contract(df if isinstance(df, pd.DataFrame) else pd.DataFrame())
+        if contract["valid"]:
+            runtime.advance("VALIDATE", evidence=contract)
+            mapping = canonical_map_columns(df if isinstance(df, pd.DataFrame) else pd.DataFrame())
+            runtime.advance("MAP", evidence={"mapping": mapping})
+        else:
+            mapping = {}
+        runtime.advance("MODEL", evidence={"module": module})
+        result = renderer()
+        runtime.advance("RUN", evidence={"renderer": getattr(renderer, "__name__", "renderer")})
+        return result
+
+
+def module_manifest(module: str, *, catalog_entry: Mapping[str, Any] | None = None, tests: Sequence[str] = ()) -> dict[str, Any]:
+    name = str(module)
+    entry = dict(catalog_entry or {})
+    required = list(entry.get("required_fields") or [])
+    module_slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+    test_list = [str(x) for x in tests]
+    has_test = bool(test_list)
+    return {
+        "contract_version": SCHEMA_VERSION,
+        "identity": name,
+        "slug": module_slug,
+        "purpose": str(entry.get("purpose") or f"Industrial engineering capability: {name}."),
+        "inputs": list(entry.get("inputs") or ["dataset", "parameters"]),
+        "required_fields": required,
+        "optional_fields": list(entry.get("optional_fields") or []),
+        "units": list(entry.get("units") or []),
+        "validation_rules": list(entry.get("validation_rules") or ["rows_present", "unique_columns", "missing_review"]),
+        "transformations": list(entry.get("transformations") or ["clean", "standardize", "map"]),
+        "model": str(entry.get("model") or name),
+        "solver": str(entry.get("solver") or ""),
+        "outputs": list(entry.get("outputs") or ["results", "kpis", "evidence"]),
+        "kpis": list(entry.get("kpis") or []),
+        "recommended_visualizations": list(entry.get("recommended_visualizations") or ["distribution", "trend", "comparison"]),
+        "uncertainty": list(entry.get("uncertainty") or ["percentiles", "intervals", "constraint_probability"]),
+        "assumptions": list(entry.get("assumptions") or []),
+        "scenario_support": bool(entry.get("scenario_support", True)),
+        "export_formats": list(entry.get("export_formats") or ["xlsx", "json", "pdf"]),
+        "persistence": bool(entry.get("persistence", True)),
+        "permissions": list(entry.get("permissions") or ["READ", "ANALYZE", "EXPORT"]),
+        "maturity": str(entry.get("maturity") or ("Implemented" if entry else "Foundation")),
+        "verification_tests": test_list or ["contract", "sanity"],
+        "workflow": list(WORKFLOW_STEPS),
+        "enforcement": {
+            "data_gate": True, "validation_gate": True, "mapping_gate": True,
+            "model_gate": True, "run_evidence": True, "visualization_contract": True,
+            "decision_trace": True, "verification_required": True,
+        },
+    }
+
+
+def capability_ledger(catalog: Sequence[Mapping[str, Any]] | None = None, feature_rows: Sequence[Mapping[str, Any]] | None = None) -> pd.DataFrame:
+    rows: list[dict[str, Any]] = []
+    entries = list(catalog or [])
+    if not entries:
+        try:
+            from industrial_platform import PLATFORM_CATALOG
+            entries = list(PLATFORM_CATALOG)
+        except Exception:
+            entries = []
+    features = list(feature_rows or [])
+    if not features:
+        try:
+            from shoir_160 import FEATURES_160
+            features = list(FEATURES_160)
+        except Exception:
+            features = []
+
+    known_names = {str(x.get("name")) for x in entries if x.get("name")}
+    for idx, feature in enumerate(features, 1):
+        name = str(feature.get("name") or f"Capability {idx}")
+        entry = next((x for x in entries if str(x.get("name")) == name), {})
+        raw_state = str(feature.get("state") or entry.get("state") or "")
+        if raw_state.lower() in {"integration-ready", "integration ready"}:
+            status = "Integration-ready"
+        elif raw_state.lower() in {"verified", "verified operational"}:
+            status = "Verified"
+        elif name in known_names or entry:
+            status = "Implemented"
+        else:
+            status = "Foundation"
+        tests = []
+        test_root = feature.get("test_coverage") or feature.get("tests") or []
+        if isinstance(test_root, (list, tuple)):
+            tests = [str(x) for x in test_root]
+        elif test_root:
+            tests = [str(test_root)]
+        rows.append({
+            "Capability ID": int(feature.get("id") or idx),
+            "Capability": name,
+            "Area": str(feature.get("area") or "Platform"),
+            "Status": status,
+            "Coverage": "catalogued" if name in known_names else "foundation",
+            "Test coverage": "evidence recorded" if tests else "not independently evidenced",
+            "Last verification": str(feature.get("last_verification") or "not recorded"),
+            "Dependencies": ", ".join(map(str, feature.get("dependencies") or [])) or "platform kernel",
+            "Deployment requirements": str(feature.get("deployment_requirements") or "runtime configuration dependent"),
+            "Source state": raw_state or "unspecified",
+            "Manifest": digest(module_manifest(name, catalog_entry=entry, tests=tests))[:12],
+        })
+    for entry in entries:
+        name = str(entry.get("name") or "")
+        if not name or name in {r["Capability"] for r in rows}:
+            continue
+        rows.append({
+            "Capability ID": len(rows) + 1,
+            "Capability": name,
+            "Area": str(entry.get("area") or "Specialist"),
+            "Status": "Implemented",
+            "Coverage": "catalogued",
+            "Test coverage": "not independently evidenced",
+            "Last verification": "not recorded",
+            "Dependencies": "specialist engine",
+            "Deployment requirements": "runtime configuration dependent",
+            "Source state": str(entry.get("state") or ""),
+            "Manifest": digest(module_manifest(name, catalog_entry=entry))[:12],
+        })
+    return pd.DataFrame(rows)
+
+
+def kpi_lineage(
+    *,
+    module: str,
+    kpi: str,
+    value: Any,
+    dataset: Mapping[str, Any] | None = None,
+    transformations: Sequence[str] = (),
+    model: Mapping[str, Any] | None = None,
+    formula: Mapping[str, Any] | None = None,
+    assumptions: Mapping[str, Any] | None = None,
+    constraints: Sequence[Mapping[str, Any] | str] = (),
+    uncertainty: Mapping[str, Any] | None = None,
+    scenario: Mapping[str, Any] | None = None,
+    run: Mapping[str, Any] | None = None,
+    evidence: Sequence[str] = (),
+    workspace: str = "default",
+) -> str:
+    record = {
+        "lineage_id": stable_id("LIN"),
+        "module": module,
+        "kpi": kpi,
+        "value": _jsonable(value),
+        "dataset": _jsonable(dataset or {}),
+        "transformations": list(transformations),
+        "model": _jsonable(model or {}),
+        "formula": _jsonable(formula or {}),
+        "assumptions": _jsonable(assumptions or {}),
+        "constraints": _jsonable(list(constraints)),
+        "uncertainty": _jsonable(uncertainty or {}),
+        "scenario": _jsonable(scenario or {}),
+        "run": _jsonable(run or {}),
+        "evidence": list(evidence),
+        "created_at": now_iso(),
+    }
+    rid = save_platform_record("kpi_lineage", f"{module}:{kpi}", record, workspace=workspace)
+    st.session_state.setdefault("shoir_kpi_lineage", {})[f"{module}:{kpi}"] = record
+    return rid
+
+
+def render_kpi_lineage(record: Mapping[str, Any]) -> None:
+    with st.expander(f"Why is {record.get('kpi','KPI')} this value?", expanded=False):
+        cols = st.columns(4)
+        cols[0].metric("Value", str(record.get("value")))
+        cols[1].metric("Dataset", str((record.get("dataset") or {}).get("version") or "session"))
+        cols[2].metric("Run", str((record.get("run") or {}).get("run_id") or "not recorded"))
+        cols[3].metric("Uncertainty", "available" if record.get("uncertainty") else "not recorded")
+        stages = [
+            ("Dataset", record.get("dataset")),
+            ("Transformations", record.get("transformations")),
+            ("Model", record.get("model")),
+            ("Formula", record.get("formula")),
+            ("Assumptions", record.get("assumptions")),
+            ("Constraints", record.get("constraints")),
+            ("Uncertainty", record.get("uncertainty")),
+            ("Scenario", record.get("scenario")),
+            ("Run", record.get("run")),
+            ("Evidence", record.get("evidence")),
+        ]
+        for title, value in stages:
+            st.markdown(f"**{title}**")
+            st.json(_jsonable(value))
+
+
+def uncertainty_engine(
+    values: Sequence[float],
+    *,
+    confidence: float = 0.95,
+    threshold: float | None = None,
+    predictions: Sequence[float] | None = None,
+    actuals: Sequence[float] | None = None,
+) -> dict[str, Any]:
+    x = pd.to_numeric(pd.Series(list(values)), errors="coerce").dropna().to_numpy(dtype=float)
+    if x.size == 0:
+        return {"n": 0, "status": "NO_DATA"}
+    alpha = max(1e-9, min(0.999999, 1 - float(confidence)))
+    mean = float(np.mean(x))
+    median = float(np.median(x))
+    std = float(np.std(x, ddof=1)) if len(x) > 1 else 0.0
+    sem = std / math.sqrt(len(x)) if len(x) > 0 else float("nan")
+    try:
+        from scipy.stats import t
+        tcrit = float(t.ppf(1 - alpha / 2, max(1, len(x) - 1)))
+    except Exception:
+        tcrit = 1.96
+    mean_ci = [mean - tcrit * sem, mean + tcrit * sem] if len(x) > 1 else [mean, mean]
+    result = {
+        "status": "OK",
+        "n": int(len(x)),
+        "mean": mean,
+        "median": median,
+        "std": std,
+        "min": float(np.min(x)),
+        "max": float(np.max(x)),
+        "p05": float(np.percentile(x, 5)),
+        "p10": float(np.percentile(x, 10)),
+        "p25": float(np.percentile(x, 25)),
+        "p50": median,
+        "p75": float(np.percentile(x, 75)),
+        "p90": float(np.percentile(x, 90)),
+        "p95": float(np.percentile(x, 95)),
+        "confidence_level": float(confidence),
+        "mean_confidence_interval": mean_ci,
+        "distribution": {
+            "skew": float(pd.Series(x).skew()) if len(x) > 2 else 0.0,
+            "kurtosis": float(pd.Series(x).kurt()) if len(x) > 3 else 0.0,
+        },
+    }
+    if threshold is not None:
+        threshold = float(threshold)
+        result["threshold"] = threshold
+        result["probability_above"] = float(np.mean(x > threshold))
+        result["probability_below"] = float(np.mean(x < threshold))
+        result["constraint_violation_probability"] = float(np.mean(x > threshold))
+    if predictions is not None and actuals is not None:
+        pred = pd.to_numeric(pd.Series(list(predictions)), errors="coerce")
+        act = pd.to_numeric(pd.Series(list(actuals)), errors="coerce")
+        mask = pred.notna() & act.notna()
+        resid = (act[mask] - pred[mask]).to_numpy(dtype=float)
+        if resid.size:
+            q = float(np.percentile(np.abs(resid), 95))
+            result["prediction_interval_95"] = [-q, q]
+            result["prediction_coverage_95"] = float(np.mean(np.abs(resid) <= q))
+    return result
+
+
+def attach_uncertainty(module: str, result: pd.DataFrame | pd.Series | Sequence[float], *, kpi: str = "", threshold: float | None = None, workspace: str = "default") -> dict[str, Any]:
+    values: Sequence[float]
+    if isinstance(result, pd.DataFrame):
+        numeric = result[kpi] if kpi and kpi in result.columns else result.select_dtypes(include=np.number).stack()
+        values = list(pd.to_numeric(numeric, errors="coerce").dropna())
+    elif isinstance(result, pd.Series):
+        values = list(pd.to_numeric(result, errors="coerce").dropna())
+    else:
+        values = list(values for values in pd.to_numeric(pd.Series(list(result)), errors="coerce").dropna())
+    summary = uncertainty_engine(values, threshold=threshold)
+    payload = {"module": module, "kpi": kpi, "summary": summary, "captured_at": now_iso()}
+    save_platform_record("uncertainty", f"{module}:{kpi or 'result'}", payload, workspace=workspace)
+    st.session_state["shoir_uncertainty_last"] = payload
+    return summary
+
+
+def scenario_analysis(
+    scenarios: Mapping[str, Mapping[str, Any]] | pd.DataFrame,
+    *,
+    baseline: str | None = None,
+    constraints: Mapping[str, Mapping[str, Any]] | Sequence[Mapping[str, Any]] | None = None,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    if isinstance(scenarios, pd.DataFrame):
+        frame = scenarios.copy()
+        name_col = "Scenario" if "Scenario" in frame.columns else str(frame.columns[0])
+        data = {str(r[name_col]): {str(c): r[c] for c in frame.columns if c != name_col} for _, r in frame.iterrows()}
+    else:
+        data = {str(k): dict(v) for k, v in scenarios.items()}
+    names = list(data.keys())
+    if not names:
+        return pd.DataFrame(), {"status": "NO_SCENARIOS"}
+    baseline = baseline or names[0]
+    if baseline not in data:
+        raise ValueError(f"Baseline scenario {baseline!r} is not defined.")
+    numeric_keys = sorted(set().union(*(set(v.keys()) for v in data.values())))
+    rows = []
+    base = data[baseline]
+    constraint_specs = constraints or {}
+    if isinstance(constraint_specs, Sequence) and not isinstance(constraint_specs, Mapping):
+        specs = {}
+        for item in constraint_specs:
+            if "kpi" in item:
+                specs[str(item["kpi"])] = dict(item)
+        constraint_specs = specs
+    for name, values in data.items():
+        for kpi in numeric_keys:
+            try:
+                cur = float(values.get(kpi))
+                base_value = float(base.get(kpi))
+            except (TypeError, ValueError):
+                continue
+            delta = cur - base_value
+            pct = (delta / base_value * 100.0) if base_value else (0.0 if delta == 0 else float("inf"))
+            row = {"Scenario": name, "KPI": kpi, "Baseline": base_value, "Value": cur, "Delta": delta, "% Change": pct}
+            spec = constraint_specs.get(kpi, {}) if isinstance(constraint_specs, Mapping) else {}
+            violations = []
+            if spec:
+                if spec.get("min") is not None and cur < float(spec["min"]):
+                    violations.append(f"< minimum {spec['min']}")
+                if spec.get("max") is not None and cur > float(spec["max"]):
+                    violations.append(f"> maximum {spec['max']}")
+                if spec.get("target") is not None and spec.get("tolerance") is not None and abs(cur - float(spec["target"])) > abs(float(spec["tolerance"])):
+                    violations.append("outside target tolerance")
+            row["Constraint Violation"] = "; ".join(violations)
+            rows.append(row)
+    out = pd.DataFrame(rows)
+    summary = {
+        "status": "OK",
+        "baseline": baseline,
+        "scenario_count": len(names),
+        "violations": int((out["Constraint Violation"].astype(str).str.len() > 0).sum()) if not out.empty else 0,
+        "best": {},
+        "worst": {},
+        "drivers": {},
+    }
+    if not out.empty:
+        for kpi, grp in out.groupby("KPI"):
+            grp2 = grp[grp["Scenario"] != baseline]
+            if grp2.empty:
+                continue
+            idx_max = grp2["Value"].idxmax()
+            idx_min = grp2["Value"].idxmin()
+            summary["best"][str(kpi)] = str(grp2.loc[idx_max, "Scenario"])
+            summary["worst"][str(kpi)] = str(grp2.loc[idx_min, "Scenario"])
+            delta_abs = grp2.assign(abs_delta=grp2["Delta"].abs()).sort_values("abs_delta", ascending=False)
+            summary["drivers"][str(kpi)] = delta_abs[["Scenario", "Delta", "% Change"]].head(5).to_dict("records")
+    return out, summary
+
+
+def explain_scenario_changes(parent: Mapping[str, Any], child: Mapping[str, Any]) -> list[dict[str, Any]]:
+    keys = sorted(set(parent) | set(child))
+    rows = []
+    for key in keys:
+        if parent.get(key) == child.get(key):
+            continue
+        rows.append({
+            "Assumption": key,
+            "Parent": _jsonable(parent.get(key)),
+            "Child": _jsonable(child.get(key)),
+            "Changed": True,
+        })
+    return rows
+
+
+def scenario_fork(scenario: Mapping[str, Any], *, name: str, overrides: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    fork = dict(scenario)
+    fork["scenario_id"] = stable_id("SCN")
+    fork["name"] = name
+    fork["parent_scenario_id"] = scenario.get("scenario_id")
+    fork["assumptions"] = {**dict(scenario.get("assumptions") or {}), **dict(overrides or {})}
+    fork["created_at"] = now_iso()
+    return fork
+
+
+def factorial_design(factors: Mapping[str, Sequence[Any]], *, randomized: bool = False, reps: int = 1, seed: int = 2026) -> pd.DataFrame:
+    names = list(factors)
+    if not names:
+        return pd.DataFrame()
+    if any(len(factors[k]) == 0 for k in names):
+        raise ValueError("Each DOE factor must have at least one level.")
+    import itertools
+    rows = [dict(zip(names, combo)) for combo in itertools.product(*(list(factors[k]) for k in names))]
+    out = pd.DataFrame(rows)
+    if reps > 1:
+        out = pd.concat([out.assign(Replication=i) for i in range(1, int(reps) + 1)], ignore_index=True)
+    if randomized:
+        out = out.sample(frac=1.0, random_state=int(seed)).reset_index(drop=True)
+        out.insert(0, "Run Order", np.arange(1, len(out) + 1))
+    return out
+
+
+def fractional_factorial_design(
+    factors: Mapping[str, Sequence[Any]],
+    *,
+    generators: Mapping[str, Sequence[str]] | None = None,
+    fraction: int = 2,
+    randomized: bool = True,
+    reps: int = 1,
+    seed: int = 2026,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    names = list(factors)
+    if not names:
+        return pd.DataFrame(), {"status": "NO_FACTORS"}
+    if any(len(factors[k]) != 2 for k in names):
+        raise ValueError("Fractional factorial DOE requires exactly two levels per factor.")
+    if fraction not in (2, 4, 8, 16):
+        raise ValueError("Fraction must be one of 2, 4, 8 or 16.")
+    base_count = max(1, len(names) - int(round(math.log2(fraction))))
+    base_names = names[:base_count]
+    design = factorial_design({k: factors[k] for k in base_names}, randomized=False)
+    gen_specs = dict(generators or {})
+    for idx, name in enumerate(names[base_count:], start=1):
+        source = gen_specs.get(name)
+        if not source:
+            source = [base_names[(idx - 1) % len(base_names)], base_names[idx % len(base_names)] if len(base_names) > 1 else base_names[0]]
+        levels = []
+        for _, row in design.iterrows():
+            sign = 1
+            for token in source:
+                pos = names.index(token)
+                base_col = names[pos] if pos < len(row.index) else None
+                if base_col is None or base_col not in row:
+                    # source can refer only to previously generated factors
+                    sign *= 1
+                else:
+                    sign *= 1 if row[base_col] == factors[base_col][0] else -1
+            levels.append(factors[name][0] if sign < 0 else factors[name][1])
+        design[name] = levels
+    if reps > 1:
+        design = pd.concat([design.assign(Replication=i) for i in range(1, reps + 1)], ignore_index=True)
+    if randomized:
+        design = design.sample(frac=1, random_state=seed).reset_index(drop=True)
+        design.insert(0, "Run Order", np.arange(1, len(design) + 1))
+    meta = {
+        "status": "OK",
+        "type": "fractional_factorial",
+        "fraction": int(fraction),
+        "base_factors": base_names,
+        "generators": {k: list(v) for k, v in gen_specs.items()},
+        "runs": int(len(design)),
+        "seed": int(seed),
+        "replications": int(reps),
+    }
+    return design, meta
+
+
+def response_surface_design(
+    factors: Mapping[str, Sequence[float]],
+    *,
+    design: str = "central_composite",
+    center_points: int = 5,
+    alpha: float | None = None,
+    seed: int = 2026,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    names = list(factors)
+    if not names or any(len(factors[k]) != 2 for k in names):
+        raise ValueError("Response-surface design requires two numeric low/high settings for every factor.")
+    low = {k: float(factors[k][0]) for k in names}
+    high = {k: float(factors[k][1]) for k in names}
+    center = {k: (low[k] + high[k]) / 2 for k in names}
+    half = {k: (high[k] - low[k]) / 2 for k in names}
+    if any(v <= 0 for v in half.values()):
+        raise ValueError("Each factor must have distinct low/high values.")
+    import itertools
+    rows: list[dict[str, Any]] = []
+    typ = str(design).lower()
+    if typ in {"central_composite", "ccd", "cc"}:
+        alpha_val = float(alpha if alpha is not None else max(1.0, len(names) ** 0.25))
+        for combo in itertools.product([-1, 1], repeat=len(names)):
+            row = {k: center[k] + combo[i] * half[k] for i, k in enumerate(names)}
+            row["Point Type"] = "factorial"
+            rows.append(row)
+        for i, name in enumerate(names):
+            for sign in (-1, 1):
+                row = dict(center)
+                row[name] = center[name] + sign * alpha_val * half[name]
+                row["Point Type"] = "axial"
+                rows.append(row)
+    elif typ in {"box_behnken", "bbd"}:
+        if len(names) < 3:
+            raise ValueError("Box-Behnken design requires at least 3 factors.")
+        for i in range(len(names)):
+            for j in range(i + 1, len(names)):
+                for a, b in itertools.product([-1, 1], repeat=2):
+                    row = dict(center)
+                    row[names[i]] = center[names[i]] + a * half[names[i]]
+                    row[names[j]] = center[names[j]] + b * half[names[j]]
+                    row["Point Type"] = "edge"
+                    rows.append(row)
+    else:
+        raise ValueError("design must be central_composite or box_behnken.")
+    rows.extend([{**center, "Point Type": "center"} for _ in range(max(1, int(center_points)))])
+    out = pd.DataFrame(rows)
+    out = out.sample(frac=1.0, random_state=int(seed)).reset_index(drop=True)
+    out.insert(0, "Run Order", np.arange(1, len(out) + 1))
+    out.insert(1, "Replication", 1)
+    return out, {
+        "status": "OK", "type": typ, "factors": names,
+        "center_points": int(center_points), "alpha": float(alpha_val) if "alpha_val" in locals() else None,
+        "runs": int(len(out)), "seed": int(seed),
+    }
+
+
+def replication_planner(effect_size: float, sigma: float = 1.0, alpha: float = 0.05, power: float = 0.8) -> dict[str, Any]:
+    try:
+        from scipy.stats import norm
+        z_alpha = float(norm.ppf(1 - alpha / 2))
+        z_beta = float(norm.ppf(power))
+    except Exception:
+        z_alpha, z_beta = 1.96, 0.842
+    es = max(abs(float(effect_size)), 1e-9)
+    n = math.ceil(2 * ((z_alpha + z_beta) / es) ** 2)
+    return {
+        "effect_size": float(effect_size),
+        "sigma": float(sigma),
+        "alpha": float(alpha),
+        "target_power": float(power),
+        "replications_per_group": int(max(2, n)),
+        "method": "normal two-group approximation",
+    }
+
+
+def residual_diagnostics(actual: Sequence[float], predicted: Sequence[float]) -> dict[str, Any]:
+    a = pd.to_numeric(pd.Series(actual), errors="coerce")
+    p = pd.to_numeric(pd.Series(predicted), errors="coerce")
+    mask = a.notna() & p.notna()
+    a, p = a[mask].to_numpy(dtype=float), p[mask].to_numpy(dtype=float)
+    if len(a) == 0:
+        return {"n": 0}
+    resid = a - p
+    return {
+        "n": int(len(resid)),
+        "mae": float(np.mean(np.abs(resid))),
+        "rmse": float(np.sqrt(np.mean(resid ** 2))),
+        "bias": float(np.mean(resid)),
+        "residual_std": float(np.std(resid, ddof=1)) if len(resid) > 1 else 0.0,
+        "max_abs_error": float(np.max(np.abs(resid))),
+    }
+
+
+def _forecast_fit(series: np.ndarray, method: str, period: int = 1) -> tuple[np.ndarray, dict[str, Any]]:
+    method = str(method)
+    if method == "naive":
+        level = float(series[-1])
+        return np.array([level]), {"method": method}
+    if method == "moving_average":
+        window = min(max(2, period), len(series))
+        return np.array([float(np.mean(series[-window:]))]), {"method": method, "window": window}
+    if method == "linear_trend":
+        n = len(series)
+        x = np.arange(n, dtype=float)
+        slope, intercept = np.polyfit(x, series, 1) if n > 1 else (0.0, float(series[-1]))
+        return np.array([float(intercept + slope * n)]), {"method": method, "slope": float(slope)}
+    if method == "seasonal_naive":
+        if len(series) <= period:
+            return np.array([float(series[-1])]), {"method": method, "period": period, "fallback": "naive"}
+        return np.array([float(series[-period])]), {"method": method, "period": period}
+    raise ValueError(f"Unknown forecast method: {method}")
+
+
+def _forecast_recursive(series: np.ndarray, method: str, horizon: int, period: int) -> np.ndarray:
+    history = list(map(float, series.tolist()))
+    for _ in range(int(horizon)):
+        pred, _ = _forecast_fit(np.asarray(history, dtype=float), method, period)
+        history.append(float(pred[-1]))
+    return np.asarray(history[-int(horizon):], dtype=float)
+
+
+def forecast_operations(
+    frame: pd.DataFrame,
+    *,
+    date_col: str | None = None,
+    target_col: str | None = None,
+    horizon: int = 12,
+    seasonal_period: int | None = None,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    if not isinstance(frame, pd.DataFrame) or frame.empty:
+        return pd.DataFrame(), {"status": "NO_DATA"}
+    dates = date_col or next((c for c in frame.columns if "date" in str(c).lower() or "time" in str(c).lower()), None)
+    target = target_col or next((c for c in frame.select_dtypes(include=np.number).columns), None)
+    if not target:
+        return pd.DataFrame(), {"status": "NO_NUMERIC_TARGET"}
+    if not dates:
+        work = frame[[target]].copy()
+        work["__date__"] = np.arange(len(work))
+        dates = "__date__"
+    else:
+        work = frame[[dates, target]].copy()
+        work[dates] = pd.to_datetime(work[dates], errors="coerce")
+        work = work.dropna(subset=[dates])
+    work[target] = pd.to_numeric(work[target], errors="coerce")
+    work = work.dropna(subset=[target]).sort_values(dates)
+    if len(work) < 8:
+        return pd.DataFrame(), {"status": "INSUFFICIENT_HISTORY", "n": int(len(work))}
+    y = work[target].to_numpy(dtype=float)
+    if seasonal_period is None:
+        if len(y) >= 24:
+            seasonal_period = 12
+        elif len(y) >= 14:
+            seasonal_period = 7
+        else:
+            seasonal_period = 1
+    candidates = ["naive", "moving_average", "linear_trend"]
+    if seasonal_period > 1:
+        candidates.append("seasonal_naive")
+    test_size = max(3, min(12, len(y) // 4))
+    rows = []
+    for method in candidates:
+        preds = []
+        actual = []
+        for idx in range(max(5, len(y) - test_size), len(y)):
+            hist = y[:idx]
+            preds.extend(_forecast_recursive(hist, method, 1, int(seasonal_period)))
+            actual.append(y[idx])
+        diag = residual_diagnostics(actual, preds)
+        mape_mask = np.abs(np.asarray(actual)) > 1e-9
+        mape = float(np.mean(np.abs((np.asarray(actual)[mape_mask] - np.asarray(preds)[mape_mask]) / np.asarray(actual)[mape_mask])) * 100) if mape_mask.any() else float("nan")
+        rows.append({"Model": method, "MAE": diag.get("mae"), "RMSE": diag.get("rmse"), "MAPE": mape, "Bias": diag.get("bias")})
+    score = pd.DataFrame(rows).sort_values(["RMSE", "MAE"], na_position="last")
+    best = str(score.iloc[0]["Model"])
+    point = _forecast_recursive(y, best, int(horizon), int(seasonal_period))
+    residual_std = float(score.iloc[0]["RMSE"] or 0.0)
+    z = 1.96
+    out = pd.DataFrame({
+        "Horizon": np.arange(1, horizon + 1),
+        "Forecast": point,
+        "Lower 95%": point - z * residual_std,
+        "Upper 95%": point + z * residual_std,
+        "P50": point,
+        "P80": point + 1.2816 * residual_std,
+        "P95": point + 1.6449 * residual_std,
+    })
+    return out, {
+        "status": "OK", "target": str(target), "date_column": str(dates),
+        "best_model": best, "seasonal_period": int(seasonal_period),
+        "model_comparison": score.to_dict("records"),
+        "backtest_size": int(test_size),
+        "prediction_interval_method": "residual standard error",
+        "seasonality_note": "seasonal-naive candidate tested" if seasonal_period > 1 else "no seasonal candidate",
+    }
+
+
+def quantity_dimension(unit: str) -> str:
+    key = str(unit).strip().lower()
+    if key not in UNIT_DEFINITIONS:
+        raise ValueError(f"Unsupported engineering unit: {unit}")
+    return UNIT_DEFINITIONS[key][0]
+
+
+def convert_quantity(value: float, from_unit: str, to_unit: str) -> float:
+    src = str(from_unit).strip().lower()
+    dst = str(to_unit).strip().lower()
+    if src not in UNIT_DEFINITIONS or dst not in UNIT_DEFINITIONS:
+        raise ValueError(f"Unsupported engineering unit conversion: {from_unit} -> {to_unit}")
+    sd, sf = UNIT_DEFINITIONS[src]
+    dd, df = UNIT_DEFINITIONS[dst]
+    if sd != dd:
+        raise ValueError(f"Incompatible dimensions: {from_unit} ({sd}) -> {to_unit} ({dd})")
+    return float(value) * sf / df
+
+
+def validate_formula(name: str, formula: str, inputs: Mapping[str, str], output_unit: str) -> dict[str, Any]:
+    """Validate units for formulas expressed as simple products/ratios/powers.
+
+    Full symbolic dimensional algebra belongs in the formula registry, but this
+    validator catches the highest-risk incompatible output-unit mistakes.
+    """
+    if not str(formula).strip():
+        raise ValueError("Formula cannot be blank.")
+    for var, unit in inputs.items():
+        quantity_dimension(unit)
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", str(var)):
+            raise ValueError(f"Unsafe formula variable: {var}")
+    quantity_dimension(output_unit)
+    tree = ast.parse(formula, mode="eval")
+    allowed = (ast.Expression, ast.BinOp, ast.UnaryOp, ast.Name, ast.Constant,
+               ast.Add, ast.Sub, ast.Mult, ast.Div, ast.Pow, ast.USub, ast.UAdd)
+    if not all(isinstance(node, allowed) for node in ast.walk(tree)):
+        raise ValueError("Formula contains unsupported operations.")
+    return {
+        "name": name, "formula": formula, "inputs": dict(inputs),
+        "output_unit": output_unit, "verified_at": now_iso(),
+        "verification": "syntax + declared-unit compatibility",
+    }
+
+
+class SafeExpressionEvaluator(ast.NodeVisitor):
+    ALLOWED_BINOPS = {ast.Add: lambda a, b: a + b, ast.Sub: lambda a, b: a - b, ast.Mult: lambda a, b: a * b, ast.Div: lambda a, b: a / b}
+    ALLOWED_FUNCS = {"abs": abs, "min": min, "max": max, "round": round}
+
+    def __init__(self, variables: Mapping[str, float]):
+        self.variables = dict(variables)
+
+    def visit_Expression(self, node: ast.Expression):
+        return self.visit(node.body)
+
+    def visit_Constant(self, node: ast.Constant):
+        if not isinstance(node.value, (int, float)):
+            raise ValueError("Only numeric constants are permitted.")
+        return float(node.value)
+
+    def visit_Name(self, node: ast.Name):
+        if node.id not in self.variables:
+            raise ValueError(f"Unknown variable: {node.id}")
+        return float(self.variables[node.id])
+
+    def visit_UnaryOp(self, node: ast.UnaryOp):
+        value = self.visit(node.operand)
+        if isinstance(node.op, ast.USub):
+            return -value
+        if isinstance(node.op, ast.UAdd):
+            return value
+        raise ValueError("Unsupported unary operator.")
+
+    def visit_BinOp(self, node: ast.BinOp):
+        op = next((fn for cls, fn in self.ALLOWED_BINOPS.items() if isinstance(node.op, cls)), None)
+        if op is None:
+            raise ValueError("Unsupported binary operator.")
+        return float(op(self.visit(node.left), self.visit(node.right)))
+
+    def visit_Call(self, node: ast.Call):
+        if not isinstance(node.func, ast.Name) or node.func.id not in self.ALLOWED_FUNCS:
+            raise ValueError("Function is not allowed.")
+        if node.keywords:
+            raise ValueError("Keyword arguments are not allowed.")
+        return float(self.ALLOWED_FUNCS[node.func.id](*[self.visit(a) for a in node.args]))
+
+    def generic_visit(self, node):
+        raise ValueError(f"Unsupported expression node: {type(node).__name__}")
+
+
+def safe_calculate(formula: str, variables: Mapping[str, float]) -> float:
+    return float(SafeExpressionEvaluator(variables).visit(ast.parse(str(formula), mode="eval")))
+
+
+def visualization_intelligence(df: pd.DataFrame) -> list[dict[str, Any]]:
+    if not isinstance(df, pd.DataFrame) or df.empty:
+        return []
+    numeric = list(df.select_dtypes(include=np.number).columns)
+    categorical = list(df.select_dtypes(exclude=np.number).columns)
+    date_cols = [c for c in df.columns if pd.api.types.is_datetime64_any_dtype(df[c]) or "date" in str(c).lower() or "time" in str(c).lower()]
+    recs = []
+    if date_cols and numeric:
+        recs.append({"chart": "time_series", "x": str(date_cols[0]), "y": str(numeric[0]), "reason": "time-indexed numeric measure"})
+    if numeric:
+        recs.append({"chart": "distribution", "x": str(numeric[0]), "reason": "numeric distribution / variation"})
+        if len(numeric) >= 2:
+            recs.append({"chart": "scatter", "x": str(numeric[0]), "y": str(numeric[1]), "reason": "numeric relationship / driver screen"})
+    if categorical and numeric:
+        recs.append({"chart": "grouped_summary", "x": str(categorical[0]), "y": str(numeric[0]), "reason": "category-to-KPI comparison"})
+        recs.append({"chart": "pareto", "x": str(categorical[0]), "y": str(numeric[0]), "reason": "prioritize concentrated contribution"})
+    return recs
+
+
+def build_visualization(df: pd.DataFrame, recommendation: Mapping[str, Any]) -> Any:
+    chart = str(recommendation.get("chart") or "")
+    x = recommendation.get("x")
+    y = recommendation.get("y")
+    if chart == "time_series" and x in df.columns and y in df.columns:
+        return px.line(df, x=x, y=y, markers=True, title=f"{y} over time")
+    if chart == "distribution" and x in df.columns:
+        return px.histogram(df, x=x, nbins=min(40, max(10, len(df)//5)), title=f"Distribution · {x}")
+    if chart == "scatter" and x in df.columns and y in df.columns:
+        return px.scatter(df, x=x, y=y, trendline="ols", title=f"{y} vs {x}")
+    if chart == "grouped_summary" and x in df.columns and y in df.columns:
+        agg = df.groupby(x, dropna=False)[y].mean().reset_index()
+        return px.bar(agg, x=x, y=y, title=f"Mean {y} by {x}")
+    if chart == "pareto" and x in df.columns and y in df.columns:
+        agg = df.groupby(x, dropna=False)[y].sum().abs().sort_values(ascending=False).reset_index()
+        agg["Cumulative %"] = agg[y].cumsum() / max(1e-12, agg[y].sum()) * 100
+        fig = go.Figure()
+        fig.add_bar(x=agg[x], y=agg[y], name=y)
+        fig.add_scatter(x=agg[x], y=agg["Cumulative %"], name="Cumulative %", yaxis="y2")
+        fig.update_layout(title=f"Pareto · {y} by {x}", yaxis2={"overlaying": "y", "side": "right", "range": [0, 100]})
+        return fig
+    return None
+
+
+def render_visualization_os(module: str, df: pd.DataFrame, *, kpi_table: pd.DataFrame | None = None) -> None:
+    with st.expander("Universal Visualization OS", expanded=False):
+        if not isinstance(df, pd.DataFrame) or df.empty:
+            st.info("Load or create data to unlock visualization intelligence.")
+            return
+        recs = visualization_intelligence(df)
+        if not recs:
+            st.info("No compatible chart family detected.")
+            return
+        labels = [f"{r['chart']} — {r['reason']}" for r in recs]
+        selected = st.selectbox("Visualization", labels, key=f"vis_os_sel_{re.sub(r'[^A-Za-z0-9]+','_',module)}")
+        rec = recs[labels.index(selected)]
+        fig = build_visualization(df, rec)
+        if fig is not None:
+            st.plotly_chart(fig, use_container_width=True, key=f"vis_os_chart_{re.sub(r'[^A-Za-z0-9]+','_',module)}")
+            c1, c2, c3, c4, c5 = st.columns(5)
+            with c1:
+                expand = st.checkbox("Expand", key=f"vis_expand_{module}")
+            with c2:
+                explain = st.button("Explain", key=f"vis_explain_{module}")
+            with c3:
+                compare = st.button("Compare", key=f"vis_compare_{module}")
+            with c4:
+                export = st.download_button(
+                    "Export", data=fig.to_json().encode("utf-8"),
+                    file_name=f"shoir_{re.sub(r'[^A-Za-z0-9]+','_',module).lower()}_visual.json",
+                    mime="application/json", key=f"vis_export_{module}",
+                )
+            with c5:
+                add = st.button("Add to Report", key=f"vis_report_{module}")
+            if expand:
+                st.plotly_chart(fig, use_container_width=True, key=f"vis_expanded_chart_{re.sub(r'[^A-Za-z0-9]+','_',module)}")
+            if explain:
+                st.info(f"{rec['chart'].replace('_',' ').title()} was selected because {rec['reason']}.")
+            if compare and kpi_table is not None and not kpi_table.empty:
+                st.dataframe(kpi_table, use_container_width=True, hide_index=True)
+            if add:
+                reports = list(st.session_state.get("shoir_report_figures", []))
+                reports.append({"module": module, "chart": rec, "created_at": now_iso()})
+                st.session_state["shoir_report_figures"] = reports
+                save_platform_record("report_figure", f"{module}:{len(reports)}", reports[-1])
+                st.success("Visualization added to the current report queue.")
+
+
+def render_engineering_canvas(*, cards: Sequence[Mapping[str, Any]] = ()) -> None:
+    """True browser-side drag/drop canvas with local persistence.
+
+    Streamlit cannot natively expose arbitrary drag/drop ordering as a Python
+    widget. This component therefore owns ordering in the browser and stores it
+    in localStorage while Python continues to own the engineering data.
+    """
+    import streamlit.components.v1 as components
+    payload = list(cards) or [
+        {"id": "data", "title": "DATA", "detail": "Dataset / readiness"},
+        {"id": "model", "title": "MODEL", "detail": "Method / solver"},
+        {"id": "scenario", "title": "SCENARIO", "detail": "Baseline / alternatives"},
+        {"id": "kpi", "title": "KPI", "detail": "Metric / target / uncertainty"},
+        {"id": "visual", "title": "VISUALIZE", "detail": "Chart / compare / explain"},
+        {"id": "verify", "title": "VERIFY", "detail": "Evidence / replay / outcome"},
+    ]
+    safe = json.dumps(_jsonable(payload))
+    html = f"""
+    <html><body style="margin:0;font-family:Inter,system-ui,sans-serif;background:#f8fafc">
+    <div id="canvas" style="display:grid;grid-template-columns:repeat(3,minmax(180px,1fr));gap:10px;padding:10px">
+    </div>
+    <div style="padding:0 10px 10px;color:#64748b;font-size:12px">Drag cards to rearrange. Order is retained in this browser.</div>
+    <script>
+    const seed={safe}; const key='shoir_canvas_order_v1';
+    const canvas=document.getElementById('canvas');
+    let order=JSON.parse(localStorage.getItem(key)||'null');
+    if(!Array.isArray(order)) order=seed.map(x=>x.id);
+    function render(){{
+      canvas.innerHTML='';
+      [...order].map(id=>seed.find(x=>x.id===id)).filter(Boolean).forEach(item=>{{
+        const el=document.createElement('div'); el.draggable=true; el.dataset.id=item.id;
+        el.style='background:white;border:1px solid #dbe4ef;border-radius:14px;padding:14px;cursor:grab;min-height:78px;box-shadow:0 8px 18px rgba(15,23,42,.05)';
+        el.innerHTML='<div style="font-size:10px;letter-spacing:.08em;font-weight:900;color:#0f766e">'+item.title+'</div><div style="font-size:12px;font-weight:700;color:#0f172a;margin-top:7px">'+item.detail+'</div>';
+        el.addEventListener('dragstart',e=>e.dataTransfer.setData('text/plain',item.id));
+        el.addEventListener('dragover',e=>e.preventDefault());
+        el.addEventListener('drop',e=>{{
+          e.preventDefault(); const from=e.dataTransfer.getData('text/plain'); const to=item.id;
+          order=order.filter(x=>x!==from); const idx=order.indexOf(to); order.splice(idx,0,from);
+          localStorage.setItem(key,JSON.stringify(order)); render();
+        }});
+        canvas.appendChild(el);
+      }});
+    }} render();
+    </script></body></html>
+    """
+    components.html(html, height=365, scrolling=False)
+
+
+def normalize_action_level(level: str) -> str:
+    candidate = str(level or "READ").upper()
+    return candidate if candidate in ACTION_LEVELS else "READ"
+
+
+def action_authorized(requested: str, actor_level: str, *, approval: bool = False) -> bool:
+    order = {x: i for i, x in enumerate(ACTION_LEVELS)}
+    req = normalize_action_level(requested)
+    actor = normalize_action_level(actor_level)
+    return order[actor] >= order[req] and (req not in {"EXECUTE", "ADMIN"} or approval)
+
+
+def copilot_plan(prompt: str, module: str, *, readiness: Mapping[str, Any], approval_level: str = "RECOMMEND") -> dict[str, Any]:
+    lower = str(prompt).lower()
+    intent = "analyze"
+    if any(t in lower for t in ("clean", "duplicate", "missing", "schema")):
+        intent = "validate_data"
+    elif any(t in lower for t in ("forecast", "predict")):
+        intent = "forecast"
+    elif any(t in lower for t in ("optimize", "minimize", "maximize", "schedule")):
+        intent = "optimize"
+    elif any(t in lower for t in ("compare", "scenario", "what if")):
+        intent = "scenario"
+    elif any(t in lower for t in ("report", "export")):
+        intent = "export"
+    steps = [
+        {"stage": "DATA", "action": "inspect active workspace"},
+        {"stage": "VALIDATE", "action": "run schema and quality gates"},
+        {"stage": "MAP", "action": "map columns to canonical industrial entities"},
+        {"stage": "MODEL", "action": f"select method for {intent}"},
+        {"stage": "RUN", "action": "execute approved specialist engine"},
+        {"stage": "VISUALIZE", "action": "generate evidence-grade visuals"},
+        {"stage": "COMPARE", "action": "compare baseline and alternatives"},
+        {"stage": "EXPLAIN", "action": "attach KPI lineage and uncertainty"},
+        {"stage": "DECIDE", "action": "prepare a decision record"},
+        {"stage": "EXPORT", "action": "build evidence/report package"},
+        {"stage": "VERIFY", "action": "run verification and reproducibility checks"},
+    ]
+    blocked = []
+    if float(readiness.get("score", 0)) < 80:
+        blocked.append("Data readiness below 80%; validation must pass before execution.")
+    if normalize_action_level(approval_level) in {"EXECUTE", "ADMIN"}:
+        blocked.append("High-impact action requires explicit approval.")
+    return {
+        "plan_id": stable_id("PLAN"),
+        "module": module,
+        "intent": intent,
+        "requested_level": normalize_action_level(approval_level),
+        "readiness": dict(readiness),
+        "steps": steps,
+        "blocked_reasons": blocked,
+        "requires_user_approval": normalize_action_level(approval_level) in {"EXECUTE", "ADMIN"},
+        "created_at": now_iso(),
+    }
+
+
+def register_replay(module: str, callable_path: str, kwargs: Mapping[str, Any], *, input_hash: str = "", workspace: str = "default") -> str:
+    if ":" not in callable_path:
+        raise ValueError("Replay callable_path must use module:function notation.")
+    payload = {
+        "module": module,
+        "callable_path": callable_path,
+        "kwargs": _jsonable(kwargs),
+        "input_hash": input_hash,
+        "python": platform.python_version(),
+        "created_at": now_iso(),
+        "schema_version": SCHEMA_VERSION,
+    }
+    rid = save_platform_record("replay", f"{module}:{callable_path}", payload, workspace=workspace)
+    st.session_state["shoir_last_replay_id"] = rid
+    return rid
+
+
+def execute_replay(record: Mapping[str, Any]) -> Any:
+    path = str(record.get("callable_path") or "")
+    if ":" not in path:
+        raise ValueError("Replay record has no callable path.")
+    module_name, func_name = path.split(":", 1)
+    module = importlib.import_module(module_name)
+    func = getattr(module, func_name, None)
+    if not callable(func):
+        raise ValueError(f"Replay target is not callable: {path}")
+    kwargs = dict(record.get("kwargs") or {})
+    started = time.perf_counter()
+    result = func(**kwargs)
+    duration = (time.perf_counter() - started) * 1000
+    result_hash = digest(result)
+    _record_event("replay.executed", actor=str(st.session_state.get("current_user", "system")),
+                  entity_key=path, payload={"duration_ms": duration, "result_hash": result_hash})
+    return result
+
+
+def engine_error_payload(module: str, exc: BaseException) -> dict[str, Any]:
+    return {
+        "error_id": stable_id("ERR"),
+        "module": module,
+        "type": type(exc).__name__,
+        "message": str(exc),
+        "traceback_tail": traceback.format_exc(limit=8)[-4000:],
+        "at": now_iso(),
+    }
+
+
+def record_engineering_error(module: str, exc: BaseException, *, workspace: str = "default", actor: str = "system") -> str:
+    payload = engine_error_payload(module, exc)
+    rid = save_platform_record("engineering_error", payload["error_id"], payload, workspace=workspace)
+    _record_event("engineering_error", actor=actor, entity_key=module, payload=payload, workspace=workspace)
+    return rid
+
+
+def performance_route(df: pd.DataFrame, *, memory_budget_mb: float = 512.0) -> dict[str, Any]:
+    rows = int(len(df)) if isinstance(df, pd.DataFrame) else 0
+    bytes_used = int(df.memory_usage(index=True, deep=True).sum()) if isinstance(df, pd.DataFrame) else 0
+    mb = bytes_used / (1024 ** 2)
+    if rows <= 100_000 and mb <= memory_budget_mb * 0.25:
+        engine = "pandas"
+    elif rows <= 2_000_000 and mb <= memory_budget_mb:
+        engine = "optimized_pandas"
+    elif rows <= 25_000_000:
+        engine = "duckdb"
+    else:
+        engine = "external_query"
+    return {
+        "engine": engine,
+        "rows": rows,
+        "estimated_memory_mb": round(mb, 2),
+        "memory_budget_mb": float(memory_budget_mb),
+        "chunking": engine in {"duckdb", "external_query"},
+        "background_recommended": engine in {"duckdb", "external_query"},
+    }
+
+
+class ConnectorAdapter:
+    kind = "generic"
+
+    def __init__(self, profile: Mapping[str, Any]):
+        self.profile = dict(profile)
+
+    def health(self) -> dict[str, Any]:
+        return {"kind": self.kind, "status": "CONFIGURED", "checked_at": now_iso()}
+
+
+class RestConnector(ConnectorAdapter):
+    kind = "REST"
+
+    def health(self) -> dict[str, Any]:
+        endpoint = str(self.profile.get("endpoint") or "")
+        if not endpoint:
+            return {"kind": self.kind, "status": "NOT_CONFIGURED", "checked_at": now_iso()}
+        if requests is None:
+            return {"kind": self.kind, "status": "DEPENDENCY_MISSING", "checked_at": now_iso()}
+        headers = dict(self.profile.get("headers") or {})
+        token = self.profile.get("token")
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        try:
+            r = requests.get(endpoint, headers=headers, timeout=float(self.profile.get("timeout", 10)))
+            return {"kind": self.kind, "status": "CONNECTED" if r.ok else f"HTTP_{r.status_code}",
+                    "http_status": r.status_code, "checked_at": now_iso(), "endpoint": _redact_endpoint(endpoint)}
+        except Exception as exc:
+            return {"kind": self.kind, "status": "ERROR", "error": str(exc), "checked_at": now_iso(),
+                    "endpoint": _redact_endpoint(endpoint)}
+
+    def fetch(self, params: Mapping[str, Any] | None = None) -> Any:
+        if requests is None:
+            raise RuntimeError("requests is not installed.")
+        endpoint = str(self.profile.get("endpoint") or "")
+        headers = dict(self.profile.get("headers") or {})
+        token = self.profile.get("token")
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        r = requests.get(endpoint, headers=headers, params=dict(params or {}), timeout=float(self.profile.get("timeout", 20)))
+        r.raise_for_status()
+        ctype = r.headers.get("content-type", "")
+        return r.json() if "json" in ctype else r.text
+
+
+class SQLConnector(ConnectorAdapter):
+    kind = "SQL"
+
+    def _query(self, query: str) -> pd.DataFrame:
+        if not str(query).lstrip().lower().startswith(("select", "with")):
+            raise ValueError("SQL connector allows read-only SELECT/WITH queries only.")
+        url = str(self.profile.get("connection_string") or "")
+        if not url:
+            raise ValueError("Missing SQL connection string.")
+        if url.startswith("postgres"):
+            if psycopg2 is None:
+                raise RuntimeError("psycopg2 is not installed.")
+            with psycopg2.connect(url, connect_timeout=10) as conn:
+                return pd.read_sql_query(query, conn)
+        if url.startswith("sqlite:///"):
+            path = url.removeprefix("sqlite:///")
+            with sqlite3.connect(path) as conn:
+                return pd.read_sql_query(query, conn)
+        if oracledb is not None and url.startswith("oracle://"):
+            with oracledb.connect(url.removeprefix("oracle://")) as conn:
+                return pd.read_sql_query(query, conn)
+        raise RuntimeError("Unsupported SQL URL. Use PostgreSQL, SQLite or configured Oracle client.")
+
+    def health(self) -> dict[str, Any]:
+        try:
+            out = self._query("SELECT 1 AS health_check")
+            return {"kind": self.kind, "status": "CONNECTED" if not out.empty else "ERROR", "checked_at": now_iso()}
+        except Exception as exc:
+            return {"kind": self.kind, "status": "ERROR", "error": str(exc), "checked_at": now_iso()}
+
+
+class MQTTConnector(ConnectorAdapter):
+    kind = "MQTT"
+
+    def health(self) -> dict[str, Any]:
+        if mqtt is None:
+            return {"kind": self.kind, "status": "DEPENDENCY_MISSING", "checked_at": now_iso()}
+        host = str(self.profile.get("host") or "")
+        port = int(self.profile.get("port", 1883))
+        if not host:
+            return {"kind": self.kind, "status": "NOT_CONFIGURED", "checked_at": now_iso()}
+        client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+        username = self.profile.get("username")
+        password = self.profile.get("password")
+        if username:
+            client.username_pw_set(str(username), str(password or ""))
+        try:
+            client.connect(host, port=port, keepalive=5)
+            client.disconnect()
+            return {"kind": self.kind, "status": "CONNECTED", "host": host, "port": port, "checked_at": now_iso()}
+        except Exception as exc:
+            return {"kind": self.kind, "status": "ERROR", "error": str(exc), "host": host, "checked_at": now_iso()}
+
+
+class OPCUAConnector(ConnectorAdapter):
+    kind = "OPC-UA"
+
+    def health(self) -> dict[str, Any]:
+        try:
+            from opcua import Client
+        except Exception:
+            return {"kind": self.kind, "status": "DEPENDENCY_MISSING", "checked_at": now_iso()}
+        endpoint = str(self.profile.get("endpoint") or "")
+        if not endpoint:
+            return {"kind": self.kind, "status": "NOT_CONFIGURED", "checked_at": now_iso()}
+        client = Client(endpoint, timeout=float(self.profile.get("timeout", 10)))
+        try:
+            client.connect()
+            client.disconnect()
+            return {"kind": self.kind, "status": "CONNECTED", "endpoint": _redact_endpoint(endpoint), "checked_at": now_iso()}
+        except Exception as exc:
+            return {"kind": self.kind, "status": "ERROR", "error": str(exc), "endpoint": _redact_endpoint(endpoint), "checked_at": now_iso()}
+
+
+class SAPODataConnector(RestConnector):
+    kind = "SAP-OData"
+
+
+class SFTPConnector(ConnectorAdapter):
+    kind = "SFTP"
+
+    def health(self) -> dict[str, Any]:
+        if paramiko is None:
+            return {"kind": self.kind, "status": "DEPENDENCY_MISSING", "checked_at": now_iso()}
+        host = str(self.profile.get("host") or "")
+        if not host:
+            return {"kind": self.kind, "status": "NOT_CONFIGURED", "checked_at": now_iso()}
+        try:
+            transport = paramiko.Transport((host, int(self.profile.get("port", 22))))
+            transport.connect(username=self.profile.get("username"), password=self.profile.get("password"))
+            transport.close()
+            return {"kind": self.kind, "status": "CONNECTED", "host": host, "checked_at": now_iso()}
+        except Exception as exc:
+            return {"kind": self.kind, "status": "ERROR", "error": str(exc), "host": host, "checked_at": now_iso()}
+
+
+def _redact_endpoint(value: str) -> str:
+    try:
+        p = urlparse(value)
+        if p.hostname:
+            netloc = p.hostname
+            if p.port:
+                netloc += f":{p.port}"
+            return p._replace(netloc=netloc).geturl()
+    except Exception:
+        pass
+    return re.sub(r"(?i)(password|token|secret)=([^&\s]+)", r"\1=***", value)
+
+
+def connector_health(profile: Mapping[str, Any]) -> dict[str, Any]:
+    kind = str(profile.get("kind") or profile.get("type") or "REST").upper()
+    cls = {
+        "REST": RestConnector, "SAP": SAPODataConnector, "SAP-ODATA": SAPODataConnector,
+        "SQL": SQLConnector, "POSTGRES": SQLConnector, "ORACLE": SQLConnector,
+        "MQTT": MQTTConnector, "OPC-UA": OPCUAConnector, "OPCUA": OPCUAConnector,
+        "SFTP": SFTPConnector,
+    }.get(kind, RestConnector)
+    result = cls(profile).health()
+    record = {"profile": {k: ("***" if k.lower() in {"password", "token", "secret", "api_key"} else v) for k, v in profile.items()},
+              "health": result, "checked_at": now_iso()}
+    save_platform_record("connector_health", str(profile.get("name") or kind), record)
+    return result
+
+
+class JobManager:
+    def __init__(self, max_workers: int = 4):
+        self.executor = ThreadPoolExecutor(max_workers=max(1, int(max_workers)), thread_name_prefix="shoir-worker")
+        self.futures: dict[str, Future] = {}
+
+    def submit(self, module: str, task: Callable[[], Any], *, workspace: str = "default", payload: Mapping[str, Any] | None = None) -> str:
+        job_id = stable_id("JOB")
+        save_platform_record("job", job_id, {
+            "job_id": job_id, "module": module, "status": "QUEUED",
+            "progress": 0.0, "payload": _jsonable(payload or {}), "created_at": now_iso(),
+        }, workspace=workspace)
+
+        def worker():
+            started = time.perf_counter()
+            try:
+                save_platform_record("job", job_id, {"job_id": job_id, "module": module, "status": "RUNNING", "progress": 0.05, "started_at": now_iso()}, workspace=workspace)
+                result = task()
+                duration = (time.perf_counter() - started) * 1000
+                save_platform_record("job", job_id, {
+                    "job_id": job_id, "module": module, "status": "COMPLETED", "progress": 1.0,
+                    "duration_ms": duration, "result_hash": digest(result), "completed_at": now_iso(),
+                }, workspace=workspace)
+                return result
+            except Exception as exc:
+                record_engineering_error(module, exc, workspace=workspace)
+                save_platform_record("job", job_id, {"job_id": job_id, "module": module, "status": "FAILED", "progress": 1.0, "error": engine_error_payload(module, exc)}, workspace=workspace)
+                raise
+
+        future = self.executor.submit(worker)
+        self.futures[job_id] = future
+        return job_id
+
+    def status(self, job_id: str) -> dict[str, Any]:
+        future = self.futures.get(job_id)
+        records = repository_records("job")
+        if not records.empty:
+            matches = records[records["entity_key"].astype(str) == str(job_id)]
+            if not matches.empty:
+                payload = json.loads(str(matches.iloc[0]["payload_json"]))
+                if future is not None and future.done() and payload.get("status") == "RUNNING":
+                    payload["status"] = "COMPLETED"
+                return payload
+        return {"job_id": job_id, "status": "UNKNOWN"}
+
+
+_JOB_MANAGER: JobManager | None = None
+
+
+def job_manager() -> JobManager:
+    global _JOB_MANAGER
+    if _JOB_MANAGER is None:
+        _JOB_MANAGER = JobManager(int(os.getenv("SHOIR_WORKERS", "4")))
+    return _JOB_MANAGER
+
+
+def submit_background_job(module: str, task: Callable[[], Any], *, workspace: str = "default", payload: Mapping[str, Any] | None = None) -> str:
+    return job_manager().submit(module, task, workspace=workspace, payload=payload)
+
+
+def decision_memory_query(problem: str, *, workspace: str = "default", limit: int = 5) -> pd.DataFrame:
+    records = repository_records("decision", workspace=workspace, limit=500)
+    if records.empty:
+        return pd.DataFrame()
+    q = set(re.findall(r"[a-z0-9]{3,}", str(problem).lower()))
+    rows = []
+    for _, row in records.iterrows():
+        try:
+            payload = json.loads(str(row["payload_json"]))
+        except Exception:
+            payload = {}
+        text = " ".join([
+            str(payload.get("title", "")), str(payload.get("problem", "")),
+            str(payload.get("domain", "")), canonical_json(payload.get("kpis", {})),
+            canonical_json(payload.get("outcome", {})),
+        ]).lower()
+        tokens = set(re.findall(r"[a-z0-9]{3,}", text))
+        score = len(q & tokens) / max(1, len(q))
+        rows.append({"score": score, **payload})
+    return pd.DataFrame(rows).sort_values("score", ascending=False).head(int(limit))
+
+
+def save_decision_memory(
+    title: str,
+    problem: str,
+    decision: Mapping[str, Any],
+    *,
+    outcome: Mapping[str, Any] | None = None,
+    workspace: str = "default",
+) -> str:
+    payload = {
+        "title": title, "problem": problem, "decision": _jsonable(decision),
+        "outcome": _jsonable(outcome or {}), "created_at": now_iso(),
+    }
+    return save_platform_record("decision", stable_id("DEC"), payload, workspace=workspace)
+
+
+def benchmark_compare(actual: Mapping[str, float], reference: Mapping[str, float]) -> pd.DataFrame:
+    rows = []
+    for k in sorted(set(actual) | set(reference)):
+        a = float(actual.get(k, np.nan)); r = float(reference.get(k, np.nan))
+        delta = a - r if np.isfinite(a) and np.isfinite(r) else np.nan
+        pct = delta / r * 100 if np.isfinite(delta) and r != 0 else np.nan
+        rows.append({"KPI": k, "Actual": a, "Reference": r, "Delta": delta, "% vs reference": pct})
+    return pd.DataFrame(rows)
+
+
+def verification_suite(
+    module: str,
+    *,
+    inputs: pd.DataFrame | None = None,
+    results: pd.DataFrame | None = None,
+    known_case: Mapping[str, Any] | None = None,
+    constraints: Mapping[str, Mapping[str, float]] | None = None,
+) -> dict[str, Any]:
+    checks = []
+    df = inputs if isinstance(inputs, pd.DataFrame) else pd.DataFrame()
+    res = results if isinstance(results, pd.DataFrame) else pd.DataFrame()
+    checks.append(("input_present", not df.empty))
+    checks.append(("results_present", not res.empty))
+    if not df.empty:
+        checks.append(("finite_numeric_inputs", np.isfinite(df.select_dtypes(include=np.number).to_numpy(dtype=float, na_value=np.nan)).all()))
+        checks.append(("unique_columns", len(set(map(str, df.columns))) == len(df.columns))
+    if known_case:
+        for key, expected in known_case.items():
+            actual = st.session_state.get(str(key))
+            if isinstance(expected, (int, float)) and isinstance(actual, (int, float)):
+                checks.append((f"known_case:{key}", math.isclose(float(actual), float(expected), rel_tol=1e-6, abs_tol=1e-6)))
+            else:
+                checks.append((f"known_case:{key}", actual == expected))
+    if constraints and not res.empty:
+        for kpi, spec in constraints.items():
+            if kpi in res.columns:
+                value = pd.to_numeric(res[kpi], errors="coerce").dropna()
+                if not value.empty:
+                    if spec.get("min") is not None:
+                        checks.append((f"constraint:{kpi}:min", float(value.iloc[-1]) >= float(spec["min"])))
+                    if spec.get("max") is not None:
+                        checks.append((f"constraint:{kpi}:max", float(value.iloc[-1]) <= float(spec["max"])))
+    passed = [name for name, ok in checks if bool(ok)]
+    failed = [name for name, ok in checks if not bool(ok)]
+    report = {
+        "module": module, "status": "PASS" if not failed else "REVIEW",
+        "passed": passed, "failed": failed, "checks": [{"name": n, "passed": bool(o)} for n, o in checks],
+        "verified_at": now_iso(),
+    }
+    save_platform_record("verification", module, report)
+    return report
+
+
+def render_platform_completion(module: str, df: pd.DataFrame, *, allowed_modules: Sequence[str] = ()) -> None:
+    """Unified completion console surfaced beside the existing OS layer."""
+    if not st.session_state.get("authenticated"):
+        return
+    st.markdown("## Industrial Platform Completion Console")
+    cols = st.columns(4)
+    readiness = data_readiness(df)
+    ledger = capability_ledger()
+    with cols[0]:
+        st.metric("Data readiness", f"{readiness['score']:.0f}%")
+    with cols[1]:
+        st.metric("Capabilities catalogued", f"{len(ledger):,}")
+    with cols[2]:
+        verified = int((ledger["Status"] == "Verified").sum()) if not ledger.empty else 0
+        st.metric("Verified evidence", str(verified))
+    with cols[3]:
+        st.metric("Persistence", "PostgreSQL" if remote_persistence_configured() else "SQLite fallback")
+    runtime = begin_module(module, actor=str(st.session_state.get("current_user", "system")), df=df)
+    tabs = st.tabs(["Workflow & Manifest", "Digital Thread", "Experiment", "Forecast", "Connectors", "Decision Memory", "Diagnostics"])
+    with tabs[0]:
+        manifest = module_manifest(module)
+        st.dataframe(pd.DataFrame([
+            {"Stage": s, "Enforced": "Yes", "Current": "●" if s == runtime.stage else "○",
+             "Evidence": "required"} for s in WORKFLOW_STEPS
+        ]), hide_index=True, use_container_width=True)
+        with st.expander("Machine-readable module manifest"):
+            st.json(manifest)
+    with tabs[1]:
+        lineage = repository_records("kpi_lineage", limit=100)
+        if lineage.empty:
+            st.info("No KPI lineage records have been captured yet.")
+        else:
+            shown = []
+            for _, row in lineage.iterrows():
+                try:
+                    p = json.loads(str(row["payload_json"]))
+                    shown.append({"KPI": p.get("kpi"), "Module": p.get("module"), "Value": p.get("value"), "Lineage ID": p.get("lineage_id")})
+                except Exception:
+                    continue
+            if shown:
+                st.dataframe(pd.DataFrame(shown), use_container_width=True, hide_index=True)
+    with tabs[2]:
+        method = st.selectbox("Experiment method", ["Full Factorial", "Fractional Factorial", "Central Composite", "Box-Behnken", "Replication Planner"], key="core_exp_method")
+        if method == "Full Factorial":
+            factors = st.text_area("Factors", "A=10,20\nB=1,2", key="core_exp_ff")
+            if st.button("Build full factorial", key="core_exp_ff_btn"):
+                f = {x.split("=",1)[0].strip(): [v.strip() for v in x.split("=",1)[1].split(",")] for x in factors.splitlines() if "=" in x}
+                st.session_state["core_exp_design"], st.session_state["core_exp_meta"] = factorial_design(f, randomized=True), {"type":"full_factorial"}
+        elif method == "Fractional Factorial":
+            factors = st.text_area("Two-level factors", "A=-1,1\nB=-1,1\nC=-1,1\nD=-1,1", key="core_exp_frac")
+            fraction = st.selectbox("Fraction", [2,4,8], key="core_exp_frac_ratio")
+            if st.button("Build fractional design", key="core_exp_frac_btn"):
+                f = {x.split("=",1)[0].strip(): [v.strip() for v in x.split("=",1)[1].split(",")] for x in factors.splitlines() if "=" in x}
+                try:
+                    d, meta = fractional_factorial_design(f, fraction=int(fraction))
+                    st.session_state["core_exp_design"], st.session_state["core_exp_meta"] = d, meta
+                except ValueError as exc:
+                    st.error(str(exc))
+        elif method in {"Central Composite", "Box-Behnken"}:
+            factors = st.text_area("Numeric low/high pairs", "A=10,20\nB=1,2\nC=5,9", key="core_exp_rs")
+            if st.button("Build response surface", key="core_exp_rs_btn"):
+                f = {x.split("=",1)[0].strip(): [float(v.strip()) for v in x.split("=",1)[1].split(",")] for x in factors.splitlines() if "=" in x}
+                try:
+                    d, meta = response_surface_design(f, design="central_composite" if method == "Central Composite" else "box_behnken")
+                    st.session_state["core_exp_design"], st.session_state["core_exp_meta"] = d, meta
+                except ValueError as exc:
+                    st.error(str(exc))
+        else:
+            effect = st.number_input("Expected standardized effect", value=0.5, min_value=0.01, key="core_exp_effect")
+            alpha = st.number_input("Alpha", value=0.05, min_value=0.001, max_value=0.2, key="core_exp_alpha")
+            power = st.number_input("Target power", value=0.80, min_value=0.50, max_value=0.99, key="core_exp_power")
+            st.json(replication_planner(effect, alpha=alpha, power=power))
+        if isinstance(st.session_state.get("core_exp_design"), pd.DataFrame):
+            st.dataframe(st.session_state["core_exp_design"], use_container_width=True, hide_index=True)
+            st.json(st.session_state.get("core_exp_meta", {}))
+    with tabs[3]:
+        pred, meta = forecast_operations(df)
+        if pred.empty:
+            st.info(meta.get("status", "Forecast unavailable."))
+        else:
+            st.dataframe(pd.DataFrame(meta.get("model_comparison", [])), use_container_width=True, hide_index=True)
+            st.plotly_chart(px.line(pred, x="Horizon", y=["P50","Lower 95%","Upper 95%"], title=f"Forecast · {meta.get('best_model')}"), use_container_width=True)
+            st.json(meta)
+    with tabs[4]:
+        names = ["REST", "SQL", "SAP-OData", "MQTT", "OPC-UA", "SFTP"]
+        kind = st.selectbox("Connector kind", names, key="core_conn_kind")
+        if kind in {"REST", "SAP-OData"}:
+            endpoint = st.text_input("Endpoint", key="core_conn_endpoint")
+            token = st.text_input("Token", type="password", key="core_conn_token")
+            if st.button("Check connection", key="core_conn_test"):
+                st.json(connector_health({"kind":kind, "endpoint":endpoint, "token":token}))
+        elif kind == "SQL":
+            conn = st.text_input("Connection string", placeholder="postgresql://user:password@host/db or sqlite:///path.db", key="core_sql_conn")
+            if st.button("Check SQL", key="core_sql_test"):
+                st.json(connector_health({"kind":"SQL","connection_string":conn}))
+        elif kind == "MQTT":
+            host = st.text_input("Broker host", key="core_mqtt_host")
+            port = st.number_input("Port", 1, 65535, 1883, key="core_mqtt_port")
+            if st.button("Check MQTT", key="core_mqtt_test"):
+                st.json(connector_health({"kind":"MQTT","host":host,"port":int(port)}))
+        elif kind == "OPC-UA":
+            endpoint = st.text_input("OPC-UA endpoint", key="core_opc_endpoint")
+            if st.button("Check OPC-UA", key="core_opc_test"):
+                st.json(connector_health({"kind":"OPC-UA","endpoint":endpoint}))
+        else:
+            host = st.text_input("SFTP host", key="core_sftp_host")
+            user = st.text_input("SFTP user", key="core_sftp_user")
+            pwd = st.text_input("SFTP password", type="password", key="core_sftp_pwd")
+            if st.button("Check SFTP", key="core_sftp_test"):
+                st.json(connector_health({"kind":"SFTP","host":host,"username":user,"password":pwd}))
+    with tabs[5]:
+        problem = st.text_area("Describe the current engineering problem", key="core_memory_problem")
+        if st.button("Search decision memory", key="core_memory_btn") and problem.strip():
+            hits = decision_memory_query(problem)
+            if hits.empty:
+                st.info("No similar historical decision records found.")
+            else:
+                st.dataframe(hits, use_container_width=True, hide_index=True)
+    with tabs[6]:
+        snap = {
+            "backend": db_backend(),
+            "python": platform.python_version(),
+            "pandas": pd.__version__, "numpy": np.__version__,
+            "streamlit": getattr(st, "__version__", "unknown"),
+            "workers": int(os.getenv("SHOIR_WORKERS", "4")),
+            "active_module": module,
+            "performance": performance_route(df),
+        }
+        st.json(snap)
+        if st.button("Run verification suite", key="core_verify_btn", type="primary"):
+            report = verification_suite(module, inputs=df, results=df)
+            st.json(report)
+
+
+def sync_project_state(workspace: str, state: Mapping[str, Any]) -> str:
+    return save_platform_record("project_state", workspace, {"workspace": workspace, "state": _jsonable(state), "updated_at": now_iso()}, workspace=workspace)
+
+
+def localization_config(language: str = "English", currency: str = BASE_CURRENCY) -> dict[str, Any]:
+    lang = "Arabic" if str(language).lower().startswith("arab") else "English"
+    return {"language": lang, "rtl": lang == "Arabic", "currency": str(currency).upper(), "date_format": "DD/MM/YYYY" if lang == "Arabic" else "YYYY-MM-DD", "number_decimal": ".", "thousands": ","}
+
+
+def formatted_number(value: float, *, decimals: int = 2, locale: str = "en") -> str:
+    if locale.lower().startswith("ar"):
+        return f"{float(value):,.{decimals}f}".translate(str.maketrans("0123456789", "٠١٢٣٤٥٦٧٨٩"))
+    return f"{float(value):,.{decimals}f}"
+
+
+__all__ = [
+    "WORKFLOW_STEPS", "ACTION_LEVELS", "CAPABILITY_STATES",
+    "db_backend", "db_connect", "ensure_core_schema", "remote_persistence_configured",
+    "data_readiness", "validate_dataset_contract", "canonical_map_columns",
+    "WorkflowRuntime", "begin_module", "governed_module", "run_governed_module",
+    "module_manifest", "capability_ledger", "kpi_lineage", "render_kpi_lineage",
+    "uncertainty_engine", "attach_uncertainty", "scenario_analysis", "explain_scenario_changes", "scenario_fork",
+    "factorial_design", "fractional_factorial_design", "response_surface_design", "replication_planner",
+    "residual_diagnostics", "forecast_operations", "quantity_dimension", "convert_quantity",
+    "validate_formula", "safe_calculate", "visualization_intelligence", "build_visualization", "render_visualization_os",
+    "normalize_action_level", "action_authorized", "copilot_plan",
+    "register_replay", "execute_replay", "record_engineering_error", "performance_route",
+    "connector_health", "submit_background_job", "decision_memory_query", "save_decision_memory",
+    "benchmark_compare", "verification_suite", "render_engineering_canvas", "render_platform_completion",
+    "sync_project_state", "localization_config", "formatted_number",
+]
