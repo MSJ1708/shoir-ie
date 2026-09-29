@@ -4780,8 +4780,17 @@ def unified_optimization(
         {"method": key, "solver": solver, "diagnostics": result, "created_at": now_iso()},
     )
     result["record_id"] = record_id
+    contract = optimization_run_contract(
+        result,
+        method=key,
+        objective_direction="minimize",
+        constraints=[
+            {"index": i, **row}
+            for i, row in enumerate(slacks)
+        ],
+    )
+    result["contract"] = contract
     return result
-
 
 __all__ = [
     "WORKFLOW_STEPS", "ACTION_LEVELS", "CAPABILITY_STATES",
