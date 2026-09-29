@@ -3658,6 +3658,7 @@ def render_platform_completion(module: str, df: pd.DataFrame, *, allowed_modules
 
     with tabs[6]:
         st.markdown("### Copilot end-to-end engineering workflow")
+        level = st.selectbox("Copilot permission level", list(ACTION_LEVELS), index=3, key=f"core_copilot_level_{module}")
         copilot_objective = st.text_area(
             "Engineering objective",
             placeholder="Describe the decision or engineering problem Copilot should analyze.",
@@ -3690,7 +3691,6 @@ def render_platform_completion(module: str, df: pd.DataFrame, *, allowed_modules
                 st.json(flow)
 
         st.markdown("### Copilot approval & action governance")
-        level = st.selectbox("Current Copilot permission level", list(ACTION_LEVELS), index=3, key=f"core_copilot_level_{module}")
         registry = copilot_action_registry()
         st.dataframe(pd.DataFrame([
             {
