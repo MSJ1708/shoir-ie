@@ -2267,8 +2267,19 @@ def render_platform_completion(module: str, df: pd.DataFrame, *, allowed_modules
     readiness = data_readiness(df)
     ledger = capability_ledger()
     runtime = begin_module(module, workspace=workspace, actor=actor, df=df)
+    command = command_center_snapshot(df, workspace=workspace)
 
     st.markdown("## Industrial Platform Console")
+    header = st.columns(5)
+    header[0].metric("Readiness", f"{readiness['score']:.0f}%")
+    header[1].metric("Open alerts", int(command["open_alerts"]))
+    header[2].metric("Draft decisions", int(command["draft_decisions"]))
+    header[3].metric("Persistence", db_backend().upper())
+    header[4].metric("Next action", str(command["what_to_do_next"])[:32])
+    if command["attention"]:
+        st.warning(" · ".join(command["attention"]))
+    else:
+        st.success("No outstanding platform attention items were detected.")
     metrics = st.columns(5)
     metrics[0].metric("Readiness", f"{readiness['score']:.0f}%")
     metrics[1].metric("Capabilities", f"{len(ledger):,}")
@@ -2279,6 +2290,7 @@ def render_platform_completion(module: str, df: pd.DataFrame, *, allowed_modules
     tabs = st.tabs([
         "Workflow & Manifest", "Digital Thread", "Experiment", "Scenario Lab",
         "Forecast", "Run & Replay", "Governance", "Diagnostics",
+        "Research & ROI", "Twin & Alerts",
     ])
 
     with tabs[0]:
@@ -2515,6 +2527,132 @@ def render_platform_completion(module: str, df: pd.DataFrame, *, allowed_modules
         if not ledger.empty:
             status_filter = st.multiselect("Capability status filter", list(CAPABILITY_STATES), default=list(CAPABILITY_STATES), key=f"core_cap_filter_{module}")
             st.dataframe(ledger[ledger["Status"].isin(status_filter)], use_container_width=True, hide_index=True, height=300)
+
+
+    with tabs[8]:
+        st.markdown("### Research Studio")
+        study_title = st.text_input("Study title", key=f"core_research_title_{module}")
+        objective = st.text_area("Objective", key=f"core_research_objective_{module}")
+        hypothesis = st.text_area("Hypothesis", key=f"core_research_hypothesis_{module}")
+        statistical_plan = st.text_area("Statistical plan (locked after preregistration)", key=f"core_research_stats_{module}")
+        exclusions = st.text_area("Exclusion criteria", key=f"core_research_exclusions_{module}")
+        limitations = st.text_area("Protocol limitations", key=f"core_research_limitations_{module}")
+        citation = st.text_input("Citation / DOI / source", key=f"core_research_citation_{module}")
+        c1, c2 = st.columns(2)
+        with c1:
+            if st.button("Create preregistration", key=f"core_research_create_{module}", type="primary"):
+                if not study_title.strip():
+                    st.error("Study title is required.")
+                else:
+                    study = research_study_record(
+                        study_title,
+                        objective=objective,
+                        hypothesis=hypothesis,
+                        statistical_plan={"plan": statistical_plan},
+                        citations=[citation] if citation.strip() else [],
+                        exclusions=[x.strip() for x in exclusions.splitlines() if x.strip()],
+                        limitations=[x.strip() for x in limitations.splitlines() if x.strip()],
+                        workspace=workspace,
+                    )
+                    st.session_state[f"core_research_study_{module}"] = study
+                    st.success(f"Preregistration {study['study_id']} saved.")
+        with c2:
+            study = st.session_state.get(f"core_research_study_{module}")
+            if study:
+                locked = st.checkbox("Protocol is ready to lock", key=f"core_research_lock_ready_{module}")
+                if locked and st.button("Lock protocol", key=f"core_research_lock_{module}"):
+                    st.session_state[f"core_research_study_{module}"] = lock_research_protocol(study, workspace=workspace)
+                    st.success("Protocol locked and hashed. Changes must be handled as versioned amendments.")
+        study = st.session_state.get(f"core_research_study_{module}")
+        if study:
+            st.json(study)
+            if citation.strip() and not study.get("protocol_locked") and st.button("Add citation", key=f"core_research_add_citation_{module}"):
+                try:
+                    st.session_state[f"core_research_study_{module}"] = add_research_citation(study["study_id"], citation, workspace=workspace)
+                except RuntimeError as exc:
+                    st.error(str(exc))
+
+        st.markdown("### Evidence-linked ROI")
+        kpi_lines = st.text_area(
+            "KPI values as KPI=baseline,target,predicted,actual",
+            "Throughput=100,110,108,112",
+            key=f"core_roi_kpis_{module}",
+        )
+        financial = st.number_input("Financial impact", value=0.0, key=f"core_roi_financial_{module}")
+        hours = st.number_input("Hours saved", value=0.0, key=f"core_roi_hours_{module}")
+        risk = st.number_input("Risk reduction", value=0.0, key=f"core_roi_risk_{module}")
+        if st.button("Capture ROI evidence", key=f"core_roi_capture_{module}"):
+            baseline, target, predicted, actual = {}, {}, {}, {}
+            for line in kpi_lines.splitlines():
+                if "=" not in line:
+                    continue
+                name, values = line.split("=", 1)
+                parts = [x.strip() for x in values.split(",")]
+                if len(parts) != 4:
+                    continue
+                try:
+                    baseline[name.strip()] = float(parts[0]); target[name.strip()] = float(parts[1])
+                    predicted[name.strip()] = float(parts[2]); actual[name.strip()] = float(parts[3])
+                except ValueError:
+                    continue
+            roi = roi_evidence_snapshot(
+                baseline=baseline, target=target, predicted=predicted, actual=actual,
+                financial_impact=financial, hours_saved=hours, risk_reduction=risk,
+                evidence_ids=[str(x) for x in st.session_state.get("shoir_kpi_lineage", {}).keys()],
+                workspace=workspace,
+            )
+            st.session_state[f"core_roi_last_{module}"] = roi
+        roi = st.session_state.get(f"core_roi_last_{module}")
+        if roi:
+            st.dataframe(pd.DataFrame(roi["kpis"]), use_container_width=True, hide_index=True)
+            st.json({k: roi[k] for k in ("financial_impact", "hours_saved", "risk_reduction", "verified_actuals", "evidence_ids")})
+
+    with tabs[9]:
+        st.markdown("### Digital Twin Cycle")
+        nums = list(df.select_dtypes(include=np.number).columns) if isinstance(df, pd.DataFrame) else []
+        if not nums:
+            st.info("Digital Twin cycle requires observed numeric telemetry.")
+        else:
+            asset = st.text_input("Asset ID", value=str(module), key=f"core_twin_asset_{module}")
+            observed = {str(c): float(pd.to_numeric(df[c], errors="coerce").dropna().mean()) for c in nums[:8]}
+            expected_text = st.text_area(
+                "Expected values (KPI=value)",
+                "\n".join(f"{k}={v:g}" for k, v in observed.items()),
+                key=f"core_twin_expected_{module}",
+            )
+            expected = {}
+            for line in expected_text.splitlines():
+                if "=" in line:
+                    k, v = line.split("=", 1)
+                    try: expected[k.strip()] = float(v.strip())
+                    except ValueError: continue
+            threshold = st.number_input("Absolute deviation alert threshold", value=5.0, min_value=0.0, key=f"core_twin_threshold_{module}")
+            if st.button("Synchronize twin state", key=f"core_twin_sync_{module}", type="primary"):
+                twin = digital_twin_cycle(
+                    asset, observed,
+                    expected=expected,
+                    thresholds={k: threshold for k in expected},
+                    scenario={"module": module, "run_id": st.session_state.get("shoir_latest_run_id")},
+                    workspace=workspace,
+                )
+                st.session_state[f"core_twin_last_{module}"] = twin
+                if twin["status"] == "DEGRADED":
+                    create_alert(
+                        "DIGITAL_TWIN_DEVIATION",
+                        f"Asset {asset} has {len(twin['anomalies'])} observed deviation(s).",
+                        severity="HIGH",
+                        entity_key=asset,
+                        workspace=workspace,
+                    )
+            twin = st.session_state.get(f"core_twin_last_{module}")
+            if twin:
+                st.metric("Twin state", twin["status"], f"{len(twin['anomalies'])} anomalies")
+                st.dataframe(pd.DataFrame(twin["state"]), use_container_width=True, hide_index=True)
+        alerts = repository_records("alert", workspace=workspace, limit=100)
+        if not alerts.empty:
+            st.markdown("### Alert → Investigation")
+            shown = [_payload_from_value(row["payload_json"]) for _, row in alerts.iterrows()]
+            st.dataframe(pd.DataFrame(shown), use_container_width=True, hide_index=True)
 
 
 def sync_project_state(workspace: str, state: Mapping[str, Any]) -> str:
