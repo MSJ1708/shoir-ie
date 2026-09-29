@@ -1959,7 +1959,7 @@ def digital_twin_sync_from_connector(
     adapter = adapter_cls(connector_profile)
     if not hasattr(adapter, "fetch"):
         raise RuntimeError(f"{kind} connector does not provide a synchronous fetch operation.")
-    raw = adapter.fetch(connector_profile.get("params") or {})
+    raw = adapter.fetch(connector_profile.get("params") or connector_profile.get("fetch_params") or {})
     payload = raw
     if isinstance(raw, list):
         frame = pd.DataFrame(raw)
@@ -2017,8 +2017,10 @@ def collaboration_attachment(
         add_collaboration_item(
             actor,
             str(entity_type),
-            str(entity_id),
             str(comment or assignment or mention),
+            subject=str(entity_id),
+            assignee=str(assignment),
+            reviewer=str(mention),
             workspace=workspace,
         )
     except Exception as exc:
