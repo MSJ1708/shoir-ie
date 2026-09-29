@@ -2125,8 +2125,55 @@ class SQLConnector(ConnectorAdapter):
             return {"kind": self.kind, "status": "ERROR", "error": str(exc), "checked_at": now_iso()}
 
 
+    def fetch(self, params: Mapping[str, Any] | None = None) -> Any:
+        query = str((params or {}).get("query") or self.profile.get("query") or "").strip()
+        if not query:
+            raise ValueError("SQL twin sync requires a read-only query.")
+        return self._query(query)
+
+
 class MQTTConnector(ConnectorAdapter):
     kind = "MQTT"
+
+    def fetch(self, params: Mapping[str, Any] | None = None) -> Any:
+        if mqtt is None:
+            raise RuntimeError("paho-mqtt is not installed.")
+        host = str(self.profile.get("host") or "")
+        topic = str((params or {}).get("topic") or self.profile.get("topic") or "")
+        if not host or not topic:
+            raise ValueError("MQTT twin sync requires host and topic.")
+        port = int(self.profile.get("port", 1883))
+        timeout = float((params or {}).get("timeout") or self.profile.get("timeout", 5))
+        messages: list[Any] = []
+        import threading
+        event = threading.Event()
+        client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+        username = self.profile.get("username")
+        password = self.profile.get("password")
+        if username:
+            client.username_pw_set(str(username), str(password or ""))
+
+        def on_connect(c, userdata, flags, reason_code, properties):
+            c.subscribe(topic)
+
+        def on_message(c, userdata, msg):
+            body = msg.payload.decode("utf-8", errors="replace")
+            try:
+                messages.append(json.loads(body))
+            except Exception:
+                messages.append({"topic": msg.topic, "value": body})
+            event.set()
+
+        client.on_connect = on_connect
+        client.on_message = on_message
+        client.connect(host, port=port, keepalive=5)
+        client.loop_start()
+        try:
+            event.wait(timeout=max(0.5, timeout))
+        finally:
+            client.loop_stop()
+            client.disconnect()
+        return messages[-1] if messages else {}
 
     def health(self) -> dict[str, Any]:
         if mqtt is None:
@@ -2151,6 +2198,25 @@ class MQTTConnector(ConnectorAdapter):
 class OPCUAConnector(ConnectorAdapter):
     kind = "OPC-UA"
 
+    def fetch(self, params: Mapping[str, Any] | None = None) -> Any:
+        try:
+            from opcua import Client
+        except Exception as exc:
+            raise RuntimeError("opcua is not installed.") from exc
+        endpoint = str(self.profile.get("endpoint") or "")
+        nodes = dict((params or {}).get("nodes") or self.profile.get("nodes") or {})
+        if not endpoint or not nodes:
+            raise ValueError("OPC-UA twin sync requires endpoint and nodes mapping.")
+        client = Client(endpoint, timeout=float(self.profile.get("timeout", 10)))
+        try:
+            client.connect()
+            result = {}
+            for name, node_id in nodes.items():
+                result[str(name)] = client.get_node(str(node_id)).get_value()
+            return result
+        finally:
+            client.disconnect()
+
     def health(self) -> dict[str, Any]:
         try:
             from opcua import Client
@@ -2174,6 +2240,31 @@ class SAPODataConnector(RestConnector):
 
 class SFTPConnector(ConnectorAdapter):
     kind = "SFTP"
+
+    def fetch(self, params: Mapping[str, Any] | None = None) -> Any:
+        if paramiko is None:
+            raise RuntimeError("paramiko is not installed.")
+        host = str(self.profile.get("host") or "")
+        remote_path = str((params or {}).get("path") or self.profile.get("path") or "")
+        if not host or not remote_path:
+            raise ValueError("SFTP twin sync requires host and remote path.")
+        transport = paramiko.Transport((host, int(self.profile.get("port", 22))))
+        transport.connect(username=self.profile.get("username"), password=self.profile.get("password"))
+        sftp = paramiko.SFTPClient.from_transport(transport)
+        try:
+            with sftp.open(remote_path, "rb") as remote:
+                raw = remote.read()
+            lower = remote_path.lower()
+            if lower.endswith(".csv"):
+                return pd.read_csv(io.BytesIO(raw)).to_dict("records")
+            if lower.endswith(".xlsx") or lower.endswith(".xlsm"):
+                return pd.read_excel(io.BytesIO(raw)).to_dict("records")
+            if lower.endswith(".json"):
+                return json.loads(raw.decode("utf-8"))
+            return {"bytes": len(raw), "path": remote_path}
+        finally:
+            sftp.close()
+            transport.close()
 
     def health(self) -> dict[str, Any]:
         if paramiko is None:
