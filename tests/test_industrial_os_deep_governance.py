@@ -117,6 +117,8 @@ def test_replay_checks_input_and_result_fingerprint():
     assert __import__("streamlit").session_state.get("shoir_last_replay_result", {}).get("status") == "PASS"
     with pytest.raises(RuntimeError):
         execute_replay(record, current_input=pd.DataFrame({"x": [9]}))
+    with pytest.raises(PermissionError):
+        execute_replay({"callable_path": "os:system", "kwargs": {"command": "echo blocked"}})
 
 
 def _replay_fixture(value: int):
