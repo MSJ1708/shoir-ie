@@ -1739,8 +1739,11 @@ def fractional_factorial_design(
     if any(len(factors[k]) != 2 for k in names):
         raise ValueError("Fractional factorial DOE requires exactly two levels per factor.")
     if fraction not in (2, 4, 8, 16):
-        raise ValueError("Fraction must be one of 2, 4, 8 or 16.")
-    base_count = max(1, len(names) - int(round(math.log2(fraction))))
+        raise ValueError("Fraction must be one of 2, 4, 8 or 16 target runs.")
+    target_runs = min(int(fraction), 2 ** len(names))
+    if target_runs < 2 or target_runs & (target_runs - 1):
+        raise ValueError("Fractional factorial target runs must be a power of two.")
+    base_count = max(1, int(round(math.log2(target_runs))))
     base_names = names[:base_count]
     design = factorial_design({k: factors[k] for k in base_names}, randomized=False)
     gen_specs = dict(generators or {})
@@ -1771,6 +1774,7 @@ def fractional_factorial_design(
         "status": "OK",
         "type": "fractional_factorial",
         "fraction": int(fraction),
+        "fraction_semantics": "target_runs",
         "base_factors": base_names,
         "generators": {k: list(v) for k, v in gen_specs.items()},
         "runs": int(len(design)),
