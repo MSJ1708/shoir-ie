@@ -6,6 +6,7 @@ workspace and lets the user generate interactive Plotly views from them.
 """
 
 from __future__ import annotations
+import logging
 
 import io
 import hashlib
@@ -604,8 +605,8 @@ def _render_auto_kpi_dashboard(module: str, df: pd.DataFrame, chart_token: str) 
             token = hashlib.sha1(str(module).encode("utf-8")).hexdigest()[:12]
             st.session_state[f"liveviz_last_figure_json_{token}"] = fig.to_json()
             st.session_state[f"liveviz_last_chart_config_{token}"] = {"chart": auto_chart, "x": x, "y": y, "z": z, "mode": "auto-dashboard"}
-        except Exception:
-            pass
+        except Exception as exc:
+            logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
     else:
         st.info("No compatible automatic visualization could be inferred from the current table. Use Custom Engineering Views below.")
 
@@ -740,8 +741,8 @@ def render_live_visualization_studio(module: str, *, expanded: bool = False, pre
                 "filter_value": filter_value,
                 "title": title,
             }
-        except Exception:
-            pass
+        except Exception as exc:
+            logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
 
         left, right = st.columns(2)
         chart_token = hashlib.sha1(str(module).encode("utf-8")).hexdigest()[:12]
@@ -994,8 +995,8 @@ def guaranteed_figure(df: pd.DataFrame, title: str = "Universal Engineering View
                 title=f"{title} · Data completeness",
                 labels={"x": "Field", "y": "Completeness %"},
             )
-    except Exception:
-        pass
+    except Exception as exc:
+        logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
 
     # Last-resort coverage chart: this is metadata, never a fabricated KPI.
     try:
@@ -1318,5 +1319,5 @@ def _render_auto_kpi_dashboard(module: str, df: pd.DataFrame, chart_token: str) 
                     "title": title,
                     "mode": "auto-suite",
                 }
-            except Exception:
-                pass
+            except Exception as exc:
+                logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
