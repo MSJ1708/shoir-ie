@@ -1,4 +1,3 @@
-from shoir_repository import sqlite_connect as shoir_sqlite_connect
 """Shoir-IE 160-capability Industrial Operating System layer.
 
 This module is intentionally additive. It unifies the existing Shoir-IE engines behind
@@ -12,6 +11,7 @@ credentials/endpoints are supplied. Demo/illustrative values are explicitly labe
 No persistent user data is deleted by this layer.
 """
 from __future__ import annotations
+from shoir_repository import sqlite_connect as shoir_sqlite_connect
 
 import hashlib
 import io
