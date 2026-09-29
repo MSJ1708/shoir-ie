@@ -5,6 +5,7 @@ contract and upgrades it into first-class industrial datasets without replacing 
 existing cleaning/rendering engines.
 """
 from __future__ import annotations
+import logging
 
 import hashlib
 import io
@@ -347,8 +348,8 @@ def fidelity_report(raw: bytes, filename: str) -> dict[str, Any]:
         report["Pivot structures present"] = bool(getattr(book, "_pivots", []))
         try:
             book.close()
-        except Exception:
-            pass
+        except Exception as exc:
+            logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
     except Exception as exc:
         report["Fidelity warning"] = f"Inspection incomplete: {type(exc).__name__}: {exc}"
 
