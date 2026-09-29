@@ -2951,6 +2951,81 @@ def derive_formula_unit(formula: str, input_units: Mapping[str, str]) -> dict[st
 
 
 
+def unified_optimization(
+    method: str,
+    objective: Sequence[float] | pd.DataFrame,
+    *,
+    A_ub: Sequence[Sequence[float]] | None = None,
+    b_ub: Sequence[float] | None = None,
+    A_eq: Sequence[Sequence[float]] | None = None,
+    b_eq: Sequence[float] | None = None,
+    bounds: Sequence[tuple[float | None, float | None]] | None = None,
+    scenario_objectives: Sequence[Sequence[float]] | None = None,
+    probabilities: Sequence[float] | None = None,
+    risk_aversion: float = 0.0,
+    quadratic: Sequence[Sequence[float]] | None = None,
+    objective_columns: Sequence[str] | None = None,
+) -> dict[str, Any]:
+    """Single optimization dispatcher with solver transparency and diagnostics."""
+    started = time.perf_counter()
+    key = str(method).lower().replace("_", "-").strip()
+    from shoir_optimization import (
+        solve_linear_program, solve_quadratic_program,
+        solve_robust_linear_program, solve_stochastic_linear_program,
+        pareto_weight_sweep,
+    )
+    if key in {"lp", "linear", "milp"}:
+        result = solve_linear_program(objective, A_ub=A_ub, b_ub=b_ub, A_eq=A_eq, b_eq=b_eq, bounds=bounds)
+        solver = "scipy-highs"
+    elif key in {"qp", "quadratic"}:
+        if quadratic is None:
+            raise ValueError("Quadratic optimization requires a quadratic matrix.")
+        result = solve_quadratic_program(objective, quadratic, A_ub=A_ub, b_ub=b_ub, A_eq=A_eq, b_eq=b_eq, bounds=bounds)
+        solver = "scipy-slsqp"
+    elif key in {"robust", "robust-lp"}:
+        result = solve_robust_linear_program(scenario_objectives or [], A_ub=A_ub, b_ub=b_ub, A_eq=A_eq, b_eq=b_eq, bounds=bounds)
+        solver = "scipy-highs"
+    elif key in {"stochastic", "stochastic-lp"}:
+        result = solve_stochastic_linear_program(scenario_objectives or [], probabilities, risk_aversion, A_ub=A_ub, b_ub=b_ub, A_eq=A_eq, b_eq=b_eq, bounds=bounds)
+        solver = "scipy-highs"
+    elif key in {"pareto", "multi-objective"}:
+        if not isinstance(objective, pd.DataFrame) or not objective_columns:
+            raise ValueError("Pareto optimization requires a DataFrame and objective_columns.")
+        table = pareto_weight_sweep(objective, objective_columns)
+        result = {"status": "Pareto set generated", "success": True, "solutions": table.to_dict("records")}
+        solver = "weighted pareto sweep"
+    else:
+        raise ValueError(f"Unsupported optimization method: {method}")
+
+    runtime_ms = (time.perf_counter() - started) * 1000.0
+    variables = result.get("variables")
+    slacks = []
+    if variables is not None and A_ub is not None and b_ub is not None:
+        x = np.asarray(variables, dtype=float)
+        for i, (row, bound) in enumerate(zip(np.asarray(A_ub, dtype=float), np.asarray(b_ub, dtype=float))):
+            lhs = float(row @ x)
+            slack = float(bound - lhs)
+            slacks.append({"constraint": i, "lhs": lhs, "rhs": float(bound), "slack": slack, "binding": abs(slack) <= 1e-7})
+    result = {
+        **_jsonable(result),
+        "method": key,
+        "solver": solver,
+        "runtime_ms": round(runtime_ms, 3),
+        "feasibility": bool(result.get("success", False)),
+        "optimality_status": result.get("status"),
+        "optimality_gap": result.get("gap", None),
+        "binding_constraints": [x["constraint"] for x in slacks if x["binding"]],
+        "constraint_slacks": slacks,
+    }
+    record_id = save_platform_record(
+        "optimization_run",
+        stable_id("OPT"),
+        {"method": key, "solver": solver, "diagnostics": result, "created_at": now_iso()},
+    )
+    result["record_id"] = record_id
+    return result
+
+
 __all__ = [
     "WORKFLOW_STEPS", "ACTION_LEVELS", "CAPABILITY_STATES",
     "db_backend", "configured_database_url", "db_connect", "ensure_core_schema", "remote_persistence_configured",
@@ -2967,6 +3042,6 @@ __all__ = [
     "connector_health", "submit_background_job", "decision_memory_query", "save_decision_memory",
     "benchmark_compare", "verification_suite", "render_engineering_canvas", "render_platform_completion",
     "research_study_record", "lock_research_protocol", "add_research_citation", "roi_evidence_snapshot",
-    "digital_twin_cycle", "create_alert", "investigate_alert", "command_center_snapshot",
+    "digital_twin_cycle", "create_alert", "investigate_alert", "command_center_snapshot", "unified_optimization",
     "sync_project_state", "localization_config", "formatted_number",
 ]
