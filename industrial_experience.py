@@ -791,9 +791,8 @@ def create_research_protocol(study_id: str, protocol: Mapping[str, Any], owner: 
                 "created_at": created_at,
                 "updated_at": stamp,
             })
-    except Exception:
-        # Local persistence remains the fallback if managed storage is temporarily unavailable.
-        pass
+    except Exception as exc:
+        logging.getLogger(__name__).warning("Remote research persistence unavailable; keeping local record: %s", exc)
     return research_id, protocol_hash
 
 
