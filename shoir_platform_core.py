@@ -554,8 +554,10 @@ def begin_module(module: str, *, workspace: str = "default", actor: str = "syste
                     stage = str(payload.get("stage") or "").upper()
                     if stage in WORKFLOW_STEPS:
                         runtime.stage_index = max(runtime.stage_index, WORKFLOW_STEPS.index(stage))
-    except Exception:
-        pass
+    except Exception as exc:
+        st.session_state.setdefault("shoir_platform_warnings", []).append({
+            "scope": "workflow_restore", "type": type(exc).__name__, "message": str(exc), "at": now_iso(),
+        })
     runtime.context(df)
     st.session_state["shoir_active_runtime"] = runtime
     return runtime
@@ -2026,8 +2028,10 @@ def _redact_endpoint(value: str) -> str:
             if p.port:
                 netloc += f":{p.port}"
             return p._replace(netloc=netloc).geturl()
-    except Exception:
-        pass
+    except Exception as exc:
+        st.session_state.setdefault("shoir_platform_warnings", []).append({
+            "scope": "endpoint_redaction", "type": type(exc).__name__, "message": str(exc), "at": now_iso(),
+        })
     return re.sub(r"(?i)(password|token|secret)=([^&\s]+)", r"\1=***", value)
 
 
