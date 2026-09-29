@@ -1,4 +1,5 @@
 from shoir_observability import log_exception
+from shoir_repository import sqlite_connect as shoir_sqlite_connect
 import streamlit as st
 import pulp
 import math
@@ -39,7 +40,6 @@ from shoir_digital_thread import render_global_project_digital_thread
 from shoir_enterprise_services import render_enterprise_bridge
 from durable_account_store import (durable_backend_configured, sync_durable_accounts, sync_remote_requests_to_local, edge_login, edge_admin_list_requests, edge_renew_request, upsert_remote_account, insert_remote_request, remote_account, account_is_expired, renewed_expiry)
 from shoir_enterprise_layer import (
-from shoir_repository import sqlite_connect as shoir_sqlite_connect
     ensure_enterprise_schema, save_twin_snapshot, load_twin_state, save_twin_scenario,
     list_twin_scenarios, twin_what_if, twin_replay, build_control_tower_health,
     record_connector_health, connector_health_frame, validate_connector_profile,
