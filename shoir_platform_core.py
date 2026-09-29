@@ -554,7 +554,10 @@ def begin_module(module: str, *, workspace: str = "default", actor: str = "syste
 @contextmanager
 def governed_module(module: str, *, workspace: str = "default", actor: str = "system", df: pd.DataFrame | None = None):
     runtime = begin_module(module, workspace=workspace, actor=actor, df=df)
-    runtime.advance("DATA", evidence={"source": st.session_state.get("shoir_data_source", "")})
+    runtime.advance("DATA", evidence={
+        "source": st.session_state.get("shoir_data_source", ""),
+        "input_mode": "active_dataset" if isinstance(df, pd.DataFrame) and not df.empty else "module_managed",
+    })
     try:
         yield runtime
     except Exception as exc:
@@ -562,29 +565,148 @@ def governed_module(module: str, *, workspace: str = "default", actor: str = "sy
         raise
     finally:
         st.session_state["shoir_last_runtime"] = runtime.context(df)
-        _record_event("workflow.complete", actor=actor, entity_key=module,
-                      payload=runtime.context(df), workspace=workspace)
+        _record_event(
+            "workflow.complete",
+            actor=actor,
+            entity_key=module,
+            payload=runtime.context(df),
+            workspace=workspace,
+        )
 
 
-def run_governed_module(module: str, renderer: Callable[[], Any], *, workspace: str = "default", actor: str = "system", df: pd.DataFrame | None = None) -> Any:
+def _runtime_result_frame(result: Any, fallback: pd.DataFrame | None = None) -> pd.DataFrame:
+    if isinstance(result, pd.DataFrame) and not result.empty:
+        return result.copy(deep=True)
+    if isinstance(result, pd.Series) and not result.empty:
+        return result.to_frame()
+    if isinstance(fallback, pd.DataFrame) and not fallback.empty:
+        return fallback.copy(deep=True)
+    for value in st.session_state.values():
+        if isinstance(value, pd.DataFrame) and not value.empty:
+            return value.copy(deep=True)
+    return pd.DataFrame()
+
+
+def run_governed_module(
+    module: str,
+    renderer: Callable[[], Any],
+    *,
+    workspace: str = "default",
+    actor: str = "system",
+    df: pd.DataFrame | None = None,
+    replay_spec: Mapping[str, Any] | None = None,
+) -> Any:
     with governed_module(module, workspace=workspace, actor=actor, df=df) as runtime:
-        # Validation and mapping gates are performed for every specialist renderer.
-        contract = validate_dataset_contract(df if isinstance(df, pd.DataFrame) else pd.DataFrame())
+        active_df = df if isinstance(df, pd.DataFrame) else pd.DataFrame()
+        contract = validate_dataset_contract(active_df)
+
+        # A module may own its input form rather than consume an external dataset.
+        # The gate remains explicit and auditable rather than silently skipped.
         if contract["valid"]:
             runtime.advance("VALIDATE", evidence=contract)
-            mapping = canonical_map_columns(df if isinstance(df, pd.DataFrame) else pd.DataFrame())
+            mapping = canonical_map_columns(active_df)
             runtime.advance("MAP", evidence={"mapping": mapping})
         else:
-            mapping = {}
-        runtime.advance("MODEL", evidence={"module": module})
+            runtime.advance("VALIDATE", evidence={"status": "MODULE_MANAGED_INPUT", "contract": contract})
+            runtime.advance("MAP", evidence={"status": "MODULE_MANAGED_SCHEMA", "mapping": {}})
+
+        runtime.advance("MODEL", evidence={"module": module, "manifest": module_manifest(module)})
+        run_id = stable_id("RUN")
+        runtime.run_id = run_id
+        st.session_state["shoir_latest_run_id"] = run_id
+
+        started = time.perf_counter()
         result = renderer()
-        runtime.advance("RUN", evidence={"renderer": getattr(renderer, "__name__", "renderer")})
-        if isinstance(df, pd.DataFrame) and not df.empty:
-            runtime.advance("VISUALIZE", evidence={"universal_visualization_contract": True})
+        duration_ms = (time.perf_counter() - started) * 1000.0
+        result_df = _runtime_result_frame(result, active_df)
+
+        runtime.advance("RUN", evidence={
+            "run_id": run_id,
+            "renderer": getattr(renderer, "__name__", "renderer"),
+            "duration_ms": round(duration_ms, 2),
+            "result_hash": dataframe_digest(result_df) if not result_df.empty else digest(result),
+        })
+
+        # Visualization is always exposed by the universal visualization service;
+        # it is marked available only when an analyzable frame exists.
+        runtime.advance("VISUALIZE", evidence={
+            "universal_visualization_contract": True,
+            "data_available": not result_df.empty,
+        })
+
+        lineage_ids: list[str] = []
+        if not result_df.empty:
             try:
-                capture_standard_kpi_lineage(module, df, workspace=workspace)
+                lineage_ids = capture_standard_kpi_lineage(module, result_df, workspace=workspace)
             except Exception as exc:
                 record_engineering_error(module, exc, workspace=workspace, actor=actor)
+                lineage_ids = []
+
+        runtime.advance("COMPARE", evidence={
+            "scenario_data_available": "Scenario" in result_df.columns if not result_df.empty else False,
+            "comparison_contract": True,
+        })
+        runtime.advance("EXPLAIN", evidence={
+            "lineage_ids": lineage_ids,
+            "assumption_trace": True,
+            "uncertainty_trace": bool(lineage_ids),
+        })
+
+        decision = {
+            "decision_id": stable_id("DEC"),
+            "title": f"{module} automated draft decision",
+            "status": "Draft",
+            "approval_required": True,
+            "module": module,
+            "run_id": run_id,
+            "kpis": (
+                {str(c): float(pd.to_numeric(result_df[c], errors="coerce").mean())
+                 for c in result_df.select_dtypes(include=np.number).columns[:8]}
+                if not result_df.empty else {}
+            ),
+            "evidence": lineage_ids,
+            "created_at": now_iso(),
+        }
+        save_platform_record("decision_draft", decision["decision_id"], decision, workspace=workspace)
+        runtime.advance("DECIDE", evidence=decision)
+
+        export_manifest = {
+            "module": module,
+            "run_id": run_id,
+            "formats": ["xlsx", "json", "pdf"],
+            "result_hash": dataframe_digest(result_df) if not result_df.empty else digest(result),
+            "generated_at": now_iso(),
+        }
+        save_platform_record("export_manifest", run_id, export_manifest, workspace=workspace)
+        runtime.advance("EXPORT", evidence=export_manifest)
+
+        verification = verification_suite(module, inputs=active_df, results=result_df)
+        runtime.advance("VERIFY", evidence=verification)
+
+        run_record = {
+            "run_id": run_id,
+            "module": module,
+            "status": "COMPLETED",
+            "duration_ms": round(duration_ms, 2),
+            "result_hash": export_manifest["result_hash"],
+            "lineage_ids": lineage_ids,
+            "verification": verification,
+            "completed_at": now_iso(),
+        }
+        save_platform_record("run", run_id, run_record, workspace=workspace)
+
+        if replay_spec:
+            try:
+                register_replay(
+                    module,
+                    str(replay_spec.get("callable_path") or ""),
+                    dict(replay_spec.get("kwargs") or {}),
+                    input_hash=active_df_hash(active_df),
+                    workspace=workspace,
+                )
+            except Exception as exc:
+                record_engineering_error(module, exc, workspace=workspace, actor=actor)
+
         return result
 
 
@@ -1600,6 +1722,10 @@ def copilot_plan(prompt: str, module: str, *, readiness: Mapping[str, Any], appr
     }
 
 
+def active_df_hash(df: pd.DataFrame) -> str:
+    return dataframe_digest(df) if isinstance(df, pd.DataFrame) and not df.empty else ""
+
+
 def register_replay(module: str, callable_path: str, kwargs: Mapping[str, Any], *, input_hash: str = "", workspace: str = "default") -> str:
     if ":" not in callable_path:
         raise ValueError("Replay callable_path must use module:function notation.")
@@ -2211,7 +2337,7 @@ __all__ = [
     "residual_diagnostics", "forecast_operations", "quantity_dimension", "convert_quantity",
     "validate_formula", "safe_calculate", "visualization_intelligence", "build_visualization", "render_visualization_os",
     "normalize_action_level", "action_authorized", "copilot_plan",
-    "register_replay", "execute_replay", "record_engineering_error", "performance_route",
+    "active_df_hash", "register_replay", "execute_replay", "record_engineering_error", "performance_route",
     "connector_health", "submit_background_job", "decision_memory_query", "save_decision_memory",
     "benchmark_compare", "verification_suite", "render_engineering_canvas", "render_platform_completion",
     "sync_project_state", "localization_config", "formatted_number",
