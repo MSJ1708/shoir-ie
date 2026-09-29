@@ -1434,7 +1434,7 @@ def render_presentation_report() -> None:
 
 def render_modes_and_localization() -> None:
     with st.expander("Experience Modes / Localization / Accessibility", expanded=False):
-        a, b, c = st.columns(3)
+        a, b, c, d, e = st.columns(5)
         with a:
             mode = st.selectbox("Information density", ["Engineer", "Manager", "Executive"], index=["Engineer", "Manager", "Executive"].index(workspace_mode()), key="shoir_os_mode")
             st.session_state["shoir_view_mode"] = mode
@@ -1444,9 +1444,24 @@ def render_modes_and_localization() -> None:
         with c:
             reduced = st.checkbox("Reduced motion", value=bool(st.session_state.get("shoir_reduced_motion", False)), key="shoir_os_reduced_motion")
             st.session_state["shoir_reduced_motion"] = reduced
+        with d:
+            focus = st.checkbox("Focus Mode", value=bool(st.session_state.get("shoir_focus_mode", False)), key="shoir_os_focus_mode")
+            st.session_state["shoir_focus_mode"] = focus
+        with e:
+            contrast = st.checkbox("High contrast", value=bool(st.session_state.get("shoir_high_contrast", False)), key="shoir_os_high_contrast")
+            st.session_state["shoir_high_contrast"] = contrast
+        styles = []
         if st.session_state.get("shoir_rtl"):
-            st.markdown("<style>.shoir-os-canvas,.shoir-os-canvas *{direction:rtl;text-align:right}.shoir-os-panel{text-align:right}</style>", unsafe_allow_html=True)
-        st.caption("Engineer exposes the full workflow; Manager emphasizes KPI/scenario/decision; Executive emphasizes impact/risk/status. Arabic applies RTL to the platform surface; specialist text is shown in its authored language unless separately localized.")
+            styles.append(".shoir-os-canvas,.shoir-os-canvas *{direction:rtl;text-align:right}.shoir-os-panel{text-align:right}")
+        if focus:
+            styles.append("[data-testid='stSidebar']{display:none!important} .block-container{max-width:1450px!important;padding-top:1.5rem!important}")
+        if contrast:
+            styles.append(":root{filter:contrast(1.12)} .stButton>button,.stDownloadButton>button{border-width:2px!important}")
+        if reduced:
+            styles.append("*,*::before,*::after{animation-duration:0.001ms!important;transition-duration:0.001ms!important;scroll-behavior:auto!important}")
+        if styles:
+            st.markdown("<style>" + " ".join(styles) + "</style>", unsafe_allow_html=True)
+        st.caption("Engineer exposes the full workflow; Manager emphasizes KPI/scenario/decision; Executive emphasizes impact/risk/status. Focus Mode reduces distraction and high contrast strengthens visual separation. Arabic applies RTL to the platform surface.")
 
 def render_capability_status() -> None:
     df = core_capability_ledger()
