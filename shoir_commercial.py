@@ -11,6 +11,8 @@ claims.
 """
 from __future__ import annotations
 
+from shoir_repository import sqlite_connect as shoir_sqlite_connect
+
 import hashlib
 import io
 import json
@@ -81,7 +83,7 @@ UNIT_MAP = {
 
 def _db():
     ensure_experience_db()
-    return sqlite3.connect("enterprise_full_workspace.db", timeout=30)
+    return shoir_sqlite_connect("enterprise_full_workspace.db", timeout=30)
 
 
 def _now():
