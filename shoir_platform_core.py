@@ -2006,6 +2006,27 @@ def active_df_hash(df: pd.DataFrame) -> str:
     return dataframe_digest(df) if isinstance(df, pd.DataFrame) and not df.empty else ""
 
 
+def validate_replay_target(callable_path: str) -> tuple[str, str]:
+    """Validate a replay target against Shoir-IE's executable-module allowlist."""
+    path = str(callable_path or "").strip()
+    if path.count(":") != 1:
+        raise ValueError("Replay callable_path must use module:function notation.")
+    module_name, func_name = (part.strip() for part in path.split(":", 1))
+    if not re.fullmatch(r"[A-Za-z_]\\w*(?:\\.[A-Za-z_]\\w*)*", module_name):
+        raise ValueError("Replay module path contains unsupported characters.")
+    if not re.fullmatch(r"[A-Za-z_]\\w*", func_name) or func_name.startswith("__"):
+        raise ValueError("Replay function name is invalid.")
+    allowed_prefixes = ("shoir_", "industrial_", "research_", "workspace_", "durable_")
+    test_mode = bool(os.getenv("PYTEST_CURRENT_TEST"))
+    if not (module_name.startswith(allowed_prefixes) or (test_mode and module_name.startswith("tests."))):
+        raise PermissionError(f"Replay target is outside the Shoir-IE executable allowlist: {module_name}")
+    module = importlib.import_module(module_name)
+    func = getattr(module, func_name, None)
+    if not callable(func):
+        raise ValueError(f"Replay target is not callable: {path}")
+    return module_name, func_name
+
+
 def register_replay(
     module: str,
     callable_path: str,
@@ -2016,8 +2037,7 @@ def register_replay(
     seed: int | None = None,
     workspace: str = "default",
 ) -> str:
-    if ":" not in str(callable_path):
-        raise ValueError("Replay callable_path must use module:function notation.")
+    validate_replay_target(str(callable_path))
     payload = {
         "module": str(module),
         "callable_path": str(callable_path),
@@ -2053,8 +2073,9 @@ def execute_replay(
     enforce_input_hash: bool = True,
 ) -> Any:
     path = str(record.get("callable_path") or "")
-    if ":" not in path:
+    if not path:
         raise ValueError("Replay record has no callable path.")
+    module_name, func_name = validate_replay_target(path)
     frame = current_input if isinstance(current_input, pd.DataFrame) else active_dataframe()[0]
     expected_input = str(record.get("input_hash") or "")
     actual_input = dataframe_digest(frame) if not frame.empty else ""
@@ -2068,11 +2089,6 @@ def execute_replay(
         }
         st.session_state["shoir_last_replay_result"] = verification
         raise RuntimeError("Replay input fingerprint mismatch; restore the captured dataset version before replaying.")
-    module_name, func_name = path.split(":", 1)
-    module = importlib.import_module(module_name)
-    func = getattr(module, func_name, None)
-    if not callable(func):
-        raise ValueError(f"Replay target is not callable: {path}")
     started = time.perf_counter()
     result = func(**dict(record.get("kwargs") or {}))
     duration = (time.perf_counter() - started) * 1000.0
