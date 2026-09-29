@@ -514,11 +514,38 @@ class WorkflowRuntime:
         st.session_state.setdefault("shoir_workflow_history", []).append({
             "module": self.module, "stage": self.stage, "at": now_iso(),
         })
+        save_platform_record(
+            "workflow",
+            self.module,
+            {
+                "module": self.module,
+                "stage": self.stage,
+                "stage_index": self.stage_index,
+                "run_id": self.run_id,
+                "data_hash": self.data_hash,
+                "at": now_iso(),
+            },
+            workspace=self.workspace,
+        )
 
 
 def begin_module(module: str, *, workspace: str = "default", actor: str = "system", df: pd.DataFrame | None = None) -> WorkflowRuntime:
     runtime = WorkflowRuntime(str(module), workspace=workspace, actor=actor)
     runtime.provenance = str(st.session_state.get("shoir_data_provenance", st.session_state.get("shoir_provenance", "DEMO"))).upper()
+    try:
+        prior = repository_records("workflow", workspace=workspace, limit=100)
+        if not prior.empty:
+            for _, row in prior.iterrows():
+                try:
+                    payload = json.loads(str(row["payload_json"]))
+                except Exception:
+                    continue
+                if str(payload.get("module")) == str(module):
+                    stage = str(payload.get("stage") or "").upper()
+                    if stage in WORKFLOW_STEPS:
+                        runtime.stage_index = max(runtime.stage_index, WORKFLOW_STEPS.index(stage))
+    except Exception:
+        pass
     runtime.context(df)
     st.session_state["shoir_active_runtime"] = runtime
     return runtime
@@ -552,6 +579,12 @@ def run_governed_module(module: str, renderer: Callable[[], Any], *, workspace: 
         runtime.advance("MODEL", evidence={"module": module})
         result = renderer()
         runtime.advance("RUN", evidence={"renderer": getattr(renderer, "__name__", "renderer")})
+        if isinstance(df, pd.DataFrame) and not df.empty:
+            runtime.advance("VISUALIZE", evidence={"universal_visualization_contract": True})
+            try:
+                capture_standard_kpi_lineage(module, df, workspace=workspace)
+            except Exception as exc:
+                record_engineering_error(module, exc, workspace=workspace, actor=actor)
         return result
 
 
@@ -803,6 +836,118 @@ def attach_uncertainty(module: str, result: pd.DataFrame | pd.Series | Sequence[
     save_platform_record("uncertainty", f"{module}:{kpi or 'result'}", payload, workspace=workspace)
     st.session_state["shoir_uncertainty_last"] = payload
     return summary
+
+
+
+def _safe_workspace() -> tuple[str, str]:
+    actor = str(st.session_state.get("current_user") or st.session_state.get("username") or "system")
+    workspace = str(st.session_state.get("workspace") or st.session_state.get("active_workspace") or "default")
+    return actor, workspace
+
+
+def capture_standard_kpi_lineage(
+    module: str,
+    df: pd.DataFrame,
+    *,
+    workspace: str = "default",
+    numeric_limit: int = 8,
+) -> list[str]:
+    """Capture first-order lineage for each numeric KPI visible in a result frame."""
+    if not isinstance(df, pd.DataFrame) or df.empty:
+        return []
+    dataset = {
+        "source": st.session_state.get("shoir_data_source", "active_workspace"),
+        "version": st.session_state.get("shoir_data_version", "session"),
+        "sha256": st.session_state.get("shoir_data_hash") or dataframe_digest(df),
+        "rows": int(len(df)),
+        "columns": int(len(df.columns)),
+    }
+    run = {
+        "run_id": st.session_state.get("shoir_latest_run_id") or st.session_state.get("last_run_id") or "",
+        "engine": str(module),
+        "captured_at": now_iso(),
+    }
+    ids: list[str] = []
+    for col in list(df.select_dtypes(include=np.number).columns)[:max(1, int(numeric_limit))]:
+        values = pd.to_numeric(df[col], errors="coerce").dropna().to_numpy(dtype=float)
+        if values.size == 0:
+            continue
+        summary = uncertainty_engine(values)
+        ids.append(
+            kpi_lineage(
+                module=str(module),
+                kpi=str(col),
+                value=float(np.mean(values)),
+                dataset=dataset,
+                transformations=["numeric coercion", "missing-value exclusion", "mean aggregation"],
+                model={"type": "descriptive_statistic", "operation": "mean"},
+                formula={"expression": f"mean({col})", "unit": "module-declared / not inferred"},
+                assumptions={"rows_used": int(values.size), "aggregation": "arithmetic mean"},
+                uncertainty=summary,
+                run=run,
+                evidence=[f"dataset_sha256:{dataset['sha256']}"],
+                workspace=workspace,
+            )
+        )
+    return ids
+
+
+def fit_response_surface(
+    data: pd.DataFrame,
+    response: str,
+    factors: Sequence[str],
+    *,
+    include_interactions: bool = True,
+    quadratic: bool = True,
+) -> tuple[dict[str, Any], pd.DataFrame]:
+    """Fit a transparent second-order response surface by least squares."""
+    if not isinstance(data, pd.DataFrame) or data.empty:
+        raise ValueError("Response-surface fitting requires data.")
+    factors = [str(x) for x in factors if str(x) in data.columns]
+    if not factors or str(response) not in data.columns:
+        raise ValueError("Response and at least one factor column are required.")
+    response = str(response)
+    work = data[factors + [response]].copy()
+    for col in factors + [response]:
+        work[col] = pd.to_numeric(work[col], errors="coerce")
+    work = work.dropna()
+    if len(work) <= len(factors) + 2:
+        raise ValueError("Not enough complete observations to fit the response surface.")
+
+    terms: list[tuple[str, np.ndarray]] = [("Intercept", np.ones(len(work)))]
+    for col in factors:
+        vals = work[col].to_numpy(dtype=float)
+        terms.append((col, vals))
+        if quadratic:
+            terms.append((f"{col}^2", vals ** 2))
+    if include_interactions:
+        for i, left in enumerate(factors):
+            for right in factors[i + 1:]:
+                terms.append((f"{left}:{right}", (work[left] * work[right]).to_numpy(dtype=float)))
+
+    X = np.column_stack([vals for _, vals in terms])
+    y = work[response].to_numpy(dtype=float)
+    beta, *_ = np.linalg.lstsq(X, y, rcond=None)
+    fitted = X @ beta
+    residual = y - fitted
+    ss_res = float(np.sum(residual ** 2))
+    ss_tot = float(np.sum((y - np.mean(y)) ** 2))
+    model = {
+        "response": response,
+        "factors": factors,
+        "terms": [name for name, _ in terms],
+        "coefficients": {name: float(coef) for (name, _), coef in zip(terms, beta)},
+        "r2": float(1.0 - ss_res / ss_tot) if ss_tot else 1.0,
+        "rmse": float(np.sqrt(np.mean(residual ** 2))),
+        "n": int(len(work)),
+        "method": "ordinary least squares second-order response surface",
+        "quadratic": bool(quadratic),
+        "interactions": bool(include_interactions),
+    }
+    fitted_frame = work.copy()
+    fitted_frame["Predicted"] = fitted
+    fitted_frame["Residual"] = residual
+    return model, fitted_frame
 
 
 def scenario_analysis(
@@ -1849,6 +1994,62 @@ def verification_suite(
     return report
 
 
+
+def replay_records(*, workspace: str = "default", limit: int = 100) -> pd.DataFrame:
+    rows = repository_records("replay", workspace=workspace, limit=limit)
+    if rows.empty:
+        return rows
+    out = []
+    for _, row in rows.iterrows():
+        try:
+            payload = json.loads(str(row["payload_json"]))
+        except Exception:
+            payload = {}
+        out.append({
+            "Replay ID": row["record_id"],
+            "Module": payload.get("module"),
+            "Callable": payload.get("callable_path"),
+            "Input Hash": payload.get("input_hash"),
+            "Created": payload.get("created_at"),
+        })
+    return pd.DataFrame(out)
+
+
+def lineage_graph_frame(*, workspace: str = "default", limit: int = 100) -> tuple[pd.DataFrame, pd.DataFrame]:
+    rows = repository_records("kpi_lineage", workspace=workspace, limit=limit)
+    if rows.empty:
+        return pd.DataFrame(), pd.DataFrame()
+    nodes: dict[str, dict[str, Any]] = {}
+    edges: list[dict[str, Any]] = []
+    for _, row in rows.iterrows():
+        try:
+            payload = json.loads(str(row["payload_json"]))
+        except Exception:
+            continue
+        kpi_id = f"kpi:{payload.get('module')}:{payload.get('kpi')}"
+        nodes[kpi_id] = {
+            "id": kpi_id,
+            "label": f"{payload.get('kpi')} = {payload.get('value')}",
+            "type": "KPI",
+        }
+        previous = kpi_id
+        for kind, value in (
+            ("dataset", payload.get("dataset")),
+            ("model", payload.get("model")),
+            ("formula", payload.get("formula")),
+            ("scenario", payload.get("scenario")),
+            ("run", payload.get("run")),
+            ("uncertainty", payload.get("uncertainty")),
+        ):
+            if not value:
+                continue
+            node_id = f"{kind}:{hashlib.sha256(canonical_json(value).encode('utf-8')).hexdigest()[:12]}"
+            nodes[node_id] = {"id": node_id, "label": f"{kind.title()}: {canonical_json(value)[:70]}", "type": kind.upper()}
+            edges.append({"source": previous, "target": node_id, "relation": "EXPLAINS"})
+            previous = node_id
+    return pd.DataFrame(nodes.values()), pd.DataFrame(edges)
+
+
 def render_platform_completion(module: str, df: pd.DataFrame, *, allowed_modules: Sequence[str] = ()) -> None:
     """Unified completion console surfaced beside the existing OS layer."""
     if not st.session_state.get("authenticated"):
@@ -2004,8 +2205,9 @@ __all__ = [
     "data_readiness", "validate_dataset_contract", "canonical_map_columns",
     "WorkflowRuntime", "begin_module", "governed_module", "run_governed_module",
     "module_manifest", "capability_ledger", "kpi_lineage", "render_kpi_lineage",
+    "capture_standard_kpi_lineage", "lineage_graph_frame", "replay_records",
     "uncertainty_engine", "attach_uncertainty", "scenario_analysis", "explain_scenario_changes", "scenario_fork",
-    "factorial_design", "fractional_factorial_design", "response_surface_design", "replication_planner",
+    "factorial_design", "fractional_factorial_design", "response_surface_design", "replication_planner", "fit_response_surface",
     "residual_diagnostics", "forecast_operations", "quantity_dimension", "convert_quantity",
     "validate_formula", "safe_calculate", "visualization_intelligence", "build_visualization", "render_visualization_os",
     "normalize_action_level", "action_authorized", "copilot_plan",
