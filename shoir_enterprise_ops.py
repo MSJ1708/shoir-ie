@@ -6,6 +6,7 @@ shown as unavailable rather than replaced with invented performance.
 """
 
 from __future__ import annotations
+import logging
 
 import hashlib
 import io
@@ -566,10 +567,10 @@ def security_posture() -> pd.DataFrame:
                 block = st.secrets[section]
                 if isinstance(block, Mapping):
                     secret_keys.extend([f"{section}.{k}" for k in block.keys()])
-            except Exception:
-                pass
-    except Exception:
-        pass
+            except Exception as exc:
+                logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
+    except Exception as exc:
+        logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
 
     oidc = any(k.startswith("oidc.") or k.startswith("sso.") or k.startswith("authentication.") for k in secret_keys)
     mfa = any(k.startswith("mfa.") for k in secret_keys)
