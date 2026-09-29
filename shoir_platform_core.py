@@ -32,6 +32,7 @@ import traceback
 import uuid
 from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import contextmanager
+from shoir_repository import sqlite_connect as shoir_sqlite_connect
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from ftplib import FTP
@@ -161,7 +162,7 @@ def db_connect(path: str | None = None, timeout: int = 30):
         conn = psycopg2.connect(configured_database_url(), connect_timeout=max(5, int(timeout)))
         conn.autocommit = False
         return conn
-    conn = sqlite3.connect(path or DEFAULT_DB_PATH, timeout=timeout, check_same_thread=False)
+    conn = shoir_sqlite_connect(path or DEFAULT_DB_PATH, timeout=timeout)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
     conn.execute("PRAGMA foreign_keys=ON")
@@ -1940,7 +1941,7 @@ class SQLConnector(ConnectorAdapter):
                 return pd.read_sql_query(query, conn)
         if url.startswith("sqlite:///"):
             path = url.removeprefix("sqlite:///")
-            with sqlite3.connect(path) as conn:
+            with shoir_sqlite_connect(path) as conn:
                 return pd.read_sql_query(query, conn)
         if oracledb is not None and url.startswith("oracle://"):
             with oracledb.connect(url.removeprefix("oracle://")) as conn:
