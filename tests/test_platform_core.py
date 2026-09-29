@@ -184,3 +184,18 @@ def test_app_entrypoint_is_thin_and_runtime_holds_application():
     assert len(entry) < 1000
     assert "import shoir_app_runtime" in entry
     assert "render_platform_os_surface" in runtime
+
+
+
+def test_unified_optimization_exposes_solver_transparency():
+    result = unified_optimization(
+        "LP",
+        [1, 2],
+        A_ub=[[1, 1]],
+        b_ub=[10],
+        bounds=[(0, None), (0, None)],
+    )
+    assert result["success"] is True
+    assert result["solver"] == "scipy-highs"
+    assert "constraint_slacks" in result
+    assert "runtime_ms" in result
