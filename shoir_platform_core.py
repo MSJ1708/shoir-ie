@@ -1409,7 +1409,8 @@ def fractional_factorial_design(
     for idx, name in enumerate(names[base_count:], start=1):
         source = gen_specs.get(name)
         if not source:
-            source = [base_names[(idx - 1) % len(base_names)], base_names[idx % len(base_names)] if len(base_names) > 1 else base_names[0]]
+            available = names[:base_count + idx - 1]
+            source = [available[0], available[-1]] if len(available) >= 2 else [available[0]]
         levels = []
         for _, row in design.iterrows():
             sign = 1
@@ -1972,22 +1973,34 @@ def active_df_hash(df: pd.DataFrame) -> str:
     return dataframe_digest(df) if isinstance(df, pd.DataFrame) and not df.empty else ""
 
 
-def register_replay(module: str, callable_path: str, kwargs: Mapping[str, Any], *, input_hash: str = "", workspace: str = "default") -> str:
-    if ":" not in callable_path:
+def register_replay(
+    module: str,
+    callable_path: str,
+    kwargs: Mapping[str, Any],
+    *,
+    input_hash: str = "",
+    result_hash: str = "",
+    seed: int | None = None,
+    workspace: str = "default",
+) -> str:
+    if ":" not in str(callable_path):
         raise ValueError("Replay callable_path must use module:function notation.")
     payload = {
-        "module": module,
-        "callable_path": callable_path,
+        "module": str(module),
+        "callable_path": str(callable_path),
         "kwargs": _jsonable(kwargs),
-        "input_hash": input_hash,
+        "input_hash": str(input_hash or ""),
+        "expected_result_hash": str(result_hash or ""),
+        "seed": seed,
         "python": platform.python_version(),
+        "numpy": np.__version__,
+        "pandas": pd.__version__,
         "created_at": now_iso(),
         "schema_version": SCHEMA_VERSION,
     }
     rid = save_platform_record("replay", f"{module}:{callable_path}", payload, workspace=workspace)
     st.session_state["shoir_last_replay_id"] = rid
     return rid
-
 
 
 def get_replay_record(replay_id: str, *, workspace: str = "default") -> dict[str, Any]:
@@ -2000,29 +2013,56 @@ def get_replay_record(replay_id: str, *, workspace: str = "default") -> dict[str
     return _payload_from_value(matches.iloc[0]["payload_json"])
 
 
-def execute_replay(record: Mapping[str, Any]) -> Any:
+def execute_replay(
+    record: Mapping[str, Any],
+    *,
+    current_input: pd.DataFrame | None = None,
+    enforce_input_hash: bool = True,
+) -> Any:
     path = str(record.get("callable_path") or "")
     if ":" not in path:
         raise ValueError("Replay record has no callable path.")
+    frame = current_input if isinstance(current_input, pd.DataFrame) else active_dataframe()[0]
+    expected_input = str(record.get("input_hash") or "")
+    actual_input = dataframe_digest(frame) if not frame.empty else ""
+    if enforce_input_hash and expected_input and actual_input != expected_input:
+        verification = {
+            "status": "INPUT_MISMATCH",
+            "callable_path": path,
+            "expected_input_hash": expected_input,
+            "actual_input_hash": actual_input,
+            "captured_at": now_iso(),
+        }
+        st.session_state["shoir_last_replay_result"] = verification
+        raise RuntimeError("Replay input fingerprint mismatch; restore the captured dataset version before replaying.")
     module_name, func_name = path.split(":", 1)
     module = importlib.import_module(module_name)
     func = getattr(module, func_name, None)
     if not callable(func):
         raise ValueError(f"Replay target is not callable: {path}")
-    kwargs = dict(record.get("kwargs") or {})
     started = time.perf_counter()
-    result = func(**kwargs)
-    duration = (time.perf_counter() - started) * 1000
-    result_hash = digest(result)
+    result = func(**dict(record.get("kwargs") or {}))
+    duration = (time.perf_counter() - started) * 1000.0
+    actual_hash = digest(result)
+    expected_hash = str(record.get("expected_result_hash") or "")
+    status = "PASS" if not expected_hash or actual_hash == expected_hash else "DRIFT"
+    verification = {
+        "status": status,
+        "callable_path": path,
+        "duration_ms": round(duration, 2),
+        "expected_result_hash": expected_hash,
+        "actual_result_hash": actual_hash,
+        "expected_input_hash": expected_input,
+        "actual_input_hash": actual_input,
+        "captured_at": now_iso(),
+    }
     _record_event(
         "replay.executed",
         actor=str(st.session_state.get("current_user", "system")),
         entity_key=path,
-        payload={"duration_ms": duration, "result_hash": result_hash, "replay_of": record.get("record_id")},
+        payload={"verification": verification, "replay_of": record.get("record_id")},
     )
-    st.session_state["shoir_last_replay_result"] = {
-        "callable_path": path, "duration_ms": round(duration, 2), "result_hash": result_hash,
-    }
+    st.session_state["shoir_last_replay_result"] = verification
     return result
 
 
@@ -2679,6 +2719,24 @@ def job_manager() -> JobManager:
     if _JOB_MANAGER is None:
         _JOB_MANAGER = JobManager(int(os.getenv("SHOIR_WORKERS", "4")))
     return _JOB_MANAGER
+
+
+def enqueue_callable_job(
+    module: str,
+    callable_path: str,
+    kwargs: Mapping[str, Any] | None = None,
+    *,
+    workspace: str = "default",
+    priority: int = 50,
+) -> str:
+    if ":" not in str(callable_path):
+        raise ValueError("callable_path must use module:function notation.")
+    return enqueue_distributed_job(
+        str(module),
+        {"callable_path": str(callable_path), "kwargs": _jsonable(kwargs or {})},
+        workspace=workspace,
+        priority=priority,
+    )
 
 
 def submit_background_job(module: str, task: Callable[[], Any], *, workspace: str = "default", payload: Mapping[str, Any] | None = None) -> str:
@@ -4058,5 +4116,6 @@ __all__ = [
     "prepare_mandatory_module_contract",
     "manifest_quality",
     "MANIFEST_FIELDS",
+    "enqueue_callable_job",
 
 ]
