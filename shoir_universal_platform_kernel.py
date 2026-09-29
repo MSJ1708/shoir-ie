@@ -20,6 +20,7 @@ import time
 import zipfile
 from contextlib import contextmanager
 from datetime import datetime, timezone
+from shoir_repository import sqlite_connect as shoir_sqlite_connect
 from typing import Any, Callable, Mapping, Sequence
 
 import numpy as np
@@ -484,7 +485,7 @@ def render_universal_inspector(module: str, ctx: Mapping[str, Any]) -> None:
 
     trace_rows = []
     try:
-        with sqlite3.connect("enterprise_full_workspace.db", timeout=5) as conn:
+        with shoir_sqlite_connect("enterprise_full_workspace.db", timeout=5) as conn:
             entity_rows = conn.execute(
                 "SELECT entity_type,name,status FROM os160_entities ORDER BY updated_at DESC LIMIT 100"
             ).fetchall()
