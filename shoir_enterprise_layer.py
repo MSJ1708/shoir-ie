@@ -1,3 +1,4 @@
+from shoir_repository import sqlite_connect as shoir_sqlite_connect
 """
 Shoir-IE Enterprise Integration Layer.
 
@@ -69,7 +70,7 @@ def _local_connect(db_path: Optional[str] = None):
     # Resolve DEFAULT_DB at call time so tests and local deployments can safely
     # override the enterprise store without relying on a stale default argument.
     target = str(db_path or DEFAULT_DB)
-    conn = sqlite3.connect(target, timeout=30, check_same_thread=False)
+    conn = shoir_sqlite_connect(target, timeout=30, check_same_thread=False)
     conn.execute("PRAGMA journal_mode=WAL")
     return conn
 
@@ -1121,7 +1122,7 @@ def _connector_sql_test(endpoint: str, timeout: float = 8.0) -> tuple[str, float
     if target.lower().startswith("sqlite:///"):
         db_path = target[10:]
         try:
-            with sqlite3.connect(db_path, timeout=max(1.0, float(timeout))) as conn:
+            with shoir_sqlite_connect(db_path, timeout=max(1.0, float(timeout))) as conn:
                 row = conn.execute("SELECT 1").fetchone()
             elapsed = (datetime.now(timezone.utc) - started).total_seconds() * 1000.0
             return "Healthy", elapsed, "SQLite connection validated.", int(bool(row))
@@ -1348,7 +1349,7 @@ def fetch_connector_sample(
                 target = str(endpoint).strip()
                 if target.lower().startswith("sqlite:///"):
                     db_path = target[10:]
-                    with sqlite3.connect(db_path, timeout=max(1.0, float(timeout))) as conn:
+                    with shoir_sqlite_connect(db_path, timeout=max(1.0, float(timeout))) as conn:
                         frame = pd.read_sql_query(bounded_query, conn)
                 elif target.lower().startswith(("postgresql://", "postgres://")):
                     import psycopg2
