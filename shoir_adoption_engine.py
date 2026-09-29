@@ -8,6 +8,7 @@ workbook -> query -> formula -> pivot -> analyze -> automation -> explain ->
 decision -> implementation -> outcome.
 """
 from __future__ import annotations
+import logging
 
 import ast
 import hashlib
@@ -836,8 +837,8 @@ def render_adoption_center(username: str, tier: str, initial_tab: str = "Home") 
         try:
             saved = list_workbook_extensions()
             st.caption(f"Developer extensions available: {len(saved):,}")
-        except Exception:
-            pass
+        except Exception as exc:
+            logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
 
     with analyze_tab:
         st.markdown("### Quick Analyze")
