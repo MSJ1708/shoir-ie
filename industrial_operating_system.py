@@ -5,6 +5,8 @@ Shoir-IE industrial data/model layer. No duplicate business state is created.
 """
 from __future__ import annotations
 
+from shoir_repository import sqlite_connect as shoir_sqlite_connect
+
 import ast
 import hashlib
 import json
@@ -133,7 +135,7 @@ def now() -> str:
     return datetime.utcnow().isoformat(timespec="microseconds")
 
 def ensure_os_db(db_path: str="enterprise_full_workspace.db") -> None:
-    with sqlite3.connect(db_path, timeout=30) as c:
+    with shoir_sqlite_connect(db_path, timeout=30) as c:
         c.execute("PRAGMA journal_mode=WAL")
         c.execute("PRAGMA foreign_keys=ON")
         c.execute("""CREATE TABLE IF NOT EXISTS os_kpi_definitions(
@@ -196,7 +198,7 @@ def scenario_save(name: str,parameters: Mapping[str,Any],kpis: Mapping[str,Any],
     p=json.dumps(parameters,sort_keys=True,default=str)
     created=now()
     sid="SCN-"+uuid.uuid4().hex[:12].upper()
-    with sqlite3.connect("enterprise_full_workspace.db", timeout=30) as c:
+    with shoir_sqlite_connect("enterprise_full_workspace.db", timeout=30) as c:
         if parent_id and not c.execute("SELECT 1 FROM os_scenarios WHERE scenario_id=?",(parent_id,)).fetchone():
             raise ValueError(f"Parent scenario {parent_id} was not found.")
         version=int(c.execute("SELECT COALESCE(MAX(version),0) FROM os_scenarios WHERE name=?",(name,)).fetchone()[0])+1
@@ -207,12 +209,12 @@ def scenario_save(name: str,parameters: Mapping[str,Any],kpis: Mapping[str,Any],
 
 def scenario_list() -> pd.DataFrame:
     ensure_os_db()
-    with sqlite3.connect("enterprise_full_workspace.db") as c:
+    with shoir_sqlite_connect("enterprise_full_workspace.db") as c:
         return pd.read_sql("SELECT scenario_id,name,parent_id,version,description,created_by,created_at,updated_at FROM os_scenarios ORDER BY updated_at DESC",c)
 
 def scenario_compare(name_a: str,name_b: str) -> pd.DataFrame:
     ensure_os_db()
-    with sqlite3.connect("enterprise_full_workspace.db") as c:
+    with shoir_sqlite_connect("enterprise_full_workspace.db") as c:
         a=c.execute("SELECT kpis_json FROM os_scenarios WHERE name=? ORDER BY version DESC LIMIT 1",(name_a,)).fetchone()
         b=c.execute("SELECT kpis_json FROM os_scenarios WHERE name=? ORDER BY version DESC LIMIT 1",(name_b,)).fetchone()
     if not a or not b: return pd.DataFrame(columns=["KPI","Scenario A","Scenario B","Delta","Delta %"])
@@ -291,7 +293,7 @@ def decision_verify(decision_id: str,predicted: pd.DataFrame,actual: pd.DataFram
     out["Absolute Error"]=(pd.to_numeric(out["Actual"],errors="coerce")-pd.to_numeric(out["Predicted"],errors="coerce")).abs()
     out["Percent Error"]=out["Absolute Error"]/pd.to_numeric(out["Predicted"],errors="coerce").abs().replace(0,np.nan)*100
     ensure_os_db()
-    with sqlite3.connect("enterprise_full_workspace.db") as c:
+    with shoir_sqlite_connect("enterprise_full_workspace.db") as c:
         for r in out.to_dict("records"):
             raw=f"{decision_id}|{r.get(metric_col)}|{now()}"
             vid="VER-"+hashlib.sha256(raw.encode()).hexdigest()[:12].upper()
@@ -305,7 +307,7 @@ def decision_verify(decision_id: str,predicted: pd.DataFrame,actual: pd.DataFram
 def improvement_create(title,method,owner,baseline,target,phase="Define") -> str:
     ensure_os_db()
     pid="IMP-"+hashlib.sha256(f"{title}|{owner}|{now()}".encode()).hexdigest()[:12].upper()
-    with sqlite3.connect("enterprise_full_workspace.db") as c:
+    with shoir_sqlite_connect("enterprise_full_workspace.db") as c:
         c.execute("INSERT INTO os_improvement_projects VALUES(?,?,?,?,?,?,?,?,?,?,?)",
                   (pid,title,method,phase,owner,json.dumps(baseline,default=str),json.dumps(target,default=str),"[]","Active",now(),now()))
         c.commit()
@@ -313,7 +315,7 @@ def improvement_create(title,method,owner,baseline,target,phase="Define") -> str
 
 def improvement_list() -> pd.DataFrame:
     ensure_os_db()
-    with sqlite3.connect("enterprise_full_workspace.db") as c:
+    with shoir_sqlite_connect("enterprise_full_workspace.db") as c:
         return pd.read_sql("SELECT project_id,title,method,phase,owner,status,created_at,updated_at FROM os_improvement_projects ORDER BY updated_at DESC",c)
 
 def platform_health(db_path="enterprise_full_workspace.db") -> pd.DataFrame:
@@ -322,7 +324,7 @@ def platform_health(db_path="enterprise_full_workspace.db") -> pd.DataFrame:
     rows.append({"Component":"Python","Status":"Ready","Detail":sys.version.split()[0]})
     ensure_os_db(db_path)
     try:
-        with sqlite3.connect(db_path) as c: ok=c.execute("PRAGMA quick_check").fetchone()[0]=="ok"
+        with shoir_sqlite_connect(db_path) as c: ok=c.execute("PRAGMA quick_check").fetchone()[0]=="ok"
         rows.append({"Component":"Database","Status":"Ready" if ok else "Attention","Detail":"PRAGMA quick_check"})
     except Exception as exc: rows.append({"Component":"Database","Status":"Attention","Detail":str(exc)})
     for pkg in ["pandas","numpy","scipy","plotly","streamlit","xlsxwriter","openpyxl"]:
