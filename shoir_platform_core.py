@@ -137,6 +137,16 @@ def stable_id(prefix: str = "REC") -> str:
     return f"{prefix}-{uuid.uuid4().hex[:12].upper()}"
 
 
+def _payload_from_value(value: Any) -> dict[str, Any]:
+    if isinstance(value, Mapping):
+        return dict(value)
+    try:
+        parsed = json.loads(str(value))
+        return dict(parsed) if isinstance(parsed, Mapping) else {}
+    except Exception:
+        return {}
+
+
 def digest(value: Any) -> str:
     return hashlib.sha256(canonical_json(value).encode("utf-8")).hexdigest()
 
@@ -537,7 +547,7 @@ def begin_module(module: str, *, workspace: str = "default", actor: str = "syste
         if not prior.empty:
             for _, row in prior.iterrows():
                 try:
-                    payload = json.loads(str(row["payload_json"]))
+                    payload = _payload_from_value(row["payload_json"])
                 except Exception:
                     continue
                 if str(payload.get("module")) == str(module):
@@ -1583,40 +1593,87 @@ def render_visualization_os(module: str, df: pd.DataFrame, *, kpi_table: pd.Data
         if not recs:
             st.info("No compatible chart family detected.")
             return
+
+        filtered = df
+        categories = [c for c in df.select_dtypes(exclude=np.number).columns if df[c].nunique(dropna=False) <= 30]
+        if categories:
+            filter_col = st.selectbox("Filter dimension", ["All"] + [str(c) for c in categories],
+                                      key=f"vis_filter_col_{re.sub(r'[^A-Za-z0-9]+','_',module)}")
+            if filter_col != "All":
+                options = [str(x) for x in df[filter_col].dropna().unique()]
+                selected_values = st.multiselect(
+                    "Filter values", options, default=options[:min(8, len(options))],
+                    key=f"vis_filter_values_{re.sub(r'[^A-Za-z0-9]+','_',module)}",
+                )
+                if selected_values:
+                    filtered = df[df[filter_col].astype(str).isin(selected_values)].copy()
+
         labels = [f"{r['chart']} — {r['reason']}" for r in recs]
         selected = st.selectbox("Visualization", labels, key=f"vis_os_sel_{re.sub(r'[^A-Za-z0-9]+','_',module)}")
         rec = recs[labels.index(selected)]
-        fig = build_visualization(df, rec)
-        if fig is not None:
-            st.plotly_chart(fig, use_container_width=True, key=f"vis_os_chart_{re.sub(r'[^A-Za-z0-9]+','_',module)}")
-            c1, c2, c3, c4, c5 = st.columns(5)
-            with c1:
-                expand = st.checkbox("Expand", key=f"vis_expand_{module}")
-            with c2:
-                explain = st.button("Explain", key=f"vis_explain_{module}")
-            with c3:
-                compare = st.button("Compare", key=f"vis_compare_{module}")
-            with c4:
-                export = st.download_button(
-                    "Export", data=fig.to_json().encode("utf-8"),
-                    file_name=f"shoir_{re.sub(r'[^A-Za-z0-9]+','_',module).lower()}_visual.json",
-                    mime="application/json", key=f"vis_export_{module}",
-                )
-            with c5:
-                add = st.button("Add to Report", key=f"vis_report_{module}")
-            if expand:
-                st.plotly_chart(fig, use_container_width=True, key=f"vis_expanded_chart_{re.sub(r'[^A-Za-z0-9]+','_',module)}")
-            if explain:
-                st.info(f"{rec['chart'].replace('_',' ').title()} was selected because {rec['reason']}.")
-            if compare and kpi_table is not None and not kpi_table.empty:
-                st.dataframe(kpi_table, use_container_width=True, hide_index=True)
-            if add:
-                reports = list(st.session_state.get("shoir_report_figures", []))
-                reports.append({"module": module, "chart": rec, "created_at": now_iso()})
-                st.session_state["shoir_report_figures"] = reports
-                save_platform_record("report_figure", f"{module}:{len(reports)}", reports[-1])
-                st.success("Visualization added to the current report queue.")
+        fig = build_visualization(filtered, rec)
+        if fig is None:
+            st.info("The selected visualization is incompatible with the current filter.")
+            return
 
+        st.session_state[f"shoir_visualization_snapshot_{module}"] = {
+            "module": module, "filter_rows": int(len(filtered)), "chart": dict(rec), "captured_at": now_iso(),
+        }
+        st.plotly_chart(fig, use_container_width=True, key=f"vis_os_chart_{re.sub(r'[^A-Za-z0-9]+','_',module)}")
+        c1, c2, c3, c4, c5 = st.columns(5)
+        with c1:
+            expand = st.checkbox("Expand", key=f"vis_expand_{module}")
+        with c2:
+            explain = st.button("Explain", key=f"vis_explain_{module}")
+        with c3:
+            compare = st.button("Compare", key=f"vis_compare_{module}")
+        with c4:
+            st.download_button(
+                "Export", data=fig.to_json().encode("utf-8"),
+                file_name=f"shoir_{re.sub(r'[^A-Za-z0-9]+','_',module).lower()}_visual.json",
+                mime="application/json", key=f"vis_export_{module}",
+            )
+        with c5:
+            add = st.button("Add to Report", key=f"vis_report_{module}")
+        if expand:
+            st.plotly_chart(fig, use_container_width=True, key=f"vis_expanded_chart_{re.sub(r'[^A-Za-z0-9]+','_',module)}")
+        if explain:
+            st.info(f"{rec['chart'].replace('_',' ').title()} was selected because {rec['reason']}; {len(filtered):,} rows are in scope.")
+        if compare:
+            if kpi_table is not None and not kpi_table.empty:
+                st.dataframe(kpi_table, use_container_width=True, hide_index=True)
+            elif filtered.select_dtypes(include=np.number).shape[1] >= 1:
+                nums = list(filtered.select_dtypes(include=np.number).columns[:2])
+                st.dataframe(filtered[nums].describe().T.reset_index().rename(columns={"index": "Metric"}), use_container_width=True, hide_index=True)
+        if add:
+            reports = list(st.session_state.get("shoir_report_figures", []))
+            reports.append({"module": module, "chart": rec, "filters": {"rows": len(filtered)}, "created_at": now_iso()})
+            st.session_state["shoir_report_figures"] = reports
+            save_platform_record("report_figure", f"{module}:{len(reports)}", reports[-1])
+            st.success("Visualization added to the current report queue.")
+
+
+
+def render_lineage_graph(*, workspace: str = "default") -> None:
+    nodes, edges = lineage_graph_frame(workspace=workspace, limit=200)
+    if nodes.empty:
+        st.info("No KPI lineage has been captured yet. Complete a module run first.")
+        return
+    st.caption("Click a KPI lineage row to inspect the full Dataset → Transformations → Model → Formula → Scenario → Run → Evidence trace.")
+    if not edges.empty:
+        node_index = {node_id: idx for idx, node_id in enumerate(nodes["id"].astype(str))}
+        sources = [node_index[x] for x in edges["source"] if x in node_index]
+        targets = [node_index[x] for x in edges["target"] if x in node_index]
+        valid = [(a, b) for a, b in zip(sources, targets) if a != b]
+        if valid:
+            fig = go.Figure(go.Sankey(
+                arrangement="snap",
+                node={"label": nodes["label"].tolist(), "pad": 12, "thickness": 16},
+                link={"source": [a for a, _ in valid], "target": [b for _, b in valid], "value": [1] * len(valid)},
+            ))
+            fig.update_layout(title="KPI Evidence Lineage", height=540, margin=dict(l=10, r=10, t=55, b=10))
+            st.plotly_chart(fig, use_container_width=True, key="shoir_lineage_sankey")
+    st.dataframe(nodes, use_container_width=True, hide_index=True, height=260)
 
 def render_engineering_canvas(*, cards: Sequence[Mapping[str, Any]] = ()) -> None:
     """True browser-side drag/drop canvas with local persistence.
@@ -1743,6 +1800,17 @@ def register_replay(module: str, callable_path: str, kwargs: Mapping[str, Any], 
     return rid
 
 
+
+def get_replay_record(replay_id: str, *, workspace: str = "default") -> dict[str, Any]:
+    rows = repository_records("replay", workspace=workspace, limit=500)
+    if rows.empty:
+        raise KeyError(f"Replay record not found: {replay_id}")
+    matches = rows[rows["record_id"].astype(str) == str(replay_id)]
+    if matches.empty:
+        raise KeyError(f"Replay record not found: {replay_id}")
+    return _payload_from_value(matches.iloc[0]["payload_json"])
+
+
 def execute_replay(record: Mapping[str, Any]) -> Any:
     path = str(record.get("callable_path") or "")
     if ":" not in path:
@@ -1757,8 +1825,15 @@ def execute_replay(record: Mapping[str, Any]) -> Any:
     result = func(**kwargs)
     duration = (time.perf_counter() - started) * 1000
     result_hash = digest(result)
-    _record_event("replay.executed", actor=str(st.session_state.get("current_user", "system")),
-                  entity_key=path, payload={"duration_ms": duration, "result_hash": result_hash})
+    _record_event(
+        "replay.executed",
+        actor=str(st.session_state.get("current_user", "system")),
+        entity_key=path,
+        payload={"duration_ms": duration, "result_hash": result_hash, "replay_of": record.get("record_id")},
+    )
+    st.session_state["shoir_last_replay_result"] = {
+        "callable_path": path, "duration_ms": round(duration, 2), "result_hash": result_hash,
+    }
     return result
 
 
@@ -2331,7 +2406,7 @@ __all__ = [
     "data_readiness", "validate_dataset_contract", "canonical_map_columns",
     "WorkflowRuntime", "begin_module", "governed_module", "run_governed_module",
     "module_manifest", "capability_ledger", "kpi_lineage", "render_kpi_lineage",
-    "capture_standard_kpi_lineage", "lineage_graph_frame", "replay_records",
+    "capture_standard_kpi_lineage", "lineage_graph_frame", "render_lineage_graph", "replay_records", "get_replay_record",
     "uncertainty_engine", "attach_uncertainty", "scenario_analysis", "explain_scenario_changes", "scenario_fork",
     "factorial_design", "fractional_factorial_design", "response_surface_design", "replication_planner", "fit_response_surface",
     "residual_diagnostics", "forecast_operations", "quantity_dimension", "convert_quantity",
