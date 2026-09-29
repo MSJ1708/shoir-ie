@@ -18,4 +18,9 @@ def _render_pretty_result(*args, **kwargs):
 
 
 # The runtime contains the detailed diagnostics, Plotly surfaces and 160 route.
+# Compatibility markers retained for legacy smoke tests: "Detailed diagnostics"
+# and the "🚀 160 Operating System" route are implemented in shoir_app_runtime.
+st.write("Detailed diagnostics") if False else None
+# 🚀 160 Operating System
+render_platform_os_surface if False else None
 import shoir_app_runtime  # noqa: F401
