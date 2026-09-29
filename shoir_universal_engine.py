@@ -7,6 +7,7 @@ behave like a consistent industrial workspace: inspect -> analyze -> visualize
 -> explain -> trace -> act -> record.
 """
 from __future__ import annotations
+import logging
 
 import hashlib
 import json
@@ -133,8 +134,8 @@ def guaranteed_figure(df: pd.DataFrame, title: str = "Universal Engineering View
         suite = ensure_visualization_suite(frame, context=title, max_figures=1)
         if suite:
             return suite[0][1]
-    except Exception:
-        pass
+    except Exception as exc:
+        logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
 
     numeric = [str(c) for c in frame.columns if pd.api.types.is_numeric_dtype(frame[c])]
     categorical = [str(c) for c in frame.columns if not pd.api.types.is_numeric_dtype(frame[c])]
@@ -202,8 +203,8 @@ def pivot_table(
                 ).df()
             finally:
                 con.close()
-        except Exception:
-            pass
+        except Exception as exc:
+            logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
 
     result = pd.pivot_table(
         work,
@@ -388,13 +389,13 @@ def runtime_choice(df: pd.DataFrame) -> dict[str, Any]:
     try:
         import duckdb  # type: ignore
         duckdb_available = True
-    except Exception:
-        pass
+    except Exception as exc:
+        logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
     try:
         import pyarrow  # type: ignore
         pyarrow_available = True
-    except Exception:
-        pass
+    except Exception as exc:
+        logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
     engine = "duckdb" if duckdb_available and cells >= 100_000 else "pandas"
     return {
         "engine": engine,
@@ -430,11 +431,11 @@ def black_box_event(module: str, kind: str, payload: Mapping[str, Any], username
                 or st.session_state.get("workspace")
                 or "default"
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
         record_artifact(username, "industrial_black_box_event", event["event_id"], event, workspace)
-    except Exception:
-        pass
+    except Exception as exc:
+        logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
     return event
 
 def record_action(action: str, payload: Mapping[str, Any] | None = None, username: str = "unknown") -> dict[str, Any]:
@@ -443,8 +444,8 @@ def record_action(action: str, payload: Mapping[str, Any] | None = None, usernam
         import streamlit as st
         st.session_state.setdefault("shoir_universal_action_log", []).append(event)
         st.session_state["shoir_universal_action_log"] = st.session_state["shoir_universal_action_log"][-100:]
-    except Exception:
-        pass
+    except Exception as exc:
+        logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
     return event
 
 def build_script(actions: Sequence[Mapping[str, Any]]) -> str:
@@ -474,8 +475,8 @@ def trust_snapshot(username: str, tier: str) -> pd.DataFrame:
             "Status": "Configured" if durable_backend_configured() else "Local/managed backend check",
             "Evidence": "Existing durable account storage service",
         })
-    except Exception:
-        pass
+    except Exception as exc:
+        logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
     return pd.DataFrame(rows)
 
 _FRAGMENT = getattr(st, "fragment", lambda fn: fn)
@@ -563,13 +564,13 @@ def _render_ui(module: str, tier: str, username: str) -> None:
                 try:
                     import streamlit as st
                     formulas = st.session_state.get("industrial_workbook_formulas", {}) or {}
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
                 sem = {}
                 try:
                     sem = st.session_state.get("industrial_workbook_semantic_map", {}) or {}
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
                 nodes, edges = dependency_graph(module, formulas=formulas, semantic_map=sem, source_tables=[choice])
                 fig = dependency_figure(nodes, edges, f"{module} · Explainable dependency graph")
                 if fig is not None:
