@@ -567,7 +567,8 @@ def export_pptx(title: str, tables: Sequence[Tuple[str,pd.DataFrame]], figures: 
     for label,fig in figures:
         try:
             png=fig.to_image(format="png",width=1600,height=900,scale=2); s=prs.slides.add_slide(prs.slide_layouts[5]); s.shapes.title.text=str(label); s.shapes.add_picture(io.BytesIO(png),Inches(.4),Inches(1.1),width=Inches(12.5))
-        except Exception: pass
+        except Exception as exc:
+            logging.getLogger(__name__).debug("Optional PDF/PPT figure rendering skipped: %s", exc)
     for label,df in tables:
         d=df.head(15).fillna("").astype(str); s=prs.slides.add_slide(prs.slide_layouts[5]); s.shapes.title.text=str(label)
         rows=max(1,len(d)+1); cols=max(1,len(d.columns)); table=s.shapes.add_table(rows,cols,Inches(.25),Inches(1.1),Inches(12.8),Inches(5.6)).table
