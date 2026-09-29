@@ -1901,6 +1901,154 @@ def performance_route(df: pd.DataFrame, *, memory_budget_mb: float = 512.0) -> d
     }
 
 
+def generate_standard_scenarios(
+    baseline: Mapping[str, float],
+    *,
+    uncertainty_pct: float = 10.0,
+    stress_pct: float = 25.0,
+    direction: Mapping[str, str] | None = None,
+) -> dict[str, dict[str, float]]:
+    """Generate explicit baseline, best-case, worst-case and stress scenarios."""
+    direction = dict(direction or {})
+    pct = abs(float(uncertainty_pct)) / 100.0
+    stress = abs(float(stress_pct)) / 100.0
+    base = {str(k): float(v) for k, v in baseline.items()}
+    best, worst, stress_up, stress_down = {}, {}, {}, {}
+    for k, value in base.items():
+        sign = str(direction.get(k, "higher_better")).lower()
+        if sign in {"lower", "lower_better", "cost", "defect", "downtime", "error"}:
+            best[k] = value * (1 - pct)
+            worst[k] = value * (1 + pct)
+        else:
+            best[k] = value * (1 + pct)
+            worst[k] = value * (1 - pct)
+        stress_up[k] = value * (1 + stress)
+        stress_down[k] = value * (1 - stress)
+    return {
+        "Baseline": base,
+        "Best Case": best,
+        "Worst Case": worst,
+        "Stress Up": stress_up,
+        "Stress Down": stress_down,
+    }
+
+
+def digital_twin_sync_from_connector(
+    asset_id: str,
+    connector_profile: Mapping[str, Any],
+    *,
+    field_map: Mapping[str, str] | None = None,
+    expected: Mapping[str, float] | None = None,
+    thresholds: Mapping[str, float] | None = None,
+    workspace: str = "default",
+) -> dict[str, Any]:
+    """Pull telemetry from a configured connector, map it to canonical signals and update twin state."""
+    kind = str(connector_profile.get("kind") or connector_profile.get("type") or "REST").upper()
+    adapter_cls = {
+        "REST": RestConnector,
+        "SAP": SAPODataConnector,
+        "SAP-ODATA": SAPODataConnector,
+        "SQL": SQLConnector,
+        "MQTT": MQTTConnector,
+        "OPC-UA": OPCUAConnector,
+        "OPCUA": OPCUAConnector,
+        "SFTP": SFTPConnector,
+    }.get(kind)
+    if adapter_cls is None:
+        raise ValueError(f"Unsupported digital-twin connector kind: {kind}")
+    adapter = adapter_cls(connector_profile)
+    if not hasattr(adapter, "fetch"):
+        raise RuntimeError(f"{kind} connector does not provide a synchronous fetch operation.")
+    raw = adapter.fetch(connector_profile.get("params") or {})
+    payload = raw
+    if isinstance(raw, list):
+        frame = pd.DataFrame(raw)
+    elif isinstance(raw, Mapping):
+        candidate = raw.get("data") if isinstance(raw.get("data"), list) else raw
+        frame = pd.DataFrame(candidate if isinstance(candidate, list) else [candidate])
+    else:
+        raise ValueError("Connector did not return structured telemetry.")
+    fmap = dict(field_map or {})
+    observed: dict[str, float] = {}
+    for canonical, source_col in fmap.items():
+        if source_col in frame.columns:
+            value = pd.to_numeric(frame[source_col], errors="coerce").dropna()
+            if not value.empty:
+                observed[str(canonical)] = float(value.iloc[-1])
+    if not observed:
+        for col in frame.select_dtypes(include=np.number).columns:
+            val = pd.to_numeric(frame[col], errors="coerce").dropna()
+            if not val.empty:
+                observed[str(col)] = float(val.iloc[-1])
+    if not observed:
+        raise ValueError("No numeric telemetry could be mapped into the twin state.")
+    twin = digital_twin_cycle(
+        asset_id, observed, expected=expected, thresholds=thresholds,
+        scenario={"connector_kind": kind, "connector": connector_profile.get("name", asset_id)},
+        workspace=workspace,
+    )
+    twin["source_payload_hash"] = digest(payload)
+    return twin
+
+
+def collaboration_attachment(
+    actor: str,
+    entity_type: str,
+    entity_id: str,
+    *,
+    comment: str = "",
+    mention: str = "",
+    assignment: str = "",
+    workspace: str = "default",
+) -> dict[str, Any]:
+    """Attach a review/comment/assignment to any digital-thread object."""
+    payload = {
+        "entity_type": str(entity_type),
+        "entity_id": str(entity_id),
+        "actor": str(actor),
+        "comment": str(comment),
+        "mention": str(mention),
+        "assignment": str(assignment),
+        "created_at": now_iso(),
+    }
+    rid = save_platform_record("collaboration_attachment", f"{entity_type}:{entity_id}:{stable_id('CMT')}", payload, workspace=workspace)
+    try:
+        from shoir_enterprise_layer import add_collaboration_item
+        add_collaboration_item(
+            actor,
+            str(entity_type),
+            str(entity_id),
+            str(comment or assignment or mention),
+            workspace=workspace,
+        )
+    except Exception as exc:
+        record_engineering_error("Collaboration", exc, workspace=workspace, actor=actor)
+    return {"attachment_id": rid, **payload}
+
+
+def capability_verification_matrix() -> pd.DataFrame:
+    """Produce a conservative 160-capability verification matrix from executable platform evidence."""
+    ledger = capability_ledger()
+    if ledger.empty:
+        return ledger
+    result = ledger.copy()
+    result["Platform contract"] = "11-stage universal contract"
+    result["Manifest complete"] = True
+    result["Verification evidence"] = result["Test coverage"].where(
+        result["Test coverage"].astype(str).str.contains("evidence", case=False, na=False),
+        "Platform-level contract only",
+    )
+    result["Production deployment"] = result["Status"].map({
+        "Verified": "evidence recorded",
+        "Implemented": "requires capability-specific verification",
+        "Foundation": "requires implementation",
+        "Integration-ready": "requires live configuration",
+    }).fillna("requires review")
+    return result
+
+
+
+
 class ConnectorAdapter:
     kind = "generic"
 
@@ -3471,7 +3619,35 @@ def unified_optimization(
         solve_robust_linear_program, solve_stochastic_linear_program,
         pareto_weight_sweep,
     )
-    if key in {"lp", "linear", "milp"}:
+    if key in {"milp"}:
+        try:
+            from scipy.optimize import Bounds as ScipyBounds, LinearConstraint, milp
+            c = np.asarray(objective, dtype=float)
+            ub = np.asarray(A_ub, dtype=float) if A_ub is not None else np.empty((0, len(c)))
+            lb_rhs = np.full(len(b_ub), -np.inf) if b_ub is not None else np.empty(0)
+            ub_rhs = np.asarray(b_ub, dtype=float) if b_ub is not None else np.empty(0)
+            constraints = []
+            if ub.size:
+                constraints.append(LinearConstraint(ub, lb_rhs, ub_rhs))
+            if A_eq is not None and b_eq is not None:
+                aeq = np.asarray(A_eq, dtype=float)
+                beq = np.asarray(b_eq, dtype=float)
+                constraints.append(LinearConstraint(aeq, beq, beq))
+            lo = np.array([(-np.inf if b[0] is None else float(b[0])) for b in (bounds or [(None, None)] * len(c))])
+            hi = np.array([(np.inf if b[1] is None else float(b[1])) for b in (bounds or [(None, None)] * len(c))])
+            integrality = np.ones(len(c), dtype=int)
+            sol = milp(c=c, integrality=integrality, bounds=ScipyBounds(lo, hi), constraints=constraints)
+            result = {
+                "success": bool(sol.success),
+                "status": str(sol.message),
+                "objective": float(sol.fun) if sol.fun is not None else None,
+                "variables": sol.x.tolist() if sol.x is not None else None,
+                "gap": float(getattr(sol, "mip_gap", np.nan)) if getattr(sol, "mip_gap", None) is not None else None,
+            }
+            solver = "scipy-highs-milp"
+        except Exception as exc:
+            raise RuntimeError(f"MILP solver unavailable or failed: {type(exc).__name__}: {exc}") from exc
+    elif key in {"lp", "linear"}:
         result = solve_linear_program(objective, A_ub=A_ub, b_ub=b_ub, A_eq=A_eq, b_eq=b_eq, bounds=bounds)
         solver = "scipy-highs"
     elif key in {"qp", "quadratic"}:
@@ -3539,6 +3715,6 @@ __all__ = [
     "connector_health", "enqueue_distributed_job", "claim_distributed_job", "update_distributed_job", "submit_background_job", "decision_memory_query", "save_decision_memory",
     "benchmark_compare", "verification_suite", "render_engineering_canvas", "render_platform_completion", "canonical_kpi_id", "register_kpi_definition", "get_kpi_definition", "knowledge_graph_frame", "render_knowledge_graph", "render_run_center_console", "copilot_action_registry", "authorize_copilot_action", "execute_copilot_action",
     "research_study_record", "lock_research_protocol", "add_research_citation", "roi_evidence_snapshot",
-    "digital_twin_cycle", "create_alert", "investigate_alert", "command_center_snapshot", "unified_optimization",
+    "digital_twin_cycle", "digital_twin_sync_from_connector", "create_alert", "investigate_alert", "command_center_snapshot", "unified_optimization", "generate_standard_scenarios", "collaboration_attachment", "capability_verification_matrix",
     "sync_project_state", "localization_config", "formatted_number",
 ]
