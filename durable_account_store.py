@@ -1,4 +1,3 @@
-from shoir_repository import sqlite_connect as shoir_sqlite_connect
 """Durable Shoir-IE account/subscription store for Streamlit Cloud.
 
 The app's SQLite file is useful for local development but Streamlit Community
@@ -16,6 +15,7 @@ import datetime as dt
 import os
 import sqlite3
 from typing import Any, Mapping, Optional
+from shoir_repository import sqlite_connect as shoir_sqlite_connect
 
 try:
     import streamlit as st
