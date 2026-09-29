@@ -10,6 +10,7 @@ Never put the database URL/password in Git.
 """
 
 from __future__ import annotations
+from shoir_observability import log_exception
 
 import datetime as dt
 import os
@@ -79,8 +80,8 @@ def database_url() -> str:
                 value = st.secrets[section]["url"]
                 if value:
                     return str(value)
-            except Exception:
-                pass
+            except Exception as exc:
+                log_exception(__name__, exc)
     return str(
         os.getenv("SHOIR_DATABASE_URL")
         or os.getenv("SUPABASE_DB_URL")
@@ -102,8 +103,8 @@ def ephemeral_local_storage_allowed() -> bool:
         try:
             value = st.secrets.get("allow_ephemeral_local_storage", False)
             return str(value).strip().lower() in {"1", "true", "yes", "on"}
-        except Exception:
-            pass
+        except Exception as exc:
+            log_exception(__name__, exc)
     return False
 
 
