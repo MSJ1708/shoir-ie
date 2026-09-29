@@ -2031,7 +2031,7 @@ def register_replay(
         "created_at": now_iso(),
         "schema_version": SCHEMA_VERSION,
     }
-    rid = save_platform_record("replay", f"{module}:{callable_path}:{stable_id(\"RPL\")}", payload, workspace=workspace)
+    rid = save_platform_record("replay", f"{module}:{callable_path}:{stable_id('RPL')}", payload, workspace=workspace)
     st.session_state["shoir_last_replay_id"] = rid
     return rid
 
