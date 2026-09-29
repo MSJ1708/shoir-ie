@@ -15,11 +15,11 @@ from typing import Iterator
 DEFAULT_DB_PATH = os.getenv("SHOIR_SQLITE_PATH", "enterprise_full_workspace.db")
 
 
-def sqlite_connect(path: str | None = None, timeout: int = 30) -> sqlite3.Connection:
+def sqlite_connect(path: str | None = None, timeout: int = 30, check_same_thread: bool = False) -> sqlite3.Connection:
     conn = sqlite3.connect(
         path or DEFAULT_DB_PATH,
         timeout=max(1, int(timeout)),
-        check_same_thread=False,
+        check_same_thread=bool(check_same_thread),
     )
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
