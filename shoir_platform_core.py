@@ -967,6 +967,23 @@ def capability_ledger(catalog: Sequence[Mapping[str, Any]] | None = None, featur
             features = []
 
     known_names = {str(x.get("name")) for x in entries if x.get("name")}
+    contract_evidence: dict[str, dict[str, Any]] = {}
+    verification_evidence: set[str] = set()
+    try:
+        contracts = repository_records("module_contract", workspace=_current_workspace(), limit=2000)
+        for _, row in contracts.iterrows():
+            payload = _payload_from_value(row["payload_json"])
+            if payload.get("module"):
+                contract_evidence[str(payload["module"])] = payload
+        verifications = repository_records("verification", workspace=_current_workspace(), limit=2000)
+        for _, row in verifications.iterrows():
+            payload = _payload_from_value(row["payload_json"])
+            if str(payload.get("status")) == "PASS" and payload.get("module"):
+                verification_evidence.add(str(payload["module"]))
+    except Exception as exc:
+        st.session_state.setdefault("shoir_platform_warnings", []).append({
+            "scope": "capability.evidence", "type": type(exc).__name__, "message": str(exc), "at": now_iso()
+        })
     for idx, feature in enumerate(features, 1):
         name = str(feature.get("name") or f"Capability {idx}")
         entry = next((x for x in entries if str(x.get("name")) == name), {})
@@ -985,35 +1002,49 @@ def capability_ledger(catalog: Sequence[Mapping[str, Any]] | None = None, featur
             tests = [str(x) for x in test_root]
         elif test_root:
             tests = [str(test_root)]
+        manifest = module_manifest(name, catalog_entry=entry, tests=tests)
+        quality = manifest_quality(manifest)
+        observed = contract_evidence.get(name, {})
+        verified = bool(quality["complete"] and observed.get("gate") == "COMPLETE" and name in verification_evidence)
         rows.append({
             "Capability ID": int(feature.get("id") or idx),
             "Capability": name,
             "Area": str(feature.get("area") or "Platform"),
-            "Status": status,
-            "Coverage": "catalogued" if name in known_names else "foundation",
-            "Test coverage": "evidence recorded" if tests else "not independently evidenced",
-            "Last verification": str(feature.get("last_verification") or "not recorded"),
+            "Status": "Verified" if verified else status,
+            "Coverage": "contracted" if quality["complete"] else "partial contract",
+            "Test coverage": "platform contract" if not tests else "capability contract suite",
+            "Last verification": observed.get("completed_at") or str(feature.get("last_verification") or "not recorded"),
             "Dependencies": ", ".join(map(str, feature.get("dependencies") or [])) or "platform kernel",
             "Deployment requirements": str(feature.get("deployment_requirements") or "runtime configuration dependent"),
+            "Manifest complete": bool(quality["complete"]),
+            "Manifest completeness": f"{quality['completeness_pct']:.1f}%",
+            "Production evidence": "verified contract + PASS" if verified else "requires capability-specific verification",
             "Source state": raw_state or "unspecified",
-            "Manifest": digest(module_manifest(name, catalog_entry=entry, tests=tests))[:12],
+            "Manifest": digest(manifest)[:12],
         })
     for entry in entries:
         name = str(entry.get("name") or "")
         if not name or name in {r["Capability"] for r in rows}:
             continue
+        manifest = module_manifest(name, catalog_entry=entry)
+        quality = manifest_quality(manifest)
+        observed = contract_evidence.get(name, {})
+        verified = bool(quality["complete"] and observed.get("gate") == "COMPLETE" and name in verification_evidence)
         rows.append({
             "Capability ID": len(rows) + 1,
             "Capability": name,
             "Area": str(entry.get("area") or "Specialist"),
-            "Status": "Implemented",
-            "Coverage": "catalogued",
-            "Test coverage": "not independently evidenced",
-            "Last verification": "not recorded",
+            "Status": "Verified" if verified else "Implemented",
+            "Coverage": "contracted" if quality["complete"] else "partial contract",
+            "Test coverage": "platform contract",
+            "Last verification": observed.get("completed_at") or "not recorded",
             "Dependencies": "specialist engine",
-            "Deployment requirements": "runtime configuration dependent",
+            "Deployment requirements": str(entry.get("deployment_requirements") or "runtime configuration dependent"),
+            "Manifest complete": bool(quality["complete"]),
+            "Manifest completeness": f"{quality['completeness_pct']:.1f}%",
+            "Production evidence": "verified contract + PASS" if verified else "not independently evidenced",
             "Source state": str(entry.get("state") or ""),
-            "Manifest": digest(module_manifest(name, catalog_entry=entry))[:12],
+            "Manifest": digest(manifest)[:12],
         })
     return pd.DataFrame(rows)
 
@@ -2234,24 +2265,23 @@ def collaboration_attachment(
 
 
 def capability_verification_matrix() -> pd.DataFrame:
-    """Produce a conservative 160-capability verification matrix from executable platform evidence."""
+    """Verification matrix driven by actual manifest and persisted evidence."""
     ledger = capability_ledger()
     if ledger.empty:
         return ledger
     result = ledger.copy()
     result["Platform contract"] = "11-stage universal contract"
-    result["Manifest complete"] = True
-    result["Verification evidence"] = result["Test coverage"].where(
-        result["Test coverage"].astype(str).str.contains("evidence", case=False, na=False),
-        "Platform-level contract only",
-    )
+    result["Manifest complete"] = result.get("Manifest complete", False)
+    result["Verification evidence"] = result.get("Production evidence", "not independently evidenced")
     result["Production deployment"] = result["Status"].map({
-        "Verified": "evidence recorded",
+        "Verified": "contract + verification evidence recorded",
         "Implemented": "requires capability-specific verification",
         "Foundation": "requires implementation",
         "Integration-ready": "requires live configuration",
     }).fillna("requires review")
     return result
+
+
 
 
 
@@ -2888,6 +2918,44 @@ def lineage_graph_frame(*, workspace: str = "default", limit: int = 100) -> tupl
             edges.append({"source": previous, "target": node_id, "relation": "EXPLAINS"})
             previous = node_id
     return pd.DataFrame(nodes.values()), pd.DataFrame(edges)
+
+
+def persistence_topology() -> dict[str, Any]:
+    return {
+        "backend": db_backend(),
+        "authoritative_store": "PostgreSQL/Supabase" if db_backend() == "postgres" else "SQLite offline fallback",
+        "database_url_configured": bool(configured_database_url()),
+        "platform_tables": ["shoir_platform_records", "shoir_platform_events", "shoir_platform_jobs"],
+        "authority_policy": "PostgreSQL is authoritative when configured; SQLite is compatibility/offline fallback.",
+    }
+
+
+def report_pack_manifest(pack_type: str, *, module: str, workspace: str = "default", include_figures: bool = True) -> dict[str, Any]:
+    sections = {
+        "Executive": ["summary", "KPI scorecard", "scenario comparison", "ROI", "decision"],
+        "Engineering": ["inputs", "validation", "model", "parameters", "results", "uncertainty", "constraints", "lineage", "verification"],
+        "Audit": ["provenance", "hashes", "workflow", "approvals", "events", "verification", "environment"],
+        "Research": ["protocol", "hypothesis", "statistical plan", "design", "effect sizes", "uncertainty", "figures", "reproducibility", "citations"],
+    }
+    key = str(pack_type).title()
+    if key not in sections:
+        raise ValueError(f"Unknown report pack: {pack_type}")
+    return {
+        "pack_type": key, "module": str(module), "workspace": workspace,
+        "sections": sections[key], "include_figures": bool(include_figures),
+        "provenance": provenance(), "generated_at": now_iso(),
+    }
+
+
+def alert_investigation_chain(alert_id: str, *, finding: str, scenario_id: str = "", decision_id: str = "", workspace: str = "default") -> dict[str, Any]:
+    investigation = investigate_alert(
+        alert_id, finding=finding, scenario_id=scenario_id, decision_id=decision_id, workspace=workspace
+    )
+    return {
+        "alert_id": alert_id, "investigation_id": investigation["investigation_id"],
+        "scenario_id": scenario_id, "decision_id": decision_id,
+        "next_stage": "DECIDE" if decision_id else ("SIMULATE" if scenario_id else "INVESTIGATE"),
+    }
 
 
 def render_platform_completion(module: str, df: pd.DataFrame, *, allowed_modules: Sequence[str] = ()) -> None:
@@ -3900,9 +3968,21 @@ def render_run_center_console(
             choice = st.selectbox("Replay record", replay_df["Replay ID"].astype(str).tolist(), key=f"run_center_replay_{module}")
             if st.button("Replay this run", key=f"run_center_replay_btn_{module}", type="primary"):
                 try:
-                    result = execute_replay(get_replay_record(choice, workspace=workspace))
+                    result = execute_replay(
+                        get_replay_record(choice, workspace=workspace),
+                        current_input=df if isinstance(df, pd.DataFrame) else None,
+                    )
                     st.session_state["shoir_last_result"] = result
-                    st.success("Replay execution completed.")
+                    verification = st.session_state.get("shoir_last_replay_result", {})
+                    status = verification.get("status")
+                    if status == "PASS":
+                        st.success("Replay executed and matched the captured result fingerprint.")
+                    elif status == "DRIFT":
+                        st.warning("Replay executed, but its result fingerprint differs from the captured run.")
+                    else:
+                        st.info("Replay executed; this legacy record has no expected result fingerprint.")
+                    if verification:
+                        st.json(verification)
                 except Exception as exc:
                     record_engineering_error(module, exc, workspace=workspace)
                     st.error(f"Replay failed safely: {type(exc).__name__}: {exc}")
@@ -4117,5 +4197,8 @@ __all__ = [
     "manifest_quality",
     "MANIFEST_FIELDS",
     "enqueue_callable_job",
+    "alert_investigation_chain",
+    "report_pack_manifest",
+    "persistence_topology",
 
 ]
