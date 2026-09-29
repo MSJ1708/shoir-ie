@@ -2012,9 +2012,9 @@ def validate_replay_target(callable_path: str) -> tuple[str, str]:
     if path.count(":") != 1:
         raise ValueError("Replay callable_path must use module:function notation.")
     module_name, func_name = (part.strip() for part in path.split(":", 1))
-    if not re.fullmatch(r"[A-Za-z_]\\w*(?:\\.[A-Za-z_]\\w*)*", module_name):
+    if not re.fullmatch(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*", module_name):
         raise ValueError("Replay module path contains unsupported characters.")
-    if not re.fullmatch(r"[A-Za-z_]\\w*", func_name) or func_name.startswith("__"):
+    if not re.fullmatch(r"[A-Za-z_]\w*", func_name) or func_name.startswith("__"):
         raise ValueError("Replay function name is invalid.")
     allowed_prefixes = ("shoir_", "industrial_", "research_", "workspace_", "durable_")
     test_mode = bool(os.getenv("PYTEST_CURRENT_TEST"))
