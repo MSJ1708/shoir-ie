@@ -2051,6 +2051,126 @@ def connector_health(profile: Mapping[str, Any]) -> dict[str, Any]:
     return result
 
 
+def enqueue_distributed_job(
+    module: str,
+    payload: Mapping[str, Any] | None = None,
+    *,
+    workspace: str = "default",
+    priority: int = 50,
+    available_at: str | None = None,
+) -> str:
+    job_id = stable_id("JOB")
+    payload_json = _jsonable(payload or {})
+    if db_backend() == "postgres":
+        with db_connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """INSERT INTO shoir_platform_jobs
+                    (job_id,workspace_key,module,status,priority,payload_json,available_at,created_at,updated_at)
+                    VALUES (%s,%s,%s,'QUEUED',%s,%s,COALESCE(%s::timestamptz,NOW()),NOW(),NOW())""",
+                    (job_id, workspace, str(module), int(priority), Json(payload_json) if Json else canonical_json(payload_json), available_at),
+                )
+            conn.commit()
+    else:
+        save_platform_record("job_queue", job_id, {
+            "job_id": job_id, "module": module, "status": "QUEUED",
+            "priority": int(priority), "payload": payload_json, "available_at": available_at or now_iso(),
+        }, workspace=workspace)
+    return job_id
+
+
+def claim_distributed_job(
+    worker_id: str,
+    *,
+    workspace: str = "default",
+) -> dict[str, Any] | None:
+    worker_id = str(worker_id)
+    if db_backend() == "postgres":
+        with db_connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """WITH candidate AS (
+                        SELECT job_id
+                        FROM shoir_platform_jobs
+                        WHERE workspace_key=%s
+                          AND status='QUEUED'
+                          AND available_at <= NOW()
+                        ORDER BY priority DESC, available_at ASC, created_at ASC
+                        FOR UPDATE SKIP LOCKED
+                        LIMIT 1
+                    )
+                    UPDATE shoir_platform_jobs j
+                    SET status='CLAIMED', worker_id=%s, claimed_at=NOW(), updated_at=NOW()
+                    FROM candidate c
+                    WHERE j.job_id=c.job_id
+                    RETURNING j.job_id,j.module,j.status,j.priority,j.payload_json,j.worker_id,j.claimed_at""",
+                    (workspace, worker_id),
+                )
+                row = cur.fetchone()
+            conn.commit()
+        if not row:
+            return None
+        return {
+            "job_id": row[0], "module": row[1], "status": row[2], "priority": row[3],
+            "payload": _payload_from_value(row[4]), "worker_id": row[5], "claimed_at": row[6],
+        }
+    rows = repository_records("job_queue", workspace=workspace, limit=500)
+    if rows.empty:
+        return None
+    candidates = []
+    for _, row in rows.iterrows():
+        payload = _payload_from_value(row["payload_json"])
+        if str(payload.get("status")) == "QUEUED":
+            candidates.append(payload)
+    if not candidates:
+        return None
+    candidates.sort(key=lambda x: (-int(x.get("priority", 50)), str(x.get("available_at", ""))))
+    job = candidates[0]
+    job["status"] = "CLAIMED"; job["worker_id"] = worker_id; job["claimed_at"] = now_iso()
+    save_platform_record("job_queue", str(job["job_id"]), job, workspace=workspace)
+    return job
+
+
+def update_distributed_job(
+    job_id: str,
+    *,
+    status: str,
+    worker_id: str = "",
+    progress: float | None = None,
+    result: Mapping[str, Any] | None = None,
+    error: Mapping[str, Any] | None = None,
+    workspace: str = "default",
+) -> None:
+    valid = {"QUEUED", "CLAIMED", "RUNNING", "COMPLETED", "FAILED", "CANCELLED"}
+    state = str(status).upper()
+    if state not in valid:
+        raise ValueError(f"Unsupported job status: {status}")
+    p = max(0.0, min(1.0, float(progress if progress is not None else (1.0 if state in {"COMPLETED","FAILED","CANCELLED"} else 0.0))))
+    if db_backend() == "postgres":
+        with db_connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """UPDATE shoir_platform_jobs
+                    SET status=%s, worker_id=COALESCE(NULLIF(%s,''),worker_id),
+                        progress=%s, result_json=%s,
+                        completed_at=CASE WHEN %s IN ('COMPLETED','FAILED','CANCELLED') THEN NOW() ELSE completed_at END,
+                        updated_at=NOW()
+                    WHERE job_id=%s AND workspace_key=%s""",
+                    (state, worker_id, p,
+                     Json(_jsonable(result or error or {})) if Json else canonical_json(result or error or {}),
+                     state, job_id, workspace),
+                )
+            conn.commit()
+    else:
+        save_platform_record("job_queue", str(job_id), {
+            "job_id": str(job_id), "status": state, "worker_id": worker_id,
+            "progress": p, "result": _jsonable(result or {}), "error": _jsonable(error or {}),
+            "updated_at": now_iso(),
+        }, workspace=workspace)
+
+
+
+
 class JobManager:
     def __init__(self, max_workers: int = 4):
         self.executor = ThreadPoolExecutor(max_workers=max(1, int(max_workers)), thread_name_prefix="shoir-worker")
@@ -2107,7 +2227,14 @@ def job_manager() -> JobManager:
 
 
 def submit_background_job(module: str, task: Callable[[], Any], *, workspace: str = "default", payload: Mapping[str, Any] | None = None) -> str:
-    return job_manager().submit(module, task, workspace=workspace, payload=payload)
+    queue_id = enqueue_distributed_job(module, payload, workspace=workspace)
+    job_id = job_manager().submit(module, task, workspace=workspace, payload={**dict(payload or {}), "queue_id": queue_id})
+    if db_backend() == "postgres":
+        try:
+            update_distributed_job(queue_id, status="RUNNING", progress=0.05, workspace=workspace)
+        except Exception as exc:
+            record_engineering_error(module, exc, workspace=workspace)
+    return job_id
 
 
 def decision_memory_query(problem: str, *, workspace: str = "default", limit: int = 5) -> pd.DataFrame:
@@ -3039,7 +3166,7 @@ __all__ = [
     "validate_formula", "safe_calculate", "visualization_intelligence", "build_visualization", "render_visualization_os",
     "normalize_action_level", "action_authorized", "copilot_plan",
     "active_df_hash", "register_replay", "execute_replay", "record_engineering_error", "performance_route",
-    "connector_health", "submit_background_job", "decision_memory_query", "save_decision_memory",
+    "connector_health", "enqueue_distributed_job", "claim_distributed_job", "update_distributed_job", "submit_background_job", "decision_memory_query", "save_decision_memory",
     "benchmark_compare", "verification_suite", "render_engineering_canvas", "render_platform_completion",
     "research_study_record", "lock_research_protocol", "add_research_citation", "roi_evidence_snapshot",
     "digital_twin_cycle", "create_alert", "investigate_alert", "command_center_snapshot", "unified_optimization",
