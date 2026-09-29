@@ -3574,9 +3574,72 @@ def render_platform_completion(module: str, df: pd.DataFrame, *, allowed_modules
         if st.session_state.get(f"core_scenario_generated_{module}"):
             st.markdown("**Generated standard scenarios**")
             st.json(st.session_state[f"core_scenario_generated_{module}"])
+
         if isinstance(st.session_state.get(f"core_scenario_result_{module}"), pd.DataFrame):
-            st.dataframe(st.session_state[f"core_scenario_result_{module}"], use_container_width=True, hide_index=True)
+            _scenario_frame = st.session_state[f"core_scenario_result_{module}"]
+            st.dataframe(_scenario_frame, use_container_width=True, hide_index=True)
             st.json(st.session_state.get(f"core_scenario_summary_{module}", {}))
+            if not _scenario_frame.empty:
+                st.plotly_chart(
+                    px.line(_scenario_frame, x="Scenario", y="Value", color="KPI", markers=True, title="Scenario KPI comparison"),
+                    use_container_width=True,
+                    key=f"core_scenario_plot_{module}",
+                )
+            st.markdown("### Scenario uncertainty")
+            uncertainty_text = st.text_area(
+                "Distribution samples: Scenario=KPI:v1,v2,v3...",
+                "Baseline=Throughput:95,100,103,98,101\nA=Throughput:104,108,111,109,107",
+                key=f"core_scenario_uncertainty_{module}",
+            )
+            if st.button("Analyze scenario uncertainty", key=f"core_scenario_uncertainty_btn_{module}"):
+                samples = {}
+                for line in uncertainty_text.splitlines():
+                    if "=" not in line:
+                        continue
+                    name, metrics = line.split("=", 1)
+                    samples.setdefault(name.strip(), {})
+                    for item in metrics.split(","):
+                        if ":" not in item:
+                            continue
+                    # Re-parse grouped KPI values to support multiple KPIs per scenario.
+                    current = samples.setdefault(name.strip(), {})
+                    for item in metrics.split(";"):
+                        if ":" in item:
+                            k, vals = item.split(":", 1)
+                            try:
+                                current[k.strip()] = [float(x.strip()) for x in vals.split(",") if x.strip()]
+                            except ValueError:
+                                continue
+                # Also accept the common single-KPI comma form shown above.
+                if not samples:
+                    for line in uncertainty_text.splitlines():
+                        if "=" not in line:
+                            continue
+                        name, metrics = line.split("=", 1)
+                        current = {}
+                        for item in [metrics]:
+                            if ":" in item:
+                                k, vals = item.split(":", 1)
+                                try:
+                                    current[k.strip()] = [float(x.strip()) for x in vals.split(",") if x.strip()]
+                                except ValueError:
+                                    continue
+                        if current:
+                            samples[name.strip()] = current
+                if samples:
+                    ub, um = scenario_uncertainty_bundle(samples, constraints=constraints)
+                    st.session_state[f"core_scenario_uncertainty_result_{module}"] = ub
+                    st.session_state[f"core_scenario_uncertainty_meta_{module}"] = um
+            if isinstance(st.session_state.get(f"core_scenario_uncertainty_result_{module}"), pd.DataFrame):
+                ub = st.session_state[f"core_scenario_uncertainty_result_{module}"]
+                st.dataframe(ub, use_container_width=True, hide_index=True)
+                st.json(st.session_state.get(f"core_scenario_uncertainty_meta_{module}", {}))
+                if not ub.empty:
+                    st.plotly_chart(
+                        px.bar(ub, x="Scenario", y=["P05", "Median", "P95"], color="KPI", barmode="group", title="Scenario uncertainty percentiles"),
+                        use_container_width=True,
+                        key=f"core_scenario_uncertainty_plot_{module}",
+                    )
 
     with tabs[4]:
         pred, meta = forecast_operations(df)
@@ -3594,6 +3657,38 @@ def render_platform_completion(module: str, df: pd.DataFrame, *, allowed_modules
         render_run_center_console(module=module, workspace=workspace, df=df)
 
     with tabs[6]:
+        st.markdown("### Copilot end-to-end engineering workflow")
+        copilot_objective = st.text_area(
+            "Engineering objective",
+            placeholder="Describe the decision or engineering problem Copilot should analyze.",
+            key=f"core_copilot_objective_{module}",
+        )
+        copilot_approval = st.checkbox(
+            "Approve PREPARE actions for this run",
+            key=f"core_copilot_flow_approval_{module}",
+        )
+        if st.button("Run complete Copilot workflow", key=f"core_copilot_flow_{module}", type="primary"):
+            if not copilot_objective.strip():
+                st.error("Enter an engineering objective before running Copilot.")
+            else:
+                try:
+                    flow = copilot_orchestrate(
+                        copilot_objective,
+                        df=df,
+                        actor_level=level,
+                        workspace=workspace,
+                        approval=copilot_approval,
+                    )
+                    st.session_state[f"core_copilot_flow_last_{module}"] = flow
+                except Exception as exc:
+                    record_engineering_error(module, exc, workspace=workspace, actor=actor)
+                    st.error(f"Copilot workflow stopped safely: {type(exc).__name__}: {exc}")
+        if st.session_state.get(f"core_copilot_flow_last_{module}"):
+            flow = st.session_state[f"core_copilot_flow_last_{module}"]
+            st.dataframe(pd.DataFrame(flow.get("stages", [])), use_container_width=True, hide_index=True)
+            with st.expander("Copilot plan / evidence"):
+                st.json(flow)
+
         st.markdown("### Copilot approval & action governance")
         level = st.selectbox("Current Copilot permission level", list(ACTION_LEVELS), index=3, key=f"core_copilot_level_{module}")
         registry = copilot_action_registry()
@@ -3929,6 +4024,32 @@ def render_platform_completion(module: str, df: pd.DataFrame, *, allowed_modules
             if twin:
                 st.metric("Twin state", twin["status"], f"{len(twin['anomalies'])} anomalies")
                 st.dataframe(pd.DataFrame(twin["state"]), use_container_width=True, hide_index=True)
+            st.markdown("### State estimation & model calibration")
+            previous_state = st.session_state.get(f"core_twin_estimated_state_{module}", {})
+            if st.button("Estimate synchronized state", key=f"core_twin_estimate_{module}"):
+                estimate = twin_state_estimate(previous_state, observed, gain=0.35)
+                st.session_state[f"core_twin_estimated_state_{module}"] = estimate["state"]
+                st.session_state[f"core_twin_estimate_meta_{module}"] = estimate
+            if st.session_state.get(f"core_twin_estimate_meta_{module}"):
+                st.json(st.session_state[f"core_twin_estimate_meta_{module}"])
+            if expected:
+                model_frame = pd.DataFrame({k: [float(expected[k])] * len(df) for k in expected if k in nums})
+                observed_frame = df[[k for k in expected if k in df.columns]].copy()
+                if not observed_frame.empty and st.button("Calibrate model vs observed", key=f"core_twin_calibrate_{module}"):
+                    calibration = twin_calibrate(observed_frame, model_frame)
+                    st.session_state[f"core_twin_calibration_{module}"] = calibration
+            if st.session_state.get(f"core_twin_calibration_{module}"):
+                st.json(st.session_state[f"core_twin_calibration_{module}"])
+            drift_cols = {}
+            for key in expected:
+                if key in df.columns:
+                    drift_cols[f"{key}_observed"] = pd.to_numeric(df[key], errors="coerce")
+                    drift_cols[f"{key}_model"] = pd.Series([float(expected[key])] * len(df), index=df.index)
+            if drift_cols:
+                drift = twin_model_drift(pd.DataFrame(drift_cols))
+                if not drift.empty:
+                    st.dataframe(drift, use_container_width=True, hide_index=True)
+                    st.caption("Drift is flagged when recent model residual mean shifts materially from the historical baseline.")
             with st.expander("Live connector synchronization"):
                 connector_kind = st.selectbox("Telemetry connector", ["REST", "SAP-OData", "SQL", "MQTT", "OPC-UA", "SFTP"], key=f"core_twin_connector_{module}")
                 endpoint = st.text_input("Endpoint / connection string", key=f"core_twin_endpoint_{module}")
