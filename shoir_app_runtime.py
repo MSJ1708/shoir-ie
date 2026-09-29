@@ -38,6 +38,7 @@ from shoir_digital_thread import render_global_project_digital_thread
 from shoir_enterprise_services import render_enterprise_bridge
 from durable_account_store import (durable_backend_configured, sync_durable_accounts, sync_remote_requests_to_local, edge_login, edge_admin_list_requests, edge_renew_request, upsert_remote_account, insert_remote_request, remote_account, account_is_expired, renewed_expiry)
 from shoir_enterprise_layer import (
+from shoir_repository import sqlite_connect as shoir_sqlite_connect
     ensure_enterprise_schema, save_twin_snapshot, load_twin_state, save_twin_scenario,
     list_twin_scenarios, twin_what_if, twin_replay, build_control_tower_health,
     record_connector_health, connector_health_frame, validate_connector_profile,
@@ -166,7 +167,7 @@ os.makedirs("payment_proofs", exist_ok=True)
 # This is now a single, consolidated version. No feature was removed.
 # =====================================================================
 def init_db():
-    with sqlite3.connect("enterprise_full_workspace.db") as conn:
+    with shoir_sqlite_connect("enterprise_full_workspace.db") as conn:
         cursor = conn.cursor()
 
         # 1. Saved Projects Table (Stores workspace / simulation states)
@@ -422,7 +423,7 @@ def is_login_rate_limited(username, max_attempts=5, window_minutes=10):
     attempts for a username after too many failures in a short window.
     Backed by the login_attempts table (survives across tabs/sessions)."""
     try:
-        conn = sqlite3.connect("enterprise_full_workspace.db")
+        conn = shoir_sqlite_connect("enterprise_full_workspace.db")
         cursor = conn.cursor()
         cursor.execute(
             "SELECT COUNT(*) FROM login_attempts WHERE LOWER(username) = ? AND success = 0 AND attempted_at > datetime('now', ?)",
@@ -436,7 +437,7 @@ def is_login_rate_limited(username, max_attempts=5, window_minutes=10):
 
 def record_login_attempt(username, success):
     try:
-        conn = sqlite3.connect("enterprise_full_workspace.db")
+        conn = shoir_sqlite_connect("enterprise_full_workspace.db")
         cursor = conn.cursor()
         cursor.execute(
             "INSERT INTO login_attempts (username, success, attempted_at) VALUES (?, ?, datetime('now'))",
@@ -463,7 +464,7 @@ def is_valid_email(email):
     return bool(email) and bool(_EMAIL_RE.match(email.strip()))
 
 def local_account_exists(username):
-    with sqlite3.connect("enterprise_full_workspace.db") as conn:
+    with shoir_sqlite_connect("enterprise_full_workspace.db") as conn:
         return conn.execute(
             "SELECT 1 FROM users WHERE LOWER(username)=? LIMIT 1",
             (str(username or "").strip().lower(),)
@@ -867,7 +868,7 @@ def get_copilot_response(prompt, history):
     
     if "safety stock" in p or ("inventory" in p and "stock" in p):
         try:
-            conn = sqlite3.connect("enterprise_full_workspace.db")
+            conn = shoir_sqlite_connect("enterprise_full_workspace.db")
             stock_df = pd.read_sql("SELECT * FROM inventory LIMIT 5", conn)
             conn.close()
             if not stock_df.empty:
@@ -948,7 +949,7 @@ def log_audit(user, action):
     every time one of those actions ran. It's defined here now.
     """
     try:
-        conn = sqlite3.connect("enterprise_full_workspace.db")
+        conn = shoir_sqlite_connect("enterprise_full_workspace.db")
         cursor = conn.cursor()
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS audit_trail (
@@ -1075,7 +1076,7 @@ if not st.session_state.get("authenticated", False):
 # ==========================================
 # Check if global free mode is enabled by admin
 try:
-    conn = sqlite3.connect("enterprise_full_workspace.db")
+    conn = shoir_sqlite_connect("enterprise_full_workspace.db")
     cursor = conn.cursor()
     cursor.execute("SELECT value FROM system_settings WHERE key = 'free_mode'")
     f_row = cursor.fetchone()
@@ -1094,7 +1095,7 @@ if is_free_mode and not st.session_state.get("current_user"):
 if st.session_state.get("authenticated") and st.session_state.get("current_user") != "Guest Visitor":
     try:
         active_user = st.session_state.get("current_user", "")
-        conn = sqlite3.connect("enterprise_full_workspace.db")
+        conn = shoir_sqlite_connect("enterprise_full_workspace.db")
         row = conn.execute(
             "SELECT subscription_expires_at,email FROM users WHERE LOWER(username)=? LIMIT 1",
             (active_user.lower(),),
@@ -1159,7 +1160,7 @@ if not st.session_state.get("current_user"):
                 # read user metadata from SQLite. This cache is never the
                 # source of truth for authentication or workspace persistence.
                 try:
-                    conn_local = sqlite3.connect("enterprise_full_workspace.db")
+                    conn_local = shoir_sqlite_connect("enterprise_full_workspace.db")
                     local_row = conn_local.execute(
                         "SELECT id FROM users WHERE LOWER(username)=? LIMIT 1",
                         (username.lower(),),
@@ -1282,7 +1283,7 @@ if not st.session_state.get("current_user"):
                         with open(file_path, "wb") as f:
                             f.write(uploaded_screenshot.getbuffer())
 
-                        conn = sqlite3.connect("enterprise_full_workspace.db")
+                        conn = shoir_sqlite_connect("enterprise_full_workspace.db")
                         cursor = conn.cursor()
                         cursor.execute("""
                             INSERT INTO pending_payments
@@ -1399,7 +1400,7 @@ render_workspace_status(
 # ENSURE AFFILIATE CODE IS LOADED IN SESSION STATE
 # =====================================================================
 if not st.session_state.get("user_affiliate"):
-    conn = sqlite3.connect("enterprise_full_workspace.db")
+    conn = shoir_sqlite_connect("enterprise_full_workspace.db")
     cursor = conn.cursor()
 
     # Make sure a row exists for this user WITHOUT touching any of their
@@ -8813,7 +8814,7 @@ if current_view == "Edit Account":
             st.session_state.user_github = new_github
             st.session_state.user_about = new_about
             
-            conn = sqlite3.connect("enterprise_full_workspace.db")
+            conn = shoir_sqlite_connect("enterprise_full_workspace.db")
             cursor = conn.cursor()
             cursor.execute("""
                 UPDATE enterprise_users 
@@ -11145,7 +11146,7 @@ if mod == "Admin Panel":
         st.subheader("📥 Pending Payment & Ticket Requests")
         
         # Connect to database and load pending payments
-        conn = sqlite3.connect("enterprise_full_workspace.db")
+        conn = shoir_sqlite_connect("enterprise_full_workspace.db")
         cursor = conn.cursor()
         
         # Ensure pending_payments table exists
@@ -11251,7 +11252,7 @@ if mod == "Admin Panel":
                         if st.button(f"✅ Approve & Send Code", key=f"approve_{row['id']}_{idx}"):
                             t_code = "SUB-" + "".join(random.choices(string.ascii_uppercase + string.digits, k=4)) + "-" + "".join(random.choices(string.ascii_uppercase + string.digits, k=4))
                             
-                            conn = sqlite3.connect("enterprise_full_workspace.db")
+                            conn = shoir_sqlite_connect("enterprise_full_workspace.db")
                             cursor = conn.cursor()
                             cursor.execute("INSERT OR IGNORE INTO license_codes (code, tier, duration_days, is_used, created_at) VALUES (?, ?, 30, 0, datetime('now'))", (t_code, row['tier']))
                             # FIX: this used to be "INSERT OR REPLACE INTO enterprise_users
@@ -11369,7 +11370,7 @@ if mod == "Admin Panel":
                         # as Declined (so it drops out of the Pending list below) and logs
                         # who declined it, without creating any account or emailing anyone.
                         if st.button("❌ Decline Request", key=f"decline_{row['id']}_{idx}"):
-                            conn = sqlite3.connect("enterprise_full_workspace.db")
+                            conn = shoir_sqlite_connect("enterprise_full_workspace.db")
                             cursor = conn.cursor()
                             cursor.execute("UPDATE pending_payments SET status = 'Declined' WHERE id = ?", (row['id'],))
                             cursor.execute(
@@ -11383,7 +11384,7 @@ if mod == "Admin Panel":
 
         st.markdown("---")
         st.subheader("📈 Owner Usage & Module Trends")
-        conn = sqlite3.connect("enterprise_full_workspace.db")
+        conn = shoir_sqlite_connect("enterprise_full_workspace.db")
         usage_df = pd.read_sql("SELECT date(timestamp) AS Day, action AS Action, COUNT(*) AS Events FROM audit_trail GROUP BY date(timestamp), action ORDER BY Day", conn)
         conn.close()
         if usage_df.empty:
@@ -11407,7 +11408,7 @@ if mod == "Admin Panel":
         # form. It's now indented so it's only reachable here.
         # --- INITIALIZE DATABASE TABLES ---
         def init_workspace_db():
-            conn = sqlite3.connect("enterprise_full_workspace.db")
+            conn = shoir_sqlite_connect("enterprise_full_workspace.db")
             cursor = conn.cursor()
 
             # 1. Enterprise Users Table
@@ -11469,14 +11470,14 @@ if mod == "Admin Panel":
 
         with col_m1:
             st.subheader("👥 Registered Enterprise Users")
-            conn = sqlite3.connect("enterprise_full_workspace.db")
+            conn = shoir_sqlite_connect("enterprise_full_workspace.db")
             users_df = pd.read_sql("SELECT username, role, tier, email FROM enterprise_users", conn)
             conn.close()
             st.dataframe(users_df, use_container_width=True)
 
         with col_m2:
             st.subheader("📊 Security Audit Log")
-            conn = sqlite3.connect("enterprise_full_workspace.db")
+            conn = shoir_sqlite_connect("enterprise_full_workspace.db")
             audit_df = pd.read_sql("SELECT * FROM audit_trail ORDER BY id DESC LIMIT 20", conn)
             conn.close()
             st.dataframe(audit_df, use_container_width=True)
@@ -11502,7 +11503,7 @@ if mod == "Admin Panel":
         if submit_gen_code:
             if custom_code_input.strip():
                 try:
-                    conn = sqlite3.connect("enterprise_full_workspace.db")
+                    conn = shoir_sqlite_connect("enterprise_full_workspace.db")
                     cursor = conn.cursor()
                     cursor.execute("""
                         INSERT OR REPLACE INTO license_codes (code, tier, duration_days, is_used, created_at)
@@ -11521,7 +11522,7 @@ if mod == "Admin Panel":
 
         # Display existing active/unused codes table including duration
         st.markdown("### 📋 Existing Active License / Trial Codes")
-        conn = sqlite3.connect("enterprise_full_workspace.db")
+        conn = shoir_sqlite_connect("enterprise_full_workspace.db")
         codes_df = pd.read_sql("SELECT id, code, tier, duration_days, is_used, created_at FROM license_codes ORDER BY id DESC", conn)
         conn.close()
         st.dataframe(codes_df, use_container_width=True)
