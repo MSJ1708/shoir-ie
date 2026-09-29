@@ -23,6 +23,10 @@ from shoir_platform_core import (
     safe_calculate,
     scenario_analysis,
     uncertainty_engine,
+    unified_optimization,
+    generate_standard_scenarios,
+    canonical_kpi_id,
+    get_kpi_definition,
     verification_suite,
 )
 
@@ -199,3 +203,29 @@ def test_unified_optimization_exposes_solver_transparency():
     assert result["solver"] == "scipy-highs"
     assert "constraint_slacks" in result
     assert "runtime_ms" in result
+
+
+def test_standard_scenarios_and_kpi_identity():
+    scenarios = generate_standard_scenarios({"Throughput": 100, "Cost": 50}, uncertainty_pct=10, stress_pct=20)
+    assert set(scenarios) == {"Baseline", "Best Case", "Worst Case", "Stress Up", "Stress Down"}
+    assert canonical_kpi_id("Decision Regret") == "KPI-DECISION-REGRET"
+    assert get_kpi_definition("Throughput")["kpi_id"] == "KPI-THROUGHPUT"
+
+
+def test_unified_milp_uses_real_integer_solver():
+    result = unified_optimization(
+        "MILP",
+        [1, 2],
+        A_ub=[[1, 1]],
+        b_ub=[3],
+        bounds=[(0, 3), (0, 3)],
+    )
+    assert result["solver"] == "scipy-highs-milp"
+    assert result["success"] is True
+    assert all(float(x).is_integer() for x in result["variables"])
+
+
+def test_copilot_blocks_high_impact_action_without_approval():
+    from shoir_platform_core import execute_copilot_action
+    blocked = execute_copilot_action("execute_operational_action", actor_level="EXECUTE")
+    assert blocked["status"] == "BLOCKED"
