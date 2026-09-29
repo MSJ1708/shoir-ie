@@ -362,9 +362,23 @@ def repository_records(record_type: str, *, workspace: str = "default", limit: i
         )
 
 
+def _current_actor(default: str = "system") -> str:
+    try:
+        return str(st.session_state.get("current_user") or st.session_state.get("username") or default)
+    except Exception:
+        return default
+
+
+def _current_workspace(default: str = "default") -> str:
+    try:
+        return str(st.session_state.get("workspace") or st.session_state.get("active_workspace") or default)
+    except Exception:
+        return default
+
+
 def save_platform_record(record_type: str, entity_key: str, payload: Mapping[str, Any], *, workspace: str = "default") -> str:
     rid = _record_upsert(record_type, entity_key, payload, workspace=workspace)
-    _record_event(f"{record_type}.saved", actor=str(st.session_state.get("current_user", "system")),
+    _record_event(f"{record_type}.saved", actor=_current_actor(),
                   entity_key=entity_key, payload={"record_id": rid, **_jsonable(payload)}, workspace=workspace)
     return rid
 
@@ -2189,12 +2203,31 @@ class JobManager:
                 save_platform_record("job", job_id, {"job_id": job_id, "module": module, "status": "RUNNING", "progress": 0.05, "started_at": now_iso()}, workspace=workspace)
                 result = task()
                 duration = (time.perf_counter() - started) * 1000
+                update_distributed_job(
+                    str(payload.get("queue_id") or ""),
+                    status="COMPLETED",
+                    worker_id=f"local:{os.getpid()}",
+                    progress=1.0,
+                    result={"result_hash": digest(result), "duration_ms": duration},
+                    workspace=workspace,
+                ) if payload and payload.get("queue_id") else None
                 save_platform_record("job", job_id, {
                     "job_id": job_id, "module": module, "status": "COMPLETED", "progress": 1.0,
                     "duration_ms": duration, "result_hash": digest(result), "completed_at": now_iso(),
                 }, workspace=workspace)
                 return result
             except Exception as exc:
+                if payload and payload.get("queue_id"):
+                    try:
+                        update_distributed_job(
+                            str(payload["queue_id"]), status="FAILED",
+                            worker_id=f"local:{os.getpid()}", progress=1.0,
+                            error=engine_error_payload(module, exc), workspace=workspace,
+                        )
+                    except Exception as queue_exc:
+                        st.session_state.setdefault("shoir_platform_warnings", []).append({
+                            "scope": "queue_update", "type": type(queue_exc).__name__, "message": str(queue_exc), "at": now_iso(),
+                        })
                 record_engineering_error(module, exc, workspace=workspace)
                 save_platform_record("job", job_id, {"job_id": job_id, "module": module, "status": "FAILED", "progress": 1.0, "error": engine_error_payload(module, exc)}, workspace=workspace)
                 raise
