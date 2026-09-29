@@ -27,7 +27,21 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
+# Legacy public sequence retained for backwards compatibility. New platform-core
+# governed modules use MANDATORY_WORKFLOW_STEPS below.
 WORKFLOW_STEPS = (
+    "DATA",
+    "VALIDATE",
+    "MODEL",
+    "RUN",
+    "VISUALIZE",
+    "COMPARE",
+    "EXPLAIN",
+    "DECIDE",
+    "EXPORT",
+    "VERIFY",
+)
+MANDATORY_WORKFLOW_STEPS = (
     "DATA",
     "VALIDATE",
     "MAP",
