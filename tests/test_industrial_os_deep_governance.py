@@ -107,7 +107,7 @@ def test_forecast_drift_and_decomposition():
 def test_replay_checks_input_and_result_fingerprint():
     frame = pd.DataFrame({"x": [1, 2, 3]})
     record = {
-        "callable_path": "tests.test_shoir_industrial_os:_replay_fixture",
+        "callable_path": "tests.test_industrial_os_deep_governance:_replay_fixture",
         "kwargs": {"value": 3},
         "input_hash": __import__("shoir_platform_core").dataframe_digest(frame),
         "expected_result_hash": __import__("shoir_platform_core").digest({"value": 6}),
@@ -156,3 +156,11 @@ def test_no_silent_broad_exception_swallowing():
                 if not body:
                     offenders.append(f"{path.relative_to(root)}:{node.lineno}")
     assert not offenders, "Silent 'except Exception: pass' remains: " + ", ".join(offenders[:30])
+
+
+def test_160_capability_catalog_has_stable_contract_surface():
+    from shoir_160 import FEATURES_160
+    assert len(FEATURES_160) == 160
+    for feature in FEATURES_160:
+        assert feature.get("name")
+        assert feature.get("area") is not None
