@@ -53,6 +53,7 @@ from shoir_adoption_engine import render_adoption_center
 from shoir_universal_engine import render_universal_engine_surface, postflight_contract
 from shoir_commercial import render_module_enrichment
 from shoir_160 import init_160_platform, render_160_command_center
+from shoir_industrial_os import render_platform_os_surface
 from shoir_enterprise_ops import (
     render_digital_twin_extension, render_control_tower_extension,
     render_connectivity_extension, render_security_extension,
@@ -11724,6 +11725,25 @@ if (
     except Exception as exc:
         st.warning("Universal Industrial Engine is temporarily unavailable; native module results remain available.")
         with st.expander("Universal Engine diagnostic"):
+            st.code(f"{type(exc).__name__}: {exc}")
+
+# Integrated Industrial Operating System surface: one governed workspace around every module.
+# It reuses the existing specialist renderer, enterprise persistence, visualization,
+# Digital Thread, jobs, Copilot and evidence infrastructure rather than replacing them.
+if (
+    st.session_state.get("authenticated")
+    and st.session_state.get("current_user")
+    and st.session_state.get("selected_nav", "Dashboard") == "Dashboard"
+    and "selected_module" in globals()
+):
+    try:
+        render_platform_os_surface(
+            str(selected_module),
+            allowed_modules=globals().get("allowed_modules", []),
+        )
+    except Exception as exc:
+        st.warning("Industrial Operating System surface is temporarily unavailable; native module results remain available.")
+        with st.expander("Industrial OS diagnostic", expanded=False):
             st.code(f"{type(exc).__name__}: {exc}")
 
 # Capture module calculations and parity edits after the selected module has rendered.
