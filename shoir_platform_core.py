@@ -742,6 +742,8 @@ def run_governed_module(
                     str(replay_spec.get("callable_path") or ""),
                     dict(replay_spec.get("kwargs") or {}),
                     input_hash=active_df_hash(active_df),
+                    result_hash=digest(result),
+                    seed=st.session_state.get("shoir_seed"),
                     workspace=workspace,
                 )
             except Exception as exc:
@@ -2029,7 +2031,7 @@ def register_replay(
         "created_at": now_iso(),
         "schema_version": SCHEMA_VERSION,
     }
-    rid = save_platform_record("replay", f"{module}:{callable_path}", payload, workspace=workspace)
+    rid = save_platform_record("replay", f"{module}:{callable_path}:{stable_id(\"RPL\")}", payload, workspace=workspace)
     st.session_state["shoir_last_replay_id"] = rid
     return rid
 
