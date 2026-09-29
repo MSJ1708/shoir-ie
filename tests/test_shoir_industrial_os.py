@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import pytest
 import numpy as np
 import pandas as pd
 
@@ -13,6 +14,7 @@ from shoir_industrial_os import (
     factorial_design,
     holm_adjust,
     module_manifest,
+    monte_carlo_summary,
     problem_solver,
     profile_data,
     residual_diagnostics,
@@ -129,3 +131,7 @@ def test_app_integrates_complete_os_surface():
 
 def test_catalog_has_explicit_maturity_states():
     assert CAPABILITY_STATES == ("Verified", "Implemented", "Foundation", "Integration-ready")
+
+def test_monte_carlo_rejects_arbitrary_python():
+    with pytest.raises(ValueError):
+        monte_carlo_summary({"X": {"distribution": "normal", "mean": 1, "std": 0.1}}, "__import__('os').system('echo unsafe')", samples=100)
