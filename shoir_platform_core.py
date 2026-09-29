@@ -2252,137 +2252,264 @@ def lineage_graph_frame(*, workspace: str = "default", limit: int = 100) -> tupl
 
 
 def render_platform_completion(module: str, df: pd.DataFrame, *, allowed_modules: Sequence[str] = ()) -> None:
-    """Unified completion console surfaced beside the existing OS layer."""
+    """Production completion console for workflow, evidence, experiments and operations."""
     if not st.session_state.get("authenticated"):
         return
-    st.markdown("## Industrial Platform Completion Console")
-    cols = st.columns(4)
+
+    ensure_core_schema()
+    workspace = str(st.session_state.get("workspace") or st.session_state.get("active_workspace") or "default")
+    actor = str(st.session_state.get("current_user") or st.session_state.get("username") or "system")
     readiness = data_readiness(df)
     ledger = capability_ledger()
-    with cols[0]:
-        st.metric("Data readiness", f"{readiness['score']:.0f}%")
-    with cols[1]:
-        st.metric("Capabilities catalogued", f"{len(ledger):,}")
-    with cols[2]:
-        verified = int((ledger["Status"] == "Verified").sum()) if not ledger.empty else 0
-        st.metric("Verified evidence", str(verified))
-    with cols[3]:
-        st.metric("Persistence", "PostgreSQL" if remote_persistence_configured() else "SQLite fallback")
-    runtime = begin_module(module, actor=str(st.session_state.get("current_user", "system")), df=df)
-    tabs = st.tabs(["Workflow & Manifest", "Digital Thread", "Experiment", "Forecast", "Connectors", "Decision Memory", "Diagnostics"])
+    runtime = begin_module(module, workspace=workspace, actor=actor, df=df)
+
+    st.markdown("## Industrial Platform Console")
+    metrics = st.columns(5)
+    metrics[0].metric("Readiness", f"{readiness['score']:.0f}%")
+    metrics[1].metric("Capabilities", f"{len(ledger):,}")
+    metrics[2].metric("Verified", str(int((ledger["Status"] == "Verified").sum())) if not ledger.empty else "0")
+    metrics[3].metric("Persistence", db_backend().upper())
+    metrics[4].metric("Workflow", runtime.stage)
+
+    tabs = st.tabs([
+        "Workflow & Manifest", "Digital Thread", "Experiment", "Scenario Lab",
+        "Forecast", "Run & Replay", "Governance", "Diagnostics",
+    ])
+
     with tabs[0]:
-        manifest = module_manifest(module)
+        stage_rows = []
+        for idx, stage in enumerate(WORKFLOW_STEPS):
+            stage_rows.append({
+                "Order": idx + 1,
+                "Stage": stage,
+                "State": "Complete" if idx <= runtime.stage_index else "Pending",
+                "Evidence": "required",
+            })
+        st.dataframe(pd.DataFrame(stage_rows), hide_index=True, use_container_width=True)
+        st.caption("The specialist calculation remains module-owned; the platform contract owns lifecycle evidence and gates.")
+        st.json(module_manifest(module, catalog_entry=next((x for x in (
+            __import__("industrial_platform", fromlist=["PLATFORM_CATALOG"]).PLATFORM_CATALOG
+        ) if str(x.get("name")) == str(module)), {})))
+        st.markdown("**Copilot action levels**")
         st.dataframe(pd.DataFrame([
-            {"Stage": s, "Enforced": "Yes", "Current": "●" if s == runtime.stage else "○",
-             "Evidence": "required"} for s in WORKFLOW_STEPS
+            {"Level": level, "Meaning": description}
+            for level, description in (
+                ("READ", "Inspect workspace and metadata."),
+                ("ANALYZE", "Run non-destructive analysis."),
+                ("SIMULATE", "Execute simulation / what-if work."),
+                ("RECOMMEND", "Prepare evidence-backed recommendations."),
+                ("PREPARE", "Prepare artifacts for approval."),
+                ("EXECUTE", "Execute an approved operational action."),
+                ("ADMIN", "Change governed platform configuration."),
+            )
         ]), hide_index=True, use_container_width=True)
-        with st.expander("Machine-readable module manifest"):
-            st.json(manifest)
+
     with tabs[1]:
-        lineage = repository_records("kpi_lineage", limit=100)
-        if lineage.empty:
-            st.info("No KPI lineage records have been captured yet.")
-        else:
-            shown = []
+        st.caption("Why-this-number lineage is persisted per workspace and reconstructed as a connected evidence graph.")
+        try:
+            render_lineage_graph(workspace=workspace)
+        except Exception as exc:
+            record_engineering_error(module, exc, workspace=workspace, actor=actor)
+            st.warning(f"Lineage graph unavailable: {type(exc).__name__}: {exc}")
+        lineage = repository_records("kpi_lineage", workspace=workspace, limit=200)
+        if not lineage.empty:
+            options = []
+            records_by_label = {}
             for _, row in lineage.iterrows():
-                try:
-                    p = json.loads(str(row["payload_json"]))
-                    shown.append({"KPI": p.get("kpi"), "Module": p.get("module"), "Value": p.get("value"), "Lineage ID": p.get("lineage_id")})
-                except Exception:
-                    continue
-            if shown:
-                st.dataframe(pd.DataFrame(shown), use_container_width=True, hide_index=True)
+                payload = _payload_from_value(row["payload_json"])
+                label = f"{payload.get('module')} · {payload.get('kpi')} = {payload.get('value')}"
+                options.append(label)
+                records_by_label[label] = payload
+            if options:
+                selected = st.selectbox("Inspect KPI evidence", options, key=f"lineage_pick_{module}")
+                render_kpi_lineage(records_by_label[selected])
+
     with tabs[2]:
-        method = st.selectbox("Experiment method", ["Full Factorial", "Fractional Factorial", "Central Composite", "Box-Behnken", "Replication Planner"], key="core_exp_method")
+        method = st.selectbox(
+            "Experiment method",
+            ["Full Factorial", "Fractional Factorial", "Central Composite", "Box-Behnken", "Replication Planner", "Response Surface Fit"],
+            key=f"core_exp_method_{module}",
+        )
         if method == "Full Factorial":
-            factors = st.text_area("Factors", "A=10,20\nB=1,2", key="core_exp_ff")
-            if st.button("Build full factorial", key="core_exp_ff_btn"):
-                f = {x.split("=",1)[0].strip(): [v.strip() for v in x.split("=",1)[1].split(",")] for x in factors.splitlines() if "=" in x}
-                st.session_state["core_exp_design"], st.session_state["core_exp_meta"] = factorial_design(f, randomized=True), {"type":"full_factorial"}
+            factors = st.text_area("Factor levels (one factor per line)", "Speed=10,20\nFeed=1,2", key=f"core_exp_ff_{module}")
+            randomized = st.checkbox("Randomize run order", True, key=f"core_exp_rand_{module}")
+            reps = int(st.number_input("Replications", 1, 100, 1, key=f"core_exp_reps_{module}"))
+            if st.button("Build full factorial", key=f"core_exp_ff_btn_{module}", type="primary"):
+                parsed = {p.split("=", 1)[0].strip(): [v.strip() for v in p.split("=", 1)[1].split(",")] for p in factors.splitlines() if "=" in p}
+                st.session_state[f"core_exp_design_{module}"] = factorial_design(parsed, randomized=randomized, reps=reps, seed=2026)
         elif method == "Fractional Factorial":
-            factors = st.text_area("Two-level factors", "A=-1,1\nB=-1,1\nC=-1,1\nD=-1,1", key="core_exp_frac")
-            fraction = st.selectbox("Fraction", [2,4,8], key="core_exp_frac_ratio")
-            if st.button("Build fractional design", key="core_exp_frac_btn"):
-                f = {x.split("=",1)[0].strip(): [v.strip() for v in x.split("=",1)[1].split(",")] for x in factors.splitlines() if "=" in x}
+            factors = st.text_area("Two-level factors", "A=-1,1\nB=-1,1\nC=-1,1\nD=-1,1", key=f"core_frac_{module}")
+            fraction = int(st.selectbox("Fraction", [2, 4, 8, 16], key=f"core_frac_ratio_{module}"))
+            if st.button("Build fractional design", key=f"core_frac_btn_{module}", type="primary"):
+                parsed = {p.split("=", 1)[0].strip(): [v.strip() for v in p.split("=", 1)[1].split(",")] for p in factors.splitlines() if "=" in p}
                 try:
-                    d, meta = fractional_factorial_design(f, fraction=int(fraction))
-                    st.session_state["core_exp_design"], st.session_state["core_exp_meta"] = d, meta
+                    d, meta = fractional_factorial_design(parsed, fraction=fraction, randomized=True, reps=2, seed=2026)
+                    st.session_state[f"core_exp_design_{module}"], st.session_state[f"core_exp_meta_{module}"] = d, meta
                 except ValueError as exc:
                     st.error(str(exc))
         elif method in {"Central Composite", "Box-Behnken"}:
-            factors = st.text_area("Numeric low/high pairs", "A=10,20\nB=1,2\nC=5,9", key="core_exp_rs")
-            if st.button("Build response surface", key="core_exp_rs_btn"):
-                f = {x.split("=",1)[0].strip(): [float(v.strip()) for v in x.split("=",1)[1].split(",")] for x in factors.splitlines() if "=" in x}
+            factors = st.text_area("Numeric low/high factors", "Speed=10,20\nFeed=1,2\nDepth=5,9", key=f"core_rs_design_{module}")
+            if st.button("Build response-surface design", key=f"core_rs_design_btn_{module}", type="primary"):
+                parsed = {p.split("=", 1)[0].strip(): [float(v.strip()) for v in p.split("=", 1)[1].split(",")] for p in factors.splitlines() if "=" in p}
                 try:
-                    d, meta = response_surface_design(f, design="central_composite" if method == "Central Composite" else "box_behnken")
-                    st.session_state["core_exp_design"], st.session_state["core_exp_meta"] = d, meta
+                    d, meta = response_surface_design(parsed, design="central_composite" if method == "Central Composite" else "box_behnken", seed=2026)
+                    st.session_state[f"core_exp_design_{module}"], st.session_state[f"core_exp_meta_{module}"] = d, meta
                 except ValueError as exc:
                     st.error(str(exc))
-        else:
-            effect = st.number_input("Expected standardized effect", value=0.5, min_value=0.01, key="core_exp_effect")
-            alpha = st.number_input("Alpha", value=0.05, min_value=0.001, max_value=0.2, key="core_exp_alpha")
-            power = st.number_input("Target power", value=0.80, min_value=0.50, max_value=0.99, key="core_exp_power")
+        elif method == "Response Surface Fit":
+            nums = list(df.select_dtypes(include=np.number).columns) if isinstance(df, pd.DataFrame) else []
+            if len(nums) < 2:
+                st.info("Response-surface fitting needs at least one response and one numeric factor.")
+            else:
+                response = st.selectbox("Response", nums, key=f"core_rsf_response_{module}")
+                factors = st.multiselect("Factors", [x for x in nums if x != response], default=[x for x in nums if x != response][:2], key=f"core_rsf_factors_{module}")
+                if st.button("Fit response surface", key=f"core_rsf_fit_{module}", type="primary"):
+                    try:
+                        model, fitted = fit_response_surface(df, response, factors)
+                        st.session_state[f"core_rsf_model_{module}"], st.session_state[f"core_rsf_fitted_{module}"] = model, fitted
+                    except ValueError as exc:
+                        st.error(str(exc))
+                if st.session_state.get(f"core_rsf_model_{module}"):
+                    st.json(st.session_state[f"core_rsf_model_{module}"])
+                    st.dataframe(st.session_state[f"core_rsf_fitted_{module}"], use_container_width=True, hide_index=True)
+        elif method == "Replication Planner":
+            effect = st.number_input("Expected standardized effect", 0.50, min_value=0.01, key=f"core_rep_effect_{module}")
+            alpha = st.number_input("Alpha", 0.05, min_value=0.001, max_value=0.20, key=f"core_rep_alpha_{module}")
+            power = st.number_input("Target power", 0.80, min_value=0.50, max_value=0.99, key=f"core_rep_power_{module}")
             st.json(replication_planner(effect, alpha=alpha, power=power))
-        if isinstance(st.session_state.get("core_exp_design"), pd.DataFrame):
-            st.dataframe(st.session_state["core_exp_design"], use_container_width=True, hide_index=True)
-            st.json(st.session_state.get("core_exp_meta", {}))
+        if isinstance(st.session_state.get(f"core_exp_design_{module}"), pd.DataFrame):
+            st.dataframe(st.session_state[f"core_exp_design_{module}"], use_container_width=True, hide_index=True)
+            st.json(st.session_state.get(f"core_exp_meta_{module}", {}))
+
     with tabs[3]:
+        st.caption("Scenario analysis now combines deltas, constraints, best/worst cases and driver tables.")
+        scenarios_text = st.text_area(
+            "Scenario definitions: Name=KPI:value,KPI:value",
+            "Baseline=Throughput:100,Cost:50\nA=Throughput:110,Cost:45\nB=Throughput:90,Cost:55",
+            key=f"core_scenarios_{module}",
+        )
+        baseline = st.text_input("Baseline scenario", "Baseline", key=f"core_scenario_base_{module}")
+        constraint_text = st.text_area("Constraints: KPI=min or KPI=max", "Throughput=min:95\nCost=max:60", key=f"core_scenario_constraints_{module}")
+        if st.button("Analyze scenarios", key=f"core_scenario_btn_{module}", type="primary"):
+            data: dict[str, dict[str, float]] = {}
+            for line in scenarios_text.splitlines():
+                if "=" not in line:
+                    continue
+                name, values = line.split("=", 1)
+                metrics = {}
+                for item in values.split(","):
+                    if ":" in item:
+                        k, v = item.split(":", 1)
+                        try: metrics[k.strip()] = float(v.strip())
+                        except ValueError: continue
+                if metrics: data[name.strip()] = metrics
+            constraints: dict[str, dict[str, float]] = {}
+            for line in constraint_text.splitlines():
+                if "=" not in line: continue
+                kpi, spec = line.split("=", 1)
+                if ":" in spec:
+                    kind, val = spec.split(":", 1)
+                    try:
+                        constraints[kpi.strip()] = {kind.strip().lower(): float(val)}
+                    except ValueError:
+                        continue
+            try:
+                comparison, summary = scenario_analysis(data, baseline=baseline, constraints=constraints)
+                st.session_state[f"core_scenario_result_{module}"] = comparison
+                st.session_state[f"core_scenario_summary_{module}"] = summary
+                save_platform_record("scenario_analysis", f"{module}:{baseline}", {"module": module, "baseline": baseline, "comparison": comparison.to_dict("records"), "summary": summary}, workspace=workspace)
+            except ValueError as exc:
+                st.error(str(exc))
+        if isinstance(st.session_state.get(f"core_scenario_result_{module}"), pd.DataFrame):
+            st.dataframe(st.session_state[f"core_scenario_result_{module}"], use_container_width=True, hide_index=True)
+            st.json(st.session_state.get(f"core_scenario_summary_{module}", {}))
+
+    with tabs[4]:
         pred, meta = forecast_operations(df)
         if pred.empty:
             st.info(meta.get("status", "Forecast unavailable."))
         else:
             st.dataframe(pd.DataFrame(meta.get("model_comparison", [])), use_container_width=True, hide_index=True)
-            st.plotly_chart(px.line(pred, x="Horizon", y=["P50","Lower 95%","Upper 95%"], title=f"Forecast · {meta.get('best_model')}"), use_container_width=True)
+            st.plotly_chart(
+                px.line(pred, x="Horizon", y=["Forecast", "Lower 95%", "Upper 95%"], title=f"{module} forecast"),
+                use_container_width=True, key=f"core_forecast_{module}",
+            )
             st.json(meta)
-    with tabs[4]:
-        names = ["REST", "SQL", "SAP-OData", "MQTT", "OPC-UA", "SFTP"]
-        kind = st.selectbox("Connector kind", names, key="core_conn_kind")
-        if kind in {"REST", "SAP-OData"}:
-            endpoint = st.text_input("Endpoint", key="core_conn_endpoint")
-            token = st.text_input("Token", type="password", key="core_conn_token")
-            if st.button("Check connection", key="core_conn_test"):
-                st.json(connector_health({"kind":kind, "endpoint":endpoint, "token":token}))
-        elif kind == "SQL":
-            conn = st.text_input("Connection string", placeholder="postgresql://user:password@host/db or sqlite:///path.db", key="core_sql_conn")
-            if st.button("Check SQL", key="core_sql_test"):
-                st.json(connector_health({"kind":"SQL","connection_string":conn}))
-        elif kind == "MQTT":
-            host = st.text_input("Broker host", key="core_mqtt_host")
-            port = st.number_input("Port", 1, 65535, 1883, key="core_mqtt_port")
-            if st.button("Check MQTT", key="core_mqtt_test"):
-                st.json(connector_health({"kind":"MQTT","host":host,"port":int(port)}))
-        elif kind == "OPC-UA":
-            endpoint = st.text_input("OPC-UA endpoint", key="core_opc_endpoint")
-            if st.button("Check OPC-UA", key="core_opc_test"):
-                st.json(connector_health({"kind":"OPC-UA","endpoint":endpoint}))
-        else:
-            host = st.text_input("SFTP host", key="core_sftp_host")
-            user = st.text_input("SFTP user", key="core_sftp_user")
-            pwd = st.text_input("SFTP password", type="password", key="core_sftp_pwd")
-            if st.button("Check SFTP", key="core_sftp_test"):
-                st.json(connector_health({"kind":"SFTP","host":host,"username":user,"password":pwd}))
+
     with tabs[5]:
-        problem = st.text_area("Describe the current engineering problem", key="core_memory_problem")
-        if st.button("Search decision memory", key="core_memory_btn") and problem.strip():
-            hits = decision_memory_query(problem)
-            if hits.empty:
-                st.info("No similar historical decision records found.")
-            else:
-                st.dataframe(hits, use_container_width=True, hide_index=True)
+        jobs = repository_records("job", workspace=workspace, limit=100)
+        if jobs.empty:
+            st.info("No platform-core jobs recorded.")
+        else:
+            st.dataframe(jobs[["record_id", "entity_key", "content_hash", "version", "updated_at"]], use_container_width=True, hide_index=True)
+        replays = replay_records(workspace=workspace, limit=100)
+        if replays.empty:
+            st.info("No executable replay records have been captured yet.")
+        else:
+            st.dataframe(replays, use_container_width=True, hide_index=True)
+            selected_replay = st.selectbox("Replay run", replays["Replay ID"].astype(str).tolist(), key=f"core_replay_pick_{module}")
+            if st.button("Replay executable run", key=f"core_replay_btn_{module}", type="primary"):
+                try:
+                    replay_payload = get_replay_record(selected_replay, workspace=workspace)
+                    result = execute_replay(replay_payload)
+                    st.session_state[f"core_replay_result_{module}"] = result
+                    st.success("Replay completed from the persisted callable + parameter manifest.")
+                except Exception as exc:
+                    record_engineering_error(module, exc, workspace=workspace, actor=actor)
+                    st.error(f"Replay failed safely: {type(exc).__name__}: {exc}")
+        replay_result = st.session_state.get(f"core_replay_result_{module}")
+        if replay_result is not None:
+            st.write(replay_result if isinstance(replay_result, (str, int, float)) else _jsonable(replay_result))
+
     with tabs[6]:
-        snap = {
+        st.markdown("**Connector execution posture**")
+        st.dataframe(pd.DataFrame(ACTION_LEVELS, columns=["Governed action level"]), hide_index=True, use_container_width=True)
+        connector_kind = st.selectbox("Connector", ["REST", "SQL", "SAP-OData", "MQTT", "OPC-UA", "SFTP"], key=f"core_conn_kind_{module}")
+        if connector_kind in {"REST", "SAP-OData"}:
+            endpoint = st.text_input("Endpoint", key=f"core_conn_endpoint_{module}")
+            token = st.text_input("Token", type="password", key=f"core_conn_token_{module}")
+            if st.button("Check connector", key=f"core_conn_test_{module}"):
+                st.json(connector_health({"kind": connector_kind, "endpoint": endpoint, "token": token, "name": module}))
+        elif connector_kind == "SQL":
+            conn = st.text_input("Read-only SQL connection", placeholder="postgresql://…", key=f"core_sql_conn_{module}")
+            if st.button("Check SQL", key=f"core_sql_test_{module}"):
+                st.json(connector_health({"kind": "SQL", "connection_string": conn, "name": module}))
+        elif connector_kind == "MQTT":
+            host = st.text_input("Broker host", key=f"core_mqtt_host_{module}")
+            port = st.number_input("Broker port", 1, 65535, 1883, key=f"core_mqtt_port_{module}")
+            if st.button("Check MQTT", key=f"core_mqtt_test_{module}"):
+                st.json(connector_health({"kind": "MQTT", "host": host, "port": int(port), "name": module}))
+        elif connector_kind == "OPC-UA":
+            endpoint = st.text_input("OPC-UA endpoint", key=f"core_opc_endpoint_{module}")
+            if st.button("Check OPC-UA", key=f"core_opc_test_{module}"):
+                st.json(connector_health({"kind": "OPC-UA", "endpoint": endpoint, "name": module}))
+        else:
+            host = st.text_input("SFTP host", key=f"core_sftp_host_{module}")
+            user = st.text_input("SFTP username", key=f"core_sftp_user_{module}")
+            password = st.text_input("SFTP password", type="password", key=f"core_sftp_pwd_{module}")
+            if st.button("Check SFTP", key=f"core_sftp_test_{module}"):
+                st.json(connector_health({"kind": "SFTP", "host": host, "username": user, "password": password, "name": module}))
+
+    with tabs[7]:
+        diagnostics = {
             "backend": db_backend(),
+            "database_authority": "PostgreSQL when configured; SQLite offline fallback",
+            "runtime": platform.python_version(),
             "python": platform.python_version(),
-            "pandas": pd.__version__, "numpy": np.__version__,
+            "pandas": pd.__version__,
+            "numpy": np.__version__,
             "streamlit": getattr(st, "__version__", "unknown"),
-            "workers": int(os.getenv("SHOIR_WORKERS", "4")),
-            "active_module": module,
             "performance": performance_route(df),
+            "readiness": readiness,
+            "last_run_id": st.session_state.get("shoir_latest_run_id") or st.session_state.get("last_run_id"),
         }
-        st.json(snap)
-        if st.button("Run verification suite", key="core_verify_btn", type="primary"):
+        st.json(diagnostics)
+        if st.button("Run verification suite", key=f"core_verify_btn_{module}", type="primary"):
             report = verification_suite(module, inputs=df, results=df)
             st.json(report)
+        if not ledger.empty:
+            status_filter = st.multiselect("Capability status filter", list(CAPABILITY_STATES), default=list(CAPABILITY_STATES), key=f"core_cap_filter_{module}")
+            st.dataframe(ledger[ledger["Status"].isin(status_filter)], use_container_width=True, hide_index=True, height=300)
 
 
 def sync_project_state(workspace: str, state: Mapping[str, Any]) -> str:
