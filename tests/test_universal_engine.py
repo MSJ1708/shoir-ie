@@ -75,11 +75,11 @@ def test_replay_script_is_human_readable_and_stable():
 def test_universal_engine_integration_is_present_in_app_and_dependencies():
     from pathlib import Path
 
-    app = Path("app.py").read_text(encoding="utf-8")
+    runtime = Path("shoir_app_runtime.py").read_text(encoding="utf-8")
     requirements = Path("requirements.txt").read_text(encoding="utf-8")
-    assert "from shoir_universal_engine import" in app
-    assert "render_universal_engine_surface" in app
-    assert "postflight_contract" in app
+    assert "from shoir_universal_engine import" in runtime
+    assert "render_universal_engine_surface" in runtime
+    assert "postflight_contract" in runtime
     assert "duckdb" in requirements.lower()
 
 
