@@ -1,3 +1,4 @@
+from shoir_repository import sqlite_connect as shoir_sqlite_connect
 """Shoir-IE shared experience layer.
 
 Provides a consistent command deck, persistence, verification and evidence
@@ -123,7 +124,7 @@ def _now() -> str:
 
 
 def _db(path: str = "enterprise_full_workspace.db"):
-    return sqlite3.connect(path, timeout=30)
+    return shoir_sqlite_connect(path, timeout=30)
 
 
 def ensure_experience_db(path: str = "enterprise_full_workspace.db") -> None:
