@@ -6,6 +6,7 @@ Monte Carlo uncertainty propagation, bootstrap confidence intervals,
 replication summaries and sensitivity measures.
 """
 from __future__ import annotations
+import logging
 
 import itertools
 import math
@@ -388,8 +389,8 @@ def _experiment_source_df(module: str) -> pd.DataFrame:
         candidate = st.session_state.get(parity_keys(module)["data"])
         if isinstance(candidate, pd.DataFrame) and not candidate.empty:
             return candidate.copy(deep=True)
-    except Exception:
-        pass
+    except Exception as exc:
+        logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
     candidate = st.session_state.get("experiment_engine_data", _experiment_source_df(module))
     return candidate.copy(deep=True) if isinstance(candidate, pd.DataFrame) else pd.DataFrame()
 
