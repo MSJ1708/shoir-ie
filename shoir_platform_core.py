@@ -2532,10 +2532,291 @@ def formatted_number(value: float, *, decimals: int = 2, locale: str = "en") -> 
     return f"{float(value):,.{decimals}f}"
 
 
+def research_study_record(
+    title: str,
+    *,
+    objective: str = "",
+    hypothesis: str = "",
+    variables: Mapping[str, Any] | None = None,
+    statistical_plan: Mapping[str, Any] | None = None,
+    citations: Sequence[Mapping[str, Any] | str] = (),
+    exclusions: Sequence[str] = (),
+    limitations: Sequence[str] = (),
+    workspace: str = "default",
+) -> dict[str, Any]:
+    payload = {
+        "study_id": stable_id("STU"),
+        "title": title,
+        "objective": objective,
+        "hypothesis": hypothesis,
+        "variables": _jsonable(variables or {}),
+        "statistical_plan": _jsonable(statistical_plan or {}),
+        "citations": _jsonable(list(citations)),
+        "exclusions": list(exclusions),
+        "limitations": list(limitations),
+        "protocol_locked": False,
+        "created_at": now_iso(),
+    }
+    save_platform_record("research_study", payload["study_id"], payload, workspace=workspace)
+    return payload
+
+
+def lock_research_protocol(study: Mapping[str, Any], *, workspace: str = "default") -> dict[str, Any]:
+    protocol = dict(study)
+    if protocol.get("protocol_locked"):
+        return protocol
+    locked = {**protocol, "protocol_locked": True, "locked_at": now_iso(), "protocol_hash": digest(protocol)}
+    save_platform_record("research_protocol", str(protocol.get("study_id") or stable_id("STU")), locked, workspace=workspace)
+    return locked
+
+
+def add_research_citation(study_id: str, citation: Mapping[str, Any] | str, *, workspace: str = "default") -> dict[str, Any]:
+    rows = repository_records("research_study", workspace=workspace, limit=1000)
+    study = {}
+    if not rows.empty:
+        for _, row in rows.iterrows():
+            p = _payload_from_value(row["payload_json"])
+            if str(p.get("study_id")) == str(study_id):
+                study = p
+                break
+    if not study:
+        raise KeyError(f"Research study not found: {study_id}")
+    if study.get("protocol_locked"):
+        raise RuntimeError("The preregistered protocol is locked; citation changes must be versioned as amendments.")
+    citations = list(study.get("citations") or [])
+    citations.append(_jsonable(citation))
+    study["citations"] = citations
+    study["updated_at"] = now_iso()
+    save_platform_record("research_study", str(study_id), study, workspace=workspace)
+    return study
+
+
+def roi_evidence_snapshot(
+    *,
+    baseline: Mapping[str, float],
+    target: Mapping[str, float],
+    predicted: Mapping[str, float],
+    actual: Mapping[str, float] | None = None,
+    financial_impact: float | None = None,
+    hours_saved: float | None = None,
+    risk_reduction: float | None = None,
+    evidence_ids: Sequence[str] = (),
+    workspace: str = "default",
+) -> dict[str, Any]:
+    keys = sorted(set(baseline) | set(target) | set(predicted) | set(actual or {}))
+    rows = []
+    for key in keys:
+        b = float(baseline.get(key, np.nan))
+        t = float(target.get(key, np.nan))
+        p = float(predicted.get(key, np.nan))
+        a = float((actual or {}).get(key, np.nan))
+        rows.append({
+            "KPI": key, "Baseline": b, "Target": t, "Predicted": p,
+            "Actual": a, "Predicted Delta": p - b if np.isfinite(p) and np.isfinite(b) else np.nan,
+            "Actual Delta": a - b if np.isfinite(a) and np.isfinite(b) else np.nan,
+        })
+    payload = {
+        "roi_id": stable_id("ROI"),
+        "kpis": rows,
+        "financial_impact": float(financial_impact) if financial_impact is not None else None,
+        "hours_saved": float(hours_saved) if hours_saved is not None else None,
+        "risk_reduction": float(risk_reduction) if risk_reduction is not None else None,
+        "evidence_ids": list(evidence_ids),
+        "verified_actuals": bool(actual),
+        "captured_at": now_iso(),
+    }
+    save_platform_record("roi_evidence", payload["roi_id"], payload, workspace=workspace)
+    return payload
+
+
+def digital_twin_cycle(
+    asset_id: str,
+    observed: Mapping[str, float],
+    *,
+    expected: Mapping[str, float] | None = None,
+    thresholds: Mapping[str, float] | None = None,
+    scenario: Mapping[str, Any] | None = None,
+    workspace: str = "default",
+) -> dict[str, Any]:
+    expected = dict(expected or {})
+    thresholds = dict(thresholds or {})
+    variables = sorted(set(map(str, observed)) | set(map(str, expected)))
+    state = []
+    anomalies = []
+    for name in variables:
+        obs = float(observed.get(name, np.nan))
+        exp = float(expected.get(name, np.nan))
+        delta = obs - exp if np.isfinite(obs) and np.isfinite(exp) else np.nan
+        pct = (delta / exp * 100.0) if np.isfinite(delta) and exp else np.nan
+        limit = float(thresholds.get(name, np.inf))
+        is_anomaly = bool(np.isfinite(delta) and abs(delta) > limit)
+        row = {"variable": name, "observed": obs, "expected": exp, "delta": delta, "delta_pct": pct, "anomaly": is_anomaly}
+        state.append(row)
+        if is_anomaly:
+            anomalies.append(row)
+    status = "DEGRADED" if anomalies else "HEALTHY"
+    payload = {
+        "asset_id": str(asset_id), "status": status, "observed_at": now_iso(),
+        "state": state, "anomalies": anomalies, "scenario": _jsonable(scenario or {}),
+        "cycle_hash": digest(state),
+    }
+    save_platform_record("digital_twin_state", str(asset_id), payload, workspace=workspace)
+    return payload
+
+
+def create_alert(
+    alert_type: str,
+    message: str,
+    *,
+    severity: str = "MEDIUM",
+    evidence_ids: Sequence[str] = (),
+    entity_key: str = "",
+    workspace: str = "default",
+) -> dict[str, Any]:
+    alert = {
+        "alert_id": stable_id("ALT"),
+        "type": str(alert_type),
+        "message": str(message),
+        "severity": str(severity).upper(),
+        "entity_key": str(entity_key),
+        "evidence_ids": list(evidence_ids),
+        "status": "OPEN",
+        "created_at": now_iso(),
+    }
+    save_platform_record("alert", alert["alert_id"], alert, workspace=workspace)
+    return alert
+
+
+def investigate_alert(alert_id: str, *, finding: str, scenario_id: str = "", decision_id: str = "", workspace: str = "default") -> dict[str, Any]:
+    rows = repository_records("alert", workspace=workspace, limit=1000)
+    alert = None
+    for _, row in rows.iterrows() if not rows.empty else []:
+        payload = _payload_from_value(row["payload_json"])
+        if str(payload.get("alert_id")) == str(alert_id):
+            alert = payload
+            break
+    if not alert:
+        raise KeyError(f"Alert not found: {alert_id}")
+    investigation = {
+        "investigation_id": stable_id("INV"),
+        "alert_id": alert_id,
+        "finding": finding,
+        "scenario_id": scenario_id,
+        "decision_id": decision_id,
+        "created_at": now_iso(),
+    }
+    save_platform_record("investigation", investigation["investigation_id"], investigation, workspace=workspace)
+    alert["status"] = "INVESTIGATING"
+    alert["investigation_id"] = investigation["investigation_id"]
+    save_platform_record("alert", alert_id, alert, workspace=workspace)
+    return investigation
+
+
+def command_center_snapshot(df: pd.DataFrame, *, workspace: str = "default") -> dict[str, Any]:
+    readiness = data_readiness(df)
+    alerts = repository_records("alert", workspace=workspace, limit=200)
+    drafts = repository_records("decision_draft", workspace=workspace, limit=200)
+    runs = repository_records("run", workspace=workspace, limit=200)
+    open_alerts = 0
+    if not alerts.empty:
+        open_alerts = sum(1 for _, row in alerts.iterrows() if str(_payload_from_value(row["payload_json"]).get("status", "")).upper() == "OPEN")
+    pending_decisions = len(drafts)
+    last_run = _payload_from_value(runs.iloc[0]["payload_json"]) if not runs.empty else {}
+    attention = []
+    if readiness.get("score", 0) < 80:
+        attention.append("Data readiness below 80%.")
+    if open_alerts:
+        attention.append(f"{open_alerts} open alert(s) require investigation.")
+    if pending_decisions:
+        attention.append(f"{pending_decisions} draft decision(s) await review.")
+    next_action = attention[0] if attention else "Review the latest run, compare scenarios, and verify the decision."
+    return {
+        "what_is_happening": {"active_rows": readiness.get("rows", 0), "last_run": last_run},
+        "attention": attention,
+        "what_to_do_next": next_action,
+        "open_alerts": open_alerts,
+        "draft_decisions": pending_decisions,
+    }
+
+
+def engineering_unit_signature(unit_expression: str) -> tuple[dict[str, int], float]:
+    """Return base-dimension exponents and conversion scale for compound units."""
+    expr = str(unit_expression).strip().lower().replace(" ", "")
+    if not expr:
+        raise ValueError("Unit expression cannot be blank.")
+    dimensions: dict[str, int] = {}
+    scale = 1.0
+    sign = 1
+    for token in re.split(r"([*/])", expr):
+        if token == "*":
+            sign = 1
+            continue
+        if token == "/":
+            sign = -1
+            continue
+        if not token:
+            continue
+        if "^" in token:
+            base, power_text = token.split("^", 1)
+            power = int(power_text)
+        else:
+            base, power = token, 1
+        if base not in UNIT_DEFINITIONS:
+            raise ValueError(f"Unsupported unit in expression: {base}")
+        dim, factor = UNIT_DEFINITIONS[base]
+        exponent = sign * power
+        dimensions[dim] = dimensions.get(dim, 0) + exponent
+        scale *= factor ** exponent
+    dimensions = {k: v for k, v in dimensions.items() if v}
+    return dimensions, scale
+
+
+def derive_formula_unit(formula: str, input_units: Mapping[str, str]) -> dict[str, Any]:
+    """Derive result dimensions for +,-,*,/ and integer powers using declared units."""
+    class UnitEvaluator(ast.NodeVisitor):
+        def visit_Expression(self, node): return self.visit(node.body)
+        def visit_Name(self, node):
+            if node.id not in input_units:
+                raise ValueError(f"Missing unit for formula variable: {node.id}")
+            return engineering_unit_signature(input_units[node.id])
+        def visit_Constant(self, node):
+            return {}, 1.0
+        def visit_UnaryOp(self, node):
+            return self.visit(node.operand)
+        def visit_BinOp(self, node):
+            left = self.visit(node.left); right = self.visit(node.right)
+            if isinstance(node.op, (ast.Add, ast.Sub)):
+                if left[0] != right[0]:
+                    raise ValueError("Add/subtract requires identical dimensions.")
+                return left
+            if isinstance(node.op, ast.Mult):
+                dims = dict(left[0])
+                for k, v in right[0].items(): dims[k] = dims.get(k, 0) + v
+                return {k:v for k,v in dims.items() if v}, left[1] * right[1]
+            if isinstance(node.op, ast.Div):
+                dims = dict(left[0])
+                for k, v in right[0].items(): dims[k] = dims.get(k, 0) - v
+                return {k:v for k,v in dims.items() if v}, left[1] / right[1]
+            if isinstance(node.op, ast.Pow):
+                if right[0]:
+                    raise ValueError("Exponent must be dimensionless.")
+                exponent_node = node.right
+                if not isinstance(exponent_node, ast.Constant) or not float(exponent_node.value).is_integer():
+                    raise ValueError("Unit derivation supports integer literal powers only.")
+                exponent = int(exponent_node.value)
+                return {k:v*exponent for k,v in left[0].items() if v*exponent}, left[1] ** exponent
+            raise ValueError("Unsupported formula operator.")
+        def generic_visit(self, node):
+            raise ValueError(f"Unsupported formula node: {type(node).__name__}")
+    dimensions, scale = UnitEvaluator().visit(ast.parse(formula, mode="eval"))
+    return {"dimensions": dimensions, "scale_to_base": float(scale)}
+
+
+
 __all__ = [
     "WORKFLOW_STEPS", "ACTION_LEVELS", "CAPABILITY_STATES",
     "db_backend", "configured_database_url", "db_connect", "ensure_core_schema", "remote_persistence_configured",
-    "data_readiness", "validate_dataset_contract", "canonical_map_columns",
+    "data_readiness", "validate_dataset_contract", "canonical_map_columns", "engineering_unit_signature", "derive_formula_unit",
     "WorkflowRuntime", "begin_module", "governed_module", "run_governed_module",
     "module_manifest", "capability_ledger", "kpi_lineage", "render_kpi_lineage",
     "capture_standard_kpi_lineage", "lineage_graph_frame", "render_lineage_graph", "replay_records", "get_replay_record",
@@ -2547,5 +2828,7 @@ __all__ = [
     "active_df_hash", "register_replay", "execute_replay", "record_engineering_error", "performance_route",
     "connector_health", "submit_background_job", "decision_memory_query", "save_decision_memory",
     "benchmark_compare", "verification_suite", "render_engineering_canvas", "render_platform_completion",
+    "research_study_record", "lock_research_protocol", "add_research_citation", "roi_evidence_snapshot",
+    "digital_twin_cycle", "create_alert", "investigate_alert", "command_center_snapshot",
     "sync_project_state", "localization_config", "formatted_number",
 ]
