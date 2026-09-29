@@ -794,7 +794,6 @@ def sanitize_module_session_state(st) -> None:
 def _render_module_impl(module: str, tier: str, username: str):
     import streamlit as st
     import plotly.express as px
-from shoir_platform_core import run_governed_module, render_visualization_os
     init_platform_db()
     sanitize_module_session_state(st)
 
