@@ -3596,6 +3596,28 @@ def sync_project_state(workspace: str, state: Mapping[str, Any]) -> str:
     return save_platform_record("project_state", workspace, {"workspace": workspace, "state": _jsonable(state), "updated_at": now_iso()}, workspace=workspace)
 
 
+def accessibility_config(language: str = "English", *, high_contrast: bool = False, reduced_motion: bool = False, font_scale: float = 1.0) -> dict[str, Any]:
+    """Return a deterministic accessibility/localization contract for every surface."""
+    lang = str(language or "English").strip() or "English"
+    rtl_languages = {"Arabic", "العربية", "Urdu", "Hebrew", "Persian", "Farsi"}
+    scale = max(0.85, min(1.5, float(font_scale)))
+    config = {
+        "language": lang,
+        "rtl": lang in rtl_languages,
+        "high_contrast": bool(high_contrast),
+        "reduced_motion": bool(reduced_motion),
+        "font_scale": round(scale, 2),
+        "keyboard_navigation": True,
+        "screen_reader_labels": True,
+        "focus_indicators": True,
+        "semantic_headings": True,
+        "minimum_target_px": 44,
+        "generated_at": now_iso(),
+    }
+    st.session_state["shoir_accessibility_config"] = config
+    return config
+
+
 def localization_config(language: str = "English", currency: str = BASE_CURRENCY) -> dict[str, Any]:
     lang = "Arabic" if str(language).lower().startswith("arab") else "English"
     return {"language": lang, "rtl": lang == "Arabic", "currency": str(currency).upper(), "date_format": "DD/MM/YYYY" if lang == "Arabic" else "YYYY-MM-DD", "number_decimal": ".", "thousands": ","}
