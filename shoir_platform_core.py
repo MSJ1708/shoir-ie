@@ -554,25 +554,23 @@ class WorkflowRuntime:
         )
 
 
-def begin_module(module: str, *, workspace: str = "default", actor: str = "system", df: pd.DataFrame | None = None) -> WorkflowRuntime:
+def begin_module(module: str, *, workspace: str = "default", actor: str = "system", df: pd.DataFrame | None = None, resume: bool = False) -> WorkflowRuntime:
     runtime = WorkflowRuntime(str(module), workspace=workspace, actor=actor)
     runtime.provenance = str(st.session_state.get("shoir_data_provenance", st.session_state.get("shoir_provenance", "DEMO"))).upper()
-    try:
-        prior = repository_records("workflow", workspace=workspace, limit=100)
-        if not prior.empty:
-            for _, row in prior.iterrows():
-                try:
+    if resume:
+        try:
+            prior = repository_records("workflow", workspace=workspace, limit=100)
+            if not prior.empty:
+                for _, row in prior.iterrows():
                     payload = _payload_from_value(row["payload_json"])
-                except Exception:
-                    continue
-                if str(payload.get("module")) == str(module):
-                    stage = str(payload.get("stage") or "").upper()
-                    if stage in WORKFLOW_STEPS:
-                        runtime.stage_index = max(runtime.stage_index, WORKFLOW_STEPS.index(stage))
-    except Exception as exc:
-        st.session_state.setdefault("shoir_platform_warnings", []).append({
-            "scope": "workflow_restore", "type": type(exc).__name__, "message": str(exc), "at": now_iso(),
-        })
+                    if str(payload.get("module")) == str(module):
+                        stage = str(payload.get("stage") or "").upper()
+                        if stage in WORKFLOW_STEPS:
+                            runtime.stage_index = max(runtime.stage_index, WORKFLOW_STEPS.index(stage))
+        except Exception as exc:
+            st.session_state.setdefault("shoir_platform_warnings", []).append({
+                "scope": "workflow_restore", "type": type(exc).__name__, "message": str(exc), "at": now_iso(),
+            })
     runtime.context(df)
     st.session_state["shoir_active_runtime"] = runtime
     return runtime
@@ -580,7 +578,7 @@ def begin_module(module: str, *, workspace: str = "default", actor: str = "syste
 
 @contextmanager
 def governed_module(module: str, *, workspace: str = "default", actor: str = "system", df: pd.DataFrame | None = None):
-    runtime = begin_module(module, workspace=workspace, actor=actor, df=df)
+    runtime = begin_module(module, workspace=workspace, actor=actor, df=df, resume=False)
     runtime.advance("DATA", evidence={
         "source": st.session_state.get("shoir_data_source", ""),
         "input_mode": "active_dataset" if isinstance(df, pd.DataFrame) and not df.empty else "module_managed",
@@ -637,7 +635,15 @@ def run_governed_module(
             runtime.advance("VALIDATE", evidence={"status": "MODULE_MANAGED_INPUT", "contract": contract})
             runtime.advance("MAP", evidence={"status": "MODULE_MANAGED_SCHEMA", "mapping": {}})
 
-        runtime.advance("MODEL", evidence={"module": module, "manifest": module_manifest(module)})
+        try:
+            from industrial_platform import PLATFORM_CATALOG
+            catalog_entry = next((item for item in PLATFORM_CATALOG if str(item.get("name")) == str(module)), {})
+        except Exception as exc:
+            catalog_entry = {}
+            st.session_state.setdefault("shoir_platform_warnings", []).append({
+                "scope": "catalog_lookup", "type": type(exc).__name__, "message": str(exc), "at": now_iso(),
+            })
+        runtime.advance("MODEL", evidence={"module": module, "manifest": module_manifest(module, catalog_entry=catalog_entry)})
         run_id = stable_id("RUN")
         runtime.run_id = run_id
         st.session_state["shoir_latest_run_id"] = run_id
