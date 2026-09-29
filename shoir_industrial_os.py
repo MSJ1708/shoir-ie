@@ -1300,8 +1300,8 @@ def render_security_and_collaboration() -> None:
                     st.info(f"Knowledge search unavailable: {type(exc).__name__}: {exc}")
 
 
-def build_presentation_package(module: str) -> bytes:
-    """Build a portable executive/engineering evidence ZIP."""
+def build_presentation_package(module: str, pack_type: str = "Executive") -> bytes:
+    """Build a role-specific evidence ZIP: Executive, Engineering, Audit or Research."""
     import io
     import zipfile
     from pptx import Presentation
@@ -1309,6 +1309,9 @@ def build_presentation_package(module: str) -> bytes:
     from reportlab.pdfgen import canvas
 
     df, _ = active_dataframe()
+    pack_type = str(pack_type or "Executive").title()
+    if pack_type not in {"Executive", "Engineering", "Audit", "Research"}:
+        raise ValueError("Unsupported report pack.")
     manifest = build_reproducibility_manifest(module)
     profile = profile_data(df)
     story = engineering_story(
@@ -1321,12 +1324,36 @@ def build_presentation_package(module: str) -> bytes:
 
     ppt = io.BytesIO()
     prs = Presentation()
-    slides = [
-        ("Shoir-IE Executive Summary", f"{module}\nGenerated {now_iso()}"),
-        ("Data & Readiness", json.dumps(profile, indent=2, default=str)[:3500]),
-        ("Industrial Story", "\n".join(f"{k}: {v}" for k, v in story.items())),
-        ("Reproducibility", json.dumps(manifest, indent=2, default=str)[:3500]),
-    ]
+    slides_by_pack = {
+        "Executive": [
+            ("Shoir-IE Executive Pack", f"{module}\nGenerated {now_iso()}"),
+            ("What happened", str(story.get("happened", ""))),
+            ("Why it matters", str(story.get("why", ""))),
+            ("What-if / risk", str(story.get("what_if", ""))),
+            ("Monitor / act", str(story.get("monitor", ""))),
+        ],
+        "Engineering": [
+            ("Shoir-IE Engineering Pack", f"{module}\nGenerated {now_iso()}"),
+            ("Data & Readiness", json.dumps(profile, indent=2, default=str)[:3500]),
+            ("Industrial Story", "\n".join(f"{k}: {v}" for k, v in story.items())),
+            ("Evidence / Reproducibility", json.dumps(manifest, indent=2, default=str)[:3500]),
+        ],
+        "Audit": [
+            ("Shoir-IE Audit Pack", f"{module}\nGenerated {now_iso()}"),
+            ("Provenance", json.dumps(manifest.get("provenance", {}), indent=2, default=str)[:2200]),
+            ("Dataset / hashes", json.dumps(manifest.get("dataset", {}), indent=2, default=str)[:2500]),
+            ("Run / parameters", json.dumps(manifest.get("run", {}), indent=2, default=str)[:2500]),
+            ("Verification / evidence", json.dumps(manifest.get("verification", {}), indent=2, default=str)[:2500]),
+        ],
+        "Research": [
+            ("Shoir-IE Research Pack", f"{module}\nGenerated {now_iso()}"),
+            ("Objective / problem", str(story.get("why", ""))),
+            ("Protocol / evidence", json.dumps(manifest, indent=2, default=str)[:3500]),
+            ("Reproducibility", json.dumps(manifest.get("reproducibility", manifest), indent=2, default=str)[:3500]),
+            ("Limitations / monitoring", str(story.get("monitor", ""))),
+        ],
+    }
+    slides = slides_by_pack[pack_type]
     for title, body in slides:
         slide = prs.slides.add_slide(prs.slide_layouts[1])
         slide.shapes.title.text = title
@@ -1366,7 +1393,8 @@ def build_presentation_package(module: str) -> bytes:
         pd.DataFrame([manifest]).to_excel(writer, sheet_name="Evidence Manifest", index=False)
 
     index = {
-        "package_version": "1.0",
+        "package_version": "2.0",
+        "pack_type": pack_type,
         "module": module,
         "files": ["presentation.pptx", "evidence.pdf", "evidence.xlsx", "manifest.json"],
         "generated_at": now_iso(),
@@ -1383,13 +1411,14 @@ def build_presentation_package(module: str) -> bytes:
 def render_presentation_report() -> None:
     with st.expander("Presentation / Report Center", expanded=False):
         module = str(st.session_state.get("selected_module", "Engineering"))
+        pack_type = st.selectbox("Report pack", ["Executive", "Engineering", "Audit", "Research"], key="shoir_os_report_pack_type")
         manifest = build_reproducibility_manifest(module)
-        st.markdown("**Executive narrative**")
+        st.markdown(f"**{pack_type} narrative**")
         for step in ("Executive Summary", "Problem", "Baseline", "Scenario comparison", "Key drivers", "Risk / uncertainty", "Evidence"):
             st.markdown(f"**{step}** — {module} workspace evidence is available in the current project/run context.")
         st.download_button(
             "Download PPTX + PDF + Excel evidence pack",
-            data=build_presentation_package(module),
+            data=build_presentation_package(module, pack_type),
             file_name=f"shoir_{re.sub(r'[^A-Za-z0-9]+','_',module).lower()}_evidence_pack.zip",
             mime="application/zip",
             key="shoir_os_presentation_pack",
