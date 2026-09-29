@@ -219,6 +219,54 @@ def ensure_core_schema() -> str:
             )
             """,
             "CREATE INDEX IF NOT EXISTS idx_shoir_events ON shoir_platform_events(workspace_key, event_type, created_at DESC)",
+        """
+        CREATE TABLE IF NOT EXISTS shoir_platform_jobs (
+            job_id TEXT PRIMARY KEY,
+            workspace_key TEXT NOT NULL DEFAULT 'default',
+            module TEXT NOT NULL,
+            status TEXT NOT NULL,
+            priority INTEGER NOT NULL DEFAULT 50,
+            payload_json TEXT NOT NULL,
+            available_at TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            worker_id TEXT,
+            claimed_at TEXT,
+            lease_until TEXT,
+            progress REAL NOT NULL DEFAULT 0,
+            result_json TEXT,
+            error_json TEXT,
+            completed_at TEXT,
+            attempts INTEGER NOT NULL DEFAULT 0,
+            max_attempts INTEGER NOT NULL DEFAULT 3
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_shoir_jobs_claim ON shoir_platform_jobs(workspace_key,status,priority,available_at,created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_shoir_jobs_worker ON shoir_platform_jobs(workspace_key,worker_id,status)",
+            """
+            CREATE TABLE IF NOT EXISTS shoir_platform_jobs (
+                job_id TEXT PRIMARY KEY,
+                workspace_key TEXT NOT NULL DEFAULT 'default',
+                module TEXT NOT NULL,
+                status TEXT NOT NULL,
+                priority INTEGER NOT NULL DEFAULT 50,
+                payload_json JSONB NOT NULL,
+                available_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                worker_id TEXT,
+                claimed_at TIMESTAMPTZ,
+                lease_until TIMESTAMPTZ,
+                progress DOUBLE PRECISION NOT NULL DEFAULT 0,
+                result_json JSONB,
+                error_json JSONB,
+                completed_at TIMESTAMPTZ,
+                attempts INTEGER NOT NULL DEFAULT 0,
+                max_attempts INTEGER NOT NULL DEFAULT 3
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_shoir_jobs_claim ON shoir_platform_jobs(workspace_key,status,priority DESC,available_at,created_at)",
+            "CREATE INDEX IF NOT EXISTS idx_shoir_jobs_worker ON shoir_platform_jobs(workspace_key,worker_id,status)",
         ]
         with db_connect() as conn:
             with conn.cursor() as cur:
@@ -2645,24 +2693,36 @@ def enqueue_distributed_job(
     workspace: str = "default",
     priority: int = 50,
     available_at: str | None = None,
+    max_attempts: int = 3,
 ) -> str:
+    """Persist a queue job in the authoritative platform job table."""
+    ensure_core_schema()
     job_id = stable_id("JOB")
     payload_json = _jsonable(payload or {})
+    attempts = max(1, int(max_attempts))
     if db_backend() == "postgres":
         with db_connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """INSERT INTO shoir_platform_jobs
-                    (job_id,workspace_key,module,status,priority,payload_json,available_at,created_at,updated_at)
-                    VALUES (%s,%s,%s,'QUEUED',%s,%s,COALESCE(%s::timestamptz,NOW()),NOW(),NOW())""",
-                    (job_id, workspace, str(module), int(priority), Json(payload_json) if Json else canonical_json(payload_json), available_at),
+                    (job_id,workspace_key,module,status,priority,payload_json,available_at,created_at,updated_at,max_attempts)
+                    VALUES (%s,%s,%s,'QUEUED',%s,%s,COALESCE(%s::timestamptz,NOW()),NOW(),NOW(),%s)""",
+                    (job_id, workspace, str(module), int(priority),
+                     Json(payload_json) if Json else canonical_json(payload_json), available_at, attempts),
                 )
             conn.commit()
     else:
-        save_platform_record("job_queue", job_id, {
-            "job_id": job_id, "module": module, "status": "QUEUED",
-            "priority": int(priority), "payload": payload_json, "available_at": available_at or now_iso(),
-        }, workspace=workspace)
+        now = now_iso()
+        due = str(available_at or now)
+        with db_connect() as conn:
+            conn.execute(
+                """INSERT INTO shoir_platform_jobs
+                (job_id,workspace_key,module,status,priority,payload_json,available_at,created_at,updated_at,max_attempts)
+                VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                (job_id, workspace, str(module), "QUEUED", int(priority),
+                 canonical_json(payload_json), due, now, now, attempts),
+            )
+            conn.commit()
     return job_id
 
 
@@ -2670,8 +2730,12 @@ def claim_distributed_job(
     worker_id: str,
     *,
     workspace: str = "default",
+    lease_seconds: int = 900,
 ) -> dict[str, Any] | None:
+    """Atomically claim one ready job and issue a renewable execution lease."""
+    ensure_core_schema()
     worker_id = str(worker_id)
+    lease = max(30, int(lease_seconds))
     if db_backend() == "postgres":
         with db_connect() as conn:
             with conn.cursor() as cur:
@@ -2682,16 +2746,20 @@ def claim_distributed_job(
                         WHERE workspace_key=%s
                           AND status='QUEUED'
                           AND available_at <= NOW()
+                          AND (lease_until IS NULL OR lease_until < NOW())
                         ORDER BY priority DESC, available_at ASC, created_at ASC
                         FOR UPDATE SKIP LOCKED
                         LIMIT 1
                     )
                     UPDATE shoir_platform_jobs j
-                    SET status='CLAIMED', worker_id=%s, claimed_at=NOW(), updated_at=NOW()
+                    SET status='CLAIMED', worker_id=%s, claimed_at=NOW(),
+                        lease_until=NOW() + (%s || ' seconds')::interval,
+                        attempts=j.attempts+1, updated_at=NOW()
                     FROM candidate c
                     WHERE j.job_id=c.job_id
-                    RETURNING j.job_id,j.module,j.status,j.priority,j.payload_json,j.worker_id,j.claimed_at""",
-                    (workspace, worker_id),
+                    RETURNING j.job_id,j.module,j.status,j.priority,j.payload_json,
+                              j.worker_id,j.claimed_at,j.lease_until,j.attempts,j.max_attempts""",
+                    (workspace, worker_id, lease),
                 )
                 row = cur.fetchone()
             conn.commit()
@@ -2699,23 +2767,41 @@ def claim_distributed_job(
             return None
         return {
             "job_id": row[0], "module": row[1], "status": row[2], "priority": row[3],
-            "payload": _payload_from_value(row[4]), "worker_id": row[5], "claimed_at": row[6],
+            "payload": _payload_from_value(row[4]), "worker_id": row[5],
+            "claimed_at": row[6], "lease_until": row[7], "attempts": row[8], "max_attempts": row[9],
         }
-    rows = repository_records("job_queue", workspace=workspace, limit=500)
-    if rows.empty:
-        return None
-    candidates = []
-    for _, row in rows.iterrows():
-        payload = _payload_from_value(row["payload_json"])
-        if str(payload.get("status")) == "QUEUED":
-            candidates.append(payload)
-    if not candidates:
-        return None
-    candidates.sort(key=lambda x: (-int(x.get("priority", 50)), str(x.get("available_at", ""))))
-    job = candidates[0]
-    job["status"] = "CLAIMED"; job["worker_id"] = worker_id; job["claimed_at"] = now_iso()
-    save_platform_record("job_queue", str(job["job_id"]), job, workspace=workspace)
-    return job
+
+    now = now_iso()
+    with db_connect() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute(
+            """SELECT job_id,module,status,priority,payload_json,worker_id,claimed_at,
+                      lease_until,attempts,max_attempts
+               FROM shoir_platform_jobs
+               WHERE workspace_key=? AND status='QUEUED' AND available_at<=?
+                 AND (lease_until IS NULL OR lease_until<?)
+               ORDER BY priority DESC,available_at ASC,created_at ASC LIMIT 1""",
+            (workspace, now, now),
+        ).fetchone()
+        if row is None:
+            conn.rollback()
+            return None
+        import datetime as _dt
+        lease_until = (_dt.datetime.now(_dt.timezone.utc) + _dt.timedelta(seconds=lease)).isoformat(timespec="seconds")
+        conn.execute(
+            """UPDATE shoir_platform_jobs
+               SET status='CLAIMED',worker_id=?,claimed_at=?,lease_until=?,
+                   attempts=attempts+1,updated_at=?
+               WHERE job_id=? AND workspace_key=?""",
+            (worker_id, now, lease_until, now, row[0], workspace),
+        )
+        conn.commit()
+    return {
+        "job_id": row[0], "module": row[1], "status": "CLAIMED", "priority": row[3],
+        "payload": _payload_from_value(row[4]), "worker_id": worker_id,
+        "claimed_at": now, "lease_until": lease_until,
+        "attempts": int(row[8] or 0)+1, "max_attempts": int(row[9] or 3),
+    }
 
 
 def update_distributed_job(
@@ -2728,34 +2814,82 @@ def update_distributed_job(
     error: Mapping[str, Any] | None = None,
     workspace: str = "default",
 ) -> None:
+    """Update queue state and evidence atomically on the authoritative job table."""
+    ensure_core_schema()
     valid = {"QUEUED", "CLAIMED", "RUNNING", "COMPLETED", "FAILED", "CANCELLED"}
     state = str(status).upper()
     if state not in valid:
         raise ValueError(f"Unsupported job status: {status}")
-    p = max(0.0, min(1.0, float(progress if progress is not None else (1.0 if state in {"COMPLETED","FAILED","CANCELLED"} else 0.0))))
+    p = max(0.0, min(1.0, float(progress if progress is not None else (
+        1.0 if state in {"COMPLETED", "FAILED", "CANCELLED"} else 0.0
+    ))))
+    payload_result = _jsonable(result or {})
+    payload_error = _jsonable(error or {})
+    terminal = state in {"COMPLETED", "FAILED", "CANCELLED"}
     if db_backend() == "postgres":
         with db_connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """UPDATE shoir_platform_jobs
-                    SET status=%s, worker_id=COALESCE(NULLIF(%s,''),worker_id),
-                        progress=%s, result_json=%s,
-                        completed_at=CASE WHEN %s IN ('COMPLETED','FAILED','CANCELLED') THEN NOW() ELSE completed_at END,
-                        updated_at=NOW()
-                    WHERE job_id=%s AND workspace_key=%s""",
+                       SET status=%s, worker_id=COALESCE(NULLIF(%s,''),worker_id),
+                           progress=%s, result_json=%s, error_json=%s,
+                           lease_until=CASE WHEN %s THEN NULL ELSE lease_until END,
+                           completed_at=CASE WHEN %s THEN NOW() ELSE completed_at END,
+                           updated_at=NOW()
+                       WHERE job_id=%s AND workspace_key=%s""",
                     (state, worker_id, p,
-                     Json(_jsonable(result or error or {})) if Json else canonical_json(result or error or {}),
-                     state, job_id, workspace),
+                     Json(payload_result) if Json else canonical_json(payload_result),
+                     Json(payload_error) if Json else canonical_json(payload_error),
+                     terminal, terminal, job_id, workspace),
                 )
             conn.commit()
     else:
-        save_platform_record("job_queue", str(job_id), {
-            "job_id": str(job_id), "status": state, "worker_id": worker_id,
-            "progress": p, "result": _jsonable(result or {}), "error": _jsonable(error or {}),
-            "updated_at": now_iso(),
-        }, workspace=workspace)
+        now = now_iso()
+        with db_connect() as conn:
+            conn.execute(
+                """UPDATE shoir_platform_jobs
+                   SET status=?,worker_id=COALESCE(NULLIF(?,''),worker_id),
+                       progress=?,result_json=?,error_json=?,
+                       lease_until=CASE WHEN ? THEN NULL ELSE lease_until END,
+                       completed_at=CASE WHEN ? THEN ? ELSE completed_at END,
+                       updated_at=?
+                   WHERE job_id=? AND workspace_key=?""",
+                (state, worker_id, p, canonical_json(payload_result), canonical_json(payload_error),
+                 1 if terminal else 0, 1 if terminal else 0, now if terminal else None, now,
+                 job_id, workspace),
+            )
+            conn.commit()
 
 
+def reap_stale_jobs(*, workspace: str = "default") -> int:
+    """Return expired claimed/running jobs to the queue; never silently loses work."""
+    ensure_core_schema()
+    if db_backend() == "postgres":
+        with db_connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """UPDATE shoir_platform_jobs
+                       SET status='QUEUED',worker_id=NULL,claimed_at=NULL,lease_until=NULL,
+                           updated_at=NOW()
+                       WHERE workspace_key=%s AND status IN ('CLAIMED','RUNNING')
+                         AND lease_until IS NOT NULL AND lease_until < NOW()
+                         AND attempts < max_attempts""",
+                    (workspace,),
+                )
+                count = cur.rowcount
+            conn.commit()
+        return int(count)
+    now = now_iso()
+    with db_connect() as conn:
+        cur=conn.execute(
+            """UPDATE shoir_platform_jobs
+               SET status='QUEUED',worker_id=NULL,claimed_at=NULL,lease_until=NULL,updated_at=?
+               WHERE workspace_key=? AND status IN ('CLAIMED','RUNNING')
+                 AND lease_until IS NOT NULL AND lease_until < ? AND attempts < max_attempts""",
+            (now, workspace, now),
+        )
+        conn.commit()
+        return int(cur.rowcount)
 
 
 class JobManager:
