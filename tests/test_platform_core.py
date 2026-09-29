@@ -132,9 +132,9 @@ def test_quantity_engine_rejects_cross_dimension_math():
 
 
 def test_compound_units_and_formula_dimensions():
-    dims, scale = derive_formula_unit("Mass / Time", {"Mass": "kg", "Time": "h"})
-    assert dims == {"mass": 1, "time": -1}
-    assert scale == 1.0
+    result = derive_formula_unit("Mass / Time", {"Mass": "kg", "Time": "h"})
+    assert result["dimensions"] == {"mass": 1, "time": -1}
+    assert result["scale_to_base"] == 1.0
 
 
 def test_digital_twin_cycle_creates_deviation_evidence():
