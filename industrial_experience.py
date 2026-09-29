@@ -1,10 +1,10 @@
-from shoir_repository import sqlite_connect as shoir_sqlite_connect
 """Shoir-IE shared experience layer.
 
 Provides a consistent command deck, persistence, verification and evidence
 surfaces for engineering modules without replacing their specialist logic.
 """
 from __future__ import annotations
+from shoir_repository import sqlite_connect as shoir_sqlite_connect
 
 import hashlib
 import io
