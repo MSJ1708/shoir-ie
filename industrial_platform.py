@@ -789,9 +789,10 @@ def sanitize_module_session_state(st) -> None:
             })
         st.session_state["agv_fleet"] = normalized
 
-def render_module(module: str, tier: str, username: str):
+def _render_module_impl(module: str, tier: str, username: str):
     import streamlit as st
     import plotly.express as px
+from shoir_platform_core import run_governed_module, render_visualization_os
     init_platform_db()
     sanitize_module_session_state(st)
 
@@ -1385,3 +1386,32 @@ def render_module(module: str, tier: str, username: str):
             render_export_bar(module,[("Roles",role),("Security Events",audit)],tier,username)
     else:
         render_blank_module_studio(module, tier, username)
+
+
+def render_module(module: str, tier: str, username: str):
+    """Govern every specialist module through the universal platform contract.
+
+    The existing specialist renderer remains the source of domain calculations.
+    This wrapper provides DATA/VALIDATE/MAP/MODEL/RUN evidence, records failures,
+    and exposes the universal visualization operating system after execution.
+    """
+    try:
+        result = run_governed_module(
+            str(module),
+            lambda: _render_module_impl(str(module), str(tier), str(username)),
+            workspace=str(st.session_state.get("workspace", "default")),
+            actor=str(username),
+        )
+    except Exception as exc:
+        st.error(f"{module} could not complete safely: {type(exc).__name__}: {exc}")
+        result = None
+    try:
+        frames = [
+            value for value in st.session_state.values()
+            if isinstance(value, pd.DataFrame) and not value.empty
+        ]
+        df = frames[0] if frames else pd.DataFrame()
+        render_visualization_os(str(module), df)
+    except Exception as exc:
+        st.caption(f"Universal visualization is unavailable for this run: {type(exc).__name__}: {exc}")
+    return result
