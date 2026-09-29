@@ -15,6 +15,7 @@ from typing import Any, Mapping
 
 from shoir_platform_core import (
     claim_distributed_job,
+    reap_stale_jobs,
     digest,
     engine_error_payload,
     update_distributed_job,
@@ -35,6 +36,7 @@ def _invoke(payload: Mapping[str, Any]) -> Any:
 
 
 def worker_once(*, worker_id: str, workspace: str = "default") -> dict[str, Any] | None:
+    reap_stale_jobs(workspace=workspace)
     job = claim_distributed_job(worker_id, workspace=workspace)
     if not job:
         return None
@@ -57,15 +59,18 @@ def worker_once(*, worker_id: str, workspace: str = "default") -> dict[str, Any]
         )
         return {"job_id": job_id, "status": "COMPLETED", "result_hash": digest(result), "duration_ms": round(duration_ms, 2)}
     except Exception as exc:
+        attempts = int(job.get("attempts") or 1)
+        max_attempts = int(job.get("max_attempts") or 3)
+        terminal = attempts >= max_attempts
         update_distributed_job(
             job_id,
-            status="FAILED",
+            status="FAILED" if terminal else "QUEUED",
             worker_id=worker_id,
-            progress=1.0,
+            progress=1.0 if terminal else 0.0,
             error=engine_error_payload(module, exc),
             workspace=workspace,
         )
-        return {"job_id": job_id, "status": "FAILED", "error_type": type(exc).__name__, "error": str(exc)}
+        return {"job_id": job_id, "status": "FAILED" if terminal else "REQUEUED", "attempts": attempts, "max_attempts": max_attempts, "error_type": type(exc).__name__, "error": str(exc)}
 
 
 def run_worker(
