@@ -497,10 +497,8 @@ def save_decision_card(card: dict, username: str, db_path="enterprise_full_works
                 ),
             )
             c.commit()
-    except Exception:
-        # The platform decision remains persisted; lifecycle mirroring must
-        # never erase or invalidate the governed card itself.
-        pass
+    except Exception as exc:
+        logging.getLogger(__name__).warning("Decision lifecycle mirror unavailable; governed card retained: %s", exc)
     return did
 
 def save_model_snapshot(
