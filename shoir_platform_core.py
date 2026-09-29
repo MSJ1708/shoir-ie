@@ -83,7 +83,20 @@ PROVENANCE_STATES = ("LIVE", "IMPORTED", "SIMULATED", "DEMO")
 SCHEMA_VERSION = "3.0"
 
 DEFAULT_DB_PATH = os.getenv("SHOIR_SQLITE_PATH", "enterprise_full_workspace.db")
-DATABASE_URL = os.getenv("DATABASE_URL") or os.getenv("SHOIR_DATABASE_URL")
+def _managed_database_url() -> str:
+    """Resolve the durable DB URL from environment or the existing account store."""
+    value = (os.getenv("DATABASE_URL") or os.getenv("SHOIR_DATABASE_URL") or os.getenv("SUPABASE_DB_URL") or "").strip()
+    if value:
+        return value
+    try:
+        from durable_account_store import database_url
+        return str(database_url() or "").strip()
+    except Exception:
+        return ""
+
+
+def configured_database_url() -> str:
+    return _managed_database_url()
 
 UNIT_DEFINITIONS: dict[str, tuple[str, float]] = {
     "m": ("length", 1.0), "cm": ("length", 0.01), "mm": ("length", 0.001),
@@ -129,13 +142,13 @@ def digest(value: Any) -> str:
 
 
 def db_backend() -> str:
-    return "postgres" if DATABASE_URL and psycopg2 is not None else "sqlite"
+    return "postgres" if configured_database_url() and psycopg2 is not None else "sqlite"
 
 
 def db_connect(path: str | None = None, timeout: int = 30):
     """Single local connection gateway used by all new platform services."""
     if db_backend() == "postgres":
-        conn = psycopg2.connect(DATABASE_URL, connect_timeout=max(5, int(timeout)))
+        conn = psycopg2.connect(configured_database_url(), connect_timeout=max(5, int(timeout)))
         conn.autocommit = False
         return conn
     conn = sqlite3.connect(path or DEFAULT_DB_PATH, timeout=timeout, check_same_thread=False)
@@ -1987,7 +2000,7 @@ def formatted_number(value: float, *, decimals: int = 2, locale: str = "en") -> 
 
 __all__ = [
     "WORKFLOW_STEPS", "ACTION_LEVELS", "CAPABILITY_STATES",
-    "db_backend", "db_connect", "ensure_core_schema", "remote_persistence_configured",
+    "db_backend", "configured_database_url", "db_connect", "ensure_core_schema", "remote_persistence_configured",
     "data_readiness", "validate_dataset_contract", "canonical_map_columns",
     "WorkflowRuntime", "begin_module", "governed_module", "run_governed_module",
     "module_manifest", "capability_ledger", "kpi_lineage", "render_kpi_lineage",
