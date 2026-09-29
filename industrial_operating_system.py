@@ -1,10 +1,10 @@
-from shoir_repository import sqlite_connect as shoir_sqlite_connect
 """Shoir-IE Industrial Operating System.
 
 Shared, governed decision-intelligence services that sit on top of the existing
 Shoir-IE industrial data/model layer. No duplicate business state is created.
 """
 from __future__ import annotations
+from shoir_repository import sqlite_connect as shoir_sqlite_connect
 
 import ast
 import hashlib
