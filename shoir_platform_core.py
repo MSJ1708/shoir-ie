@@ -707,7 +707,8 @@ def run_governed_module(
         save_platform_record("export_manifest", run_id, export_manifest, workspace=workspace)
         runtime.advance("EXPORT", evidence=export_manifest)
 
-        verification = verification_suite(module, inputs=active_df, results=result_df)
+        verification_input = active_df if not active_df.empty else result_df
+        verification = verification_suite(module, inputs=verification_input, results=result_df)
         runtime.advance("VERIFY", evidence=verification)
 
         run_record = {
@@ -3111,6 +3112,327 @@ def derive_formula_unit(formula: str, input_units: Mapping[str, str]) -> dict[st
 
 
 
+KPI_ONTOLOGY_DEFAULTS: dict[str, dict[str, Any]] = {
+    "Throughput": {"unit": "units/time", "direction": "higher", "frequency": "run", "source": "production/simulation/optimization"},
+    "OEE": {"unit": "%", "direction": "higher", "frequency": "shift", "source": "production telemetry"},
+    "Utilization": {"unit": "%", "direction": "higher", "frequency": "shift", "source": "asset state"},
+    "Defect Rate": {"unit": "%", "direction": "lower", "frequency": "shift", "source": "quality inspection"},
+    "Downtime": {"unit": "time", "direction": "lower", "frequency": "shift", "source": "maintenance/MES"},
+    "Energy": {"unit": "energy", "direction": "lower", "frequency": "shift", "source": "energy telemetry"},
+    "Cost": {"unit": "currency", "direction": "lower", "frequency": "run", "source": "finance/ERP"},
+    "Decision Regret": {"unit": "normalized", "direction": "lower", "frequency": "experiment", "source": "decision/experiment"},
+    "Forecast Error": {"unit": "measure unit", "direction": "lower_absolute", "frequency": "forecast cycle", "source": "forecast operations"},
+}
+
+
+def canonical_kpi_id(name: str) -> str:
+    return "KPI-" + re.sub(r"[^A-Z0-9]+", "-", str(name).strip().upper()).strip("-")
+
+
+def register_kpi_definition(
+    name: str,
+    *,
+    definition: str,
+    unit: str,
+    direction: str = "context",
+    target: float | str | None = None,
+    threshold: float | str | None = None,
+    source: str = "",
+    owner: str = "",
+    frequency: str = "",
+    verification: Sequence[str] = (),
+    workspace: str = "default",
+) -> str:
+    payload = {
+        "kpi_id": canonical_kpi_id(name),
+        "name": str(name),
+        "definition": str(definition),
+        "unit": str(unit),
+        "direction": str(direction),
+        "target": _jsonable(target),
+        "threshold": _jsonable(threshold),
+        "source": str(source),
+        "owner": str(owner),
+        "frequency": str(frequency),
+        "verification": list(map(str, verification)),
+        "updated_at": now_iso(),
+    }
+    rid = save_platform_record("kpi_definition", payload["kpi_id"], payload, workspace=workspace)
+    st.session_state.setdefault("shoir_kpi_registry", {})[payload["kpi_id"]] = payload
+    return rid
+
+
+def get_kpi_definition(name: str, *, workspace: str = "default") -> dict[str, Any]:
+    kpi_id = canonical_kpi_id(name)
+    rows = repository_records("kpi_definition", workspace=workspace, limit=5000)
+    if not rows.empty:
+        matches = rows[rows["entity_key"].astype(str) == kpi_id]
+        if not matches.empty:
+            return _payload_from_value(matches.iloc[0]["payload_json"])
+    default = KPI_ONTOLOGY_DEFAULTS.get(str(name), {})
+    return {
+        "kpi_id": kpi_id,
+        "name": str(name),
+        "definition": str(default.get("definition") or f"Governed industrial KPI: {name}."),
+        "unit": str(default.get("unit") or "project-defined"),
+        "direction": str(default.get("direction") or "context"),
+        "target": None,
+        "threshold": None,
+        "source": str(default.get("source") or "project-defined"),
+        "owner": "",
+        "frequency": str(default.get("frequency") or "project-defined"),
+        "verification": ["definition review", "input validation", "lineage"],
+    }
+
+
+def knowledge_graph_frame(
+    *,
+    username: str | None = None,
+    workspace: str = "default",
+    limit: int = 5000,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Combine canonical industrial relationships with KPI lineage semantics."""
+    actor = str(username or _current_actor())
+    try:
+        from shoir_enterprise_layer import canonical_entities_frame, canonical_relationships_frame
+        entities = canonical_entities_frame(actor, workspace, limit=min(5000, int(limit)))
+        rels = canonical_relationships_frame(actor, workspace, limit=min(10000, int(limit)))
+    except Exception:
+        entities = pd.DataFrame()
+        rels = pd.DataFrame()
+
+    nodes: dict[str, dict[str, Any]] = {}
+    edges: list[dict[str, Any]] = []
+    if not entities.empty:
+        for row in entities.to_dict("records"):
+            eid = str(row.get("entity_id") or "")
+            if not eid:
+                continue
+            nodes[eid] = {
+                "id": eid,
+                "label": str(row.get("name") or eid),
+                "type": str(row.get("entity_type") or "Entity"),
+                "status": str(row.get("status") or ""),
+            }
+    if not rels.empty:
+        for row in rels.to_dict("records"):
+            source = str(row.get("source_entity_id") or row.get("from_entity_id") or row.get("subject_id") or "")
+            target = str(row.get("target_entity_id") or row.get("to_entity_id") or row.get("object_id") or "")
+            relation = str(row.get("relationship_type") or row.get("relation_type") or row.get("type") or "RELATED_TO")
+            if source and target:
+                nodes.setdefault(source, {"id": source, "label": source, "type": "Entity", "status": ""})
+                nodes.setdefault(target, {"id": target, "label": target, "type": "Entity", "status": ""})
+                edges.append({"source": source, "target": target, "relation": relation})
+
+    lineage_nodes, lineage_edges = lineage_graph_frame(workspace=workspace, limit=limit)
+    if not lineage_nodes.empty:
+        for row in lineage_nodes.to_dict("records"):
+            nodes.setdefault(str(row["id"]), {
+                "id": str(row["id"]),
+                "label": str(row["label"]),
+                "type": str(row.get("type") or "Evidence"),
+                "status": "",
+            })
+    if not lineage_edges.empty:
+        for row in lineage_edges.to_dict("records"):
+            source, target = str(row.get("source") or ""), str(row.get("target") or "")
+            if source and target:
+                edges.append({"source": source, "target": target, "relation": str(row.get("relation") or "EXPLAINS")})
+    return pd.DataFrame(nodes.values()), pd.DataFrame(edges)
+
+
+def render_knowledge_graph(*, workspace: str = "default") -> None:
+    nodes, edges = knowledge_graph_frame(workspace=workspace)
+    if nodes.empty:
+        st.info("No canonical industrial graph is available for this workspace yet.")
+        return
+    st.caption("Industrial Graph · USES · CONSUMES · AFFECTS · HAS · MONITORED_BY · ANALYZED_BY · PART_OF · INFLUENCES")
+    st.dataframe(nodes, use_container_width=True, hide_index=True, height=220)
+    if edges.empty:
+        st.info("Entities exist, but no relationships have been persisted yet.")
+        return
+    node_ids = nodes["id"].astype(str).tolist()
+    index = {node_id: idx for idx, node_id in enumerate(node_ids)}
+    valid = edges[edges["source"].astype(str).isin(index) & edges["target"].astype(str).isin(index)].copy()
+    if valid.empty:
+        return
+    fig = go.Figure(go.Sankey(
+        arrangement="snap",
+        node={"label": nodes["label"].astype(str).tolist(), "pad": 10, "thickness": 14},
+        link={
+            "source": valid["source"].map(index).astype(int).tolist(),
+            "target": valid["target"].map(index).astype(int).tolist(),
+            "value": [1] * len(valid),
+            "label": valid["relation"].astype(str).tolist(),
+        },
+    ))
+    fig.update_layout(title="Knowledge Graph / Digital Thread", height=520, margin=dict(l=8, r=8, t=48, b=8))
+    st.plotly_chart(fig, use_container_width=True, key="shoir_knowledge_graph")
+
+
+def render_run_center_console(
+    *,
+    module: str,
+    workspace: str = "default",
+    df: pd.DataFrame | None = None,
+) -> None:
+    """Professional run console: Overview | Logs | Parameters | Inputs | Outputs | Charts | Evidence | Replay."""
+    tabs = st.tabs(["Overview", "Logs", "Parameters", "Inputs", "Outputs", "Charts", "Evidence", "Replay"])
+    run_rows = repository_records("run", workspace=workspace, limit=100)
+    error_rows = repository_records("engineering_error", workspace=workspace, limit=200)
+    replay_df = replay_records(workspace=workspace, limit=100)
+    last_run = _payload_from_value(run_rows.iloc[0]["payload_json"]) if not run_rows.empty else {}
+    with tabs[0]:
+        st.metric("Latest run", str(last_run.get("run_id") or "—"))
+        st.metric("Status", str(last_run.get("status") or "No run"))
+        if last_run:
+            st.json(last_run)
+    with tabs[1]:
+        if error_rows.empty:
+            st.success("No persisted engineering errors in this workspace.")
+        else:
+            shown = []
+            for _, row in error_rows.iterrows():
+                p = _payload_from_value(row["payload_json"])
+                shown.append({
+                    "At": p.get("at"), "Module": p.get("module"), "Type": p.get("type"),
+                    "Message": p.get("message"), "Error ID": p.get("error_id"),
+                })
+            st.dataframe(pd.DataFrame(shown), use_container_width=True, hide_index=True)
+    with tabs[2]:
+        st.json({
+            "module": module,
+            "latest_run_id": st.session_state.get("shoir_latest_run_id"),
+            "parameters": st.session_state.get("shoir_active_parameters") or st.session_state.get("model_parameters") or {},
+        })
+    with tabs[3]:
+        if isinstance(df, pd.DataFrame) and not df.empty:
+            st.dataframe(df.head(500), use_container_width=True, hide_index=True)
+        else:
+            st.info("No active input DataFrame is available; the specialist module may own its input form.")
+    with tabs[4]:
+        result = st.session_state.get("shoir_last_result") or st.session_state.get("latest_result")
+        if isinstance(result, pd.DataFrame):
+            st.dataframe(result, use_container_width=True, hide_index=True)
+        elif result is not None:
+            st.json(_jsonable(result))
+        else:
+            st.info("Run output will appear here after the specialist calculation executes.")
+    with tabs[5]:
+        render_visualization_os(module, df if isinstance(df, pd.DataFrame) else pd.DataFrame())
+    with tabs[6]:
+        lineage = repository_records("kpi_lineage", workspace=workspace, limit=200)
+        if lineage.empty:
+            st.info("No KPI evidence captured yet.")
+        else:
+            st.dataframe(pd.DataFrame([
+                {
+                    "KPI": _payload_from_value(row["payload_json"]).get("kpi"),
+                    "Value": _payload_from_value(row["payload_json"]).get("value"),
+                    "Module": _payload_from_value(row["payload_json"]).get("module"),
+                    "Lineage ID": _payload_from_value(row["payload_json"]).get("lineage_id"),
+                } for _, row in lineage.iterrows()
+            ]), use_container_width=True, hide_index=True)
+    with tabs[7]:
+        if replay_df.empty:
+            st.info("No executable replay records are registered for this workspace.")
+        else:
+            st.dataframe(replay_df, use_container_width=True, hide_index=True)
+            choice = st.selectbox("Replay record", replay_df["Replay ID"].astype(str).tolist(), key=f"run_center_replay_{module}")
+            if st.button("Replay this run", key=f"run_center_replay_btn_{module}", type="primary"):
+                try:
+                    result = execute_replay(get_replay_record(choice, workspace=workspace))
+                    st.session_state["shoir_last_result"] = result
+                    st.success("Replay execution completed.")
+                except Exception as exc:
+                    record_engineering_error(module, exc, workspace=workspace)
+                    st.error(f"Replay failed safely: {type(exc).__name__}: {exc}")
+
+
+def copilot_action_registry() -> dict[str, dict[str, Any]]:
+    """Known safe actions exposed to the Copilot; arbitrary callables are never accepted."""
+    return {
+        "inspect_workspace": {"level": "READ", "description": "Inspect active data, project state and evidence."},
+        "validate_data": {"level": "ANALYZE", "description": "Run dataset validation and readiness checks."},
+        "simulate_scenario": {"level": "SIMULATE", "description": "Execute a saved scenario / what-if analysis."},
+        "prepare_decision": {"level": "PREPARE", "description": "Create a draft decision with traceable evidence."},
+        "export_evidence": {"level": "PREPARE", "description": "Prepare an evidence/report artifact."},
+        "execute_operational_action": {"level": "EXECUTE", "description": "Execute an approved high-impact operational action."},
+        "admin_configure": {"level": "ADMIN", "description": "Change governed platform configuration."},
+    }
+
+
+def authorize_copilot_action(
+    action: str,
+    *,
+    actor_level: str,
+    approval_token: str = "",
+    requested_by: str = "system",
+    workspace: str = "default",
+) -> dict[str, Any]:
+    registry = copilot_action_registry()
+    spec = registry.get(str(action))
+    if not spec:
+        raise KeyError(f"Unknown Copilot action: {action}")
+    required = str(spec["level"])
+    approved = bool(approval_token) or required not in {"EXECUTE", "ADMIN"}
+    authorized = action_authorized(required, actor_level, approval=approved)
+    record = {
+        "action": action,
+        "required_level": required,
+        "actor_level": normalize_action_level(actor_level),
+        "approved": approved,
+        "authorized": authorized,
+        "requested_by": requested_by,
+        "created_at": now_iso(),
+    }
+    save_platform_record("copilot_authorization", f"{requested_by}:{action}", record, workspace=workspace)
+    return record
+
+
+def execute_copilot_action(
+    action: str,
+    *,
+    actor_level: str,
+    workspace: str = "default",
+    approval_token: str = "",
+    df: pd.DataFrame | None = None,
+) -> dict[str, Any]:
+    """Execute only registered, bounded actions; high-impact actions require explicit approval."""
+    authorization = authorize_copilot_action(
+        action,
+        actor_level=actor_level,
+        approval_token=approval_token,
+        requested_by=_current_actor(),
+        workspace=workspace,
+    )
+    if not authorization["authorized"]:
+        return {"status": "BLOCKED", "authorization": authorization}
+    if action == "inspect_workspace":
+        result = {"readiness": data_readiness(df), "workspace": workspace}
+    elif action == "validate_data":
+        result = validate_dataset_contract(df if isinstance(df, pd.DataFrame) else pd.DataFrame())
+    elif action == "prepare_decision":
+        result = {
+            "status": "Draft",
+            "approval_required": True,
+            "module": st.session_state.get("selected_module", ""),
+            "evidence": list(st.session_state.get("shoir_kpi_lineage", {}).keys()),
+        }
+        save_platform_record("decision_draft", stable_id("DEC"), result, workspace=workspace)
+    elif action == "export_evidence":
+        result = {"status": "Prepared", "module": st.session_state.get("selected_module", ""), "formats": ["xlsx", "json", "pdf"]}
+    elif action == "simulate_scenario":
+        result = {"status": "READY", "message": "Scenario execution must supply a scenario record through Scenario Lab."}
+    elif action in {"execute_operational_action", "admin_configure"}:
+        result = {"status": "APPROVED_BUT_NO_EXTERNAL_SIDE_EFFECT", "message": "External operational side effects remain deployment-controlled."}
+    else:
+        result = {"status": "UNKNOWN"}
+    save_platform_record("copilot_action", stable_id("CPA"), {"action": action, "result": _jsonable(result), "authorization": authorization}, workspace=workspace)
+    return {"status": "EXECUTED", "authorization": authorization, "result": result}
+
+
+
 def unified_optimization(
     method: str,
     objective: Sequence[float] | pd.DataFrame,
@@ -3200,7 +3522,7 @@ __all__ = [
     "normalize_action_level", "action_authorized", "copilot_plan",
     "active_df_hash", "register_replay", "execute_replay", "record_engineering_error", "performance_route",
     "connector_health", "enqueue_distributed_job", "claim_distributed_job", "update_distributed_job", "submit_background_job", "decision_memory_query", "save_decision_memory",
-    "benchmark_compare", "verification_suite", "render_engineering_canvas", "render_platform_completion",
+    "benchmark_compare", "verification_suite", "render_engineering_canvas", "render_platform_completion", "canonical_kpi_id", "register_kpi_definition", "get_kpi_definition", "knowledge_graph_frame", "render_knowledge_graph", "render_run_center_console", "copilot_action_registry", "authorize_copilot_action", "execute_copilot_action",
     "research_study_record", "lock_research_protocol", "add_research_citation", "roi_evidence_snapshot",
     "digital_twin_cycle", "create_alert", "investigate_alert", "command_center_snapshot", "unified_optimization",
     "sync_project_state", "localization_config", "formatted_number",
