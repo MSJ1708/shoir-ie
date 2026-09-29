@@ -1902,6 +1902,49 @@ def _forecast_recursive(series: np.ndarray, method: str, horizon: int, period: i
     return np.asarray(history[-int(horizon):], dtype=float)
 
 
+def forecast_drift(
+    actual: Sequence[float],
+    predicted: Sequence[float],
+    *,
+    baseline_window: int = 12,
+    threshold: float = 0.25,
+) -> dict[str, Any]:
+    a = pd.to_numeric(pd.Series(actual), errors="coerce")
+    p = pd.to_numeric(pd.Series(predicted), errors="coerce")
+    mask = a.notna() & p.notna()
+    a = a[mask].to_numpy(dtype=float)
+    p = p[mask].to_numpy(dtype=float)
+    if len(a) < 4:
+        return {"status": "INSUFFICIENT_HISTORY", "n": int(len(a))}
+    recent_n = min(max(1, int(baseline_window)), max(1, len(a) // 2))
+    recent = a[-recent_n:]
+    baseline = a[:-recent_n] if len(a) > recent_n else a
+    scale = max(1e-9, float(np.std(baseline, ddof=1)) if len(baseline) > 1 else abs(float(np.mean(baseline))) or 1.0)
+    shift = abs(float(np.mean(recent)) - float(np.mean(baseline))) / scale
+    rmse = float(np.sqrt(np.mean((a - p) ** 2)))
+    return {
+        "status": "DRIFT" if shift > float(threshold) else "STABLE",
+        "n": int(len(a)),
+        "baseline_mean": float(np.mean(baseline)),
+        "recent_mean": float(np.mean(recent)),
+        "standardized_mean_shift": shift,
+        "threshold": float(threshold),
+        "rmse": rmse,
+    }
+
+
+def forecast_decomposition(values: Sequence[float], *, seasonal_period: int = 7) -> pd.DataFrame:
+    y = pd.to_numeric(pd.Series(values), errors="coerce").dropna().reset_index(drop=True)
+    period = max(2, int(seasonal_period))
+    if len(y) < max(2 * period, 8):
+        return pd.DataFrame()
+    trend = y.rolling(period, center=True, min_periods=1).mean()
+    detrended = y - trend
+    seasonal = detrended.groupby(np.arange(len(y)) % period).transform("mean")
+    residual = y - trend - seasonal
+    return pd.DataFrame({"Observed": y, "Trend": trend, "Seasonal": seasonal, "Residual": residual})
+
+
 def forecast_operations(
     frame: pd.DataFrame,
     *,
@@ -4932,5 +4975,7 @@ __all__ = [
     "twin_model_drift",
     "copilot_orchestrate",
     "optimization_run_contract",
+    "forecast_decomposition",
+    "forecast_drift",
 
 ]
