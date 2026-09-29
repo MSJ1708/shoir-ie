@@ -478,9 +478,8 @@ def sync_workspace_to_thread(owner: str, active_module: str | None = None) -> di
             },
             workspace=workspace,
         )
-    except Exception:
-        # The graph remains available in-session if a persistence backend is temporarily unavailable.
-        pass
+    except Exception as exc:
+        logging.getLogger(__name__).warning("Digital-thread persistence unavailable; session graph retained: %s", exc)
 
     try:
         from shoir_enterprise_layer import record_artifact
