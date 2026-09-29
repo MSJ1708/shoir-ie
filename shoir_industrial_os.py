@@ -1013,7 +1013,8 @@ def render_alerts() -> None:
         hits = df[s.gt(threshold) if greater else s.lt(threshold)]
         if hits.empty:
             st.success("No rows currently violate the configured rule.")
-        else:            st.warning(f"{len(hits):,} observed row(s) match the alert rule.")
+        else:
+            st.warning(f"{len(hits):,} observed row(s) match the alert rule.")
             st.dataframe(hits.head(250), use_container_width=True, hide_index=True)
 
 def module_self_diagnostics(allowed_modules: Sequence[str]) -> pd.DataFrame:
