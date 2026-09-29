@@ -1,3 +1,4 @@
+from shoir_observability import log_exception
 import streamlit as st
 import pulp
 import math
@@ -141,12 +142,12 @@ st.markdown("""
 apply_shoir_design_system()
 try:
     ensure_enterprise_schema()
-except Exception:
-    pass
+except Exception as exc:
+    log_exception(__name__, exc)
 try:
     init_160_platform()
-except Exception:
-    pass
+except Exception as exc:
+    log_exception(__name__, exc)
 
 os.makedirs("payment_proofs", exist_ok=True)
 
@@ -445,8 +446,8 @@ def record_login_attempt(username, success):
         )
         conn.commit()
         conn.close()
-    except Exception:
-        pass
+    except Exception as exc:
+        log_exception(__name__, exc)
 
 _USERNAME_RE = re.compile(r"^[A-Za-z0-9_.\-]{3,32}$")
 
@@ -827,8 +828,8 @@ def get_copilot_response(prompt, history):
             messages=msgs
         )
         return response.content[0].text
-    except Exception:
-        pass  # no key configured, package missing, or the call failed - fall through
+    except Exception as exc:
+        log_exception(__name__, exc)  # no key configured, package missing, or the call failed - fall through
 
     p = prompt.lower().strip()
 
@@ -965,8 +966,8 @@ def log_audit(user, action):
         )
         conn.commit()
         conn.close()
-    except Exception:
-        pass
+    except Exception as exc:
+        log_exception(__name__, exc)
 
 init_db()
 
@@ -1106,8 +1107,8 @@ if st.session_state.get("authenticated") and st.session_state.get("current_user"
             st.session_state["authenticated"] = False
             st.session_state["current_user"] = ""
             st.session_state["subscription_expired_notice"] = True
-    except Exception:
-        pass
+    except Exception as exc:
+        log_exception(__name__, exc)
 
 if not st.session_state.get("current_user"):
     st.title("🔐 Welcome to Shoir-IE Workspace")
@@ -1201,8 +1202,8 @@ if not st.session_state.get("current_user"):
                     )
                     conn_local.commit()
                     conn_local.close()
-                except Exception:
-                    pass
+                except Exception as exc:
+                    log_exception(__name__, exc)
 
                 st.success(f"Welcome back, {username}!")
                 st.rerun()
@@ -9823,8 +9824,8 @@ if mod == "MEIO Matrix":
         if "log_audit" in globals() and "current_user" in st.session_state:
             try:
                 log_audit(st.session_state.current_user, "Executed MEIO Optimization")
-            except Exception:
-                pass
+            except Exception as exc:
+                log_exception(__name__, exc)
 
         with st.spinner("Optimizing multi-echelon safety stock buffers and network holding costs..."):
             optimized_results = []
@@ -10220,8 +10221,8 @@ if mod == "Monte Carlo Sim":
         if "log_audit" in globals() and "current_user" in st.session_state:
             try:
                 log_audit(st.session_state.current_user, "Executed Monte Carlo Simulation")
-            except Exception:
-                pass
+            except Exception as exc:
+                log_exception(__name__, exc)
 
         with st.spinner("Running Monte Carlo stochastic trials & computing probability distributions..."):
             # Run simulation
@@ -10300,8 +10301,8 @@ elif mod == "Warehouse Heatmap":
     if "log_audit" in globals() and "current_user" in st.session_state:
         try:
             log_audit(st.session_state.current_user, "Viewed Warehouse Heatmap Matrix")
-        except Exception:
-            pass
+        except Exception as exc:
+            log_exception(__name__, exc)
 
     with st.spinner("Generating spatial pick-path grid and computing congestion density matrix..."):
         # Generate grid data
@@ -11355,8 +11356,8 @@ if mod == "Admin Panel":
                                         "target_username": login_username,
                                         "request_type": request_type,
                                     })
-                                except Exception:
-                                    pass
+                                except Exception as exc:
+                                    log_exception(__name__, exc)
 
                             email_success = send_tier_email(row['email'], row['username'], t_code, row['tier'])
                             if email_success:
@@ -11751,8 +11752,8 @@ if (
 if st.session_state.get("authenticated") and st.session_state.get("current_user"):
     try:
         save_user_workspace(st.session_state["current_user"], st.session_state)
-    except Exception:
-        pass
+    except Exception as exc:
+        log_exception(__name__, exc)
 
 
 # Finalize the universal platform contract after specialist rendering.
@@ -11760,5 +11761,5 @@ if st.session_state.get("authenticated") and st.session_state.get("current_user"
     try:
         from shoir_universal_platform_kernel import finalize_module_contract
         finalize_module_contract(str(selected_module))
-    except Exception:
-        pass
+    except Exception as exc:
+        log_exception(__name__, exc)
