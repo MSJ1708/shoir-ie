@@ -448,10 +448,10 @@ def roi_evidence(baseline: Mapping[str, float], target: Mapping[str, float], act
 def classify_exception(exc: BaseException) -> dict[str, Any]:
     text=f"{type(exc).__name__}: {exc}".lower(); category="unknown"
     if "timeout" in text or "connection" in text: category="integration"
-    elif "keyerror" in text or "column" in text: category="data_schema"
     elif "permission" in text or "unauthorized" in text: category="authorization"
-    elif "valueerror" in text or "typeerror" in text: category="input_validation"
     elif "memory" in text: category="resource"
+    elif isinstance(exc, (ValueError, TypeError)): category="input_validation"
+    elif isinstance(exc, KeyError) or "column" in text or "schema" in text: category="data_schema"
     return {"category":category,"exception":type(exc).__name__,"message":str(exc),"recoverable":category in {"integration","data_schema","input_validation"}}
 
 
