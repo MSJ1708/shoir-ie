@@ -375,8 +375,8 @@ def list_persisted_objects(object_type: str, limit: int = 100) -> pd.DataFrame:
         df = list_artifacts(username, artifact_type=object_type, workspace=workspace, limit=limit)
         if not df.empty:
             return df
-    except Exception:
-        pass
+    except Exception as exc:
+        log_exception(__name__, exc)
     items = st.session_state.get(f"shoir_os_{object_type}_objects", {})
     if not isinstance(items, Mapping) or not items:
         return pd.DataFrame()
@@ -423,8 +423,8 @@ def active_project() -> dict[str, Any] | None:
                 recovered.setdefault("name", row.get("name", "Project"))
                 recovered.setdefault("project_id", row.get("artifact_id", ""))
                 return recovered
-        except Exception:
-            pass
+        except Exception as exc:
+            log_exception(__name__, exc)
     return None
 
 
@@ -1201,8 +1201,8 @@ def platform_health_snapshot() -> dict[str, Any]:
         jobs = list_jobs(username, workspace=workspace, limit=20)
         connectors = connector_health_frame(username, workspace)
         entities = canonical_entities_frame(username, workspace, limit=300)
-    except Exception:
-        pass
+    except Exception as exc:
+        log_exception(__name__, exc)
     return {
         "application": True,
         "database": remote,
