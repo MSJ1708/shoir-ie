@@ -10,6 +10,7 @@ as pending or inferred from available workspace metadata.
 """
 
 from __future__ import annotations
+import logging
 
 import hashlib
 import io
@@ -222,8 +223,8 @@ def _discover_experience_records(owner: str) -> tuple[list[dict[str, Any]], list
                         "created_at": row[4],
                         "updated_at": row[5],
                     })
-            except Exception:
-                pass
+            except Exception as exc:
+                logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
 
             # Include Experiment Engine runs from the platform experiment ledger.
             try:
@@ -240,15 +241,15 @@ def _discover_experience_records(owner: str) -> tuple[list[dict[str, Any]], list
                         "module": row[2],
                         "updated_at": row[4],
                     })
-            except Exception:
-                pass
+            except Exception as exc:
+                logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
 
             # De-duplicate records across the legacy and platform stores.
             studies = list({str(x["study_id"]): x for x in studies}.values())
             decisions = list({str(x["decision_id"]): x for x in decisions}.values())
 
-    except Exception:
-        pass
+    except Exception as exc:
+        logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
     return studies, decisions
 
 
@@ -494,8 +495,8 @@ def sync_workspace_to_thread(owner: str, active_module: str | None = None) -> di
             },
             workspace,
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
 
     st.session_state[_keys()["sync"]] = _now()
     st.session_state[_keys()["version"]] = int(st.session_state.get(_keys()["version"], 1)) + 1
@@ -815,8 +816,8 @@ def render_global_project_digital_thread(module: str, username: str) -> None:
     if not st.session_state.get(keys["sync"]):
         try:
             sync_workspace_to_thread(username, active_module=None)
-        except Exception:
-            pass
+        except Exception as exc:
+            logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
 
     c1, c2, c3, c4 = st.columns(4)
     nodes = node_frame()
