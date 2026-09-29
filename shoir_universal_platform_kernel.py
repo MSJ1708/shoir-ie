@@ -1,7 +1,7 @@
 """Shoir-IE universal platform kernel.
 
 Cross-cutting contracts for every engineering module:
-DATA -> VALIDATE -> MODEL -> RUN -> VISUALIZE -> COMPARE -> EXPLAIN ->
+DATA -> VALIDATE -> MAP -> MODEL -> RUN -> VISUALIZE -> COMPARE -> EXPLAIN ->
 DECIDE -> EXPORT -> VERIFY.
 
 The kernel is additive. Domain engines keep ownership of their calculations;
@@ -29,6 +29,7 @@ import streamlit as st
 WORKFLOW_STEPS = (
     "DATA",
     "VALIDATE",
+    "MAP",
     "MODEL",
     "RUN",
     "VISUALIZE",
@@ -40,7 +41,7 @@ WORKFLOW_STEPS = (
 )
 
 PROVENANCE_STATES = ("LIVE", "IMPORTED", "SIMULATED", "DEMO")
-WORKFLOW_VERSION = "1.0"
+WORKFLOW_VERSION = "2.0"
 _KERNEL_FLAG = "_shoir_universal_kernel_v1"
 
 GROUPED_160_VIEWS = {
