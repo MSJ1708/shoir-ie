@@ -1,4 +1,3 @@
-from shoir_repository import sqlite_connect as shoir_sqlite_connect
 """Persistent per-user Shoir-IE workspace state.
 
 The Streamlit session is ephemeral. This module snapshots the user's
@@ -7,6 +6,7 @@ inputs, tables, selections, research state, and Copilot conversation.
 """
 
 from __future__ import annotations
+from shoir_repository import sqlite_connect as shoir_sqlite_connect
 
 import datetime as _dt
 import hashlib
