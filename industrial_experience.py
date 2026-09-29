@@ -4,6 +4,9 @@ Provides a consistent command deck, persistence, verification and evidence
 surfaces for engineering modules without replacing their specialist logic.
 """
 from __future__ import annotations
+import logging
+
+from shoir_repository import sqlite_connect as shoir_sqlite_connect
 
 import hashlib
 import io
@@ -123,7 +126,7 @@ def _now() -> str:
 
 
 def _db(path: str = "enterprise_full_workspace.db"):
-    return sqlite3.connect(path, timeout=30)
+    return shoir_sqlite_connect(path, timeout=30)
 
 
 def ensure_experience_db(path: str = "enterprise_full_workspace.db") -> None:
@@ -467,8 +470,8 @@ def record_decision_outcome(
                 },
                 workspace,
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
 
     # Close the loop in the canonical Digital Thread: Decision → Outcome.
     try:
@@ -516,8 +519,8 @@ def record_decision_outcome(
             relationship_id=relationship_id,
             workspace=workspace,
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
     return outcome_id
 
 
@@ -880,8 +883,8 @@ def load_research_protocol(study_id: str, owner: Optional[str] = None) -> Option
             hydrated = _hydrate_remote_research_to_local(remote) if remote else None
             if hydrated:
                 return hydrated
-        except Exception:
-            pass
+        except Exception as exc:
+            logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
         return None
     keys = [
         "study_id","research_id","title","objective","research_question","hypothesis",
@@ -931,10 +934,10 @@ def list_research_studies(owner: str) -> pd.DataFrame:
             for remote in remote_research_studies(owner):
                 try:
                     _hydrate_remote_research_to_local(remote)
-                except Exception:
-                    pass
-    except Exception:
-        pass
+                except Exception as exc:
+                    logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
+    except Exception as exc:
+        logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
     with _db() as conn:
         rows = conn.execute(
             """
@@ -1170,8 +1173,8 @@ def register_research_run(
                 "results_csv": raw_results,
                 "created_at": created_at,
             })
-    except Exception:
-        pass
+    except Exception as exc:
+        logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
     return run_id
 
 
@@ -1351,8 +1354,8 @@ def research_runs_frame(study_id: Optional[str], owner: Optional[str] = None) ->
                                 ),
                             )
                             conn.commit()
-        except Exception:
-            pass
+        except Exception as exc:
+            logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
 
     # Primary source: persisted research runs with full evidence data.
     with _db() as conn:
@@ -2268,8 +2271,8 @@ def render_blank_module_studio(module: str, tier: str, username: str) -> None:
                             suite = build_visualization_suite(variance_df, context="Decision-to-Value", max_figures=3)
                             for title, fig in suite:
                                 st.plotly_chart(fig, use_container_width=True)
-                        except Exception:
-                            pass
+                        except Exception as exc:
+                            logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
                     st.dataframe(outcome_df[["outcome_id","implementation_status","lesson","verified_at","created_at"]].head(20), use_container_width=True, hide_index=True)
 
     with tabs[4]:
