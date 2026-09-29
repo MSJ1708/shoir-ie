@@ -10,6 +10,7 @@ the owners of their domain calculations; this module provides the governed
 cross-module infrastructure around them.
 """
 from __future__ import annotations
+from shoir_observability import log_exception
 from shoir_repository import sqlite_connect as shoir_sqlite_connect
 
 import hashlib
@@ -1042,8 +1043,8 @@ def resolve_connector_secret(secret_ref: str = "") -> str:
         value = os.environ.get(key)
         if value:
             return value
-    except Exception:
-        pass
+    except Exception as exc:
+        log_exception(__name__, exc)
     try:
         import streamlit as st
         for section in ("connector_secrets", "secrets", "authentication"):
@@ -1191,8 +1192,8 @@ def _connector_opcua_test(endpoint: str, timeout: float = 8.0) -> tuple[str, flo
         try:
             if client is not None:
                 client.disconnect()
-        except Exception:
-            pass
+        except Exception as exc:
+            log_exception(__name__, exc)
 
 
 def test_connector_profile(
@@ -2095,8 +2096,8 @@ def build_research_paper_bundle(
                     r"\caption{" + str(label).replace("&", r"\&") + r"}",
                     r"\end{figure}",
                 ])
-            except Exception:
-                pass
+            except Exception as exc:
+                log_exception(__name__, exc)
         latex.extend([r"\section*{Reproducibility}", r"All data tables and successfully rendered figures are included in this bundle.", r"\end{document}"])
         zf.writestr(safe_module + "_research_paper.tex", "\n".join(latex).encode("utf-8"))
         manifest = {
@@ -2747,8 +2748,8 @@ def _render_enterprise_visual_evidence(module: str, username: str, workspace: st
                         {"module": module, "dataset": label, "figure_hash": fp, "figure_json_sha256": fp},
                         workspace,
                     )
-                except Exception:
-                    pass
+                except Exception as exc:
+                    log_exception(__name__, exc)
                 try:
                     st.download_button(
                         "📥 Download exact figure · PNG",
@@ -2757,8 +2758,8 @@ def _render_enterprise_visual_evidence(module: str, username: str, workspace: st
                         mime="image/png",
                         key="ent_fig_png_"+hashlib.sha1((module+"|"+label+"|"+title).encode()).hexdigest()[:12],
                     )
-                except Exception:
-                    pass
+                except Exception as exc:
+                    log_exception(__name__, exc)
                 rendered += 1
                 if rendered >= 15:
                     break
