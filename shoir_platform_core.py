@@ -1513,6 +1513,200 @@ def scenario_fork(scenario: Mapping[str, Any], *, name: str, overrides: Mapping[
     return fork
 
 
+def scenario_uncertainty_bundle(
+    scenario_samples: Mapping[str, Mapping[str, Sequence[float]]],
+    *,
+    constraints: Mapping[str, Mapping[str, float]] | None = None,
+    confidence: float = 0.95,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    """Attach distributions, percentiles and constraint-violation probabilities to scenarios."""
+    constraint_specs = constraints or {}
+    rows: list[dict[str, Any]] = []
+    for scenario, kpis in scenario_samples.items():
+        for kpi, values in kpis.items():
+            summary = uncertainty_engine(values, confidence=confidence)
+            spec = constraint_specs.get(str(kpi), {})
+            violation = None
+            if summary.get("n") and spec:
+                x = pd.to_numeric(pd.Series(list(values)), errors="coerce").dropna().to_numpy(dtype=float)
+                if spec.get("min") is not None:
+                    violation = float(np.mean(x < float(spec["min"])))
+                elif spec.get("max") is not None:
+                    violation = float(np.mean(x > float(spec["max"])))
+                elif spec.get("target") is not None and spec.get("tolerance") is not None:
+                    tol = abs(float(spec["tolerance"]))
+                    violation = float(np.mean(np.abs(x - float(spec["target"])) > tol))
+            rows.append({
+                "Scenario": str(scenario),
+                "KPI": str(kpi),
+                "Mean": summary.get("mean"),
+                "Median": summary.get("median"),
+                "P05": summary.get("p05"),
+                "P95": summary.get("p95"),
+                "Min": summary.get("min"),
+                "Max": summary.get("max"),
+                "Constraint Violation Probability": violation,
+                "N": summary.get("n", 0),
+            })
+    frame = pd.DataFrame(rows)
+    return frame, {
+        "status": "OK" if rows else "NO_DATA",
+        "scenario_count": len(scenario_samples),
+        "kpi_count": len({r["KPI"] for r in rows}),
+        "confidence": float(confidence),
+        "constraint_probability_available": bool(constraint_specs),
+    }
+
+
+def twin_state_estimate(
+    previous: Mapping[str, float] | None,
+    measurements: Mapping[str, float],
+    *,
+    gain: float = 0.35,
+) -> dict[str, Any]:
+    """Deterministic lightweight state estimator for telemetry synchronization."""
+    k = max(0.01, min(1.0, float(gain)))
+    prev = {str(a): float(b) for a, b in (previous or {}).items() if np.isfinite(float(b))}
+    state: dict[str, float] = {}
+    residuals: dict[str, float] = {}
+    for key, raw in measurements.items():
+        value = float(raw)
+        if not np.isfinite(value):
+            continue
+        old = prev.get(str(key), value)
+        estimate = old + k * (value - old)
+        state[str(key)] = estimate
+        residuals[str(key)] = value - estimate
+    return {"state": state, "residuals": residuals, "gain": k, "timestamp": now_iso()}
+
+
+def twin_calibrate(
+    observed: pd.DataFrame,
+    modelled: pd.DataFrame,
+    *,
+    keys: Sequence[str] | None = None,
+) -> dict[str, Any]:
+    """Calibrate per-signal scale/offset and report RMSE against observed telemetry."""
+    if not isinstance(observed, pd.DataFrame) or not isinstance(modelled, pd.DataFrame):
+        raise TypeError("Twin calibration requires observed and modelled DataFrames.")
+    selected = [str(k) for k in (keys or observed.columns) if str(k) in observed.columns and str(k) in modelled.columns]
+    result: dict[str, Any] = {}
+    for key in selected:
+        y = pd.to_numeric(observed[key], errors="coerce")
+        x = pd.to_numeric(modelled[key], errors="coerce")
+        mask = y.notna() & x.notna()
+        if mask.sum() < 3:
+            continue
+        xv, yv = x[mask].to_numpy(float), y[mask].to_numpy(float)
+        A = np.column_stack([xv, np.ones(len(xv))])
+        scale, offset = np.linalg.lstsq(A, yv, rcond=None)[0]
+        fitted = scale * xv + offset
+        result[key] = {
+            "scale": float(scale),
+            "offset": float(offset),
+            "rmse_before": float(np.sqrt(np.mean((yv - xv) ** 2))),
+            "rmse_after": float(np.sqrt(np.mean((yv - fitted) ** 2))),
+            "n": int(len(xv)),
+        }
+    return {"status": "OK" if result else "INSUFFICIENT_DATA", "signals": result, "calibrated_at": now_iso()}
+
+
+def twin_model_drift(
+    history: pd.DataFrame,
+    *,
+    observed_suffix: str = "_observed",
+    model_suffix: str = "_model",
+    window: int = 12,
+) -> pd.DataFrame:
+    """Measure rolling mean/std drift of model residuals for twin health monitoring."""
+    if not isinstance(history, pd.DataFrame):
+        raise TypeError("Twin drift history must be a DataFrame.")
+    rows = []
+    for col in history.columns:
+        name = str(col)
+        if not name.endswith(observed_suffix):
+            continue
+        stem = name[:-len(observed_suffix)]
+        model_col = f"{stem}{model_suffix}"
+        if model_col not in history.columns:
+            continue
+        resid = pd.to_numeric(history[name], errors="coerce") - pd.to_numeric(history[model_col], errors="coerce")
+        resid = resid.dropna()
+        if resid.empty:
+            continue
+        recent = resid.tail(min(int(window), len(resid)))
+        baseline = resid.iloc[:-len(recent)] if len(resid) > len(recent) else resid
+        rows.append({
+            "Signal": stem,
+            "Baseline Residual Mean": float(baseline.mean()),
+            "Recent Residual Mean": float(recent.mean()),
+            "Baseline Residual Std": float(baseline.std(ddof=1)) if len(baseline) > 1 else 0.0,
+            "Recent Residual Std": float(recent.std(ddof=1)) if len(recent) > 1 else 0.0,
+            "Mean Shift": float(recent.mean() - baseline.mean()),
+            "Drift": bool(abs(float(recent.mean() - baseline.mean())) > 2 * max(1e-9, float(baseline.std(ddof=1)) if len(baseline) > 1 else 1.0)),
+        })
+    return pd.DataFrame(rows)
+
+
+def copilot_orchestrate(
+    objective: str,
+    *,
+    df: pd.DataFrame,
+    actor_level: str = "RECOMMEND",
+    workspace: str = "default",
+    approval: bool = False,
+) -> dict[str, Any]:
+    """Execute the bounded Copilot flow: inspect → validate → analyze → simulate → explain → verify → decide → export."""
+    actor = _current_actor()
+    requested = str(actor_level).upper()
+    if requested not in ACTION_LEVELS:
+        raise ValueError(f"Unsupported Copilot action level: {actor_level}")
+    readiness = data_readiness(df)
+    validation = validate_dataset_contract(df if isinstance(df, pd.DataFrame) else pd.DataFrame())
+    plan = copilot_plan(str(objective), df if isinstance(df, pd.DataFrame) else pd.DataFrame())
+    stages: list[dict[str, Any]] = [
+        {"stage": "DATA", "status": "COMPLETE", "readiness": readiness},
+        {"stage": "VALIDATE", "status": "COMPLETE" if validation.get("valid") else "BLOCKED", "validation": validation},
+        {"stage": "MAP", "status": "COMPLETE", "mapping": canonical_map_columns(df) if isinstance(df, pd.DataFrame) else {}},
+        {"stage": "MODEL", "status": "PLANNED", "plan": plan},
+    ]
+    if not validation.get("valid"):
+        return {"status": "BLOCKED", "objective": objective, "plan": plan, "stages": stages}
+    nums = list(df.select_dtypes(include=np.number).columns)
+    analysis = {"numeric_summary": df[nums].describe().to_dict() if nums else {}, "visualizations": visualization_intelligence(df)}
+    stages.append({"stage": "RUN", "status": "COMPLETE", "analysis": analysis})
+    uncertainty = uncertainty_engine(df[nums].stack().tolist()) if nums else {"status": "NO_NUMERIC_DATA"}
+    stages.append({"stage": "VISUALIZE", "status": "AVAILABLE", "recommendations": analysis["visualizations"]})
+    stages.append({"stage": "COMPARE", "status": "AVAILABLE"})
+    stages.append({"stage": "EXPLAIN", "status": "COMPLETE", "uncertainty": uncertainty, "evidence": {"dataset_hash": dataframe_digest(df)}})
+    verification = verification_suite("Copilot", inputs=df, results=df)
+    stages.append({"stage": "VERIFY", "status": verification.get("status", "REVIEW"), "verification": verification})
+    decision = None
+    export = None
+    level_index = ACTION_LEVELS.index(requested)
+    if level_index >= ACTION_LEVELS.index("RECOMMEND"):
+        decision = {
+            "status": "DRAFT",
+            "objective": str(objective),
+            "recommendation": plan,
+            "evidence": {"dataset_hash": dataframe_digest(df), "readiness": readiness, "uncertainty": uncertainty},
+            "approval_required": True,
+        }
+        save_platform_record("decision", stable_id("DEC"), decision, workspace=workspace)
+        stages.append({"stage": "DECIDE", "status": "DRAFT", "decision": decision})
+    else:
+        stages.append({"stage": "DECIDE", "status": "LOCKED_BY_PERMISSION"})
+    if level_index >= ACTION_LEVELS.index("PREPARE") and approval:
+        export = report_pack_manifest("Engineering", module="Copilot", workspace=workspace)
+        stages.append({"stage": "EXPORT", "status": "PREPARED", "pack": export})
+    else:
+        stages.append({"stage": "EXPORT", "status": "APPROVAL_REQUIRED"})
+    stages.append({"stage": "RUN", "status": "COMPLETE"})
+    result = {"status": "COMPLETE", "objective": str(objective), "plan": plan, "stages": stages, "decision": decision, "export": export}
+    save_platform_record("copilot_run", stable_id("COP"), result, workspace=workspace)
+    return result
+
+
 def factorial_design(factors: Mapping[str, Sequence[Any]], *, randomized: bool = False, reps: int = 1, seed: int = 2026) -> pd.DataFrame:
     names = list(factors)
     if not names:
@@ -4456,6 +4650,36 @@ def execute_copilot_action(
 
 
 
+def optimization_run_contract(
+    result: Mapping[str, Any],
+    *,
+    method: str,
+    objective_direction: str = "minimize",
+    constraints: Sequence[Mapping[str, Any]] | None = None,
+    workspace: str = "default",
+) -> dict[str, Any]:
+    """Normalize optimizer output into a cross-solver transparency contract."""
+    diagnostics = dict(result or {})
+    contract = {
+        "method": str(method),
+        "objective_direction": str(objective_direction).lower(),
+        "objective_value": diagnostics.get("objective"),
+        "constraints_declared": int(len(constraints or [])),
+        "constraints_binding": list(diagnostics.get("binding_constraints") or []),
+        "feasible": bool(diagnostics.get("feasibility", diagnostics.get("success", False))),
+        "optimality_status": diagnostics.get("optimality_status") or diagnostics.get("status"),
+        "optimality_gap": diagnostics.get("optimality_gap", diagnostics.get("gap")),
+        "runtime_ms": diagnostics.get("runtime_ms"),
+        "iterations": diagnostics.get("iterations"),
+        "shadow_prices": diagnostics.get("shadow_prices") or [],
+        "solver": diagnostics.get("solver"),
+        "variables": diagnostics.get("variables"),
+        "recorded_at": now_iso(),
+    }
+    save_platform_record("optimization_contract", stable_id("OPC"), contract, workspace=workspace)
+    return contract
+
+
 def unified_optimization(
     method: str,
     objective: Sequence[float] | pd.DataFrame,
@@ -4588,5 +4812,11 @@ __all__ = [
     "register_benchmark",
     "amend_research_protocol",
     "accessibility_config",
+    "scenario_uncertainty_bundle",
+    "twin_state_estimate",
+    "twin_calibrate",
+    "twin_model_drift",
+    "copilot_orchestrate",
+    "optimization_run_contract",
 
 ]
