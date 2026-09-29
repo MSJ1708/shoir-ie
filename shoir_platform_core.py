@@ -3023,6 +3023,19 @@ def render_platform_completion(module: str, df: pd.DataFrame, *, allowed_modules
             )
         ]), hide_index=True, use_container_width=True)
 
+        contract = st.session_state.get("shoir_mandatory_module_contract") or {}
+        quality = contract.get("manifest_quality") or {}
+        st.markdown("### Mandatory module governance")
+        gc1, gc2, gc3 = st.columns(3)
+        gc1.metric("Manifest completeness", f"{float(quality.get('completeness_pct', 0.0)):.1f}%")
+        gc2.metric("Workflow completion", f"{float(contract.get('completion_pct', 0.0)):.1f}%")
+        gc3.metric("Contract gate", str(contract.get("gate") or "PENDING"))
+        if contract:
+            st.dataframe(pd.DataFrame([
+                {"Stage": stage, "Status": (contract.get("workflow", {}).get(stage, {}) or {}).get("status", "PENDING")}
+                for stage in WORKFLOW_STEPS
+            ]), hide_index=True, use_container_width=True)
+
     with tabs[1]:
         st.caption("Digital Thread: Dataset → Asset → Process → Constraint → KPI → Model → Experiment → Scenario → Decision → Implementation → Outcome.")
         try:
@@ -3204,6 +3217,55 @@ def render_platform_completion(module: str, df: pd.DataFrame, *, allowed_modules
             st.json(st.session_state[f"core_copilot_last_{module}"])
 
         st.divider()
+        st.markdown("### Decision Memory")
+        memory_prompt = st.text_input(
+            "Search similar historical engineering problems",
+            placeholder="e.g. capacity shortfall, supplier disruption, high downtime",
+            key=f"core_memory_prompt_{module}",
+        )
+        if memory_prompt.strip():
+            memory = decision_memory_query(memory_prompt, workspace=workspace, limit=8)
+            if memory.empty:
+                st.info("No similar decision records found in this workspace.")
+            else:
+                st.dataframe(memory, use_container_width=True, hide_index=True)
+        with st.expander("Capture a reusable decision memory"):
+            mm_title = st.text_input("Decision title", key=f"core_memory_title_{module}")
+            mm_problem = st.text_area("Problem statement", key=f"core_memory_problem_{module}")
+            mm_decision = st.text_area("Decision JSON", value='{"action":"","rationale":""}', key=f"core_memory_decision_{module}")
+            mm_outcome = st.text_area("Outcome JSON", value='{"actual_kpis":{}}', key=f"core_memory_outcome_{module}")
+            if st.button("Save decision memory", key=f"core_memory_save_{module}"):
+                try:
+                    save_decision_memory(
+                        mm_title or f"{module} decision",
+                        mm_problem,
+                        json.loads(mm_decision or "{}"),
+                        outcome=json.loads(mm_outcome or "{}"),
+                        workspace=workspace,
+                    )
+                    st.success("Decision memory saved with searchable problem/evidence/outcome context.")
+                except Exception as exc:
+                    record_engineering_error(module, exc, workspace=workspace, actor=actor)
+                    st.error(f"Decision memory could not be saved: {type(exc).__name__}: {exc}")
+
+        st.divider()
+        st.markdown("### Accessibility & localization")
+        ac1, ac2, ac3 = st.columns(3)
+        with ac1:
+            language = st.selectbox("Language", ["English", "Arabic"], key=f"core_language_{module}")
+        with ac2:
+            high_contrast = st.checkbox("High contrast", key=f"core_high_contrast_{module}")
+        with ac3:
+            reduced_motion = st.checkbox("Reduced motion", value=True, key=f"core_reduced_motion_{module}")
+        accessibility = accessibility_config(language, high_contrast=high_contrast, reduced_motion=reduced_motion)
+        st.session_state["shoir_accessibility_config"] = accessibility
+        if accessibility["rtl"]:
+            st.markdown("<style>div[data-testid='stAppViewContainer']{direction:rtl}</style>", unsafe_allow_html=True)
+        if accessibility["high_contrast"]:
+            st.markdown("<style>:focus-visible{outline:3px solid #000 !important} [data-testid='stMetric']{border:2px solid #000 !important}</style>", unsafe_allow_html=True)
+        st.caption("Keyboard focus, RTL and reduced-motion preferences are recorded as workspace settings. Streamlit component semantics remain subject to browser/widget support.")
+
+        st.divider()
         st.markdown("**Connector execution posture**")
 
         st.dataframe(pd.DataFrame(ACTION_LEVELS, columns=["Governed action level"]), hide_index=True, use_container_width=True)
@@ -3259,6 +3321,7 @@ def render_platform_completion(module: str, df: pd.DataFrame, *, allowed_modules
     with tabs[7]:
         diagnostics = {
             "backend": db_backend(),
+            "persistence_topology": persistence_topology(),
             "database_authority": "PostgreSQL when configured; SQLite offline fallback",
             "runtime": platform.python_version(),
             "python": platform.python_version(),
@@ -3357,6 +3420,65 @@ def render_platform_completion(module: str, df: pd.DataFrame, *, allowed_modules
             st.dataframe(pd.DataFrame(roi["kpis"]), use_container_width=True, hide_index=True)
             st.json({k: roi[k] for k in ("financial_impact", "hours_saved", "risk_reduction", "verified_actuals", "evidence_ids")})
 
+        st.divider()
+        st.markdown("### Distinct evidence report packs")
+        pack_type = st.selectbox("Pack", ["Executive", "Engineering", "Audit", "Research"], key=f"core_pack_type_{module}")
+        pack_manifest = report_pack_manifest(pack_type, module=module, workspace=workspace)
+        st.download_button(
+            "Download pack manifest",
+            data=json.dumps(pack_manifest, indent=2, default=str).encode("utf-8"),
+            file_name=f"shoir_{pack_type.lower()}_pack_manifest.json",
+            mime="application/json",
+            key=f"core_pack_download_{module}",
+            use_container_width=True,
+        )
+        st.json(pack_manifest)
+
+        with st.expander("Research protocol amendments"):
+            locked_study = st.session_state.get(f"core_research_study_{module}")
+            if locked_study and locked_study.get("protocol_locked"):
+                amendment_reason = st.text_input("Reason", key=f"core_amend_reason_{module}")
+                amendment_json = st.text_area("Amendment JSON", value='{"analysis_plan":""}', key=f"core_amend_json_{module}")
+                if st.button("Record versioned amendment", key=f"core_amend_{module}"):
+                    try:
+                        updated = amend_research_protocol(
+                            locked_study["study_id"],
+                            changes=json.loads(amendment_json or "{}"),
+                            reason=amendment_reason,
+                            workspace=workspace,
+                        )
+                        st.session_state[f"core_research_study_{module}"] = updated["study"]
+                        st.success(f"Amendment {updated['amendment']['amendment_id']} recorded as version {updated['amendment']['version']}.")
+                    except Exception as exc:
+                        record_engineering_error(module, exc, workspace=workspace, actor=actor)
+                        st.error(f"Amendment failed safely: {type(exc).__name__}: {exc}")
+
+        with st.expander("Benchmark library"):
+            bn, bs, bt = st.columns(3)
+            with bn:
+                benchmark_name = st.text_input("Benchmark name", key=f"core_bench_name_{module}")
+            with bs:
+                benchmark_source = st.text_input("Source / provenance", key=f"core_bench_source_{module}")
+            with bt:
+                benchmark_type = st.selectbox("Benchmark type", ["INTERNAL", "REFERENCE", "TARGET"], key=f"core_bench_type_{module}")
+            benchmark_values = st.text_area("KPI=value per line", key=f"core_bench_values_{module}")
+            if st.button("Register benchmark", key=f"core_bench_save_{module}"):
+                values = {}
+                for line in benchmark_values.splitlines():
+                    if "=" in line:
+                        k,v=line.split("=",1)
+                        try: values[k.strip()] = float(v.strip())
+                        except ValueError: continue
+                if benchmark_name.strip() and benchmark_source.strip() and values:
+                    register_benchmark(
+                        benchmark_name, values, source=benchmark_source,
+                        benchmark_type=benchmark_type, workspace=workspace,
+                    )
+                    st.success("Benchmark registered with provenance and version metadata.")
+            benchmarks = list_benchmarks(workspace=workspace)
+            if not benchmarks.empty:
+                st.dataframe(benchmarks, use_container_width=True, hide_index=True)
+
     with tabs[9]:
         st.markdown("### Digital Twin Cycle")
         nums = list(df.select_dtypes(include=np.number).columns) if isinstance(df, pd.DataFrame) else []
@@ -3438,9 +3560,34 @@ def render_platform_completion(module: str, df: pd.DataFrame, *, allowed_modules
                         st.error(f"Live synchronization failed safely: {type(exc).__name__}: {exc}")
         alerts = repository_records("alert", workspace=workspace, limit=100)
         if not alerts.empty:
-            st.markdown("### Alert → Investigation")
+            st.markdown("### Alert → Investigation → Simulation → Decision")
             shown = [_payload_from_value(row["payload_json"]) for _, row in alerts.iterrows()]
             st.dataframe(pd.DataFrame(shown), use_container_width=True, hide_index=True)
+            open_alerts = [x for x in shown if str(x.get("status","")).upper() in {"OPEN","INVESTIGATING"}]
+            if open_alerts:
+                labels = [f"{x.get('alert_id')} · {x.get('severity')} · {x.get('message','')[:60]}" for x in open_alerts]
+                chosen = st.selectbox("Alert to investigate", labels, key=f"core_alert_pick_{module}")
+                alert = open_alerts[labels.index(chosen)]
+                finding = st.text_area("Investigation finding", key=f"core_alert_finding_{module}")
+                scenario_id = st.text_input("Scenario ID (optional)", key=f"core_alert_scenario_{module}")
+                decision_id = st.text_input("Decision ID (optional)", key=f"core_alert_decision_{module}")
+                if st.button("Record investigation", key=f"core_alert_investigate_{module}", type="primary"):
+                    if not finding.strip():
+                        st.error("A finding is required before closing the investigation step.")
+                    else:
+                        try:
+                            chain = alert_investigation_chain(
+                                str(alert["alert_id"]),
+                                finding=finding,
+                                scenario_id=scenario_id,
+                                decision_id=decision_id,
+                                workspace=workspace,
+                            )
+                            st.session_state[f"core_alert_chain_{module}"] = chain
+                            st.success(f"Investigation {chain['investigation_id']} saved. Next stage: {chain['next_stage']}.")
+                        except Exception as exc:
+                            record_engineering_error(module, exc, workspace=workspace, actor=actor)
+                            st.error(f"Investigation failed safely: {type(exc).__name__}: {exc}")
 
 
 def sync_project_state(workspace: str, state: Mapping[str, Any]) -> str:
@@ -4200,5 +4347,9 @@ __all__ = [
     "alert_investigation_chain",
     "report_pack_manifest",
     "persistence_topology",
+    "list_benchmarks",
+    "register_benchmark",
+    "amend_research_protocol",
+    "accessibility_config",
 
 ]
