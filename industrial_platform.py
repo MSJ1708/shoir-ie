@@ -1,4 +1,3 @@
-from shoir_repository import sqlite_connect as shoir_sqlite_connect
 """Shoir-IE Industrial Platform Suite.
 
 Additive, production-oriented services for the unified industrial decision platform:
@@ -11,6 +10,7 @@ The module functions are deterministic where possible, persist important metadat
 and return explicit diagnostics rather than inventing data.
 """
 from __future__ import annotations
+from shoir_repository import sqlite_connect as shoir_sqlite_connect
 import io, json, math, os, re, sqlite3, hashlib, heapq, time, html
 from datetime import datetime, timedelta
 from itertools import product
