@@ -2523,8 +2523,7 @@ def decision_memory_query(problem: str, *, workspace: str = "default", limit: in
     q = set(re.findall(r"[a-z0-9]{3,}", str(problem).lower()))
     rows = []
     for _, row in records.iterrows():
-        try:
-            payload = _payload_from_value(row["payload_json"])
+        payload = _payload_from_value(row["payload_json"])
         text = " ".join([
             str(payload.get("title", "")), str(payload.get("problem", "")),
             str(payload.get("domain", "")), canonical_json(payload.get("kpis", {})),
@@ -2811,6 +2810,14 @@ def render_platform_completion(module: str, df: pd.DataFrame, *, allowed_modules
         )
         baseline = st.text_input("Baseline scenario", "Baseline", key=f"core_scenario_base_{module}")
         constraint_text = st.text_area("Constraints: KPI=min or KPI=max", "Throughput=min:95\nCost=max:60", key=f"core_scenario_constraints_{module}")
+        if st.button("Generate baseline / best / worst / stress", key=f"core_scenario_standard_{module}"):
+            numeric_cols = list(df.select_dtypes(include=np.number).columns) if isinstance(df, pd.DataFrame) else []
+            baseline_values = {}
+            for col in numeric_cols[:8]:
+                values = pd.to_numeric(df[col], errors="coerce").dropna()
+                if not values.empty:
+                    baseline_values[str(col)] = float(values.mean())
+            st.session_state[f"core_scenario_generated_{module}"] = generate_standard_scenarios(baseline_values)
         if st.button("Analyze scenarios", key=f"core_scenario_btn_{module}", type="primary"):
             data: dict[str, dict[str, float]] = {}
             for line in scenarios_text.splitlines():
@@ -2841,6 +2848,9 @@ def render_platform_completion(module: str, df: pd.DataFrame, *, allowed_modules
                 save_platform_record("scenario_analysis", f"{module}:{baseline}", {"module": module, "baseline": baseline, "comparison": comparison.to_dict("records"), "summary": summary}, workspace=workspace)
             except ValueError as exc:
                 st.error(str(exc))
+        if st.session_state.get(f"core_scenario_generated_{module}"):
+            st.markdown("**Generated standard scenarios**")
+            st.json(st.session_state[f"core_scenario_generated_{module}"])
         if isinstance(st.session_state.get(f"core_scenario_result_{module}"), pd.DataFrame):
             st.dataframe(st.session_state[f"core_scenario_result_{module}"], use_container_width=True, hide_index=True)
             st.json(st.session_state.get(f"core_scenario_summary_{module}", {}))
@@ -2922,6 +2932,29 @@ def render_platform_completion(module: str, df: pd.DataFrame, *, allowed_modules
             if st.button("Check SFTP", key=f"core_sftp_test_{module}"):
                 st.json(connector_health({"kind": "SFTP", "host": host, "username": user, "password": password, "name": module}))
 
+        st.divider()
+        st.markdown("### KPI ontology")
+        ontology_cols = list(df.select_dtypes(include=np.number).columns)[:12] if isinstance(df, pd.DataFrame) else []
+        if ontology_cols:
+            st.dataframe(pd.DataFrame([get_kpi_definition(str(c), workspace=workspace) for c in ontology_cols]), use_container_width=True, hide_index=True)
+        st.divider()
+        st.markdown("### Collaboration")
+        entity_type = st.selectbox(
+            "Attach review to",
+            ["Dataset", "Asset", "Process", "Constraint", "KPI", "Model", "Experiment", "Scenario", "Decision", "Run", "Chart"],
+            key=f"core_collab_type_{module}",
+        )
+        entity_id = st.text_input("Entity ID", value=str(st.session_state.get("shoir_latest_run_id") or module), key=f"core_collab_id_{module}")
+        comment = st.text_area("Comment / review note", key=f"core_collab_comment_{module}")
+        mention = st.text_input("Mention", key=f"core_collab_mention_{module}")
+        assignment = st.text_input("Assignment", key=f"core_collab_assignment_{module}")
+        if st.button("Attach collaboration", key=f"core_collab_attach_{module}"):
+            attachment = collaboration_attachment(
+                actor, entity_type, entity_id, comment=comment, mention=mention,
+                assignment=assignment, workspace=workspace,
+            )
+            st.success(f"Collaboration attachment {attachment['attachment_id']} saved.")
+
     with tabs[7]:
         diagnostics = {
             "backend": db_backend(),
@@ -2941,7 +2974,8 @@ def render_platform_completion(module: str, df: pd.DataFrame, *, allowed_modules
             st.json(report)
         if not ledger.empty:
             status_filter = st.multiselect("Capability status filter", list(CAPABILITY_STATES), default=list(CAPABILITY_STATES), key=f"core_cap_filter_{module}")
-            st.dataframe(ledger[ledger["Status"].isin(status_filter)], use_container_width=True, hide_index=True, height=300)
+            matrix = capability_verification_matrix()
+            st.dataframe(matrix[matrix["Status"].isin(status_filter)], use_container_width=True, hide_index=True, height=340)
 
 
     with tabs[8]:
@@ -3063,6 +3097,43 @@ def render_platform_completion(module: str, df: pd.DataFrame, *, allowed_modules
             if twin:
                 st.metric("Twin state", twin["status"], f"{len(twin['anomalies'])} anomalies")
                 st.dataframe(pd.DataFrame(twin["state"]), use_container_width=True, hide_index=True)
+            with st.expander("Live connector synchronization"):
+                connector_kind = st.selectbox("Telemetry connector", ["REST", "SAP-OData", "SQL", "MQTT", "OPC-UA", "SFTP"], key=f"core_twin_connector_{module}")
+                endpoint = st.text_input("Endpoint / connection string", key=f"core_twin_endpoint_{module}")
+                params_text = st.text_area(
+                    "Fetch parameters JSON",
+                    value='{"query":"SELECT * FROM telemetry LIMIT 100"}' if connector_kind == "SQL" else '{}',
+                    key=f"core_twin_params_{module}",
+                )
+                fmap_text = st.text_area("Canonical field map JSON", value='{}', key=f"core_twin_map_{module}")
+                if st.button("Sync from live connector", key=f"core_twin_live_{module}"):
+                    try:
+                        params = json.loads(params_text or "{}")
+                        fmap = json.loads(fmap_text or "{}")
+                        profile = {"kind": connector_kind, "name": asset}
+                        if connector_kind in {"REST", "SAP-OData", "OPC-UA"}:
+                            profile["endpoint"] = endpoint
+                        elif connector_kind == "SQL":
+                            profile["connection_string"] = endpoint
+                        elif connector_kind == "MQTT":
+                            profile.update({"host": endpoint, "topic": str(params.get("topic") or ""), "port": int(params.get("port", 1883))})
+                        elif connector_kind == "SFTP":
+                            profile.update({
+                                "host": endpoint,
+                                "username": str(params.get("username") or ""),
+                                "password": str(params.get("password") or ""),
+                                "path": str(params.get("path") or ""),
+                            })
+                        live_twin = digital_twin_sync_from_connector(
+                            asset, profile, field_map=fmap,
+                            expected=expected, thresholds={k: threshold for k in expected},
+                            workspace=workspace,
+                        )
+                        st.session_state[f"core_twin_last_{module}"] = live_twin
+                        st.success("Live telemetry synchronized into the Digital Twin.")
+                    except Exception as exc:
+                        record_engineering_error(module, exc, workspace=workspace, actor=actor)
+                        st.error(f"Live synchronization failed safely: {type(exc).__name__}: {exc}")
         alerts = repository_records("alert", workspace=workspace, limit=100)
         if not alerts.empty:
             st.markdown("### Alert → Investigation")
