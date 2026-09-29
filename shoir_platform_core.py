@@ -2610,8 +2610,7 @@ def replay_records(*, workspace: str = "default", limit: int = 100) -> pd.DataFr
         return rows
     out = []
     for _, row in rows.iterrows():
-        try:
-            payload = _payload_from_value(row["payload_json"])
+        payload = _payload_from_value(row["payload_json"])
         out.append({
             "Replay ID": row["record_id"],
             "Module": payload.get("module"),
