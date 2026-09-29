@@ -10,6 +10,7 @@ The module functions are deterministic where possible, persist important metadat
 and return explicit diagnostics rather than inventing data.
 """
 from __future__ import annotations
+from shoir_observability import log_exception
 from shoir_repository import sqlite_connect as shoir_sqlite_connect
 import io, json, math, os, re, sqlite3, hashlib, heapq, time, html
 from datetime import datetime, timedelta
@@ -177,8 +178,8 @@ def log_security_event(username: str, event_type: str, details: str="", db_path:
         with shoir_sqlite_connect(db_path) as c:
             c.execute("INSERT INTO security_events(username,event_type,details,created_at) VALUES(?,?,?,?)",(username,event_type,details,_now()))
             c.commit()
-    except Exception:
-        pass
+    except Exception as exc:
+        log_exception(__name__, exc)
 
 def register_dataset(name: str, source_name: str, df: pd.DataFrame, db_path: str="enterprise_full_workspace.db") -> str:
     raw=df.to_csv(index=False).encode()
@@ -729,14 +730,14 @@ def _safe_df(value: Any, default: Optional[pd.DataFrame] = None) -> pd.DataFrame
         try:
             candidate = pd.DataFrame(value)
             return candidate
-        except Exception:
-            pass
+        except Exception as exc:
+            log_exception(__name__, exc)
     if isinstance(value, dict):
         # A scalar result dict is one record; nested objects become strings safely.
         try:
             return pd.DataFrame([value])
-        except Exception:
-            pass
+        except Exception as exc:
+            log_exception(__name__, exc)
     return default.copy() if isinstance(default, pd.DataFrame) else pd.DataFrame()
 
 def sanitize_module_session_state(st) -> None:
