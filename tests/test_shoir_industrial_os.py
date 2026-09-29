@@ -124,7 +124,7 @@ def test_benchmark_snapshot_is_neutral_delta():
 
 
 def test_app_integrates_complete_os_surface():
-    source = Path("app.py").read_text(encoding="utf-8")
+    source = Path("shoir_app_runtime.py").read_text(encoding="utf-8")
     assert "from shoir_industrial_os import render_platform_os_surface" in source
     assert "render_platform_os_surface(" in source
 
