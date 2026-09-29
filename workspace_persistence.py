@@ -7,6 +7,8 @@ inputs, tables, selections, research state, and Copilot conversation.
 
 from __future__ import annotations
 
+from shoir_repository import sqlite_connect as shoir_sqlite_connect
+
 import datetime as _dt
 import hashlib
 import json
@@ -174,7 +176,7 @@ def _unpack(value: Any) -> Any:
     return payload
 
 def ensure_workspace_state_db(db_path: str = "enterprise_full_workspace.db") -> None:
-    with sqlite3.connect(db_path, timeout=15) as conn:
+    with shoir_sqlite_connect(db_path, timeout=15) as conn:
         conn.execute(_STATE_TABLE_SQL)
         conn.commit()
 
@@ -290,7 +292,7 @@ def save_user_workspace(
         # configure a managed database because local files are ephemeral.
         ensure_workspace_state_db(db_path)
         now = _dt.datetime.now(_dt.timezone.utc).isoformat()
-        with sqlite3.connect(db_path, timeout=15) as conn:
+        with shoir_sqlite_connect(db_path, timeout=15) as conn:
             conn.execute(
                 """
                 INSERT INTO workspace_states (username, state_json, updated_at)
@@ -328,7 +330,7 @@ def load_user_workspace(
             payload = json.loads(remote_payload)
         else:
             ensure_workspace_state_db(db_path)
-            with sqlite3.connect(db_path, timeout=15) as conn:
+            with shoir_sqlite_connect(db_path, timeout=15) as conn:
                 row = conn.execute(
                     "SELECT state_json FROM workspace_states WHERE username = ?",
                     (username.strip().lower(),),
