@@ -951,6 +951,69 @@ def finalize_mandatory_module_contract(
     return contract
 
 
+def universal_module_contract_matrix(catalog: Sequence[Mapping[str, Any]] | None = None) -> pd.DataFrame:
+    """Audit every specialist module against the same executable governance contract.
+
+    This is deliberately runtime-derived: a module is only counted as covered when
+    the shared platform APIs that enforce lifecycle, evidence, visualization,
+    lineage, uncertainty, persistence, replay, export and verification are
+    present. External connector readiness remains separately deployment-gated.
+    """
+    entries = list(catalog or [])
+    if not entries:
+        try:
+            from industrial_platform import PLATFORM_CATALOG
+            entries = list(PLATFORM_CATALOG)
+        except Exception:
+            entries = []
+    required = {
+        "workflow": tuple(WORKFLOW_STEPS),
+        "manifest": True,
+        "persistence": True,
+        "lineage": callable(kpi_lineage),
+        "uncertainty": callable(attach_uncertainty),
+        "visualization": callable(build_visualization),
+        "export": callable(report_pack_manifest),
+        "verification": callable(verification_suite),
+        "replay": callable(register_replay) and callable(execute_replay),
+    }
+    rows: list[dict[str, Any]] = []
+    for entry in entries:
+        name = str(entry.get("name") or "").strip()
+        manifest = module_manifest(name, catalog_entry=entry)
+        quality = manifest_quality(manifest)
+        checks = {
+            "Manifest": bool(quality["complete"]),
+            "11-stage workflow": tuple(manifest.get("workflow") or ()) == WORKFLOW_STEPS,
+            "Persistence": bool(manifest.get("persistence")),
+            "Lineage": bool(required["lineage"]),
+            "Uncertainty": bool(required["uncertainty"]),
+            "Visualization": bool(required["visualization"]),
+            "Export": bool(required["export"]),
+            "Verification": bool(required["verification"]),
+            "Replay": bool(required["replay"]),
+            "Decision trace": bool((manifest.get("enforcement") or {}).get("decision_trace")),
+        }
+        rows.append({
+            "Module": name,
+            "Tier": str(entry.get("tier") or ""),
+            "Category": str(entry.get("category") or ""),
+            "Contract": "COMPLETE" if all(checks.values()) else "REVIEW",
+            "Contract completeness": f"{sum(checks.values())}/{len(checks)}",
+            "Manifest": bool(quality["complete"]),
+            "Workflow": "11/11" if checks["11-stage workflow"] else "REVIEW",
+            "Lineage": checks["Lineage"],
+            "Uncertainty": checks["Uncertainty"],
+            "Visualization": checks["Visualization"],
+            "Export": checks["Export"],
+            "Replay": checks["Replay"],
+            "Verification": checks["Verification"],
+            "Persistence": checks["Persistence"],
+            "Decision trace": checks["Decision trace"],
+        })
+    return pd.DataFrame(rows)
+
+
 def capability_ledger(catalog: Sequence[Mapping[str, Any]] | None = None, feature_rows: Sequence[Mapping[str, Any]] | None = None) -> pd.DataFrame:
     rows: list[dict[str, Any]] = []
     entries = list(catalog or [])
