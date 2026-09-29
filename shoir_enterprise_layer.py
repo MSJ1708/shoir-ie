@@ -1,4 +1,3 @@
-from shoir_repository import sqlite_connect as shoir_sqlite_connect
 """
 Shoir-IE Enterprise Integration Layer.
 
@@ -11,6 +10,7 @@ the owners of their domain calculations; this module provides the governed
 cross-module infrastructure around them.
 """
 from __future__ import annotations
+from shoir_repository import sqlite_connect as shoir_sqlite_connect
 
 import hashlib
 import io
