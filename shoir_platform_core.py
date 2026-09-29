@@ -3587,7 +3587,7 @@ def render_platform_completion(module: str, df: pd.DataFrame, *, allowed_modules
                 )
             st.markdown("### Scenario uncertainty")
             uncertainty_text = st.text_area(
-                "Distribution samples: Scenario=KPI:v1,v2,v3...",
+                "Distribution samples: Scenario=KPI:v1,v2,v3;KPI2:v1,v2,v3",
                 "Baseline=Throughput:95,100,103,98,101\nA=Throughput:104,108,111,109,107",
                 key=f"core_scenario_uncertainty_{module}",
             )
@@ -3597,35 +3597,19 @@ def render_platform_completion(module: str, df: pd.DataFrame, *, allowed_modules
                     if "=" not in line:
                         continue
                     name, metrics = line.split("=", 1)
-                    samples.setdefault(name.strip(), {})
-                    for item in metrics.split(","):
+                    current = {}
+                    for item in metrics.split(";"):
                         if ":" not in item:
                             continue
-                    # Re-parse grouped KPI values to support multiple KPIs per scenario.
-                    current = samples.setdefault(name.strip(), {})
-                    for item in metrics.split(";"):
-                        if ":" in item:
-                            k, vals = item.split(":", 1)
-                            try:
-                                current[k.strip()] = [float(x.strip()) for x in vals.split(",") if x.strip()]
-                            except ValueError:
-                                continue
-                # Also accept the common single-KPI comma form shown above.
-                if not samples:
-                    for line in uncertainty_text.splitlines():
-                        if "=" not in line:
+                        k, vals = item.split(":", 1)
+                        try:
+                            parsed = [float(x.strip()) for x in vals.split(",") if x.strip()]
+                        except ValueError:
                             continue
-                        name, metrics = line.split("=", 1)
-                        current = {}
-                        for item in [metrics]:
-                            if ":" in item:
-                                k, vals = item.split(":", 1)
-                                try:
-                                    current[k.strip()] = [float(x.strip()) for x in vals.split(",") if x.strip()]
-                                except ValueError:
-                                    continue
-                        if current:
-                            samples[name.strip()] = current
+                        if parsed:
+                            current[k.strip()] = parsed
+                    if current:
+                        samples[name.strip()] = current
                 if samples:
                     ub, um = scenario_uncertainty_bundle(samples, constraints=constraints)
                     st.session_state[f"core_scenario_uncertainty_result_{module}"] = ub
