@@ -2200,11 +2200,20 @@ class MQTTConnector(ConnectorAdapter):
 class OPCUAConnector(ConnectorAdapter):
     kind = "OPC-UA"
 
-    def fetch(self, params: Mapping[str, Any] | None = None) -> Any:
+    @staticmethod
+    def _client():
         try:
-            from opcua import Client
-        except Exception as exc:
-            raise RuntimeError("opcua is not installed.") from exc
+            from asyncua.sync import Client
+            return Client, "asyncua.sync"
+        except Exception:
+            try:
+                from opcua import Client
+                return Client, "opcua"
+            except Exception as exc:
+                raise RuntimeError("No OPC-UA client dependency is installed. Install asyncua.") from exc
+
+    def fetch(self, params: Mapping[str, Any] | None = None) -> Any:
+        Client, _ = self._client()
         endpoint = str(self.profile.get("endpoint") or "")
         nodes = dict((params or {}).get("nodes") or self.profile.get("nodes") or {})
         if not endpoint or not nodes:
@@ -2214,15 +2223,15 @@ class OPCUAConnector(ConnectorAdapter):
             client.connect()
             result = {}
             for name, node_id in nodes.items():
-                result[str(name)] = client.get_node(str(node_id)).get_value()
+                result[str(name)] = client.get_node(str(node_id)).read_value()
             return result
         finally:
             client.disconnect()
 
     def health(self) -> dict[str, Any]:
         try:
-            from opcua import Client
-        except Exception:
+            Client, client_kind = self._client()
+        except RuntimeError:
             return {"kind": self.kind, "status": "DEPENDENCY_MISSING", "checked_at": now_iso()}
         endpoint = str(self.profile.get("endpoint") or "")
         if not endpoint:
