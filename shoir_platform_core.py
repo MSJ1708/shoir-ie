@@ -2249,7 +2249,7 @@ class JobManager:
         if not records.empty:
             matches = records[records["entity_key"].astype(str) == str(job_id)]
             if not matches.empty:
-                payload = json.loads(str(matches.iloc[0]["payload_json"]))
+                payload = _payload_from_value(matches.iloc[0]["payload_json"])
                 if future is not None and future.done() and payload.get("status") == "RUNNING":
                     payload["status"] = "COMPLETED"
                 return payload
@@ -2285,9 +2285,7 @@ def decision_memory_query(problem: str, *, workspace: str = "default", limit: in
     rows = []
     for _, row in records.iterrows():
         try:
-            payload = json.loads(str(row["payload_json"]))
-        except Exception:
-            payload = {}
+            payload = _payload_from_value(row["payload_json"])
         text = " ".join([
             str(payload.get("title", "")), str(payload.get("problem", "")),
             str(payload.get("domain", "")), canonical_json(payload.get("kpis", {})),
@@ -2375,9 +2373,7 @@ def replay_records(*, workspace: str = "default", limit: int = 100) -> pd.DataFr
     out = []
     for _, row in rows.iterrows():
         try:
-            payload = json.loads(str(row["payload_json"]))
-        except Exception:
-            payload = {}
+            payload = _payload_from_value(row["payload_json"])
         out.append({
             "Replay ID": row["record_id"],
             "Module": payload.get("module"),
@@ -2448,11 +2444,11 @@ def render_platform_completion(module: str, df: pd.DataFrame, *, allowed_modules
     else:
         st.success("No outstanding platform attention items were detected.")
     metrics = st.columns(5)
-    metrics[0].metric("Readiness", f"{readiness['score']:.0f}%")
-    metrics[1].metric("Capabilities", f"{len(ledger):,}")
-    metrics[2].metric("Verified", str(int((ledger["Status"] == "Verified").sum())) if not ledger.empty else "0")
-    metrics[3].metric("Persistence", db_backend().upper())
-    metrics[4].metric("Workflow", runtime.stage)
+    metrics[0].metric("Rows in scope", f"{int(readiness['rows']):,}")
+    metrics[1].metric("Columns", f"{int(readiness['columns']):,}")
+    metrics[2].metric("Capabilities", f"{len(ledger):,}")
+    metrics[3].metric("Verified evidence", str(int((ledger["Status"] == "Verified").sum())) if not ledger.empty else "0")
+    metrics[4].metric("Workflow stage", runtime.stage)
 
     tabs = st.tabs([
         "Workflow & Manifest", "Digital Thread", "Experiment", "Scenario Lab",
