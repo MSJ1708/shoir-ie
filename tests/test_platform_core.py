@@ -9,11 +9,17 @@ from shoir_platform_core import (
     WORKFLOW_STEPS,
     capability_ledger,
     canonical_map_columns,
+    command_center_snapshot,
     convert_quantity,
+    derive_formula_unit,
+    digital_twin_cycle,
     data_readiness,
     fractional_factorial_design,
     module_manifest as core_module_manifest,
     response_surface_design,
+    research_study_record,
+    lock_research_protocol,
+    roi_evidence_snapshot,
     safe_calculate,
     scenario_analysis,
     uncertainty_engine,
@@ -117,6 +123,45 @@ def test_quantity_engine_rejects_cross_dimension_math():
     assert convert_quantity(1, "m", "cm") == 100.0
     with pytest.raises(ValueError):
         convert_quantity(1, "m", "kg")
+
+
+def test_compound_units_and_formula_dimensions():
+    dims, scale = derive_formula_unit("Mass / Time", {"Mass": "kg", "Time": "h"})
+    assert dims == {"mass": 1, "time": -1}
+    assert scale == 1.0
+
+
+def test_digital_twin_cycle_creates_deviation_evidence():
+    twin = digital_twin_cycle(
+        "ASSET-01", {"Throughput": 120}, expected={"Throughput": 100},
+        thresholds={"Throughput": 5},
+    )
+    assert twin["status"] == "DEGRADED"
+    assert len(twin["anomalies"]) == 1
+
+
+def test_research_protocol_lock_and_roi_evidence():
+    study = research_study_record("Test Study", objective="Validate process", hypothesis="H1")
+    locked = lock_research_protocol(study)
+    assert locked["protocol_locked"] is True
+    assert locked["protocol_hash"]
+    roi = roi_evidence_snapshot(
+        baseline={"Throughput": 100},
+        target={"Throughput": 110},
+        predicted={"Throughput": 108},
+        actual={"Throughput": 112},
+        financial_impact=5000,
+        hours_saved=8,
+        risk_reduction=0.1,
+    )
+    assert roi["verified_actuals"] is True
+    assert roi["kpis"][0]["Actual Delta"] == 12
+
+
+def test_command_center_snapshot_surfaces_attention_state():
+    snap = command_center_snapshot(pd.DataFrame({"Throughput": [100, 80]}))
+    assert "what_to_do_next" in snap
+    assert "attention" in snap
 
 
 def test_safe_formula_engine_rejects_code_execution():
