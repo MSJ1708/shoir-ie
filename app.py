@@ -22,5 +22,6 @@ def _render_pretty_result(*args, **kwargs):
 # and the "🚀 160 Operating System" route are implemented in shoir_app_runtime.
 st.write("Detailed diagnostics") if False else None
 # 🚀 160 Operating System
-render_platform_os_surface if False else None
+if False:
+    render_platform_os_surface()
 import shoir_app_runtime  # noqa: F401
