@@ -6,6 +6,7 @@ archive and an auditable record of every automatic transformation.
 """
 
 from __future__ import annotations
+import logging
 
 import hashlib
 import math
@@ -523,8 +524,8 @@ def build_ultimate_workbook(
                         "style": "Table Style Medium 2",
                         "columns": [{"header": str(c)} for c in df.columns],
                     })
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
 
             raw_ws = workbook.add_worksheet(raw_names[original])
             raw_ws.hide()
@@ -1267,8 +1268,8 @@ def _extract_source_metadata(raw: bytes, filename: str, raw_sheets: dict[str, pd
                 })
             try:
                 book.close()
-            except Exception:
-                pass
+            except Exception as exc:
+                logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
     except Exception:
         workbook_formula_scanned = False
 
@@ -1315,8 +1316,8 @@ def _safe_xlsx_write(ws: Any, row: int, col: int, value: Any, fmt: Any = None) -
             if math.isfinite(number):
                 ws.write_number(row, col, number, fmt)
                 return
-        except Exception:
-            pass
+        except Exception as exc:
+            logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
     # Never use worksheet.write() for arbitrary strings: strings beginning with
     # "=" can otherwise become formulas. write_string makes the export inert.
     ws.write_string(row, col, str(value), fmt)
@@ -1627,8 +1628,8 @@ def build_ultimate_workbook(
                         "columns": [{"header": str(c)} for c in df.columns],
                     })
                     ws.autofilter(5, 0, end_row, len(df.columns) - 1)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
             for j, col in enumerate(df.columns):
                 sample = [str(x) for x in df[col].head(80).tolist()]
                 width = min(46, max(12, len(str(col)) + 2, max([len(x) for x in sample] + [0]) + 2))
@@ -2018,8 +2019,8 @@ def _enhanced_read_raw_workbook(raw: bytes, filename: str) -> dict[str, pd.DataF
         try:
             dialect = csv.Sniffer().sniff(decoded[:8192], delimiters=",;\t|")
             delimiter = dialect.delimiter
-        except Exception:
-            pass
+        except Exception as exc:
+            logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
         return {
             "CSV": pd.read_csv(
                 io.StringIO(decoded),
@@ -2224,8 +2225,8 @@ def _final_read_raw_workbook(raw: bytes, filename: str) -> dict[str, pd.DataFram
         finally:
             try:
                 book.close()
-            except Exception:
-                pass
+            except Exception as exc:
+                logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
     raise ValueError("Only .xlsx, .xlsm and .csv files are supported.")
 
 
@@ -2285,8 +2286,8 @@ def _postprocess_export_guardrails(xlsx_bytes: bytes) -> bytes:
         book.save(out)
         try:
             book.close()
-        except Exception:
-            pass
+        except Exception as exc:
+            logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
         return out.getvalue()
     except Exception:
         # Export safety should never make the import unusable; the primary
@@ -2560,8 +2561,8 @@ def _append_governance_plus_to_workbook(xlsx_bytes: bytes, result: dict[str, Any
         book.save(out)
         try:
             book.close()
-        except Exception:
-            pass
+        except Exception as exc:
+            logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
         return out.getvalue()
     except Exception:
         return xlsx_bytes
@@ -3093,8 +3094,8 @@ def _excel_extended_outlier_findings(df: pd.DataFrame, sheet: str) -> list[dict[
             diff_median = float(diff.abs().median())
             if diff_median > 0:
                 spike_count = int((diff.abs() > 8 * diff_median).sum())
-        except Exception:
-            pass
+        except Exception as exc:
+            logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
         flatline = 0
         if len(values) >= 10:
             flatline = int((values.rolling(5).std().fillna(np.nan) == 0).sum())
@@ -3683,8 +3684,8 @@ def _excel_process(raw: bytes, filename: str) -> dict[str, Any]:
             result["import_diagnostics"].update(_excel_detect_locale(text))
             result["import_diagnostics"]["Encoding"] = encoding
             result["import_diagnostics"]["Delimiter"] = "\t" if str(filename).lower().endswith(".tsv") else _choose_csv_delimiter(text)
-        except Exception:
-            pass
+        except Exception as exc:
+            logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
     table_catalog, table_datasets = _excel_table_catalog(result.get("raw_sheets", {}))
     result["table_catalog"] = table_catalog
     result["table_datasets"] = table_datasets
@@ -4038,8 +4039,8 @@ def _excel_render_professional(tier: str, username: str) -> None:
                 fig = guaranteed_figure(frame, f"Excel Studio · {choice}")
                 if fig is not None:
                     st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False, "responsive": True})
-            except Exception:
-                pass
+            except Exception as exc:
+                logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
             numeric = [str(c) for c in frame.columns if pd.api.types.is_numeric_dtype(frame[c])]
             categorical = [str(c) for c in frame.columns if str(c) not in numeric]
             if numeric:
@@ -4303,8 +4304,8 @@ def _excel_render_v2(tier: str, username: str) -> None:
                             try:
                                 from shoir_excel_foundation import refresh_version_state
                                 refresh_version_state(result)
-                            except Exception:
-                                pass
+                            except Exception as exc:
+                                logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
                             _rebuild_excel_result(result)
                             st.session_state["excel_studio_result"] = result
                             _excel_persist_result(username, result)
