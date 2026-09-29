@@ -166,3 +166,15 @@ def test_160_capability_catalog_has_stable_contract_surface():
     for feature in FEATURES_160:
         assert feature.get("name")
         assert feature.get("area") is not None
+
+
+def test_every_specialist_module_has_the_universal_contract():
+    matrix = universal_module_contract_matrix()
+    assert len(matrix) >= 30
+    assert matrix["Contract"].eq("COMPLETE").all()
+    assert matrix["Workflow"].eq("11/11").all()
+    assert matrix["Visualization"].all()
+    assert matrix["Lineage"].all()
+    assert matrix["Uncertainty"].all()
+    assert matrix["Replay"].all()
+    assert matrix["Verification"].all()
