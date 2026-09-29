@@ -182,43 +182,42 @@ def remote_persistence_configured() -> bool:
 
 def ensure_core_schema() -> str:
     """Create the platform-owned repository schema on the selected backend."""
-    if db_backend() == "postgres":
-        statements = [
-            """
-            CREATE TABLE IF NOT EXISTS shoir_platform_meta (
-                key TEXT PRIMARY KEY,
-                value_json JSONB NOT NULL,
-                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            )
-            """,
-            """
-            CREATE TABLE IF NOT EXISTS shoir_platform_records (
-                record_id TEXT PRIMARY KEY,
-                workspace_key TEXT NOT NULL DEFAULT 'default',
-                record_type TEXT NOT NULL,
-                entity_key TEXT NOT NULL,
-                payload_json JSONB NOT NULL,
-                content_hash TEXT NOT NULL,
-                version INTEGER NOT NULL DEFAULT 1,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                UNIQUE(workspace_key, record_type, entity_key)
-            )
-            """,
-            "CREATE INDEX IF NOT EXISTS idx_shoir_records_type ON shoir_platform_records(workspace_key, record_type)",
-            "CREATE INDEX IF NOT EXISTS idx_shoir_records_hash ON shoir_platform_records(content_hash)",
-            """
-            CREATE TABLE IF NOT EXISTS shoir_platform_events (
-                event_id TEXT PRIMARY KEY,
-                workspace_key TEXT NOT NULL DEFAULT 'default',
-                event_type TEXT NOT NULL,
-                actor TEXT NOT NULL DEFAULT 'system',
-                entity_key TEXT,
-                payload_json JSONB NOT NULL,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            )
-            """,
-            "CREATE INDEX IF NOT EXISTS idx_shoir_events ON shoir_platform_events(workspace_key, event_type, created_at DESC)",
+    postgres_ddl = [
+        """
+        CREATE TABLE IF NOT EXISTS shoir_platform_meta (
+            key TEXT PRIMARY KEY,
+            value_json JSONB NOT NULL,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS shoir_platform_records (
+            record_id TEXT PRIMARY KEY,
+            workspace_key TEXT NOT NULL DEFAULT 'default',
+            record_type TEXT NOT NULL,
+            entity_key TEXT NOT NULL,
+            payload_json JSONB NOT NULL,
+            content_hash TEXT NOT NULL,
+            version INTEGER NOT NULL DEFAULT 1,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            UNIQUE(workspace_key, record_type, entity_key)
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_shoir_records_type ON shoir_platform_records(workspace_key, record_type)",
+        "CREATE INDEX IF NOT EXISTS idx_shoir_records_hash ON shoir_platform_records(content_hash)",
+        """
+        CREATE TABLE IF NOT EXISTS shoir_platform_events (
+            event_id TEXT PRIMARY KEY,
+            workspace_key TEXT NOT NULL DEFAULT 'default',
+            event_type TEXT NOT NULL,
+            actor TEXT NOT NULL DEFAULT 'system',
+            entity_key TEXT,
+            payload_json JSONB NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_shoir_events ON shoir_platform_events(workspace_key, event_type, created_at DESC)",
         """
         CREATE TABLE IF NOT EXISTS shoir_platform_jobs (
             job_id TEXT PRIMARY KEY,
@@ -226,56 +225,33 @@ def ensure_core_schema() -> str:
             module TEXT NOT NULL,
             status TEXT NOT NULL,
             priority INTEGER NOT NULL DEFAULT 50,
-            payload_json TEXT NOT NULL,
-            available_at TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
+            payload_json JSONB NOT NULL,
+            available_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             worker_id TEXT,
-            claimed_at TEXT,
-            lease_until TEXT,
-            progress REAL NOT NULL DEFAULT 0,
-            result_json TEXT,
-            error_json TEXT,
-            completed_at TEXT,
+            claimed_at TIMESTAMPTZ,
+            lease_until TIMESTAMPTZ,
+            progress DOUBLE PRECISION NOT NULL DEFAULT 0,
+            result_json JSONB,
+            error_json JSONB,
+            completed_at TIMESTAMPTZ,
             attempts INTEGER NOT NULL DEFAULT 0,
             max_attempts INTEGER NOT NULL DEFAULT 3
         )
         """,
-        "CREATE INDEX IF NOT EXISTS idx_shoir_jobs_claim ON shoir_platform_jobs(workspace_key,status,priority,available_at,created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_shoir_jobs_claim ON shoir_platform_jobs(workspace_key,status,priority DESC,available_at,created_at)",
         "CREATE INDEX IF NOT EXISTS idx_shoir_jobs_worker ON shoir_platform_jobs(workspace_key,worker_id,status)",
-            """
-            CREATE TABLE IF NOT EXISTS shoir_platform_jobs (
-                job_id TEXT PRIMARY KEY,
-                workspace_key TEXT NOT NULL DEFAULT 'default',
-                module TEXT NOT NULL,
-                status TEXT NOT NULL,
-                priority INTEGER NOT NULL DEFAULT 50,
-                payload_json JSONB NOT NULL,
-                available_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                worker_id TEXT,
-                claimed_at TIMESTAMPTZ,
-                lease_until TIMESTAMPTZ,
-                progress DOUBLE PRECISION NOT NULL DEFAULT 0,
-                result_json JSONB,
-                error_json JSONB,
-                completed_at TIMESTAMPTZ,
-                attempts INTEGER NOT NULL DEFAULT 0,
-                max_attempts INTEGER NOT NULL DEFAULT 3
-            )
-            """,
-            "CREATE INDEX IF NOT EXISTS idx_shoir_jobs_claim ON shoir_platform_jobs(workspace_key,status,priority DESC,available_at,created_at)",
-            "CREATE INDEX IF NOT EXISTS idx_shoir_jobs_worker ON shoir_platform_jobs(workspace_key,worker_id,status)",
-        ]
+    ]
+    if db_backend() == "postgres":
         with db_connect() as conn:
             with conn.cursor() as cur:
-                for statement in statements:
+                for statement in postgres_ddl:
                     cur.execute(statement)
             conn.commit()
         return "postgres"
 
-    statements = [
+    sqlite_ddl = [
         """
         CREATE TABLE IF NOT EXISTS shoir_platform_meta (
             key TEXT PRIMARY KEY,
@@ -311,9 +287,33 @@ def ensure_core_schema() -> str:
         )
         """,
         "CREATE INDEX IF NOT EXISTS idx_shoir_events ON shoir_platform_events(workspace_key, event_type, created_at DESC)",
+        """
+        CREATE TABLE IF NOT EXISTS shoir_platform_jobs (
+            job_id TEXT PRIMARY KEY,
+            workspace_key TEXT NOT NULL DEFAULT 'default',
+            module TEXT NOT NULL,
+            status TEXT NOT NULL,
+            priority INTEGER NOT NULL DEFAULT 50,
+            payload_json TEXT NOT NULL,
+            available_at TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            worker_id TEXT,
+            claimed_at TEXT,
+            lease_until TEXT,
+            progress REAL NOT NULL DEFAULT 0,
+            result_json TEXT,
+            error_json TEXT,
+            completed_at TEXT,
+            attempts INTEGER NOT NULL DEFAULT 0,
+            max_attempts INTEGER NOT NULL DEFAULT 3
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_shoir_jobs_claim ON shoir_platform_jobs(workspace_key,status,priority,available_at,created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_shoir_jobs_worker ON shoir_platform_jobs(workspace_key,worker_id,status)",
     ]
     with db_connect() as conn:
-        for statement in statements:
+        for statement in sqlite_ddl:
             conn.execute(statement)
         conn.commit()
     return "sqlite"
