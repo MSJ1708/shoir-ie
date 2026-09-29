@@ -7,6 +7,7 @@ provenance around the existing application state.
 """
 
 from __future__ import annotations
+import logging
 
 import hashlib
 import io
@@ -643,8 +644,8 @@ def render_enterprise_bridge(module: str, tier: str, username: str) -> None:
                             from industrial_experience import decision_approval_history
                             approval_history = decision_approval_history(decision_id)
                             st.session_state["enterprise_decision_approval_history_df"] = approval_history.copy(deep=True)
-                        except Exception:
-                            pass
+                        except Exception as exc:
+                            logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
                     assignments = st.session_state.setdefault("enterprise_collaboration_assignments", [])
                     if assignment.strip():
                         assignments.append({
