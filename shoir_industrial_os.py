@@ -597,7 +597,7 @@ def monte_carlo_summary(
                 raise ValueError("Function calls must use an allow-listed np.* function.")
             continue
         raise ValueError(f"Unsupported expression operation: {type(node).__name__}")
-    result = pd.eval(str(expression), local_dict=local, engine="numexpr")
+    result = pd.eval(str(expression), local_dict=local, global_dict={"np": np, "__builtins__": {}}, engine="python", parser="python")
     if not isinstance(result, (pd.Series, np.ndarray, np.generic, int, float)):
         raise ValueError("Expression did not produce a numeric result.")
     if isinstance(result, pd.Series):
