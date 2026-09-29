@@ -1663,7 +1663,7 @@ def copilot_orchestrate(
         raise ValueError(f"Unsupported Copilot action level: {actor_level}")
     readiness = data_readiness(df)
     validation = validate_dataset_contract(df if isinstance(df, pd.DataFrame) else pd.DataFrame())
-    plan = copilot_plan(str(objective), df if isinstance(df, pd.DataFrame) else pd.DataFrame())
+    plan = copilot_plan("".join([str(objective)]), "Copilot", readiness=readiness, approval_level=requested)
     stages: list[dict[str, Any]] = [
         {"stage": "DATA", "status": "COMPLETE", "readiness": readiness},
         {"stage": "VALIDATE", "status": "COMPLETE" if validation.get("valid") else "BLOCKED", "validation": validation},
@@ -2306,7 +2306,8 @@ def action_authorized(requested: str, actor_level: str, *, approval: bool = Fals
     return order[actor] >= order[req] and (req not in {"EXECUTE", "ADMIN"} or approval)
 
 
-def copilot_plan(prompt: str, module: str, *, readiness: Mapping[str, Any], approval_level: str = "RECOMMEND") -> dict[str, Any]:
+def copilot_plan(prompt: str, module: str = "Copilot", *, readiness: Mapping[str, Any] | None = None, approval_level: str = "RECOMMEND") -> dict[str, Any]:
+    readiness = dict(readiness or {"score": 0.0, "rows": 0, "columns": 0, "warnings": ["Readiness was not supplied; validation is required before execution."]})
     lower = str(prompt).lower()
     intent = "analyze"
     if any(t in lower for t in ("clean", "duplicate", "missing", "schema")):
@@ -2438,6 +2439,10 @@ def execute_replay(
         st.session_state["shoir_last_replay_result"] = verification
         raise RuntimeError("Replay input fingerprint mismatch; restore the captured dataset version before replaying.")
     started = time.perf_counter()
+    module_obj = importlib.import_module(module_name)
+    func = getattr(module_obj, func_name, None)
+    if not callable(func):
+        raise ValueError(f"Replay target is not callable: {path}")
     result = func(**dict(record.get("kwargs") or {}))
     duration = (time.perf_counter() - started) * 1000.0
     actual_hash = digest(result)
@@ -3380,6 +3385,21 @@ def persistence_topology() -> dict[str, Any]:
         "platform_tables": ["shoir_platform_records", "shoir_platform_events", "shoir_platform_jobs"],
         "authority_policy": "PostgreSQL is authoritative when configured; SQLite is compatibility/offline fallback.",
     }
+
+
+def provenance() -> str:
+    """Resolve the current dataset provenance without inventing live connectivity."""
+    state = str(st.session_state.get("shoir_data_status", "")).upper().strip()
+    if state in PROVENANCE_STATES:
+        return state
+    source_key = str(st.session_state.get("shoir_data_source_key", "")).lower()
+    if source_key in {"live", "iot", "telemetry", "connector"}:
+        return "LIVE"
+    if source_key in {"imported", "upload", "workbook"}:
+        return "IMPORTED"
+    if source_key in {"simulated", "scenario", "simulation", "experiment"}:
+        return "SIMULATED"
+    return "DEMO"
 
 
 def report_pack_manifest(pack_type: str, *, module: str, workspace: str = "default", include_figures: bool = True) -> dict[str, Any]:
