@@ -337,7 +337,7 @@ def _record_event(
             conn.execute(
                 """INSERT INTO shoir_platform_events
                 (event_id,workspace_key,event_type,actor,entity_key,payload_json,created_at)
-                VALUES (?,?,?,?,?,?)""",
+                VALUES (?,?,?,?,?,?,?)""",
                 (event_id, workspace, event_type, str(actor), entity_key, payload_json, now),
             )
             conn.commit()
