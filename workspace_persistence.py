@@ -6,6 +6,7 @@ inputs, tables, selections, research state, and Copilot conversation.
 """
 
 from __future__ import annotations
+import logging
 
 from shoir_repository import sqlite_connect as shoir_sqlite_connect
 
@@ -229,9 +230,8 @@ def _persist_domain_manifest(username: str, session_state: MutableMapping[str, A
             "backend": "managed" if (db_path == "enterprise_full_workspace.db" and durable_backend_configured()) else "local",
         }
         record_artifact(username, "workspace_manifest", f"{username}:{workspace}", manifest, workspace)
-    except Exception:
-        # Manifest persistence is supplementary; native workspace save must remain independent.
-        pass
+    except Exception as exc:
+        logging.getLogger(__name__).warning("Workspace manifest persistence unavailable; native workspace retained: %s", exc)
 
 
 def _workspace_change_signature(session_state: MutableMapping[str, Any]) -> str:
