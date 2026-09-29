@@ -12,6 +12,7 @@ Shoir-IE's existing Digital Thread, Copilot, Visualization, persistence,
 optimization, forecasting and reporting layers.
 """
 from __future__ import annotations
+import logging
 
 from shoir_repository import sqlite_connect as shoir_sqlite_connect
 
@@ -662,8 +663,8 @@ def register_workbook_extension(extension:WorkbookExtension)->None:
             handler=(lambda df, _name=extension.name: run_workbook_extension(_name, df))
                 if extension.transform is not None else None,
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
 
 def list_workbook_extensions()->list[WorkbookExtension]:
     return list(_EXTENSION_REGISTRY.values())
@@ -1472,5 +1473,5 @@ def render_industrial_workbook(tier:str="Starter",username:str="unknown")->None:
                               f"Shoir-IE Workbook · {current_sheet}",st.session_state.get("industrial_workbook_id"),variables=variables)
             st.session_state["industrial_workbook_id"]=wid
             st.session_state["industrial_workbook_last_autosave_fingerprint"]=fingerprint
-    except Exception:
-        pass
+    except Exception as exc:
+        logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
