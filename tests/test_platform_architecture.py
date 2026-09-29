@@ -69,6 +69,7 @@ def test_distributed_job_queue_schema_and_atomic_claim_are_present():
 
 
 def test_report_pack_variants_are_present():
-    source = read("shoir_industrial_os.py")
-    for pack in ("Executive", "Engineering", "Audit", "Research"):
-        assert pack in source
+    from shoir_completion_engine import REPORT_PROFILES
+    assert set(REPORT_PROFILES) >= {
+        "Executive Pack", "Engineering Pack", "Audit Pack", "Research Pack"
+    }
