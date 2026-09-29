@@ -17,6 +17,8 @@ kaleido>=1.0.0
 playwright
 pytest>=9.0.3,<10
 psycopg2-binary>=2.9,<3
+oracledb>=26,<27
 
 paho-mqtt>=2,<3
+paramiko>=5,<6
 duckdb>=1.0,<2
