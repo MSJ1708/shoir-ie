@@ -15,7 +15,7 @@ from typing import Union
 PathLike = Union[str, Path]
 
 
-def sqlite_connect(path: PathLike = "enterprise_full_workspace.db", timeout: int = 30) -> sqlite3.Connection:
+def sqlite_connect(path: PathLike = "enterprise_full_workspace.db", timeout: int = 30, check_same_thread: bool = False) -> sqlite3.Connection:
     """Open a consistently configured SQLite connection.
 
     This is intentionally small: schema ownership stays with the service that
@@ -24,7 +24,7 @@ def sqlite_connect(path: PathLike = "enterprise_full_workspace.db", timeout: int
     db_path = Path(path).expanduser()
     if db_path.parent and str(db_path.parent) not in ("", "."):
         db_path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(db_path), timeout=max(1, int(timeout)), check_same_thread=False)
+    conn = sqlite3.connect(str(db_path), timeout=max(1, int(timeout)), check_same_thread=bool(check_same_thread))
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys=ON")
     conn.execute("PRAGMA journal_mode=WAL")
