@@ -26,6 +26,8 @@ from shoir_platform_core import (
     response_surface_design,
     scenario_analysis,
     safe_calculate,
+    universal_module_contract_matrix,
+    enqueue_distributed_job, claim_distributed_job, update_distributed_job, reap_stale_jobs,
 )
 
 
@@ -178,3 +180,19 @@ def test_every_specialist_module_has_the_universal_contract():
     assert matrix["Uncertainty"].all()
     assert matrix["Replay"].all()
     assert matrix["Verification"].all()
+
+
+def test_durable_local_job_queue_is_atomic_and_recoverable(tmp_path, monkeypatch):
+    import shoir_platform_core as core
+    monkeypatch.setattr(core, "DEFAULT_DB_PATH", str(tmp_path / "jobs.db"))
+    job_id = enqueue_distributed_job(
+        "Regression",
+        {"callable_path": "tests.test_industrial_os_deep_governance:_replay_fixture", "kwargs": {"value": 4}},
+        workspace="w", max_attempts=2,
+    )
+    claimed = claim_distributed_job("worker-1", workspace="w", lease_seconds=60)
+    assert claimed and claimed["job_id"] == job_id
+    assert claimed["attempts"] == 1
+    update_distributed_job(job_id, status="COMPLETED", worker_id="worker-1", progress=1.0, result={"value": 8}, workspace="w")
+    assert claim_distributed_job("worker-2", workspace="w") is None
+    assert reap_stale_jobs(workspace="w") == 0
