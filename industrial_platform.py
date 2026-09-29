@@ -1402,6 +1402,10 @@ def render_module(module: str, tier: str, username: str):
             lambda: _render_module_impl(str(module), str(tier), str(username)),
             workspace=str(st.session_state.get("workspace", "default")),
             actor=str(username),
+            replay_spec={
+                "callable_path": "industrial_platform:_render_module_impl",
+                "kwargs": {"module": str(module), "tier": str(tier), "username": str(username)},
+            },
         )
     except Exception as exc:
         st.error(f"{module} could not complete safely: {type(exc).__name__}: {exc}")
