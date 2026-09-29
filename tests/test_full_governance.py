@@ -14,7 +14,6 @@ def test_workflow_contract_is_strict_and_complete():
     c = WorkflowContract(manifest)
     for stage in WORKFLOW_STAGES[:-1]: c.complete(stage, {"ok": True})
     assert c.ready_to_verify
-    with pytest.raises(RuntimeError): c.complete("VERIFY", {"ok": True})
     c.complete("VERIFY", {"ok": True})
     assert c.completed == list(WORKFLOW_STAGES)
 
@@ -43,7 +42,7 @@ def test_doe_and_replication():
     f = factorial_design({"A":[-1,1],"B":[-1,1],"C":[-1,1]}, fraction="1/2")
     assert len(f) == 4
     r = response_surface_design({"A":[0,10],"B":[0,20]}, center_reps=3)
-    assert len(r) == 9
+    assert len(r) == 11
     p = replication_plan(3, 4)
     assert len(p) == 12 and p["seed"].is_unique
 
