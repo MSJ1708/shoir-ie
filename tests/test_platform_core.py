@@ -27,6 +27,8 @@ from shoir_platform_core import (
     generate_standard_scenarios,
     canonical_kpi_id,
     get_kpi_definition,
+    knowledge_graph_frame,
+    capability_verification_matrix,
     verification_suite,
 )
 
@@ -229,3 +231,21 @@ def test_copilot_blocks_high_impact_action_without_approval():
     from shoir_platform_core import execute_copilot_action
     blocked = execute_copilot_action("execute_operational_action", actor_level="EXECUTE")
     assert blocked["status"] == "BLOCKED"
+
+
+def test_capability_verification_matrix_is_conservative():
+    matrix = capability_verification_matrix()
+    assert len(matrix) >= 160
+    assert "Platform contract" in matrix.columns
+    assert "Production deployment" in matrix.columns
+    assert "Implemented" in set(matrix["Status"])
+
+
+def test_knowledge_graph_frame_has_stable_schema():
+    nodes, edges = knowledge_graph_frame(workspace="default")
+    assert isinstance(nodes, pd.DataFrame)
+    assert isinstance(edges, pd.DataFrame)
+    if not nodes.empty:
+        assert {"id", "label", "type"}.issubset(nodes.columns)
+    if not edges.empty:
+        assert {"source", "target", "relation"}.issubset(edges.columns)
