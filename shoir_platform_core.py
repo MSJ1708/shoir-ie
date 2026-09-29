@@ -2577,7 +2577,7 @@ def verification_suite(
     checks.append(("results_present", not res.empty))
     if not df.empty:
         checks.append(("finite_numeric_inputs", np.isfinite(df.select_dtypes(include=np.number).to_numpy(dtype=float, na_value=np.nan)).all()))
-        checks.append(("unique_columns", len(set(map(str, df.columns))) == len(df.columns))
+        checks.append(("unique_columns", len(set(map(str, df.columns))) == len(df.columns)))
     if known_case:
         for key, expected in known_case.items():
             actual = st.session_state.get(str(key))
