@@ -633,8 +633,8 @@ def install_visualization_contract() -> None:
                 "run_id": run_id,
                 "captured_at": now_iso(),
             }
-        except Exception:
-            pass
+        except Exception as exc:
+            log_exception(__name__, exc)
         return original(figure, *args, **kwargs)
 
     st.plotly_chart = contracted_plotly_chart
