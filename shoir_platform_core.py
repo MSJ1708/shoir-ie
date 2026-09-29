@@ -2489,8 +2489,10 @@ def render_platform_completion(module: str, df: pd.DataFrame, *, allowed_modules
         ]), hide_index=True, use_container_width=True)
 
     with tabs[1]:
-        st.caption("Why-this-number lineage is persisted per workspace and reconstructed as a connected evidence graph.")
+        st.caption("Digital Thread: Dataset → Asset → Process → Constraint → KPI → Model → Experiment → Scenario → Decision → Implementation → Outcome.")
         try:
+            render_knowledge_graph(workspace=workspace)
+            st.divider()
             render_lineage_graph(workspace=workspace)
         except Exception as exc:
             record_engineering_error(module, exc, workspace=workspace, actor=actor)
@@ -2621,32 +2623,43 @@ def render_platform_completion(module: str, df: pd.DataFrame, *, allowed_modules
             st.json(meta)
 
     with tabs[5]:
-        jobs = repository_records("job", workspace=workspace, limit=100)
-        if jobs.empty:
-            st.info("No platform-core jobs recorded.")
-        else:
-            st.dataframe(jobs[["record_id", "entity_key", "content_hash", "version", "updated_at"]], use_container_width=True, hide_index=True)
-        replays = replay_records(workspace=workspace, limit=100)
-        if replays.empty:
-            st.info("No executable replay records have been captured yet.")
-        else:
-            st.dataframe(replays, use_container_width=True, hide_index=True)
-            selected_replay = st.selectbox("Replay run", replays["Replay ID"].astype(str).tolist(), key=f"core_replay_pick_{module}")
-            if st.button("Replay executable run", key=f"core_replay_btn_{module}", type="primary"):
-                try:
-                    replay_payload = get_replay_record(selected_replay, workspace=workspace)
-                    result = execute_replay(replay_payload)
-                    st.session_state[f"core_replay_result_{module}"] = result
-                    st.success("Replay completed from the persisted callable + parameter manifest.")
-                except Exception as exc:
-                    record_engineering_error(module, exc, workspace=workspace, actor=actor)
-                    st.error(f"Replay failed safely: {type(exc).__name__}: {exc}")
-        replay_result = st.session_state.get(f"core_replay_result_{module}")
-        if replay_result is not None:
-            st.write(replay_result if isinstance(replay_result, (str, int, float)) else _jsonable(replay_result))
+        render_run_center_console(module=module, workspace=workspace, df=df)
 
     with tabs[6]:
+        st.markdown("### Copilot approval & action governance")
+        level = st.selectbox("Current Copilot permission level", list(ACTION_LEVELS), index=3, key=f"core_copilot_level_{module}")
+        registry = copilot_action_registry()
+        st.dataframe(pd.DataFrame([
+            {
+                "Action": name,
+                "Required": spec["level"],
+                "Description": spec["description"],
+                "Allowed now": action_authorized(spec["level"], level, approval=False),
+            }
+            for name, spec in registry.items()
+        ]), use_container_width=True, hide_index=True)
+        action = st.selectbox("Action to execute", list(registry), key=f"core_copilot_action_{module}")
+        approval = st.checkbox(
+            "I explicitly approve this action",
+            value=False,
+            key=f"core_copilot_approval_{module}",
+            help="Required for EXECUTE and ADMIN actions.",
+        )
+        if st.button("Run governed Copilot action", key=f"core_copilot_run_{module}", type="primary"):
+            result = execute_copilot_action(
+                action,
+                actor_level=level,
+                workspace=workspace,
+                approval_token="APPROVED_BY_USER" if approval else "",
+                df=df,
+            )
+            st.session_state[f"core_copilot_last_{module}"] = result
+        if st.session_state.get(f"core_copilot_last_{module}") is not None:
+            st.json(st.session_state[f"core_copilot_last_{module}"])
+
+        st.divider()
         st.markdown("**Connector execution posture**")
+
         st.dataframe(pd.DataFrame(ACTION_LEVELS, columns=["Governed action level"]), hide_index=True, use_container_width=True)
         connector_kind = st.selectbox("Connector", ["REST", "SQL", "SAP-OData", "MQTT", "OPC-UA", "SFTP"], key=f"core_conn_kind_{module}")
         if connector_kind in {"REST", "SAP-OData"}:
