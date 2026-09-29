@@ -3125,6 +3125,7 @@ def render_platform_completion(module: str, df: pd.DataFrame, *, allowed_modules
                                 "password": str(params.get("password") or ""),
                                 "path": str(params.get("path") or ""),
                             })
+                        profile["params"] = params
                         live_twin = digital_twin_sync_from_connector(
                             asset, profile, field_map=fmap,
                             expected=expected, thresholds={k: threshold for k in expected},
