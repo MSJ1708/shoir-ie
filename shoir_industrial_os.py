@@ -577,13 +577,29 @@ def monte_carlo_summary(
             cols[name] = rng.lognormal(float(spec.get("mean", 0)), float(spec.get("sigma", 1)), n)
         else:
             raise ValueError(f"Unsupported distribution: {dist}")
-    # Evaluation is intentionally constrained to arithmetic/numpy expressions.
-    safe = {"__builtins__": {}, "np": np}
+    # Evaluation is intentionally constrained to arithmetic expressions and a
+    # small allow-list of NumPy functions; arbitrary Python execution is never
+    # accepted from the Monte Carlo expression field.
+    import ast
     local = {k: pd.Series(v) for k, v in cols.items()}
-    try:
-        result = pd.eval(expression, local_dict=local, engine="numexpr")
-    except Exception:
-        result = eval(expression, safe, local)  # noqa: S307 - caller-controlled expression is restricted by token scan below
+    allowed_names = set(local) | {"np"}
+    allowed_np = {"abs", "sqrt", "exp", "log", "log10", "minimum", "maximum", "clip"}
+    tree = ast.parse(str(expression), mode="eval")
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Expression, ast.BinOp, ast.UnaryOp, ast.Add, ast.Sub, ast.Mult, ast.Div, ast.Pow, ast.Mod,
+                             ast.USub, ast.UAdd, ast.Load, ast.Name, ast.Constant, ast.Call, ast.Attribute)):
+            if isinstance(node, ast.Name) and node.id not in allowed_names:
+                raise ValueError(f"Unknown expression name: {node.id}")
+            if isinstance(node, ast.Attribute):
+                if not isinstance(node.value, ast.Name) or node.value.id != "np" or node.attr not in allowed_np:
+                    raise ValueError("Only allow-listed np.* functions are permitted.")
+            if isinstance(node, ast.Call) and not isinstance(node.func, ast.Attribute):
+                raise ValueError("Function calls must use an allow-listed np.* function.")
+            continue
+        raise ValueError(f"Unsupported expression operation: {type(node).__name__}")
+    result = pd.eval(str(expression), local_dict=local, engine="numexpr")
+    if not isinstance(result, (pd.Series, np.ndarray, np.generic, int, float)):
+        raise ValueError("Expression did not produce a numeric result.")
     if isinstance(result, pd.Series):
         y = pd.to_numeric(result, errors="coerce")
     else:
