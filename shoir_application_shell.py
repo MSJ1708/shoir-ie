@@ -7,6 +7,9 @@ It deliberately reuses existing specialist modules instead of replacing them.
 
 from __future__ import annotations
 
+from shoir_repository import sqlite_connect as shoir_sqlite_connect
+import logging
+
 import html
 import json
 import math
@@ -90,7 +93,7 @@ CREATE INDEX IF NOT EXISTS idx_shoir_shell_outcomes_decision
 
 
 def _db(path: str = "enterprise_full_workspace.db") -> sqlite3.Connection:
-    return sqlite3.connect(path, timeout=30)
+    return shoir_sqlite_connect(path, timeout=30)
 
 
 def _now() -> str:
@@ -104,8 +107,8 @@ def ensure_shell_schema(db_path: str = "enterprise_full_workspace.db") -> None:
                 if statement.strip():
                     conn.execute(statement)
             conn.commit()
-    except Exception:
-        pass
+    except Exception as exc:
+        logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
 
 
 def _safe_df(value: Any) -> pd.DataFrame:
@@ -520,8 +523,8 @@ def render_application_shell(
     try:
         from shoir_universal_platform_kernel import install_visualization_contract
         install_visualization_contract()
-    except Exception:
-        pass
+    except Exception as exc:
+        logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
     render_shell_css()
 
     nav_labels = list(NAV_GROUPS.keys())
@@ -1076,8 +1079,8 @@ def render_shell_surface(surface: str, username: str, tier: str, module: str, al
             try:
                 from workspace_persistence import save_user_workspace
                 save_user_workspace(user, st.session_state)
-            except Exception:
-                pass
+            except Exception as exc:
+                logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
         for key in list(st.session_state.keys()):
             del st.session_state[key]
         st.rerun()

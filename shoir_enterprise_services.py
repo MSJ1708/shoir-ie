@@ -8,6 +8,9 @@ provenance around the existing application state.
 
 from __future__ import annotations
 
+from shoir_repository import sqlite_connect as shoir_sqlite_connect
+import logging
+
 import hashlib
 import io
 import json
@@ -311,7 +314,7 @@ def replay_twin_frame() -> pd.DataFrame:
                 frames.append(out)
     if not frames:
         try:
-            with sqlite3.connect("enterprise_full_workspace.db") as conn:
+            with shoir_sqlite_connect("enterprise_full_workspace.db") as conn:
                 stored = pd.read_sql("SELECT asset_id AS Asset, ts AS Timestamp, metric AS Metric, value AS Value, source AS Source FROM telemetry_events ORDER BY id DESC LIMIT 500", conn)
             stored["Value"] = pd.to_numeric(stored["Value"], errors="coerce")
             return stored.dropna(subset=["Value"])
@@ -358,7 +361,7 @@ def replay_twin_what_if(df: pd.DataFrame, metric: str, delta_pct: float) -> pd.D
 
 def control_job(job_id: str, action: str) -> None:
     from industrial_experience import update_job
-    with sqlite3.connect("enterprise_full_workspace.db") as conn:
+    with shoir_sqlite_connect("enterprise_full_workspace.db") as conn:
         row = conn.execute("SELECT status FROM experience_jobs WHERE job_id=?", (job_id,)).fetchone()
     if not row:
         raise ValueError("Job not found.")
@@ -377,7 +380,7 @@ def control_job(job_id: str, action: str) -> None:
 
 def job_history_frame() -> pd.DataFrame:
     try:
-        with sqlite3.connect("enterprise_full_workspace.db") as conn:
+        with shoir_sqlite_connect("enterprise_full_workspace.db") as conn:
             return pd.read_sql(
                 "SELECT job_id,module,job_type,status,progress,message,started_at,finished_at FROM experience_jobs ORDER BY COALESCE(started_at,finished_at) DESC LIMIT 250",
                 conn,
@@ -643,8 +646,8 @@ def render_enterprise_bridge(module: str, tier: str, username: str) -> None:
                             from industrial_experience import decision_approval_history
                             approval_history = decision_approval_history(decision_id)
                             st.session_state["enterprise_decision_approval_history_df"] = approval_history.copy(deep=True)
-                        except Exception:
-                            pass
+                        except Exception as exc:
+                            logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
                     assignments = st.session_state.setdefault("enterprise_collaboration_assignments", [])
                     if assignment.strip():
                         assignments.append({
@@ -700,7 +703,7 @@ def render_enterprise_bridge(module: str, tier: str, username: str) -> None:
                 })
                 audit_note = st.text_input("Audit event note", key=f"enterprise_audit_note_{hash(module)&0xffff:04x}")
                 if st.button("🔐 Record audit event", use_container_width=True, key=f"enterprise_audit_save_{hash(module)&0xffff:04x}"):
-                    with sqlite3.connect("enterprise_full_workspace.db") as conn:
+                    with shoir_sqlite_connect("enterprise_full_workspace.db") as conn:
                         conn.execute("INSERT INTO security_events(username,event_type,details,created_at) VALUES(?,?,?,?)",
                                      (username, "Enterprise Capability Audit", audit_note[:500], utc_now()))
                         conn.commit()

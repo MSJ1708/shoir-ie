@@ -9,6 +9,7 @@ the current Shoir-IE workspace. No external side effects are performed.
 """
 
 from __future__ import annotations
+import logging
 
 import hashlib
 import io
@@ -516,8 +517,8 @@ def stage_copilot_decision(
             metadata={"run_id": run_id},
             workspace=workspace,
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
     return did
 
 
@@ -597,8 +598,8 @@ def run_orchestration(prompt: str, module: str, df: pd.DataFrame, context: Mappi
             evidence=evidence_manifest,
             run_id=run_id,
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
     try:
         from shoir_enterprise_layer import record_artifact
         record_artifact(
@@ -608,8 +609,8 @@ def run_orchestration(prompt: str, module: str, df: pd.DataFrame, context: Mappi
             evidence_manifest,
             workspace=str(runtime.get("workspace") or "default"),
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
 
     export = build_export_bundle(prompt, module, run_id, inspection, method, result, explanation, figure, knowledge_text, evidence_manifest=evidence_manifest)
     return {

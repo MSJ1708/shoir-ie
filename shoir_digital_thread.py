@@ -11,6 +11,9 @@ as pending or inferred from available workspace metadata.
 
 from __future__ import annotations
 
+from shoir_repository import sqlite_connect as shoir_sqlite_connect
+import logging
+
 import hashlib
 import io
 import json
@@ -180,7 +183,7 @@ def _discover_experience_records(owner: str) -> tuple[list[dict[str, Any]], list
     studies: list[dict[str, Any]] = []
     decisions: list[dict[str, Any]] = []
     try:
-        with sqlite3.connect("enterprise_full_workspace.db", timeout=10) as conn:
+        with shoir_sqlite_connect("enterprise_full_workspace.db", timeout=10) as conn:
             rows = conn.execute(
                 "SELECT study_id,research_id,title,methodology,module,updated_at FROM experience_research_studies WHERE owner=? ORDER BY updated_at DESC LIMIT 100",
                 (owner,),
@@ -222,8 +225,8 @@ def _discover_experience_records(owner: str) -> tuple[list[dict[str, Any]], list
                         "created_at": row[4],
                         "updated_at": row[5],
                     })
-            except Exception:
-                pass
+            except Exception as exc:
+                logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
 
             # Include Experiment Engine runs from the platform experiment ledger.
             try:
@@ -240,15 +243,15 @@ def _discover_experience_records(owner: str) -> tuple[list[dict[str, Any]], list
                         "module": row[2],
                         "updated_at": row[4],
                     })
-            except Exception:
-                pass
+            except Exception as exc:
+                logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
 
             # De-duplicate records across the legacy and platform stores.
             studies = list({str(x["study_id"]): x for x in studies}.values())
             decisions = list({str(x["decision_id"]): x for x in decisions}.values())
 
-    except Exception:
-        pass
+    except Exception as exc:
+        logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
     return studies, decisions
 
 
@@ -475,9 +478,8 @@ def sync_workspace_to_thread(owner: str, active_module: str | None = None) -> di
             },
             workspace=workspace,
         )
-    except Exception:
-        # The graph remains available in-session if a persistence backend is temporarily unavailable.
-        pass
+    except Exception as exc:
+        logging.getLogger(__name__).warning("Digital-thread persistence unavailable; session graph retained: %s", exc)
 
     try:
         from shoir_enterprise_layer import record_artifact
@@ -494,8 +496,8 @@ def sync_workspace_to_thread(owner: str, active_module: str | None = None) -> di
             },
             workspace,
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
 
     st.session_state[_keys()["sync"]] = _now()
     st.session_state[_keys()["version"]] = int(st.session_state.get(_keys()["version"], 1)) + 1
@@ -815,8 +817,8 @@ def render_global_project_digital_thread(module: str, username: str) -> None:
     if not st.session_state.get(keys["sync"]):
         try:
             sync_workspace_to_thread(username, active_module=None)
-        except Exception:
-            pass
+        except Exception as exc:
+            logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
 
     c1, c2, c3, c4 = st.columns(4)
     nodes = node_frame()

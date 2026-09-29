@@ -10,6 +10,9 @@ The module functions are deterministic where possible, persist important metadat
 and return explicit diagnostics rather than inventing data.
 """
 from __future__ import annotations
+import logging
+
+from shoir_repository import sqlite_connect as shoir_sqlite_connect
 import io, json, math, os, re, sqlite3, hashlib, heapq, time, html
 from datetime import datetime, timedelta
 from itertools import product
@@ -132,7 +135,7 @@ def tier_allows(current: str, required: str) -> bool:
     return TIER_ORDER.index(c) >= TIER_ORDER.index(r)
 
 def init_platform_db(db_path: str="enterprise_full_workspace.db") -> bool:
-    with sqlite3.connect(db_path) as conn:
+    with shoir_sqlite_connect(db_path) as conn:
         conn.execute("PRAGMA journal_mode=WAL")
         ddl = [
             ("industrial_entities","CREATE TABLE IF NOT EXISTS industrial_entities(entity_id TEXT PRIMARY KEY, entity_type TEXT, name TEXT, attributes_json TEXT, updated_at TEXT)"),
@@ -173,17 +176,17 @@ def _now() -> str:
 
 def log_security_event(username: str, event_type: str, details: str="", db_path: str="enterprise_full_workspace.db"):
     try:
-        with sqlite3.connect(db_path) as c:
+        with shoir_sqlite_connect(db_path) as c:
             c.execute("INSERT INTO security_events(username,event_type,details,created_at) VALUES(?,?,?,?)",(username,event_type,details,_now()))
             c.commit()
-    except Exception:
-        pass
+    except Exception as exc:
+        logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
 
 def register_dataset(name: str, source_name: str, df: pd.DataFrame, db_path: str="enterprise_full_workspace.db") -> str:
     raw=df.to_csv(index=False).encode()
     dataset_id="DS-"+hashlib.sha256((name+source_name+str(len(raw))).encode()).hexdigest()[:12].upper()
     schema={str(c):str(df[c].dtype) for c in df.columns}
-    with sqlite3.connect(db_path) as c:
+    with shoir_sqlite_connect(db_path) as c:
         c.execute("INSERT OR REPLACE INTO platform_datasets VALUES(?,?,?,?,?,?,?,?)",(dataset_id,name,source_name,len(df),len(df.columns),hashlib.sha256(raw).hexdigest(),_now(),json.dumps(schema)))
         c.commit()
     return dataset_id
@@ -227,7 +230,7 @@ def model_health(df: pd.DataFrame, feasible: bool=True, solver_status: str="Not 
 def upsert_entities(df: pd.DataFrame, entity_type: str, id_col: str, db_path: str="enterprise_full_workspace.db") -> int:
     if id_col not in df.columns: raise KeyError(f"{id_col} not found")
     count=0
-    with sqlite3.connect(db_path) as c:
+    with shoir_sqlite_connect(db_path) as c:
         for rec in df.to_dict("records"):
             eid=f"{entity_type}:{rec[id_col]}"
             name=str(rec.get("name",rec.get("Customer",rec.get("Product",rec[id_col]))))
@@ -463,7 +466,7 @@ def create_decision_card(title: str, module: str, metrics: dict, assumptions: di
 def save_decision_card(card: dict, username: str, db_path="enterprise_full_workspace.db") -> str:
     """Persist one Decision Center card into the shared decision lifecycle ledger."""
     did="DEC-"+hashlib.sha256(json.dumps(card,sort_keys=True,default=str).encode()).hexdigest()[:12].upper()
-    with sqlite3.connect(db_path) as c:
+    with shoir_sqlite_connect(db_path) as c:
         c.execute("INSERT OR REPLACE INTO platform_decisions VALUES(?,?,?,?,?,?,?,?,?)",(did,card["title"],card["module"],json.dumps(card["metrics"],default=str),json.dumps(card["assumptions"],default=str),json.dumps(card["uncertainty"],default=str),username,card["created_at"],card["status"]))
         c.commit()
 
@@ -474,7 +477,7 @@ def save_decision_card(card: dict, username: str, db_path="enterprise_full_works
         from industrial_experience import ensure_experience_db
         ensure_experience_db(db_path)
         lifecycle_status = {"Under Review": "Review"}.get(str(card.get("status")), str(card.get("status", "Draft")))
-        with sqlite3.connect(db_path) as c:
+        with shoir_sqlite_connect(db_path) as c:
             c.execute(
                 """INSERT OR REPLACE INTO experience_decisions(
                     decision_id,title,module,status,metrics_json,assumptions_json,
@@ -494,10 +497,8 @@ def save_decision_card(card: dict, username: str, db_path="enterprise_full_works
                 ),
             )
             c.commit()
-    except Exception:
-        # The platform decision remains persisted; lifecycle mirroring must
-        # never erase or invalidate the governed card itself.
-        pass
+    except Exception as exc:
+        logging.getLogger(__name__).warning("Decision lifecycle mirror unavailable; governed card retained: %s", exc)
     return did
 
 def save_model_snapshot(
@@ -517,7 +518,7 @@ def save_model_snapshot(
 ) -> str:
     base = f"{name}|{json.dumps(parameters,sort_keys=True,default=str)}|{data_hash}|{version}|{solver_version}|{result_hash}|{dataset_id}|{run_id}"
     mid = "MOD-" + hashlib.sha256(base.encode()).hexdigest()[:12].upper()
-    with sqlite3.connect(db_path) as c:
+    with shoir_sqlite_connect(db_path) as c:
         c.execute(
             """
             INSERT OR REPLACE INTO platform_models
@@ -536,7 +537,7 @@ def save_model_snapshot(
 
 def save_experiment(name: str, module: str, scenarios: list, results: dict, username: str, db_path="enterprise_full_workspace.db") -> str:
     eid="EXP-"+hashlib.sha256((name+module+_now()).encode()).hexdigest()[:12].upper()
-    with sqlite3.connect(db_path) as c:
+    with shoir_sqlite_connect(db_path) as c:
         c.execute("INSERT INTO platform_experiments VALUES(?,?,?,?,?,?)",(eid,name,module,json.dumps(scenarios,default=str),json.dumps(results,default=str),username,_now())); c.commit()
     return eid
 
@@ -566,7 +567,8 @@ def export_pptx(title: str, tables: Sequence[Tuple[str,pd.DataFrame]], figures: 
     for label,fig in figures:
         try:
             png=fig.to_image(format="png",width=1600,height=900,scale=2); s=prs.slides.add_slide(prs.slide_layouts[5]); s.shapes.title.text=str(label); s.shapes.add_picture(io.BytesIO(png),Inches(.4),Inches(1.1),width=Inches(12.5))
-        except Exception: pass
+        except Exception as exc:
+            logging.getLogger(__name__).debug("Optional PDF/PPT figure rendering skipped: %s", exc)
     for label,df in tables:
         d=df.head(15).fillna("").astype(str); s=prs.slides.add_slide(prs.slide_layouts[5]); s.shapes.title.text=str(label)
         rows=max(1,len(d)+1); cols=max(1,len(d.columns)); table=s.shapes.add_table(rows,cols,Inches(.25),Inches(1.1),Inches(12.8),Inches(5.6)).table
@@ -698,12 +700,12 @@ def ml_demand_forecast(
 
 def save_scenario(name: str, parent_name: str, parameters: dict, kpis: dict, username: str, db_path="enterprise_full_workspace.db") -> str:
     sid="SCN-"+hashlib.sha256((name+username).encode()).hexdigest()[:12].upper()
-    with sqlite3.connect(db_path) as c:
+    with shoir_sqlite_connect(db_path) as c:
         c.execute("INSERT OR REPLACE INTO platform_scenarios VALUES(?,?,?,?,?,?,?)",(sid,name,parent_name,json.dumps(parameters,default=str),json.dumps(kpis,default=str),username,_now())); c.commit()
     return sid
 
 def scenario_table(db_path="enterprise_full_workspace.db") -> pd.DataFrame:
-    with sqlite3.connect(db_path) as c: return pd.read_sql("SELECT * FROM platform_scenarios ORDER BY created_at DESC",c)
+    with shoir_sqlite_connect(db_path) as c: return pd.read_sql("SELECT * FROM platform_scenarios ORDER BY created_at DESC",c)
 
 def predictive_maintenance_score(df: pd.DataFrame) -> pd.DataFrame:
     req={"Asset","Temperature","Vibration","RuntimeHours"}
@@ -728,14 +730,14 @@ def _safe_df(value: Any, default: Optional[pd.DataFrame] = None) -> pd.DataFrame
         try:
             candidate = pd.DataFrame(value)
             return candidate
-        except Exception:
-            pass
+        except Exception as exc:
+            logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
     if isinstance(value, dict):
         # A scalar result dict is one record; nested objects become strings safely.
         try:
             return pd.DataFrame([value])
-        except Exception:
-            pass
+        except Exception as exc:
+            logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
     return default.copy() if isinstance(default, pd.DataFrame) else pd.DataFrame()
 
 def sanitize_module_session_state(st) -> None:
@@ -810,7 +812,7 @@ def render_module(module: str, tier: str, username: str):
         render_research_ai(tier, username)
         return
 
-    with sqlite3.connect("enterprise_full_workspace.db") as _usage_conn:
+    with shoir_sqlite_connect("enterprise_full_workspace.db") as _usage_conn:
         _usage_conn.execute(
             "INSERT INTO platform_usage_events(username,module,event_time) VALUES(?,?,?)",
             (username,module,_now()),
@@ -858,7 +860,7 @@ def render_module(module: str, tier: str, username: str):
             if st.button("🔗 Register Entities",type="primary",use_container_width=True,key="thread_register"):
                 if id_col in df.columns: st.success(f"Registered {upsert_entities(df,entity_type,id_col):,} entities into the digital thread.")
                 else: st.error(f"ID column '{id_col}' not found.")
-            with sqlite3.connect("enterprise_full_workspace.db") as c: ent=pd.read_sql("SELECT * FROM industrial_entities ORDER BY updated_at DESC LIMIT 100",c)
+            with shoir_sqlite_connect("enterprise_full_workspace.db") as c: ent=pd.read_sql("SELECT * FROM industrial_entities ORDER BY updated_at DESC LIMIT 100",c)
             st.dataframe(ent,use_container_width=True,hide_index=True)
         with tabs[1]:
             rel=st.data_editor(st.session_state.setdefault("thread_rel",pd.DataFrame({"From":["FAC-001"],"Relationship":["contains"],"To":["MCH-001"]})),num_rows="dynamic",use_container_width=True,key="thread_rel_editor")
@@ -889,14 +891,14 @@ def render_module(module: str, tier: str, username: str):
         with tabs[0]:
             wo=st.data_editor(st.session_state.setdefault("mes_wo_df",pd.DataFrame({"Work Order":["WO-001","WO-002"],"Product":["P-100","P-200"],"Quantity":[1000,600],"Due Date":[str(datetime.now()+timedelta(days=1)),str(datetime.now()+timedelta(days=2))],"Status":["Released","Released"],"Machine":["M-01","M-02"],"Operator":[""]*2})),num_rows="dynamic",use_container_width=True,key="mes_wo_editor")
             if st.button("💾 Save Work Orders",type="primary",use_container_width=True,key="mes_save"): 
-                with sqlite3.connect("enterprise_full_workspace.db") as c:
+                with shoir_sqlite_connect("enterprise_full_workspace.db") as c:
                     for r in wo.to_dict("records"): c.execute("INSERT OR REPLACE INTO mes_work_orders VALUES(?,?,?,?,?,?,?,?)",(r["Work Order"],r["Product"],float(r["Quantity"]),str(r["Due Date"]),r["Status"],r["Machine"],r["Operator"],_now()))
                     c.commit()
                 st.success("Work orders saved.")
         with tabs[1]:
             ev=st.data_editor(st.session_state.setdefault("mes_events_df",pd.DataFrame({"Work Order":["WO-001"],"Event":["START"],"Event Time":[_now()],"Quantity":[0],"Reason":[""],"Operator":[""]})),num_rows="dynamic",use_container_width=True,key="mes_event_editor")
             if st.button("📝 Record Events",use_container_width=True,key="mes_event_save"):
-                with sqlite3.connect("enterprise_full_workspace.db") as c:
+                with shoir_sqlite_connect("enterprise_full_workspace.db") as c:
                     for r in ev.to_dict("records"): c.execute("INSERT INTO mes_events(work_order,event_type,event_time,quantity,reason,operator) VALUES(?,?,?,?,?,?)",(r["Work Order"],r["Event"],str(r["Event Time"]),float(r["Quantity"] or 0),str(r["Reason"]),str(r["Operator"])))
                     c.commit()
         with tabs[2]:
@@ -904,7 +906,7 @@ def render_module(module: str, tier: str, username: str):
             if st.button("📊 Calculate OEE",type="primary",use_container_width=True,key="mes_oee_run"):
                 st.session_state["mes_oee_result"]=oee_from_events(oe.iloc[[0]])
             if "mes_oee_result" in st.session_state: st.json(st.session_state["mes_oee_result"])
-            with sqlite3.connect("enterprise_full_workspace.db") as c: saved=pd.read_sql("SELECT * FROM mes_work_orders",c)
+            with shoir_sqlite_connect("enterprise_full_workspace.db") as c: saved=pd.read_sql("SELECT * FROM mes_work_orders",c)
             st.write("Persisted Work Orders"); st.dataframe(saved,use_container_width=True,hide_index=True)
         render_export_bar(module,[("Work Orders",wo),("Events",ev),("OEE Input",oe),("Persisted Work Orders",saved if "saved" in locals() else pd.DataFrame())],tier,username)
     elif module=="Quality Engineering & Reliability":
@@ -1008,7 +1010,7 @@ def render_module(module: str, tier: str, username: str):
                 if not query.lstrip().lower().startswith("select"): st.error("Only SELECT queries are permitted.")
                 else:
                     try:
-                        with sqlite3.connect("enterprise_full_workspace.db") as c: st.dataframe(pd.read_sql_query(query,c))
+                        with shoir_sqlite_connect("enterprise_full_workspace.db") as c: st.dataframe(pd.read_sql_query(query,c))
                     except Exception as exc: st.error(f"SQL failed safely: {exc}")
         with tabs[2]:
             st.info("MQTT and OPC-UA connectors are configuration-ready. Live sessions require the site broker/server and protocol libraries.")
@@ -1112,7 +1114,7 @@ def render_module(module: str, tier: str, username: str):
                 record_workspace_artifact("model",name,username,{"data_hash":data_hash,"solver_version":solver_version,"result_hash":result_hash})
                 st.success(f"Registered {mid}")
             except Exception as exc: st.error(f"Could not register model: {exc}")
-        with sqlite3.connect("enterprise_full_workspace.db") as c: reg=pd.read_sql("SELECT * FROM platform_models ORDER BY created_at DESC",c)
+        with shoir_sqlite_connect("enterprise_full_workspace.db") as c: reg=pd.read_sql("SELECT * FROM platform_models ORDER BY created_at DESC",c)
         st.dataframe(reg,use_container_width=True,hide_index=True)
         render_export_bar(module,[("Registry",df),("Persisted Models",reg)],tier,username)
     elif module=="Experiment Lab":
@@ -1188,7 +1190,7 @@ def render_module(module: str, tier: str, username: str):
         did=st.session_state.get("decision_active_id")
         if did:
             spec=load_decision_spec(did,username) or {}
-            with sqlite3.connect("enterprise_full_workspace.db") as conn:
+            with shoir_sqlite_connect("enterprise_full_workspace.db") as conn:
                 row=conn.execute("SELECT decision_id,title,status,owner,created_at,updated_at FROM experience_decisions WHERE decision_id=? AND owner=?",(did,username)).fetchone()
             if row:
                 status=str(row[2])
@@ -1231,7 +1233,7 @@ def render_module(module: str, tier: str, username: str):
                     st.session_state["data_platform_latest_df"] = df.copy(deep=True)
                     st.subheader(name); st.write(data_quality_report(df)); st.dataframe(df.head(25),use_container_width=True)
                     st.success(f"Registered dataset {did}")
-                with sqlite3.connect("enterprise_full_workspace.db") as c: cat=pd.read_sql("SELECT * FROM platform_datasets ORDER BY created_at DESC",c)
+                with shoir_sqlite_connect("enterprise_full_workspace.db") as c: cat=pd.read_sql("SELECT * FROM platform_datasets ORDER BY created_at DESC",c)
                 st.dataframe(cat,use_container_width=True,hide_index=True)
             except Exception as exc: st.error(f"Ingestion failed safely: {exc}")
     elif module=="Capital Investment & Engineering Economics":
@@ -1276,10 +1278,10 @@ def render_module(module: str, tier: str, username: str):
     elif module=="Live Industrial Digital Twin":
         tel=st.data_editor(st.session_state.setdefault("twin_tel",pd.DataFrame({"Asset":["CNC-01","CNC-01","Packing-01"],"Timestamp":[_now(),_now(),_now()],"Metric":["Temperature","Vibration","Temperature"],"Value":[65,2.4,72],"Source":["simulated","simulated","simulated"]})),num_rows="dynamic",use_container_width=True,key="twin_editor")
         if st.button("🌐 Update Twin State",type="primary",use_container_width=True,key="twin_update"):
-            with sqlite3.connect("enterprise_full_workspace.db") as c:
+            with shoir_sqlite_connect("enterprise_full_workspace.db") as c:
                 for r in tel.to_dict("records"): c.execute("INSERT INTO telemetry_events(asset_id,ts,metric,value,source) VALUES(?,?,?,?,?)",(r["Asset"],str(r["Timestamp"]),r["Metric"],float(r["Value"]),r["Source"]))
                 c.commit()
-        with sqlite3.connect("enterprise_full_workspace.db") as c: stored=pd.read_sql("SELECT * FROM telemetry_events ORDER BY id DESC LIMIT 100",c)
+        with shoir_sqlite_connect("enterprise_full_workspace.db") as c: stored=pd.read_sql("SELECT * FROM telemetry_events ORDER BY id DESC LIMIT 100",c)
         st.dataframe(stored,use_container_width=True,hide_index=True)
         st.success("Twin state synchronized from persisted telemetry.")
         render_export_bar(module,[("Telemetry Input",tel),("Stored Telemetry",stored)],tier,username)
@@ -1340,11 +1342,11 @@ def render_module(module: str, tier: str, username: str):
         ws=st.text_input("Workspace name","Plant-01 Engineering",key="workspace_name")
         members=st.data_editor(st.session_state.setdefault("workspace_members_df",pd.DataFrame({"Username":[username],"Role":["Owner"]})),num_rows="dynamic",use_container_width=True,key="workspace_members_editor")
         if st.button("💾 Save Workspace Members",type="primary",use_container_width=True,key="workspace_save"):
-            with sqlite3.connect("enterprise_full_workspace.db") as c:
+            with shoir_sqlite_connect("enterprise_full_workspace.db") as c:
                 for r in members.to_dict("records"): c.execute("INSERT OR REPLACE INTO workspace_members VALUES(?,?,?,?)",(ws,r["Username"],r["Role"],_now()))
                 c.commit()
             st.success("Workspace membership saved with explicit roles.")
-        with sqlite3.connect("enterprise_full_workspace.db") as c: saved=pd.read_sql("SELECT * FROM workspace_members WHERE workspace=?",(c),params=(ws,))
+        with shoir_sqlite_connect("enterprise_full_workspace.db") as c: saved=pd.read_sql("SELECT * FROM workspace_members WHERE workspace=?",(c),params=(ws,))
         st.dataframe(saved,use_container_width=True,hide_index=True)
         render_export_bar(module,[("Workspace Members",saved)],tier,username)
     elif module=="Executive Report Center":
@@ -1380,7 +1382,7 @@ def render_module(module: str, tier: str, username: str):
             role=st.data_editor(st.session_state.setdefault("security_roles",pd.DataFrame({"Role":["Owner","Planner","Engineer","Viewer"],"Read":["Yes","Yes","Yes","Yes"],"Write":["Yes","Yes","Yes","No"],"Execute":["Yes","Yes","Yes","No"],"Admin":["Yes","No","No","No"]})),num_rows="dynamic",use_container_width=True,key="security_roles_editor")
             st.dataframe(role,use_container_width=True)
         with tabs[2]:
-            with sqlite3.connect("enterprise_full_workspace.db") as c: audit=pd.read_sql("SELECT * FROM security_events ORDER BY id DESC LIMIT 200",c)
+            with shoir_sqlite_connect("enterprise_full_workspace.db") as c: audit=pd.read_sql("SELECT * FROM security_events ORDER BY id DESC LIMIT 200",c)
             st.dataframe(audit,use_container_width=True,hide_index=True)
             render_export_bar(module,[("Roles",role),("Security Events",audit)],tier,username)
     else:

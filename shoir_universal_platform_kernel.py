@@ -15,7 +15,7 @@ import io
 import json
 import math
 import re
-import sqlite3
+from shoir_repository import sqlite_connect as shoir_sqlite_connect
 import time
 import zipfile
 from contextlib import contextmanager
@@ -483,7 +483,7 @@ def render_universal_inspector(module: str, ctx: Mapping[str, Any]) -> None:
 
     trace_rows = []
     try:
-        with sqlite3.connect("enterprise_full_workspace.db", timeout=5) as conn:
+        with shoir_sqlite_connect("enterprise_full_workspace.db", timeout=5) as conn:
             entity_rows = conn.execute(
                 "SELECT entity_type,name,status FROM os160_entities ORDER BY updated_at DESC LIMIT 100"
             ).fetchall()
@@ -631,8 +631,8 @@ def install_visualization_contract() -> None:
                 "run_id": run_id,
                 "captured_at": now_iso(),
             }
-        except Exception:
-            pass
+        except Exception as exc:
+            st.session_state.setdefault("shoir_platform_warnings", []).append({"scope": "plot_provenance", "type": type(exc).__name__, "message": str(exc)[:500], "at": now_iso()})
         return original(figure, *args, **kwargs)
 
     st.plotly_chart = contracted_plotly_chart
