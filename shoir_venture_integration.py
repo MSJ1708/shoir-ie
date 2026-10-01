@@ -560,7 +560,7 @@ def render_venture_capabilities(module: str, tier: str = "", username: str = "")
     if not selected:
         return
     st.markdown("---")
-    st.markdown("## Venture & Evidence tabs")
+    st.caption("Integrated venture workflow tabs · shared workspace persistence · evidence-first governance")
     tabs = st.tabs([labels[x] for x in selected])
     renderers = {
         "venture":_render_venture, "stakeholders":_render_stakeholders,
