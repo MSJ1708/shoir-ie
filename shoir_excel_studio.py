@@ -2274,19 +2274,20 @@ def _final_read_raw_workbook(raw: bytes, filename: str) -> dict[str, pd.DataFram
     if not raw:
         raise ValueError("The uploaded file is empty.")
     lower = str(filename).lower()
-    if lower.endswith(".csv"):
+
+    if lower.endswith((".csv",".tsv",".txt")):
         decoded = None
-        for encoding in ("utf-8-sig", "utf-8", "cp1252", "latin-1"):
+        for encoding in ("utf-8-sig","utf-8","cp1252","latin-1"):
             try:
                 decoded = raw.decode(encoding)
                 break
             except UnicodeDecodeError:
                 continue
         if decoded is None:
-            raise ValueError("CSV encoding could not be decoded safely.")
-        delimiter = _choose_csv_delimiter(decoded)
+            raise ValueError("Delimited-text encoding could not be decoded safely.")
+        delimiter = "\t" if lower.endswith(".tsv") else _choose_csv_delimiter(decoded)
         return {
-            "CSV": pd.read_csv(
+            "CSV" if lower.endswith(".csv") else "TEXT": pd.read_csv(
                 io.StringIO(decoded),
                 header=None,
                 dtype=object,
@@ -2294,8 +2295,12 @@ def _final_read_raw_workbook(raw: bytes, filename: str) -> dict[str, pd.DataFram
                 keep_default_na=False,
             )
         }
-    if lower.endswith((".xlsx", ".xlsm")):
-        book = pd.ExcelFile(io.BytesIO(raw), engine="openpyxl")
+
+    if lower.endswith((".xlsx",".xlsm",".xls")):
+        try:
+            book = pd.ExcelFile(io.BytesIO(raw))
+        except Exception as exc:
+            raise ValueError(f"Excel workbook could not be opened: {type(exc).__name__}: {exc}") from exc
         try:
             return {
                 str(sheet): pd.read_excel(book, sheet_name=sheet, header=None, dtype=object)
@@ -2306,7 +2311,9 @@ def _final_read_raw_workbook(raw: bytes, filename: str) -> dict[str, pd.DataFram
                 book.close()
             except Exception:
                 pass
-    raise ValueError("Only .xlsx, .xlsm and .csv files are supported.")
+
+    raise ValueError("Supported imports: .xlsx, .xlsm, .xls, .csv, .tsv and .txt.")
+
 
 
 def _final_clean_dataframe(df: pd.DataFrame) -> tuple[pd.DataFrame, list[dict[str, str]]]:
