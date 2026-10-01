@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import sqlite3
 import uuid
 from datetime import datetime, timezone
@@ -209,10 +210,10 @@ def _event(event_type: str, object_type: str = "", object_id: str = "", payload:
             workspace=workspace,
             artifact_id=object_id if str(object_id).startswith(("PROJ-","STAK-","VENT-","PILO-","HYPO-","EVT-")) else None,
         )
-    except Exception:
+    except Exception as exc:
         # SQLite event persistence remains authoritative for the local/offline
         # path when enterprise persistence is not configured.
-        pass
+        logging.getLogger(__name__).warning("Enterprise artifact mirror unavailable: %s: %s", type(exc).__name__, exc)
 
 
 def _insert(table: str, fields: dict[str, Any]) -> str:
