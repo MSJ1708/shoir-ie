@@ -1,4 +1,3 @@
-from shoir_repository import sqlite_connect as shoir_sqlite_connect
 """Shoir-IE Industrial Decision Command Center.
 
 A thin integration surface over the existing industrial_platform service layer.
@@ -35,7 +34,7 @@ tier = st.session_state.get("user_tier", "Enterprise Plus Tier")
 user = st.session_state.get("current_user", "unknown")
 
 # Shared platform health
-with shoir_sqlite_connect("enterprise_full_workspace.db") as c:
+with sqlite3.connect("enterprise_full_workspace.db") as c:
     counts = {}
     for table in [
         "industrial_entities","platform_datasets","platform_models",

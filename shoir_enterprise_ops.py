@@ -7,9 +7,6 @@ shown as unavailable rather than replaced with invented performance.
 
 from __future__ import annotations
 
-from shoir_repository import sqlite_connect as shoir_sqlite_connect
-import logging
-
 import hashlib
 import io
 import json
@@ -569,10 +566,10 @@ def security_posture() -> pd.DataFrame:
                 block = st.secrets[section]
                 if isinstance(block, Mapping):
                     secret_keys.extend([f"{section}.{k}" for k in block.keys()])
-            except Exception as exc:
-                logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
-    except Exception as exc:
-        logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
+            except Exception:
+                pass
+    except Exception:
+        pass
 
     oidc = any(k.startswith("oidc.") or k.startswith("sso.") or k.startswith("authentication.") for k in secret_keys)
     mfa = any(k.startswith("mfa.") for k in secret_keys)
@@ -1278,7 +1275,7 @@ def build_realtime_monitoring(df: pd.DataFrame, threshold: float | None = None) 
 def _load_persisted_telemetry(limit: int = 500) -> pd.DataFrame:
     try:
         import sqlite3
-        with shoir_sqlite_connect("enterprise_full_workspace.db", timeout=10) as conn:
+        with sqlite3.connect("enterprise_full_workspace.db", timeout=10) as conn:
             data = pd.read_sql(
                 "SELECT asset_id AS Asset, ts AS Timestamp, metric AS Metric, value AS Value, source AS Source "
                 "FROM telemetry_events ORDER BY id DESC LIMIT ?",

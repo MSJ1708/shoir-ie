@@ -12,8 +12,6 @@ No persistent user data is deleted by this layer.
 """
 from __future__ import annotations
 
-from shoir_repository import sqlite_connect as shoir_sqlite_connect
-
 import hashlib
 import io
 import json
@@ -39,7 +37,6 @@ from industrial_experience import (
 )
 from industrial_platform import init_platform_db, PLATFORM_CATALOG
 from industrial_platform_excellence import dataframe_fingerprint, connector_validation
-from shoir_universal_platform_kernel import GROUPED_160_VIEWS
 
 
 FEATURES_160: list[dict[str, Any]] = [
@@ -234,7 +231,7 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 def _db(path: str = "enterprise_full_workspace.db") -> sqlite3.Connection:
-    return shoir_sqlite_connect(path, timeout=30)
+    return sqlite3.connect(path, timeout=30)
 
 def _json(data: Any) -> str:
     return json.dumps(data, sort_keys=True, default=str, ensure_ascii=False)
@@ -996,22 +993,9 @@ def render_160_command_center(username: str,tier: str) -> None:
         else:
             st.info("No command or capability match.")
     st.markdown("<div style='height:6px'></div>",unsafe_allow_html=True)
-    # Compact navigation: four grouped workspaces replace the previous ten-tab surface.
-    group_labels = list(GROUPED_160_VIEWS)
-    selected_group = st.radio(
-        "160 Operating System workspace",
-        group_labels,
-        index=group_labels.index(st.session_state.get("os160_group", "Work")) if st.session_state.get("os160_group", "Work") in group_labels else 0,
-        horizontal=True,
-        key="os160_group",
-    )
-    os_view = st.selectbox(
-        "Workspace view",
-        list(GROUPED_160_VIEWS[selected_group]),
-        key="os160_group_view",
-    )
+    tabs=st.tabs(["⚡ Command Center","📁 Data Studio","🕸️ Digital Thread","🧪 Scenarios","🧠 Copilot","✅ Decisions","⚙️ Jobs & Runs","📡 Connectors","📊 Insights","📚 160 Matrix"])
 
-    if os_view == "Overview":
+    with tabs[0]:
         st.markdown("<div class='os160-section'>Morning-start workspace</div>",unsafe_allow_html=True)
         a,b,c=st.columns(3)
         with a: st.markdown("<div class='os160-card'><b>1 · Ingest</b><div class='os160-check'>✓ Upload or select data</div><div class='os160-check'>✓ Canonical mapping</div><div class='os160-check'>✓ Quality gate</div></div>",unsafe_allow_html=True)
@@ -1040,7 +1024,7 @@ def render_160_command_center(username: str,tier: str) -> None:
         fig.update_layout(height=350,margin=dict(l=8,r=8,t=55,b=8),xaxis_tickangle=-35)
         st.plotly_chart(fig,use_container_width=True,config={"displayModeBar":False})
 
-    if os_view == "Data":
+    with tabs[1]:
         st.markdown("<div class='os160-section'>Excel → validated engineering dataset</div>",unsafe_allow_html=True)
         uploaded=st.file_uploader("Upload .xlsx / .xls / .csv",type=["xlsx","xls","csv"],key="os160_uploader")
         if uploaded is None:
@@ -1079,7 +1063,7 @@ def render_160_command_center(username: str,tier: str) -> None:
                 st.markdown("**Cleaned preview**"); st.dataframe(st.session_state["os160_cleaned_df"],use_container_width=True,hide_index=True)
                 if st.session_state.get("os160_clean_audit"): st.dataframe(pd.DataFrame(st.session_state["os160_clean_audit"]),use_container_width=True,hide_index=True)
 
-    if os_view == "Digital Thread":
+    with tabs[2]:
         st.markdown("<div class='os160-section'>Canonical entities → relationships → impact trace</div>",unsafe_allow_html=True)
         with _db() as conn:
             entities=pd.read_sql_query("SELECT entity_id,entity_type,name,status,owner,updated_at FROM os160_entities ORDER BY updated_at DESC LIMIT 250",conn)
@@ -1103,7 +1087,7 @@ def render_160_command_center(username: str,tier: str) -> None:
                         fig.update_layout(height=300,margin=dict(l=5,r=5,t=20,b=5),title="Impact path")
                         st.plotly_chart(fig,use_container_width=True,config={"displayModeBar":False})
 
-    if os_view == "Scenarios":
+    with tabs[3]:
         st.markdown("<div class='os160-section'>Baseline → fork → compare → explain delta</div>",unsafe_allow_html=True)
         left,right=st.columns([1,1.5])
         with left:
@@ -1131,7 +1115,7 @@ def render_160_command_center(username: str,tier: str) -> None:
                     fig2=px.bar(pd.DataFrame(imp),x="Range",y="Metric",orientation="h",title="Why-changed sensitivity")
                     fig2.update_layout(height=260,margin=dict(l=8,r=8,t=50,b=8)); st.plotly_chart(fig2,use_container_width=True,config={"displayModeBar":False})
 
-    if os_view == "Copilot":
+    with tabs[4]:
         st.markdown("<div class='os160-section'>Engineering Copilot — evidence-first, approval-gated</div>",unsafe_allow_html=True)
         prompt=st.text_area("Describe the engineering task",value="Analyze why throughput fell and compare a capacity scenario.",height=110,key="os160_prompt")
         platform_context=ai_capability_context()
@@ -1184,7 +1168,7 @@ def render_160_command_center(username: str,tier: str) -> None:
                 else:
                     st.write(value)
 
-    if os_view == "Decisions":
+    with tabs[5]:
         st.markdown("<div class='os160-section'>Decision Center — evidence → approval → implementation → verification</div>",unsafe_allow_html=True)
         d1,d2=st.columns([1,1.5])
         with d1:
@@ -1211,7 +1195,7 @@ def render_160_command_center(username: str,tier: str) -> None:
                 sc=decisions["status"].value_counts().rename_axis("Status").reset_index(name="Decisions")
                 fig=px.bar(sc,x="Status",y="Decisions",title="Decision lifecycle"); fig.update_layout(height=280,margin=dict(l=8,r=8,t=50,b=8)); st.plotly_chart(fig,use_container_width=True,config={"displayModeBar":False})
 
-    if os_view == "Runs & Evidence":
+    with tabs[6]:
         st.markdown("<div class='os160-section'>Jobs & runs — durable state, progress, diagnostics</div>",unsafe_allow_html=True)
         if st.button("▶ Run verification job",type="primary",key="os160_verify_job"):
             rid=run_engineering_job("Industrial Operating System","verification",{"checks":list(health["checks"])},username); st.success(f"Run {rid} completed.")
@@ -1232,7 +1216,7 @@ def render_160_command_center(username: str,tier: str) -> None:
                     request_run_control(selected_run,"cancel"); st.rerun()
             fig=px.line(runs.sort_values("created_at"),x="created_at",y="duration_ms",markers=True,title="Run duration trend"); fig.update_layout(height=280,margin=dict(l=8,r=8,t=50,b=8)); st.plotly_chart(fig,use_container_width=True,config={"displayModeBar":False})
 
-    if os_view == "Connectors":
+    with tabs[7]:
         st.markdown("<div class='os160-section'>Connectivity — validate adapters, monitor health, never persist secrets</div>",unsafe_allow_html=True)
         q1,q2=st.columns([1,1.5])
         with q1:
@@ -1251,7 +1235,7 @@ def render_160_command_center(username: str,tier: str) -> None:
                 fig=px.bar(cons,x="name",y=["latency_ms","error_rate"],barmode="group",title="Connector diagnostics"); fig.update_layout(height=280,margin=dict(l=8,r=8,t=50,b=8)); st.plotly_chart(fig,use_container_width=True,config={"displayModeBar":False})
         st.caption("External credentials, certificates and network permissions remain deployment-owned; this layer stores only safe references.")
 
-    if os_view == "Insights":
+    with tabs[8]:
         st.markdown("<div class='os160-section'>Insights — one platform, multiple visual languages</div>",unsafe_allow_html=True)
         l,r=st.columns(2)
         with l:
@@ -1283,7 +1267,7 @@ def render_160_command_center(username: str,tier: str) -> None:
             except ValueError:
                 st.warning("Enter numeric comma-separated values for drift analysis.")
 
-    if os_view == "160 Matrix":
+    with tabs[9]:
         st.markdown("<div class='os160-section'>Every requested capability is searchable and status-labelled</div>",unsafe_allow_html=True)
         q=st.text_input("Search 160 capabilities",key="os160_feature_search",placeholder="scenario, telemetry, Excel, security…")
         matrix=feature_matrix()

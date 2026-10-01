@@ -9,7 +9,6 @@ module provides a consistent cross-module data/evidence contract around them.
 """
 
 from __future__ import annotations
-import logging
 
 import hashlib
 import io
@@ -291,8 +290,8 @@ def _seed_from_known_module_table(module: str, keys: dict[str, str]) -> None:
                     "imported_at": datetime.now(timezone.utc).isoformat(),
                 }
                 return
-    except Exception as exc:
-        logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
+    except Exception:
+        pass
 
 
 def _init_state(module: str) -> dict[str, str]:
@@ -391,8 +390,8 @@ def _build_export_zip(
                 fig = go.Figure(json.loads(figure_json))
                 zf.writestr(f"{safe}_live_chart.html", fig.to_html(full_html=True, include_plotlyjs="cdn").encode("utf-8"))
                 zf.writestr(f"{safe}_live_chart.json", figure_json.encode("utf-8"))
-            except Exception as exc:
-                logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
+            except Exception:
+                pass
 
         manifest = {
             "module": module,
@@ -569,8 +568,8 @@ def _render_results(module: str, keys: dict[str, str]) -> None:
                 continue
             result_options.append((label, state_key, candidate))
             seen.add(state_key)
-    except Exception as exc:
-        logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
+    except Exception:
+        pass
 
     labels = [x[0] for x in result_options]
     selected_label = st.selectbox("Result dataset", labels, key=f"module_parity_result_source_{token}")

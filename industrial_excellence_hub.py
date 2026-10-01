@@ -6,8 +6,6 @@ experiments, verification, decisions, Copilot controls, exports and platform hea
 """
 from __future__ import annotations
 
-from shoir_repository import sqlite_connect as shoir_sqlite_connect
-
 import io
 import json
 import hashlib
@@ -43,7 +41,7 @@ from industrial_experience import (
 
 def _db():
     ensure_experience_db()
-    return shoir_sqlite_connect("enterprise_full_workspace.db", timeout=30)
+    return sqlite3.connect("enterprise_full_workspace.db", timeout=30)
 
 
 def _now() -> str:
