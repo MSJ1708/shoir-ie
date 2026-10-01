@@ -644,21 +644,30 @@ def render_export_bar(module: str, tables: Sequence[Tuple[str,pd.DataFrame]], fi
     if not tables: return
     st.markdown("---")
     st.subheader("📤 Results & Executive Exports")
-    st.caption("Download the current analysis in the format that fits your workflow. Export errors are isolated so they never interrupt the results view.")
+    st.caption("Every module keeps its working results available and uses a verified data-first export path.")
     a,b,c=st.columns(3)
+    slug=re.sub(r"[^A-Za-z0-9]+","_",module).strip("_").lower() or "module"
     with a:
         x=None
         try:
             x=build_excel_report("Shoir-IE | "+module,tables,figures)
-        except Exception as exc:
-            st.warning("Excel export is temporarily unavailable for this result set. The analysis itself is still available.")
-        if x is not None and st.download_button("📊 Download Excel",x,"shoir_ie_"+re.sub(r"[^A-Za-z0-9]+","_",module).lower()+".xlsx","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",use_container_width=True):
-            log_security_event(username,"report_export",module+"|xlsx")
+            if isinstance(x,(bytearray,memoryview)): x=bytes(x)
+            if not isinstance(x,bytes) or not x: raise ValueError("Empty XLSX payload")
+        except Exception:
+            try:
+                x=build_excel_report("Shoir-IE | "+module,[(str(n), d.copy(deep=True) if isinstance(d,pd.DataFrame) else pd.DataFrame(d)) for n,d in tables],[])
+            except Exception:
+                x=None
+        if x:
+            if st.download_button("📊 Download Excel",x,f"shoir_ie_{slug}.xlsx","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",type="primary",use_container_width=True):
+                log_security_event(username,"report_export",module+"|xlsx")
+        else:
+            st.error("Excel export could not be generated for this result set.")
     with b:
         if tier_allows(tier,"Enterprise"):
             try:
                 y=export_pdf("Shoir-IE | "+module,tables,figures)
-                if st.download_button("📄 Download PDF",y,"shoir_ie_"+re.sub(r"[^A-Za-z0-9]+","_",module).lower()+".pdf","application/pdf",use_container_width=True): log_security_event(username,"report_export",module+"|pdf")
+                if st.download_button("📄 Download PDF",y,f"shoir_ie_{slug}.pdf","application/pdf",use_container_width=True): log_security_event(username,"report_export",module+"|pdf")
             except Exception:
                 st.warning("PDF export could not be generated for this result set.")
         else: st.info("PDF export: Enterprise")
@@ -666,7 +675,7 @@ def render_export_bar(module: str, tables: Sequence[Tuple[str,pd.DataFrame]], fi
         if tier_allows(tier,"Enterprise"):
             try:
                 z=export_pptx("Shoir-IE | "+module,tables,figures)
-                if st.download_button("📽️ Download PowerPoint",z,"shoir_ie_"+re.sub(r"[^A-Za-z0-9]+","_",module).lower()+".pptx","application/vnd.openxmlformats-officedocument.presentationml.presentation",use_container_width=True): log_security_event(username,"report_export",module+"|pptx")
+                if st.download_button("📽️ Download PowerPoint",z,f"shoir_ie_{slug}.pptx","application/vnd.openxmlformats-officedocument.presentationml.presentation",use_container_width=True): log_security_event(username,"report_export",module+"|pptx")
             except Exception:
                 st.warning("PowerPoint export could not be generated for this result set.")
         else: st.info("PowerPoint: Enterprise")
