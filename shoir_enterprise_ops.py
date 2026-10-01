@@ -475,7 +475,7 @@ def render_control_tower_extension() -> None:
             if st.button("✅ Update selected action",use_container_width=True,key="ct_action_update"):
                 import sqlite3
                 with sqlite3.connect("enterprise_full_workspace.db") as con:
-                    con.execute("UPDATE control_tower_actions SET status=?,notes=?,updated_at=? WHERE action_id=?",(new_status,update_note,_now(),selected_action))
+                    con.execute("UPDATE control_tower_actions SET status=?,notes=?,updated_at=? WHERE action_id=? AND workspace=?",(new_status,update_note,_now(),selected_action,workspace))
                     con.commit()
                 st.success(f"{selected_action} updated.")
                 st.rerun()
