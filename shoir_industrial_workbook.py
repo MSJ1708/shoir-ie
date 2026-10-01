@@ -849,6 +849,23 @@ def _build_workbook_evidence_bundle(
     return bundle.getvalue()
 
 
+def _serialize_persistence_workbook(workbook:Mapping[str,pd.DataFrame])->bytes:
+    """Stable internal format for DB persistence; do not couple it to presentation exports."""
+    payload=io.BytesIO()
+    with pd.ExcelWriter(payload,engine="xlsxwriter") as writer:
+        used=set()
+        for raw_sheet,df in workbook.items():
+            sheet=re.sub(r"[:\\/?*\[\]]+","",str(raw_sheet)).strip()[:31] or "Sheet1"
+            base=sheet; idx=2
+            while sheet in used:
+                suffix=f" ({idx})"
+                sheet=(base[:31-len(suffix)]+suffix)[:31]
+                idx+=1
+            used.add(sheet)
+            df.copy(deep=True).to_excel(writer,index=False,sheet_name=sheet)
+    return payload.getvalue()
+
+
 def _deserialize_workbook(payload:bytes)->dict[str,pd.DataFrame]:
     book=pd.ExcelFile(io.BytesIO(payload))
     return {sheet:pd.read_excel(io.BytesIO(payload),sheet_name=sheet) for sheet in book.sheet_names}
@@ -859,8 +876,7 @@ def save_workbook(workbook:Mapping[str,pd.DataFrame],formulas:Mapping[str,Mappin
     ensure_workbook_db(path)
     formulas=formulas or {}
     variables=variables or {}
-    payload=_serialize_workbook(workbook)
-    digest=hashlib.sha256(payload).hexdigest()
+    # Keep DB round-trip format stable; rich presentation formatting belongs to exports.\n    payload=_serialize_persistence_workbook(workbook)\n    digest=hashlib.sha256(payload).hexdigest()
     wid=str(workbook_id or ("WB-"+uuid.uuid4().hex[:12].upper()))
     now=_now()
     workspace,owner=_workspace(),_actor()
