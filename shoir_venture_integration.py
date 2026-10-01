@@ -23,6 +23,25 @@ from shoir_repository import sqlite_connect
 DB_PATH = "enterprise_full_workspace.db"
 
 
+CAPABILITY_PLACEMENT = {
+    "Venture Studio": ["Industrial Operating System", "Industrial Problem Solver", "Industrial Workbook"],
+    "Customer & Stakeholder Hub": ["Industrial Data Model & Digital Thread", "Global Project & Digital Thread", "Enterprise Integration & Collaboration"],
+    "Pilot Manager": ["Experiment Lab", "Advanced Planning & Scheduling", "Manufacturing Execution System", "Industrial Simulation Lab"],
+    "Hypothesis → Evidence": ["Experiment Engine", "Research AI", "Statistical Hypothesis Testing"],
+    "Business Model + Pricing": ["Capital Investment & Engineering Economics", "Engineering Economics & Finance", "Engineering Decision Center"],
+    "ROI / Value Evidence": ["Capital Investment & Engineering Economics", "Engineering Economics & Finance", "Engineering Decision Center", "Industrial Sustainability & LCA"],
+    "Investor Data Room": ["Engineering Model Registry", "Executive Report Center", "Team Workspaces & RBAC"],
+    "Product / Traction Analytics": ["Industrial Control Center", "Control Tower", "Manufacturing Execution System", "Industrial Data Platform"],
+    "End-to-End Demo Mode": ["Industrial Operating System", "Executive Report Center", "Advanced Engineering Copilot"],
+    "Market & Competitive Intelligence": ["Benchmarking & Engineering Standards"],
+    "Product-Market-Fit / Readiness Dashboard": ["Industrial Operating System", "Industrial Control Center", "Engineering Validation Center", "Benchmarking & Engineering Standards"],
+    "Evidence Vault": ["Engineering Model Registry", "Engineering Validation Center", "Research AI", "Industrial Data Platform"],
+    "Pilot / Experiment Comparison": ["Experiment Lab", "Experiment Engine", "Industrial Simulation Lab", "Scenarios", "Scenario Versioning & Comparison"],
+    "Better Onboarding": ["Industrial Problem Solver", "Industrial Workbook", "Excel Data Cleaning & Import", "AI Copilot"],
+    "Case-Study Management": ["Global Project & Digital Thread", "Engineering Decision Center", "Executive Report Center", "Lean Manufacturing & Shop Floor Operations"],
+}
+
+
 MODULE_TABS = {
     "Industrial Operating System": ("venture", "readiness", "demo"),
     "Industrial Problem Solver": ("venture", "onboarding"),
