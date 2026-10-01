@@ -85,6 +85,12 @@ _PREFIX_EXCLUDE = (
     "module_parity_xlsx_",
     "module_parity_csv_",
     "module_parity_zip_",
+    # Streamlit shell widgets must never be restored into session_state before
+    # their widgets are instantiated on the next rerun. This prevents
+    # StreamlitValueAssignmentNotAllowedError after a successful login.
+    "shoir_shell_",
+    "shoir_universal_",
+    "shoir_repro_",
 )
 
 _ACTION_KEYS = {
