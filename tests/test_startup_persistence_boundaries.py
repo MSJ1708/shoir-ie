@@ -46,6 +46,9 @@ def test_workspace_snapshot_and_restore_drop_streamlit_widget_state(monkeypatch,
         "shoir_shell_module_search": "excel",
         "shoir_shell_module_selector_HOME": "Industrial Workbook",
         "shoir_universal_advance_Industrial_Workbook": True,
+        "ui_data_upload": "transient",
+        "global_command_palette_x": "transient",
+        "shoir_global_module_0": True,
         "useful_workspace_value": {"saved": True},
     }
 
@@ -59,6 +62,9 @@ def test_workspace_snapshot_and_restore_drop_streamlit_widget_state(monkeypatch,
     assert "shoir_shell_section_radio" not in stored
     assert "shoir_shell_module_search" not in stored
     assert "shoir_universal_advance_Industrial_Workbook" not in stored
+    assert "ui_data_upload" not in stored
+    assert "global_command_palette_x" not in stored
+    assert "shoir_global_module_0" not in stored
     assert stored["selected_module"] == "Industrial Workbook"
 
     legacy_payload = {
@@ -66,6 +72,9 @@ def test_workspace_snapshot_and_restore_drop_streamlit_widget_state(monkeypatch,
         "shoir_shell_section_radio": "DATA",
         "shoir_shell_module_selector_DATA": "Industrial Workbook",
         "shoir_universal_advance_Industrial_Workbook": True,
+        "ui_data_upload": "transient",
+        "global_command_palette_x": "transient",
+        "shoir_global_module_0": True,
         "useful_workspace_value": {"__type__": "dict", "value": {"saved": True}},
     }
     with wp.shoir_sqlite_connect(db_path) as conn:
@@ -82,3 +91,6 @@ def test_workspace_snapshot_and_restore_drop_streamlit_widget_state(monkeypatch,
     assert "shoir_shell_section_radio" not in restored
     assert "shoir_shell_module_selector_DATA" not in restored
     assert "shoir_universal_advance_Industrial_Workbook" not in restored
+    assert "ui_data_upload" not in restored
+    assert "global_command_palette_x" not in restored
+    assert "shoir_global_module_0" not in restored
