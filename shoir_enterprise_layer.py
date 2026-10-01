@@ -27,16 +27,18 @@ import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from typing import Any, Callable, Mapping, Optional, Sequence
+from urllib.parse import urlparse
 
 import numpy as np
 import pandas as pd
 import requests
 
 try:
-    from durable_account_store import _pg_connect, durable_backend_configured
+    from durable_account_store import _pg_connect, database_url, postgres_backend_configured
 except Exception:  # local/unit-test safety
     _pg_connect = None
-    durable_backend_configured = lambda: False
+    database_url = lambda: ""
+    postgres_backend_configured = lambda: False
 
 
 DEFAULT_DB = "enterprise_full_workspace.db"
@@ -62,8 +64,25 @@ def workspace_key(username: str, workspace: str = "default") -> str:
 
 
 def _remote() -> bool:
+    """Use direct PostgreSQL only when a real non-local DSN is configured.
+
+    Supabase Edge persistence is already the durable account/workspace backend
+    and does not mean a psycopg2 connection is available in the Streamlit
+    process. Treat empty-host/local PostgreSQL DSNs as local development unless
+    explicitly opted in, so Streamlit Cloud never probes /var/run/postgresql.
+    """
     try:
-        return bool(durable_backend_configured and durable_backend_configured() and _pg_connect)
+        if not postgres_backend_configured() or not _pg_connect:
+            return False
+        target = str(database_url() or "").strip()
+        parsed = urlparse(target)
+        if parsed.scheme.lower() not in {"postgres", "postgresql"} or not parsed.hostname:
+            return False
+        host = parsed.hostname.lower()
+        if host in {"localhost", "127.0.0.1", "::1"}:
+            raw = os.getenv("SHOIR_ALLOW_LOCAL_POSTGRES", "").strip().lower()
+            return raw in {"1", "true", "yes", "on"}
+        return True
     except Exception:
         return False
 
