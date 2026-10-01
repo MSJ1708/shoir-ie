@@ -61,9 +61,24 @@ def test_workspace_snapshot_and_restore_drop_streamlit_widget_state(monkeypatch,
     assert "shoir_universal_advance_Industrial_Workbook" not in stored
     assert stored["selected_module"] == "Industrial Workbook"
 
+    legacy_payload = {
+        "selected_module": "Industrial Workbook",
+        "shoir_shell_section_radio": "DATA",
+        "shoir_shell_module_selector_DATA": "Industrial Workbook",
+        "shoir_universal_advance_Industrial_Workbook": True,
+        "useful_workspace_value": {"__type__": "dict", "value": {"saved": True}},
+    }
+    with wp.shoir_sqlite_connect(db_path) as conn:
+        conn.execute(
+            "UPDATE workspace_states SET state_json=? WHERE username='alice'",
+            (json.dumps(legacy_payload),),
+        )
+        conn.commit()
+
     restored = {}
     assert wp.load_user_workspace("Alice", restored, db_path=db_path) is True
     assert restored["selected_module"] == "Industrial Workbook"
-    assert restored["useful_workspace_value"] == {"__type__": "dict", "value": {"saved": True}} or restored["useful_workspace_value"] == {"saved": True}
+    assert restored["useful_workspace_value"] == {"saved": True}
     assert "shoir_shell_section_radio" not in restored
-    assert "shoir_shell_module_search" not in restored
+    assert "shoir_shell_module_selector_DATA" not in restored
+    assert "shoir_universal_advance_Industrial_Workbook" not in restored
