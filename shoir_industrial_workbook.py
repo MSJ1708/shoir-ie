@@ -876,7 +876,9 @@ def save_workbook(workbook:Mapping[str,pd.DataFrame],formulas:Mapping[str,Mappin
     ensure_workbook_db(path)
     formulas=formulas or {}
     variables=variables or {}
-    # Keep DB round-trip format stable; rich presentation formatting belongs to exports.\n    payload=_serialize_persistence_workbook(workbook)\n    digest=hashlib.sha256(payload).hexdigest()
+    # Keep DB round-trip format stable; rich presentation formatting belongs to exports.
+    payload=_serialize_persistence_workbook(workbook)
+    digest=hashlib.sha256(payload).hexdigest()
     wid=str(workbook_id or ("WB-"+uuid.uuid4().hex[:12].upper()))
     now=_now()
     workspace,owner=_workspace(),_actor()
