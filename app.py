@@ -6089,6 +6089,26 @@ if selected_module == "AGV Fleet Dispatcher":
     st.stop()
 
 # ==============================================================================
+# =============================================================================
+# Shared post-module context
+# -----------------------------------------------------------------------------
+# Native/domain modules call this cross-cutting layer after their main UI.
+# Keep it defensive: optional workspace context must never crash a module.
+def _render_post_module_layers(module: str) -> None:
+    try:
+        render_post_module_context(
+            str(module),
+            str(st.session_state.get("current_user", "unknown")),
+            str(st.session_state.get("user_tier", "Starter Tier")),
+        )
+    except Exception as exc:
+        st.warning(
+            f"Shared module context is temporarily unavailable for {module}. "
+            "The domain workspace remains active."
+        )
+        with st.expander("Module context diagnostic", expanded=False):
+            st.code(f"{type(exc).__name__}: {exc}")
+
 # SHOIR-IE: ELITE GEOSPATIAL NETWORK DESIGNER & FACILITY OPTIMIZER (V2.2 FIXED)
 # ==============================================================================
 if selected_module == "Geospatial Network Designer":
