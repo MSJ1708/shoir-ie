@@ -71,12 +71,10 @@ from shoir_venture_integration import render_venture_capabilities
 # =====================================================================
 # PAGE CONFIGURATION & CUSTOM CSS (Professional Styling & Hover Zoom)
 # =====================================================================
-st.set_page_config(
-    page_title="shoir",
-    page_icon="⚡",
-    layout="wide",
-    initial_sidebar_state="collapsed"
-)
+# Page configuration is owned by app.py so import/runtime failures can be surfaced
+# on a visible recovery screen instead of leaving the browser blank.
+
+_startup_errors: list[str] = []
 
 if not st.session_state.get("authenticated"):
     st.markdown("""
@@ -141,17 +139,29 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-apply_shoir_design_system()
+try:
+    apply_shoir_design_system()
+except Exception as exc:
+    _startup_errors.append(f"Design system: {type(exc).__name__}: {exc}")
+    log_exception(__name__, exc)
+
 try:
     ensure_enterprise_schema()
 except Exception as exc:
+    _startup_errors.append(f"Enterprise schema: {type(exc).__name__}: {exc}")
     log_exception(__name__, exc)
+
 try:
     init_160_platform()
 except Exception as exc:
+    _startup_errors.append(f"160-platform initialization: {type(exc).__name__}: {exc}")
     log_exception(__name__, exc)
 
-os.makedirs("payment_proofs", exist_ok=True)
+try:
+    os.makedirs("payment_proofs", exist_ok=True)
+except Exception as exc:
+    _startup_errors.append(f"Payment storage: {type(exc).__name__}: {exc}")
+    log_exception(__name__, exc)
 
 # =====================================================================
 # SQLITE ENTERPRISE DATABASE SETUP & AUTO-MIGRATION
@@ -971,7 +981,17 @@ def log_audit(user, action):
     except Exception as exc:
         log_exception(__name__, exc)
 
-init_db()
+_startup_db_error: str | None = None
+try:
+    init_db()
+except Exception as exc:
+    # A local SQLite/configuration problem must never prevent the public login
+    # screen from rendering. Authentication can still use the durable auth
+    # service when configured, while local-only features will show their own
+    # actionable errors when opened.
+    _startup_db_error = f"{type(exc).__name__}: {exc}"
+    _startup_errors.append(f"Local account database: {_startup_db_error}")
+    log_exception(__name__, exc)
 
 # Managed PostgreSQL/Supabase is the durable account authority when configured.
 # Existing local-only accounts are migrated only when absent remotely, then
@@ -980,8 +1000,10 @@ try:
     _durable_accounts_ready = sync_durable_accounts()
     if _durable_accounts_ready:
         sync_remote_requests_to_local()
-except Exception:
+except Exception as exc:
     _durable_accounts_ready = False
+    _startup_errors.append(f"Durable account sync: {type(exc).__name__}: {exc}")
+    log_exception(__name__, exc)
 
 
 # =====================================================================
@@ -1113,6 +1135,11 @@ if st.session_state.get("authenticated") and st.session_state.get("current_user"
         log_exception(__name__, exc)
 
 if not st.session_state.get("current_user"):
+    if _startup_errors:
+        st.warning("Shoir-IE started in recovery mode. The sign-in screen remains available; some local services may be limited until the startup warning is resolved.")
+        with st.expander("Startup diagnostics", expanded=False):
+            for _startup_error in _startup_errors:
+                st.code(_startup_error)
     st.title("🔐 Welcome to Shoir-IE Workspace")
     st.markdown("Please sign in with your approved account or register and submit your payment ticket below.")
     auth_tab1, auth_tab2, auth_tab3 = st.tabs(["🔑 Sign In", "📝 Get Ticket & Register", "🧭 Explore the Modules"])
