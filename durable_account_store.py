@@ -91,8 +91,14 @@ def database_url() -> str:
     ).strip()
 
 
+def postgres_backend_configured() -> bool:
+    """Return whether a direct PostgreSQL connection is actually configured."""
+    return bool(database_url()) and psycopg2 is not None
+
+
 def durable_backend_configured() -> bool:
-    return edge_backend_configured() or (bool(database_url()) and psycopg2 is not None)
+    """Return whether any durable backend is configured (Edge or direct PostgreSQL)."""
+    return edge_backend_configured() or postgres_backend_configured()
 
 def ephemeral_local_storage_allowed() -> bool:
     """Explicit opt-in for SQLite-only local development.
@@ -110,8 +116,10 @@ def ephemeral_local_storage_allowed() -> bool:
 
 
 def _pg_connect():
-    if not durable_backend_configured():
-        raise RuntimeError("Durable PostgreSQL backend is not configured.")
+    # Edge-mode persistence does not provide a PostgreSQL DSN to the Streamlit
+    # process. Never attempt psycopg2 just because the Edge backend is enabled.
+    if not postgres_backend_configured():
+        raise RuntimeError("Direct PostgreSQL backend is not configured.")
     return psycopg2.connect(
         database_url(),
         sslmode="require",
