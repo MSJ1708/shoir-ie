@@ -419,13 +419,20 @@ def render_control_tower_extension() -> None:
         with sqlite3.connect("enterprise_full_workspace.db") as con:
             con.execute(
                 "CREATE TABLE IF NOT EXISTS control_tower_actions("
-                "action_id TEXT PRIMARY KEY,domain TEXT,action TEXT,owner TEXT,status TEXT,"
+                "action_id TEXT PRIMARY KEY,workspace TEXT NOT NULL,domain TEXT,action TEXT,owner TEXT,status TEXT,"
                 "notes TEXT,created_at TEXT,updated_at TEXT,created_by TEXT)"
             )
+            try:
+                con.execute("ALTER TABLE control_tower_actions ADD COLUMN workspace TEXT")
+                con.execute("UPDATE control_tower_actions SET workspace=? WHERE workspace IS NULL", (workspace,))
+            except sqlite3.OperationalError:
+                pass
+            con.execute("CREATE INDEX IF NOT EXISTS idx_control_tower_actions_ws ON control_tower_actions(workspace,updated_at DESC)")
             con.commit()
             actions=pd.read_sql(
                 "SELECT action_id,domain,action,owner,status,notes,created_at,updated_at "
-                "FROM control_tower_actions ORDER BY updated_at DESC LIMIT 250",con
+                "FROM control_tower_actions WHERE workspace=? ORDER BY updated_at DESC LIMIT 250",
+                con, params=(workspace,)
             )
     except Exception:
         actions=pd.DataFrame()
@@ -448,8 +455,8 @@ def render_control_tower_extension() -> None:
             action_id="CTA-"+uuid.uuid4().hex[:10].upper()
             with sqlite3.connect("enterprise_full_workspace.db") as con:
                 con.execute(
-                    "INSERT INTO control_tower_actions VALUES(?,?,?,?,?,?,?,?,?)",
-                    (action_id,action_domain,action_type,action_owner.strip() or username,action_status,action_notes.strip(),_now(),_now(),username)
+                    "INSERT INTO control_tower_actions(action_id,workspace,domain,action,owner,status,notes,created_at,updated_at,created_by) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                    (action_id,workspace,action_domain,action_type,action_owner.strip() or username,action_status,action_notes.strip(),_now(),_now(),username)
                 )
                 con.commit()
             st.session_state["control_tower_last_action"]=action_id
