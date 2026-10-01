@@ -38,6 +38,7 @@ from datetime import datetime, timezone
 from ftplib import FTP
 from typing import Any, Callable, Iterable, Mapping, Sequence
 from urllib.parse import urlparse
+from shoir_universal_platform_kernel import active_dataframe
 
 import numpy as np
 import pandas as pd
