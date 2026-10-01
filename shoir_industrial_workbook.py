@@ -790,7 +790,16 @@ def _serialize_workbook(
                 ws.autofilter(2,0,2+len(safe),len(safe.columns)-1)
             ws.freeze_panes(3,0)
 
-        guide=book.add_worksheet("WORKBOOK GUIDE")
+        def system_sheet(preferred: str) -> str:
+            base=re.sub(r"[:\\/?*\[\]]+","",preferred)[:31] or "SYSTEM"
+            name=base; idx=2
+            while name in used:
+                suffix=f" ({idx})"; name=(base[:31-len(suffix)]+suffix)[:31]; idx+=1
+            used.add(name)
+            return name
+
+        guide_name=system_sheet("WORKBOOK GUIDE")
+        guide=book.add_worksheet(guide_name)
         guide.write(0,0,"Shoir-IE Industrial Workbook",title_fmt)
         guide.write(2,0,"Purpose",header_fmt); guide.write(2,1,"Editable workbook with formulas, repeatable query pipelines, semantic mapping and governed persistence.")
         guide.write(3,0,"Sheets",header_fmt); guide.write(3,1,len(workbook))
@@ -799,17 +808,20 @@ def _serialize_workbook(
         guide.write(6,0,"Semantic mappings",header_fmt); guide.write(6,1,sum(len(v) for v in semantic_map.values() if isinstance(v,dict)))
         guide.set_column(0,0,22); guide.set_column(1,1,72)
 
+        formula_name=system_sheet("FORMULA REGISTER")
         formula_rows=[{"Sheet":sh,"Cell":cell,"Formula":formula} for sh,entries in formulas.items() for cell,formula in entries.items()]
-        pd.DataFrame(formula_rows or [{"Sheet":"","Cell":"","Formula":""}]).to_excel(writer,index=False,sheet_name="FORMULA REGISTER")
-        writer.sheets["FORMULA REGISTER"].freeze_panes(1,0)
+        pd.DataFrame(formula_rows or [{"Sheet":"","Cell":"","Formula":""}]).to_excel(writer,index=False,sheet_name=formula_name)
+        writer.sheets[formula_name].freeze_panes(1,0)
 
+        semantic_name=system_sheet("SEMANTIC MAP")
         semantic_rows=[{"Sheet":sh,"Column":col,"Role":role} for sh,entries in semantic_map.items() for col,role in (entries.items() if isinstance(entries,dict) else [])]
-        pd.DataFrame(semantic_rows or [{"Sheet":"","Column":"","Role":""}]).to_excel(writer,index=False,sheet_name="SEMANTIC MAP")
-        writer.sheets["SEMANTIC MAP"].freeze_panes(1,0)
+        pd.DataFrame(semantic_rows or [{"Sheet":"","Column":"","Role":""}]).to_excel(writer,index=False,sheet_name=semantic_name)
+        writer.sheets[semantic_name].freeze_panes(1,0)
 
+        variable_name=system_sheet("VARIABLES")
         variable_rows=[{"Name":name,"Value":v.get("value",v) if isinstance(v,dict) else v,"Unit":v.get("unit","") if isinstance(v,dict) else "","Description":v.get("description","") if isinstance(v,dict) else ""} for name,v in variables.items()]
-        pd.DataFrame(variable_rows or [{"Name":"","Value":"","Unit":"","Description":""}]).to_excel(writer,index=False,sheet_name="VARIABLES")
-        writer.sheets["VARIABLES"].freeze_panes(1,0)
+        pd.DataFrame(variable_rows or [{"Name":"","Value":"","Unit":"","Description":""}]).to_excel(writer,index=False,sheet_name=variable_name)
+        writer.sheets[variable_name].freeze_panes(1,0)
     return payload.getvalue()
 
 
@@ -1165,10 +1177,10 @@ def render_industrial_workbook(tier:str="Starter",username:str="unknown")->None:
     st.caption("Excel/CSV import is optional — the workbook tools are available immediately with the built-in workspace.")
     c1,c2,c3,c4,c5,c6=st.columns(6)
     uploaded=c1.file_uploader(
-        "Optional Excel / CSV import",
-        type=["xlsx","csv"],
-        key="industrial_workbook_upload",
-        help="Uploading a file is optional. You can use and edit the built-in Sheet1 without importing anything."
+        "Import raw workbook / data",
+        type=["xlsx","xlsm","xls","csv","tsv","txt"],
+        key="industrial_workbook_upload_v2",
+        help="Imports are passed through the governed Excel Intelligence cleaning + structure pipeline before entering the workbook."
     )
     if c2.button("➕ Sheet",use_container_width=True):
         name=f"Sheet{len(wb)+1}"; wb[name]=pd.DataFrame({"Value":[None]}); formulas[name]={}; st.rerun()
@@ -1190,15 +1202,21 @@ def render_industrial_workbook(tier:str="Starter",username:str="unknown")->None:
         try:
             upload_sig = hashlib.sha256(uploaded.getvalue()).hexdigest()
             if upload_sig != st.session_state.get("industrial_workbook_last_upload_signature"):
-                from shoir_upgrade import read_uploaded_workbook
-                loaded=read_uploaded_workbook(uploaded.getvalue(),uploaded.name)
+                from shoir_excel_studio import process_uploaded_workbook
+                processed=process_uploaded_workbook(uploaded.getvalue(),uploaded.name)
+                loaded=processed.get("cleaned_sheets") or processed.get("raw_sheets") or {}
+                if not loaded:
+                    raise ValueError("The imported file contained no usable tables.")
                 st.session_state["industrial_workbook_undo"].append({k: v.copy(deep=True) for k,v in wb.items()})
                 st.session_state["industrial_workbook_undo"]=st.session_state["industrial_workbook_undo"][-20:]
                 wb.clear(); wb.update({k: v.copy(deep=True) for k,v in loaded.items()})
                 st.session_state[FORMULA_STATE_KEY]={k:{} for k in wb}
                 st.session_state["industrial_workbook_redo"].clear()
                 st.session_state["industrial_workbook_last_upload_signature"]=upload_sig
-                st.success(f"Imported {len(loaded)} sheet(s) from {uploaded.name}.")
+                st.success(
+                    f"Imported and governed {len(loaded):,} sheet(s) from {uploaded.name}. "
+                    "Headers, nulls, duplicates and structure were processed before workbook editing."
+                )
                 st.rerun()
         except Exception as exc: st.error(f"Excel import failed safely: {exc}")
 
