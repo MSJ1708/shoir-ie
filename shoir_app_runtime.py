@@ -9343,6 +9343,21 @@ else:
                 st.code(f"{type(exc).__name__}: {exc}")
 
     # =========================================================
+    # INTEGRATED VENTURE / INCUBATOR CAPABILITIES
+    # These capabilities are rendered as tabs inside the appropriate existing
+    # module; there is intentionally no separate venture top-level destination.
+    if st.session_state.get("authenticated") and st.session_state.get("current_user"):
+        try:
+            render_venture_capabilities(
+                str(mod),
+                str(tier_val),
+                st.session_state.get("current_user", "unknown"),
+            )
+        except Exception as exc:
+            log_exception(__name__, exc)
+            st.warning("Integrated venture workspace tabs are temporarily unavailable; the selected engineering module remains available.")
+
+# =========================================================
 # CARBON ACCOUNTING & NET-ZERO STUDIO (Astonishing & Stunning)
 # =========================================================
 if mod == "Carbon Accounting":
