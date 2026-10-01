@@ -1007,28 +1007,137 @@ def render_module(module: str, tier: str, username: str):
         figs=[("Finite Schedule",fig)] if "fig" in locals() else []
         render_export_bar(module,tables,figs,tier,username)
     elif module=="Manufacturing Execution System":
-        tabs=st.tabs(["Work Orders","Execution Events","OEE & WIP"])
+        st.subheader("🏭 Manufacturing Execution System")
+        st.caption("Manage the work-order lifecycle, capture shop-floor events, calculate OEE/WIP, release quality, and maintain lot genealogy from one operational record.")
+        tabs=st.tabs(["🛰️ Command Center","📋 Work Orders","▶️ Execution","📊 OEE & WIP","🧬 Quality & Genealogy"])
+        summary=mes_execution_summary()
         with tabs[0]:
-            wo=st.data_editor(st.session_state.setdefault("mes_wo_df",pd.DataFrame({"Work Order":["WO-001","WO-002"],"Product":["P-100","P-200"],"Quantity":[1000,600],"Due Date":[str(datetime.now()+timedelta(days=1)),str(datetime.now()+timedelta(days=2))],"Status":["Released","Released"],"Machine":["M-01","M-02"],"Operator":[""]*2})),num_rows="dynamic",use_container_width=True,key="mes_wo_editor")
-            if st.button("💾 Save Work Orders",type="primary",use_container_width=True,key="mes_save"): 
-                with sqlite3.connect("enterprise_full_workspace.db") as c:
-                    for r in wo.to_dict("records"): c.execute("INSERT OR REPLACE INTO mes_work_orders VALUES(?,?,?,?,?,?,?,?)",(r["Work Order"],r["Product"],float(r["Quantity"]),str(r["Due Date"]),r["Status"],r["Machine"],r["Operator"],_now()))
-                    c.commit()
-                st.success("Work orders saved.")
+            open_mask=~summary["Status"].astype(str).str.lower().isin(["completed","cancelled"]) if not summary.empty else pd.Series(dtype=bool)
+            wip=float(summary.loc[open_mask,"WIP Qty"].sum()) if not summary.empty else 0.0
+            total=float(summary["Planned Qty"].sum()) if not summary.empty else 0.0
+            completed=int(summary["Status"].astype(str).str.lower().eq("completed").sum()) if not summary.empty else 0
+            running=int(summary["Status"].astype(str).str.lower().isin(["running","paused","dispatched"]).sum()) if not summary.empty else 0
+            k1,k2,k3,k4=st.columns(4)
+            k1.metric("Work orders",f"{len(summary):,}"); k2.metric("WIP qty",f"{wip:,.0f}"); k3.metric("Running / paused",f"{running:,}"); k4.metric("Completed",f"{completed:,}")
+            if total:
+                st.progress(min(1.0,max(0.0,(total-wip)/total)),text=f"Gross completion {(total-wip)/total*100:.1f}%")
+            st.dataframe(summary,use_container_width=True,hide_index=True)
+            try:
+                with sqlite3.connect("enterprise_full_workspace.db") as con:
+                    event_counts=pd.read_sql("SELECT event_type AS Event, COUNT(*) AS Count FROM mes_events GROUP BY event_type ORDER BY Count DESC",con)
+                if not event_counts.empty:
+                    st.plotly_chart(px.bar(event_counts,x="Event",y="Count",title="Shop-floor event mix"),use_container_width=True)
+            except Exception:
+                pass
         with tabs[1]:
-            ev=st.data_editor(st.session_state.setdefault("mes_events_df",pd.DataFrame({"Work Order":["WO-001"],"Event":["START"],"Event Time":[_now()],"Quantity":[0],"Reason":[""],"Operator":[""]})),num_rows="dynamic",use_container_width=True,key="mes_event_editor")
-            if st.button("📝 Record Events",use_container_width=True,key="mes_event_save"):
-                with sqlite3.connect("enterprise_full_workspace.db") as c:
-                    for r in ev.to_dict("records"): c.execute("INSERT INTO mes_events(work_order,event_type,event_time,quantity,reason,operator) VALUES(?,?,?,?,?,?)",(r["Work Order"],r["Event"],str(r["Event Time"]),float(r["Quantity"] or 0),str(r["Reason"]),str(r["Operator"])))
-                    c.commit()
+            wo_default=pd.DataFrame({"Work Order":["WO-001","WO-002"],"Product":["P-100","P-200"],"Quantity":[1000,600],"Due Date":[str(datetime.now()+timedelta(days=1)),str(datetime.now()+timedelta(days=2))],"Status":["Released","Released"],"Machine":["M-01","M-02"],"Operator":["",""]})
+            wo=st.data_editor(st.session_state.setdefault("mes_wo_df",wo_default),num_rows="dynamic",use_container_width=True,hide_index=True,key="mes_wo_editor_v2")
+            st.session_state["mes_wo_df"]=wo.copy(deep=True)
+            left,right=st.columns([1,1])
+            with left:
+                st.markdown("#### Create work order")
+                with st.form("mes_create_wo_form"):
+                    new_wo=st.text_input("Work order ID","WO-NEW")
+                    new_product=st.text_input("Product","P-100")
+                    new_qty=st.number_input("Planned quantity",1.0,1000000.0,100.0)
+                    new_due=st.date_input("Due date",datetime.now().date()+timedelta(days=1))
+                    new_machine=st.text_input("Machine","M-01")
+                    create=st.form_submit_button("➕ Create & Release")
+                if create:
+                    try:
+                        with sqlite3.connect("enterprise_full_workspace.db") as con:
+                            con.execute("INSERT INTO mes_work_orders(work_order,product,quantity,due_date,status,machine,operator,updated_at) VALUES(?,?,?,?,?,?,?,?)",(new_wo.strip(),new_product,float(new_qty),str(new_due),"Released",new_machine,"",_now()))
+                            con.commit()
+                        st.success(f"Created {new_wo} and released it."); st.rerun()
+                    except sqlite3.IntegrityError:
+                        st.error("That work-order ID already exists.")
+                    except Exception as exc:
+                        st.error(f"Work-order creation failed safely: {exc}")
+            with right:
+                ids=sorted(set(wo["Work Order"].astype(str))) if "Work Order" in wo.columns else []
+                selected_wo=st.selectbox("Selected work order",ids,key="mes_selected_wo") if ids else ""
+                operator=st.text_input("Operator / supervisor",key="mes_operator")
+                lifecycle=st.selectbox("Lifecycle action",["Released","Dispatched","Running","Paused","Completed","On Hold","Cancelled"],key="mes_lifecycle")
+                if st.button("⚙️ Apply lifecycle action",type="primary",use_container_width=True,key="mes_transition"):
+                    try:
+                        mes_transition_work_order(selected_wo,lifecycle,operator); st.success(f"{selected_wo} moved to {lifecycle}."); st.rerun()
+                    except Exception as exc:
+                        st.error(f"Lifecycle transition failed safely: {exc}")
+            with sqlite3.connect("enterprise_full_workspace.db") as con:
+                saved=pd.read_sql("SELECT * FROM mes_work_orders ORDER BY updated_at DESC",con)
+            st.dataframe(saved,use_container_width=True,hide_index=True)
         with tabs[2]:
-            oe=st.data_editor(st.session_state.setdefault("mes_oee_df",pd.DataFrame({"PlannedMin":[480],"DowntimeMin":[45],"IdealCycleSec":[30],"TotalCount":[800],"GoodCount":[760]})),num_rows="dynamic",use_container_width=True,key="mes_oee_editor")
-            if st.button("📊 Calculate OEE",type="primary",use_container_width=True,key="mes_oee_run"):
-                st.session_state["mes_oee_result"]=oee_from_events(oe.iloc[[0]])
-            if "mes_oee_result" in st.session_state: st.json(st.session_state["mes_oee_result"])
-            with sqlite3.connect("enterprise_full_workspace.db") as c: saved=pd.read_sql("SELECT * FROM mes_work_orders",c)
-            st.write("Persisted Work Orders"); st.dataframe(saved,use_container_width=True,hide_index=True)
-        render_export_bar(module,[("Work Orders",wo),("Events",ev),("OEE Input",oe),("Persisted Work Orders",saved if "saved" in locals() else pd.DataFrame())],tier,username)
+            ids=sorted(set(summary["Work Order"].astype(str))) if not summary.empty else []
+            selected_event_wo=st.selectbox("Work order",ids,key="mes_event_wo") if ids else ""
+            e1,e2,e3=st.columns(3)
+            with e1:
+                event_type=st.selectbox("Event",["START","PAUSE","RESUME","GOOD","SCRAP","COMPLETE","DOWNTIME","HOLD","RELEASE","DISPATCH"],key="mes_event_type")
+                event_qty=st.number_input("Quantity",0.0,1000000.0,0.0,key="mes_event_qty")
+            with e2:
+                event_reason=st.text_input("Reason / note",key="mes_event_reason")
+                event_operator=st.text_input("Operator",key="mes_event_operator")
+            with e3:
+                st.write(" ")
+                if st.button("📝 Record shop-floor event",type="primary",use_container_width=True,key="mes_record_event_v2"):
+                    try:
+                        mes_record_event(selected_event_wo,event_type,event_qty,event_reason,event_operator)
+                        status_map={"COMPLETE":"Completed","START":"Running","PAUSE":"Paused","RESUME":"Running","HOLD":"On Hold","RELEASE":"Released","DISPATCH":"Dispatched"}
+                        if event_type in status_map: mes_transition_work_order(selected_event_wo,status_map[event_type],event_operator)
+                        st.success("Event recorded and work-order state synchronized."); st.rerun()
+                    except Exception as exc:
+                        st.error(f"Event capture failed safely: {exc}")
+            with sqlite3.connect("enterprise_full_workspace.db") as con:
+                events=pd.read_sql("SELECT id,work_order,event_type,event_time,quantity,reason,operator FROM mes_events ORDER BY id DESC LIMIT 500",con)
+            st.dataframe(events,use_container_width=True,hide_index=True)
+        with tabs[3]:
+            oe_default=pd.DataFrame({"PlannedMin":[480],"DowntimeMin":[45],"IdealCycleSec":[30],"TotalCount":[800],"GoodCount":[760]})
+            oe=st.data_editor(st.session_state.setdefault("mes_oee_df",oe_default),num_rows="dynamic",use_container_width=True,hide_index=True,key="mes_oee_editor_v2")
+            st.session_state["mes_oee_df"]=oe.copy(deep=True)
+            if st.button("📊 Calculate OEE",type="primary",use_container_width=True,key="mes_oee_run_v2"):
+                try: st.session_state["mes_oee_result"]=oee_from_events(oe)
+                except Exception as exc: st.error(f"OEE calculation failed safely: {exc}")
+            res=st.session_state.get("mes_oee_result")
+            if isinstance(res,dict):
+                a,b,c2,d2=st.columns(4)
+                a.metric("Availability",f"{float(res.get('Availability %',0)):.1f}%"); b.metric("Performance",f"{float(res.get('Performance %',0)):.1f}%"); c2.metric("Quality",f"{float(res.get('Quality %',0)):.1f}%"); d2.metric("OEE",f"{float(res.get('OEE %',0)):.1f}%")
+            st.markdown("#### Live execution summary")
+            st.dataframe(summary,use_container_width=True,hide_index=True)
+        with tabs[4]:
+            st.markdown("#### Quality release")
+            q1,q2=st.columns(2)
+            with q1:
+                qwo=st.selectbox("Work order",sorted(set(summary["Work Order"].astype(str))) if not summary.empty else [""],key="mes_quality_wo")
+                lot=st.text_input("Lot / batch","LOT-001",key="mes_lot")
+                qstatus=st.selectbox("Release status",["Pending","Released","Hold","Rejected"],key="mes_qstatus")
+            with q2:
+                defect_qty=st.number_input("Defect quantity",0.0,1000000.0,0.0,key="mes_defect_qty")
+                qnotes=st.text_area("Quality notes",height=80,key="mes_quality_notes")
+                qoperator=st.text_input("Quality operator",key="mes_quality_operator")
+            if st.button("✅ Save quality release",type="primary",use_container_width=True,key="mes_quality_save"):
+                with sqlite3.connect("enterprise_full_workspace.db") as con:
+                    con.execute("INSERT INTO mes_quality_releases(work_order,lot,status,defect_qty,notes,operator,created_at) VALUES(?,?,?,?,?,?,?)",(qwo,lot,qstatus,float(defect_qty),qnotes,qoperator,_now())); con.commit()
+                st.success("Quality release recorded."); st.rerun()
+            with sqlite3.connect("enterprise_full_workspace.db") as con:
+                qreleases=pd.read_sql("SELECT * FROM mes_quality_releases ORDER BY id DESC LIMIT 200",con)
+            st.dataframe(qreleases,use_container_width=True,hide_index=True)
+            st.markdown("#### Lot genealogy")
+            g1,g2,g3=st.columns(3)
+            with g1:
+                gwo=st.selectbox("WO for genealogy",sorted(set(summary["Work Order"].astype(str))) if not summary.empty else [""],key="mes_genealogy_wo")
+                glot=st.text_input("Current lot",value="LOT-001",key="mes_genealogy_lot")
+            with g2:
+                parent=st.text_input("Parent lot / source","RAW-001",key="mes_genealogy_parent")
+                material=st.text_input("Material","MAT-001",key="mes_genealogy_material")
+            with g3:
+                gqty=st.number_input("Material quantity",0.0,1000000.0,100.0,key="mes_genealogy_qty")
+                if st.button("➕ Record genealogy",use_container_width=True,key="mes_genealogy_save"):
+                    with sqlite3.connect("enterprise_full_workspace.db") as con:
+                        con.execute("INSERT INTO mes_genealogy(work_order,lot,parent_lot,material,quantity,created_at) VALUES(?,?,?,?,?,?)",(gwo,glot,parent,material,float(gqty),_now())); con.commit()
+                    st.success("Genealogy link recorded."); st.rerun()
+            with sqlite3.connect("enterprise_full_workspace.db") as con:
+                genealogy=pd.read_sql("SELECT * FROM mes_genealogy ORDER BY id DESC LIMIT 300",con)
+            st.dataframe(genealogy,use_container_width=True,hide_index=True)
+        render_export_bar(module,[("Work Orders",wo),("Execution Events",events if 'events' in locals() else pd.DataFrame()),("Execution Summary",summary),("OEE Input",oe),("Quality Releases",qreleases if 'qreleases' in locals() else pd.DataFrame()),("Genealogy",genealogy if 'genealogy' in locals() else pd.DataFrame())],tier,username)
     elif module=="Quality Engineering & Reliability":
         tabs=st.tabs(["SPC & Capability","MSA","DOE / ANOVA / Regression","FMEA & Reliability"])
         with tabs[0]:
