@@ -33,6 +33,18 @@ from shoir_platform_core import (
 )
 
 
+def test_prepare_mandatory_module_contract_uses_shared_active_dataframe():
+    """The universal gate must resolve the active dataset helper from the kernel."""
+    import streamlit as st
+    from shoir_platform_core import prepare_mandatory_module_contract
+
+    st.session_state.clear()
+    contract = prepare_mandatory_module_contract("Capacity Optimizer")
+    assert contract["gate"] == "MODULE_MANAGED"
+    assert contract["allowed"] is True
+    assert contract["validation"]["valid"] is True
+
+
 def test_core_exposes_full_mandatory_workflow():
     assert WORKFLOW_STEPS == (
         "DATA", "VALIDATE", "MAP", "MODEL", "RUN", "VISUALIZE",
