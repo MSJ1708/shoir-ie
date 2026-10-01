@@ -350,14 +350,14 @@ def render_control_tower_extension() -> None:
         or "default"
     )
     try:
-        from shoir_enterprise_layer import build_control_tower_health_from_canonical, canonical_health, canonical_events_frame
+        from shoir_enterprise_layer import build_control_tower_health_from_canonical, canonical_health
         health = build_control_tower_health_from_canonical(username, workspace)
         manifest = canonical_health(username, workspace)
         st.session_state["control_tower_canonical_health"] = manifest
     except Exception:
         health = pd.DataFrame()
         manifest = {"coverage": 0.0}
-    if health.empty or int(health["Records"].sum()) == 0:
+    if health.empty or int(health.get("Records", pd.Series(dtype=float)).sum()) == 0:
         state = {
             "workstations": st.session_state.get("dt_workstations", []),
             "supply": st.session_state.get("supply_nodes", []),
@@ -374,17 +374,109 @@ def render_control_tower_extension() -> None:
     else:
         signal_source = "Canonical Digital Thread"
     st.session_state["control_tower_unified_health_df"] = health
-    st.markdown("### 🗼 Unified Industrial Health Map")
+
+    st.markdown("### 🗼 Unified Industrial Control Tower")
     st.caption(
         f"Source: **{signal_source}** · Canonical coverage: **{float(manifest.get('coverage', 0.0)):.1f}%**. "
-        "Unobserved areas remain No Data; no health values are fabricated."
+        "Only observed or explicitly entered data is shown."
     )
     if health.empty:
         st.info("No cross-domain operational datasets are currently available.")
         return
-    st.dataframe(health, use_container_width=True, hide_index=True)
-    _render_universal_viz("Control Tower", "control_tower_unified_health_df")
 
+    # Operator controls: filters and configurable attention thresholds are durable
+    # within the workspace session and make the tower actionable instead of read-only.
+    c1,c2,c3=st.columns(3)
+    status_filter=c1.multiselect(
+        "Status filter", ["Healthy","Attention","No Data"], default=["Healthy","Attention","No Data"],
+        key="ct_status_filter"
+    )
+    attention_threshold=c2.slider(
+        "Attention threshold (%)", 0, 100, 70, 5, key="ct_attention_threshold"
+    )
+    show_no_data=c3.checkbox("Show No Data domains", value=True, key="ct_show_no_data")
+
+    view=health.copy(deep=True)
+    if "Health %" in view.columns:
+        view["Operator Status"]=np.where(
+            pd.to_numeric(view["Health %"],errors="coerce").fillna(0) < attention_threshold,
+            "Attention","Healthy"
+        )
+        view.loc[view["Status"].astype(str).eq("No Data"),"Operator Status"]="No Data"
+    if status_filter:
+        view=view[view["Operator Status"].isin(status_filter)]
+    if not show_no_data:
+        view=view[view["Operator Status"].ne("No Data")]
+    st.dataframe(view, use_container_width=True, hide_index=True)
+
+    if "Health %" in view.columns:
+        fig=px.bar(view,x="Area",y="Health %",color="Operator Status",range_y=[0,100],title="Industrial domain health")
+        st.plotly_chart(fig,use_container_width=True)
+
+    # Persist an explicit action queue so the tower supports intervention, not only observation.
+    try:
+        import sqlite3
+        with sqlite3.connect("enterprise_full_workspace.db") as con:
+            con.execute(
+                "CREATE TABLE IF NOT EXISTS control_tower_actions("
+                "action_id TEXT PRIMARY KEY,domain TEXT,action TEXT,owner TEXT,status TEXT,"
+                "notes TEXT,created_at TEXT,updated_at TEXT,created_by TEXT)"
+            )
+            con.commit()
+            actions=pd.read_sql(
+                "SELECT action_id,domain,action,owner,status,notes,created_at,updated_at "
+                "FROM control_tower_actions ORDER BY updated_at DESC LIMIT 250",con
+            )
+    except Exception:
+        actions=pd.DataFrame()
+
+    st.markdown("### 🎛️ Action Center")
+    a1,a2=st.columns([1.2,1.8])
+    with a1:
+        domain_choices=view["Area"].astype(str).tolist() if not view.empty else health["Area"].astype(str).tolist()
+        action_domain=st.selectbox("Domain",domain_choices or ["Operations"],key="ct_action_domain")
+        action_type=st.selectbox(
+            "Action",["Investigate","Assign owner","Mitigate","Escalate","Verify","Close"],
+            key="ct_action_type"
+        )
+        action_owner=st.text_input("Owner",value=username,key="ct_action_owner")
+    with a2:
+        action_notes=st.text_area("Action notes / evidence",height=118,key="ct_action_notes")
+        action_status=st.selectbox("Status",["Planned","In Progress","Blocked","Done"],key="ct_action_status")
+        if st.button("➕ Create control-tower action",type="primary",use_container_width=True,key="ct_action_create"):
+            import uuid,sqlite3
+            action_id="CTA-"+uuid.uuid4().hex[:10].upper()
+            with sqlite3.connect("enterprise_full_workspace.db") as con:
+                con.execute(
+                    "INSERT INTO control_tower_actions VALUES(?,?,?,?,?,?,?,?,?)",
+                    (action_id,action_domain,action_type,action_owner.strip() or username,action_status,action_notes.strip(),_now(),_now(),username)
+                )
+                con.commit()
+            st.session_state["control_tower_last_action"]=action_id
+            st.success(f"Action created · {action_id}")
+            st.rerun()
+
+    if not actions.empty:
+        st.markdown("#### Open action queue")
+        action_view=actions[actions["status"].astype(str).str.lower().ne("done")].copy()
+        st.dataframe(action_view,use_container_width=True,hide_index=True)
+        action_ids=action_view["action_id"].astype(str).tolist() if not action_view.empty else []
+        if action_ids:
+            selected_action=st.selectbox("Action to update",action_ids,key="ct_action_update_id")
+            new_status=st.selectbox("Move action to",["Planned","In Progress","Blocked","Done"],key="ct_action_update_status")
+            update_note=st.text_input("Update note",key="ct_action_update_note")
+            if st.button("✅ Update selected action",use_container_width=True,key="ct_action_update"):
+                import sqlite3
+                with sqlite3.connect("enterprise_full_workspace.db") as con:
+                    con.execute("UPDATE control_tower_actions SET status=?,notes=?,updated_at=? WHERE action_id=?",(new_status,update_note,_now(),selected_action))
+                    con.commit()
+                st.success(f"{selected_action} updated.")
+                st.rerun()
+    elif actions is not None:
+        st.info("No control-tower actions have been created yet. Use the form above to turn an observed issue into tracked work.")
+
+    st.markdown("### 🔗 Decision Operating Loop")
+    st.caption("Observe → prioritize → assign → mitigate → verify. Control actions are stored with the workspace record.")
 # ---------------------------------------------------------------------------
 # Connectivity + health monitoring
 # ---------------------------------------------------------------------------
