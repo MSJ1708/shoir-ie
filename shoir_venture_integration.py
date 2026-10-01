@@ -189,12 +189,30 @@ def _id(prefix: str, payload: Any = "") -> str:
 
 def _event(event_type: str, object_type: str = "", object_id: str = "", payload: Any = None) -> None:
     owner, workspace = _ctx()
+    body = payload or {}
     with _db() as conn:
         conn.execute(
             "INSERT INTO venture_events(id,workspace,owner,event_type,object_type,object_id,payload,created_at) VALUES(?,?,?,?,?,?,?,?)",
-            (_id("EVT"), workspace, owner, event_type, object_type, object_id, json.dumps(payload or {}, default=str), _now()),
+            (_id("EVT"), workspace, owner, event_type, object_type, object_id, json.dumps(body, default=str), _now()),
         )
         conn.commit()
+    # Mirror lifecycle artifacts into the existing enterprise artifact layer.
+    # This keeps the venture workspaces connected to Shoir-IE's canonical
+    # persistence/evidence infrastructure instead of creating a second silo.
+    try:
+        from shoir_enterprise_layer import record_artifact
+        record_artifact(
+            owner,
+            f"venture_{object_type}",
+            f"{object_type}:{object_id}",
+            body,
+            workspace=workspace,
+            artifact_id=object_id if str(object_id).startswith(("PROJ-","STAK-","VENT-","PILO-","HYPO-","EVT-")) else None,
+        )
+    except Exception:
+        # SQLite event persistence remains authoritative for the local/offline
+        # path when enterprise persistence is not configured.
+        pass
 
 
 def _insert(table: str, fields: dict[str, Any]) -> str:
