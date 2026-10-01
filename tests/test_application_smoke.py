@@ -19,6 +19,16 @@ def test_required_modules_parse():
         ast.parse(path.read_text(encoding="utf-8"), filename=filename)
 
 
+def test_entrypoint_has_page_config_and_visible_runtime_recovery_boundary():
+    app_source = Path("app.py").read_text(encoding="utf-8")
+    runtime_source = Path("shoir_app_runtime.py").read_text(encoding="utf-8")
+    assert "st.set_page_config(" in app_source
+    assert "except Exception as exc" in app_source
+    assert "Technical diagnostic" in app_source
+    assert "Page configuration is owned by app.py" in runtime_source
+    assert "_startup_errors" in runtime_source
+
+
 def test_validation_workflow_covers_compile_and_tests():
     workflow = Path(".github/workflows/shoir-validation.yml").read_text(encoding="utf-8")
     assert "compileall" in workflow
