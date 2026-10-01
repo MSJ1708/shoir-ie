@@ -913,22 +913,81 @@ def render_module(module: str, tier: str, username: str):
         st.dataframe(edited,use_container_width=True)
         render_export_bar(module,[("Validation Table",edited)],tier,username=username)
     elif module=="Industrial Data Model & Digital Thread":
-        tabs=st.tabs(["Entities","Relationships","Data Quality"])
+        st.subheader("🧬 Industrial Data Model & Digital Thread")
+        st.caption("Create canonical entities, persist explicit relationships, inspect lineage and see change-impact paths in one governed workspace.")
+        tabs=st.tabs(["🏗️ Entity Studio","🔗 Relationship Studio","🕸️ Thread Map","🔎 Trace & Impact","✅ Data Quality"])
         with tabs[0]:
-            entity_type=st.selectbox("Entity type",["Product","SKU","Customer","Supplier","Facility","Machine","Employee","Material","Route","Operation","Order"])
-            id_col=st.text_input("ID column","ID")
-            df=st.data_editor(st.session_state.setdefault("thread_df",pd.DataFrame({"ID":["FAC-001","MCH-001"],"name":["Riyadh DC","CNC-01"],"capacity":[1000,80]})),num_rows="dynamic",use_container_width=True,key="thread_editor")
-            if st.button("🔗 Register Entities",type="primary",use_container_width=True,key="thread_register"):
-                if id_col in df.columns: st.success(f"Registered {upsert_entities(df,entity_type,id_col):,} entities into the digital thread.")
-                else: st.error(f"ID column '{id_col}' not found.")
-            with sqlite3.connect("enterprise_full_workspace.db") as c: ent=pd.read_sql("SELECT * FROM industrial_entities ORDER BY updated_at DESC LIMIT 100",c)
+            entity_type=st.selectbox("Entity type",["Product","SKU","Customer","Supplier","Facility","Machine","Employee","Material","Route","Operation","Order","Process","Quality","Maintenance","Energy","Cost","Scenario","Decision","Outcome"],key="thread_entity_type_v2")
+            id_col=st.text_input("Identity column","ID",key="thread_id_col_v2")
+            default_entity=pd.DataFrame({"ID":["FAC-001","MCH-001","WO-001"],"name":["Riyadh DC","CNC-01","WO-001"],"status":["Active","Active","Released"],"owner":["Operations","Maintenance","Production"],"capacity":[1000,80,100],"unit":["units/day","units/hour","units"]})
+            df=st.data_editor(st.session_state.setdefault("thread_df",default_entity),num_rows="dynamic",use_container_width=True,hide_index=True,key="thread_editor_v2")
+            st.session_state["thread_df"]=df.copy(deep=True)
+            q=data_quality_report(df)
+            m1,m2,m3,m4=st.columns(4)
+            m1.metric("Rows",f"{len(df):,}"); m2.metric("Fields",f"{len(df.columns):,}"); m3.metric("Quality",f"{q['score']:.1f}%")
+            m4.metric("Duplicate IDs",f"{int(df[id_col].duplicated().sum()) if id_col in df.columns else 0:,}")
+            if st.button("🔗 Register / update entities",type="primary",use_container_width=True,key="thread_register_v2"):
+                try:
+                    if id_col not in df.columns: raise ValueError(f"Identity column '{id_col}' is missing.")
+                    n=upsert_entities(df,entity_type,id_col)
+                    st.success(f"{n:,} {entity_type} record(s) persisted to the Digital Thread.")
+                    st.rerun()
+                except Exception as exc: st.error(f"Entity registration failed safely: {exc}")
+            with sqlite3.connect("enterprise_full_workspace.db") as con:
+                ent=pd.read_sql("SELECT entity_id,entity_type,name,attributes_json,updated_at FROM industrial_entities ORDER BY updated_at DESC LIMIT 500",con)
             st.dataframe(ent,use_container_width=True,hide_index=True)
         with tabs[1]:
-            rel=st.data_editor(st.session_state.setdefault("thread_rel",pd.DataFrame({"From":["FAC-001"],"Relationship":["contains"],"To":["MCH-001"]})),num_rows="dynamic",use_container_width=True,key="thread_rel_editor")
-            st.info("Relationships are intentionally explicit: use entity IDs and relationship names; no hidden inference.")
+            with sqlite3.connect("enterprise_full_workspace.db") as con:
+                entity_frame=pd.read_sql("SELECT entity_id,entity_type,name FROM industrial_entities ORDER BY entity_type,name",con)
+            entity_ids=entity_frame["entity_id"].astype(str).tolist() if not entity_frame.empty else ["Facility:FAC-001","Machine:MCH-001"]
+            default_rel=pd.DataFrame({"From":[entity_ids[0]],"Relationship":["contains"],"To":[entity_ids[1] if len(entity_ids)>1 else entity_ids[0]],"Evidence":["User-entered relationship"]})
+            rel=st.data_editor(st.session_state.setdefault("thread_rel",default_rel),num_rows="dynamic",use_container_width=True,hide_index=True,key="thread_rel_editor_v2")
+            st.session_state["thread_rel"]=rel.copy(deep=True)
+            persisted_rel=load_entity_relationships()
+            a,b,c2=st.columns(3); a.metric("Registered entities",f"{len(entity_ids):,}"); b.metric("Persisted links",f"{len(persisted_rel):,}"); c2.metric("Relation types",f"{persisted_rel['Relationship'].nunique() if not persisted_rel.empty else 0:,}")
+            if st.button("💾 Save explicit relationships",type="primary",use_container_width=True,key="thread_rel_save_v2"):
+                try:
+                    n=upsert_relationships(rel)
+                    st.success(f"{n:,} relationship(s) persisted.")
+                    st.rerun()
+                except Exception as exc: st.error(f"Relationship save blocked safely: {exc}")
+            st.dataframe(persisted_rel.head(500),use_container_width=True,hide_index=True)
         with tabs[2]:
-            st.write(data_quality_report(df))
-        render_export_bar(module,[("Entities",df),("Relationships",rel)],tier,username=username)
+            rels=load_entity_relationships()
+            if rels.empty:
+                st.info("Register entities and save at least one relationship to activate the thread graph.")
+            else:
+                import plotly.graph_objects as go
+                all_ids=sorted(set(rels["FromEntity"].astype(str))|set(rels["ToEntity"].astype(str)))
+                theta=np.linspace(0,2*np.pi,max(1,len(all_ids)),endpoint=False)
+                pos={eid:(float(np.cos(t)),float(np.sin(t))) for eid,t in zip(all_ids,theta)}
+                fig=go.Figure()
+                for rr in rels.itertuples(index=False):
+                    sx,sy=pos[str(rr.FromEntity)]; tx,ty=pos[str(rr.ToEntity)]
+                    fig.add_trace(go.Scatter(x=[sx,tx,None],y=[sy,ty,None],mode="lines",showlegend=False,hovertext=[str(rr.Relationship),"",""]))
+                labels={str(r.entity_id):f"{r.entity_type} · {r.name}" for r in ent.itertuples()} if isinstance(ent,pd.DataFrame) and not ent.empty else {}
+                fig.add_trace(go.Scatter(x=[pos[x][0] for x in all_ids],y=[pos[x][1] for x in all_ids],mode="markers+text",text=[labels.get(x,x) for x in all_ids],textposition="top center",marker=dict(size=16),hovertext=all_ids,showlegend=False))
+                fig.update_layout(height=520,showlegend=False,xaxis=dict(visible=False),yaxis=dict(visible=False),margin=dict(l=10,r=10,t=20,b=10))
+                st.plotly_chart(fig,use_container_width=True)
+                st.dataframe(rels,use_container_width=True,hide_index=True)
+        with tabs[3]:
+            rels=load_entity_relationships()
+            with sqlite3.connect("enterprise_full_workspace.db") as con:
+                ents=pd.read_sql("SELECT entity_id,entity_type,name,attributes_json,updated_at FROM industrial_entities",con)
+            if ents.empty:
+                st.info("No entities registered yet.")
+            else:
+                labels={str(r.entity_id):f"{r.entity_type} · {r.name} · {r.entity_id}" for r in ents.itertuples()}
+                selected_id=st.selectbox("Trace from entity",list(labels),format_func=labels.get,key="thread_trace_id")
+                incoming=rels[rels["ToEntity"].eq(selected_id)] if not rels.empty else pd.DataFrame()
+                outgoing=rels[rels["FromEntity"].eq(selected_id)] if not rels.empty else pd.DataFrame()
+                a,b,c2=st.columns(3); a.metric("Incoming links",len(incoming)); b.metric("Outgoing links",len(outgoing)); c2.metric("Impact paths",len(incoming)+len(outgoing))
+                st.markdown("#### Incoming"); st.dataframe(incoming,use_container_width=True,hide_index=True)
+                st.markdown("#### Outgoing / downstream"); st.dataframe(outgoing,use_container_width=True,hide_index=True)
+                st.markdown("#### Entity attributes"); st.dataframe(ents[ents["entity_id"].astype(str).eq(selected_id)],use_container_width=True,hide_index=True)
+        with tabs[4]:
+            st.json(data_quality_report(df))
+        render_export_bar(module,[("Entities",df),("Relationships",load_entity_relationships())],tier,username=username)
     elif module=="Advanced Planning & Scheduling":
         tabs=st.tabs(["Demand / MRP","Finite Schedule","Dispatch"])
         with tabs[0]:
