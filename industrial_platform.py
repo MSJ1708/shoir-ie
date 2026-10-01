@@ -136,6 +136,9 @@ def init_platform_db(db_path: str="enterprise_full_workspace.db") -> bool:
         conn.execute("PRAGMA journal_mode=WAL")
         ddl = [
             ("industrial_entities","CREATE TABLE IF NOT EXISTS industrial_entities(entity_id TEXT PRIMARY KEY, entity_type TEXT, name TEXT, attributes_json TEXT, updated_at TEXT)"),
+            ("industrial_relationships","CREATE TABLE IF NOT EXISTS industrial_relationships(source_entity_id TEXT,target_entity_id TEXT,relationship TEXT,attributes_json TEXT,updated_at TEXT,PRIMARY KEY(source_entity_id,target_entity_id,relationship))"),
+            ("mes_quality_releases","CREATE TABLE IF NOT EXISTS mes_quality_releases(id INTEGER PRIMARY KEY AUTOINCREMENT,work_order TEXT,lot TEXT,status TEXT,defect_qty REAL,notes TEXT,operator TEXT,created_at TEXT)"),
+            ("mes_genealogy","CREATE TABLE IF NOT EXISTS mes_genealogy(id INTEGER PRIMARY KEY AUTOINCREMENT,work_order TEXT,lot TEXT,parent_lot TEXT,material TEXT,quantity REAL,created_at TEXT)"),
             ("platform_datasets","CREATE TABLE IF NOT EXISTS platform_datasets(dataset_id TEXT PRIMARY KEY, name TEXT, source_name TEXT, row_count INTEGER, column_count INTEGER, sha256 TEXT, created_at TEXT, schema_json TEXT)"),
             ("platform_models","CREATE TABLE IF NOT EXISTS platform_models(model_id TEXT PRIMARY KEY, name TEXT, version TEXT, model_type TEXT, parameters_json TEXT, data_hash TEXT, assumptions_json TEXT, created_by TEXT, created_at TEXT, status TEXT, solver_version TEXT, result_hash TEXT)"),
             ("platform_experiments","CREATE TABLE IF NOT EXISTS platform_experiments(experiment_id TEXT PRIMARY KEY, name TEXT, module TEXT, scenarios_json TEXT, results_json TEXT, created_by TEXT, created_at TEXT)"),
@@ -236,6 +239,66 @@ def upsert_entities(df: pd.DataFrame, entity_type: str, id_col: str, db_path: st
             count+=1
         c.commit()
     return count
+
+def upsert_relationships(df: pd.DataFrame, source_col: str="From", relation_col: str="Relationship", target_col: str="To", db_path: str="enterprise_full_workspace.db") -> int:
+    req={source_col,relation_col,target_col}
+    if not req <= set(df.columns): raise ValueError(f"Relationships require {sorted(req)}")
+    with sqlite3.connect(db_path) as c:
+        valid={str(x[0]) for x in c.execute("SELECT entity_id FROM industrial_entities").fetchall()}
+        count=0
+        for rec in df.to_dict("records"):
+            source,target,relation=str(rec.get(source_col,"")).strip(),str(rec.get(target_col,"")).strip(),str(rec.get(relation_col,"")).strip()
+            if not source or not target or not relation: continue
+            if valid and (source not in valid or target not in valid): raise ValueError(f"Unknown entity reference: {source} → {target}")
+            attrs={k:v for k,v in rec.items() if k not in {source_col,relation_col,target_col}}
+            c.execute("INSERT OR REPLACE INTO industrial_relationships VALUES(?,?,?,?,?)",(source,target,relation,json.dumps(attrs,default=str),_now()))
+            count+=1
+        c.commit()
+    return count
+
+
+def load_entity_relationships(db_path: str="enterprise_full_workspace.db") -> pd.DataFrame:
+    with sqlite3.connect(db_path) as c:
+        return pd.read_sql("SELECT source_entity_id AS FromEntity,target_entity_id AS ToEntity,relationship AS Relationship,updated_at AS Updated FROM industrial_relationships ORDER BY updated_at DESC",c)
+
+
+def mes_transition_work_order(work_order: str, status: str, operator: str="", db_path: str="enterprise_full_workspace.db") -> bool:
+    allowed={"Planned","Released","Dispatched","Running","Paused","Completed","On Hold","Cancelled"}
+    if status not in allowed: raise ValueError(f"Unsupported MES status: {status}")
+    with sqlite3.connect(db_path) as c:
+        if not c.execute("SELECT 1 FROM mes_work_orders WHERE work_order=?",(work_order,)).fetchone(): raise ValueError(f"Work order {work_order} was not found.")
+        c.execute("UPDATE mes_work_orders SET status=?,operator=?,updated_at=? WHERE work_order=?",(status,operator,_now(),work_order))
+        c.execute("INSERT INTO mes_events(work_order,event_type,event_time,quantity,reason,operator) VALUES(?,?,?,?,?,?)",(work_order,status.upper().replace(" ","_"),_now(),0,"Lifecycle transition",operator))
+        c.commit()
+    return True
+
+
+def mes_record_event(work_order: str, event_type: str, quantity: float=0.0, reason: str="", operator: str="", db_path: str="enterprise_full_workspace.db") -> int:
+    allowed={"START","PAUSE","RESUME","GOOD","SCRAP","COMPLETE","DOWNTIME","HOLD","RELEASE","DISPATCH"}
+    event=str(event_type).upper().strip()
+    if event not in allowed: raise ValueError(f"Unsupported MES event: {event}")
+    with sqlite3.connect(db_path) as c:
+        if not c.execute("SELECT 1 FROM mes_work_orders WHERE work_order=?",(work_order,)).fetchone(): raise ValueError(f"Work order {work_order} was not found.")
+        cur=c.execute("INSERT INTO mes_events(work_order,event_type,event_time,quantity,reason,operator) VALUES(?,?,?,?,?,?)",(work_order,event,_now(),max(0.0,float(quantity or 0)),str(reason or ""),str(operator or "")))
+        c.commit()
+        return int(cur.lastrowid)
+
+
+def mes_execution_summary(db_path: str="enterprise_full_workspace.db") -> pd.DataFrame:
+    with sqlite3.connect(db_path) as c:
+        wo=pd.read_sql("SELECT * FROM mes_work_orders",c); ev=pd.read_sql("SELECT * FROM mes_events",c)
+    if wo.empty: return pd.DataFrame(columns=["Work Order","Product","Planned Qty","Good Qty","Scrap Qty","WIP Qty","Status","Machine"])
+    if ev.empty:
+        good,scrap=pd.Series(dtype=float),pd.Series(dtype=float)
+    else:
+        ev["quantity"]=pd.to_numeric(ev["quantity"],errors="coerce").fillna(0)
+        good=ev[ev["event_type"].astype(str).str.upper()=="GOOD"].groupby("work_order")["quantity"].sum()
+        scrap=ev[ev["event_type"].astype(str).str.upper()=="SCRAP"].groupby("work_order")["quantity"].sum()
+    out=wo.rename(columns={"work_order":"Work Order","product":"Product","quantity":"Planned Qty","status":"Status","machine":"Machine"})[["Work Order","Product","Planned Qty","Status","Machine"]].copy()
+    out["Good Qty"]=out["Work Order"].map(good).fillna(0); out["Scrap Qty"]=out["Work Order"].map(scrap).fillna(0)
+    out["WIP Qty"]=(pd.to_numeric(out["Planned Qty"],errors="coerce").fillna(0)-out["Good Qty"]-out["Scrap Qty"]).clip(lower=0)
+    return out
+
 
 def finite_schedule(orders: pd.DataFrame, machine_capacity: Optional[dict]=None, start_time: Optional[datetime]=None) -> pd.DataFrame:
     req={"Order","Product","Qty","DueDate","ProcessingMin"}
