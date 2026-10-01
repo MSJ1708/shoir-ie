@@ -57,6 +57,19 @@ def test_roi_reads_pilot_and_case_data(venture_db):
     assert float(pilots.iloc[0]["actual"]) == 75.0
 
 
+def test_all_requested_capabilities_have_existing_module_placements():
+    assert set(venture.CAPABILITY_PLACEMENT) == {
+        "Venture Studio", "Customer & Stakeholder Hub", "Pilot Manager",
+        "Hypothesis → Evidence", "Business Model + Pricing", "ROI / Value Evidence",
+        "Investor Data Room", "Product / Traction Analytics", "End-to-End Demo Mode",
+        "Market & Competitive Intelligence", "Product-Market-Fit / Readiness Dashboard",
+        "Evidence Vault", "Pilot / Experiment Comparison", "Better Onboarding",
+        "Case-Study Management",
+    }
+    assert all(placements for placements in venture.CAPABILITY_PLACEMENT.values())
+    assert all("Venture Studio" not in placements for placements in venture.MODULE_TABS.values())
+
+
 def test_module_mapping_has_no_new_top_level_destination():
     assert "Venture Studio" not in venture.MODULE_TABS
     assert "Industrial Operating System" in venture.MODULE_TABS
