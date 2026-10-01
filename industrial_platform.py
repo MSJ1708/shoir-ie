@@ -136,6 +136,9 @@ def init_platform_db(db_path: str="enterprise_full_workspace.db") -> bool:
         conn.execute("PRAGMA journal_mode=WAL")
         ddl = [
             ("industrial_entities","CREATE TABLE IF NOT EXISTS industrial_entities(entity_id TEXT PRIMARY KEY, entity_type TEXT, name TEXT, attributes_json TEXT, updated_at TEXT)"),
+            ("industrial_relationships","CREATE TABLE IF NOT EXISTS industrial_relationships(source_entity_id TEXT,target_entity_id TEXT,relationship TEXT,attributes_json TEXT,updated_at TEXT,PRIMARY KEY(source_entity_id,target_entity_id,relationship))"),
+            ("mes_quality_releases","CREATE TABLE IF NOT EXISTS mes_quality_releases(id INTEGER PRIMARY KEY AUTOINCREMENT,work_order TEXT,lot TEXT,status TEXT,defect_qty REAL,notes TEXT,operator TEXT,created_at TEXT)"),
+            ("mes_genealogy","CREATE TABLE IF NOT EXISTS mes_genealogy(id INTEGER PRIMARY KEY AUTOINCREMENT,work_order TEXT,lot TEXT,parent_lot TEXT,material TEXT,quantity REAL,created_at TEXT)"),
             ("platform_datasets","CREATE TABLE IF NOT EXISTS platform_datasets(dataset_id TEXT PRIMARY KEY, name TEXT, source_name TEXT, row_count INTEGER, column_count INTEGER, sha256 TEXT, created_at TEXT, schema_json TEXT)"),
             ("platform_models","CREATE TABLE IF NOT EXISTS platform_models(model_id TEXT PRIMARY KEY, name TEXT, version TEXT, model_type TEXT, parameters_json TEXT, data_hash TEXT, assumptions_json TEXT, created_by TEXT, created_at TEXT, status TEXT, solver_version TEXT, result_hash TEXT)"),
             ("platform_experiments","CREATE TABLE IF NOT EXISTS platform_experiments(experiment_id TEXT PRIMARY KEY, name TEXT, module TEXT, scenarios_json TEXT, results_json TEXT, created_by TEXT, created_at TEXT)"),
@@ -236,6 +239,66 @@ def upsert_entities(df: pd.DataFrame, entity_type: str, id_col: str, db_path: st
             count+=1
         c.commit()
     return count
+
+def upsert_relationships(df: pd.DataFrame, source_col: str="From", relation_col: str="Relationship", target_col: str="To", db_path: str="enterprise_full_workspace.db") -> int:
+    req={source_col,relation_col,target_col}
+    if not req <= set(df.columns): raise ValueError(f"Relationships require {sorted(req)}")
+    with sqlite3.connect(db_path) as c:
+        valid={str(x[0]) for x in c.execute("SELECT entity_id FROM industrial_entities").fetchall()}
+        count=0
+        for rec in df.to_dict("records"):
+            source,target,relation=str(rec.get(source_col,"")).strip(),str(rec.get(target_col,"")).strip(),str(rec.get(relation_col,"")).strip()
+            if not source or not target or not relation: continue
+            if valid and (source not in valid or target not in valid): raise ValueError(f"Unknown entity reference: {source} → {target}")
+            attrs={k:v for k,v in rec.items() if k not in {source_col,relation_col,target_col}}
+            c.execute("INSERT OR REPLACE INTO industrial_relationships VALUES(?,?,?,?,?)",(source,target,relation,json.dumps(attrs,default=str),_now()))
+            count+=1
+        c.commit()
+    return count
+
+
+def load_entity_relationships(db_path: str="enterprise_full_workspace.db") -> pd.DataFrame:
+    with sqlite3.connect(db_path) as c:
+        return pd.read_sql("SELECT source_entity_id AS FromEntity,target_entity_id AS ToEntity,relationship AS Relationship,updated_at AS Updated FROM industrial_relationships ORDER BY updated_at DESC",c)
+
+
+def mes_transition_work_order(work_order: str, status: str, operator: str="", db_path: str="enterprise_full_workspace.db") -> bool:
+    allowed={"Planned","Released","Dispatched","Running","Paused","Completed","On Hold","Cancelled"}
+    if status not in allowed: raise ValueError(f"Unsupported MES status: {status}")
+    with sqlite3.connect(db_path) as c:
+        if not c.execute("SELECT 1 FROM mes_work_orders WHERE work_order=?",(work_order,)).fetchone(): raise ValueError(f"Work order {work_order} was not found.")
+        c.execute("UPDATE mes_work_orders SET status=?,operator=?,updated_at=? WHERE work_order=?",(status,operator,_now(),work_order))
+        c.execute("INSERT INTO mes_events(work_order,event_type,event_time,quantity,reason,operator) VALUES(?,?,?,?,?,?)",(work_order,status.upper().replace(" ","_"),_now(),0,"Lifecycle transition",operator))
+        c.commit()
+    return True
+
+
+def mes_record_event(work_order: str, event_type: str, quantity: float=0.0, reason: str="", operator: str="", db_path: str="enterprise_full_workspace.db") -> int:
+    allowed={"START","PAUSE","RESUME","GOOD","SCRAP","COMPLETE","DOWNTIME","HOLD","RELEASE","DISPATCH"}
+    event=str(event_type).upper().strip()
+    if event not in allowed: raise ValueError(f"Unsupported MES event: {event}")
+    with sqlite3.connect(db_path) as c:
+        if not c.execute("SELECT 1 FROM mes_work_orders WHERE work_order=?",(work_order,)).fetchone(): raise ValueError(f"Work order {work_order} was not found.")
+        cur=c.execute("INSERT INTO mes_events(work_order,event_type,event_time,quantity,reason,operator) VALUES(?,?,?,?,?,?)",(work_order,event,_now(),max(0.0,float(quantity or 0)),str(reason or ""),str(operator or "")))
+        c.commit()
+        return int(cur.lastrowid)
+
+
+def mes_execution_summary(db_path: str="enterprise_full_workspace.db") -> pd.DataFrame:
+    with sqlite3.connect(db_path) as c:
+        wo=pd.read_sql("SELECT * FROM mes_work_orders",c); ev=pd.read_sql("SELECT * FROM mes_events",c)
+    if wo.empty: return pd.DataFrame(columns=["Work Order","Product","Planned Qty","Good Qty","Scrap Qty","WIP Qty","Status","Machine"])
+    if ev.empty:
+        good,scrap=pd.Series(dtype=float),pd.Series(dtype=float)
+    else:
+        ev["quantity"]=pd.to_numeric(ev["quantity"],errors="coerce").fillna(0)
+        good=ev[ev["event_type"].astype(str).str.upper()=="GOOD"].groupby("work_order")["quantity"].sum()
+        scrap=ev[ev["event_type"].astype(str).str.upper()=="SCRAP"].groupby("work_order")["quantity"].sum()
+    out=wo.rename(columns={"work_order":"Work Order","product":"Product","quantity":"Planned Qty","status":"Status","machine":"Machine"})[["Work Order","Product","Planned Qty","Status","Machine"]].copy()
+    out["Good Qty"]=out["Work Order"].map(good).fillna(0); out["Scrap Qty"]=out["Work Order"].map(scrap).fillna(0)
+    out["WIP Qty"]=(pd.to_numeric(out["Planned Qty"],errors="coerce").fillna(0)-out["Good Qty"]-out["Scrap Qty"]).clip(lower=0)
+    return out
+
 
 def finite_schedule(orders: pd.DataFrame, machine_capacity: Optional[dict]=None, start_time: Optional[datetime]=None) -> pd.DataFrame:
     req={"Order","Product","Qty","DueDate","ProcessingMin"}
@@ -581,21 +644,30 @@ def render_export_bar(module: str, tables: Sequence[Tuple[str,pd.DataFrame]], fi
     if not tables: return
     st.markdown("---")
     st.subheader("📤 Results & Executive Exports")
-    st.caption("Download the current analysis in the format that fits your workflow. Export errors are isolated so they never interrupt the results view.")
+    st.caption("Every module keeps its working results available and uses a verified data-first export path.")
     a,b,c=st.columns(3)
+    slug=re.sub(r"[^A-Za-z0-9]+","_",module).strip("_").lower() or "module"
     with a:
         x=None
         try:
             x=build_excel_report("Shoir-IE | "+module,tables,figures)
-        except Exception as exc:
-            st.warning("Excel export is temporarily unavailable for this result set. The analysis itself is still available.")
-        if x is not None and st.download_button("📊 Download Excel",x,"shoir_ie_"+re.sub(r"[^A-Za-z0-9]+","_",module).lower()+".xlsx","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",use_container_width=True):
-            log_security_event(username,"report_export",module+"|xlsx")
+            if isinstance(x,(bytearray,memoryview)): x=bytes(x)
+            if not isinstance(x,bytes) or not x: raise ValueError("Empty XLSX payload")
+        except Exception:
+            try:
+                x=build_excel_report("Shoir-IE | "+module,[(str(n), d.copy(deep=True) if isinstance(d,pd.DataFrame) else pd.DataFrame(d)) for n,d in tables],[])
+            except Exception:
+                x=None
+        if x:
+            if st.download_button("📊 Download Excel",x,f"shoir_ie_{slug}.xlsx","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",type="primary",use_container_width=True):
+                log_security_event(username,"report_export",module+"|xlsx")
+        else:
+            st.error("Excel export could not be generated for this result set.")
     with b:
         if tier_allows(tier,"Enterprise"):
             try:
                 y=export_pdf("Shoir-IE | "+module,tables,figures)
-                if st.download_button("📄 Download PDF",y,"shoir_ie_"+re.sub(r"[^A-Za-z0-9]+","_",module).lower()+".pdf","application/pdf",use_container_width=True): log_security_event(username,"report_export",module+"|pdf")
+                if st.download_button("📄 Download PDF",y,f"shoir_ie_{slug}.pdf","application/pdf",use_container_width=True): log_security_event(username,"report_export",module+"|pdf")
             except Exception:
                 st.warning("PDF export could not be generated for this result set.")
         else: st.info("PDF export: Enterprise")
@@ -603,7 +675,7 @@ def render_export_bar(module: str, tables: Sequence[Tuple[str,pd.DataFrame]], fi
         if tier_allows(tier,"Enterprise"):
             try:
                 z=export_pptx("Shoir-IE | "+module,tables,figures)
-                if st.download_button("📽️ Download PowerPoint",z,"shoir_ie_"+re.sub(r"[^A-Za-z0-9]+","_",module).lower()+".pptx","application/vnd.openxmlformats-officedocument.presentationml.presentation",use_container_width=True): log_security_event(username,"report_export",module+"|pptx")
+                if st.download_button("📽️ Download PowerPoint",z,f"shoir_ie_{slug}.pptx","application/vnd.openxmlformats-officedocument.presentationml.presentation",use_container_width=True): log_security_event(username,"report_export",module+"|pptx")
             except Exception:
                 st.warning("PowerPoint export could not be generated for this result set.")
         else: st.info("PowerPoint: Enterprise")
@@ -850,22 +922,81 @@ def render_module(module: str, tier: str, username: str):
         st.dataframe(edited,use_container_width=True)
         render_export_bar(module,[("Validation Table",edited)],tier,username=username)
     elif module=="Industrial Data Model & Digital Thread":
-        tabs=st.tabs(["Entities","Relationships","Data Quality"])
+        st.subheader("🧬 Industrial Data Model & Digital Thread")
+        st.caption("Create canonical entities, persist explicit relationships, inspect lineage and see change-impact paths in one governed workspace.")
+        tabs=st.tabs(["🏗️ Entity Studio","🔗 Relationship Studio","🕸️ Thread Map","🔎 Trace & Impact","✅ Data Quality"])
         with tabs[0]:
-            entity_type=st.selectbox("Entity type",["Product","SKU","Customer","Supplier","Facility","Machine","Employee","Material","Route","Operation","Order"])
-            id_col=st.text_input("ID column","ID")
-            df=st.data_editor(st.session_state.setdefault("thread_df",pd.DataFrame({"ID":["FAC-001","MCH-001"],"name":["Riyadh DC","CNC-01"],"capacity":[1000,80]})),num_rows="dynamic",use_container_width=True,key="thread_editor")
-            if st.button("🔗 Register Entities",type="primary",use_container_width=True,key="thread_register"):
-                if id_col in df.columns: st.success(f"Registered {upsert_entities(df,entity_type,id_col):,} entities into the digital thread.")
-                else: st.error(f"ID column '{id_col}' not found.")
-            with sqlite3.connect("enterprise_full_workspace.db") as c: ent=pd.read_sql("SELECT * FROM industrial_entities ORDER BY updated_at DESC LIMIT 100",c)
+            entity_type=st.selectbox("Entity type",["Product","SKU","Customer","Supplier","Facility","Machine","Employee","Material","Route","Operation","Order","Process","Quality","Maintenance","Energy","Cost","Scenario","Decision","Outcome"],key="thread_entity_type_v2")
+            id_col=st.text_input("Identity column","ID",key="thread_id_col_v2")
+            default_entity=pd.DataFrame({"ID":["FAC-001","MCH-001","WO-001"],"name":["Riyadh DC","CNC-01","WO-001"],"status":["Active","Active","Released"],"owner":["Operations","Maintenance","Production"],"capacity":[1000,80,100],"unit":["units/day","units/hour","units"]})
+            df=st.data_editor(st.session_state.setdefault("thread_df",default_entity),num_rows="dynamic",use_container_width=True,hide_index=True,key="thread_editor_v2")
+            st.session_state["thread_df"]=df.copy(deep=True)
+            q=data_quality_report(df)
+            m1,m2,m3,m4=st.columns(4)
+            m1.metric("Rows",f"{len(df):,}"); m2.metric("Fields",f"{len(df.columns):,}"); m3.metric("Quality",f"{q['score']:.1f}%")
+            m4.metric("Duplicate IDs",f"{int(df[id_col].duplicated().sum()) if id_col in df.columns else 0:,}")
+            if st.button("🔗 Register / update entities",type="primary",use_container_width=True,key="thread_register_v2"):
+                try:
+                    if id_col not in df.columns: raise ValueError(f"Identity column '{id_col}' is missing.")
+                    n=upsert_entities(df,entity_type,id_col)
+                    st.success(f"{n:,} {entity_type} record(s) persisted to the Digital Thread.")
+                    st.rerun()
+                except Exception as exc: st.error(f"Entity registration failed safely: {exc}")
+            with sqlite3.connect("enterprise_full_workspace.db") as con:
+                ent=pd.read_sql("SELECT entity_id,entity_type,name,attributes_json,updated_at FROM industrial_entities ORDER BY updated_at DESC LIMIT 500",con)
             st.dataframe(ent,use_container_width=True,hide_index=True)
         with tabs[1]:
-            rel=st.data_editor(st.session_state.setdefault("thread_rel",pd.DataFrame({"From":["FAC-001"],"Relationship":["contains"],"To":["MCH-001"]})),num_rows="dynamic",use_container_width=True,key="thread_rel_editor")
-            st.info("Relationships are intentionally explicit: use entity IDs and relationship names; no hidden inference.")
+            with sqlite3.connect("enterprise_full_workspace.db") as con:
+                entity_frame=pd.read_sql("SELECT entity_id,entity_type,name FROM industrial_entities ORDER BY entity_type,name",con)
+            entity_ids=entity_frame["entity_id"].astype(str).tolist() if not entity_frame.empty else ["Facility:FAC-001","Machine:MCH-001"]
+            default_rel=pd.DataFrame({"From":[entity_ids[0]],"Relationship":["contains"],"To":[entity_ids[1] if len(entity_ids)>1 else entity_ids[0]],"Evidence":["User-entered relationship"]})
+            rel=st.data_editor(st.session_state.setdefault("thread_rel",default_rel),num_rows="dynamic",use_container_width=True,hide_index=True,key="thread_rel_editor_v2")
+            st.session_state["thread_rel"]=rel.copy(deep=True)
+            persisted_rel=load_entity_relationships()
+            a,b,c2=st.columns(3); a.metric("Registered entities",f"{len(entity_ids):,}"); b.metric("Persisted links",f"{len(persisted_rel):,}"); c2.metric("Relation types",f"{persisted_rel['Relationship'].nunique() if not persisted_rel.empty else 0:,}")
+            if st.button("💾 Save explicit relationships",type="primary",use_container_width=True,key="thread_rel_save_v2"):
+                try:
+                    n=upsert_relationships(rel)
+                    st.success(f"{n:,} relationship(s) persisted.")
+                    st.rerun()
+                except Exception as exc: st.error(f"Relationship save blocked safely: {exc}")
+            st.dataframe(persisted_rel.head(500),use_container_width=True,hide_index=True)
         with tabs[2]:
-            st.write(data_quality_report(df))
-        render_export_bar(module,[("Entities",df),("Relationships",rel)],tier,username=username)
+            rels=load_entity_relationships()
+            if rels.empty:
+                st.info("Register entities and save at least one relationship to activate the thread graph.")
+            else:
+                import plotly.graph_objects as go
+                all_ids=sorted(set(rels["FromEntity"].astype(str))|set(rels["ToEntity"].astype(str)))
+                theta=np.linspace(0,2*np.pi,max(1,len(all_ids)),endpoint=False)
+                pos={eid:(float(np.cos(t)),float(np.sin(t))) for eid,t in zip(all_ids,theta)}
+                fig=go.Figure()
+                for rr in rels.itertuples(index=False):
+                    sx,sy=pos[str(rr.FromEntity)]; tx,ty=pos[str(rr.ToEntity)]
+                    fig.add_trace(go.Scatter(x=[sx,tx,None],y=[sy,ty,None],mode="lines",showlegend=False,hovertext=[str(rr.Relationship),"",""]))
+                labels={str(r.entity_id):f"{r.entity_type} · {r.name}" for r in ent.itertuples()} if isinstance(ent,pd.DataFrame) and not ent.empty else {}
+                fig.add_trace(go.Scatter(x=[pos[x][0] for x in all_ids],y=[pos[x][1] for x in all_ids],mode="markers+text",text=[labels.get(x,x) for x in all_ids],textposition="top center",marker=dict(size=16),hovertext=all_ids,showlegend=False))
+                fig.update_layout(height=520,showlegend=False,xaxis=dict(visible=False),yaxis=dict(visible=False),margin=dict(l=10,r=10,t=20,b=10))
+                st.plotly_chart(fig,use_container_width=True)
+                st.dataframe(rels,use_container_width=True,hide_index=True)
+        with tabs[3]:
+            rels=load_entity_relationships()
+            with sqlite3.connect("enterprise_full_workspace.db") as con:
+                ents=pd.read_sql("SELECT entity_id,entity_type,name,attributes_json,updated_at FROM industrial_entities",con)
+            if ents.empty:
+                st.info("No entities registered yet.")
+            else:
+                labels={str(r.entity_id):f"{r.entity_type} · {r.name} · {r.entity_id}" for r in ents.itertuples()}
+                selected_id=st.selectbox("Trace from entity",list(labels),format_func=labels.get,key="thread_trace_id")
+                incoming=rels[rels["ToEntity"].eq(selected_id)] if not rels.empty else pd.DataFrame()
+                outgoing=rels[rels["FromEntity"].eq(selected_id)] if not rels.empty else pd.DataFrame()
+                a,b,c2=st.columns(3); a.metric("Incoming links",len(incoming)); b.metric("Outgoing links",len(outgoing)); c2.metric("Impact paths",len(incoming)+len(outgoing))
+                st.markdown("#### Incoming"); st.dataframe(incoming,use_container_width=True,hide_index=True)
+                st.markdown("#### Outgoing / downstream"); st.dataframe(outgoing,use_container_width=True,hide_index=True)
+                st.markdown("#### Entity attributes"); st.dataframe(ents[ents["entity_id"].astype(str).eq(selected_id)],use_container_width=True,hide_index=True)
+        with tabs[4]:
+            st.json(data_quality_report(df))
+        render_export_bar(module,[("Entities",df),("Relationships",load_entity_relationships())],tier,username=username)
     elif module=="Advanced Planning & Scheduling":
         tabs=st.tabs(["Demand / MRP","Finite Schedule","Dispatch"])
         with tabs[0]:
@@ -885,28 +1016,137 @@ def render_module(module: str, tier: str, username: str):
         figs=[("Finite Schedule",fig)] if "fig" in locals() else []
         render_export_bar(module,tables,figs,tier,username)
     elif module=="Manufacturing Execution System":
-        tabs=st.tabs(["Work Orders","Execution Events","OEE & WIP"])
+        st.subheader("🏭 Manufacturing Execution System")
+        st.caption("Manage the work-order lifecycle, capture shop-floor events, calculate OEE/WIP, release quality, and maintain lot genealogy from one operational record.")
+        tabs=st.tabs(["🛰️ Command Center","📋 Work Orders","▶️ Execution","📊 OEE & WIP","🧬 Quality & Genealogy"])
+        summary=mes_execution_summary()
         with tabs[0]:
-            wo=st.data_editor(st.session_state.setdefault("mes_wo_df",pd.DataFrame({"Work Order":["WO-001","WO-002"],"Product":["P-100","P-200"],"Quantity":[1000,600],"Due Date":[str(datetime.now()+timedelta(days=1)),str(datetime.now()+timedelta(days=2))],"Status":["Released","Released"],"Machine":["M-01","M-02"],"Operator":[""]*2})),num_rows="dynamic",use_container_width=True,key="mes_wo_editor")
-            if st.button("💾 Save Work Orders",type="primary",use_container_width=True,key="mes_save"): 
-                with sqlite3.connect("enterprise_full_workspace.db") as c:
-                    for r in wo.to_dict("records"): c.execute("INSERT OR REPLACE INTO mes_work_orders VALUES(?,?,?,?,?,?,?,?)",(r["Work Order"],r["Product"],float(r["Quantity"]),str(r["Due Date"]),r["Status"],r["Machine"],r["Operator"],_now()))
-                    c.commit()
-                st.success("Work orders saved.")
+            open_mask=~summary["Status"].astype(str).str.lower().isin(["completed","cancelled"]) if not summary.empty else pd.Series(dtype=bool)
+            wip=float(summary.loc[open_mask,"WIP Qty"].sum()) if not summary.empty else 0.0
+            total=float(summary["Planned Qty"].sum()) if not summary.empty else 0.0
+            completed=int(summary["Status"].astype(str).str.lower().eq("completed").sum()) if not summary.empty else 0
+            running=int(summary["Status"].astype(str).str.lower().isin(["running","paused","dispatched"]).sum()) if not summary.empty else 0
+            k1,k2,k3,k4=st.columns(4)
+            k1.metric("Work orders",f"{len(summary):,}"); k2.metric("WIP qty",f"{wip:,.0f}"); k3.metric("Running / paused",f"{running:,}"); k4.metric("Completed",f"{completed:,}")
+            if total:
+                st.progress(min(1.0,max(0.0,(total-wip)/total)),text=f"Gross completion {(total-wip)/total*100:.1f}%")
+            st.dataframe(summary,use_container_width=True,hide_index=True)
+            try:
+                with sqlite3.connect("enterprise_full_workspace.db") as con:
+                    event_counts=pd.read_sql("SELECT event_type AS Event, COUNT(*) AS Count FROM mes_events GROUP BY event_type ORDER BY Count DESC",con)
+                if not event_counts.empty:
+                    st.plotly_chart(px.bar(event_counts,x="Event",y="Count",title="Shop-floor event mix"),use_container_width=True)
+            except Exception:
+                pass
         with tabs[1]:
-            ev=st.data_editor(st.session_state.setdefault("mes_events_df",pd.DataFrame({"Work Order":["WO-001"],"Event":["START"],"Event Time":[_now()],"Quantity":[0],"Reason":[""],"Operator":[""]})),num_rows="dynamic",use_container_width=True,key="mes_event_editor")
-            if st.button("📝 Record Events",use_container_width=True,key="mes_event_save"):
-                with sqlite3.connect("enterprise_full_workspace.db") as c:
-                    for r in ev.to_dict("records"): c.execute("INSERT INTO mes_events(work_order,event_type,event_time,quantity,reason,operator) VALUES(?,?,?,?,?,?)",(r["Work Order"],r["Event"],str(r["Event Time"]),float(r["Quantity"] or 0),str(r["Reason"]),str(r["Operator"])))
-                    c.commit()
+            wo_default=pd.DataFrame({"Work Order":["WO-001","WO-002"],"Product":["P-100","P-200"],"Quantity":[1000,600],"Due Date":[str(datetime.now()+timedelta(days=1)),str(datetime.now()+timedelta(days=2))],"Status":["Released","Released"],"Machine":["M-01","M-02"],"Operator":["",""]})
+            wo=st.data_editor(st.session_state.setdefault("mes_wo_df",wo_default),num_rows="dynamic",use_container_width=True,hide_index=True,key="mes_wo_editor_v2")
+            st.session_state["mes_wo_df"]=wo.copy(deep=True)
+            left,right=st.columns([1,1])
+            with left:
+                st.markdown("#### Create work order")
+                with st.form("mes_create_wo_form"):
+                    new_wo=st.text_input("Work order ID","WO-NEW")
+                    new_product=st.text_input("Product","P-100")
+                    new_qty=st.number_input("Planned quantity",1.0,1000000.0,100.0)
+                    new_due=st.date_input("Due date",datetime.now().date()+timedelta(days=1))
+                    new_machine=st.text_input("Machine","M-01")
+                    create=st.form_submit_button("➕ Create & Release")
+                if create:
+                    try:
+                        with sqlite3.connect("enterprise_full_workspace.db") as con:
+                            con.execute("INSERT INTO mes_work_orders(work_order,product,quantity,due_date,status,machine,operator,updated_at) VALUES(?,?,?,?,?,?,?,?)",(new_wo.strip(),new_product,float(new_qty),str(new_due),"Released",new_machine,"",_now()))
+                            con.commit()
+                        st.success(f"Created {new_wo} and released it."); st.rerun()
+                    except sqlite3.IntegrityError:
+                        st.error("That work-order ID already exists.")
+                    except Exception as exc:
+                        st.error(f"Work-order creation failed safely: {exc}")
+            with right:
+                ids=sorted(set(wo["Work Order"].astype(str))) if "Work Order" in wo.columns else []
+                selected_wo=st.selectbox("Selected work order",ids,key="mes_selected_wo") if ids else ""
+                operator=st.text_input("Operator / supervisor",key="mes_operator")
+                lifecycle=st.selectbox("Lifecycle action",["Released","Dispatched","Running","Paused","Completed","On Hold","Cancelled"],key="mes_lifecycle")
+                if st.button("⚙️ Apply lifecycle action",type="primary",use_container_width=True,key="mes_transition"):
+                    try:
+                        mes_transition_work_order(selected_wo,lifecycle,operator); st.success(f"{selected_wo} moved to {lifecycle}."); st.rerun()
+                    except Exception as exc:
+                        st.error(f"Lifecycle transition failed safely: {exc}")
+            with sqlite3.connect("enterprise_full_workspace.db") as con:
+                saved=pd.read_sql("SELECT * FROM mes_work_orders ORDER BY updated_at DESC",con)
+            st.dataframe(saved,use_container_width=True,hide_index=True)
         with tabs[2]:
-            oe=st.data_editor(st.session_state.setdefault("mes_oee_df",pd.DataFrame({"PlannedMin":[480],"DowntimeMin":[45],"IdealCycleSec":[30],"TotalCount":[800],"GoodCount":[760]})),num_rows="dynamic",use_container_width=True,key="mes_oee_editor")
-            if st.button("📊 Calculate OEE",type="primary",use_container_width=True,key="mes_oee_run"):
-                st.session_state["mes_oee_result"]=oee_from_events(oe.iloc[[0]])
-            if "mes_oee_result" in st.session_state: st.json(st.session_state["mes_oee_result"])
-            with sqlite3.connect("enterprise_full_workspace.db") as c: saved=pd.read_sql("SELECT * FROM mes_work_orders",c)
-            st.write("Persisted Work Orders"); st.dataframe(saved,use_container_width=True,hide_index=True)
-        render_export_bar(module,[("Work Orders",wo),("Events",ev),("OEE Input",oe),("Persisted Work Orders",saved if "saved" in locals() else pd.DataFrame())],tier,username)
+            ids=sorted(set(summary["Work Order"].astype(str))) if not summary.empty else []
+            selected_event_wo=st.selectbox("Work order",ids,key="mes_event_wo") if ids else ""
+            e1,e2,e3=st.columns(3)
+            with e1:
+                event_type=st.selectbox("Event",["START","PAUSE","RESUME","GOOD","SCRAP","COMPLETE","DOWNTIME","HOLD","RELEASE","DISPATCH"],key="mes_event_type")
+                event_qty=st.number_input("Quantity",0.0,1000000.0,0.0,key="mes_event_qty")
+            with e2:
+                event_reason=st.text_input("Reason / note",key="mes_event_reason")
+                event_operator=st.text_input("Operator",key="mes_event_operator")
+            with e3:
+                st.write(" ")
+                if st.button("📝 Record shop-floor event",type="primary",use_container_width=True,key="mes_record_event_v2"):
+                    try:
+                        mes_record_event(selected_event_wo,event_type,event_qty,event_reason,event_operator)
+                        status_map={"COMPLETE":"Completed","START":"Running","PAUSE":"Paused","RESUME":"Running","HOLD":"On Hold","RELEASE":"Released","DISPATCH":"Dispatched"}
+                        if event_type in status_map: mes_transition_work_order(selected_event_wo,status_map[event_type],event_operator)
+                        st.success("Event recorded and work-order state synchronized."); st.rerun()
+                    except Exception as exc:
+                        st.error(f"Event capture failed safely: {exc}")
+            with sqlite3.connect("enterprise_full_workspace.db") as con:
+                events=pd.read_sql("SELECT id,work_order,event_type,event_time,quantity,reason,operator FROM mes_events ORDER BY id DESC LIMIT 500",con)
+            st.dataframe(events,use_container_width=True,hide_index=True)
+        with tabs[3]:
+            oe_default=pd.DataFrame({"PlannedMin":[480],"DowntimeMin":[45],"IdealCycleSec":[30],"TotalCount":[800],"GoodCount":[760]})
+            oe=st.data_editor(st.session_state.setdefault("mes_oee_df",oe_default),num_rows="dynamic",use_container_width=True,hide_index=True,key="mes_oee_editor_v2")
+            st.session_state["mes_oee_df"]=oe.copy(deep=True)
+            if st.button("📊 Calculate OEE",type="primary",use_container_width=True,key="mes_oee_run_v2"):
+                try: st.session_state["mes_oee_result"]=oee_from_events(oe)
+                except Exception as exc: st.error(f"OEE calculation failed safely: {exc}")
+            res=st.session_state.get("mes_oee_result")
+            if isinstance(res,dict):
+                a,b,c2,d2=st.columns(4)
+                a.metric("Availability",f"{float(res.get('Availability %',0)):.1f}%"); b.metric("Performance",f"{float(res.get('Performance %',0)):.1f}%"); c2.metric("Quality",f"{float(res.get('Quality %',0)):.1f}%"); d2.metric("OEE",f"{float(res.get('OEE %',0)):.1f}%")
+            st.markdown("#### Live execution summary")
+            st.dataframe(summary,use_container_width=True,hide_index=True)
+        with tabs[4]:
+            st.markdown("#### Quality release")
+            q1,q2=st.columns(2)
+            with q1:
+                qwo=st.selectbox("Work order",sorted(set(summary["Work Order"].astype(str))) if not summary.empty else [""],key="mes_quality_wo")
+                lot=st.text_input("Lot / batch","LOT-001",key="mes_lot")
+                qstatus=st.selectbox("Release status",["Pending","Released","Hold","Rejected"],key="mes_qstatus")
+            with q2:
+                defect_qty=st.number_input("Defect quantity",0.0,1000000.0,0.0,key="mes_defect_qty")
+                qnotes=st.text_area("Quality notes",height=80,key="mes_quality_notes")
+                qoperator=st.text_input("Quality operator",key="mes_quality_operator")
+            if st.button("✅ Save quality release",type="primary",use_container_width=True,key="mes_quality_save"):
+                with sqlite3.connect("enterprise_full_workspace.db") as con:
+                    con.execute("INSERT INTO mes_quality_releases(work_order,lot,status,defect_qty,notes,operator,created_at) VALUES(?,?,?,?,?,?,?)",(qwo,lot,qstatus,float(defect_qty),qnotes,qoperator,_now())); con.commit()
+                st.success("Quality release recorded."); st.rerun()
+            with sqlite3.connect("enterprise_full_workspace.db") as con:
+                qreleases=pd.read_sql("SELECT * FROM mes_quality_releases ORDER BY id DESC LIMIT 200",con)
+            st.dataframe(qreleases,use_container_width=True,hide_index=True)
+            st.markdown("#### Lot genealogy")
+            g1,g2,g3=st.columns(3)
+            with g1:
+                gwo=st.selectbox("WO for genealogy",sorted(set(summary["Work Order"].astype(str))) if not summary.empty else [""],key="mes_genealogy_wo")
+                glot=st.text_input("Current lot",value="LOT-001",key="mes_genealogy_lot")
+            with g2:
+                parent=st.text_input("Parent lot / source","RAW-001",key="mes_genealogy_parent")
+                material=st.text_input("Material","MAT-001",key="mes_genealogy_material")
+            with g3:
+                gqty=st.number_input("Material quantity",0.0,1000000.0,100.0,key="mes_genealogy_qty")
+                if st.button("➕ Record genealogy",use_container_width=True,key="mes_genealogy_save"):
+                    with sqlite3.connect("enterprise_full_workspace.db") as con:
+                        con.execute("INSERT INTO mes_genealogy(work_order,lot,parent_lot,material,quantity,created_at) VALUES(?,?,?,?,?,?)",(gwo,glot,parent,material,float(gqty),_now())); con.commit()
+                    st.success("Genealogy link recorded."); st.rerun()
+            with sqlite3.connect("enterprise_full_workspace.db") as con:
+                genealogy=pd.read_sql("SELECT * FROM mes_genealogy ORDER BY id DESC LIMIT 300",con)
+            st.dataframe(genealogy,use_container_width=True,hide_index=True)
+        render_export_bar(module,[("Work Orders",wo),("Execution Events",events if 'events' in locals() else pd.DataFrame()),("Execution Summary",summary),("OEE Input",oe),("Quality Releases",qreleases if 'qreleases' in locals() else pd.DataFrame()),("Genealogy",genealogy if 'genealogy' in locals() else pd.DataFrame())],tier,username)
     elif module=="Quality Engineering & Reliability":
         tabs=st.tabs(["SPC & Capability","MSA","DOE / ANOVA / Regression","FMEA & Reliability"])
         with tabs[0]:

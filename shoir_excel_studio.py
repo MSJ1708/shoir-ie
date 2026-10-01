@@ -2109,6 +2109,86 @@ def _enhanced_coerce_series(series: pd.Series, name: str) -> tuple[pd.Series, st
     return s.astype("string"), "Text"
 
 
+def _excel_download_bytes(value: Any, label: str) -> bytes:
+    """Normalize Streamlit download payloads and reject empty/invalid binaries."""
+    if isinstance(value, bytes):
+        payload = value
+    elif isinstance(value, bytearray):
+        payload = bytes(value)
+    elif isinstance(value, memoryview):
+        payload = value.tobytes()
+    elif hasattr(value, "getvalue"):
+        payload = value.getvalue()
+        if isinstance(payload, bytearray):
+            payload = bytes(payload)
+    else:
+        raise TypeError(f"{label} export is not a byte payload ({type(value).__name__}).")
+    if not isinstance(payload, bytes) or not payload:
+        raise ValueError(f"{label} export is empty.")
+    return payload
+
+
+def _excel_valid_xlsx(payload: bytes) -> bool:
+    """Cheap integrity check that works in Streamlit Cloud without filesystem I/O."""
+    try:
+        if not zipfile.is_zipfile(io.BytesIO(payload)):
+            return False
+        import openpyxl
+        book = openpyxl.load_workbook(io.BytesIO(payload), read_only=True, data_only=False)
+        try:
+            return bool(book.sheetnames)
+        finally:
+            book.close()
+    except Exception:
+        return False
+
+
+def _ensure_excel_exports(result: dict[str, Any]) -> dict[str, Any]:
+    """Guarantee downloadable XLSX + evidence bundle payloads exist and are valid."""
+    try:
+        xlsx = _excel_download_bytes(result.get("xlsx"), "Industrial XLSX")
+    except Exception:
+        xlsx = b""
+    if not _excel_valid_xlsx(xlsx):
+        xlsx = _postprocess_export_guardrails(
+            build_ultimate_workbook(
+                f"Shoir-IE — {result.get('filename', 'industrial_workbook')}",
+                result.get("cleaned_sheets", {}) or {},
+                result.get("raw_sheets", {}) or {},
+                result.get("audits", {}) or {},
+                result.get("profiles", {}) or {},
+                source_metadata=result.get("source_metadata"),
+                field_intelligence=result.get("field_intelligence"),
+                review_register=result.get("review_register"),
+                before_after=result.get("before_after"),
+                formula_inventory=result.get("formula_inventory"),
+                cross_sheet_map=result.get("cross_sheet_map"),
+            )
+        )
+    if not _excel_valid_xlsx(xlsx):
+        raise ValueError("Shoir-IE could not create a valid XLSX payload from the cleaned workbook.")
+    result["xlsx"] = xlsx
+
+    try:
+        bundle = _excel_download_bytes(result.get("bundle"), "Evidence bundle")
+    except Exception:
+        bundle = b""
+    if not bundle or not zipfile.is_zipfile(io.BytesIO(bundle)):
+        bundle = build_ultimate_bundle(
+            f"Shoir-IE — {result.get('filename', 'industrial_workbook')}",
+            xlsx,
+            result.get("audits", {}) or {},
+            result.get("profiles", {}) or {},
+            cleaned_sheets=result.get("cleaned_sheets", {}) or {},
+            raw_sheets=result.get("raw_sheets", {}) or {},
+            field_intelligence=result.get("field_intelligence"),
+            review_register=result.get("review_register"),
+            source_metadata=result.get("source_metadata"),
+        )
+    result["bundle"] = _excel_download_bytes(bundle, "Evidence bundle")
+    return result
+
+
 def _rebuild_excel_result(result: dict[str, Any]) -> dict[str, Any]:
     result["xlsx"] = _postprocess_export_guardrails(build_ultimate_workbook(
         f"Shoir-IE — {result['filename']}",
@@ -2134,7 +2214,7 @@ def _rebuild_excel_result(result: dict[str, Any]) -> dict[str, Any]:
         review_register=result.get("review_register"),
         source_metadata=result.get("source_metadata"),
     )
-    return result
+    return _ensure_excel_exports(result)
 
 
 _BASE_PROCESS_UPGRADED = process_uploaded_workbook
@@ -2194,19 +2274,20 @@ def _final_read_raw_workbook(raw: bytes, filename: str) -> dict[str, pd.DataFram
     if not raw:
         raise ValueError("The uploaded file is empty.")
     lower = str(filename).lower()
-    if lower.endswith(".csv"):
+
+    if lower.endswith((".csv",".tsv",".txt")):
         decoded = None
-        for encoding in ("utf-8-sig", "utf-8", "cp1252", "latin-1"):
+        for encoding in ("utf-8-sig","utf-8","cp1252","latin-1"):
             try:
                 decoded = raw.decode(encoding)
                 break
             except UnicodeDecodeError:
                 continue
         if decoded is None:
-            raise ValueError("CSV encoding could not be decoded safely.")
-        delimiter = _choose_csv_delimiter(decoded)
+            raise ValueError("Delimited-text encoding could not be decoded safely.")
+        delimiter = "\t" if lower.endswith(".tsv") else _choose_csv_delimiter(decoded)
         return {
-            "CSV": pd.read_csv(
+            "CSV" if lower.endswith(".csv") else "TEXT": pd.read_csv(
                 io.StringIO(decoded),
                 header=None,
                 dtype=object,
@@ -2214,8 +2295,12 @@ def _final_read_raw_workbook(raw: bytes, filename: str) -> dict[str, pd.DataFram
                 keep_default_na=False,
             )
         }
-    if lower.endswith((".xlsx", ".xlsm")):
-        book = pd.ExcelFile(io.BytesIO(raw), engine="openpyxl")
+
+    if lower.endswith((".xlsx",".xlsm",".xls")):
+        try:
+            book = pd.ExcelFile(io.BytesIO(raw))
+        except Exception as exc:
+            raise ValueError(f"Excel workbook could not be opened: {type(exc).__name__}: {exc}") from exc
         try:
             return {
                 str(sheet): pd.read_excel(book, sheet_name=sheet, header=None, dtype=object)
@@ -2226,7 +2311,9 @@ def _final_read_raw_workbook(raw: bytes, filename: str) -> dict[str, pd.DataFram
                 book.close()
             except Exception:
                 pass
-    raise ValueError("Only .xlsx, .xlsm and .csv files are supported.")
+
+    raise ValueError("Supported imports: .xlsx, .xlsm, .xls, .csv, .tsv and .txt.")
+
 
 
 def _final_clean_dataframe(df: pd.DataFrame) -> tuple[pd.DataFrame, list[dict[str, str]]]:
@@ -4175,6 +4262,34 @@ def _excel_render_v2(tier: str, username: str) -> None:
     cards[3].metric("Review", len(review))
     cards[4].metric("High priority", high)
     cards[5].metric("Validation fails", len(failures))
+
+    # Always expose verified downloads above the tabbed workflow. This keeps
+    # export reachable even when a user never opens the Version & Export tab.
+    try:
+        _ensure_excel_exports(result)
+        st.session_state["excel_studio_result"] = result
+        export_name = re.sub(r"[^A-Za-z0-9]+", "_", str(result.get("filename", "workbook"))).strip("_").lower() or "workbook"
+        ex1, ex2, ex3 = st.columns([1.2, 1.2, 1])
+        ex1.download_button(
+            "📥 Download improved Excel now",
+            result["xlsx"],
+            file_name=f"shoir_ie_industrial_{export_name}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            type="primary",
+            use_container_width=True,
+            key="excel_studio_verified_xlsx_top",
+        )
+        ex2.download_button(
+            "📦 Download evidence package",
+            result["bundle"],
+            file_name=f"shoir_ie_industrial_{export_name}_evidence.zip",
+            mime="application/zip",
+            use_container_width=True,
+            key="excel_studio_verified_bundle_top",
+        )
+        ex3.caption(f"Verified XLSX: {len(result['xlsx'])/1024:.1f} KB · bundle: {len(result['bundle'])/1024:.1f} KB")
+    except Exception as exc:
+        st.error(f"Export preparation failed safely: {type(exc).__name__}: {exc}")
 
     chosen_key = st.session_state.get("excel_studio_active_dataset")
     if chosen_key not in frames:

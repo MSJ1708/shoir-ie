@@ -63,6 +63,30 @@ from shoir_enterprise_ops import (
     render_human_factors_extension, render_geospatial_extension,
     knowledge_context,
 )
+
+
+# =====================================================================
+# Shared post-module context
+# ---------------------------------------------------------------------
+# Must be defined before any module-specific st.stop() can interrupt the page.
+# -----------------------------------------------------------------------------
+# Native/domain modules call this cross-cutting layer after their main UI.
+# Keep it defensive: optional workspace context must never crash a module.
+def _render_post_module_layers(module: str) -> None:
+    try:
+        render_post_module_context(
+            str(module),
+            str(st.session_state.get("current_user", "unknown")),
+            str(st.session_state.get("user_tier", "Starter Tier")),
+        )
+    except Exception as exc:
+        st.warning(
+            f"Shared module context is temporarily unavailable for {module}. "
+            "The domain workspace remains active."
+        )
+        with st.expander("Module context diagnostic", expanded=False):
+            st.code(f"{type(exc).__name__}: {exc}")
+
 # =====================================================================
 # PAGE CONFIGURATION & CUSTOM CSS (Professional Styling & Hover Zoom)
 # =====================================================================
