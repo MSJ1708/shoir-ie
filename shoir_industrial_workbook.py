@@ -22,6 +22,7 @@ import math
 import re
 import sqlite3
 import uuid
+import zipfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable, Mapping, Sequence
@@ -752,18 +753,89 @@ def ensure_workbook_db(path:str=DB_PATH)->None:
             owner TEXT NOT NULL,sheet_name TEXT,cell_ref TEXT,comment TEXT NOT NULL,created_at TEXT NOT NULL)""")
         conn.commit()
 
-def _serialize_workbook(workbook:Mapping[str,pd.DataFrame])->bytes:
+def _serialize_workbook(
+    workbook:Mapping[str,pd.DataFrame],
+    formulas:Mapping[str,Mapping[str,str]]|None=None,
+    semantic_map:Mapping[str,Any]|None=None,
+    variables:Mapping[str,Any]|None=None,
+)->bytes:
+    """Create a presentation-ready, auditable XLSX without losing workbook data."""
+    formulas=formulas or {}
+    semantic_map=semantic_map or {}
+    variables=variables or {}
     payload=io.BytesIO()
     with pd.ExcelWriter(payload,engine="xlsxwriter") as writer:
+        book=writer.book
+        title_fmt=book.add_format({"bold":True,"font_size":16,"font_color":"1E3A8A"})
+        meta_fmt=book.add_format({"italic":True,"font_color":"64748B"})
+        header_fmt=book.add_format({"bold":True,"bg_color":"1E3A8A","font_color":"white","border":1})
         used=set()
         for raw_sheet,df in workbook.items():
-            sheet=re.sub(r"[:\\\\/?*\\[\\]]+","",str(raw_sheet)).strip()[:31] or "Sheet1"
+            sheet=re.sub(r"[:\\/?*\[\]]+","",str(raw_sheet)).strip()[:31] or "Sheet1"
             base=sheet; idx=2
             while sheet in used:
                 suffix=f" ({idx})"; sheet=(base[:31-len(suffix)]+suffix)[:31]; idx+=1
             used.add(sheet)
-            df.copy(deep=True).to_excel(writer,index=False,sheet_name=sheet)
+            safe=df.copy(deep=True)
+            safe.to_excel(writer,index=False,sheet_name=sheet,startrow=2)
+            ws=writer.sheets[sheet]
+            ws.write(0,0,str(raw_sheet),title_fmt)
+            ws.write(1,0,f"{len(safe):,} rows × {len(safe.columns):,} columns",meta_fmt)
+            for j,col in enumerate(safe.columns):
+                ws.write(2,j,str(col),header_fmt)
+                series=safe.iloc[:,j] if len(safe) else pd.Series(dtype=object)
+                width=min(36,max(10,max([len(str(col))]+[len(str(v)) for v in series.head(200).tolist()])+2))
+                ws.set_column(j,j,width)
+            if len(safe.columns) and len(safe):
+                ws.autofilter(2,0,2+len(safe),len(safe.columns)-1)
+            ws.freeze_panes(3,0)
+
+        guide=book.add_worksheet("WORKBOOK GUIDE")
+        guide.write(0,0,"Shoir-IE Industrial Workbook",title_fmt)
+        guide.write(2,0,"Purpose",header_fmt); guide.write(2,1,"Editable workbook with formulas, repeatable query pipelines, semantic mapping and governed persistence.")
+        guide.write(3,0,"Sheets",header_fmt); guide.write(3,1,len(workbook))
+        guide.write(4,0,"Rows",header_fmt); guide.write(4,1,sum(len(df) for df in workbook.values()))
+        guide.write(5,0,"Formula cells",header_fmt); guide.write(5,1,sum(len(v) for v in formulas.values()))
+        guide.write(6,0,"Semantic mappings",header_fmt); guide.write(6,1,sum(len(v) for v in semantic_map.values() if isinstance(v,dict)))
+        guide.set_column(0,0,22); guide.set_column(1,1,72)
+
+        formula_rows=[{"Sheet":sh,"Cell":cell,"Formula":formula} for sh,entries in formulas.items() for cell,formula in entries.items()]
+        pd.DataFrame(formula_rows or [{"Sheet":"","Cell":"","Formula":""}]).to_excel(writer,index=False,sheet_name="FORMULA REGISTER")
+        writer.sheets["FORMULA REGISTER"].freeze_panes(1,0)
+
+        semantic_rows=[{"Sheet":sh,"Column":col,"Role":role} for sh,entries in semantic_map.items() for col,role in (entries.items() if isinstance(entries,dict) else [])]
+        pd.DataFrame(semantic_rows or [{"Sheet":"","Column":"","Role":""}]).to_excel(writer,index=False,sheet_name="SEMANTIC MAP")
+        writer.sheets["SEMANTIC MAP"].freeze_panes(1,0)
+
+        variable_rows=[{"Name":name,"Value":v.get("value",v) if isinstance(v,dict) else v,"Unit":v.get("unit","") if isinstance(v,dict) else "","Description":v.get("description","") if isinstance(v,dict) else ""} for name,v in variables.items()]
+        pd.DataFrame(variable_rows or [{"Name":"","Value":"","Unit":"","Description":""}]).to_excel(writer,index=False,sheet_name="VARIABLES")
+        writer.sheets["VARIABLES"].freeze_panes(1,0)
     return payload.getvalue()
+
+
+def _build_workbook_evidence_bundle(
+    workbook:Mapping[str,pd.DataFrame],
+    formulas:Mapping[str,Mapping[str,str]],
+    semantic_map:Mapping[str,Any],
+    variables:Mapping[str,Any],
+)->bytes:
+    xlsx=_serialize_workbook(workbook,formulas,semantic_map,variables)
+    validation=validate_workbook(workbook)
+    bundle=io.BytesIO()
+    with zipfile.ZipFile(bundle,"w",zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("industrial_workbook.xlsx",xlsx)
+        archive.writestr("validation.json",json.dumps({
+            "generated_utc":_now(),"health":validation["health"],"sheets":validation["sheets"],
+            "rows":validation["rows"],"cells":validation["cells"],"missing_cells":validation["missing_cells"],
+            "duplicate_rows":validation["duplicate_rows"],"duplicate_columns":validation["duplicate_columns"],
+        },indent=2,default=str))
+        archive.writestr("formula_register.csv",pd.DataFrame([
+            {"Sheet":sh,"Cell":cell,"Formula":formula} for sh,entries in formulas.items() for cell,formula in entries.items()
+        ]).to_csv(index=False))
+        archive.writestr("semantic_map.json",json.dumps(semantic_map,indent=2,default=str))
+        archive.writestr("variables.json",json.dumps(variables,indent=2,default=str))
+    return bundle.getvalue()
+
 
 def _deserialize_workbook(payload:bytes)->dict[str,pd.DataFrame]:
     book=pd.ExcelFile(io.BytesIO(payload))
@@ -1144,6 +1216,33 @@ def render_industrial_workbook(tier:str="Starter",username:str="unknown")->None:
     wb=st.session_state[WORKBOOK_STATE_KEY]; formulas=st.session_state[FORMULA_STATE_KEY]
     current_sheet=st.selectbox("Active sheet",list(wb.keys()),index=min(list(wb.keys()).index(current_sheet),len(wb)-1),key="industrial_workbook_active_sheet")
     current=wb[current_sheet]
+    workbook_health=validate_workbook(wb)
+    formula_count=sum(len(v) for v in formulas.values())
+    semantic_count=sum(len(v) for v in st.session_state.get("industrial_workbook_semantic_map",{}).values() if isinstance(v,dict))
+    k1,k2,k3,k4,k5=st.columns(5)
+    k1.metric("Sheets",f"{len(wb):,}"); k2.metric("Rows",f"{workbook_health['rows']:,}"); k3.metric("Data health",f"{workbook_health['health']:.1f}%")
+    k4.metric("Formula cells",f"{formula_count:,}"); k5.metric("Semantic mappings",f"{semantic_count:,}")
+    a1,a2,a3,a4=st.columns(4)
+    if a1.button("✅ Validate & recalculate",type="primary",use_container_width=True,key="iw_validate_recalculate"):
+        try:
+            recalculated,audit=evaluate_workbook_formulas(wb,formulas,variables=variables)
+            st.session_state[WORKBOOK_STATE_KEY]=recalculated
+            st.session_state["industrial_workbook_formula_audit_df"]=audit
+            st.success("Workbook recalculated and validation refreshed.")
+            st.rerun()
+        except Exception as exc:
+            st.error(f"Workbook recalculation failed safely: {type(exc).__name__}: {exc}")
+    if a2.button("💾 Save checkpoint",use_container_width=True,key="iw_save_checkpoint"):
+        try:
+            wid=save_workbook(wb,formulas,st.session_state.get("industrial_workbook_semantic_map",{}),f"Shoir-IE Workbook · {current_sheet}",st.session_state.get("industrial_workbook_id"),variables=variables,version_label="Checkpoint")
+            st.session_state["industrial_workbook_id"]=wid
+            st.success(f"Checkpoint saved · {wid}")
+        except Exception as exc:
+            st.error(f"Checkpoint failed safely: {exc}")
+    verified_xlsx=_serialize_workbook(wb,formulas,st.session_state.get("industrial_workbook_semantic_map",{}),variables)
+    verified_bundle=_build_workbook_evidence_bundle(wb,formulas,st.session_state.get("industrial_workbook_semantic_map",{}),variables)
+    a3.download_button("📥 Verified Excel",verified_xlsx,file_name=f"shoir_ie_{_slug(current_sheet)}_workbook.xlsx",mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",use_container_width=True,key="iw_verified_xlsx")
+    a4.download_button("📦 Evidence ZIP",verified_bundle,file_name=f"shoir_ie_{_slug(current_sheet)}_evidence.zip",mime="application/zip",use_container_width=True,key="iw_verified_zip")
     tabs=st.tabs(["📊 Workbook","⚡ Instant Analyze","🔧 Query Studio","🧰 Templates","🧬 Semantic Thread","🤖 Copilot Edit","🎓 Learn & Extend"])
 
     with tabs[0]:
@@ -1320,9 +1419,26 @@ def render_industrial_workbook(tier:str="Starter",username:str="unknown")->None:
         if st.session_state["industrial_workbook_query_steps"]: st.dataframe(pd.DataFrame(st.session_state["industrial_workbook_query_steps"]),use_container_width=True,hide_index=True)
         result=st.session_state["industrial_workbook_query_result_df"]
         if not result.empty:
-            st.dataframe(result,use_container_width=True,hide_index=True); nums=[c for c in result.columns if pd.api.types.is_numeric_dtype(result[c])]
+            st.dataframe(result,use_container_width=True,hide_index=True)
+            nums=[c for c in result.columns if pd.api.types.is_numeric_dtype(result[c])]
             if nums: st.plotly_chart(px.histogram(result,x=nums[0],title=f"Query Result · {nums[0]}"),use_container_width=True,config={"displayModeBar":False})
-            if st.button("💾 Save pipeline",key="iw_query_save"):
+            qa,qb,qc=st.columns(3)
+            if qa.button("↪ Apply result to current sheet",type="primary",use_container_width=True,key="iw_query_apply_result"):
+                prior={k:v.copy(deep=True) for k,v in wb.items()}
+                st.session_state["industrial_workbook_undo"].append(prior)
+                st.session_state["industrial_workbook_redo"].clear()
+                wb[current_sheet]=result.copy(deep=True)
+                st.session_state[WORKBOOK_STATE_KEY]=wb
+                st.success(f"Applied pipeline result to {current_sheet}."); st.rerun()
+            if qb.button("➕ Add result as new sheet",use_container_width=True,key="iw_query_add_sheet"):
+                prior={k:v.copy(deep=True) for k,v in wb.items()}
+                st.session_state["industrial_workbook_undo"].append(prior)
+                st.session_state["industrial_workbook_redo"].clear()
+                name=f"Query Result {len(wb)+1}"
+                wb[name]=result.copy(deep=True); formulas[name]={}
+                st.session_state[WORKBOOK_STATE_KEY]=wb
+                st.success(f"Created {name}."); st.rerun()
+            if qc.button("💾 Save pipeline",key="iw_query_save"):
                 try: pid=save_query_pipeline("Industrial Query Pipeline",current_sheet,st.session_state["industrial_workbook_query_steps"]); st.success(f"Saved pipeline {pid}.")
                 except Exception as exc: st.error(f"Pipeline save failed: {exc}")
 
@@ -1457,8 +1573,14 @@ def render_industrial_workbook(tier:str="Starter",username:str="unknown")->None:
 
     st.session_state["industrial_workbook_current_df"]=wb[current_sheet].copy(deep=True)
     st.session_state["industrial_workbook_query_result_df"]=st.session_state.get("industrial_workbook_query_result_df",pd.DataFrame())
+    with st.expander("🔎 Workbook health & readiness",expanded=False):
+        st.dataframe(workbook_health["sheet_summary"],use_container_width=True,hide_index=True)
+        if workbook_health["health"] < 90:
+            st.warning("Review missing or duplicate data before using this workbook as decision evidence.")
+        else:
+            st.success("Workbook structure is currently ready for governed analysis.")
     try:
-        export_payload=_serialize_workbook(wb)
+        export_payload=_serialize_workbook(wb,formulas,st.session_state.get("industrial_workbook_semantic_map",{}),variables)
         st.download_button("⬇️ Export current workbook (.xlsx)",data=export_payload,
                            file_name=f"{_slug('Shoir-IE-' + current_sheet)}.xlsx",
                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
