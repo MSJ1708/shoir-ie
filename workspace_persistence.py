@@ -91,6 +91,11 @@ _PREFIX_EXCLUDE = (
     "shoir_shell_",
     "shoir_universal_",
     "shoir_repro_",
+    # Unified/global command surfaces are transient Streamlit widget plumbing.
+    # Their durable engineering state lives in the corresponding unified_* keys.
+    "ui_",
+    "global_",
+    "shoir_global_",
 )
 
 _ACTION_KEYS = {
