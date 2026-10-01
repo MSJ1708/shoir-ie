@@ -180,8 +180,8 @@ def ensure_remote_schema() -> None:
 
 
 def ensure_remote_research_schema() -> None:
-    """Create the durable research-study table alongside account storage."""
-    if not durable_backend_configured():
+    """Create research tables only when direct PostgreSQL is configured."""
+    if not postgres_backend_configured():
         return
     schema = """
     CREATE TABLE IF NOT EXISTS shoir_research_studies (
@@ -218,8 +218,8 @@ def ensure_remote_research_schema() -> None:
 
 
 def upsert_remote_research_study(study: Mapping[str, Any]) -> None:
-    """Persist a research protocol durably when the managed DB is configured."""
-    if not durable_backend_configured():
+    """Persist a research protocol when direct PostgreSQL is configured."""
+    if not postgres_backend_configured():
         return
     ensure_remote_research_schema()
     import json
@@ -258,8 +258,8 @@ def upsert_remote_research_study(study: Mapping[str, Any]) -> None:
 
 
 def remote_research_study(study_id: str, owner: Optional[str] = None) -> Optional[dict[str, Any]]:
-    """Load one durable research protocol, optionally owner-scoped."""
-    if not durable_backend_configured():
+    """Load one direct-PostgreSQL research protocol, optionally owner-scoped."""
+    if not postgres_backend_configured():
         return None
     ensure_remote_research_schema()
     import json
@@ -288,8 +288,8 @@ def remote_research_study(study_id: str, owner: Optional[str] = None) -> Optiona
 
 
 def upsert_remote_research_run(run: Mapping[str, Any]) -> None:
-    """Persist a completed research run and its CSV evidence."""
-    if not durable_backend_configured():
+    """Persist a completed research run when direct PostgreSQL is configured."""
+    if not postgres_backend_configured():
         return
     ensure_remote_research_schema()
     import json
@@ -332,8 +332,8 @@ def upsert_remote_research_run(run: Mapping[str, Any]) -> None:
 
 
 def remote_research_runs(owner: str, study_id: Optional[str] = None) -> list[dict[str, Any]]:
-    """Return durable research runs for one owner, optionally one study."""
-    if not durable_backend_configured():
+    """Return direct-PostgreSQL research runs for one owner."""
+    if not postgres_backend_configured():
         return []
     ensure_remote_research_schema()
     import json
@@ -366,8 +366,8 @@ def remote_research_runs(owner: str, study_id: Optional[str] = None) -> list[dic
 
 
 def remote_research_studies(owner: str) -> list[dict[str, Any]]:
-    """List all durable research protocols for one workspace owner."""
-    if not durable_backend_configured():
+    """List direct-PostgreSQL research protocols for one workspace owner."""
+    if not postgres_backend_configured():
         return []
     ensure_remote_research_schema()
     import json
@@ -569,6 +569,8 @@ def insert_remote_request(request: Mapping[str, Any]) -> None:
 
 
 def update_remote_request_status(request_id: int, status: str) -> None:
+    if not postgres_backend_configured():
+        return
     ensure_remote_schema()
     with _pg_connect() as conn:
         with conn.cursor() as cur:
@@ -584,7 +586,9 @@ def update_remote_request_status(request_id: int, status: str) -> None:
         conn.commit()
 
 def update_latest_remote_request(username: str, request_type: str, status: str) -> None:
-    """Update the latest pending request for a user/type without requiring its local ID."""
+    """Update a direct-PostgreSQL pending request without requiring local ID."""
+    if not postgres_backend_configured():
+        return
     ensure_remote_schema()
     with _pg_connect() as conn:
         with conn.cursor() as cur:
@@ -610,7 +614,7 @@ def sync_remote_requests_to_local(db_path: str = "enterprise_full_workspace.db")
     Edge mode retrieves requests only after an authenticated admin session."""
     if edge_backend_configured():
         return 0
-    if not durable_backend_configured():
+    if not postgres_backend_configured():
         return 0
     ensure_remote_schema()
     with _pg_connect() as conn:
@@ -668,7 +672,7 @@ def sync_remote_accounts_to_local(db_path: str = "enterprise_full_workspace.db")
     """Hydrate local SQLite from remote accounts in direct PostgreSQL mode."""
     if edge_backend_configured():
         return 0
-    if not durable_backend_configured():
+    if not postgres_backend_configured():
         return 0
     ensure_remote_schema()
     rows = remote_accounts()
@@ -726,7 +730,7 @@ def migrate_local_accounts_to_remote(db_path: str = "enterprise_full_workspace.d
     """Upload local accounts in direct PostgreSQL mode only."""
     if edge_backend_configured():
         return 0
-    if not durable_backend_configured():
+    if not postgres_backend_configured():
         return 0
     ensure_remote_schema()
     existing = {row["username_lc"] for row in remote_accounts()}
