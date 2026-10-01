@@ -5,7 +5,6 @@ reversible reset support, professional XLSX exports, and helper functions used b
 the Streamlit Copilot.
 """
 from __future__ import annotations
-import logging
 import io, re, zipfile, html
 from datetime import datetime
 from typing import Iterable, Optional, Tuple, Sequence
@@ -307,12 +306,12 @@ def build_workbook_bundle(title: str, tables: Iterable[Tuple[str,pd.DataFrame]],
                 safe_label=re.sub(r'[^A-Za-z0-9]+','_',str(label)).lower()
                 try:
                     z.writestr(f"charts/chart_{idx}_{safe_label}.html",fig.to_html(include_plotlyjs="cdn",full_html=True))
-                except Exception as exc:
-                    logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
+                except Exception:
+                    pass
                 try:
                     z.writestr(f"charts/chart_{idx}_{safe_label}.png",fig.to_image(format="png",width=1600,height=900,scale=2))
-                except Exception as exc:
-                    logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
+                except Exception:
+                    pass
         readme=(
             f"Shoir-IE Report: {title}\n"
             "The XLSX contains formatted tables and cleaning audit information. "

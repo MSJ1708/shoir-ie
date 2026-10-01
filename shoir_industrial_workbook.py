@@ -12,9 +12,6 @@ Shoir-IE's existing Digital Thread, Copilot, Visualization, persistence,
 optimization, forecasting and reporting layers.
 """
 from __future__ import annotations
-import logging
-
-from shoir_repository import sqlite_connect as shoir_sqlite_connect
 
 import ast
 import base64
@@ -663,8 +660,8 @@ def register_workbook_extension(extension:WorkbookExtension)->None:
             handler=(lambda df, _name=extension.name: run_workbook_extension(_name, df))
                 if extension.transform is not None else None,
         )
-    except Exception as exc:
-        logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
+    except Exception:
+        pass
 
 def list_workbook_extensions()->list[WorkbookExtension]:
     return list(_EXTENSION_REGISTRY.values())
@@ -716,7 +713,7 @@ def _starter_templates()->dict[str,dict[str,Any]]:
     }
 
 def ensure_workbook_db(path:str=DB_PATH)->None:
-    with shoir_sqlite_connect(path,timeout=30) as conn:
+    with sqlite3.connect(path,timeout=30) as conn:
         conn.execute("""CREATE TABLE IF NOT EXISTS industrial_workbooks(
             workbook_id TEXT PRIMARY KEY,workspace TEXT NOT NULL,owner TEXT NOT NULL,name TEXT NOT NULL,
             payload_b64 TEXT NOT NULL,formulas_json TEXT NOT NULL,semantic_map_json TEXT,
@@ -786,7 +783,7 @@ def save_workbook(workbook:Mapping[str,pd.DataFrame],formulas:Mapping[str,Mappin
     formula_json=json.dumps({str(k):dict(v) for k,v in formulas.items()},default=str,sort_keys=True)
     semantic_json=json.dumps(dict(semantic_map or {}),default=str,sort_keys=True)
     variables_json=json.dumps(dict(variables),default=str,sort_keys=True)
-    with shoir_sqlite_connect(path,timeout=30) as conn:
+    with sqlite3.connect(path,timeout=30) as conn:
         existing=conn.execute(
             "SELECT sha256,formulas_json,semantic_map_json,COALESCE(variables_json,'{}') "
             "FROM industrial_workbooks WHERE workbook_id=? AND workspace=?",
@@ -848,7 +845,7 @@ def save_workbook(workbook:Mapping[str,pd.DataFrame],formulas:Mapping[str,Mappin
 
 def list_workbook_versions(workbook_id:str|None=None,path:str=DB_PATH)->pd.DataFrame:
     ensure_workbook_db(path)
-    with shoir_sqlite_connect(path,timeout=30) as conn:
+    with sqlite3.connect(path,timeout=30) as conn:
         if workbook_id:
             return pd.read_sql(
                 """SELECT version_id AS ID,version_no AS Version,COALESCE(label,'Autosave') AS Label,
@@ -879,7 +876,7 @@ def load_workbook_version(
     returns workbook, formulas, semantic map and variables.
     """
     ensure_workbook_db(path)
-    with shoir_sqlite_connect(path,timeout=30) as conn:
+    with sqlite3.connect(path,timeout=30) as conn:
         if version_no is None:
             row=conn.execute(
                 """SELECT payload_b64,formulas_json,semantic_map_json,COALESCE(variables_json,'{}')
@@ -907,7 +904,7 @@ def load_workbook_version(
 
 def load_workbook_version_variables(workbook_id:str,version_no:int,path:str=DB_PATH)->dict[str,Any]:
     ensure_workbook_db(path)
-    with shoir_sqlite_connect(path,timeout=30) as conn:
+    with sqlite3.connect(path,timeout=30) as conn:
         row=conn.execute(
             """SELECT COALESCE(variables_json,'{}') FROM industrial_workbook_versions
                WHERE workbook_id=? AND workspace=? AND version_no=?""",
@@ -919,7 +916,7 @@ def load_workbook_version_variables(workbook_id:str,version_no:int,path:str=DB_P
 def save_workbook_comment(workbook_id:str,sheet_name:str,cell_ref:str,comment:str,path:str=DB_PATH)->int:
     if not str(comment).strip(): raise ValueError("Comment text is required.")
     ensure_workbook_db(path)
-    with shoir_sqlite_connect(path,timeout=30) as conn:
+    with sqlite3.connect(path,timeout=30) as conn:
         cur=conn.execute(
             "INSERT INTO industrial_workbook_comments(workbook_id,workspace,owner,sheet_name,cell_ref,comment,created_at) VALUES(?,?,?,?,?,?,?)",
             (workbook_id,_workspace(),_actor(),str(sheet_name)[:160],str(cell_ref).upper()[:20],str(comment).strip()[:2000],_now())
@@ -929,7 +926,7 @@ def save_workbook_comment(workbook_id:str,sheet_name:str,cell_ref:str,comment:st
 
 def list_workbook_comments(workbook_id:str,path:str=DB_PATH)->pd.DataFrame:
     ensure_workbook_db(path)
-    with shoir_sqlite_connect(path,timeout=30) as conn:
+    with sqlite3.connect(path,timeout=30) as conn:
         return pd.read_sql(
             "SELECT comment_id AS ID,sheet_name AS Sheet,cell_ref AS Cell,comment AS Comment,owner AS Author,created_at AS Created "
             "FROM industrial_workbook_comments WHERE workbook_id=? AND workspace=? ORDER BY comment_id DESC",
@@ -938,7 +935,7 @@ def list_workbook_comments(workbook_id:str,path:str=DB_PATH)->pd.DataFrame:
 
 def load_workbook(workbook_id:str,path:str=DB_PATH)->tuple[dict[str,pd.DataFrame],dict[str,dict[str,str]],dict[str,Any]]:
     ensure_workbook_db(path)
-    with shoir_sqlite_connect(path,timeout=30) as conn:
+    with sqlite3.connect(path,timeout=30) as conn:
         row=conn.execute(
             "SELECT payload_b64,formulas_json,semantic_map_json FROM industrial_workbooks WHERE workbook_id=? AND workspace=?",
             (workbook_id,_workspace())).fetchone()
@@ -947,7 +944,7 @@ def load_workbook(workbook_id:str,path:str=DB_PATH)->tuple[dict[str,pd.DataFrame
 
 def list_saved_workbooks(path:str=DB_PATH)->pd.DataFrame:
     ensure_workbook_db(path)
-    with shoir_sqlite_connect(path,timeout=30) as conn:
+    with sqlite3.connect(path,timeout=30) as conn:
         return pd.read_sql(
             "SELECT workbook_id AS ID,name AS Name,owner AS Owner,updated_at AS Updated,sha256 AS SHA256 "
             "FROM industrial_workbooks WHERE workspace=? ORDER BY updated_at DESC",
@@ -956,7 +953,7 @@ def list_saved_workbooks(path:str=DB_PATH)->pd.DataFrame:
 
 def load_workbook_variables(workbook_id:str,path:str=DB_PATH)->dict[str,Any]:
     ensure_workbook_db(path)
-    with shoir_sqlite_connect(path,timeout=30) as conn:
+    with sqlite3.connect(path,timeout=30) as conn:
         row=conn.execute(
             "SELECT COALESCE(variables_json,'{}') FROM industrial_workbooks WHERE workbook_id=? AND workspace=?",
             (workbook_id,_workspace())).fetchone()
@@ -965,7 +962,7 @@ def load_workbook_variables(workbook_id:str,path:str=DB_PATH)->dict[str,Any]:
 
 def save_template(name:str,category:str,description:str,workbook:Mapping[str,pd.DataFrame],path:str=DB_PATH)->str:
     ensure_workbook_db(path); payload=_serialize_workbook(workbook); tid="TPL-"+uuid.uuid4().hex[:10].upper()
-    with shoir_sqlite_connect(path,timeout=30) as conn:
+    with sqlite3.connect(path,timeout=30) as conn:
         conn.execute("INSERT INTO industrial_workbook_templates(template_id,workspace,owner,name,category,description,payload_b64,builtin,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
                      (tid,_workspace(),_actor(),str(name)[:160],str(category)[:80],str(description)[:500],
                       base64.b64encode(payload).decode("ascii"),0,_now(),_now())); conn.commit()
@@ -974,7 +971,7 @@ def save_template(name:str,category:str,description:str,workbook:Mapping[str,pd.
 def list_templates(path:str=DB_PATH)->pd.DataFrame:
     ensure_workbook_db(path)
     built=[{"ID":"builtin:"+_slug(n),"Name":n,"Category":d["category"],"Description":d["description"],"Source":"Shoir-IE built-in"} for n,d in _starter_templates().items()]
-    with shoir_sqlite_connect(path,timeout=30) as conn:
+    with sqlite3.connect(path,timeout=30) as conn:
         try:
             custom=pd.read_sql("SELECT template_id AS ID,name AS Name,category AS Category,description AS Description,'Workspace library' AS Source FROM industrial_workbook_templates WHERE workspace=? ORDER BY updated_at DESC",
                                conn,params=(_workspace(),))
@@ -990,21 +987,21 @@ def load_template(template_id:str,path:str=DB_PATH)->tuple[str,dict[str,pd.DataF
             if _slug(name)==target: return name,{"Sheet1":data["data"].copy(deep=True)}
         raise KeyError("Built-in template not found.")
     ensure_workbook_db(path)
-    with shoir_sqlite_connect(path,timeout=30) as conn:
+    with sqlite3.connect(path,timeout=30) as conn:
         row=conn.execute("SELECT name,payload_b64 FROM industrial_workbook_templates WHERE template_id=? AND workspace=?",(template_id,_workspace())).fetchone()
     if not row: raise KeyError("Template not found.")
     return str(row[0]),_deserialize_workbook(base64.b64decode(row[1]))
 
 def save_query_pipeline(name:str,source_sheet:str,steps:Sequence[Mapping[str,Any]],path:str=DB_PATH)->str:
     ensure_workbook_db(path); pid="Q-"+uuid.uuid4().hex[:10].upper()
-    with shoir_sqlite_connect(path,timeout=30) as conn:
+    with sqlite3.connect(path,timeout=30) as conn:
         conn.execute("INSERT INTO industrial_workbook_queries(pipeline_id,workspace,owner,name,source_sheet,steps_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
                      (pid,_workspace(),_actor(),str(name)[:160],str(source_sheet)[:160],json.dumps(list(steps),default=str),_now(),_now())); conn.commit()
     return pid
 
 def list_query_pipelines(path:str=DB_PATH)->pd.DataFrame:
     ensure_workbook_db(path)
-    with shoir_sqlite_connect(path,timeout=30) as conn:
+    with sqlite3.connect(path,timeout=30) as conn:
         return pd.read_sql("SELECT pipeline_id AS ID,name AS Name,source_sheet AS Source,updated_at AS Updated FROM industrial_workbook_queries WHERE workspace=? ORDER BY updated_at DESC",
                            conn,params=(_workspace(),))
 
@@ -1093,8 +1090,14 @@ def render_industrial_workbook(tier:str="Starter",username:str="unknown")->None:
     </style><div class="iw-hero"><div class="iw-chip">INDUSTRIAL WORKBOOK</div><div class="iw-chip">EXCEL INTEROPERABLE</div><div class="iw-chip">DIGITAL THREAD AWARE</div><div class="iw-title">Work the way engineers already work.</div><div class="iw-copy">Editable sheets → formulas → data preparation → instant analysis → engineering workflows → governed evidence.</div></div>""",unsafe_allow_html=True)
 
     current_sheet=st.selectbox("Sheet",list(wb.keys()),key="industrial_workbook_sheet")
+    st.caption("Excel/CSV import is optional — the workbook tools are available immediately with the built-in workspace.")
     c1,c2,c3,c4,c5,c6=st.columns(6)
-    uploaded=c1.file_uploader("Import .xlsx / .csv",type=["xlsx","csv"],key="industrial_workbook_upload")
+    uploaded=c1.file_uploader(
+        "Optional Excel / CSV import",
+        type=["xlsx","csv"],
+        key="industrial_workbook_upload",
+        help="Uploading a file is optional. You can use and edit the built-in Sheet1 without importing anything."
+    )
     if c2.button("➕ Sheet",use_container_width=True):
         name=f"Sheet{len(wb)+1}"; wb[name]=pd.DataFrame({"Value":[None]}); formulas[name]={}; st.rerun()
     if c3.button("↶ Undo",disabled=not st.session_state["industrial_workbook_undo"],use_container_width=True):
@@ -1473,5 +1476,5 @@ def render_industrial_workbook(tier:str="Starter",username:str="unknown")->None:
                               f"Shoir-IE Workbook · {current_sheet}",st.session_state.get("industrial_workbook_id"),variables=variables)
             st.session_state["industrial_workbook_id"]=wid
             st.session_state["industrial_workbook_last_autosave_fingerprint"]=fingerprint
-    except Exception as exc:
-        logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
+    except Exception:
+        pass

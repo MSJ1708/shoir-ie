@@ -7,9 +7,6 @@ It deliberately reuses existing specialist modules instead of replacing them.
 
 from __future__ import annotations
 
-from shoir_repository import sqlite_connect as shoir_sqlite_connect
-import logging
-
 import html
 import json
 import math
@@ -93,7 +90,7 @@ CREATE INDEX IF NOT EXISTS idx_shoir_shell_outcomes_decision
 
 
 def _db(path: str = "enterprise_full_workspace.db") -> sqlite3.Connection:
-    return shoir_sqlite_connect(path, timeout=30)
+    return sqlite3.connect(path, timeout=30)
 
 
 def _now() -> str:
@@ -107,8 +104,8 @@ def ensure_shell_schema(db_path: str = "enterprise_full_workspace.db") -> None:
                 if statement.strip():
                     conn.execute(statement)
             conn.commit()
-    except Exception as exc:
-        logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
+    except Exception:
+        pass
 
 
 def _safe_df(value: Any) -> pd.DataFrame:
@@ -520,11 +517,6 @@ def render_application_shell(
     is_admin: bool = False,
 ) -> tuple[str, str | None]:
     ensure_shell_schema()
-    try:
-        from shoir_universal_platform_kernel import install_visualization_contract
-        install_visualization_contract()
-    except Exception as exc:
-        logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
     render_shell_css()
 
     nav_labels = list(NAV_GROUPS.keys())
@@ -1079,25 +1071,17 @@ def render_shell_surface(surface: str, username: str, tier: str, module: str, al
             try:
                 from workspace_persistence import save_user_workspace
                 save_user_workspace(user, st.session_state)
-            except Exception as exc:
-                logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
+            except Exception:
+                pass
         for key in list(st.session_state.keys()):
             del st.session_state[key]
         st.rerun()
 
 
 def render_post_module_context(module: str, username: str, tier: str) -> None:
-    """Apply the universal platform kernel before every specialist renderer."""
-    try:
-        from shoir_universal_platform_kernel import install_and_render_module_context
-        install_and_render_module_context(str(module), show_copilot=True)
-    except Exception as _kernel_error:
-        # Preserve the existing shell context if the additive kernel is unavailable.
-        provenance = infer_provenance()
-        render_module_workflow(module, provenance)
-        render_inspector(module, username, tier)
-        with st.expander("Universal platform kernel diagnostic", expanded=False):
-            st.code(f"{type(_kernel_error).__name__}: {_kernel_error}")
+    provenance = infer_provenance()
+    render_module_workflow(module, provenance)
+    render_inspector(module, username, tier)
 
 
 def shell_health_snapshot() -> dict[str, Any]:

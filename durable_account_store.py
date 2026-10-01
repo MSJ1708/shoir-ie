@@ -10,9 +10,6 @@ Never put the database URL/password in Git.
 """
 
 from __future__ import annotations
-import logging
-
-from shoir_repository import sqlite_connect as shoir_sqlite_connect
 
 import datetime as dt
 import os
@@ -81,8 +78,8 @@ def database_url() -> str:
                 value = st.secrets[section]["url"]
                 if value:
                     return str(value)
-            except Exception as exc:
-                logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
+            except Exception:
+                pass
     return str(
         os.getenv("SHOIR_DATABASE_URL")
         or os.getenv("SUPABASE_DB_URL")
@@ -110,14 +107,14 @@ def ephemeral_local_storage_allowed() -> bool:
         try:
             value = st.secrets.get("allow_ephemeral_local_storage", False)
             return str(value).strip().lower() in {"1", "true", "yes", "on"}
-        except Exception as exc:
-            logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
+        except Exception:
+            pass
     return False
 
 
 def _pg_connect():
-    # Edge-mode persistence does not provide a PostgreSQL DSN to the Streamlit
-    # process. Never attempt psycopg2 just because the Edge backend is enabled.
+    # Supabase Edge persistence does not provide a PostgreSQL DSN to this process.
+    # Never let psycopg2 fall back to the machine's local Unix socket.
     if not postgres_backend_configured():
         raise RuntimeError("Direct PostgreSQL backend is not configured.")
     return psycopg2.connect(
@@ -258,7 +255,7 @@ def upsert_remote_research_study(study: Mapping[str, Any]) -> None:
 
 
 def remote_research_study(study_id: str, owner: Optional[str] = None) -> Optional[dict[str, Any]]:
-    """Load one direct-PostgreSQL research protocol, optionally owner-scoped."""
+    """Load one durable research protocol, optionally owner-scoped."""
     if not postgres_backend_configured():
         return None
     ensure_remote_research_schema()
@@ -288,7 +285,7 @@ def remote_research_study(study_id: str, owner: Optional[str] = None) -> Optiona
 
 
 def upsert_remote_research_run(run: Mapping[str, Any]) -> None:
-    """Persist a completed research run when direct PostgreSQL is configured."""
+    """Persist a completed research run and its CSV evidence."""
     if not postgres_backend_configured():
         return
     ensure_remote_research_schema()
@@ -332,7 +329,7 @@ def upsert_remote_research_run(run: Mapping[str, Any]) -> None:
 
 
 def remote_research_runs(owner: str, study_id: Optional[str] = None) -> list[dict[str, Any]]:
-    """Return direct-PostgreSQL research runs for one owner."""
+    """Return durable research runs for one owner, optionally one study."""
     if not postgres_backend_configured():
         return []
     ensure_remote_research_schema()
@@ -366,7 +363,7 @@ def remote_research_runs(owner: str, study_id: Optional[str] = None) -> list[dic
 
 
 def remote_research_studies(owner: str) -> list[dict[str, Any]]:
-    """List direct-PostgreSQL research protocols for one workspace owner."""
+    """List all durable research protocols for one workspace owner."""
     if not postgres_backend_configured():
         return []
     ensure_remote_research_schema()
@@ -630,7 +627,7 @@ def sync_remote_requests_to_local(db_path: str = "enterprise_full_workspace.db")
             )
             rows = [dict(row) for row in cur.fetchall()]
     inserted = 0
-    with shoir_sqlite_connect(db_path) as conn:
+    with sqlite3.connect(db_path) as conn:
         for row in rows:
             exists = conn.execute(
                 """
@@ -678,7 +675,7 @@ def sync_remote_accounts_to_local(db_path: str = "enterprise_full_workspace.db")
     rows = remote_accounts()
     if not rows:
         return 0
-    with shoir_sqlite_connect(db_path) as conn:
+    with sqlite3.connect(db_path) as conn:
         for row in rows:
             conn.execute(
                 """
@@ -734,7 +731,7 @@ def migrate_local_accounts_to_remote(db_path: str = "enterprise_full_workspace.d
         return 0
     ensure_remote_schema()
     existing = {row["username_lc"] for row in remote_accounts()}
-    with shoir_sqlite_connect(db_path) as conn:
+    with sqlite3.connect(db_path) as conn:
         rows = conn.execute(
             """
             SELECT

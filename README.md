@@ -135,20 +135,6 @@ Methods   Optimize  Simulate   Quality  Economics
 
 ---
 
-## 🏭 Industrial Engineering Operating System layer
-
-Shoir-IE now adds an integrated operating layer around the specialist modules instead of treating each capability as a separate destination.
-
-**Shared lifecycle:** DATA → VALIDATE → MAP → MODEL → RUN → VISUALIZE → COMPARE → EXPLAIN → DECIDE → EXPORT → VERIFY
-
-The shared layer connects Projects, Datasets, the Digital Thread, Models, Experiments, Scenarios, Runs, KPIs, Decisions, Outcomes and Evidence. It provides a common Engineering Canvas, Scenario Laboratory, Visualization Intelligence, Forecast Operations, Decision/Evidence workflow, Verification/Replay, Run Center, Control Tower, Self-Diagnostics, Connector health, Formula/KPI registry, templates, benchmarking, localization and presentation/report packaging.
-
-Capability status is surfaced as **Verified / Implemented / Foundation / Integration-ready**. The status view does not treat a UI adapter as a live production integration; external systems remain integration-ready until configured and verified.
-
-See [docs/INDUSTRIAL_OS.md](docs/INDUSTRIAL_OS.md) for the architecture and validation scope.
-
----
-
 ## 🤖 Copilot AI
 
 The Copilot is designed as the natural-language entry point into the platform, while keeping engineering assumptions and user control visible.

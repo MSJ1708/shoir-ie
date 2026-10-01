@@ -19,16 +19,6 @@ def test_required_modules_parse():
         ast.parse(path.read_text(encoding="utf-8"), filename=filename)
 
 
-def test_entrypoint_has_page_config_and_visible_runtime_recovery_boundary():
-    app_source = Path("app.py").read_text(encoding="utf-8")
-    runtime_source = Path("shoir_app_runtime.py").read_text(encoding="utf-8")
-    assert "st.set_page_config(" in app_source
-    assert "except Exception as exc" in app_source
-    assert "Technical diagnostic" in app_source
-    assert "Page configuration is owned by app.py" in runtime_source
-    assert "_startup_errors" in runtime_source
-
-
 def test_validation_workflow_covers_compile_and_tests():
     workflow = Path(".github/workflows/shoir-validation.yml").read_text(encoding="utf-8")
     assert "compileall" in workflow
@@ -40,18 +30,17 @@ def test_platform_catalog_has_render_path():
     from industrial_platform import PLATFORM_CATALOG
     platform_source = Path("industrial_platform.py").read_text(encoding="utf-8")
     app_source = Path("app.py").read_text(encoding="utf-8")
-    runtime_source = Path("shoir_app_runtime.py").read_text(encoding="utf-8")
     for item in PLATFORM_CATALOG:
         name = str(item.get("name", "")).strip()
         assert name, "Catalog contains a module without a name"
-        assert (f'"{name}"' in platform_source) or (f'"{name}"' in runtime_source) or (f'"{name}"' in app_source), (
+        assert (f'"{name}"' in platform_source) or (f'"{name}"' in app_source), (
             f"Catalog module is not wired into the application: {name}"
         )
 
 
 def test_polished_results_surface_is_wired():
     """Guard against regressions to raw implementation-style result output."""
-    source = Path("shoir_app_runtime.py").read_text(encoding="utf-8")
+    source = Path("app.py").read_text(encoding="utf-8")
     assert "def _render_pretty_result" in source
     assert "enterprise_module_selector" in source
     assert "Detailed diagnostics" in source
@@ -68,7 +57,7 @@ def test_streamlit_application_starts_without_runtime_exception():
 
 
 def test_160_operating_system_route_is_wired():
-    app_source = Path("shoir_app_runtime.py").read_text(encoding="utf-8")
+    app_source = Path("app.py").read_text(encoding="utf-8")
     assert '"🚀 160 Operating System"' in app_source
     assert "render_160_command_center" in app_source
     assert 'if st.session_state.get("selected_nav") == "🚀 160 Operating System"' in app_source

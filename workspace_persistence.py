@@ -6,9 +6,6 @@ inputs, tables, selections, research state, and Copilot conversation.
 """
 
 from __future__ import annotations
-import logging
-
-from shoir_repository import sqlite_connect as shoir_sqlite_connect
 
 import datetime as _dt
 import hashlib
@@ -85,17 +82,6 @@ _PREFIX_EXCLUDE = (
     "module_parity_xlsx_",
     "module_parity_csv_",
     "module_parity_zip_",
-    # Streamlit shell widgets must never be restored into session_state before
-    # their widgets are instantiated on the next rerun. This prevents
-    # StreamlitValueAssignmentNotAllowedError after a successful login.
-    "shoir_shell_",
-    "shoir_universal_",
-    "shoir_repro_",
-    # Unified/global command surfaces are transient Streamlit widget plumbing.
-    # Their durable engineering state lives in the corresponding unified_* keys.
-    "ui_",
-    "global_",
-    "shoir_global_",
 )
 
 _ACTION_KEYS = {
@@ -188,7 +174,7 @@ def _unpack(value: Any) -> Any:
     return payload
 
 def ensure_workspace_state_db(db_path: str = "enterprise_full_workspace.db") -> None:
-    with shoir_sqlite_connect(db_path, timeout=15) as conn:
+    with sqlite3.connect(db_path, timeout=15) as conn:
         conn.execute(_STATE_TABLE_SQL)
         conn.commit()
 
@@ -241,8 +227,9 @@ def _persist_domain_manifest(username: str, session_state: MutableMapping[str, A
             "backend": "managed" if (db_path == "enterprise_full_workspace.db" and durable_backend_configured()) else "local",
         }
         record_artifact(username, "workspace_manifest", f"{username}:{workspace}", manifest, workspace)
-    except Exception as exc:
-        logging.getLogger(__name__).warning("Workspace manifest persistence unavailable; native workspace retained: %s", exc)
+    except Exception:
+        # Manifest persistence is supplementary; native workspace save must remain independent.
+        pass
 
 
 def _workspace_change_signature(session_state: MutableMapping[str, Any]) -> str:
@@ -303,7 +290,7 @@ def save_user_workspace(
         # configure a managed database because local files are ephemeral.
         ensure_workspace_state_db(db_path)
         now = _dt.datetime.now(_dt.timezone.utc).isoformat()
-        with shoir_sqlite_connect(db_path, timeout=15) as conn:
+        with sqlite3.connect(db_path, timeout=15) as conn:
             conn.execute(
                 """
                 INSERT INTO workspace_states (username, state_json, updated_at)
@@ -341,7 +328,7 @@ def load_user_workspace(
             payload = json.loads(remote_payload)
         else:
             ensure_workspace_state_db(db_path)
-            with shoir_sqlite_connect(db_path, timeout=15) as conn:
+            with sqlite3.connect(db_path, timeout=15) as conn:
                 row = conn.execute(
                     "SELECT state_json FROM workspace_states WHERE username = ?",
                     (username.strip().lower(),),

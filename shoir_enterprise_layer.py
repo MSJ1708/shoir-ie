@@ -11,9 +11,6 @@ cross-module infrastructure around them.
 """
 from __future__ import annotations
 
-from shoir_repository import sqlite_connect as shoir_sqlite_connect
-import logging
-
 import hashlib
 import io
 import json
@@ -64,12 +61,11 @@ def workspace_key(username: str, workspace: str = "default") -> str:
 
 
 def _remote() -> bool:
-    """Use direct PostgreSQL only when a real non-local DSN is configured.
+    """Use direct PostgreSQL only when a real remote DSN is configured.
 
-    Supabase Edge persistence is already the durable account/workspace backend
-    and does not mean a psycopg2 connection is available in the Streamlit
-    process. Treat empty-host/local PostgreSQL DSNs as local development unless
-    explicitly opted in, so Streamlit Cloud never probes /var/run/postgresql.
+    Supabase Edge persistence is handled through its HTTP function and must not
+    make the Streamlit process attempt psycopg2 against a local Unix socket.
+    Local PostgreSQL is opt-in for development only.
     """
     try:
         if not postgres_backend_configured() or not _pg_connect:
@@ -91,7 +87,7 @@ def _local_connect(db_path: Optional[str] = None):
     # Resolve DEFAULT_DB at call time so tests and local deployments can safely
     # override the enterprise store without relying on a stale default argument.
     target = str(db_path or DEFAULT_DB)
-    conn = shoir_sqlite_connect(target, timeout=30, check_same_thread=False)
+    conn = sqlite3.connect(target, timeout=30, check_same_thread=False)
     conn.execute("PRAGMA journal_mode=WAL")
     return conn
 
@@ -1063,8 +1059,8 @@ def resolve_connector_secret(secret_ref: str = "") -> str:
         value = os.environ.get(key)
         if value:
             return value
-    except Exception as exc:
-        logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
+    except Exception:
+        pass
     try:
         import streamlit as st
         for section in ("connector_secrets", "secrets", "authentication"):
@@ -1143,7 +1139,7 @@ def _connector_sql_test(endpoint: str, timeout: float = 8.0) -> tuple[str, float
     if target.lower().startswith("sqlite:///"):
         db_path = target[10:]
         try:
-            with shoir_sqlite_connect(db_path, timeout=max(1.0, float(timeout))) as conn:
+            with sqlite3.connect(db_path, timeout=max(1.0, float(timeout))) as conn:
                 row = conn.execute("SELECT 1").fetchone()
             elapsed = (datetime.now(timezone.utc) - started).total_seconds() * 1000.0
             return "Healthy", elapsed, "SQLite connection validated.", int(bool(row))
@@ -1212,8 +1208,8 @@ def _connector_opcua_test(endpoint: str, timeout: float = 8.0) -> tuple[str, flo
         try:
             if client is not None:
                 client.disconnect()
-        except Exception as exc:
-            logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
+        except Exception:
+            pass
 
 
 def test_connector_profile(
@@ -1370,7 +1366,7 @@ def fetch_connector_sample(
                 target = str(endpoint).strip()
                 if target.lower().startswith("sqlite:///"):
                     db_path = target[10:]
-                    with shoir_sqlite_connect(db_path, timeout=max(1.0, float(timeout))) as conn:
+                    with sqlite3.connect(db_path, timeout=max(1.0, float(timeout))) as conn:
                         frame = pd.read_sql_query(bounded_query, conn)
                 elif target.lower().startswith(("postgresql://", "postgres://")):
                     import psycopg2
@@ -2116,8 +2112,8 @@ def build_research_paper_bundle(
                     r"\caption{" + str(label).replace("&", r"\&") + r"}",
                     r"\end{figure}",
                 ])
-            except Exception as exc:
-                logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
+            except Exception:
+                pass
         latex.extend([r"\section*{Reproducibility}", r"All data tables and successfully rendered figures are included in this bundle.", r"\end{document}"])
         zf.writestr(safe_module + "_research_paper.tex", "\n".join(latex).encode("utf-8"))
         manifest = {
@@ -2768,8 +2764,8 @@ def _render_enterprise_visual_evidence(module: str, username: str, workspace: st
                         {"module": module, "dataset": label, "figure_hash": fp, "figure_json_sha256": fp},
                         workspace,
                     )
-                except Exception as exc:
-                    logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
+                except Exception:
+                    pass
                 try:
                     st.download_button(
                         "📥 Download exact figure · PNG",
@@ -2778,8 +2774,8 @@ def _render_enterprise_visual_evidence(module: str, username: str, workspace: st
                         mime="image/png",
                         key="ent_fig_png_"+hashlib.sha1((module+"|"+label+"|"+title).encode()).hexdigest()[:12],
                     )
-                except Exception as exc:
-                    logging.getLogger(__name__).warning("Optional operation failed safely: %s: %s", type(exc).__name__, exc)
+                except Exception:
+                    pass
                 rendered += 1
                 if rendered >= 15:
                     break
