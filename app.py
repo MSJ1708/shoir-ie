@@ -1,4 +1,4 @@
-"""Shoir-IE entrypoint with startup recovery."""
+"""Shoir-IE entrypoint."""
 import streamlit as st
 
 st.set_page_config(page_title="shoir", page_icon="⚡", layout="wide", initial_sidebar_state="collapsed")
