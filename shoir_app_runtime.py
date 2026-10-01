@@ -67,6 +67,7 @@ from shoir_enterprise_ops import (
     render_human_factors_extension, render_geospatial_extension,
     knowledge_context,
 )
+from shoir_venture_integration import render_venture_capabilities
 # =====================================================================
 # PAGE CONFIGURATION & CUSTOM CSS (Professional Styling & Hover Zoom)
 # =====================================================================
