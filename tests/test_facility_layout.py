@@ -63,3 +63,12 @@ def test_route_scenario_can_remove_a_connection_and_find_an_alternate_path():
     assert base_dist == 30.0
     assert alt == ["D1", "D3"]
     assert alt_dist == 50.0
+
+def test_route_scenario_respects_from_to_direction():
+    from shoir_facility_layout import _shortest_path
+    flows = pd.DataFrame([
+        {"flow_id":"F001","from_id":"D1","to_id":"D2","loads_day":10,"distance_m":5,"relationship":"A"},
+    ])
+    path, distance, _ = _shortest_path(flows, "D2", "D1")
+    assert path == []
+    assert distance == float("inf")
