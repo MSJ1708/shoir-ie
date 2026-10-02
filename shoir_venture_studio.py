@@ -650,6 +650,12 @@ def _render_data_room(owner:str)->None:
         st.markdown("#### Room completeness")
         room=pd.DataFrame([{"Category":cat,"Artifacts":int((artifacts["category"]==cat).sum()) if not artifacts.empty else 0,"Status":"Recorded" if not artifacts.empty and (artifacts["category"]==cat).any() else "Missing"} for cat in ARTIFACT_CATEGORIES])
         st.dataframe(room,use_container_width=True,hide_index=True)
+        room_plot=room.copy()
+        room_plot["RecordedFlag"]=room_plot["Status"].map({"Recorded":1,"Missing":0})
+        _show_fig(px.bar(room_plot,x="Category",y="RecordedFlag",text="Status"),320,"Investor room completeness")
+        missing=room[room["Status"]=="Missing"]
+        if not missing.empty:
+            st.warning("Missing room categories: " + ", ".join(missing["Category"].tolist()))
     if submit:
         if not title.strip() or not content.strip(): st.error("Artifact category, title and content are required.")
         else:
@@ -695,6 +701,10 @@ def _render_readiness(owner:str)->None:
     mean=float(frame["Evidence completeness %"].mean()) if not frame.empty else 0
     c1,c2=st.columns([1,2]); c1.metric("Evidence completeness",f"{mean:.0f}%"); c2.progress(mean/100.0)
     st.dataframe(frame,use_container_width=True,hide_index=True)
+    _show_fig(px.bar(frame.sort_values("Evidence completeness %"),x="Evidence completeness %",y="Readiness area",orientation="h",text="Evidence completeness %",range_x=[0,100]),430,"Readiness evidence coverage")
+    gaps=frame.loc[frame["Evidence completeness %"]<100,"Readiness area"].tolist()
+    if gaps:
+        st.info("Current evidence gaps: " + " · ".join(gaps[:7]))
     st.caption("This is an evidence-completeness diagnostic, not a claim of market success or product-market fit.")
 
 
