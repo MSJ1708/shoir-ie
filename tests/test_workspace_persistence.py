@@ -64,6 +64,9 @@ def test_workspace_does_not_restore_streamlit_action_widget_keys(tmp_path: Path)
         "shoir_shell_excellence": True,
         "shoir_shell_edit_account": True,
         "shoir_shell_logout": True,
+        "shoir_create_study": True,
+        "shoir_presentation_return": True,
+        "shoir_global_module_0": True,
         "enterprise_module_selector": "Inventory · EOQ",
         "research_title": "My Study",
         "research_question": "A durable question that should be restored.",
@@ -85,9 +88,12 @@ def test_workspace_does_not_restore_streamlit_action_widget_keys(tmp_path: Path)
         "shoir_shell_excellence",
         "shoir_shell_edit_account",
         "shoir_shell_logout",
+        "shoir_create_study",
+        "shoir_presentation_return",
     ):
         assert key not in restored
     assert "global_command_open_inventory" not in restored
+    assert "shoir_global_module_0" not in restored
     assert restored["enterprise_module_selector"] == "Inventory · EOQ"
     assert restored["research_title"] == "My Study"
 
