@@ -2787,15 +2787,33 @@ _BASE_ENTERPRISE_RENDER = render_enterprise_integration_surface
 
 
 def render_enterprise_integration_surface(module: str, username: str, tier: str) -> None:
-    """Keep the established enterprise surface and layer its evidence suite on top."""
+    """Render the shared enterprise layer without allowing one overlay to break the module."""
     workspace = str(
         st.session_state.get("shoir_workspace_name")
         or st.session_state.get("workspace")
         or st.session_state.get("active_workspace_name")
         or "default"
     )
-    _BASE_ENTERPRISE_RENDER(module, username, tier)
-    _render_enterprise_visual_evidence(str(module), username, workspace)
+
+    # Fault isolation: native enterprise controls and evidence graphs are independent.
+    # A visualization, optional dependency or remote integration failure must not
+    # suppress the other enterprise tools or the module's own renderer.
+    try:
+        _BASE_ENTERPRISE_RENDER(str(module), str(username or "unknown"), str(tier or "Starter Tier"))
+    except Exception as exc:
+        st.warning(
+            "Some enterprise controls are temporarily unavailable; the core module and "
+            "remaining enterprise capabilities are still available."
+        )
+        with st.expander("Enterprise layer diagnostic", expanded=False):
+            st.code(f"{type(exc).__name__}: {exc}")
+
+    try:
+        _render_enterprise_visual_evidence(str(module), str(username or "unknown"), workspace)
+    except Exception as exc:
+        st.info("Enterprise evidence graphs are temporarily unavailable; native results remain available.")
+        with st.expander("Evidence graph diagnostic", expanded=False):
+            st.code(f"{type(exc).__name__}: {exc}")
 
 
 def persist_dataframe_artifact(
