@@ -1361,48 +1361,229 @@ if not st.session_state.get("current_user"):
                             st.warning("Please fill in your name, password, and email address.")
 
     # ------------------------------------------
-    # TAB 3: EXPLORE THE MODULES
+    # TAB 3: EXPLORE THE MODULES — PUBLIC VALUE SHOWCASE
     # ------------------------------------------
     with auth_tab3:
-        st.subheader("What's inside Shoir-IE")
+        # This page is intentionally outcome-led: visitors see the problems
+        # each capability solves, where it applies, and a concrete example.
+        # Implementation details stay out of the buying conversation.
+        st.markdown("""
+        <div class="public-showcase-hero">
+          <div class="kicker">INDUSTRIAL ENGINEERING • OPERATIONS • AI</div>
+          <div class="public-showcase-title">Turn hard industrial decisions into clear next moves.</div>
+          <div class="public-showcase-copy">
+            Shoir-IE brings optimization, planning, quality, simulation, facilities,
+            supply chain, sustainability, research and decision intelligence into one
+            industrial workspace — so teams can move from <b>“What is happening?”</b>
+            to <b>“What should we do?”</b> with evidence.
+          </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        _showcase_css = """
+        <style>
+        .public-showcase-hero {
+            border:1px solid #cbd5e1; border-radius:24px; padding:28px 30px;
+            background:linear-gradient(135deg,#f8fbff 0%,#ffffff 48%,#ecfeff 100%);
+            box-shadow:0 14px 38px rgba(15,23,42,.08); margin:4px 0 20px;
+        }
+        .public-showcase-title {font-size:34px;font-weight:900;line-height:1.08;color:#0f172a;margin:5px 0 9px;}
+        .public-showcase-copy {font-size:16px;line-height:1.6;color:#475569;max-width:980px;}
+        .value-strip {
+            border:1px solid #dbe4f0;border-radius:16px;padding:16px 18px;
+            background:#fff;height:100%;box-shadow:0 6px 18px rgba(15,23,42,.04);
+        }
+        .value-strip b {font-size:19px;color:#0f172a;}
+        .value-strip span {display:block;color:#64748b;font-size:13px;line-height:1.45;margin-top:4px;}
+        .proof-card {
+            border:1px solid #dbe4f0;border-radius:16px;padding:17px 18px;
+            background:linear-gradient(135deg,#ffffff,#f8fafc);height:100%;
+        }
+        .proof-card .proof-kicker {font-size:10px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#0f766e;}
+        .proof-card .proof-stat {font-size:25px;font-weight:900;color:#0f172a;margin:3px 0;}
+        .proof-card .proof-text {font-size:13px;line-height:1.45;color:#64748b;}
+        .module-value-card {
+            border:1px solid #e2e8f0;border-radius:15px;padding:14px 16px;
+            background:#fff;min-height:126px;margin-bottom:8px;
+        }
+        .module-value-card .module-name {font-weight:850;color:#0f172a;font-size:16px;}
+        .module-value-card .module-category {font-size:11px;color:#0f766e;font-weight:800;text-transform:uppercase;letter-spacing:.06em;}
+        .module-value-card .module-when {font-size:13px;color:#475569;line-height:1.45;margin-top:6px;}
+        .module-example {border-left:3px solid #0f766e;padding:8px 11px;background:#f8fafc;border-radius:8px;color:#334155;font-size:13px;line-height:1.5;}
+        </style>
+        """
+        st.markdown(_showcase_css, unsafe_allow_html=True)
+
+        _value_cols = st.columns(4)
+        _value_items = [
+            ("DECIDE", "Compare options with numbers instead of opinions."),
+            ("SIMULATE", "Test changes before they disrupt the real operation."),
+            ("OPTIMIZE", "Find better schedules, routes, layouts and allocations."),
+            ("PROVE", "Turn results into evidence leaders can inspect and act on."),
+        ]
+        for _col, (_label, _copy) in zip(_value_cols, _value_items):
+            with _col:
+                st.markdown(
+                    f'<div class="value-strip"><b>{_label}</b><span>{_copy}</span></div>',
+                    unsafe_allow_html=True
+                )
+
+        st.markdown("### Why industrial teams are moving this way")
         st.markdown(
-            "Every module listed below is real and running in this platform right now - this isn't a marketing mockup. "
-            "Tiers are cumulative: Mid-Tier Pro includes everything in Starter, and so on up to Research Pack."
+            "The shift is visible across manufacturing: AI, digital twins, connected engineering, "
+            "optimization and industrial data are moving from isolated pilots toward operational use. "
+            "Shoir-IE is positioned around the practical questions those technologies are meant to answer."
         )
 
-        explore_tier = st.radio(
-            "Browse by tier",
-            ["Starter", "Mid-Tier Pro", "Enterprise", "Research Pack"],
-            horizontal=True,
-            key="explore_tier_radio"
+        _proof_cols = st.columns(3)
+        _proofs = [
+            (
+                "WORLD ECONOMIC FORUM • 2026",
+                "238",
+                "industrial sites are now in the Global Lighthouse Network. The 2026 cohort includes Saudi Aramco and highlights end-to-end intelligence, human-machine collaboration and measurable operational value.",
+                "https://www.weforum.org/press/2026/06/new-global-lighthouse-sites-demonstrate-how-ai-is-rewiring-manufacturing-and-supply-chains/"
+            ),
+            (
+                "SIEMENS • REALIZE LIVE 2026",
+                "20%",
+                "reported throughput improvement across PepsiCo’s end-to-end value chain in a digital-twin transformation; Siemens also reported 90%+ of potential operational issues avoided before implementation.",
+                "https://news.siemens.com/en-us/realize-live-americas-2026-recap-day-1/"
+            ),
+            (
+                "NIST • 2026 ROADMAP",
+                "4 priorities",
+                "the smart-manufacturing roadmap emphasizes data, integration, digital twins, optimization, explainability and trustworthy operation — the same decision chain industrial teams increasingly need to connect.",
+                "https://www.nist.gov/publications/2026-roadmap-artificial-intelligence-and-machine-learning-smart-manufacturing"
+            ),
+        ]
+        for _col, (_kicker, _stat, _text, _url) in zip(_proof_cols, _proofs):
+            with _col:
+                st.markdown(
+                    f'<div class="proof-card"><div class="proof-kicker">{_kicker}</div>'
+                    f'<div class="proof-stat">{_stat}</div><div class="proof-text">{_text}</div>'
+                    f'<div style="margin-top:10px;"><a href="{_url}" target="_blank">Read the source ↗</a></div></div>',
+                    unsafe_allow_html=True
+                )
+
+        st.caption(
+            "External examples are industry evidence, not Shoir-IE customer results. "
+            "They show the kinds of operational outcomes industrial organizations are pursuing."
         )
 
-        _tier_order = ["Starter", "Mid-Tier Pro", "Enterprise", "Research Pack"]
-        _cumulative = set(_tier_order[:_tier_order.index(explore_tier) + 1])
-        _benefit = TIER_BENEFITS[explore_tier]
-        _modules_here = [m for m in MODULE_CATALOG if m["tier"] == explore_tier]
-        _total_so_far = sum(1 for m in MODULE_CATALOG if m["tier"] in _cumulative)
+        st.markdown("### Find the capability for the problem you have")
+        _tier_options = ["All capabilities", "Starter", "Mid-Tier Pro", "Enterprise", "Research Pack"]
+        _browse_tier = st.selectbox(
+            "Plan / access level",
+            _tier_options,
+            key="explore_tier_filter_v2"
+        )
+        _search = st.text_input(
+            "Search capabilities",
+            placeholder="Try: inventory, quality, warehouse, simulation, maintenance, research, sustainability…",
+            key="explore_module_search_v2"
+        )
+        _category_options = ["All categories"] + sorted({str(m.get("category","Other")) for m in MODULE_CATALOG})
+        _browse_category = st.selectbox(
+            "Area",
+            _category_options,
+            key="explore_category_filter_v2"
+        )
 
-        st.markdown(f"### {explore_tier} — {_benefit['price']}")
-        st.markdown(f"**{_benefit['pitch']}**")
-        st.caption(_benefit["gain"])
-        st.markdown(f"**+{len(_modules_here)} modules at this tier** · **{_total_so_far} modules total included**")
+        _query = _search.strip().lower()
+        _filtered_modules = []
+        for _m in MODULE_CATALOG:
+            if _browse_tier != "All capabilities" and _m.get("tier") != _browse_tier:
+                continue
+            if _browse_category != "All categories" and _m.get("category") != _browse_category:
+                continue
+            _haystack = " ".join([
+                str(_m.get("name","")),
+                str(_m.get("category","")),
+                str(_m.get("when","")),
+                str(_m.get("example","")),
+            ]).lower()
+            if _query and _query not in _haystack:
+                continue
+            _filtered_modules.append(_m)
+
+        st.markdown(
+            f"**{len(_filtered_modules)} capabilities shown** · "
+            f"{len(MODULE_CATALOG)} capabilities in the complete catalog"
+        )
+
+        if _browse_tier != "All capabilities":
+            _benefit = TIER_BENEFITS.get(_browse_tier, {})
+            _tier_price = _benefit.get("price", "")
+            _tier_pitch = _benefit.get("pitch", "")
+            _tier_gain = _benefit.get("gain", "")
+            st.markdown(
+                f"#### {_browse_tier} · {_tier_price}\n"
+                f"**{_tier_pitch}**\n\n{_tier_gain}"
+            )
+
+        # Every catalog entry remains visible through the filters and keeps
+        # its concrete "when" and "example" story. No internal implementation
+        # details are exposed on the public buying page.
+        for _idx in range(0, len(_filtered_modules), 2):
+            _pair = _filtered_modules[_idx:_idx + 2]
+            _cols = st.columns(len(_pair))
+            for _col, _m in zip(_cols, _pair):
+                with _col:
+                    st.markdown(
+                        f'<div class="module-value-card">'
+                        f'<div class="module-category">{html.escape(str(_m.get("category","Industrial Engineering")))}</div>'
+                        f'<div class="module-name">{html.escape(str(_m.get("name","Capability")))}</div>'
+                        f'<div class="module-when"><b>Helps when:</b> {html.escape(str(_m.get("when","")))}</div>'
+                        f'</div>',
+                        unsafe_allow_html=True
+                    )
+                    with st.expander("See a real-world example"):
+                        st.markdown(
+                            f'<div class="module-example"><b>Example:</b> '
+                            f'{html.escape(str(_m.get("example","")))}</div>',
+                            unsafe_allow_html=True
+                        )
+
+        if not _filtered_modules:
+            st.info("No capability matches those filters. Try a broader search or select All capabilities.")
+
         st.markdown("---")
+        st.markdown("### What changes for the person using it?")
+        _outcome_cols = st.columns(3)
+        _outcomes = [
+            ("For an Industrial Engineer", "Go from raw operational data to a quantified improvement case — layout, line balance, inventory, quality, scheduling, simulation and economics in one place."),
+            ("For an Operations Manager", "See the constraint, compare scenarios, understand the trade-off and give the team a decision they can execute — instead of another static report."),
+            ("For a Researcher / University", "Move from hypothesis to experiment, statistics, reproducibility and presentation-ready evidence without separating the analytical work from the industrial model."),
+        ]
+        for _col, (_title, _body) in zip(_outcome_cols, _outcomes):
+            with _col:
+                st.markdown(
+                    f'<div class="value-strip"><b>{_title}</b><span>{_body}</span></div>',
+                    unsafe_allow_html=True
+                )
 
-        _cats_seen = []
-        _by_cat = {}
-        for _m in _modules_here:
-            if _m["category"] not in _by_cat:
-                _by_cat[_m["category"]] = []
-                _cats_seen.append(_m["category"])
-            _by_cat[_m["category"]].append(_m)
+        st.markdown("### A simple way to choose")
+        _plan_cols = st.columns(4)
+        _plan_copy = [
+            ("Starter", "$29", "Core engineering decisions", "Optimization, inventory, facilities and essential IE workflows."),
+            ("Mid-Tier Pro", "$79", "Operational improvement", "Adds routing, planning, quality, finance, sustainability and network operations."),
+            ("Enterprise", "$199", "Connected decision-making", "Adds simulation, automation, monitoring, control-tower capabilities and team-scale workflows."),
+            ("Research Pack", "+$30", "Research-grade evidence", "Adds statistical analysis, reproducibility, paper-to-simulation and research stress-testing."),
+        ]
+        for _col, (_name, _price, _headline, _body) in zip(_plan_cols, _plan_copy):
+            with _col:
+                st.markdown(
+                    f'<div class="value-strip"><div class="kicker">{_name}</div>'
+                    f'<b>{_price}</b><span><b>{_headline}</b><br>{_body}</span></div>',
+                    unsafe_allow_html=True
+                )
 
-        for _cat in _cats_seen:
-            st.markdown(f"##### {_cat}")
-            for _m in _by_cat[_cat]:
-                with st.expander(_m["name"]):
-                    st.markdown(f"**When to use it:** {_m['when']}")
-                    st.markdown(f"**Example:** {_m['example']}")
+        st.success(
+            "If you can describe the industrial problem, there is a strong chance the catalog has a workflow "
+            "for it. Start with the smallest plan that covers the decision you need to make, then expand as your "
+            "use case grows."
+        )
+        st.info("Ready to see it with your own problem? Open **Get Ticket & Register**, choose a tier, and request access.")
 
     # FIX: nothing below this point stopped script execution for a visitor
     # who isn't signed in, so the entire dashboard (sidebar, all modules,
