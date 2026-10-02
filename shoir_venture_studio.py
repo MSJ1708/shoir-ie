@@ -424,6 +424,7 @@ def _render_overview(owner: str) -> None:
     """Executive evidence cockpit: show the venture proof chain without inventing traction."""
     customers = int(_scalar("SELECT COUNT(*) FROM venture_customers WHERE owner=?", (owner,)))
     pilots = int(_scalar("SELECT COUNT(*) FROM venture_pilots WHERE owner=?", (owner,)))
+    active = int(_scalar("SELECT COUNT(*) FROM venture_pilots WHERE owner=? AND status='Active'", (owner,)))
     completed = int(_scalar("SELECT COUNT(*) FROM venture_pilots WHERE owner=? AND status IN ('Complete','Converted')", (owner,)))
     hypotheses = int(_scalar("SELECT COUNT(*) FROM venture_hypotheses WHERE owner=?", (owner,)))
     evidence = int(_scalar("SELECT COUNT(*) FROM venture_evidence WHERE owner=?", (owner,)))
@@ -445,7 +446,7 @@ def _render_overview(owner: str) -> None:
 
     metrics = [
         ("Customers", customers),
-        ("Active pilots", max(0, pilots - completed)),
+        ("Active pilots", active),
         ("Completed pilots", completed),
         ("Hypotheses", hypotheses),
         ("Evidence", evidence),
@@ -852,7 +853,7 @@ def _render_value_evidence(owner: str) -> None:
         st.info("Enter confirmed issue counts and rework hours to activate the controlled quality-value metrics.")
     with st.form("venture_quality_metrics_form"):
         q1,q2,q3=st.columns(3)
-        issues_detected=q1.number_input("Issues detected before analysis",min_value=0.0,value=float(quality.iloc[0]['issues_detected']) if not quality.empty and pd.notna(quality.iloc[0]['issues_detected']) else 0.0,step=1.0)
+        issues_detected=q1.number_input("Confirmed issues detected",min_value=0.0,value=float(quality.iloc[0]['issues_detected']) if not quality.empty and pd.notna(quality.iloc[0]['issues_detected']) else 0.0,step=1.0)
         issues_confirmed=q2.number_input("Issues confirmed in ground truth",min_value=0.0,value=float(quality.iloc[0]['issues_confirmed']) if not quality.empty and pd.notna(quality.iloc[0]['issues_confirmed']) else 0.0,step=1.0)
         baseline_rework=q3.number_input("Baseline rework hours",min_value=0.0,value=float(quality.iloc[0]['baseline_rework_hours']) if not quality.empty and pd.notna(quality.iloc[0]['baseline_rework_hours']) else 0.0,step=0.5)
         post_rework=st.number_input("Post-deployment rework hours",min_value=0.0,value=float(quality.iloc[0]['post_rework_hours']) if not quality.empty and pd.notna(quality.iloc[0]['post_rework_hours']) else 0.0,step=0.5)
