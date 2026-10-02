@@ -868,6 +868,17 @@ def _render_case_study(owner:str)->None:
         ("Measured value present",not values.empty),
     ]
     check_df=pd.DataFrame(checks,columns=["Requirement","Pass"]); check_df["Pass"]=check_df["Pass"].map(lambda x:"✓ PASS" if x else "⚠ MISSING"); st.dataframe(check_df,use_container_width=True,hide_index=True)
+    evidence_conf=evidence["confidence"].value_counts().reset_index() if not evidence.empty else pd.DataFrame()
+    if not evidence_conf.empty:
+        evidence_conf.columns=["Confidence","Evidence"]
+        _show_fig(px.bar(evidence_conf,x="Confidence",y="Evidence",text="Evidence"),280,"Case-study evidence confidence")
+    value_valid=values.copy()
+    value_valid["Baseline"]=pd.to_numeric(value_valid["baseline_value"],errors="coerce")
+    value_valid["Post"]=pd.to_numeric(value_valid["post_value"],errors="coerce")
+    value_valid=value_valid.dropna(subset=["Baseline","Post"])
+    if not value_valid.empty:
+        case_chart=value_valid[["metric","Baseline","Post"]].head(12).melt(id_vars="metric",var_name="Stage",value_name="Value")
+        _show_fig(px.bar(case_chart,x="metric",y="Value",color="Stage",barmode="group"),330,"Case-study measured change")
     if any(x is False for _,x in checks): st.warning("The pilot is not yet eligible for a case study."); return
     customer=_customer_record(owner,str(pilot.get("customer_id","")))
     summary=value_summary(values)
@@ -955,6 +966,8 @@ def render_venture_studio(tier:str,username:str,current_module:str="Venture Stud
     if "venture_session_started_at" not in st.session_state:
         st.session_state["venture_session_started_at"]=_now(); track_event(owner,"workspace_opened","Venture Studio")
     _render_header(owner)
-    tabs=st.tabs(["👥 Customer","🧪 Pilots","🔎 Hypothesis → Evidence","💰 Value & ROI","🗄️ Investor Room","📈 Readiness","📊 Traction","🎬 Demo Mode","🌐 Market Intel","📝 Case Study","💳 Business Model"])
-    for tab,renderer in zip(tabs,[_render_customer,_render_pilots,_render_hypothesis_evidence,_render_value_evidence,_render_data_room,_render_readiness,_render_traction,_render_demo,_render_market,_render_case_study,_render_business_model]):
+    tabs=st.tabs(["🧭 Overview","👥 Customer","🧪 Pilots","🔎 Hypothesis → Evidence","💰 Value & ROI","🗄️ Investor Room","📈 Readiness","📊 Traction","🎬 Demo Mode","🌐 Market Intel","📝 Case Study","💳 Business Model"])
+    with tabs[0]:
+        _render_overview(owner)
+    for tab,renderer in zip(tabs[1:],[_render_customer,_render_pilots,_render_hypothesis_evidence,_render_value_evidence,_render_data_room,_render_readiness,_render_traction,_render_demo,_render_market,_render_case_study,_render_business_model]):
         with tab: renderer(owner)
