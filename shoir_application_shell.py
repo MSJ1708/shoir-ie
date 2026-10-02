@@ -18,7 +18,7 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-SHELL_VERSION = "3.0"
+SHELL_VERSION = "3.1"
 
 NAV_GROUPS = {
     "HOME": "⌂ Home",
@@ -718,6 +718,13 @@ def render_application_shell(
     ensure_shell_schema()
     render_shell_css()
 
+    # Defense in depth: the admin navigation and module cannot enter a non-admin session,
+    # even if an older session contains stale allowed_modules state.
+    safe_allowed_modules = tuple(
+        str(x) for x in allowed_modules
+        if is_admin or str(x).strip().casefold() not in {"admin panel", "admin"}
+    )
+    allowed_modules = safe_allowed_modules
     nav_labels = [key for key in NAV_GROUPS.keys() if is_admin or key != "ADMIN"]
     current_section = str(st.session_state.get("shoir_shell_section", "HOME"))
     if not is_admin and current_section == "ADMIN":
