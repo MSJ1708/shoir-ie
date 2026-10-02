@@ -166,3 +166,22 @@ def test_value_summary_blocks_silent_mixed_currency_aggregation():
     assert result["annualized_benefit"] == 0.0
     assert result["roi_percent"] == 0.0
     assert result["currency"] == "MIXED"
+
+
+def test_venture_scope_exposes_requested_incubator_workspaces():
+    required = [
+        "_render_customer",
+        "_render_pilots",
+        "_render_hypothesis_evidence",
+        "_render_evidence_vault",
+        "_render_pilot_comparison",
+        "_render_value_evidence",
+        "_render_data_room",
+        "_render_readiness",
+        "_render_traction",
+        "_render_demo",
+        "_render_market",
+        "_render_case_study",
+        "_render_business_model",
+    ]
+    assert all(callable(getattr(vs, name, None)) for name in required)
