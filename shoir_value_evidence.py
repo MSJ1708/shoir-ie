@@ -323,6 +323,42 @@ def render_value_evidence_engine(owner: str, current_module: str = "Venture Stud
         fig.update_layout(height=320, margin=dict(l=16,r=16,t=56,b=20))
         st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
+    with st.expander("Save verified financial bridge", expanded=False):
+        bridge_source = st.text_input("Financial evidence source / reference", key="ve_fin_source")
+        bridge_state = st.selectbox(
+            "Financial evidence state",
+            ["Reference estimate", "Customer measured", "Audited"],
+            key="ve_fin_state",
+        )
+        if st.button("💾 Save financial value bridge", type="primary", use_container_width=True, key="ve_fin_save"):
+            if bridge_state != "Reference estimate" and not bridge_source.strip():
+                st.error("Customer measured or audited financial values require a source reference.")
+            else:
+                bridge_id = "VB-" + datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S") + "-" + hashlib.sha256(
+                    f"{owner}|{module}|{baseline_cost}|{post_cost}|{implementation}|{_now()}".encode("utf-8")
+                ).hexdigest()[:10].upper()
+                with sqlite3.connect(DB_PATH, timeout=30) as conn:
+                    conn.execute(
+                        """INSERT INTO shoir_value_financial_bridges
+                           VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                        (
+                            bridge_id, owner, module,
+                            float(baseline_cost), float(post_cost), float(implementation),
+                            float(fb["verified_period_benefit"]),
+                            float(financial_freq),
+                            float(fb["annualized_operational_benefit"]),
+                            float(fb["annual_net_benefit"]),
+                            float(fb["roi_percent"] or 0.0),
+                            float(fb["payback_months"]) if fb["payback_months"] is not None else None,
+                            "SAR",
+                            bridge_source.strip()[:300] or "Reference planning estimate",
+                            _now(),
+                        ),
+                    )
+                    conn.commit()
+                st.success(f"Financial bridge {bridge_id} saved.")
+                st.rerun()
+
     st.markdown("#### 3 · Industrial value scorecard")
     metric_df = pd.DataFrame(_METRICS, columns=["Metric", "Category", "Direction", "Unit"])
     metric_df["Evidence status"] = "Needs baseline + post value"
