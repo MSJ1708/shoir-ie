@@ -56,6 +56,10 @@ _PREFIX_EXCLUDE = (
     "uploaded_",
     "_workspace_",
     # Streamlit action widgets are event controls, not durable workspace values.
+    # The unified shell uses a consistent shoir_shell_* namespace for UI
+    # controls and transient surface state; none of it belongs in persistence.
+    "shoir_shell_",
+    "shoir_global_module_",
     "upgrade_clean_",
     "upgrade_reset_",
     "upgrade_uploader_",
@@ -101,6 +105,8 @@ _ACTION_KEYS = {
     "btn_remove_landmark",
     "run_monte_carlo_btn",
     "payment_screenshot_upload",
+    "shoir_create_study",
+    "shoir_presentation_return",
     # Unified application-shell actions are ephemeral Streamlit button state.
     # Persisting any of these keys would hydrate a button before its widget is
     # instantiated on the next run, which Streamlit rejects.
