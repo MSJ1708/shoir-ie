@@ -777,6 +777,9 @@ def _demo_report(data:dict[str,Any])->bytes:
 def _render_demo(owner:str)->None:
     st.markdown("### 🎬 End-to-End Demo / Story Mode")
     st.caption("Deterministic, synthetic and presentation-safe. No customer data is used.")
+    if not st.session_state.get("venture_demo_viewed"):
+        track_event(owner,"demo_viewed","End-to-End Demo Mode")
+        st.session_state["venture_demo_viewed"]=True
     data=_demo_data()
     if st.button("🚀 Load deterministic demo into Shoir-IE", type="primary", use_container_width=True, key="venture_demo_load"):
         st.session_state["universal_active_dataset"] = data["clean"].copy()
@@ -801,13 +804,21 @@ def _render_demo(owner:str)->None:
         st.markdown("**Inputs | Data | Calculations | KPIs | Simulation | Optimization | Scenarios | Decisions | Dashboard**")
         st.dataframe(data["clean"].head(12),use_container_width=True,hide_index=True)
     with tabs[3]:
-        st.dataframe(data["flow"],use_container_width=True,hide_index=True); st.caption("Material flow: Receiving → Machining → Assembly → Pack.")
+        st.dataframe(data["flow"],use_container_width=True,hide_index=True)
+        sankey=go.Figure(go.Sankey(node=dict(label=["Receiving","Machining","Assembly","Pack"]),link=dict(source=[0,1,2],target=[1,2,3],value=data["flow"]["Flow units / day"].tolist())))
+        _show_fig(sankey,330,"Synthetic material-flow path")
+        st.caption("DEMO flow only · this is not a customer facility map.")
     with tabs[4]:
         st.write("Focused question: how does a facility/flow alternative change throughput, travel distance and planning effort?")
         st.dataframe(data["scenarios"].iloc[[0,2]],use_container_width=True,hide_index=True)
     with tabs[5]:
         st.dataframe(data["scenarios"],use_container_width=True,hide_index=True)
-        st.bar_chart(data["scenarios"].set_index("Scenario")[["Throughput units/day","Travel distance m/day","Planning hours"]])
+        melted=data["scenarios"].melt(id_vars="Scenario",var_name="KPI",value_name="Value")
+        _show_fig(px.bar(melted,x="Scenario",y="Value",color="KPI",barmode="group"),360,"Scenario stress test")
+        deltas=data["scenarios"].copy()
+        base=deltas.iloc[0]
+        delta_frame=pd.DataFrame({"KPI":["Throughput","Travel distance","Planning hours"],"Delta":[deltas.iloc[-1]["Throughput units/day"]-base["Throughput units/day"],deltas.iloc[-1]["Travel distance m/day"]-base["Travel distance m/day"],deltas.iloc[-1]["Planning hours"]-base["Planning hours"]]})
+        _show_fig(px.bar(delta_frame,x="KPI",y="Delta",text="Delta"),300,"Scenario B delta vs baseline")
         if not st.session_state.get("venture_demo_scenario_recorded"):
             track_event(owner,"scenario_compared","End-to-End Demo Mode")
             st.session_state["venture_demo_scenario_recorded"]=True
