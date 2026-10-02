@@ -430,6 +430,18 @@ def _render_overview(owner: str) -> None:
     artifacts = int(_scalar("SELECT COUNT(*) FROM venture_artifacts WHERE owner=?", (owner,)))
     cases = int(_scalar("SELECT COUNT(*) FROM venture_case_studies WHERE owner=?", (owner,)))
 
+    onboarding_done = sum([
+        customers > 0,
+        pilots > 0,
+        hypotheses > 0,
+        evidence > 0,
+    ])
+    st.progress(onboarding_done / 4)
+    if onboarding_done < 4:
+        st.info("Start here: record the customer problem → create a pilot baseline → state the hypothesis → preserve source-backed evidence. This turns the Venture Studio from a register into a defensible proof chain.")
+    else:
+        st.success("Core evidence chain active · Customer → Pilot → Hypothesis → Evidence. Next: preserve measured value, complete pilots, and assemble the investor room.")
+
     metrics = [
         ("Customers", customers),
         ("Active pilots", max(0, pilots - completed)),
@@ -480,10 +492,12 @@ def _render_overview(owner: str) -> None:
             f"{summary['annualized_benefit']:,.2f}",
         )
         value_chart = values.copy()
-        value_chart["Value"] = pd.to_numeric(value_chart["economic_value"], errors="coerce")
-        value_chart = value_chart.dropna(subset=["Value"]).loc[value_chart["Value"] != 0].head(12)
+        value_chart["Value"] = values.apply(lambda row: value_calculation(row)["economic_value"], axis=1)
+        value_chart["Metric"] = value_chart["metric"].fillna("").astype(str)
+        value_chart = value_chart.dropna(subset=["Value"])
+        value_chart = value_chart.loc[value_chart["Value"] != 0].head(12)
         if not value_chart.empty:
-            _show_fig(px.bar(value_chart, x="Value", y="metric", orientation="h", text="Value"), 330, "Measured economic value")
+            _show_fig(px.bar(value_chart, x="Value", y="Metric", orientation="h", text="Value"), 330, "Measured economic value")
 
     actions: list[dict[str, str]] = []
     customer_actions = _query(
@@ -903,6 +917,63 @@ def _room_export(owner:str)->bytes:
     return buf.getvalue()
 
 
+def _render_evidence_vault(owner: str) -> None:
+    st.markdown("### 🗂️ Evidence Vault")
+    st.caption("One searchable evidence ledger for interviews, pilot measurements, experiments, approvals, datasets, documents and calculations. Every record keeps source, date, confidence and linkage.")
+    evidence = _query(
+        """SELECT evidence_id,title,evidence_type,source,source_date,confidence,linked_object_type,linked_object_id,artifact_url,created_at
+           FROM venture_evidence WHERE owner=? ORDER BY created_at DESC""",
+        (owner,),
+    )
+    if evidence.empty:
+        st.info("No evidence records yet. Start in Hypothesis → Evidence or create a pilot measurement record.")
+        return
+
+    c1,c2,c3,c4 = st.columns(4)
+    c1.metric("Evidence records", f"{len(evidence):,}")
+    c2.metric("High / audited", f"{int(evidence['confidence'].isin(['High','Audited']).sum()):,}")
+    c3.metric("Sourced + dated", f"{int((evidence['source'].fillna('').astype(str).str.strip().ne('') & evidence['source_date'].fillna('').astype(str).str.strip().ne('')).sum()):,}")
+    c4.metric("Linked records", f"{int(evidence['linked_object_id'].fillna('').astype(str).str.strip().ne('').sum()):,}")
+
+    f1,f2,f3 = st.columns([1.3,1.3,2])
+    types = ["All"] + sorted(evidence["evidence_type"].dropna().astype(str).unique().tolist())
+    confidences = ["All"] + [x for x in CONFIDENCE if x in set(evidence["confidence"].dropna().astype(str))]
+    selected_type = f1.selectbox("Evidence type", types, key="venture_evidence_type_filter")
+    selected_conf = f2.selectbox("Confidence", confidences, key="venture_evidence_conf_filter")
+    query = f3.text_input("Search title, source or linked object", key="venture_evidence_search")
+    filtered = evidence.copy()
+    if selected_type != "All":
+        filtered = filtered[filtered["evidence_type"].astype(str).eq(selected_type)]
+    if selected_conf != "All":
+        filtered = filtered[filtered["confidence"].astype(str).eq(selected_conf)]
+    if query.strip():
+        q=query.strip().lower()
+        mask = (
+            filtered["title"].fillna("").astype(str).str.lower().str.contains(q, regex=False)
+            | filtered["source"].fillna("").astype(str).str.lower().str.contains(q, regex=False)
+            | filtered["linked_object_id"].fillna("").astype(str).str.lower().str.contains(q, regex=False)
+        )
+        filtered = filtered.loc[mask]
+
+    if filtered.empty:
+        st.warning("No evidence matches the current filters.")
+        return
+    st.dataframe(filtered,use_container_width=True,hide_index=True)
+
+    counts = filtered["evidence_type"].value_counts().reset_index()
+    counts.columns = ["Evidence type","Records"]
+    _show_fig(px.bar(counts,x="Records",y="Evidence type",orientation="h",text="Records"),300,"Evidence mix")
+    coverage = pd.DataFrame({
+        "Control": ["Source","Date","Confidence","Link"],
+        "Coverage": [
+            filtered["source"].fillna("").astype(str).str.strip().ne("").mean()*100,
+            filtered["source_date"].fillna("").astype(str).str.strip().ne("").mean()*100,
+            filtered["confidence"].fillna("").astype(str).str.strip().ne("").mean()*100,
+            filtered["linked_object_id"].fillna("").astype(str).str.strip().ne("").mean()*100,
+        ],
+    })
+    _show_fig(px.bar(coverage,x="Coverage",y="Control",orientation="h",text=coverage["Coverage"].map(lambda x:f"{x:.0f}%"),range_x=[0,100]),300,"Evidence metadata coverage")
+
 def _render_data_room(owner:str)->None:
     st.markdown("### 🗄️ Investor Data Room")
     st.caption("Product → Problem → Market → Customer Evidence → Pilots → ROI → Traction → Roadmap → Security → Financial Model")
@@ -943,6 +1014,46 @@ def _render_data_room(owner:str)->None:
             else: st.dataframe(versions,use_container_width=True,hide_index=True)
     st.download_button("📦 Download Investor Data Room package",_room_export(owner),file_name="shoir_ie_investor_data_room.zip",mime="application/zip",type="primary",use_container_width=True,key="venture_room_export")
 
+
+def _render_pilot_comparison(owner: str) -> None:
+    st.markdown("### 🧪 Pilot / Experiment Comparison")
+    st.caption("Compare customer-specific pilots using recorded status, evidence depth, measured value and quality signals. Missing measurements stay missing.")
+    pilots = _query("SELECT * FROM venture_pilots WHERE owner=? ORDER BY updated_at DESC",(owner,))
+    if pilots.empty:
+        st.info("Create at least one pilot to activate the comparison workspace.")
+        return
+    rows=[]
+    for _, pilot in pilots.iterrows():
+        pilot_id=str(pilot.get("pilot_id",""))
+        values=_query("SELECT * FROM venture_value_measurements WHERE owner=? AND pilot_id=?",(owner,pilot_id))
+        summary=value_summary(values)
+        ev_count=int(_scalar("SELECT COUNT(*) FROM venture_evidence WHERE owner=? AND linked_object_type='Pilot' AND linked_object_id=?",(owner,pilot_id)))
+        qdf=_query("SELECT * FROM venture_quality_metrics WHERE owner=? AND pilot_id=? ORDER BY updated_at DESC LIMIT 1",(owner,pilot_id))
+        qcalc=quality_evidence_calculation(qdf.iloc[0]) if not qdf.empty else {"error_detection_rate_percent":0.0,"rework_avoided_hours":0.0}
+        rows.append({
+            "Pilot":str(pilot.get("title") or pilot_id),
+            "Stage":str(pilot.get("stage") or ""),
+            "Status":str(pilot.get("status") or ""),
+            "Evidence":ev_count,
+            "Measured rows":summary["measured_rows"],
+            "Priced rows":summary["priced_rows"],
+            "Annualized benefit":summary["annualized_benefit"],
+            "Currency":summary["currency"] if not summary["mixed_currency"] else "MIXED",
+            "ROI %":summary["roi_percent"] if not summary["mixed_currency"] else np.nan,
+            "Error detection %":qcalc["error_detection_rate_percent"] if not qdf.empty else np.nan,
+            "Rework avoided h":qcalc["rework_avoided_hours"] if not qdf.empty else np.nan,
+        })
+    frame=pd.DataFrame(rows)
+    st.dataframe(frame,use_container_width=True,hide_index=True)
+    c1,c2=st.columns(2)
+    priced=frame[frame["Annualized benefit"]!=0].copy()
+    with c1:
+        if not priced.empty:
+            _show_fig(px.bar(priced,x="Annualized benefit",y="Pilot",orientation="h",text="Annualized benefit"),320,"Measured annualized benefit by pilot")
+        else:
+            st.info("No pilot has a non-zero, currency-consistent measured economic benefit yet.")
+    with c2:
+        _show_fig(px.bar(frame.sort_values("Evidence"),x="Evidence",y="Pilot",orientation="h",text="Evidence"),320,"Evidence depth by pilot")
 
 def _render_readiness(owner:str)->None:
     st.markdown("### 📈 Product-Market-Fit / Readiness Dashboard")
@@ -1261,8 +1372,8 @@ def render_venture_studio(tier:str,username:str,current_module:str="Venture Stud
     if "venture_session_started_at" not in st.session_state:
         st.session_state["venture_session_started_at"]=_now(); track_event(owner,"workspace_opened","Venture Studio")
     _render_header(owner)
-    tabs=st.tabs(["🧭 Overview","👥 Customer","🧪 Pilots","🔎 Hypothesis → Evidence","💰 Value & ROI","🗄️ Investor Room","📈 Readiness","📊 Traction","🎬 Demo Mode","🌐 Market Intel","📝 Case Study","💳 Business Model"])
+    tabs=st.tabs(["🧭 Overview","👥 Customer","🧪 Pilots","🔎 Hypothesis → Evidence","🗂️ Evidence Vault","🧪 Compare","💰 Value & ROI","🗄️ Investor Room","📈 Readiness","📊 Traction","🎬 Demo Mode","🌐 Market Intel","📝 Case Study","💳 Business Model"])
     with tabs[0]:
         _render_overview(owner)
-    for tab,renderer in zip(tabs[1:],[_render_customer,_render_pilots,_render_hypothesis_evidence,_render_value_evidence,_render_data_room,_render_readiness,_render_traction,_render_demo,_render_market,_render_case_study,_render_business_model]):
+    for tab,renderer in zip(tabs[1:],[_render_customer,_render_pilots,_render_hypothesis_evidence,_render_evidence_vault,_render_pilot_comparison,_render_value_evidence,_render_data_room,_render_readiness,_render_traction,_render_demo,_render_market,_render_case_study,_render_business_model]):
         with tab: renderer(owner)
