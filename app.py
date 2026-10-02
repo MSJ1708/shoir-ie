@@ -10973,7 +10973,7 @@ elif mod == "Agentic Workflows":
 if mod == "Admin Panel":
     st.header("🔒 Security Admin Panel & Ticket Management")
     
-    if not st.session_state.get("authenticated", False) or st.session_state.get("current_user") != "sho":
+    if not st.session_state.get("authenticated", False) or not is_admin:
         st.error("Access Denied: The Admin Panel is exclusively restricted to administrator 'sho'.")
     else:
         st.success("Welcome, Administrator sho! Full administrative controls unlocked.")
