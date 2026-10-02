@@ -4302,6 +4302,31 @@ def _excel_render_v2(tier: str, username: str) -> None:
         result["active_table_id"] = chosen_key
         st.session_state["excel_studio_visual_df"] = active.copy(deep=True)
 
+        # Publish the cleaned active table immediately. Downstream modules can
+        # consume it without another upload.
+        st.session_state["universal_active_dataset"] = active.copy(deep=True)
+        st.session_state["industrial_workbook_current_df"] = active.copy(deep=True)
+        st.session_state["data_platform_latest_df"] = active.copy(deep=True)
+        st.session_state["unified_data"] = active.copy(deep=True)
+        st.session_state["shoir_data_status"] = "IMPORTED"
+        st.session_state["shoir_data_source_key"] = "upload"
+        st.session_state["shoir_data_source"] = f"{result.get('filename', 'Uploaded workbook')} · {chosen_key or ''}".strip(" ·")
+        st.session_state["shoir_data_version"] = str(result.get("signature", ""))[:12]
+        st.session_state["shoir_data_hash"] = str(result.get("signature", ""))
+
+        # Show the transformed result immediately, not only inside later tabs.
+        st.markdown("### ✅ Improved workbook is ready")
+        st.caption(
+            f"Active cleaned dataset: {chosen_key or 'Cleaned sheet'} · "
+            f"{len(active):,} rows × {len(active.columns):,} columns"
+        )
+        preview_cols = st.columns([1.15, 1.15, 1, 1])
+        preview_cols[0].metric("Cleaned rows", f"{len(active):,}")
+        preview_cols[1].metric("Columns", f"{len(active.columns):,}")
+        preview_cols[2].metric("Review items", f"{len(review):,}")
+        preview_cols[3].metric("High priority", f"{high:,}")
+        st.dataframe(active.head(20), use_container_width=True, hide_index=True)
+
     tabs = st.tabs([
         "1 · Import", "2 · Structure", "3 · Quality", "4 · Map", "5 · Remediate",
         "6 · Visualize", "7 · Activate", "8 · Version & Export"
