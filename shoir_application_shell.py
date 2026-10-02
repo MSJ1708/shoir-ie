@@ -372,6 +372,15 @@ def render_shell_css() -> None:
 .shoir-shell-card {border:1px solid #dbe4ef;border-radius:16px;padding:13px 15px;background:#fff;box-shadow:0 7px 24px rgba(15,23,42,.04);}
 .shoir-shell-muted {color:#64748b;font-size:12px;line-height:1.5;}
 .shoir-presentation [data-testid="stSidebar"] {display:none !important;}
+.shoir-home-hero {padding:28px 30px;border-radius:22px;background:linear-gradient(135deg,#071524,#173b77 55%,#0f766e);color:#fff;box-shadow:0 18px 48px rgba(15,23,42,.14);margin:0 0 16px;}
+.shoir-home-eyebrow {font-size:11px;font-weight:900;letter-spacing:.14em;color:#7dd3fc;text-transform:uppercase;}
+.shoir-home-title {font-size:34px;font-weight:950;letter-spacing:-.035em;line-height:1.05;margin-top:6px;}
+.shoir-home-copy {font-size:14px;color:#dbeafe;line-height:1.55;margin-top:8px;max-width:900px;}
+.shoir-home-step {height:100%;padding:17px;border:1px solid #dbe4ef;border-radius:16px;background:#fff;box-shadow:0 8px 24px rgba(15,23,42,.035);}
+.shoir-home-step-num {display:inline-flex;width:28px;height:28px;align-items:center;justify-content:center;border-radius:999px;background:#eff6ff;color:#1d4ed8;font-weight:900;font-size:12px;}
+.shoir-home-step-title {margin-top:8px;font-size:15px;font-weight:900;color:#0f172a;}
+.shoir-home-step-copy {margin-top:4px;font-size:12px;color:#64748b;line-height:1.45;}
+.shoir-home-section {margin-top:18px;margin-bottom:9px;font-size:20px;font-weight:900;color:#0f172a;letter-spacing:-.02em;}
 .shoir-presentation .block-container {max-width:1450px !important;padding-top:1.2rem !important;}
 @media(max-width:1050px){.shoir-shell-top{grid-template-columns:1.7fr repeat(3,1fr);}}
 @media(max-width:700px){.shoir-shell-top{grid-template-columns:1fr 1fr;}}
@@ -508,6 +517,196 @@ def render_inspector(module: str, username: str, tier: str) -> None:
             body()
 
 
+
+def _activate_shared_dataset(
+    df: pd.DataFrame,
+    *,
+    filename: str,
+    sheet: str,
+    signature: str = "",
+) -> None:
+    """Publish one imported/cleaned table as the shared Shoir-IE active dataset."""
+    if not isinstance(df, pd.DataFrame):
+        raise TypeError("The active dataset must be a pandas DataFrame.")
+    active = df.copy(deep=True)
+    digest = str(signature or "")
+    if not digest:
+        import hashlib
+        digest = hashlib.sha256(active.to_csv(index=False).encode("utf-8", errors="replace")).hexdigest()
+    st.session_state["universal_active_dataset"] = active
+    st.session_state["excel_studio_visual_df"] = active
+    st.session_state["data_platform_latest_df"] = active
+    st.session_state["unified_data"] = active
+    st.session_state["industrial_workbook_current_df"] = active
+    st.session_state["shoir_data_status"] = "IMPORTED"
+    st.session_state["shoir_data_source_key"] = "upload"
+    st.session_state["shoir_data_source"] = f"{filename} · {sheet}" if sheet else str(filename)
+    st.session_state["shoir_data_version"] = str(digest)[:12]
+    st.session_state["shoir_data_hash"] = str(digest)
+    st.session_state["shoir_active_workbook_sheet"] = str(sheet)
+
+
+def _process_home_upload(uploaded: Any) -> tuple[dict[str, pd.DataFrame], str]:
+    raw = uploaded.getvalue()
+    from shoir_excel_studio import process_uploaded_workbook
+    result = process_uploaded_workbook(raw, str(uploaded.name))
+    sheets = result.get("cleaned_sheets") or result.get("raw_sheets") or {}
+    cleaned = {
+        str(name): frame.copy(deep=True)
+        for name, frame in sheets.items()
+        if isinstance(frame, pd.DataFrame)
+    }
+    cleaned = {name: frame for name, frame in cleaned.items() if not frame.empty}
+    if not cleaned:
+        raise ValueError("The uploaded file contained no usable data tables after inspection.")
+    return cleaned, str(result.get("signature") or "")
+
+
+def render_data_hub(username: str, tier: str) -> None:
+    """Central data handoff used by Home and Data; downstream modules share the active table."""
+    st.markdown("### Load your industrial data")
+    st.caption(
+        "Upload once. Shoir-IE cleans the file, keeps the multi-sheet workbook available, "
+        "and publishes the active sheet to analysis, simulation, optimization and decision tools."
+    )
+    upload = st.file_uploader(
+        "📤 Upload Excel / CSV / TSV / TXT",
+        type=["xlsx", "xlsm", "xls", "csv", "tsv", "txt"],
+        key="shoir_data_hub_upload",
+        help="The uploaded file is processed through the existing Excel Intelligence cleaning and governance pipeline.",
+    )
+    if upload is not None:
+        import hashlib
+        signature = hashlib.sha256(upload.getvalue()).hexdigest()
+        if signature != st.session_state.get("_shoir_data_hub_signature"):
+            with st.spinner("Inspecting, cleaning and connecting your data…"):
+                sheets, processed_signature = _process_home_upload(upload)
+                st.session_state["industrial_workbook"] = sheets
+                st.session_state["industrial_workbook_formulas"] = {name: {} for name in sheets}
+                st.session_state["industrial_workbook_variables"] = {}
+                st.session_state["industrial_workbook_id"] = None
+                st.session_state["_shoir_data_hub_signature"] = signature
+                st.session_state["_shoir_data_hub_filename"] = str(upload.name)
+                first_sheet = next(iter(sheets))
+                _activate_shared_dataset(
+                    sheets[first_sheet],
+                    filename=str(upload.name),
+                    sheet=first_sheet,
+                    signature=processed_signature or signature,
+                )
+                st.session_state["industrial_workbook_current_df"] = sheets[first_sheet].copy(deep=True)
+                st.session_state["industrial_workbook_last_upload_signature"] = signature
+                st.success(
+                    f"Connected {len(sheets):,} cleaned sheet(s) from **{upload.name}**. "
+                    "The active dataset is now available to downstream engineering tools."
+                )
+                st.rerun()
+
+    sheets = st.session_state.get("industrial_workbook", {})
+    if isinstance(sheets, Mapping) and sheets:
+        names = [str(name) for name in sheets]
+        active = str(st.session_state.get("shoir_active_workbook_sheet") or names[0])
+        if active not in names:
+            active = names[0]
+        choice = st.selectbox(
+            "Active sheet",
+            names,
+            index=names.index(active),
+            key="shoir_data_hub_sheet",
+        )
+        if choice != st.session_state.get("shoir_active_workbook_sheet"):
+            _activate_shared_dataset(
+                sheets[choice],
+                filename=str(st.session_state.get("_shoir_data_hub_filename") or "Industrial Workbook"),
+                sheet=choice,
+                signature=str(st.session_state.get("shoir_data_hash") or ""),
+            )
+            st.rerun()
+        active_df = st.session_state.get("universal_active_dataset", pd.DataFrame())
+        if isinstance(active_df, pd.DataFrame) and not active_df.empty:
+            ready = data_readiness(active_df)
+            a,b,c,d = st.columns(4)
+            a.metric("Rows", f"{len(active_df):,}")
+            b.metric("Columns", f"{len(active_df.columns):,}")
+            c.metric("Readiness", f"{ready['score']:.0f}%")
+            d.metric("State", infer_provenance())
+            st.dataframe(active_df.head(12), use_container_width=True, hide_index=True)
+            if ready["warnings"]:
+                st.caption(" · ".join(ready["warnings"][:2]))
+    else:
+        st.info("No shared dataset yet. Upload an industrial workbook above or open Industrial Workbook to start from a built-in engineering template.")
+
+
+def render_industrial_home(username: str, tier: str) -> None:
+    """Calm first-run landing page with an explicit engineering workflow guide."""
+    username_safe = html.escape(str(username or "Engineer"))
+    st.markdown(
+        f"""
+<div class="shoir-home-hero">
+  <div class="shoir-home-eyebrow">SHOIR-IE · INDUSTRIAL ENGINEERING DECISION PLATFORM</div>
+  <div class="shoir-home-title">Welcome to Shoir-IE, {username_safe}.</div>
+  <div class="shoir-home-copy">This is your engineering workspace. Bring in a workbook, choose the right tool, validate the evidence, visualize the result, and carry the decision through implementation and learning.</div>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
+
+    steps = [
+        ("01", "Load data", "Upload Excel/CSV and let Shoir-IE clean, structure and connect the active table."),
+        ("02", "Choose a tool", "Use the sidebar sections to move between Workbench, Data, Analyze, Simulate and Optimize."),
+        ("03", "Validate", "Review missing values, duplicates, units and assumptions before relying on a result."),
+        ("04", "Analyze & visualize", "Run the specialist engineering engine and inspect the live result graph."),
+        ("05", "Decide & learn", "Compare scenarios, export evidence, implement the action and record the actual KPI."),
+    ]
+    st.markdown("### Your 5-step Shoir-IE workflow")
+    cols = st.columns(5)
+    for col, (num, title, copy) in zip(cols, steps):
+        with col:
+            st.markdown(
+                f"<div class='shoir-home-step'><span class='shoir-home-step-num'>{num}</span>"
+                f"<div class='shoir-home-step-title'>{title}</div><div class='shoir-home-step-copy'>{copy}</div></div>",
+                unsafe_allow_html=True,
+            )
+
+    st.markdown("<div class='shoir-home-section'>Start here</div>", unsafe_allow_html=True)
+    actions = st.columns(3)
+    with actions[0]:
+        if st.button("📊 Open Industrial Workbook", type="primary", use_container_width=True, key="shoir_home_open_workbook"):
+            st.session_state["_shoir_requested_module"] = "Industrial Workbook"
+            st.session_state["shoir_shell_section"] = "WORKBENCH"
+            st.rerun()
+    with actions[1]:
+        if st.button("🧹 Open Excel Intelligence", use_container_width=True, key="shoir_home_open_excel"):
+            st.session_state["_shoir_requested_module"] = "Excel Data Cleaning & Import"
+            st.session_state["shoir_shell_section"] = "DATA"
+            st.rerun()
+    with actions[2]:
+        if st.button("⚙ Open Core IE Tools", use_container_width=True, key="shoir_home_open_core"):
+            st.session_state["_shoir_requested_module"] = "Core IE Tools"
+            st.session_state["shoir_shell_section"] = "ANALYZE"
+            st.rerun()
+
+    st.markdown("### Where each section takes you")
+    guide = pd.DataFrame([
+        {"Section": "Workbench", "Use it for": "Workbook, formulas, templates, query pipelines and fast engineering productivity."},
+        {"Section": "Data", "Use it for": "Import, cleaning, data readiness, datasets, versions and governance."},
+        {"Section": "Analyze", "Use it for": "Quality, production, supply chain, economics and other diagnostic studies."},
+        {"Section": "Simulate", "Use it for": "Scenario, Monte Carlo, digital twin and uncertainty workflows."},
+        {"Section": "Optimize", "Use it for": "MILP, routing, scheduling, inventory and planning decisions."},
+        {"Section": "Operations", "Use it for": "Control tower, maintenance, facilities, connectivity and execution workflows."},
+        {"Section": "Decisions", "Use it for": "Evidence-backed decision records, implementation tracking and actual outcomes."},
+        {"Section": "Research / Knowledge", "Use it for": "Experiments, literature, standards, learning and reusable knowledge."},
+    ])
+    st.dataframe(guide, use_container_width=True, hide_index=True)
+
+    has_data = isinstance(st.session_state.get("universal_active_dataset"), pd.DataFrame) and not st.session_state["universal_active_dataset"].empty
+    st.markdown("### 1 · Load your data", unsafe_allow_html=True)
+    render_data_hub(username, tier)
+    if not has_data:
+        st.caption("For a first walkthrough, upload any clean industrial table above; the next screen will show the same dataset inside the workbook and module workflows.")
+
+
+
 def render_application_shell(
     *,
     username: str,
@@ -526,6 +725,13 @@ def render_application_shell(
     except ValueError:
         current_index = 0
 
+    previous_section = st.session_state.get("_shoir_shell_previous_section")
+    section_changed = previous_section != current_section
+    explicit_module_request = bool(
+        st.session_state.get("_shoir_requested_module")
+        and str(current_module or "") == str(st.session_state.get("_shoir_requested_module"))
+    )
+
     with st.sidebar:
         st.markdown("## SHOIR-IE")
         st.caption("Industrial Engineering Decision Platform")
@@ -541,6 +747,12 @@ def render_application_shell(
             label_visibility="collapsed",
         )
         st.session_state["shoir_shell_section"] = section
+
+        # Section changes are intentional navigation events. A module click
+        # inside the active section should instead dispatch the selected module.
+        if section != current_section:
+            section_changed = True
+        st.session_state["_shoir_shell_previous_section"] = section
 
         st.markdown("#### Module Launcher")
         search = st.text_input(
@@ -640,14 +852,22 @@ def render_application_shell(
     else:
         st.session_state["selected_nav"] = "Dashboard"
 
-    if section == "WORKBENCH":
-        surface = surface or "workbench"
-    elif section == "DATA":
-        surface = surface or "catalog"
-    elif section == "DECISIONS":
-        surface = surface or "decisions"
-    elif section == "KNOWLEDGE":
-        surface = surface or "trust"
+    # Explicit module requests (including Open Industrial Workbook) always win
+    # over section landing surfaces. This fixes the former "button does nothing"
+    # behavior for modules inside the Workbench section.
+    if explicit_module_request:
+        surface = None
+    elif surface is None and section_changed:
+        if section == "HOME":
+            surface = "home"
+        elif section == "WORKBENCH":
+            surface = "workbench"
+        elif section == "DATA":
+            surface = "catalog"
+        elif section == "DECISIONS":
+            surface = "decisions"
+        elif section == "KNOWLEDGE":
+            surface = "trust"
 
     if st.session_state.pop("shoir_new_study_requested", False):
         surface = "new_study"
@@ -1012,7 +1232,9 @@ def render_new_study(username: str, tier: str, current_module: str) -> None:
 
 def render_shell_surface(surface: str, username: str, tier: str, module: str, allowed_modules: Sequence[str], is_admin: bool = False) -> None:
     surface = str(surface or "")
-    if surface == "catalog":
+    if surface == "home":
+        render_industrial_home(username, tier)
+    elif surface == "catalog":
         render_data_catalog(username, tier)
     elif surface == "runs":
         render_run_center(username, tier)
