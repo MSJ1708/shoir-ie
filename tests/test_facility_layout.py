@@ -49,3 +49,17 @@ def test_slp_matrix_contains_all_departments():
     assert list(matrix.index) == ["D1", "D2", "D3"]
     assert matrix.loc["D1", "D2"] == "A"
     assert matrix.loc["D3", "D1"] == ""
+
+
+def test_route_scenario_can_remove_a_connection_and_find_an_alternate_path():
+    flows = pd.DataFrame([
+        {"flow_id":"F001","from_id":"D1","to_id":"D2","loads_day":100,"distance_m":10,"relationship":"A"},
+        {"flow_id":"F002","from_id":"D2","to_id":"D3","loads_day":100,"distance_m":20,"relationship":"A"},
+        {"flow_id":"F003","from_id":"D1","to_id":"D3","loads_day":100,"distance_m":50,"relationship":"O"},
+    ])
+    base, base_dist, _ = __import__("shoir_facility_layout")._shortest_path(flows, "D1", "D3")
+    alt, alt_dist, _ = __import__("shoir_facility_layout")._shortest_path(flows, "D1", "D3", None, "F002")
+    assert base == ["D1", "D2", "D3"]
+    assert base_dist == 30.0
+    assert alt == ["D1", "D3"]
+    assert alt_dist == 50.0
