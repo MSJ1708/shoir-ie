@@ -274,6 +274,24 @@ def summarize_module_dataframe(df: pd.DataFrame) -> dict[str, Any]:
 def _seed_from_known_module_table(module: str, keys: dict[str, str]) -> None:
     if isinstance(st.session_state.get(keys["data"]), pd.DataFrame) and not st.session_state[keys["data"]].empty:
         return
+
+    # The Data Hub is the shared handoff point. When a user has already loaded
+    # data on Home/Data, every module should start from that active dataset
+    # rather than presenting a disconnected empty state or requiring another upload.
+    shared = st.session_state.get("universal_active_dataset")
+    if isinstance(shared, pd.DataFrame) and not shared.empty:
+        seed = shared.copy(deep=True)
+        st.session_state[keys["data"]] = seed
+        st.session_state[keys["original"]] = seed.copy(deep=True)
+        st.session_state[keys["validation"]] = validate_module_dataframe(seed)
+        st.session_state[keys["results"]] = summarize_module_dataframe(seed)
+        st.session_state[keys["meta"]] = {
+            "source": "Shared Data Hub",
+            "source_sheet": str(st.session_state.get("shoir_active_workbook_sheet", "")),
+            "imported_at": datetime.now(timezone.utc).isoformat(),
+        }
+        return
+
     try:
         from shoir_live_visuals import _MODULE_KEYS
         for state_key in _MODULE_KEYS.get(module, []):
@@ -457,7 +475,7 @@ def _render_prepare(module: str, keys: dict[str, str]) -> None:
 
     up = st.file_uploader(
         "📤 Import Excel / CSV",
-        type=["xlsx", "csv"],
+        type=["xlsx", "xlsm", "xls", "csv", "tsv", "txt"],
         key=f"module_parity_upload_{token}",
         help="The imported dataset is kept separate from authentication secrets and is included in workspace persistence.",
     )
