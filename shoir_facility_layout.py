@@ -391,13 +391,23 @@ def _matrix(depts: pd.DataFrame, slp: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def _shortest_path(flows: pd.DataFrame, start: str, end: str, avoid: str | None = None) -> tuple[list[str], float, float]:
-    graph: dict[str, list[tuple[str,float,float]]] = {}
+def _shortest_path(
+    flows: pd.DataFrame,
+    start: str,
+    end: str,
+    avoid: str | None = None,
+    avoid_flow_id: str | None = None,
+) -> tuple[list[str], float, float]:
+    """Find the shortest navigable path, optionally excluding a department or edge."""
+    graph: dict[str, list[tuple[str,float,float,str]]] = {}
     for r in flows.itertuples(index=False):
+        flow_id = str(getattr(r, "flow_id", ""))
+        if avoid_flow_id and flow_id == str(avoid_flow_id):
+            continue
         if avoid and (str(r.from_id) == avoid or str(r.to_id) == avoid):
             continue
-        graph.setdefault(str(r.from_id), []).append((str(r.to_id), float(r.distance_m), float(r.loads_day)))
-        graph.setdefault(str(r.to_id), []).append((str(r.from_id), float(r.distance_m), float(r.loads_day)))
+        graph.setdefault(str(r.from_id), []).append((str(r.to_id), float(r.distance_m), float(r.loads_day), flow_id))
+        graph.setdefault(str(r.to_id), []).append((str(r.from_id), float(r.distance_m), float(r.loads_day), flow_id))
     import heapq
     heap = [(0.0, start, [start], 0.0)]
     seen: dict[str,float] = {}
@@ -408,12 +418,11 @@ def _shortest_path(flows: pd.DataFrame, start: str, end: str, avoid: str | None 
         seen[node] = dist
         if node == end:
             return path, dist, volume
-        for nxt, edge_dist, loads in graph.get(node, []):
+        for nxt, edge_dist, loads, _flow_id in graph.get(node, []):
             if nxt in path:
                 continue
             heapq.heappush(heap, (dist + edge_dist, nxt, path + [nxt], volume + loads))
     return [], math.inf, 0.0
-
 
 def _file_to_frames(upload: Any) -> dict[str, pd.DataFrame]:
     raw = upload.getvalue()
