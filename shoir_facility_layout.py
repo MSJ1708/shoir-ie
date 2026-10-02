@@ -708,31 +708,50 @@ def render_facility_layout(tier: str, username: str) -> None:
                 st.plotly_chart(px.imshow(heat,text_auto=True,aspect="auto",title="SLP closeness heatmap · A=4 … X=-1"),use_container_width=True,config={"displayModeBar":False})
 
     with tabs[3]:
-        st.markdown("### Process scenario laboratory")
-        st.caption("See how a selected routing path changes when a department is avoided. This is a graph/path calculation, not a claim about real-world traffic performance.")
-        ids=depts["id"].astype(str).tolist()
-        if len(ids)>=2 and not flows.empty:
-            p1,p2,p3=st.columns(3)
-            start=p1.selectbox("Process starts at",ids,key="fl_scenario_start")
-            end=p2.selectbox("Process ends at",ids,index=min(1,len(ids)-1),key="fl_scenario_end")
-            avoid=p3.selectbox("Avoid / relocate department",["None"]+ids,key="fl_scenario_avoid")
-            avoid_id=None if avoid=="None" else avoid
-            base_path,base_dist,base_vol=_shortest_path(flows,start,end,None)
-            alt_path,alt_dist,alt_vol=_shortest_path(flows,start,end,avoid_id)
-            c1,c2,c3,c4=st.columns(4)
-            c1.metric("Baseline path", " → ".join(base_path) if base_path else "No route")
-            c2.metric("Baseline distance", f"{base_dist:.1f} m" if math.isfinite(base_dist) else "—")
-            c3.metric("Alternate path", " → ".join(alt_path) if alt_path else "No route")
-            c4.metric("Alternate distance", f"{alt_dist:.1f} m" if math.isfinite(alt_dist) else "—")
-            comparison=pd.DataFrame([
-                {"Scenario":"Baseline","Path":" → ".join(base_path) if base_path else "No route","Distance (m)":base_dist if math.isfinite(base_dist) else None},
-                {"Scenario":"Avoid "+(avoid_id or "none"),"Path":" → ".join(alt_path) if alt_path else "No route","Distance (m)":alt_dist if math.isfinite(alt_dist) else None},
-            ])
-            st.dataframe(comparison,use_container_width=True,hide_index=True)
-            if comparison["Distance (m)"].notna().any():
-                st.plotly_chart(px.bar(comparison.dropna(subset=["Distance (m)"]),x="Scenario",y="Distance (m)",text="Distance (m)",title="Routing distance impact"),use_container_width=True,config={"displayModeBar":False})
-        else:
-            st.info("Create at least two departments and one connection to activate path scenarios.")
+         st.markdown("### Process scenario laboratory")
+         st.caption("Test the operational effect of changing the department network: remove a department or remove a connection, then compare the resulting route and travel burden with the baseline.")
+         ids=depts["id"].astype(str).tolist()
+         if len(ids)>=2 and not flows.empty:
+             p1,p2,p3=st.columns(3)
+             start=p1.selectbox("Process starts at",ids,key="fl_scenario_start")
+             end=p2.selectbox("Process ends at",ids,index=min(1,len(ids)-1),key="fl_scenario_end")
+             mode=p3.selectbox("Scenario change",["Avoid department","Remove connection"],key="fl_scenario_mode")
+             if start==end:
+                 st.warning("Choose different start and end departments to calculate a route change.")
+             else:
+                 base_path,base_dist,base_vol=_shortest_path(flows,start,end,None)
+                 scenario_label="No change"
+                 if mode=="Avoid department":
+                     avoid=st.selectbox("Avoid / relocate department",["None"]+ids,key="fl_scenario_avoid")
+                     avoid_id=None if avoid=="None" else avoid
+                     alt_path,alt_dist,alt_vol=_shortest_path(flows,start,end,avoid_id)
+                     scenario_label="Avoid "+(avoid_id or "none")
+                 else:
+                     flow_options={str(r.flow_id):f"{r.flow_id} · {r.from_id} → {r.to_id}" for r in flows.itertuples()}
+                     removed_flow=st.selectbox("Remove / reroute connection",list(flow_options),format_func=flow_options.get,key="fl_scenario_flow")
+                     alt_path,alt_dist,alt_vol=_shortest_path(flows,start,end,None,removed_flow)
+                     scenario_label="Remove "+removed_flow
+
+                 c1,c2,c3,c4=st.columns(4)
+                 c1.metric("Baseline path", " → ".join(base_path) if base_path else "No route")
+                 c2.metric("Baseline distance", f"{base_dist:.1f} m" if math.isfinite(base_dist) else "—")
+                 c3.metric("Scenario path", " → ".join(alt_path) if alt_path else "No route")
+                 if math.isfinite(base_dist) and math.isfinite(alt_dist):
+                     delta=alt_dist-base_dist
+                     pct=(delta/base_dist*100) if base_dist else 0.0
+                     c4.metric("Distance change", f"{delta:+.1f} m", f"{pct:+.1f}%")
+                 else:
+                     c4.metric("Distance change", "No alternate route")
+
+                 comparison=pd.DataFrame([
+                     {"Scenario":"Baseline","Path":" → ".join(base_path) if base_path else "No route","Distance (m)":base_dist if math.isfinite(base_dist) else None,"Daily Loads on Path":base_vol if base_path else None},
+                     {"Scenario":scenario_label,"Path":" → ".join(alt_path) if alt_path else "No route","Distance (m)":alt_dist if math.isfinite(alt_dist) else None,"Daily Loads on Path":alt_vol if alt_path else None},
+                 ])
+                 st.dataframe(comparison,use_container_width=True,hide_index=True)
+                 if comparison["Distance (m)"].notna().any():
+                     st.plotly_chart(px.bar(comparison.dropna(subset=["Distance (m)"]),x="Scenario",y="Distance (m)",text="Distance (m)",title="Routing distance impact"),use_container_width=True,config={"displayModeBar":False})
+         else:
+             st.info("Create at least two departments and one connection to activate path scenarios.")
 
     with tabs[4]:
         st.markdown("### Move layouts between Shoir-IE workspaces")
