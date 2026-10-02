@@ -246,30 +246,56 @@ def _layout_figure(depts: pd.DataFrame, flows: pd.DataFrame | None = None) -> go
 
 
 def _flow_process_figure(depts: pd.DataFrame, flows: pd.DataFrame) -> go.Figure:
-    """Render every department, plus directional connections where defined."""
+    """Render every department with directional connections and edge detail."""
     fig = go.Figure()
-    for row in flows.itertuples(index=False):
-        s = depts[depts["id"].astype(str) == str(row.from_id)]
-        t = depts[depts["id"].astype(str) == str(row.to_id)]
-        if s.empty or t.empty:
-            continue
-        srow, trow = s.iloc[0], t.iloc[0]
-        fig.add_trace(
-            go.Scatter(
-                x=[srow["x"], trow["x"]],
-                y=[srow["y"], trow["y"]],
-                mode="lines+markers",
-                line=dict(width=max(1.5, min(8.0, 1 + float(row.loads_day)/45))),
-                marker=dict(size=9),
-                name=f"{row.from_id} → {row.to_id}",
-                hovertemplate=f"{row.from_id} → {row.to_id}<br>Loads/day: {float(row.loads_day):,.0f}<br>Distance: {float(row.distance_m):,.1f} m<br>REL: {row.relationship}<extra></extra>",
+    if not flows.empty:
+        for row in flows.itertuples(index=False):
+            s = depts[depts["id"].astype(str) == str(row.from_id)]
+            t = depts[depts["id"].astype(str) == str(row.to_id)]
+            if s.empty or t.empty:
+                continue
+            srow, trow = s.iloc[0], t.iloc[0]
+            fig.add_trace(
+                go.Scatter(
+                    x=[srow["x"], trow["x"]],
+                    y=[srow["y"], trow["y"]],
+                    mode="lines",
+                    line=dict(width=max(1.8, min(9.0, 1.5 + float(row.loads_day) / 40))),
+                    name=f"{row.from_id} → {row.to_id}",
+                    hovertemplate=(
+                        f"<b>{row.from_id} → {row.to_id}</b><br>"
+                        f"Loads/day: {float(row.loads_day):,.0f}<br>"
+                        f"Distance: {float(row.distance_m):,.1f} m<br>"
+                        f"SLP: {row.relationship}<br>"
+                        f"Handling: {row.transport}<extra></extra>"
+                    ),
+                    showlegend=True,
+                )
             )
-        )
+            fig.add_annotation(
+                x=float(trow["x"]),
+                y=float(trow["y"]),
+                ax=float(srow["x"]),
+                ay=float(srow["y"]),
+                xref="x",
+                yref="y",
+                axref="x",
+                ayref="y",
+                text="",
+                showarrow=True,
+                arrowhead=3,
+                arrowsize=1.1,
+                arrowwidth=1.6,
+                opacity=0.85,
+            )
     if not depts.empty:
         fig.add_trace(
             go.Scatter(
-                x=depts["x"], y=depts["y"], mode="markers+text",
-                text=depts["id"], textposition="middle center",
+                x=depts["x"],
+                y=depts["y"],
+                mode="markers+text",
+                text=depts["id"],
+                textposition="middle center",
                 marker=dict(size=32),
                 customdata=depts[["name"]].astype(str).values,
                 hovertemplate="<b>%{text}</b><br>%{customdata[0]}<extra></extra>",
@@ -277,16 +303,22 @@ def _flow_process_figure(depts: pd.DataFrame, flows: pd.DataFrame) -> go.Figure:
             )
         )
         for row in depts.itertuples(index=False):
-            fig.add_annotation(x=float(row.x), y=float(row.y)+7, text=str(row.name), showarrow=False, font=dict(size=10))
+            fig.add_annotation(
+                x=float(row.x), y=float(row.y) + 7,
+                text=str(row.name), showarrow=False,
+                font=dict(size=10),
+            )
     fig.update_layout(
-        height=520, title="Department process map · connected and unconnected nodes",
-        xaxis=dict(visible=False), yaxis=dict(visible=False),
+        height=520,
+        title="Department process map · directional material flow",
+        xaxis=dict(visible=False),
+        yaxis=dict(visible=False),
         legend=dict(orientation="v"),
-        margin=dict(l=10,r=10,t=50,b=10),
-        plot_bgcolor="#f8fafc", paper_bgcolor="rgba(0,0,0,0)",
+        margin=dict(l=10, r=10, t=50, b=10),
+        plot_bgcolor="#f8fafc",
+        paper_bgcolor="rgba(0,0,0,0)",
     )
     return fig
-
 
 def _flow_matrix(depts: pd.DataFrame, flows: pd.DataFrame) -> pd.DataFrame:
     """Return a complete From-To load matrix, including zero/unconnected pairs."""
