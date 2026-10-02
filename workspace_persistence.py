@@ -101,6 +101,18 @@ _ACTION_KEYS = {
     "btn_remove_landmark",
     "run_monte_carlo_btn",
     "payment_screenshot_upload",
+    # Unified application-shell actions are ephemeral Streamlit button state.
+    # Persisting any of these keys would hydrate a button before its widget is
+    # instantiated on the next run, which Streamlit rejects.
+    "shoir_shell_new_study",
+    "shoir_shell_present",
+    "shoir_shell_trust",
+    "shoir_shell_runs",
+    "shoir_shell_copilot",
+    "shoir_shell_os",
+    "shoir_shell_excellence",
+    "shoir_shell_edit_account",
+    "shoir_shell_logout",
 }
 
 def _excluded(key: str) -> bool:
