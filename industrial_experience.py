@@ -1817,7 +1817,6 @@ def render_experience_shell(module: str, tier: str, username: str) -> None:
             "SELECT COUNT(*) FROM experience_jobs WHERE owner=? AND status IN ('Queued','Running')", (username,)
         ).fetchone()[0])
 
-    sample = _starter_data(module)
     active = st.session_state.get("universal_active_dataset")
     sample = active.copy(deep=True) if isinstance(active, pd.DataFrame) and not active.empty else _starter_data(module)
     result = generic_result(sample)
