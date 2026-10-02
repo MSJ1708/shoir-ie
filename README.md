@@ -768,7 +768,7 @@ These commercialization capabilities are now implemented as a durable **Venture 
 
 The Venture Studio is available as a first-class platform module and is deliberately additive: existing industrial engineering modules, the Industrial Workbook, scenario workflows, decision records, digital thread and validation layers remain intact.
 
-The Venture Studio now includes an executive evidence cockpit with Plotly-based pipeline, pilot-stage, customer-pain, hypothesis-confidence, measured-value, readiness, traction, market-evidence and deterministic-demo visualizations. Operational value inputs default to unmeasured rather than zero, incomplete rows are excluded from economic claims, and case-study generation is gated on preserved baseline, sourced evidence and priced value evidence.
+The Venture Studio now includes an executive evidence cockpit with Plotly-based pipeline, pilot-stage, customer-pain, hypothesis-confidence, measured-value, readiness, traction, market-evidence and deterministic-demo visualizations. The workflow also includes a searchable Evidence Vault, pilot/experiment comparison workspace, and a seven-step presenter controller for the deterministic 7-minute demo. Operational value inputs default to unmeasured rather than zero, incomplete rows are excluded from economic claims, zero is treated as a real measurement only when explicitly entered, mixed or unspecified currencies are blocked from economic aggregation, and case-study generation is gated on preserved baseline, sourced evidence and priced value evidence.
 
 
 ### Product Intelligence
