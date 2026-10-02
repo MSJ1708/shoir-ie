@@ -728,39 +728,54 @@ def _render_data_room(owner:str)->None:
 
 def _render_readiness(owner:str)->None:
     st.markdown("### 📈 Product-Market-Fit / Readiness Dashboard")
-    customers=_scalar("SELECT COUNT(*) FROM venture_customers WHERE owner=?",(owner,))
-    pilots=_scalar("SELECT COUNT(*) FROM venture_pilots WHERE owner=?",(owner,))
-    evidence=_scalar("SELECT COUNT(*) FROM venture_evidence WHERE owner=?",(owner,))
-    value=_scalar("SELECT COUNT(*) FROM venture_value_measurements WHERE owner=?",(owner,))
-    complete_pilots=_scalar("SELECT COUNT(*) FROM venture_pilots WHERE owner=? AND status IN ('Complete','Converted')",(owner,))
-    pricing=_scalar("SELECT COUNT(*) FROM venture_business_model WHERE owner=?",(owner,))
-    product=not _query("SELECT 1 FROM venture_artifacts WHERE owner=? AND category='Product' LIMIT 1",(owner,)).empty
-    security=not _query("SELECT 1 FROM venture_artifacts WHERE owner=? AND category='Security' LIMIT 1",(owner,)).empty
+    st.caption("Evidence checklist, not a predictive score. Each area shows the concrete record required to support readiness.")
+    customers=_query("SELECT * FROM venture_customers WHERE owner=? ORDER BY updated_at DESC",(owner,))
+    pilots=_query("SELECT * FROM venture_pilots WHERE owner=? ORDER BY updated_at DESC",(owner,))
+    evidence=_query("SELECT * FROM venture_evidence WHERE owner=? ORDER BY created_at DESC",(owner,))
+    artifacts=_artifact_df(owner)
+    pricing=_query("SELECT * FROM venture_business_model WHERE owner=?",(owner,))
     active_df=st.session_state.get("universal_active_dataset")
     data_ready=isinstance(active_df,pd.DataFrame) and not active_df.empty
+    customer_problem=not customers.empty and customers["problem_statement"].fillna("").astype(str).str.strip().ne("").any()
+    customer_interview=not customers.empty and customers["interview_notes"].fillna("").astype(str).str.strip().ne("").any()
+    icp=not customers.empty and customers["target_customer"].fillna("").astype(str).str.strip().ne("") .any()
+    buying=not customers.empty and customers["buying_process"].fillna("").astype(str).str.strip().ne("").any()
+    pilot_baseline=not pilots.empty and pilots["baseline_summary"].fillna("").astype(str).str.strip().ne("").any()
+    pilot_measurement=not pilots.empty and pilots["measurement_plan"].fillna("").astype(str).str.strip().ne("").any()
+    deploy=not pilots.empty and pilots["stage"].isin(["Deployment","Measurement","Customer Feedback","Decision"]).any()
+    complete=(not pilots.empty and pilots["status"].isin(["Complete","Converted"]).sum() >= 1)
+    repeatable=(not pilots.empty and pilots["status"].isin(["Complete","Converted"]).sum() >= 2)
+    security=not artifacts.empty and artifacts["category"].eq("Security").any()
+    product=not artifacts.empty and artifacts["category"].eq("Product").any()
+    evidence_source=not evidence.empty and evidence["source"].fillna("").astype(str).str.strip().ne("").any()
+    evidence_date=not evidence.empty and evidence["source_date"].fillna("").astype(str).str.strip().ne("").any()
+    wtp=evidence_source and not pricing.empty and buying
+    feedback=not pilots.empty and pilots["customer_feedback"].fillna("").astype(str).str.strip().ne("").any()
     rows=[
-        ("Problem validation",min(100,customers*25+(25 if evidence else 0))),
-        ("ICP definition",min(100,customers*20)),
-        ("MVP completeness",100 if product else 0),
-        ("Data readiness",100 if data_ready else 0),
-        ("Deployment readiness",min(100,complete_pilots*50)),
-        ("Security readiness",100 if security else 0),
-        ("Pilot readiness",min(100,pilots*25)),
-        ("Customer evidence",min(100,evidence*15)),
-        ("Willingness-to-pay evidence",min(100,pricing*40+int(_scalar("SELECT COUNT(*) FROM venture_customers WHERE owner=? AND buying_process<>''",(owner,))>0)*20)),
-        ("Repeatability",min(100,complete_pilots*50)),
-        ("Adoption readiness",min(100,complete_pilots*40+(30 if value else 0))),
+        ("Problem validation",customer_problem and customer_interview and evidence_source,"Customer problem + interview evidence"),
+        ("ICP definition",icp,"Target customer is explicitly recorded"),
+        ("MVP completeness",product,"Product artifact is controlled in the Investor Room"),
+        ("Data readiness",data_ready,"Active shared engineering dataset is available"),
+        ("Deployment readiness",deploy,"Pilot has reached deployment or later"),
+        ("Security readiness",security,"Security artifact is recorded"),
+        ("Pilot readiness",pilot_baseline and pilot_measurement,"Baseline and measurement plan are preserved"),
+        ("Customer evidence",evidence_source and evidence_date,"Evidence has source and date metadata"),
+        ("Willingness-to-pay evidence",wtp,"Buying process + pricing hypothesis + sourced evidence"),
+        ("Repeatability",repeatable,"At least two pilots are complete or converted"),
+        ("Adoption readiness",complete and feedback,"Completed pilot with customer feedback"),
     ]
-    frame=pd.DataFrame(rows,columns=["Readiness area","Evidence completeness %"])
-    mean=float(frame["Evidence completeness %"].mean()) if not frame.empty else 0
-    c1,c2=st.columns([1,2]); c1.metric("Evidence completeness",f"{mean:.0f}%"); c2.progress(mean/100.0)
-    st.dataframe(frame,use_container_width=True,hide_index=True)
-    _show_fig(px.bar(frame.sort_values("Evidence completeness %"),x="Evidence completeness %",y="Readiness area",orientation="h",text="Evidence completeness %",range_x=[0,100]),430,"Readiness evidence coverage")
-    gaps=frame.loc[frame["Evidence completeness %"]<100,"Readiness area"].tolist()
-    if gaps:
-        st.info("Current evidence gaps: " + " · ".join(gaps[:7]))
-    st.caption("This is an evidence-completeness diagnostic, not a claim of market success or product-market fit.")
-
+    frame=pd.DataFrame(rows,columns=["Readiness area","Supported","Evidence condition"])
+    frame["Status"]=frame["Supported"].map({True:"✓ Supported",False:"⚠ Gap"})
+    support_pct=float(frame["Supported"].mean()*100) if not frame.empty else 0.0
+    c1,c2,c3=st.columns(3)
+    c1.metric("Readiness areas supported",f"{int(frame['Supported'].sum())}/{len(frame)}")
+    c2.metric("Evidence coverage",f"{support_pct:.0f}%")
+    c3.metric("Repeatable pilots",f"{int(pilots['status'].isin(['Complete','Converted']).sum()) if not pilots.empty else 0}")
+    st.dataframe(frame[["Readiness area","Status","Evidence condition"]],use_container_width=True,hide_index=True)
+    plot=frame.copy(); plot["Coverage"]=plot["Supported"].astype(int)*100
+    _show_fig(px.bar(plot.sort_values("Coverage"),x="Coverage",y="Readiness area",orientation="h",text="Status",range_x=[0,100]),430,"Evidence-based readiness coverage")
+    gaps=frame.loc[~frame["Supported"],"Readiness area"].tolist()
+    if gaps: st.info("Current evidence gaps: " + " · ".join(gaps[:7]))
 
 def _render_traction(owner:str)->None:
     st.markdown("### 📊 Product & Traction Analytics")
