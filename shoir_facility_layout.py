@@ -246,9 +246,8 @@ def _layout_figure(depts: pd.DataFrame, flows: pd.DataFrame | None = None) -> go
 
 
 def _flow_process_figure(depts: pd.DataFrame, flows: pd.DataFrame) -> go.Figure:
+    """Render every department, plus directional connections where defined."""
     fig = go.Figure()
-    if flows.empty:
-        return fig
     for row in flows.itertuples(index=False):
         s = depts[depts["id"].astype(str) == str(row.from_id)]
         t = depts[depts["id"].astype(str) == str(row.to_id)]
@@ -266,8 +265,21 @@ def _flow_process_figure(depts: pd.DataFrame, flows: pd.DataFrame) -> go.Figure:
                 hovertemplate=f"{row.from_id} → {row.to_id}<br>Loads/day: {float(row.loads_day):,.0f}<br>Distance: {float(row.distance_m):,.1f} m<br>REL: {row.relationship}<extra></extra>",
             )
         )
+    if not depts.empty:
+        fig.add_trace(
+            go.Scatter(
+                x=depts["x"], y=depts["y"], mode="markers+text",
+                text=depts["id"], textposition="middle center",
+                marker=dict(size=32),
+                customdata=depts[["name"]].astype(str).values,
+                hovertemplate="<b>%{text}</b><br>%{customdata[0]}<extra></extra>",
+                showlegend=False,
+            )
+        )
+        for row in depts.itertuples(index=False):
+            fig.add_annotation(x=float(row.x), y=float(row.y)+7, text=str(row.name), showarrow=False, font=dict(size=10))
     fig.update_layout(
-        height=520, title="Connected department process map",
+        height=520, title="Department process map · connected and unconnected nodes",
         xaxis=dict(visible=False), yaxis=dict(visible=False),
         legend=dict(orientation="v"),
         margin=dict(l=10,r=10,t=50,b=10),
@@ -276,22 +288,63 @@ def _flow_process_figure(depts: pd.DataFrame, flows: pd.DataFrame) -> go.Figure:
     return fig
 
 
+def _flow_matrix(depts: pd.DataFrame, flows: pd.DataFrame) -> pd.DataFrame:
+    """Return a complete From-To load matrix, including zero/unconnected pairs."""
+    ids = depts["id"].astype(str).tolist()
+    out = pd.DataFrame(0.0, index=ids, columns=ids)
+    if not flows.empty:
+        for row in flows.itertuples(index=False):
+            frm, to = str(row.from_id), str(row.to_id)
+            if frm in out.index and to in out.columns:
+                out.loc[frm, to] += float(row.loads_day)
+    out.index.name = "From / To"
+    return out
+
+
 def _slp_frame(depts: pd.DataFrame, flows: pd.DataFrame) -> pd.DataFrame:
+    """Return explicit rows for every department pair.
+
+    A newly added department therefore appears immediately in SLP even before
+    a user creates its first process connection.
+    """
     names = {str(r.id): str(r.name) for r in depts.itertuples()}
+    flow_lookup = {
+        (str(r.from_id), str(r.to_id)): r for r in flows.itertuples(index=False)
+    } if not flows.empty else {}
+    ids = list(names)
     records = []
-    for row in flows.itertuples(index=False):
-        loads = float(row.loads_day)
-        score = {"A":4, "E":3, "I":2, "O":1, "U":0, "X":-1}.get(str(row.relationship).upper(), 1)
-        records.append({
-            "From": str(row.from_id), "To": str(row.to_id),
-            "From Department": names.get(str(row.from_id), str(row.from_id)),
-            "To Department": names.get(str(row.to_id), str(row.to_id)),
-            "Daily Loads": loads,
-            "Distance (m)": float(row.distance_m),
-            "REL": str(row.relationship).upper(),
-            "Score": score,
-            "Reason": str(row.reason or ""),
-        })
+    rel_scores = {"A": 4, "E": 3, "I": 2, "O": 1, "U": 0, "X": -1}
+
+    for frm in ids:
+        for to in ids:
+            if frm == to:
+                continue
+            row = flow_lookup.get((frm, to))
+            if row is None:
+                records.append({
+                    "From": frm, "To": to,
+                    "From Department": names[frm],
+                    "To Department": names[to],
+                    "Daily Loads": 0.0,
+                    "Distance (m)": 0.0,
+                    "REL": "—",
+                    "Score": None,
+                    "Reason": "No connection defined",
+                    "Status": "Unconnected",
+                })
+                continue
+            rel = str(row.relationship).upper()
+            records.append({
+                "From": frm, "To": to,
+                "From Department": names[frm],
+                "To Department": names[to],
+                "Daily Loads": float(row.loads_day),
+                "Distance (m)": float(row.distance_m),
+                "REL": rel,
+                "Score": rel_scores.get(rel, 1),
+                "Reason": str(row.reason or ""),
+                "Status": "Connected",
+            })
     return pd.DataFrame(records)
 
 
@@ -300,7 +353,9 @@ def _matrix(depts: pd.DataFrame, slp: pd.DataFrame) -> pd.DataFrame:
     out = pd.DataFrame("", index=ids, columns=ids)
     for r in slp.to_dict("records"):
         if str(r["From"]) in out.index and str(r["To"]) in out.columns:
-            out.loc[str(r["From"]), str(r["To"])] = str(r["REL"])
+            rel = str(r.get("REL", ""))
+            if rel != "—":
+                out.loc[str(r["From"]), str(r["To"])] = rel
     return out
 
 
@@ -511,6 +566,11 @@ def render_facility_layout(tier: str, username: str) -> None:
 
     with tabs[1]:
         st.markdown("### Connect departments to model the process")
+        st.markdown("#### From-To load matrix")
+        st.dataframe(
+            _flow_matrix(depts, flows),
+            use_container_width=True,
+        )
         st.caption("Every connection below feeds the From-To table, process map, SLP relationship matrix, and what-if routing. Direction matters; the route model also uses the connection as a navigable edge.")
         a,b=st.columns([1.1,1.4])
         ids=depts["id"].astype(str).tolist()
@@ -582,7 +642,7 @@ def render_facility_layout(tier: str, username: str) -> None:
 
     with tabs[2]:
         st.markdown("### Systematic Layout Planning")
-        st.caption("SLP now reads the same persistent connections used by the From-To process model. Adding a department without a connection remains visible as an unrated node instead of disappearing.")
+        st.caption("SLP reads the same persistent connections used by the From-To process model. Every department pair is shown; unconnected pairs are explicitly marked so new departments never disappear from the SLP model.")
         st.dataframe(slp,use_container_width=True,hide_index=True)
         if not depts.empty:
             matrix=_matrix(depts,slp)
@@ -592,7 +652,8 @@ def render_facility_layout(tier: str, username: str) -> None:
             if not numeric.empty:
                 st.plotly_chart(px.bar(numeric,x="REL",y="Connections",text="Connections",title="SLP relationship mix"),use_container_width=True,config={"displayModeBar":False})
             if not slp.empty:
-                heat=matrix.replace("",float("nan")).applymap({"A":4,"E":3,"I":2,"O":1,"U":0,"X":-1}.get)
+                heat=matrix.replace("",float("nan")).replace("—",float("nan"))
+                heat=heat.applymap({"A":4,"E":3,"I":2,"O":1,"U":0,"X":-1}.get)
                 st.plotly_chart(px.imshow(heat,text_auto=True,aspect="auto",title="SLP closeness heatmap · A=4 … X=-1"),use_container_width=True,config={"displayModeBar":False})
 
     with tabs[3]:
