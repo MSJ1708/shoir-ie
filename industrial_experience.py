@@ -1950,6 +1950,8 @@ def render_blank_module_studio(module: str, tier: str, username: str) -> None:
                 st.session_state["shoir_data_source"] = str(upload.name)
                 st.success(f"Imported {len(imported):,} rows × {len(imported.columns):,} columns from {upload.name}.")
                 st.rerun()
+        except Exception as exc:
+            st.error(f"Module data import failed safely: {type(exc).__name__}: {exc}")
 
     df = st.data_editor(
         st.session_state[data_key],
