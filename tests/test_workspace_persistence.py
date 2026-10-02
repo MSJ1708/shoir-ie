@@ -67,6 +67,11 @@ def test_workspace_does_not_restore_streamlit_action_widget_keys(tmp_path: Path)
         "shoir_create_study": True,
         "shoir_presentation_return": True,
         "shoir_global_module_0": True,
+        "shoir_home_open_workbook": True,
+        "shoir_home_open_excel": True,
+        "shoir_home_open_core": True,
+        "shoir_data_hub_upload": "transient",
+        "shoir_data_hub_sheet": "Sheet1",
         "enterprise_module_selector": "Inventory · EOQ",
         "research_title": "My Study",
         "research_question": "A durable question that should be restored.",
@@ -94,6 +99,8 @@ def test_workspace_does_not_restore_streamlit_action_widget_keys(tmp_path: Path)
         assert key not in restored
     assert "global_command_open_inventory" not in restored
     assert "shoir_global_module_0" not in restored
+    for key in ("shoir_home_open_workbook", "shoir_home_open_excel", "shoir_home_open_core", "shoir_data_hub_upload", "shoir_data_hub_sheet"):
+        assert key not in restored
     assert restored["enterprise_module_selector"] == "Inventory · EOQ"
     assert restored["research_title"] == "My Study"
 
