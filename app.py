@@ -52,6 +52,7 @@ from shoir_application_shell import render_application_shell, render_shell_surfa
 from shoir_adoption_engine import render_adoption_center
 from shoir_universal_engine import render_universal_engine_surface, postflight_contract
 from shoir_commercial import render_module_enrichment
+from shoir_venture_studio import render_venture_studio
 from shoir_160 import init_160_platform, render_160_command_center
 from shoir_enterprise_ops import (
     render_digital_twin_extension, render_control_tower_extension,
@@ -789,6 +790,17 @@ _IOS_CATALOG_ENTRY = {"tier":"Enterprise","category":"Platform","name":"Industri
 if not any(x.get("name") == _IOS_CATALOG_ENTRY["name"] for x in MODULE_CATALOG):
     MODULE_CATALOG.append(_IOS_CATALOG_ENTRY)
 
+# Venture Studio — durable customer / pilot / evidence / ROI / investor layer.
+_VENTURE_CATALOG_ENTRY = {
+    "tier": "Starter",
+    "category": "Platform",
+    "name": "Venture Studio",
+    "when": "You are validating Shoir-IE with customers, running pilots, measuring value, or preparing an incubator / investment evidence package.",
+    "example": "Capture a customer problem, baseline, pilot stages, hypothesis, evidence, customer-specific ROI, traction, market claims, controlled investor artifacts and a gated case study in one durable workspace.",
+}
+if not any(x.get("name") == _VENTURE_CATALOG_ENTRY["name"] for x in MODULE_CATALOG):
+    MODULE_CATALOG.append(_VENTURE_CATALOG_ENTRY)
+
 # =====================================================================
 # COPILOT
 # ---------------------------------------------------------------------
@@ -1478,7 +1490,7 @@ if _current_username.casefold() == "sho" and not _current_role:
         is_admin = False
 
 
-tier1_features = ["MILP Solvers", "Inventory Playback", "Core IE Tools", "Subscriptions", "Persistence", "Facility Layout & Warehousing", "Enterprise Integration & Collaboration", "Engineering Validation Center", "Excel Data Cleaning & Import", "Industrial Workbook", "AI Copilot"]
+tier1_features = ["MILP Solvers", "Inventory Playback", "Core IE Tools", "Subscriptions", "Persistence", "Facility Layout & Warehousing", "Enterprise Integration & Collaboration", "Engineering Validation Center", "Excel Data Cleaning & Import", "Industrial Workbook", "AI Copilot", "Venture Studio"]
 tier2_features = tier1_features + ["Carbon Accounting", "IoT Digital Twin", "MEIO Matrix", "Slotting & Gantt", "Fleet Routing", "Warehouse Heatmap", "Supplier Risk Matrix", "Scenarios", "AGV Fleet Dispatcher", "Geospatial Network Designer", "Production Planning & Control (PPC)", "Lean Manufacturing & Shop Floor Operations", "Quality Control, Six Sigma & Reliability", "Engineering Economics & Finance", "Industrial Data Model & Digital Thread"]
 professional_features = tier2_features + ["Advanced Planning & Scheduling", "Quality Engineering & Reliability", "Capital Investment & Engineering Economics", "Workforce Engineering", "Industrial Sustainability & LCA", "Benchmarking & Engineering Standards", "Scenario Versioning & Comparison", "Localization & Multi-Currency"]
 tier3_features = professional_features + ["AI Copilot", "FastAPI Gateway", "Monte Carlo Sim", "Sensitivity Analysis", "Webhook Alerts", "Agentic Workflows", "Control Tower", "Cryptographic Ledger", "Predictive Maintenance Hub", "Human Factors & Ergonomics (NIOSH)", "Digital Twin & Discrete-Event Simulation", "Green IE & Sustainability", "Manufacturing Execution System", "Industrial Simulation Lab", "3D Factory Designer", "Industrial Connectivity Hub", "Multi-Objective Optimization", "Robust & Resilient Optimization", "Engineering Model Registry", "Experiment Lab", "Experiment Engine", "Industrial Control Center", "Engineering Decision Center", "Advanced ML Demand Forecasting", "Team Workspaces & RBAC", "Executive Report Center", "Global Project & Digital Thread"]
@@ -1701,12 +1713,13 @@ try:
         if isinstance(value, pd.DataFrame) and not value.empty
     ]
     _commercial_df = _commercial_frames[0] if _commercial_frames else pd.DataFrame()
-    render_module_enrichment(
-        str(selected_module),
-        str(st.session_state.get("user_tier", "Starter Tier")),
-        st.session_state.get("current_user", "unknown"),
-        _commercial_df,
-    )
+    if str(selected_module) != "Venture Studio":
+        render_module_enrichment(
+            str(selected_module),
+            str(st.session_state.get("user_tier", "Starter Tier")),
+            st.session_state.get("current_user", "unknown"),
+            _commercial_df,
+        )
 except Exception as _commercial_error:
     st.caption(f"Integrated workspace enrichment unavailable: {_commercial_error}")
 
@@ -9126,7 +9139,15 @@ else:
             st.code(f"{type(exc).__name__}: {exc}")
 
     # New unified Industrial Operating System renders as a first-class platform workspace.
-    if mod == "Industrial Operating System":
+    if mod == "Venture Studio":
+        try:
+            render_venture_studio(tier_val, st.session_state.get("current_user", "unknown"), mod)
+        except Exception as exc:
+            st.error("Venture Studio encountered a recoverable rendering issue. Your existing engineering workspace remains available.")
+            with st.expander("Technical diagnostic"):
+                st.code(f"{type(exc).__name__}: {exc}")
+        st.stop()
+    elif mod == "Industrial Operating System":
         if platform_tier_allows(tier_val, "Enterprise"):
             try:
                 render_industrial_operating_system(tier_val, st.session_state.get("current_user", "unknown"))
