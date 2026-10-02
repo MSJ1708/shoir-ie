@@ -1039,8 +1039,8 @@ def render_shell_surface(surface: str, username: str, tier: str, module: str, al
             else:
                 prompt = st.text_area("Ask Shoir to orchestrate the engineering task", placeholder="Clean this workbook, determine data readiness, run an analysis and prepare the evidence pack.", height=120, key="shoir_shell_copilot_prompt")
                 if st.button("Plan workflow", type="primary", use_container_width=True, key="shoir_shell_copilot_plan"):
-                    st.session_state["shoir_shell_copilot_plan"] = build_workflow_plan(prompt, module, df)
-                plan = st.session_state.get("shoir_shell_copilot_plan")
+                    st.session_state["shoir_shell_copilot_plan_result"] = build_workflow_plan(prompt, module, df)
+                plan = st.session_state.get("shoir_shell_copilot_plan_result")
                 if plan:
                     st.markdown("### Proposed workflow")
                     for idx, step in enumerate(plan.get("steps", []), 1):
