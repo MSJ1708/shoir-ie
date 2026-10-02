@@ -52,6 +52,7 @@ from shoir_application_shell import render_application_shell, render_shell_surfa
 from shoir_adoption_engine import render_adoption_center
 from shoir_universal_engine import render_universal_engine_surface, postflight_contract
 from shoir_commercial import render_module_enrichment
+from shoir_value_evidence import render_value_pulse, ensure_value_evidence_db
 from shoir_venture_studio import render_venture_studio
 from shoir_160 import init_160_platform, render_160_command_center
 from shoir_enterprise_ops import (
@@ -1852,6 +1853,19 @@ except Exception as _shell_context_error:
     st.warning("Unified workspace context is temporarily unavailable; the specialist module remains available.")
     with st.expander("Shell diagnostic", expanded=False):
         st.code(f"{type(_shell_context_error).__name__}: {_shell_context_error}")
+
+# Universal Value Evidence — every specialist module gets a task-specific value pulse.
+# Reference times are planning assumptions until the user calibrates them to the real operation.
+try:
+    ensure_value_evidence_db()
+    render_value_pulse(
+        str(selected_module),
+        st.session_state.get("current_user", "unknown"),
+    )
+except Exception as _value_engine_error:
+    st.caption("Value Evidence Engine is temporarily unavailable; the engineering module remains available.")
+    with st.expander("Value engine diagnostic", expanded=False):
+        st.code(f"{type(_value_engine_error).__name__}: {_value_engine_error}")
 
 # The ROI estimator moved out of the sidebar; keep its calculation available to
 # economics modules through a non-UI session value for compatibility.
