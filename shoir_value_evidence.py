@@ -215,56 +215,134 @@ def record_time_snapshot(owner: str, module: str, task: str, values: dict[str, A
         conn.commit()
     return snapshot_id
 
-def render_value_pulse(module: str, username: str) -> None:
-    """Compact value layer rendered on every module."""
-    ensure_value_evidence_db()
-    owner = str(username or "unknown")
+def result_button_should_track(label: str = "", button_type: str = "", form_submit: bool = False) -> bool:
+    """Classify likely result-generating controls without touching save/navigation controls."""
+    text = str(label or "").strip().casefold()
+    excluded = (
+        "save", "download", "export", "logout", "lock", "login", "register", "ticket",
+        "approve", "decline", "delete", "remove", "decommission", "account", "profile",
+        "return", "back", "next", "open", "view", "unlock", "invite", "share", "reset",
+        "add to workspace", "record snapshot", "record governed action",
+    )
+    if any(x in text for x in excluded):
+        return False
+    keywords = (
+        "run", "generate", "calculate", "compute", "solve", "optimize", "simulate",
+        "forecast", "analyze", "analyse", "validate", "predict", "schedule", "compare",
+        "evaluate", "execute", "build", "clean", "process", "apply", "test", "derive",
+        "recommend", "refresh", "start", "create", "design", "model", "inspect",
+        "classify", "benchmark", "check", "map", "route", "plan", "search",
+    )
+    return bool(form_submit or any(x in text for x in keywords) or str(button_type).casefold() == "primary")
+
+def begin_result_timer(module: str, label: str) -> None:
+    """Start timing the user's result-generation action."""
+    now = time.perf_counter()
+    st.session_state["shoir_value_active_run"] = {
+        "module": str(module or "Default"),
+        "label": str(label or "Result generation"),
+        "started_at": now,
+        "started_wall": _now(),
+    }
+
+def render_value_receipt(module: str, username: str) -> None:
+    """Show actual post-click execution time versus a traditional task baseline."""
+    run = st.session_state.get("shoir_value_active_run")
+    if not isinstance(run, dict) or str(run.get("module", "")) != str(module):
+        return
+
+    started = _safe_float(run.get("started_at"), 0.0)
+    if started <= 0:
+        return
+    elapsed = max(0.0, time.perf_counter() - started)
+
     profile = task_profile(module)
-    saved = _saved_baseline(owner, module)
-    current = dict(profile)
-    current.update(saved or {})
-    studies = max(1.0, _safe_float(current.get("studies_per_year", 1.0), 1.0))
-    rate = max(0.0, _safe_float(current.get("hourly_rate", 0.0)))
-    values = calculate_time_value(current["baseline_minutes"], current["shoir_minutes"], studies, rate)
-    key = "shoir_value_" + _slug(module)
+    saved = _saved_baseline(str(username or "unknown"), module) or {}
+    traditional_minutes = _safe_float(saved.get("baseline_minutes", profile["baseline_minutes"]))
+    traditional_hours = traditional_minutes / 60.0
+    time_saved = traditional_hours - (elapsed / 3600.0)
+    saved_positive = max(0.0, time_saved)
+    saved_pct = (saved_positive / traditional_hours * 100.0) if traditional_hours > 0 else 0.0
+
+    studies = max(1.0, _safe_float(saved.get("studies_per_year", 1.0), 1.0))
+    hourly = _safe_float(saved.get("hourly_rate", 250.0), 250.0)
+    if hourly <= 0:
+        hourly = 250.0
+    currency = str(saved.get("currency", "SAR") or "SAR").upper()
+    annual_hours = saved_positive * studies
+    labor_value = saved_positive * hourly
+    annual_labor_value = annual_hours * hourly
+
     st.markdown(
-        f"""<div class="result-card" style="margin:10px 0 14px 0;">
-        <div class="kicker">VALUE PULSE · {html.escape(str(module))}</div>
-        <div style="font-size:18px;font-weight:850;margin-top:2px;">What this workflow can release in time</div>
-        <div style="color:#64748b;font-size:12px;margin-top:4px;">Task-specific reference baseline. Replace it with your measured customer baseline to turn the estimate into evidence.</div>
+        f"""<div class="hero-card" style="margin:16px 0 14px 0;border-color:#99f6e4;background:linear-gradient(135deg,#f0fdfa,#ffffff 62%,#eff6ff);">
+        <div class="kicker">RESULT VALUE RECEIPT · {html.escape(str(module))}</div>
+        <div class="hero-title">⏱️ This result just saved measurable engineering time</div>
+        <div class="hero-copy">Compared with the traditional time required for the same task. Shoir-IE time is measured from the result-generating action to completion; the traditional time is a configurable task-specific reference baseline.</div>
         </div>""",
         unsafe_allow_html=True,
     )
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Manual reference", f"{values['baseline_hours']:,.1f} h")
-    c2.metric("Shoir workflow", f"{values['shoir_hours']:,.1f} h")
-    c3.metric("Time released", f"{values['hours_saved']:,.1f} h")
-    c4.metric("Annual capacity", f"{values['annual_capacity_hours']:,.1f} h")
-    with st.expander("Calibrate this task to your real operation", expanded=False):
-        with st.form("shoir_value_calibrate_" + key):
-            a, b, c, d = st.columns(4)
-            baseline = a.number_input("Baseline task time (minutes)", min_value=0.0, value=float(current["baseline_minutes"]), step=5.0, key=key+"_baseline")
-            shoir = b.number_input("Shoir task time (minutes)", min_value=0.0, value=float(current["shoir_minutes"]), step=1.0, key=key+"_shoir")
-            freq = c.number_input("Studies / tasks per year", min_value=1.0, value=float(studies), step=1.0, key=key+"_freq")
-            hourly = d.number_input(f"Loaded hourly value ({current.get('currency','SAR')})", min_value=0.0, value=float(rate), step=10.0, key=key+"_hourly")
-            source = st.text_input("Baseline source / reference", value=str(current.get("source", "Reference planning benchmark")), key=key+"_source")
-            save = st.form_submit_button("Save calibrated value baseline", type="primary", use_container_width=True)
-        if save:
+    c1.metric("Traditional time", f"{traditional_hours:,.2f} h")
+    c2.metric("Shoir-IE actual time", f"{elapsed / 3600.0:,.2f} h")
+    c3.metric("Time saved", f"{saved_positive:,.2f} h", delta=f"{saved_pct:,.0f}% less time" if traditional_hours > 0 else None)
+    c4.metric(f"Est. labor value · {currency}", f"{currency} {labor_value:,.0f}")
+
+    a1, a2, a3 = st.columns(3)
+    a1.metric("Annual capacity released", f"{annual_hours:,.1f} h")
+    a2.metric("Annual labor-value equivalent", f"{currency} {annual_labor_value:,.0f}")
+    a3.metric("Result action", str(run.get("label", "Result generation"))[:55])
+
+    with st.expander("Calibrate the traditional-time and money baseline", expanded=False):
+        st.caption("The traditional time is a planning reference unless you replace it with your real measured customer baseline. The hourly value is an editable planning assumption, not a claimed industry average.")
+        key = "shoir_result_calibrate_" + _slug(module)
+        with st.form(key):
+            b1, b2, b3 = st.columns(3)
+            baseline_input = b1.number_input("Traditional task time (minutes)", min_value=0.0, value=float(traditional_minutes), step=5.0, key=key+"_baseline")
+            freq_input = b2.number_input("Tasks / studies per year", min_value=1.0, value=float(studies), step=1.0, key=key+"_frequency")
+            hourly_input = b3.number_input(f"Loaded engineering value / hour ({currency})", min_value=0.0, value=float(hourly), step=10.0, key=key+"_hourly")
+            source_input = st.text_input("Traditional-time source / reference", value=str(saved.get("source", "Reference planning benchmark")), key=key+"_source")
+            save_input = st.form_submit_button("Save value baseline", type="primary", use_container_width=True)
+        if save_input:
             with sqlite3.connect(DB_PATH, timeout=30) as conn:
                 conn.execute(
                     """INSERT INTO shoir_value_task_baselines
                        (owner,module,task,baseline_minutes,shoir_minutes,studies_per_year,hourly_rate,currency,source,updated_at)
                        VALUES(?,?,?,?,?,?,?,?,?,?)
                        ON CONFLICT(owner,module) DO UPDATE SET
-                       task=excluded.task,baseline_minutes=excluded.baseline_minutes,shoir_minutes=excluded.shoir_minutes,
-                       studies_per_year=excluded.studies_per_year,hourly_rate=excluded.hourly_rate,
-                       currency=excluded.currency,source=excluded.source,updated_at=excluded.updated_at""",
-                    (owner, str(module), str(current["task"]), baseline, shoir, freq, hourly, str(current.get("currency","SAR") or "SAR"), source[:300], _now()),
+                       task=excluded.task,baseline_minutes=excluded.baseline_minutes,
+                       shoir_minutes=excluded.shoir_minutes,studies_per_year=excluded.studies_per_year,
+                       hourly_rate=excluded.hourly_rate,currency=excluded.currency,
+                       source=excluded.source,updated_at=excluded.updated_at""",
+                    (str(username or "unknown"), str(module), profile["task"], baseline_input,
+                     max(0.01, elapsed/60.0), freq_input, hourly_input, currency,
+                     source_input.strip()[:300] or "Reference planning benchmark", _now()),
                 )
                 conn.commit()
-            st.success("Customer-calibrated value baseline saved.")
+            st.success("Value baseline saved for this module.")
             st.rerun()
-    st.caption(f"Task: {profile['task']} · {profile['purpose']} · Source state: {'Customer-calibrated' if saved else 'Reference benchmark'}")
+
+    st.caption(
+        f"Measured at {elapsed:,.2f}s after '{str(run.get('label','result'))[:80]}'. "
+        f"Traditional reference: {traditional_minutes:,.0f} min. "
+        f"Time released: {saved_positive:,.2f} h. "
+        f"Money shown is an estimated labor-value equivalent using {currency} {hourly:,.0f}/h."
+    )
+    st.session_state["shoir_value_last_receipt"] = {
+        "module": str(module),
+        "label": str(run.get("label", "Result generation")),
+        "elapsed_seconds": elapsed,
+        "traditional_minutes": traditional_minutes,
+        "time_saved_hours": saved_positive,
+        "labor_value": labor_value,
+        "currency": currency,
+        "created_at": _now(),
+    }
+    st.session_state.pop("shoir_value_active_run", None)
+
+def render_value_pulse(module: str, username: str) -> None:
+    """Compatibility entry point: render the post-result receipt when a result run is active."""
+    ensure_value_evidence_db()
+    render_value_receipt(module, username)
 
 def render_value_evidence_engine(owner: str, current_module: str = "Venture Studio") -> None:
     """Full professional evidence workspace for Venture Studio."""
