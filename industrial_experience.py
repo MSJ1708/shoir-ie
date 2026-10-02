@@ -1792,6 +1792,7 @@ def _evidence_bundle(module: str, df: pd.DataFrame, actor: str, research_protoco
 
 
 def render_experience_shell(module: str, tier: str, username: str) -> None:
+    """Render a restrained shared module shell around specialist engineering engines."""
     ensure_experience_db()
     import streamlit as st
 
@@ -1800,333 +1801,118 @@ def render_experience_shell(module: str, tier: str, username: str) -> None:
         return
 
     meta = _module_meta(module)
-    stats = feature_stats()
-    is_research_lab = ("Experiment Lab" in str(module)) or ("Experimentation" in str(module))
-    with _db() as conn:
-        projects = int(conn.execute("SELECT COUNT(*) FROM experience_projects").fetchone()[0])
-        # Research counts should reflect the current workspace owner, not the
-        # entire local database. This prevents a "Research studies = 2" badge
-        # from appearing when the visible list only contains another owner's
-        # record.
-        research_studies = int(
-            conn.execute(
-                "SELECT COUNT(*) FROM experience_research_studies WHERE owner=?",
-                (username,),
-            ).fetchone()[0]
-        )
-        decisions = int(conn.execute("SELECT COUNT(*) FROM experience_decisions").fetchone()[0])
-        jobs = int(conn.execute("SELECT COUNT(*) FROM experience_jobs WHERE status IN ('Queued','Running')").fetchone()[0])
-
     key = _safe_key(module)
     category = str(meta.get("category", "Industrial Engineering"))
     capability_tier = str(meta.get("tier", tier))
-    when = str(meta.get("when", "Prepare, validate, analyze, decide and export in one governed workspace."))
+    when = str(meta.get("when", "Prepare data, run the engineering method, inspect evidence and export the result."))
 
-    st.markdown(
-        "<div class='sx-hero'><div class='sx-kicker'>{}</div><div class='sx-title'>{}</div><div class='sx-sub'>{}</div>"
-        "<div class='sx-badges'><span>● Workspace ready</span><span>✓ {}/60 core capabilities</span><span>◈ Evidence-first</span></div></div>".format(
-            category + " · " + capability_tier,
-            module,
-            when,
-            stats["implemented"],
-        ),
-        unsafe_allow_html=True,
-    )
+    with _db() as conn:
+        studies = int(conn.execute(
+            "SELECT COUNT(*) FROM experience_research_studies WHERE owner=?", (username,)
+        ).fetchone()[0])
+        decisions = int(conn.execute(
+            "SELECT COUNT(*) FROM experience_decisions WHERE owner=?", (username,)
+        ).fetchone()[0])
+        jobs = int(conn.execute(
+            "SELECT COUNT(*) FROM experience_jobs WHERE owner=? AND status IN ('Queued','Running')", (username,)
+        ).fetchone()[0])
+
+    sample = _starter_data(module)
+    result = generic_result(sample)
+
     st.markdown(
         """
         <style>
-        .sx-hero{padding:24px 26px;border-radius:20px;background:linear-gradient(135deg,#0b1220 0%,#192657 58%,#0f5c63 100%);color:#fff;box-shadow:0 18px 40px rgba(15,23,42,.16);border:1px solid rgba(255,255,255,.08);margin:2px 0 14px;position:relative;overflow:hidden}
-        .sx-hero:after{content:"";position:absolute;inset:0;background:linear-gradient(110deg,transparent 0%,rgba(255,255,255,.06) 46%,transparent 60%);transform:translateX(-120%);animation:sxShimmer 8s ease-in-out infinite}
-        @keyframes sxShimmer{0%,58%{transform:translateX(-120%)}78%,100%{transform:translateX(120%)}}
-        .sx-kicker{font-size:11px;font-weight:800;letter-spacing:.10em;text-transform:uppercase;color:#7dd3fc}
-        .sx-title{font-size:29px;font-weight:850;margin-top:5px;line-height:1.16}.sx-sub{font-size:13px;color:#dbeafe;margin-top:8px;max-width:1000px}
-        .sx-badges{display:flex;gap:10px;flex-wrap:wrap;margin-top:13px}.sx-badges span{font-size:11px;padding:5px 10px;border-radius:999px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);color:#e2e8f0}
-        .sx-step{padding:7px 11px;border-radius:12px;border:1px solid #dbe4f0;background:#fff;text-align:center;font-size:11px;font-weight:750;color:#334155;min-height:28px;transition:transform .18s ease,box-shadow .18s ease}
-        .sx-step:hover{transform:translateY(-2px);box-shadow:0 8px 18px rgba(15,23,42,.08)}
-        @media (prefers-reduced-motion: reduce){.sx-hero:after{animation:none}.sx-step{transition:none}}
+        .mx-hero{padding:22px 25px;border-radius:20px;background:linear-gradient(135deg,#0b1220,#172554 58%,#0f766e);color:#fff;box-shadow:0 14px 32px rgba(15,23,42,.12);border:1px solid rgba(255,255,255,.08);margin:2px 0 14px;position:relative;overflow:hidden}
+        .mx-kicker{font-size:11px;font-weight:850;letter-spacing:.11em;text-transform:uppercase;color:#7dd3fc}
+        .mx-title{font-size:28px;font-weight:900;letter-spacing:-.03em;margin-top:4px}
+        .mx-sub{font-size:13px;color:#dbeafe;margin-top:7px;max-width:1000px}
+        .mx-pill{display:inline-block;font-size:11px;margin:12px 6px 0 0;padding:5px 9px;border-radius:999px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);color:#e2e8f0}
+        .mx-flow{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0 14px}
+        .mx-step{padding:7px 11px;border-radius:999px;border:1px solid #dbe4f0;background:#fff;font-size:11px;font-weight:800;color:#334155}
         </style>
         """,
         unsafe_allow_html=True,
     )
+    st.markdown(
+        f"""
+        <div class="mx-hero">
+          <div class="mx-kicker">{html.escape(category)} · {html.escape(capability_tier)}</div>
+          <div class="mx-title">{html.escape(str(module))}</div>
+          <div class="mx-sub">{html.escape(when)}</div>
+          <span class="mx-pill">Data-first</span><span class="mx-pill">Evidence-linked</span><span class="mx-pill">Human approval</span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Core capabilities", "{}/60".format(stats["implemented"]), "active")
-    c2.metric("Research studies" if is_research_lab else "Saved studies", "{:,}".format(research_studies if is_research_lab else projects), "protocols" if is_research_lab else "persistent")
-    c3.metric("Decision records", "{:,}".format(decisions), "governed")
-    c4.metric("Active jobs", "{:,}".format(jobs), "live")
+    c1,c2,c3,c4 = st.columns(4)
+    c1.metric("Input rows", f"{result['rows']:,}")
+    c2.metric("Data readiness", f"{result['quality']:.0f}%")
+    c3.metric("Saved studies", f"{studies:,}")
+    c4.metric("Decisions", f"{decisions:,}")
 
-    if is_research_lab:
-        st.markdown("### 🔬 Research Study Protocol")
-        st.caption("Define the research question, hypotheses, variables, controls, sampling plan and reproducibility settings before the main experiment. This is a local protocol record and integrity control; it is not external preregistration.")
-        active_protocol_id = st.session_state.get("sx_research_study_id")
-        active_protocol = load_research_protocol(active_protocol_id, owner=username) if active_protocol_id else None
-        locked = bool(active_protocol and active_protocol.get("protocol_locked"))
-        methods = ["Controlled simulation benchmark", "Design of experiments (DOE)", "Cross-domain transfer benchmark", "Monte Carlo study", "Hybrid simulation + optimization"]
-        domains = ["Manufacturing", "Warehouse / inventory", "Supply chain", "Maintenance", "Quality", "Energy"]
-        method_index = methods.index(active_protocol["methodology"]) if active_protocol and active_protocol.get("methodology") in methods else 2
-        primary_index = domains.index(active_protocol["primary_domain"]) if active_protocol and active_protocol.get("primary_domain") in domains else 0
-        transfer_index = domains.index(active_protocol["transfer_domain"]) if active_protocol and active_protocol.get("transfer_domain") in domains else 2
+    st.markdown(
+        '<div class="mx-flow">'
+        '<span class="mx-step">1 · Prepare</span>'
+        '<span class="mx-step">2 · Validate</span>'
+        '<span class="mx-step">3 · Analyze</span>'
+        '<span class="mx-step">4 · Visualize</span>'
+        '<span class="mx-step">5 · Decide</span>'
+        '<span class="mx-step">6 · Export</span>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
 
-        r1, r2 = st.columns([1.7, 1])
-        with r1:
-            research_title = st.text_input("Study title", value=(active_protocol or {}).get("title", "Industrial Decision Genome — Experiment 001"), disabled=locked, key="sx_research_title_" + key)
-            research_question = st.text_area("Research question", value=(active_protocol or {}).get("research_question", "Can transferable industrial decision structures improve AI decision-making on previously unseen industrial environments and compound disruptions?"), height=90, disabled=locked, key="sx_research_question_" + key)
-            objective = st.text_area("Study objective", value=(active_protocol or {}).get("objective", "Determine whether industrial decision knowledge transfers across domains without retraining on the target domain."), height=70, disabled=locked, key="sx_research_objective_" + key)
-        with r2:
-            methodology = st.selectbox("Methodology", methods, index=method_index, disabled=locked, key="sx_research_methodology_" + key)
-            primary_endpoint = st.text_input("Primary endpoint", value=(active_protocol or {}).get("primary_endpoint", "Normalized decision regret"), disabled=locked, key="sx_research_endpoint_" + key)
-            primary_domain = st.selectbox("Primary domain", domains, index=primary_index, disabled=locked, key="sx_research_primary_domain_" + key)
-            transfer_domain = st.selectbox("Unseen / transfer domain", domains, index=transfer_index, disabled=locked, key="sx_research_transfer_domain_" + key)
-
-        h1, h2 = st.columns(2)
-        with h1:
-            hypothesis = st.text_area("Primary hypothesis (H1)", value=(active_protocol or {}).get("hypothesis", "A transferable decision representation will retain measurable performance on an unseen industrial environment compared with documented baselines."), height=80, disabled=locked, key="sx_research_h1_" + key)
-        with h2:
-            null_hypothesis = st.text_area("Null hypothesis (H0)", value=(active_protocol or {}).get("null_hypothesis", "Transferable decision representations will not produce a reliable improvement on unseen industrial environments after controlling for baseline performance and variance."), height=80, disabled=locked, key="sx_research_h0_" + key)
-
-        v1, v2, v3 = st.columns(3)
-        with v1:
-            secondary_metrics = st.text_input("Secondary metrics", value=", ".join((active_protocol or {}).get("secondary_metrics", ["cost", "throughput", "service", "risk", "inventory", "carbon"])), disabled=locked, key="sx_research_secondary_" + key)
-            independent_variables = st.text_input("Independent variables", value=", ".join((active_protocol or {}).get("independent_variables", ["decision method", "domain", "disruption type"])), disabled=locked, key="sx_research_independent_" + key)
-            controls = st.text_input("Controls / covariates", value=", ".join((active_protocol or {}).get("controls", ["scenario seed", "objective weights", "constraint set"])), disabled=locked, key="sx_research_controls_" + key)
-        with v2:
-            sample_size = st.number_input("Scenario count", min_value=10, max_value=100000, value=int((active_protocol or {}).get("sample_size", 100)), step=10, disabled=locked, key="sx_research_sample_size_" + key)
-            replications = st.number_input("Replications / scenario", min_value=1, max_value=10000, value=int((active_protocol or {}).get("replications", 30)), step=1, disabled=locked, key="sx_research_replications_" + key)
-            random_seed = st.number_input("Random seed", min_value=0, max_value=2147483647, value=int((active_protocol or {}).get("random_seed", 2026)), step=1, disabled=locked, key="sx_research_seed_" + key)
-        with v3:
-            alpha = st.number_input("Significance level (α)", min_value=0.001, max_value=0.20, value=float((active_protocol or {}).get("alpha", 0.05)), step=0.01, format="%.3f", disabled=locked, key="sx_research_alpha_" + key)
-            confidence_level = st.number_input("Confidence level", min_value=0.80, max_value=0.999, value=float((active_protocol or {}).get("confidence_level", 0.95)), step=0.01, format="%.3f", disabled=locked, key="sx_research_confidence_" + key)
-            data_source = st.text_input("Data source", value=(active_protocol or {}).get("data_source", "Shoir-IE controlled synthetic scenarios; later external validation dataset"), disabled=locked, key="sx_research_data_source_" + key)
-
-        baseline_definition = st.text_area("Baseline definition", value=(active_protocol or {}).get("baseline_definition", "A fixed documented baseline policy plus a classical optimization baseline where applicable."), height=60, disabled=locked, key="sx_research_baseline_" + key)
-        treatment_definition = st.text_area("Treatment / experimental condition", value=(active_protocol or {}).get("treatment_definition", "Shoir-IE decision representation evaluated on held-out combinations and an unseen transfer domain."), height=60, disabled=locked, key="sx_research_treatment_" + key)
-        planned_tests = st.text_input("Planned statistical tests", value=", ".join((active_protocol or {}).get("planned_tests", ["confidence intervals", "paired comparison", "effect size", "bootstrap sensitivity"])), disabled=locked, key="sx_research_tests_" + key)
-
-        ic1, ic2 = st.columns(2)
-        with ic1:
-            inclusion_criteria = st.text_area("Inclusion criteria", value=(active_protocol or {}).get("inclusion_criteria", "Valid scenario definitions; finite numeric inputs; all required constraints specified."), height=60, disabled=locked, key="sx_research_inclusion_" + key)
-        with ic2:
-            exclusion_criteria = st.text_area("Exclusion criteria", value=(active_protocol or {}).get("exclusion_criteria", "Failed validation; malformed scenarios; missing primary outcome; solver/runtime failure not attributable to decision method."), height=60, disabled=locked, key="sx_research_exclusion_" + key)
-
-        protocol_notes = st.text_area("Protocol notes / limitations", value=(active_protocol or {}).get("protocol_notes", "Record protocol amendments explicitly instead of silently changing the main test specification."), height=70, disabled=locked, key="sx_research_notes_" + key)
-        lock_protocol = st.checkbox("Lock protocol after saving (local integrity lock)", value=locked, disabled=locked, key="sx_research_lock_" + key, help="Locks this local record. It is not external preregistration.")
-        save_protocol = st.button("💾 Save Research Study & Protocol" if not locked else "🔒 Protocol Locked", type="primary", use_container_width=True, disabled=locked, key="sx_save_research_protocol_" + key)
-
-        if save_protocol:
-            validation_errors = []
-            if not research_title.strip(): validation_errors.append("Study title is required.")
-            if len(research_question.strip()) < 20: validation_errors.append("Research question should be at least 20 characters.")
-            if len(hypothesis.strip()) < 20: validation_errors.append("H1 should be at least 20 characters.")
-            if len(null_hypothesis.strip()) < 20: validation_errors.append("H0 should be at least 20 characters.")
-            if not primary_endpoint.strip(): validation_errors.append("Primary endpoint is required.")
-            if primary_domain == transfer_domain: validation_errors.append("Primary and transfer domains must differ for this cross-domain study.")
-            if not (0.0 < alpha < 1.0): validation_errors.append("Significance level must be between 0 and 1.")
-            if not (0.0 < confidence_level < 1.0): validation_errors.append("Confidence level must be between 0 and 1.")
-            if validation_errors:
-                for error in validation_errors: st.error(error)
-            else:
-                payload = {
-                    "title": research_title,
-                    "objective": objective,
-                    "research_question": research_question,
-                    "hypothesis": hypothesis,
-                    "null_hypothesis": null_hypothesis,
-                    "methodology": methodology,
-                    "primary_domain": primary_domain,
-                    "transfer_domain": transfer_domain,
-                    "primary_endpoint": primary_endpoint,
-                    "secondary_metrics": _research_list(secondary_metrics),
-                    "independent_variables": _research_list(independent_variables),
-                    "controls": _research_list(controls),
-                    "baseline_definition": baseline_definition,
-                    "treatment_definition": treatment_definition,
-                    "sample_size": int(sample_size),
-                    "replications": int(replications),
-                    "random_seed": int(random_seed),
-                    "alpha": float(alpha),
-                    "confidence_level": float(confidence_level),
-                    "planned_tests": _research_list(planned_tests),
-                    "inclusion_criteria": inclusion_criteria,
-                    "exclusion_criteria": exclusion_criteria,
-                    "data_source": data_source,
-                    "protocol_notes": protocol_notes,
-                    "protocol_locked": bool(lock_protocol),
-                    "module": module,
-                    "tier": tier,
-                }
-                pid = save_project(research_title, module, username, {"research_protocol": payload, "protocol_type": "local_research_protocol"})
-                rid, phash = create_research_protocol(pid, payload, username)
-                st.session_state["sx_research_study_id"] = pid
-                st.session_state["sx_research_id"] = rid
-                st.session_state["sx_research_protocol_hash"] = phash
-                st.success("Research study saved: {} · Protocol {} · SHA-256 {}…".format(pid, rid, phash[:20]))
-                if lock_protocol:
-                    st.info("Protocol integrity lock is ON. This is an internal reproducibility control, not external preregistration.")
-
-        active_id = st.session_state.get("sx_research_study_id")
-        if active_id:
-            frame = research_protocol_frame(active_id, owner=username)
-            if not frame.empty:
-                st.markdown("#### Current research study")
-                st.dataframe(frame, use_container_width=True, hide_index=True)
-
-        # Always show the saved research studies for the current workspace.
-        # Previously the UI rendered only the currently active protocol, while
-        # the metric counted all records in the database. That made saved
-        # studies appear to "disappear" even though they were persisted.
-        with _db() as conn:
-            rows = conn.execute(
-                """
-                SELECT research_id,study_id,title,methodology,primary_domain,
-                       transfer_domain,primary_endpoint,sample_size,replications,
-                       protocol_locked,created_at,updated_at
-                FROM experience_research_studies
-                WHERE owner=?
-                ORDER BY updated_at DESC
-                """,
-                (username,),
-            ).fetchall()
-
-        st.markdown("#### 📚 Saved research studies")
-        if rows:
-            saved_df = pd.DataFrame(
-                rows,
-                columns=[
-                    "Research ID","Study ID","Study title","Methodology",
-                    "Primary domain","Transfer domain","Primary endpoint",
-                    "Scenarios","Replications","Protocol","Created","Updated",
-                ],
-            )
-            saved_df["Protocol"] = saved_df["Protocol"].map(
-                lambda value: "LOCKED" if bool(value) else "DRAFT"
-            )
-            st.dataframe(saved_df, use_container_width=True, hide_index=True)
-        else:
-            st.info("No research studies are saved in this workspace yet.")
-
-    # A compact visual pulse keeps the workspace informative without making
-    # every module feel like a dashboard overload.
-    pulse = pd.DataFrame({
-        "State": ["Implemented", "Integration-ready"],
-        "Capabilities": [stats["implemented"], stats["integration_ready"]],
-    })
-    pc1, pc2 = st.columns([1.35, 2.65])
-    with pc1:
-        st.markdown("**Platform pulse**")
-        st.progress(stats["implemented"] / max(1, stats["total"]), text="{}/60 capabilities active".format(stats["implemented"]))
-    with pc2:
-        fig = px.bar(
-            pulse,
-            x="Capabilities",
-            y="State",
-            orientation="h",
-            text="Capabilities",
-            title="Experience readiness",
-        )
-        fig.update_layout(height=155, margin=dict(l=10, r=10, t=38, b=8), showlegend=False)
-        fig.update_traces(textposition="outside", cliponaxis=False)
-        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
-
-    steps = st.columns(6)
-    for col, label in zip(steps, ["01 Prepare", "02 Validate", "03 Run", "04 Inspect", "05 Decide", "06 Export"]):
-        col.markdown("<div class='sx-step'>✓ {}</div>".format(label), unsafe_allow_html=True)
-
-    a, b, c, d, e = st.columns(5)
-    if is_research_lab:
-        a.info("Research protocol above")
-    elif module == "Engineering Decision Center":
-        if a.button("🔬 Open Research Lab", use_container_width=True, key="sx_open_research_" + key):
-            # The sidebar selectbox is already instantiated on this run, so
-            # mutating its widget-owned session key here raises
-            # StreamlitWidgetAlreadyInstantiatedError. Set a one-run request
-            # flag instead; app.py consumes it before creating the selectbox.
-            st.session_state["open_research_lab_requested"] = True
-            st.rerun()
-        a.caption("Research studies start in Experiment Lab; return here later for governed decision cards.")
-    else:
-        if a.button("💾 Save Study", use_container_width=True, key="sx_save_" + key):
+    action_cols = st.columns(4)
+    with action_cols[0]:
+        if st.button("💾 Save study", use_container_width=True, key="mx_save_" + key):
             pid = save_project(module + " Study", module, username, {"module": module, "tier": tier})
             st.session_state["sx_project_id"] = pid
             st.success("Study saved: " + pid)
-    if b.button("🧪 Create Run", use_container_width=True, key="sx_job_" + key):
-        if is_research_lab:
-            study_id = st.session_state.get("sx_research_study_id")
-            protocol = load_research_protocol(study_id) if study_id else None
-            if not study_id or not protocol:
-                st.warning("Save the research protocol before creating a run.")
-            else:
-                jid = create_job(module, "research-experiment", username, {"study_id": study_id, "research_id": protocol["research_id"], "protocol_hash": protocol["protocol_hash"], "sample_size": protocol["sample_size"], "replications": protocol["replications"], "random_seed": protocol["random_seed"]})
-                update_job(jid, "Running", 20, "Research run initialized")
-                update_job(jid, "Completed", 100, "Research run metadata recorded")
-                st.success("Research run recorded: " + jid)
-        else:
+    with action_cols[1]:
+        if st.button("▶ Record run", use_container_width=True, key="mx_run_" + key):
             jid = create_job(module, "interactive-analysis", username, {"module": module})
             update_job(jid, "Running", 20, "Run initialized")
-            update_job(jid, "Completed", 100, "Run recorded")
+            update_job(jid, "Completed", 100, "Run metadata recorded")
+            st.session_state["shoir_latest_run_id"] = jid
             st.success("Run recorded: " + jid)
-    if c.button("📝 Decision Card", use_container_width=True, key="sx_decision_" + key):
-        did = create_decision(module + " decision", module, {"Status": "Pending review"}, {"Tier": tier}, {"Uncertainty": "Module-specific"}, username)
-        st.session_state["sx_decision_id"] = did
-        st.success("Decision created: " + did)
-    if d.button("🤖 Copilot Plan", use_container_width=True, key="sx_copilot_" + key):
-        rid = log_copilot_action(module, "Prepare validated multi-step plan", username, True, "Preview", {"capabilities": stats["total"]})
-        st.session_state["sx_copilot_run_id"] = rid
-        st.info("Copilot plan staged for approval. No destructive action runs automatically.")
-    if e.button("📦 Evidence Pack", use_container_width=True, key="sx_export_" + key):
-        st.session_state["sx_show_export"] = True
+    with action_cols[2]:
+        if st.button("📝 Decision card", use_container_width=True, key="mx_decision_" + key):
+            did = create_decision(
+                module + " decision", module,
+                {"rows": result["rows"], "quality": result["quality"]},
+                {"Tier": tier},
+                {"Uncertainty": "Module-specific; inspect source evidence"},
+                username,
+            )
+            st.session_state["sx_decision_id_" + key] = did
+            st.success("Decision created: " + did)
+    with action_cols[3]:
+        if st.button("📦 Evidence pack", use_container_width=True, key="mx_export_" + key):
+            st.session_state["mx_show_export_" + key] = True
 
-    if st.session_state.pop("sx_show_export", False):
-        sample = _starter_data(module)
-        research_protocol = None
-        if is_research_lab:
-            study_id = st.session_state.get("sx_research_study_id")
-            research_protocol = load_research_protocol(study_id) if study_id else None
+    if st.session_state.pop("mx_show_export_" + key, False):
         st.download_button(
-            "📥 Download Research Evidence Bundle" if is_research_lab else "📥 Download Universal Evidence Bundle",
-            data=_evidence_bundle(module, sample, username, research_protocol=research_protocol),
-            file_name="shoir_ie_" + key + ("_research_evidence.zip" if is_research_lab else "_evidence.zip"),
+            "📥 Download evidence bundle",
+            data=_evidence_bundle(module, sample, username),
+            file_name="shoir_ie_" + key + "_evidence.zip",
             mime="application/zip",
             use_container_width=True,
-            key="sx_dl_" + key,
+            key="mx_dl_" + key,
         )
 
-    if is_research_lab and st.session_state.get("sx_research_study_id"):
-        with st.expander("🧪 Research reproducibility checklist", expanded=False):
-            checklist = pd.DataFrame([
-                {"Checkpoint": "Research question recorded", "Status": "✓"},
-                {"Checkpoint": "H1 and H0 recorded", "Status": "✓"},
-                {"Checkpoint": "Primary endpoint defined", "Status": "✓"},
-                {"Checkpoint": "Baseline and treatment documented", "Status": "✓"},
-                {"Checkpoint": "Scenario count and replications defined", "Status": "✓"},
-                {"Checkpoint": "Seed and confidence level recorded", "Status": "✓"},
-                {"Checkpoint": "Inclusion and exclusion criteria recorded", "Status": "✓"},
-                {"Checkpoint": "Protocol hash captured", "Status": "✓"},
-            ])
-            st.dataframe(checklist, use_container_width=True, hide_index=True)
-            st.caption("Keep the main test specification stable. Record later changes as protocol amendments rather than silently changing the endpoint, seed, scenario rule or exclusion rule.")
-
-    with st.expander("✨ Platform Excellence · 60 capabilities", expanded=False):
-        st.caption("A calm, searchable capability map — not another wall of controls.")
-        search = st.text_input("Search capabilities", key="sx_feature_search_" + key, placeholder="Search data, Copilot, testing, reporting…")
-        catalog = feature_catalog()
-        if search.strip():
-            term = search.strip().lower()
-            mask = catalog["Feature"].str.lower().str.contains(term, regex=False) | catalog["Description"].str.lower().str.contains(term, regex=False)
-            catalog = catalog[mask]
-        st.dataframe(catalog, use_container_width=True, hide_index=True)
-        q1, q2, q3 = st.columns(3)
-        q1.metric("Implemented", stats["implemented"])
-        q2.metric("Integration-ready", stats["integration_ready"])
-        q3.metric("Tracked", stats["total"])
+    if jobs:
+        st.caption(f"{jobs:,} active orchestration job(s) are associated with this workspace.")
 
     if "AI" in module or "Copilot" in module:
-        with st.expander("🤖 Copilot capability registry", expanded=True):
-            st.caption("Imported text is treated as data. Tool execution stays approval-gated.")
-            tools = pd.DataFrame(COPILOT_TOOLS, columns=["Tool", "Scope", "Approval"])
-            st.dataframe(tools, use_container_width=True, hide_index=True)
-            if st.button("✅ Approve preview plan", type="primary", use_container_width=True, key="sx_approve_" + key):
-                rid = log_copilot_action(module, "Approve preview plan", username, True, "Approved", {"tools": len(tools)})
-                st.success("Copilot approval recorded: " + rid)
+        with st.expander("🤖 Copilot controls", expanded=False):
+            st.caption("Imported text is treated as data. State-changing operations remain approval-gated.")
+            try:
+                tools = pd.DataFrame(COPILOT_TOOLS, columns=["Tool","Scope","Approval"])
+                st.dataframe(tools, use_container_width=True, hide_index=True)
+            except Exception:
+                st.info("Copilot tool registry is temporarily unavailable.")
 
 
 def render_blank_module_studio(module: str, tier: str, username: str) -> None:
@@ -2137,6 +1923,35 @@ def render_blank_module_studio(module: str, tier: str, username: str) -> None:
     data_key = "sx_blank_data_" + key
     if data_key not in st.session_state:
         st.session_state[data_key] = _starter_data(module)
+
+    upload = st.file_uploader(
+        "📥 Import module data (Excel / CSV / TSV)",
+        type=["xlsx","xlsm","xls","csv","tsv"],
+        key="sx_blank_upload_" + key,
+        help="Import a dataset into this module canvas. The editor and charts below update from the imported table.",
+    )
+    if upload is not None:
+        try:
+            raw = upload.getvalue()
+            if str(upload.name).lower().endswith(".csv"):
+                imported = pd.read_csv(io.BytesIO(raw))
+            elif str(upload.name).lower().endswith(".tsv"):
+                imported = pd.read_csv(io.BytesIO(raw), sep="\t")
+            else:
+                imported = pd.read_excel(io.BytesIO(raw))
+            if imported.empty:
+                st.warning("The imported file contained no rows.")
+            else:
+                st.session_state[data_key] = imported.copy(deep=True)
+                st.session_state["universal_active_dataset"] = imported.copy(deep=True)
+                st.session_state["industrial_workbook_current_df"] = imported.copy(deep=True)
+                st.session_state["shoir_data_status"] = "IMPORTED"
+                st.session_state["shoir_data_source_key"] = "upload"
+                st.session_state["shoir_data_source"] = str(upload.name)
+                st.success(f"Imported {len(imported):,} rows × {len(imported.columns):,} columns from {upload.name}.")
+                st.rerun()
+        except Exception as exc:
+            st.error(f"Module data import failed safely: {type(exc).__name__}: {exc}")
 
     df = st.data_editor(
         st.session_state[data_key],
