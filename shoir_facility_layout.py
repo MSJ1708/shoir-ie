@@ -398,7 +398,7 @@ def _shortest_path(
     avoid: str | None = None,
     avoid_flow_id: str | None = None,
 ) -> tuple[list[str], float, float]:
-    """Find the shortest navigable path, optionally excluding a department or edge."""
+    """Find the shortest directed process path, optionally excluding a department or edge."""
     graph: dict[str, list[tuple[str,float,float,str]]] = {}
     for r in flows.itertuples(index=False):
         flow_id = str(getattr(r, "flow_id", ""))
@@ -407,7 +407,6 @@ def _shortest_path(
         if avoid and (str(r.from_id) == avoid or str(r.to_id) == avoid):
             continue
         graph.setdefault(str(r.from_id), []).append((str(r.to_id), float(r.distance_m), float(r.loads_day), flow_id))
-        graph.setdefault(str(r.to_id), []).append((str(r.from_id), float(r.distance_m), float(r.loads_day), flow_id))
     import heapq
     heap = [(0.0, start, [start], 0.0)]
     seen: dict[str,float] = {}
