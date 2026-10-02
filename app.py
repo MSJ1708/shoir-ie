@@ -1458,7 +1458,25 @@ if not st.session_state.get("user_affiliate"):
 # here so older modules can continue requesting workbook/unified views.
 # =====================================================================
 tier_val = st.session_state.user_tier
-is_admin = (st.session_state.current_user == "sho")
+_current_username = str(st.session_state.get("current_user", "")).strip()
+_current_role = str(st.session_state.get("user_role", "")).strip()
+# Admin access requires both the canonical admin identity and an admin role.
+# A stale tier, module selector, or username alone cannot expose administration.
+is_admin = (
+    _current_username.casefold() == "sho"
+    and _current_role.casefold() in {"enterprise admin", "administrator", "admin"}
+)
+if _current_username.casefold() == "sho" and not _current_role:
+    try:
+        with sqlite3.connect("enterprise_full_workspace.db") as _admin_probe:
+            _role_row = _admin_probe.execute(
+                "SELECT role FROM enterprise_users WHERE LOWER(username)=? LIMIT 1",
+                ("sho",),
+            ).fetchone()
+        is_admin = bool(_role_row and str(_role_row[0] or "").casefold() in {"enterprise admin", "administrator", "admin"})
+    except Exception:
+        is_admin = False
+
 
 tier1_features = ["MILP Solvers", "Inventory Playback", "Core IE Tools", "Subscriptions", "Persistence", "Facility Layout & Warehousing", "Enterprise Integration & Collaboration", "Engineering Validation Center", "Excel Data Cleaning & Import", "Industrial Workbook", "AI Copilot"]
 tier2_features = tier1_features + ["Carbon Accounting", "IoT Digital Twin", "MEIO Matrix", "Slotting & Gantt", "Fleet Routing", "Warehouse Heatmap", "Supplier Risk Matrix", "Scenarios", "AGV Fleet Dispatcher", "Geospatial Network Designer", "Production Planning & Control (PPC)", "Lean Manufacturing & Shop Floor Operations", "Quality Control, Six Sigma & Reliability", "Engineering Economics & Finance", "Industrial Data Model & Digital Thread"]
