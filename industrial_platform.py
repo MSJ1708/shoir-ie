@@ -1557,14 +1557,18 @@ def render_module(module: str, tier: str, username: str):
     elif module=="Engineering Validation Center":
         st.subheader("✅ Engineering Validation Center")
         st.caption("Validate structure, required fields, numeric ranges, data quality, model feasibility and result health before using a module output in a decision.")
-        default_validation = st.session_state.setdefault(
-            "validation_df",
-            pd.DataFrame({
-                "Metric":["Cost","Service Level","Capacity","Lead Time"],
-                "Value":[100000,95,12000,7],
-                "Unit":["USD","%","units","days"],
-            }),
-        )
+        staged_validation = st.session_state.get(f"{_module_slug(module)}_import_df")
+        if "validation_df" not in st.session_state:
+            st.session_state["validation_df"] = (
+                staged_validation.copy(deep=True)
+                if isinstance(staged_validation, pd.DataFrame) and not staged_validation.empty
+                else pd.DataFrame({
+                    "Metric":["Cost","Service Level","Capacity","Lead Time"],
+                    "Value":[100000,95,12000,7],
+                    "Unit":["USD","%","units","days"],
+                })
+            )
+        default_validation = st.session_state["validation_df"]
         validation_df = st.data_editor(
             default_validation,
             num_rows="dynamic",
