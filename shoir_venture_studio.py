@@ -286,6 +286,7 @@ def value_summary(values: pd.DataFrame) -> dict[str, Any]:
         "payback_months": 0.0,
         "currency": "",
         "mixed_currency": 0.0,
+        "currency_missing": 0.0,
     }
     if values.empty:
         return empty
@@ -304,13 +305,12 @@ def value_summary(values: pd.DataFrame) -> dict[str, Any]:
         priced = calc.iloc[0:0]
 
     currencies: list[str] = []
+    missing_currency = False
     if currency_col is not None and not priced.empty:
-        currencies = sorted({
-            str(x).strip().upper()
-            for x in values.loc[priced_mask, currency_col].tolist()
-            if str(x).strip()
-        })
-    mixed_currency = len(currencies) > 1
+        currency_values = [str(x).strip().upper() for x in values.loc[priced_mask, currency_col].tolist()]
+        missing_currency = any(not x for x in currency_values)
+        currencies = sorted({x for x in currency_values if x})
+    mixed_currency = len(currencies) > 1 or missing_currency
 
     benefit = 0.0 if mixed_currency else float(priced["economic_value"].sum())
     implementation = float(valid["implementation_cost"].max()) if not valid.empty else 0.0
@@ -329,6 +329,7 @@ def value_summary(values: pd.DataFrame) -> dict[str, Any]:
         "payback_months": payback,
         "currency": currency,
         "mixed_currency": 1.0 if mixed_currency else 0.0,
+        "currency_missing": 1.0 if missing_currency else 0.0,
     }
 
 
@@ -485,7 +486,7 @@ def _render_overview(owner: str) -> None:
     values = _query("SELECT * FROM venture_value_measurements WHERE owner=?", (owner,))
     summary = value_summary(values)
     if summary["mixed_currency"]:
-        st.warning("Value evidence contains multiple currencies. Economic benefit, ROI and payback are intentionally withheld until the value set is currency-consistent.")
+        st.warning("Value evidence contains multiple or unspecified currencies. Economic benefit, ROI and payback are intentionally withheld until the value set is currency-consistent.")
     elif summary["priced_rows"] > 0:
         st.metric(
             f"Measured annualized benefit · {summary['currency'] or 'currency'}",
