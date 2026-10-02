@@ -52,7 +52,7 @@ from shoir_application_shell import render_application_shell, render_shell_surfa
 from shoir_adoption_engine import render_adoption_center
 from shoir_universal_engine import render_universal_engine_surface, postflight_contract
 from shoir_commercial import render_module_enrichment
-from shoir_value_evidence import render_value_pulse, ensure_value_evidence_db
+from shoir_value_evidence import render_value_pulse, ensure_value_evidence_db, result_button_should_track, begin_result_timer, render_value_receipt
 from shoir_venture_studio import render_venture_studio
 from shoir_160 import init_160_platform, render_160_command_center
 from shoir_enterprise_ops import (
