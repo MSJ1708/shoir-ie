@@ -941,13 +941,11 @@ def render_module(module: str, tier: str, username: str):
         render_industrial_workbook(tier, username)
         return
     render_module_data_exchange(module, st, tier, username)
-    render_experience_shell(module, tier, username)
     if module == "Experiment Lab":
         # Experiment Lab is a dedicated research workspace. Its UI and
         # persistence are rendered by render_research_workspace, so do not
         # append the old generic scenario screen underneath it.
         return
-    st.caption("Workflow: Prepare → Validate → Run → Inspect → Explain → Export")
     if module=="Experiment Engine":
         render_experiment_engine(tier, username)
         return
@@ -1784,4 +1782,5 @@ def render_module(module: str, tier: str, username: str):
             st.dataframe(audit,use_container_width=True,hide_index=True)
             render_export_bar(module,[("Roles",role),("Security Events",audit)],tier,username)
     else:
+        render_experience_shell(module, tier, username)
         render_blank_module_studio(module, tier, username)
