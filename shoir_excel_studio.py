@@ -4247,7 +4247,9 @@ def _excel_render_v2(tier: str, username: str) -> None:
                     st.info("Dataset is active in this session. Durable workspace persistence is not currently available.")
             except Exception as exc:
                 st.error(f"Import failed safely: {type(exc).__name__}: {exc}")
-        st.stop()
+        # Continue into the results view on the same run as the upload.
+        if not isinstance(result, dict):
+            return
 
     cleaned = result.get("cleaned_sheets", {})
     frames = result.get("table_datasets", {}) or cleaned
