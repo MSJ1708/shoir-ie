@@ -126,3 +126,43 @@ def test_quality_evidence_calculates_error_detection_and_rework_avoided():
     })
     assert np.isclose(result["error_detection_rate_percent"], 80.0)
     assert np.isclose(result["rework_avoided_hours"], 8.0)
+
+
+def test_venture_ui_foundation_helpers_and_demo_story_are_present():
+    assert callable(vs._render_overview)
+    assert callable(vs._show_fig)
+    assert callable(vs._optional_float)
+    assert len(vs.DEMO_STORY) == 7
+
+
+def test_value_calculation_distinguishes_unmeasured_from_zero():
+    missing = vs.value_calculation({
+        "Baseline": np.nan,
+        "Post": 0,
+        "Unit value": 50,
+        "Frequency / year": 50,
+    })
+    measured_zero = vs.value_calculation({
+        "Baseline": 0,
+        "Post": 0,
+        "Unit value": 50,
+        "Frequency / year": 50,
+    })
+    assert missing["valid"] == 0.0
+    assert missing["economic_value"] == 0.0
+    assert measured_zero["valid"] == 1.0
+    assert measured_zero["economic_value"] == 0.0
+
+
+def test_value_summary_blocks_silent_mixed_currency_aggregation():
+    values = pd.DataFrame([
+        {"baseline_value": 10, "post_value": 5, "frequency_per_year": 10, "unit_value": 2, "currency": "SAR", "implementation_cost": 100},
+        {"baseline_value": 20, "post_value": 15, "frequency_per_year": 10, "unit_value": 3, "currency": "USD", "implementation_cost": 100},
+    ])
+    result = vs.value_summary(values)
+    assert result["measured_rows"] == 2
+    assert result["priced_rows"] == 2
+    assert result["mixed_currency"] == 1.0
+    assert result["annualized_benefit"] == 0.0
+    assert result["roi_percent"] == 0.0
+    assert result["currency"] == "MIXED"
