@@ -356,8 +356,8 @@ def init_db():
         # live in):
         #   [admin]
         #   password value should come from the configured secret provider.
-        # Until you do, it falls back to the exact same password that was
-        # already hardcoded here, so sho's login does not change today.
+         # If no secret provider is configured, an existing admin password hash
+         # is preserved; the application never embeds a plaintext fallback.
         # IMPORTANT: since that password has been sitting in plain text in
         # this file, if this project has ever been pushed to git (even a
         # private repo) or shared anywhere, treat it as compromised and
