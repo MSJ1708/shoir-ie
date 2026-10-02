@@ -710,29 +710,32 @@ def _render_readiness(owner:str)->None:
 
 def _render_traction(owner:str)->None:
     st.markdown("### 📊 Product & Traction Analytics")
+    st.caption("Owner-scoped operational analytics. No customer-sensitive records are exposed in these charts.")
     since=(datetime.now(timezone.utc)-timedelta(days=30)).isoformat(timespec="seconds")
-    active=_scalar("SELECT COUNT(DISTINCT owner) FROM experience_projects WHERE updated_at>=?",(since,))
-    studies=_scalar("SELECT COUNT(*) FROM experience_projects")
-    datasets=_scalar("SELECT COUNT(*) FROM os160_datasets")
-    analyses=_scalar("SELECT COUNT(*) FROM experience_jobs WHERE status='Completed'")
-    scenarios=_scalar("SELECT COUNT(*) FROM venture_product_events WHERE event_type='scenario_compared' AND owner=?",(owner,))
-    reports=_scalar("SELECT COUNT(*) FROM venture_product_events WHERE event_type='report_exported' AND owner=?",(owner,))
+    projects=_scalar("SELECT COUNT(*) FROM experience_projects WHERE owner=?",(owner,))
+    datasets=_scalar("SELECT COUNT(*) FROM os160_datasets WHERE owner=?",(owner,))
+    runs=_scalar("SELECT COUNT(*) FROM os160_runs WHERE owner=?",(owner,))
+    scenarios=_scalar("SELECT COUNT(*) FROM os160_scenarios WHERE owner=?",(owner,))
+    events=_query("SELECT event_type AS Event,feature AS Feature,COUNT(*) AS Events FROM venture_product_events WHERE owner=? GROUP BY event_type,feature ORDER BY Events DESC",(owner,))
     pilots=_scalar("SELECT COUNT(*) FROM venture_pilots WHERE owner=?",(owner,))
     converted=_scalar("SELECT COUNT(*) FROM venture_pilots WHERE owner=? AND status='Converted'",(owner,))
     conversion=converted/pilots*100 if pilots else 0
-    c=st.columns(8)
-    metrics=[("Active workspaces · 30d",active),("Studies created",studies),("Datasets activated",datasets),("Analyses run",analyses),("Scenarios compared",scenarios),("Reports exported",reports),("Pilot conversion",conversion),("Pilots",pilots)]
-    for i,(label,val) in enumerate(metrics): c[i].metric(label,f"{val:.1f}%" if label=="Pilot conversion" else f"{val:,.0f}")
-    events=_query("SELECT event_type AS Event,feature AS Feature,COUNT(*) AS Events FROM venture_product_events WHERE owner=? GROUP BY event_type,feature ORDER BY Events DESC",(owner,))
-    if not events.empty: st.dataframe(events,use_container_width=True,hide_index=True)
+    cards=st.columns(7)
+    metrics=[("Projects",projects),("Datasets",datasets),("Runs",runs),("Scenarios",scenarios),("Tracked events",float(events["Events"].sum()) if not events.empty else 0),("Pilots",pilots),("Pilot conversion",conversion)]
+    for i,(label,val) in enumerate(metrics):
+        cards[i].metric(label,f"{val:.1f}%" if label=="Pilot conversion" else f"{val:,.0f}")
+    if not events.empty:
+        _show_fig(px.bar(events.head(12),x="Events",y="Feature",color="Event",orientation="h",text="Events"),390,"Tracked feature adoption")
+        daily=_query("SELECT substr(created_at,1,10) AS Day,COUNT(*) AS Events FROM venture_product_events WHERE owner=? AND created_at>=? GROUP BY Day ORDER BY Day",(owner,since))
+        if not daily.empty:
+            _show_fig(px.line(daily,x="Day",y="Events",markers=True),300,"Venture activity · last 30 days")
     ttfr=_query("SELECT details_json FROM venture_product_events WHERE owner=? AND event_type='first_result' ORDER BY created_at DESC LIMIT 200",(owner,))
     seconds=[]
     for raw in ttfr.get("details_json",pd.Series(dtype=str)).tolist():
         try: seconds.append(float(json.loads(raw).get("time_to_first_result_seconds",0)))
         except Exception: pass
     if seconds: st.metric("Time to first result · tracked sessions",f"{np.mean(seconds):.1f} s")
-    st.caption("Cross-platform metrics are derived from durable platform tables where available; venture-specific events are explicitly labelled as tracked.")
-
+    st.caption("Platform objects are counted only where their tables expose owner identifiers; Venture events are explicitly product-analytics records.")
 
 def _demo_data()->dict[str,Any]:
     rng=np.random.default_rng(2026); n=24
