@@ -626,10 +626,12 @@ def render_facility_layout(tier: str, username: str) -> None:
                 reason=st.text_input("Reason / process step","Material transfer",key="fl_flow_reason")
                 add=st.form_submit_button("🔗 Create connection",type="primary",use_container_width=True)
             if add:
-                if not frm or not to or frm==to: st.error("Choose two different departments.")
+                if not frm or not to or frm==to:
+                    st.error("Choose two different departments.")
+                elif not flows.empty and ((flows["from_id"].astype(str)==frm) & (flows["to_id"].astype(str)==to)).any():
+                    st.warning("That directed connection already exists. Edit the existing edge below instead of creating a duplicate.")
                 else:
                     flow_id=f"F{len(flows)+1:03d}"
-                    existing=set(flows["flow_id"].astype(str)) if not flows.empty else set()
                     while flow_id in existing: flow_id=f"F{int(flow_id[1:])+1:03d}"
                     with _db() as conn:
                         conn.execute(
