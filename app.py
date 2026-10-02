@@ -52,6 +52,44 @@ from shoir_application_shell import render_application_shell, render_shell_surfa
 from shoir_adoption_engine import render_adoption_center
 from shoir_universal_engine import render_universal_engine_surface, postflight_contract
 from shoir_commercial import render_module_enrichment
+from shoir_value_evidence import render_value_pulse, ensure_value_evidence_db, result_button_should_track, begin_result_timer, render_value_receipt
+
+# Central result-action timer: every result-generating button starts a run clock.
+# The wrapper marker lives on the Streamlit function itself, not session state,
+# so it survives Streamlit reruns without disabling tracking on later runs.
+if not getattr(st.button, "_shoir_value_wrapper", False):
+    _shoir_original_button = getattr(st.button, "_shoir_original", st.button)
+    _shoir_original_form_submit = getattr(st.form_submit_button, "_shoir_original", st.form_submit_button)
+
+    def _shoir_tracked_button(label, *args, **kwargs):
+        clicked = _shoir_original_button(label, *args, **kwargs)
+        if clicked and result_button_should_track(label, kwargs.get("type", ""), form_submit=False):
+            begin_result_timer(st.session_state.get("selected_module", "Default"), label)
+        return clicked
+
+    def _shoir_tracked_form_submit(label="Submit", *args, **kwargs):
+        submitted = _shoir_original_form_submit(label, *args, **kwargs)
+        if submitted and result_button_should_track(label, kwargs.get("type", ""), form_submit=True):
+            begin_result_timer(st.session_state.get("selected_module", "Default"), label)
+        return submitted
+
+    _shoir_tracked_button._shoir_value_wrapper = True
+    _shoir_tracked_button._shoir_original = _shoir_original_button
+    _shoir_tracked_form_submit._shoir_value_wrapper = True
+    _shoir_tracked_form_submit._shoir_original = _shoir_original_form_submit
+    st.button = _shoir_tracked_button
+    st.form_submit_button = _shoir_tracked_form_submit
+
+# Value receipt hook for modules that end a render with _shoir_module_stop().
+def _shoir_module_stop():
+    try:
+        render_value_receipt(
+            st.session_state.get("selected_module", "Default"),
+            st.session_state.get("current_user", "unknown"),
+        )
+    except Exception:
+        pass
+    st.stop()
 from shoir_venture_studio import render_venture_studio
 from shoir_160 import init_160_platform, render_160_command_center
 from shoir_enterprise_ops import (
@@ -69,7 +107,7 @@ from shoir_enterprise_ops import (
 # =====================================================================
 # Shared post-module context
 # ---------------------------------------------------------------------
-# Must be defined before any module-specific st.stop() can interrupt the page.
+# Must be defined before any module-specific _shoir_module_stop() can interrupt the page.
 # -----------------------------------------------------------------------------
 # Native/domain modules call this cross-cutting layer after their main UI.
 # Keep it defensive: optional workspace context must never crash a module.
@@ -1159,7 +1197,7 @@ if not st.session_state.get("current_user"):
         if st.button("Sign In", type="primary", key="btn_sign_action"):
             if signin_user and is_login_rate_limited(signin_user):
                 st.error("Too many failed sign-in attempts. Please wait 10 minutes and try again.")
-                st.stop()
+                _shoir_module_stop()
 
             try:
                 # Supabase Edge is the authoritative authentication service.
@@ -1168,7 +1206,7 @@ if not st.session_state.get("current_user"):
             except Exception:
                 record_login_attempt(signin_user, False)
                 st.error("Invalid username or password. Note: Access requires admin approval and ticket delivery.")
-                st.stop()
+                _shoir_module_stop()
 
             username = str(auth.get("username") or signin_user).strip()
             role = str(auth.get("role") or "User")
@@ -1349,7 +1387,7 @@ if not st.session_state.get("current_user"):
                                 })
                             except Exception as exc:
                                 st.error(f"Could not create the durable account request: {exc}")
-                                st.stop()
+                                _shoir_module_stop()
 
                         st.success("Request sent successfully! Your code will be emailed to you from shoirtheagent@gmail.com")
                         st.session_state.show_qr = False
@@ -1651,7 +1689,7 @@ if not st.session_state.get("current_user"):
     # who isn't signed in, so the entire dashboard (sidebar, all modules,
     # including the module list that reveals "Admin Panel") was rendering
     # underneath the login form for anyone, logged in or not.
-    st.stop()
+    _shoir_module_stop()
 
 # =====================================================================
 # PERSISTENT USER WORKSPACE — load once after authentication
@@ -1812,7 +1850,7 @@ if _shell_surface:
             str(st.session_state.get("user_tier", "Starter Tier")),
             st.session_state.get("current_user", "unknown"),
         )
-        st.stop()
+        _shoir_module_stop()
     if _shell_surface == "universal":
         from shoir_universal_engine import render_universal_engine_surface
         render_universal_engine_surface(
@@ -1820,7 +1858,7 @@ if _shell_surface:
             str(st.session_state.get("user_tier", "Starter Tier")),
             st.session_state.get("current_user", "unknown"),
         )
-        st.stop()
+        _shoir_module_stop()
     render_shell_surface(
         _shell_surface,
         st.session_state.get("current_user", "unknown"),
@@ -1833,7 +1871,7 @@ if _shell_surface:
         # Fall through to the existing, fully tested profile editor below.
         pass
     else:
-        st.stop()
+        _shoir_module_stop()
 
 # Platform-surface fallbacks kept for old session state/deep links.
 if st.session_state.get("selected_nav") == "Edit Account":
@@ -1852,6 +1890,19 @@ except Exception as _shell_context_error:
     st.warning("Unified workspace context is temporarily unavailable; the specialist module remains available.")
     with st.expander("Shell diagnostic", expanded=False):
         st.code(f"{type(_shell_context_error).__name__}: {_shell_context_error}")
+
+# Universal Value Evidence — every specialist module gets a task-specific value pulse.
+# Reference times are planning assumptions until the user calibrates them to the real operation.
+try:
+    ensure_value_evidence_db()
+    render_value_pulse(
+        str(selected_module),
+        st.session_state.get("current_user", "unknown"),
+    )
+except Exception as _value_engine_error:
+    st.caption("Value Evidence Engine is temporarily unavailable; the engineering module remains available.")
+    with st.expander("Value engine diagnostic", expanded=False):
+        st.code(f"{type(_value_engine_error).__name__}: {_value_engine_error}")
 
 # The ROI estimator moved out of the sidebar; keep its calculation available to
 # economics modules through a non-UI session value for compatibility.
@@ -1966,6 +2017,15 @@ try:
 except Exception as _commercial_error:
     st.caption(f"Integrated workspace enrichment unavailable: {_commercial_error}")
 
+# Non-stopping modules reach this common tail after rendering their result.
+try:
+    render_value_receipt(
+        st.session_state.get("selected_module", "Default"),
+        st.session_state.get("current_user", "unknown"),
+    )
+except Exception:
+    pass
+
 # =====================================================================
 # AUTOSAVE LAST KNOWN USER WORKSPACE STATE
 # =====================================================================
@@ -1980,14 +2040,14 @@ if st.session_state.get("selected_nav") == "🚀 160 Operating System":
         st.session_state.get("current_user", "unknown"),
         st.session_state.get("user_tier", "Starter Tier"),
     )
-    st.stop()
+    _shoir_module_stop()
 
 if st.session_state.get("selected_nav") == "✨ Excellence Hub":
     render_platform_excellence_hub(
         st.session_state.get("current_user", "unknown"),
         st.session_state.get("user_tier", "Starter Tier"),
     )
-    st.stop()
+    _shoir_module_stop()
 
 st.sidebar.markdown("---")
 if st.sidebar.button("Lock / Logout Workspace"):
@@ -6394,7 +6454,7 @@ if selected_module == "AGV Fleet Dispatcher":
             st.metric("Quality Rate", "100%", "Collision-Free")
 
     # Stop execution so the rest of the page underneath doesn't overwrite
-    st.stop()
+    _shoir_module_stop()
 
 # ==============================================================================
 # SHOIR-IE: ELITE GEOSPATIAL NETWORK DESIGNER & FACILITY OPTIMIZER (V2.2 FIXED)
@@ -6682,7 +6742,7 @@ if selected_module == "Geospatial Network Designer":
                 st.plotly_chart(bar_cap, use_container_width=True)
 
     _render_post_module_layers("Geospatial Network Designer")
-    st.stop()
+    _shoir_module_stop()
 
 # ==============================================================================
 # SHOIR-IE: ELITE PREDICTIVE MAINTENANCE & ASSET HEALTH HUB (V2.2)
@@ -6897,7 +6957,7 @@ if selected_module == "Predictive Maintenance Hub":
                 st.rerun()
 
     _render_post_module_layers("Predictive Maintenance Hub")
-    st.stop()
+    _shoir_module_stop()
 # ==============================================================================
 # SHOIR-IE: ELITE PRODUCTION PLANNING, SCHEDULING & CONTROL (PPC) SUITE (V2.2)
 # ==============================================================================
@@ -7125,7 +7185,7 @@ if selected_module == "Production Planning & Control (PPC)":
             fig_agg.update_layout(plot_bgcolor="#0b0f19", paper_bgcolor="#0b0f19", font=dict(color="#f3f4f6"), height=340)
             st.plotly_chart(fig_agg, use_container_width=True)
 
-    st.stop()
+    _shoir_module_stop()
 
 # ==============================================================================
 # SHOIR-IE: ELITE LEAN MANUFACTURING & SHOP FLOOR OPERATIONS SUITE (V2.4)
@@ -7376,7 +7436,7 @@ if selected_module == "Lean Manufacturing & Shop Floor Operations":
         fig_5s.update_layout(plot_bgcolor="#0b0f19", paper_bgcolor="#0b0f19", font=dict(color="#f3f4f6"), height=320)
         st.plotly_chart(fig_5s, use_container_width=True)
 
-    st.stop()
+    _shoir_module_stop()
 # ==============================================================================
 # SHOIR-IE: ELITE QUALITY CONTROL, SIX SIGMA & RELIABILITY SUITE (V2.6)
 # ==============================================================================
@@ -7604,7 +7664,7 @@ if selected_module == "Quality Control, Six Sigma & Reliability":
         fig_pareto.update_layout(plot_bgcolor="#0b0f19", paper_bgcolor="#0b0f19", font=dict(color="#f3f4f6"), height=320)
         st.plotly_chart(fig_pareto, use_container_width=True)
 
-    st.stop()
+    _shoir_module_stop()
 # ==============================================================================
 # SHOIR-IE: FACILITY LAYOUT, MATERIAL HANDLING & WAREHOUSING
 # ==============================================================================
@@ -7619,7 +7679,7 @@ if selected_module in ["Facility Layout & Warehousing", "Facility Layout, Materi
         st.error("Facility Layout encountered a recoverable rendering issue.")
         with st.expander("Facility Layout diagnostic", expanded=False):
             st.code(f"{type(exc).__name__}: {exc}")
-    st.stop()
+    _shoir_module_stop()
 
 # ==============================================================================
 # SHOIR-IE: ELITE HUMAN FACTORS, ERGONOMICS & SAFETY ENGINEERING (V3.1)
@@ -7893,7 +7953,7 @@ if selected_module in ["Human Factors & Ergonomics (NIOSH)", "Human Factors, Erg
             st.metric("Total Shift Rest", f"{rest_mins_per_hour * shift_hours:.1f} minutes")
 
     _render_post_module_layers("Human Factors & Ergonomics (NIOSH)")
-    st.stop()
+    _shoir_module_stop()
 
 # ==============================================================================
 # SHOIR-IE: ELITE ENGINEERING ECONOMICS & FINANCIAL ANALYSIS SUITE (V3.3)
@@ -8219,7 +8279,7 @@ if selected_module in ["Engineering Economics & Finance", "Engineering Economics
             }), use_container_width=True, hide_index=True)
 
     _render_post_module_layers("Engineering Economics & Finance")
-    st.stop()
+    _shoir_module_stop()
 
 # ==============================================================================
 # SHOIR-IE: ELITE DIGITAL TWIN, DES & MES CONTROL TOWER (V3.8 - FULL CRUD)
@@ -8586,7 +8646,7 @@ if selected_module in ["Digital Twin & Discrete-Event Simulation", "Digital Twin
             st.rerun()
 
     _render_post_module_layers("Digital Twin & Discrete-Event Simulation")
-    st.stop()
+    _shoir_module_stop()
 
 # ==============================================================================
 # SHOIR-IE: GREEN IE, SUSTAINABILITY & CIRCULAR ECONOMY SUITE (V3.9)
@@ -8782,7 +8842,7 @@ if selected_module in ["Green IE & Sustainability", "Sustainability & Circular E
                 st.plotly_chart(fig_lca, use_container_width=True)
 
     _render_post_module_layers("Green IE & Sustainability")
-    st.stop()
+    _shoir_module_stop()
 
 # ==============================================================================
 # SHOIR-IE: ENTERPRISE INTEGRATION & COLLABORATION
@@ -8798,7 +8858,7 @@ if selected_module in ["Enterprise Integration & Collaboration", "Enterprise Int
         st.error("Enterprise Integration & Collaboration encountered a recoverable rendering issue.")
         with st.expander("Enterprise Integration diagnostic", expanded=False):
             st.code(f"{type(exc).__name__}: {exc}")
-    st.stop()
+    _shoir_module_stop()
 
 def render_data_editor(df, key_name):
     if hasattr(st, "data_editor"):
@@ -9000,7 +9060,7 @@ else:
         from shoir_tier_capabilities import tier_allows
         if not tier_allows(tier_val, "Starter"):
             st.warning("🔒 AI Copilot is not included in this package.")
-            st.stop()
+            _shoir_module_stop()
         st.header("🤖 Natural Language AI Copilot")
         st.caption("Upload a workbook, ask Copilot to clean or analyze it, apply Excel-style transformations, and download the improved workbook. Recommendations are grounded in the available modules and your current tier.")
 
@@ -9389,7 +9449,7 @@ else:
             st.error("Venture Studio encountered a recoverable rendering issue. Your existing engineering workspace remains available.")
             with st.expander("Technical diagnostic"):
                 st.code(f"{type(exc).__name__}: {exc}")
-        st.stop()
+        _shoir_module_stop()
     elif mod == "Industrial Operating System":
         if platform_tier_allows(tier_val, "Enterprise"):
             try:
@@ -11680,7 +11740,7 @@ if mod == "Control Tower":
         if idx < len(flow) - 1:
             pass
     st.caption("The loop reflects observed canonical entities. A Ready stage is not treated as a completed or live measurement.")
-    st.stop()
+    _shoir_module_stop()
 
 if mod == "Cryptographic Ledger":
     st.header("🔐 Cryptographic Product Provenance & ESG Ledger")

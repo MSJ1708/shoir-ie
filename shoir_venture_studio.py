@@ -24,6 +24,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from industrial_experience import ensure_experience_db
+from shoir_value_evidence import render_value_evidence_engine
 
 DB_PATH = "enterprise_full_workspace.db"
 PILOT_STAGES = ["Discovery", "Baseline", "Pilot Setup", "Deployment", "Measurement", "Customer Feedback", "Decision"]
@@ -757,8 +758,10 @@ def _default_value_table() -> pd.DataFrame:
 
 
 def _render_value_evidence(owner: str) -> None:
-    st.markdown("### 💰 Value Evidence Center")
-    st.caption("Enter customer baseline and post-deployment measurements. The calculation engine does not impose a universal savings percentage.")
+    render_value_evidence_engine(owner, current_module="Venture Studio")
+    st.markdown("---")
+    st.markdown("### Customer-Specific Operational Evidence")
+    st.caption("Attach measured baseline/post-deployment evidence to the pilot. Financial claims stay tied to source, date and confidence; the existing evidence ledger remains the system of record.")
     pilots=_pilot_df(owner)
     options=["Workspace / not pilot-specific"] + ([] if pilots.empty else [f"{x.pilot_id} · {x.title}" for x in pilots.itertuples()])
     pilot_choice=st.selectbox("Attach value evidence to",options,key="venture_value_pilot")
@@ -1373,7 +1376,7 @@ def render_venture_studio(tier:str,username:str,current_module:str="Venture Stud
     if "venture_session_started_at" not in st.session_state:
         st.session_state["venture_session_started_at"]=_now(); track_event(owner,"workspace_opened","Venture Studio")
     _render_header(owner)
-    tabs=st.tabs(["🧭 Overview","👥 Customer","🧪 Pilots","🔎 Hypothesis → Evidence","🗂️ Evidence Vault","🧪 Compare","💰 Value & ROI","🗄️ Investor Room","📈 Readiness","📊 Traction","🎬 Demo Mode","🌐 Market Intel","📝 Case Study","💳 Business Model"])
+    tabs=st.tabs(["🧭 Overview","👥 Customer","🧪 Pilots","🔎 Hypothesis → Evidence","🗂️ Evidence Vault","🧪 Compare","💎 Value Evidence Engine","🗄️ Investor Room","📈 Readiness","📊 Traction","🎬 Demo Mode","🌐 Market Intel","📝 Case Study","💳 Business Model"])
     with tabs[0]:
         _render_overview(owner)
     for tab,renderer in zip(tabs[1:],[_render_customer,_render_pilots,_render_hypothesis_evidence,_render_evidence_vault,_render_pilot_comparison,_render_value_evidence,_render_data_room,_render_readiness,_render_traction,_render_demo,_render_market,_render_case_study,_render_business_model]):

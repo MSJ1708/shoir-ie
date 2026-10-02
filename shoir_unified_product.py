@@ -21,6 +21,7 @@ from typing import Any, Iterable, Mapping, Optional, Sequence
 import numpy as np
 import pandas as pd
 import plotly.express as px
+import streamlit as st
 
 from industrial_experience import (
     create_decision,
