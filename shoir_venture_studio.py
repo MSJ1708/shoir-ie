@@ -821,7 +821,10 @@ Generated only after baseline, evidence and measured value records are preserved
         cid=_id("CASE")
         with _db() as conn:
             conn.execute("INSERT INTO venture_case_studies VALUES(?,?,?,?,?,?,?)",(cid,owner,selected,title[:180],content,0,_now())); conn.commit()
-        track_event(owner,"case_study_generated","Case Study Studio"); _maybe_first_result(owner); st.success(f"Case study package prepared · {cid}")
+        artifact_id=save_artifact(owner,"Customer Evidence",title,content,"",_now(),"Medium")
+        track_event(owner,"case_study_generated","Case Study Studio",details={"case_id":cid,"artifact_id":artifact_id,"pilot_id":selected})
+        _maybe_first_result(owner)
+        st.success(f"Case study package prepared · {cid} · Investor Room artifact {artifact_id}")
     st.download_button("📄 Download case study draft",content.encode("utf-8"),file_name="shoir_ie_case_study.md",mime="text/markdown",use_container_width=True,key="venture_case_download")
 
 
