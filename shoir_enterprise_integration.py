@@ -258,7 +258,19 @@ def render_enterprise_integration(tier: str, username: str) -> None:
             fig.update_layout(height=450,title="System-to-workspace topology",xaxis=dict(visible=False),yaxis=dict(visible=False),showlegend=False,margin=dict(l=10,r=10,t=55,b=10),plot_bgcolor="#f8fafc",paper_bgcolor="rgba(0,0,0,0)")
             st.plotly_chart(fig,use_container_width=True,config={"displayModeBar":False})
         else:
-            st.info("No enterprise systems are registered yet. Add a connector in Connector Registry.")
+             st.markdown("### Start here")
+             st.markdown("**Register a system → validate it → publish shared data → coordinate work**")
+             adapter_catalog = pd.DataFrame({
+                 "Adapter":["SAP","Oracle","SQL","REST","MQTT","OPC-UA","WMS","MES","ERP"],
+                 "Purpose":["ERP","ERP","Database","API","Telemetry","Industrial protocol","Warehouse","Execution","Enterprise planning"],
+                 "Configured":[0]*9,
+             })
+             st.plotly_chart(
+                 px.bar(adapter_catalog,x="Adapter",y="Configured",title="Enterprise adapter catalog"),
+                 use_container_width=True,
+                 config={"displayModeBar":False},
+             )
+             st.info("No external systems are configured yet. The catalog describes adapter types; it does not claim a live connection.")
         if not health.empty:
             st.markdown("#### Adapter availability and health context")
             st.plotly_chart(px.bar(health,x="Protocol",color="Status",title="Connector coverage"),use_container_width=True,config={"displayModeBar":False})
