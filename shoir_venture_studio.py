@@ -861,11 +861,13 @@ def _render_case_study(owner:str)->None:
     pilot=_pilot_record(owner,selected)
     evidence=_query("SELECT evidence_id,title,evidence_type,source,source_date,confidence FROM venture_evidence WHERE owner=? AND linked_object_type='Pilot' AND linked_object_id=?",(owner,selected))
     values=_query("SELECT * FROM venture_value_measurements WHERE owner=? AND pilot_id=?",(owner,selected))
+    summary=value_summary(values)
     checks=[
         ("Pilot completed / converted",str(pilot.get("status")) in {"Complete","Converted"}),
         ("Baseline preserved",bool(str(pilot.get("baseline_summary","")).strip())),
         ("Evidence preserved",not evidence.empty),
-        ("Measured value present",not values.empty),
+        ("Measured value present",summary["measured_rows"] > 0),
+        ("Economic value basis present",summary["priced_rows"] > 0),
     ]
     check_df=pd.DataFrame(checks,columns=["Requirement","Pass"]); check_df["Pass"]=check_df["Pass"].map(lambda x:"✓ PASS" if x else "⚠ MISSING"); st.dataframe(check_df,use_container_width=True,hide_index=True)
     evidence_conf=evidence["confidence"].value_counts().reset_index() if not evidence.empty else pd.DataFrame()
@@ -881,7 +883,6 @@ def _render_case_study(owner:str)->None:
         _show_fig(px.bar(case_chart,x="metric",y="Value",color="Stage",barmode="group"),330,"Case-study measured change")
     if any(x is False for _,x in checks): st.warning("The pilot is not yet eligible for a case study."); return
     customer=_customer_record(owner,str(pilot.get("customer_id","")))
-    summary=value_summary(values)
     quote=st.text_area("Customer quote / approval text (optional; enter only approved wording)")
     title=st.text_input("Case study title",value=f"{pilot.get('title','Industrial Pilot')} · Proof of Value")
     content=f"""# {title}
