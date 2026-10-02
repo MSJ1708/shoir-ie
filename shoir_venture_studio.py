@@ -525,8 +525,8 @@ def _render_value_evidence(owner: str) -> None:
                   post_value AS Post,frequency_per_year AS 'Frequency / year',unit_value AS 'Unit value',
                   currency AS Currency,source_ref AS 'Source ref',source_date AS 'Source date',confidence AS Confidence,notes AS Notes
            FROM venture_value_measurements WHERE owner=? AND pilot_id=? ORDER BY rowid""",(owner,pilot_id))
-    edited=st.data_editor(existing if not existing.empty else _default_value_table(),num_rows="dynamic",use_container_width=True,hide_index=True,key="venture_value_editor")
-    implementation_cost=st.number_input("Implementation cost for this value set",min_value=0.0,value=0.0,step=100.0,key="venture_value_implementation_cost")
+    edited=st.data_editor(existing if not existing.empty else _default_value_table(),num_rows="dynamic",use_container_width=True,hide_index=True,key="venture_value_editor_" + (pilot_id or "workspace"))
+    implementation_cost=st.number_input("Implementation cost for this value set",min_value=0.0,value=0.0,step=100.0,key="venture_value_implementation_cost_" + (pilot_id or "workspace"))
     preview=[]
     for _,row in edited.iterrows():
         calc=value_calculation(row)
@@ -923,7 +923,11 @@ def _render_business_model(owner:str)->None:
     st.markdown("### 💳 Business Model + Pricing")
     st.caption("Pricing is stored as a hypothesis with evidence requirements; it is not treated as willingness-to-pay proof.")
     df=_query("SELECT offering,target_segment,billing_model,price,currency,sales_motion,evidence_required,notes,updated_at FROM venture_business_model WHERE owner=? ORDER BY offering",(owner,))
-    if not df.empty: st.dataframe(df,use_container_width=True,hide_index=True)
+    if not df.empty:
+        st.dataframe(df,use_container_width=True,hide_index=True)
+        price_plot=df[["offering","price","currency"]].copy()
+        price_plot["price"]=pd.to_numeric(price_plot["price"],errors="coerce").fillna(0)
+        _show_fig(px.bar(price_plot,x="offering",y="price",text="price",facet_col="currency"),320,"Pricing hypotheses")
     with st.form("venture_business_model_form"):
         offering=st.text_input("Offering"); target=st.text_input("Target segment")
         billing=st.selectbox("Billing model",["Pilot","Monthly SaaS","Annual SaaS","Enterprise","Professional Services","University / Research"])
