@@ -234,6 +234,7 @@ def result_button_should_track(label: str = "", button_type: str = "", form_subm
             "evaluate", "execute", "build", "clean", "process", "apply", "test", "derive",
             "recommend", "refresh", "start", "create", "design", "model", "inspect",
             "classify", "benchmark", "check", "map", "route", "plan", "search",
+        "result", "results", "produce", "launch", "solve",
         )
     ):
         return False
