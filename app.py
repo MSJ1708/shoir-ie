@@ -758,6 +758,34 @@ MODULE_CATALOG = [
      "example": "Coordinate verification requests across a team of collaborators, each contributing without exposing their private data to the others - the control-panel view of the ACO-ZKMS mesh."},
 ]
 
+
+# Customer-facing contexts used by Explore the Modules. Every module receives an
+# explicit "where it helps" line even when a module is added dynamically.
+MODULE_CATEGORY_CONTEXTS = {
+    "Core Optimization": "Network design, inventory and strategic operations.",
+    "Platform": "Cross-functional engineering, project work and shared operating decisions.",
+    "Facilities": "Factories, warehouses, distribution centers and physical-flow design.",
+    "Sustainability": "Energy, emissions, resource efficiency and sustainable operations.",
+    "Digital Twin": "Factories, equipment, process simulation and operational visibility.",
+    "Inventory": "Stock policy, service levels, working capital and replenishment.",
+    "Logistics": "Transport planning, delivery networks and internal material movement.",
+    "Risk": "Supply continuity, disruption planning and operational resilience.",
+    "Network Design": "Facility location, territory coverage and distribution strategy.",
+    "Production": "Production planning, shop-floor flow, capacity and scheduling.",
+    "Quality": "Process capability, defects, reliability and continuous improvement.",
+    "Finance": "Capital planning, investment cases and engineering economics.",
+    "Economics": "Business cases, cost-to-value analysis and engineering investment decisions.",
+    "AI & Automation": "Repeatable engineering work, alerts, orchestration and decision support.",
+    "Operations": "Multi-site operations, exception management and control-room visibility.",
+    "Trust & Security": "Auditability, decision records, governance and controlled evidence.",
+    "Human Factors": "Manual work, ergonomics, workplace design and human performance.",
+    "Research AI": "Research planning, study design and evidence-focused scientific workflows.",
+    "Research Authoring": "Experiments, statistical analysis, academic writing and publication.",
+    "Paper-to-Simulation Pipeline": "Model replication, mathematical implementation and simulation research.",
+    "Peer Review & Stress-Testing": "Research critique, robustness, falsification and resilience testing.",
+    "Advanced Computation Infrastructure": "High-assurance research, emerging optimization and sensitive collaboration.",
+}
+
 TIER_BENEFITS = {
     "Starter": {
         "price": "$29",
@@ -1363,47 +1391,111 @@ if not st.session_state.get("current_user"):
     # ------------------------------------------
     # TAB 3: EXPLORE THE MODULES
     # ------------------------------------------
+    # ------------------------------------------
+    # TAB 3: EXPLORE THE MODULES
+    # ------------------------------------------
     with auth_tab3:
-        st.subheader("What's inside Shoir-IE")
+        st.subheader("Explore the Modules")
+        st.markdown("### Choose the outcome. Then choose the module.")
         st.markdown(
-            "Every module listed below is real and running in this platform right now - this isn't a marketing mockup. "
-            "Tiers are cumulative: Mid-Tier Pro includes everything in Starter, and so on up to Research Pack."
-        )
-
-        explore_tier = st.radio(
-            "Browse by tier",
-            ["Starter", "Mid-Tier Pro", "Enterprise", "Research Pack"],
-            horizontal=True,
-            key="explore_tier_radio"
+            "Shoir-IE is organized around real industrial work: **plan, improve, protect, explain, verify and scale**. "
+            "This catalog is written for the person deciding whether the platform is worth using—not for someone comparing technical components."
         )
 
         _tier_order = ["Starter", "Mid-Tier Pro", "Enterprise", "Research Pack"]
-        _cumulative = set(_tier_order[:_tier_order.index(explore_tier) + 1])
+        explore_tier = st.radio("Browse the experience", _tier_order, horizontal=True, key="explore_tier_radio")
         _benefit = TIER_BENEFITS[explore_tier]
-        _modules_here = [m for m in MODULE_CATALOG if m["tier"] == explore_tier]
-        _total_so_far = sum(1 for m in MODULE_CATALOG if m["tier"] in _cumulative)
+        _cumulative = set(_tier_order[:_tier_order.index(explore_tier) + 1])
+        _modules_here = [m for m in MODULE_CATALOG if m.get("tier") == explore_tier]
+        _total_so_far = sum(1 for m in MODULE_CATALOG if m.get("tier") in _cumulative)
 
-        st.markdown(f"### {explore_tier} — {_benefit['price']}")
-        st.markdown(f"**{_benefit['pitch']}**")
+        _k1,_k2,_k3,_k4 = st.columns(4)
+        _k1.metric("Modules in this tier", f"{len(_modules_here)}")
+        _k2.metric("Modules included", f"{_total_so_far}")
+        _k3.metric("Use-case areas", f"{len(set(m.get('category','Other') for m in _modules_here))}")
+        _k4.metric("Price", _benefit["price"])
+        st.markdown(f"## {explore_tier} · {_benefit['pitch']}")
         st.caption(_benefit["gain"])
-        st.markdown(f"**+{len(_modules_here)} modules at this tier** · **{_total_so_far} modules total included**")
-        st.markdown("---")
 
-        _cats_seen = []
-        _by_cat = {}
+        st.markdown("#### Find your job to be done")
+        _lens_options = {
+            "All outcomes": None,
+            "Save time": {"Platform","AI & Automation","Core Optimization","Research Authoring"},
+            "Reduce risk": {"Risk","Risk & Simulation","Trust & Security","Quality"},
+            "Improve operations": {"Facilities","Inventory","Logistics","Production","Operations","Digital Twin"},
+            "Improve quality": {"Quality","Human Factors"},
+            "Plan investment & value": {"Finance","Economics","Sustainability"},
+            "Research & prove": {"Research AI","Research Authoring","Paper-to-Simulation Pipeline","Peer Review & Stress-Testing","Advanced Computation Infrastructure"},
+        }
+        _lens = st.selectbox("Outcome lens", list(_lens_options), key="explore_outcome_lens")
+        _search = st.text_input("Search by need, use case or module", placeholder="e.g. inventory, maintenance, capital investment, research", key="explore_module_search")
+        _categories = ["All categories"] + sorted(set(str(m.get("category","Other")) for m in _modules_here))
+        _category = st.selectbox("Filter by area", _categories, key="explore_module_category")
+
+        _filtered=[]
         for _m in _modules_here:
-            if _m["category"] not in _by_cat:
-                _by_cat[_m["category"]] = []
-                _cats_seen.append(_m["category"])
-            _by_cat[_m["category"]].append(_m)
+            _name=str(_m.get("name","Module"))
+            _cat=str(_m.get("category","Other"))
+            _when=str(_m.get("when","")).strip()
+            _example=str(_m.get("example","")).strip()
+            _where=MODULE_CATEGORY_CONTEXTS.get(_cat, f"{_cat} workflows, engineering teams and operational decision-making.")
+            _hay=" ".join([_name,_cat,_when,_where,_example]).lower()
+            if _category != "All categories" and _cat != _category: continue
+            if _lens_options[_lens] and _cat not in _lens_options[_lens]: continue
+            if _search.strip() and _search.strip().lower() not in _hay: continue
+            _filtered.append((_m,_when,_where,_example))
+
+        st.markdown(f"**Showing {len(_filtered)} of {len(_modules_here)} modules**")
+        if not _filtered:
+            st.info("No module matches that filter. Try All outcomes or clear the search.")
+
+        _cats_seen=[]; _by_cat={}
+        for _m,_when,_where,_example in _filtered:
+            _cat=str(_m.get("category","Other"))
+            if _cat not in _by_cat: _by_cat[_cat]=[]; _cats_seen.append(_cat)
+            _by_cat[_cat].append((_m,_when,_where,_example))
 
         for _cat in _cats_seen:
-            st.markdown(f"##### {_cat}")
-            for _m in _by_cat[_cat]:
-                with st.expander(_m["name"]):
-                    st.markdown(f"**When to use it:** {_m['when']}")
-                    st.markdown(f"**Example:** {_m['example']}")
+            st.markdown(f"### {_cat}")
+            for _m,_when,_where,_example in _by_cat[_cat]:
+                _name=str(_m.get("name","Module"))
+                with st.expander(f"**{_name}**", expanded=False):
+                    a,b=st.columns([1.25,1])
+                    with a:
+                        st.markdown("**What it helps you do**")
+                        st.write(_when or "Turn this industrial capability into a clearer next decision.")
+                        st.markdown("**Where it helps**")
+                        st.write(_where)
+                    with b:
+                        st.markdown("**Illustrative example**")
+                        st.info(_example or f"A {explore_tier} customer uses {_name} to turn an operational question into a clearer, faster decision.")
+                        st.caption(f"Included in {str(_m.get('tier',explore_tier))}.")
 
+        st.markdown("---")
+        st.markdown("### Why this is becoming a bigger industrial buying priority")
+        st.caption("External signals from public institutions, industry groups, company announcements and news. These are market evidence—not claims about Shoir-IE performance.")
+        _proofs = [
+            ("NIST · 2026 Smart Manufacturing AI/ML Roadmap", "NIST identifies industrial AI/ML as an active transformation area and highlights analytics, digital twins, robotics, logistics optimization and sustainable manufacturing.", "https://www.nist.gov/publications/2026-roadmap-artificial-intelligence-and-machine-learning-smart-manufacturing", "July 3, 2026"),
+            ("World Economic Forum · Global Lighthouse Network 2026", "WEF reports industrial sites using broad digital and AI deployments, including Saudi Aramco Hawiyah NGL and other lighthouse examples.", "https://www.weforum.org/press/2026/06/new-global-lighthouse-sites-demonstrate-how-ai-is-rewiring-manufacturing-and-supply-chains/", "June 2026"),
+            ("Unilever + Accenture · Digital twins at manufacturing scale", "Unilever announced more than 40 additional AI-powered digital twins and described earlier site-level improvements in waste, capacity and quality.", "https://www.unilever.com/news/news-search/2026/unilever-x-accenture-partnership-scales-digital-twins-across-global-manufacturing/", "2026"),
+            ("Siemens · Industrial AI strategy, CES 2026", "Siemens announced an industrial-AI strategy spanning design, engineering, manufacturing, operations and supply chains, including industrial copilots and digital-twin tooling.", "https://press.siemens.com/global/en/pressrelease/siemens-unveils-technologies-accelerate-industrial-ai-revolution-ces-2026", "January 6, 2026"),
+            ("Reuters · AI-driven factory investment signal", "Reuters reported that September 2026 factory activity in parts of Europe and Asia benefited in part from demand associated with the global AI investment boom, while noting uneven conditions and cost pressure.", "https://www.reuters.com/world/china/global-economy-asian-factory-activity-expands-thanks-global-ai-boom-2026-10-01/", "October 1, 2026"),
+        ]
+        _pc1,_pc2 = st.columns(2)
+        for _idx,(_title,_summary,_url,_date) in enumerate(_proofs):
+            _col=_pc1 if _idx%2==0 else _pc2
+            with _col:
+                st.markdown(f"**{_title}**")
+                st.caption(_date)
+                st.write(_summary)
+                st.markdown(f"[Read the source ↗]({_url})")
+
+        st.markdown("### The buying case in one sentence")
+        st.markdown(
+            "**Use the module that matches the operational question, then carry the answer forward into scenarios, evidence, decisions and executive outputs.** "
+            "That is the experience buyers should evaluate—not another isolated dashboard."
+        )
+        st.caption("Illustrative examples should be replaced with the customer’s own baseline, post-change measurements and business assumptions before making a quantified ROI claim.")
     # FIX: nothing below this point stopped script execution for a visitor
     # who isn't signed in, so the entire dashboard (sidebar, all modules,
     # including the module list that reveals "Admin Panel") was rendering
