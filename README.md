@@ -763,6 +763,12 @@ Each stage increases the amount of shared data, reusable engineering knowledge, 
 ### Commercial Intelligence
 **Customer & Stakeholder Hub · Pilot Manager · Hypothesis → Evidence · Value Evidence Center · Investor Data Room**
 
+#### ✅ Venture Studio implementation
+These commercialization capabilities are now implemented as a durable **Venture Studio** workspace rather than disconnected roadmap labels. Venture Studio persists customer/stakeholder records, pilot stages, hypotheses, evidence links, customer-specific value measurements, controlled investor artifacts with versions/checksums, readiness diagnostics, product/traction events, deterministic demo data, market intelligence, pricing hypotheses and evidence-gated case studies in the existing workspace database.
+
+The Venture Studio is available as a first-class platform module and is deliberately additive: existing industrial engineering modules, the Industrial Workbook, scenario workflows, decision records, digital thread and validation layers remain intact.
+
+
 ### Product Intelligence
 **PMF / Readiness Dashboard · Product Analytics · Traction Intelligence · Case Study Studio**
 
