@@ -712,6 +712,20 @@ def _render_demo(owner:str)->None:
     st.markdown("### 🎬 End-to-End Demo / Story Mode")
     st.caption("Deterministic, synthetic and presentation-safe. No customer data is used.")
     data=_demo_data()
+    if st.button("🚀 Load deterministic demo into Shoir-IE", type="primary", use_container_width=True, key="venture_demo_load"):
+        st.session_state["universal_active_dataset"] = data["clean"].copy()
+        st.session_state["industrial_workbook_current_df"] = data["clean"].copy()
+        st.session_state["copilot_workbook"] = {
+            "DEMO_RAW": data["raw"].copy(),
+            "DEMO_CLEAN": data["clean"].copy(),
+            "DEMO_FLOW": data["flow"].copy(),
+            "DEMO_SCENARIOS": data["scenarios"].copy(),
+        }
+        st.session_state["shoir_data_status"] = "DEMO"
+        st.session_state["shoir_data_source"] = "Deterministic Venture Demo · seed 2026"
+        st.session_state["shoir_data_version"] = "demo-2026"
+        track_event(owner, "demo_loaded", "End-to-End Demo Mode", details={"seed": 2026, "rows": int(len(data["clean"]))})
+        st.success("Deterministic demo is loaded into the shared Shoir-IE workspace. Open Industrial Workbook next to continue the story.")
     tabs=st.tabs(["Raw Excel","Data Quality","Industrial Workbook","Facility / Flow","Engineering","Scenario","ROI / Report"])
     with tabs[0]: st.dataframe(data["raw"],use_container_width=True,hide_index=True)
     with tabs[1]:
