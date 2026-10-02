@@ -718,8 +718,12 @@ def render_application_shell(
     ensure_shell_schema()
     render_shell_css()
 
-    nav_labels = list(NAV_GROUPS.keys())
+    nav_labels = [key for key in NAV_GROUPS.keys() if is_admin or key != "ADMIN"]
     current_section = str(st.session_state.get("shoir_shell_section", "HOME"))
+    if not is_admin and current_section == "ADMIN":
+        current_section = "HOME"
+        st.session_state["shoir_shell_section"] = "HOME"
+        st.session_state.pop("shoir_shell_section_radio", None)
     try:
         current_index = nav_labels.index(current_section)
     except ValueError:
@@ -746,6 +750,8 @@ def render_application_shell(
             key="shoir_shell_section_radio",
             label_visibility="collapsed",
         )
+        if not is_admin and section == "ADMIN":
+            section = "HOME"
         st.session_state["shoir_shell_section"] = section
 
         # Section changes are intentional navigation events. A module click
@@ -848,6 +854,9 @@ def render_application_shell(
 
     if surface == "edit_account":
         st.session_state["selected_nav"] = "Edit Account"
+        surface = None
+    elif surface == "admin" and not is_admin:
+        st.session_state["selected_nav"] = "Dashboard"
         surface = None
     else:
         st.session_state["selected_nav"] = "Dashboard"
@@ -1132,28 +1141,160 @@ def render_decision_center(username: str, tier: str) -> None:
 
 
 def render_trust_center(username: str, tier: str) -> None:
-    st.markdown("## Trust Center")
-    st.caption("A factual status surface for data, provenance, computation and governance context.")
+    """Evidence-led Knowledge & Trust workspace.
+
+    The surface reports observed state, provenance and capability evidence
+    separately. It never converts readiness into a blanket trust guarantee.
+    """
+    from shoir_160 import feature_matrix, feature_readiness_by_area
 
     metrics = _trust_metrics(username, tier)
+    df, source_key = _first_dataframe()
+    provenance = metrics["provenance"]
+    docs = st.session_state.get("knowledge_documents", [])
+    docs = docs if isinstance(docs, list) else []
+
+    st.markdown(
+        """
+        <style>
+        .kt-hero{padding:25px 28px;border-radius:22px;background:linear-gradient(135deg,#0b1220,#172554 55%,#0f766e);color:#fff;box-shadow:0 16px 36px rgba(15,23,42,.14);margin-bottom:16px}
+        .kt-kicker{font-size:11px;font-weight:850;letter-spacing:.12em;text-transform:uppercase;color:#7dd3fc}
+        .kt-title{font-size:30px;font-weight:900;letter-spacing:-.03em;margin-top:4px}
+        .kt-sub{font-size:13px;color:#dbeafe;max-width:1000px;margin-top:7px}
+        .kt-pill{display:inline-block;padding:5px 10px;border-radius:999px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.14);font-size:11px;margin:12px 6px 0 0}
+        .kt-note{padding:13px 15px;border:1px solid #dbe4f0;border-radius:14px;background:#f8fafc;color:#475569}
+        </style>
+        <div class="kt-hero">
+          <div class="kt-kicker">Knowledge · Evidence · Governance</div>
+          <div class="kt-title">📚 Knowledge & Trust Center</div>
+          <div class="kt-sub">See what Shoir-IE actually knows, where the current data came from, what has been verified, and which capabilities are evidence-backed. Imported, simulated and live states stay explicitly separated.</div>
+          <span class="kt-pill">Provenance-aware</span><span class="kt-pill">Evidence ledger</span><span class="kt-pill">Knowledge library</span><span class="kt-pill">No blanket trust claims</span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Data readiness", f"{metrics['data_readiness']:.0f}%")
-    c2.metric("Platform health", f"{metrics['platform_health']:.0f}%")
-    c3.metric("Verified capabilities", f"{metrics['verified_capabilities']}/{metrics['capabilities']}")
-    c4.metric("Assumptions", str(metrics["assumptions"]))
+    c2.metric("Current data state", provenance)
+    c3.metric("Platform health", f"{metrics['platform_health']:.0f}%")
+    c4.metric("Verified capabilities", f"{metrics['verified_capabilities']}/{metrics['capabilities']}")
 
-    rows = [
-        {"Control": "Data provenance", "Status": metrics["provenance"], "Detail": "Explicit platform state contract"},
-        {"Control": "Durable session", "Status": "Connected" if metrics["durable_session"] else "Local/session fallback", "Detail": "Workspace persistence connection state"},
-        {"Control": "Uncertainty", "Status": "Present" if metrics["assumptions"] > 0 else "None recorded", "Detail": "Assumption count is shown separately from measured outputs"},
-        {"Control": "Platform health", "Status": f"{metrics['platform_health']:.0f}%", "Detail": "Existing 160 OS health snapshot"},
-        {"Control": "Capability evidence", "Status": f"{metrics['verified_capabilities']}/{metrics['capabilities']}", "Detail": "Existing capability evidence/verification catalog"},
-    ]
-    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
-    with st.expander("Trust interpretation", expanded=False):
-        st.markdown("Trust metrics are descriptive, not guarantees. Imported, simulated and demo content remain distinct labels; external connectivity is only treated as live when the application explicitly declares it.")
-    for warning in metrics["warnings"]:
-        st.warning(warning)
+    tabs = st.tabs(["Overview", "Knowledge Library", "Evidence & Lineage", "Capability Coverage"])
+
+    with tabs[0]:
+        left, right = st.columns([1.35, 1])
+        with left:
+            st.markdown("### Current evidence state")
+            rows = [
+                {"Signal":"Provenance","Value":provenance,"Meaning":"LIVE / IMPORTED / SIMULATED / DEMO state of the active workspace data."},
+                {"Signal":"Active dataset","Value":source_key or "None","Meaning":"The dataset currently exposed to shared engineering surfaces."},
+                {"Signal":"Rows × columns","Value":f"{len(df):,} × {len(df.columns):,}","Meaning":"Observed size of the active dataset."},
+                {"Signal":"Data warnings","Value":str(len(metrics["warnings"])),"Meaning":"Deterministic data-readiness warnings from the current dataset."},
+                {"Signal":"Assumptions recorded","Value":str(metrics["assumptions"]),"Meaning":"Explicit assumptions stored in the workspace."},
+                {"Signal":"Knowledge documents","Value":str(len(docs)),"Meaning":"Documents currently linked to this workspace session."},
+            ]
+            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+            if source_key:
+                st.markdown(
+                    f"<div class='kt-note'><b>Trace:</b> {html.escape(source_key)} · "
+                    f"<b>version:</b> {html.escape(str(st.session_state.get('shoir_data_version','session/latest')))} · "
+                    f"<b>hash:</b> {html.escape(str(st.session_state.get('shoir_data_hash','not recorded'))[:20])}…</div>",
+                    unsafe_allow_html=True,
+                )
+            for warning in metrics["warnings"]:
+                st.warning(warning)
+        with right:
+            matrix = feature_matrix()
+            coverage_counts = matrix["coverage"].value_counts().rename_axis("Coverage").reset_index(name="Features")
+            if not coverage_counts.empty:
+                st.plotly_chart(
+                    px.donut(coverage_counts, names="Coverage", values="Features", title="Capability evidence coverage", hole=0.58),
+                    use_container_width=True,
+                    config={"displayModeBar": False},
+                )
+            st.caption("Capability coverage is a descriptive inventory of recorded evidence states, not a guarantee of runtime behavior.")
+
+    with tabs[1]:
+        st.markdown("### Knowledge library")
+        st.caption("Add manuals, SOPs, standards, engineering notes and research references that Copilot can treat as workspace context.")
+        try:
+            from shoir_enterprise_services import render_knowledge_layer
+            render_knowledge_layer(username)
+        except Exception as exc:
+            st.error(f"Knowledge library could not load safely: {type(exc).__name__}: {exc}")
+
+    with tabs[2]:
+        st.markdown("### Evidence and lineage")
+        st.caption("Trace datasets and capability claims without exposing secrets.")
+        evidence = _query_df(
+            "SELECT source_type, COUNT(*) AS records, AVG(confidence) AS mean_confidence FROM os160_evidence_ledger GROUP BY source_type ORDER BY records DESC"
+        )
+        lineage = _query_df(
+            "SELECT source_module, operation, COUNT(*) AS records FROM os160_lineage GROUP BY source_module, operation ORDER BY records DESC LIMIT 50"
+        )
+        a, b = st.columns(2)
+        with a:
+            st.markdown("#### Evidence ledger")
+            if evidence.empty:
+                st.info("No capability evidence records are currently indexed.")
+            else:
+                st.dataframe(evidence, use_container_width=True, hide_index=True)
+                st.plotly_chart(
+                    px.bar(evidence, x="source_type", y="records", title="Evidence records by source"),
+                    use_container_width=True,
+                    config={"displayModeBar": False},
+                )
+        with b:
+            st.markdown("#### Data lineage")
+            if lineage.empty:
+                st.info("No lineage events are currently indexed.")
+            else:
+                st.dataframe(lineage, use_container_width=True, hide_index=True)
+                st.plotly_chart(
+                    px.bar(lineage.head(12), x="records", y="source_module", orientation="h", title="Lineage activity by module"),
+                    use_container_width=True,
+                    config={"displayModeBar": False},
+                )
+        st.markdown("#### Current run / version trace")
+        trace = pd.DataFrame([
+            {"Trace item":"Latest run ID","Value":st.session_state.get("shoir_latest_run_id") or st.session_state.get("last_run_id") or "Not assigned"},
+            {"Trace item":"Data version","Value":st.session_state.get("shoir_data_version","session/latest")},
+            {"Trace item":"Data source","Value":st.session_state.get("shoir_data_source") or source_key or "Not recorded"},
+            {"Trace item":"Workspace","Value":st.session_state.get("shoir_workspace_name") or st.session_state.get("workspace") or "default"},
+        ])
+        st.dataframe(trace, use_container_width=True, hide_index=True)
+
+    with tabs[3]:
+        st.markdown("### Capability coverage by area")
+        by_area = feature_readiness_by_area()
+        if not by_area.empty:
+            fig = px.bar(
+                by_area,
+                x="area",
+                y="Features",
+                color="state",
+                barmode="stack",
+                title="Recorded capability state by product area",
+            )
+            fig.update_layout(height=420, xaxis_title="", yaxis_title="Capabilities", legend_title="State")
+            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+            st.dataframe(by_area, use_container_width=True, hide_index=True)
+        st.markdown("#### Verified capability index")
+        matrix = feature_matrix()
+        verified = matrix[matrix["coverage"].astype(str).str.casefold().eq("verified")]
+        if verified.empty:
+            st.info("No capabilities are currently marked Verified in the evidence matrix.")
+        else:
+            st.dataframe(
+                verified[["id","name","area","state","coverage","evidence"]],
+                use_container_width=True,
+                hide_index=True,
+            )
+
+    st.caption(
+        "Trust is built from traceable evidence: the center reports observed data, provenance, capability records and governance context separately rather than using a single confidence score."
+    )
 
 
 def render_presentation_mode(username: str, tier: str, module: str) -> None:
