@@ -185,3 +185,14 @@ def test_venture_scope_exposes_requested_incubator_workspaces():
         "_render_business_model",
     ]
     assert all(callable(getattr(vs, name, None)) for name in required)
+
+
+def test_value_summary_blocks_unspecified_currency_when_priced():
+    values = pd.DataFrame([
+        {"baseline_value": 10, "post_value": 5, "frequency_per_year": 10, "unit_value": 2, "currency": "", "implementation_cost": 100},
+    ])
+    result = vs.value_summary(values)
+    assert result["priced_rows"] == 1
+    assert result["mixed_currency"] == 1.0
+    assert result["currency_missing"] == 1.0
+    assert result["annualized_benefit"] == 0.0
