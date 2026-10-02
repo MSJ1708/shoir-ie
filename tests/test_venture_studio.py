@@ -97,3 +97,22 @@ def test_venture_schema_and_artifact_versioning_are_durable(tmp_path, monkeypatc
     assert "manifest.json" in names
     assert "artifacts.csv" in names
     assert "customers.csv" in names
+
+def test_value_inputs_start_unmeasured_and_incomplete_rows_cannot_create_value():
+    table = vs._default_value_table()
+    assert table["Baseline"].isna().all()
+    assert table["Post"].isna().all()
+    invalid = vs.value_calculation({"Baseline": 8, "Post": np.nan, "Unit value": 50, "Frequency / year": 50})
+    assert invalid["valid"] == 0.0
+    assert invalid["economic_value"] == 0.0
+
+
+def test_value_summary_does_not_treat_unpriced_measurements_as_economic_value():
+    values = pd.DataFrame([
+        {"baseline_value": 8, "post_value": 3, "frequency_per_year": 50, "unit_value": np.nan, "implementation_cost": 2000, "direction": "lower_is_better"},
+    ])
+    result = vs.value_summary(values)
+    assert result["measured_rows"] == 1
+    assert result["priced_rows"] == 0
+    assert result["annualized_benefit"] == 0
+    assert result["roi_percent"] == 0
