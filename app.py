@@ -1544,6 +1544,10 @@ st.session_state.pop("_shoir_requested_module", None)
 LEGACY_MODULE_SELECTOR_KEY = "enterprise_module_selector"
 st.session_state[LEGACY_MODULE_SELECTOR_KEY] = selected_module
 st.session_state["selected_module"] = selected_module
+if not is_admin and str(selected_module).strip().casefold() in {"admin panel", "admin"}:
+    selected_module = "MILP Solvers" if "MILP Solvers" in allowed_modules else str(allowed_modules[0] if allowed_modules else "MILP Solvers")
+    st.session_state["shoir_shell_section"] = "HOME"
+    st.session_state["selected_module"] = selected_module
 
 # Consolidated platform surfaces remain inside the same application shell.
 if _shell_surface:
