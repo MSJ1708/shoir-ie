@@ -308,7 +308,7 @@ def _render_customer(owner: str) -> None:
         _show_fig(px.bar(pain_plot, x="target_customer", y="pain_severity", text="pain_severity"), 300, "Pain severity by stakeholder")
         scatter = df[["pain_severity", "current_process_time_hours"]].apply(pd.to_numeric, errors="coerce").dropna()
         if len(scatter) >= 2:
-            _show_fig(px.scatter(scatter, x="current_process_time_hours", y="pain_severity", trendline="ols"), 300, "Pain vs current process burden")
+            _show_fig(px.scatter(scatter, x="current_process_time_hours", y="pain_severity"), 300, "Pain vs current process burden")
         else:
             c2.info("Add at least two customer records with process time to activate the burden relationship chart.")
     options = ["➕ New customer"] + ([] if df.empty else [str(x) for x in df["customer_id"]])
