@@ -302,6 +302,15 @@ def _render_customer(owner: str) -> None:
     df = _customer_df(owner)
     if not df.empty:
         st.dataframe(df, use_container_width=True, hide_index=True)
+        c1, c2 = st.columns(2)
+        pain_plot = df[["target_customer", "pain_severity"]].copy()
+        pain_plot["target_customer"] = pain_plot["target_customer"].fillna("Unnamed").astype(str)
+        _show_fig(px.bar(pain_plot, x="target_customer", y="pain_severity", text="pain_severity"), 300, "Pain severity by stakeholder")
+        scatter = df[["pain_severity", "current_process_time_hours"]].apply(pd.to_numeric, errors="coerce").dropna()
+        if len(scatter) >= 2:
+            _show_fig(px.scatter(scatter, x="current_process_time_hours", y="pain_severity", trendline="ols"), 300, "Pain vs current process burden")
+        else:
+            c2.info("Add at least two customer records with process time to activate the burden relationship chart.")
     options = ["➕ New customer"] + ([] if df.empty else [str(x) for x in df["customer_id"]])
     selected = st.selectbox("Customer record", options, key="venture_customer_select")
     existing = _customer_record(owner, None if selected.startswith("➕") else selected)
@@ -364,6 +373,12 @@ def _render_pilots(owner: str) -> None:
     df = _pilot_df(owner)
     if not df.empty:
         st.dataframe(df, use_container_width=True, hide_index=True)
+        stage_counts = df["stage"].value_counts().reindex(PILOT_STAGES).fillna(0).reset_index()
+        stage_counts.columns = ["Stage", "Pilots"]
+        _show_fig(px.bar(stage_counts, x="Stage", y="Pilots", text="Pilots"), 300, "Pilot funnel by stage")
+        status_counts = df["status"].value_counts().reset_index()
+        status_counts.columns = ["Status", "Pilots"]
+        _show_fig(px.bar(status_counts, x="Status", y="Pilots", text="Pilots"), 300, "Pilot status")
     customers = _query("SELECT customer_id,target_customer,adopting_organization FROM venture_customers WHERE owner=? ORDER BY updated_at DESC", (owner,))
     customer_options = ["➕ Unlinked"] + ([] if customers.empty else [f"{r.customer_id} · {r.target_customer or r.adopting_organization or 'Customer'}" for r in customers.itertuples()])
     pilot_options = ["➕ New pilot"] + ([] if df.empty else list(df["pilot_id"].astype(str)))
@@ -430,6 +445,12 @@ def _render_hypothesis_evidence(owner: str) -> None:
     ev = _query("SELECT evidence_id,title,evidence_type,source,source_date,confidence,linked_object_type,linked_object_id,artifact_url,checksum,created_at FROM venture_evidence WHERE owner=? ORDER BY created_at DESC", (owner,))
     if not hyp.empty:
         st.dataframe(hyp, use_container_width=True, hide_index=True)
+        status_counts = hyp["status"].value_counts().reset_index()
+        status_counts.columns = ["Status", "Hypotheses"]
+        _show_fig(px.bar(status_counts, x="Status", y="Hypotheses", text="Hypotheses"), 280, "Hypothesis status")
+        confidence_counts = hyp["confidence"].value_counts().reset_index()
+        confidence_counts.columns = ["Confidence", "Hypotheses"]
+        _show_fig(px.bar(confidence_counts, x="Confidence", y="Hypotheses", text="Hypotheses"), 280, "Hypothesis confidence")
     h1,h2=st.columns(2)
     with h1:
         with st.form("venture_hypothesis_form"):
