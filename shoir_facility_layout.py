@@ -632,6 +632,25 @@ def render_facility_layout(tier: str, username: str) -> None:
                     st.rerun()
         with b:
             st.plotly_chart(_flow_process_figure(depts,flows),use_container_width=True,config={"displayModeBar":False})
+            connected = flows[flows["from_id"].isin(ids) & flows["to_id"].isin(ids)].copy()
+            if not connected.empty:
+                node_ids = ids
+                node_index = {node: i for i, node in enumerate(node_ids)}
+                fig_sankey = go.Figure(go.Sankey(
+                    arrangement="snap",
+                    node=dict(label=node_ids, pad=14, thickness=18),
+                    link=dict(
+                        source=[node_index[str(v)] for v in connected["from_id"]],
+                        target=[node_index[str(v)] for v in connected["to_id"]],
+                        value=[max(0.0, float(v)) for v in connected["loads_day"]],
+                    ),
+                ))
+                fig_sankey.update_layout(
+                    height=330,
+                    title="Material-flow volume by department",
+                    margin=dict(l=8,r=8,t=50,b=8),
+                )
+                st.plotly_chart(fig_sankey,use_container_width=True,config={"displayModeBar":False})
         st.markdown("#### Edit or remove an existing connection")
         if not flows.empty:
             labels={str(r.flow_id):f"{r.flow_id} · {r.from_id} → {r.to_id}" for r in flows.itertuples()}
