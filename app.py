@@ -55,9 +55,11 @@ from shoir_commercial import render_module_enrichment
 from shoir_value_evidence import render_value_pulse, ensure_value_evidence_db, result_button_should_track, begin_result_timer, render_value_receipt
 
 # Central result-action timer: every result-generating button starts a run clock.
-if not st.session_state.get("_shoir_value_controls_wrapped"):
-    _shoir_original_button = st.button
-    _shoir_original_form_submit = st.form_submit_button
+# The wrapper marker lives on the Streamlit function itself, not session state,
+# so it survives Streamlit reruns without disabling tracking on later runs.
+if not getattr(st.button, "_shoir_value_wrapper", False):
+    _shoir_original_button = getattr(st.button, "_shoir_original", st.button)
+    _shoir_original_form_submit = getattr(st.form_submit_button, "_shoir_original", st.form_submit_button)
 
     def _shoir_tracked_button(label, *args, **kwargs):
         clicked = _shoir_original_button(label, *args, **kwargs)
@@ -71,9 +73,12 @@ if not st.session_state.get("_shoir_value_controls_wrapped"):
             begin_result_timer(st.session_state.get("selected_module", "Default"), label)
         return submitted
 
+    _shoir_tracked_button._shoir_value_wrapper = True
+    _shoir_tracked_button._shoir_original = _shoir_original_button
+    _shoir_tracked_form_submit._shoir_value_wrapper = True
+    _shoir_tracked_form_submit._shoir_original = _shoir_original_form_submit
     st.button = _shoir_tracked_button
     st.form_submit_button = _shoir_tracked_form_submit
-    st.session_state["_shoir_value_controls_wrapped"] = True
 
 # Value receipt hook for modules that end a render with _shoir_module_stop().
 def _shoir_module_stop():
