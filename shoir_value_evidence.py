@@ -227,6 +227,16 @@ def result_button_should_track(label: str = "", button_type: str = "", form_subm
     )
     if any(x in text for x in excluded):
         return False
+    if form_submit and not any(
+        x in text for x in (
+            "run", "generate", "calculate", "compute", "solve", "optimize", "simulate",
+            "forecast", "analyze", "analyse", "validate", "predict", "schedule", "compare",
+            "evaluate", "execute", "build", "clean", "process", "apply", "test", "derive",
+            "recommend", "refresh", "start", "create", "design", "model", "inspect",
+            "classify", "benchmark", "check", "map", "route", "plan", "search",
+        )
+    ):
+        return False
     keywords = (
         "run", "generate", "calculate", "compute", "solve", "optimize", "simulate",
         "forecast", "analyze", "analyse", "validate", "predict", "schedule", "compare",
@@ -328,6 +338,24 @@ def render_value_receipt(module: str, username: str) -> None:
         f"Time released: {saved_positive:,.2f} h. "
         f"Money shown is an estimated labor-value equivalent using {currency} {hourly:,.0f}/h."
     )
+    try:
+        record_time_snapshot(
+            str(username or "unknown"),
+            str(module),
+            str(profile["task"]),
+            {
+                "baseline_hours": traditional_hours,
+                "shoir_hours": elapsed / 3600.0,
+                "hours_saved": saved_positive,
+                "annual_capacity_hours": annual_hours,
+                "annual_time_value": annual_labor_value,
+                "currency": currency,
+            },
+            str(saved.get("source") or "Measured result runtime vs reference planning baseline"),
+        )
+    except Exception:
+        pass
+
     st.session_state["shoir_value_last_receipt"] = {
         "module": str(module),
         "label": str(run.get("label", "Result generation")),
