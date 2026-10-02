@@ -212,15 +212,21 @@ def value_calculation(row: pd.Series | dict[str, Any]) -> dict[str, float]:
 
 def value_summary(values: pd.DataFrame) -> dict[str, float]:
     if values.empty:
-        return {"annualized_benefit": 0.0, "implementation_cost": 0.0, "net_value": 0.0, "roi_percent": 0.0, "payback_months": 0.0}
+        return {"measured_rows": 0.0, "priced_rows": 0.0, "annualized_benefit": 0.0, "implementation_cost": 0.0, "net_value": 0.0, "roi_percent": 0.0, "payback_months": 0.0}
     calc = values.apply(value_calculation, axis=1, result_type="expand")
-    benefit = float(calc["economic_value"].sum())
-    implementation = float(calc["implementation_cost"].max()) if not calc.empty else 0.0
+    valid_mask = calc["valid"] > 0
+    valid = calc.loc[valid_mask]
+    if "unit_value" in values.columns:
+        priced_mask = values.reset_index(drop=True).loc[valid_mask.to_numpy(), "unit_value"].map(_optional_float).notna().to_numpy()
+        priced = valid.loc[priced_mask]
+    else:
+        priced = valid.iloc[0:0]
+    benefit = float(priced["economic_value"].sum()) if not priced.empty else 0.0
+    implementation = float(valid["implementation_cost"].max()) if not valid.empty else 0.0
     net = benefit - implementation
-    roi = (net / implementation * 100.0) if implementation > 0 else 0.0
+    roi = (net / implementation * 100.0) if implementation > 0 and benefit != 0 else 0.0
     payback = (implementation / (benefit / 12.0)) if benefit > 0 and implementation > 0 else 0.0
-    return {"annualized_benefit": benefit, "implementation_cost": implementation, "net_value": net, "roi_percent": roi, "payback_months": payback}
-
+    return {"measured_rows": float(len(valid)), "priced_rows": float(len(priced)), "annualized_benefit": benefit, "implementation_cost": implementation, "net_value": net, "roi_percent": roi, "payback_months": payback}
 
 def _customer_df(owner: str) -> pd.DataFrame:
     return _query(
