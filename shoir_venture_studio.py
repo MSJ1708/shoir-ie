@@ -80,6 +80,11 @@ CREATE TABLE IF NOT EXISTS venture_value_measurements (
     implementation_cost REAL DEFAULT 0, source_ref TEXT, source_date TEXT, confidence TEXT,
     notes TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS venture_quality_metrics (
+    quality_id TEXT PRIMARY KEY, owner TEXT NOT NULL, pilot_id TEXT, issues_detected REAL,
+    issues_confirmed REAL, baseline_rework_hours REAL, post_rework_hours REAL,
+    source_ref TEXT, source_date TEXT, confidence TEXT, notes TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
 
 CREATE TABLE IF NOT EXISTS venture_artifacts (
     artifact_id TEXT PRIMARY KEY, owner TEXT NOT NULL, category TEXT NOT NULL, title TEXT NOT NULL,
@@ -209,6 +214,16 @@ def value_calculation(row: pd.Series | dict[str, Any]) -> dict[str, float]:
         "implementation_cost": implementation,
     }
 
+
+def quality_evidence_calculation(row: pd.Series | dict[str, Any]) -> dict[str, float]:
+    d = row.to_dict() if isinstance(row, pd.Series) else dict(row)
+    detected = max(0.0, _safe_float(d.get("issues_detected", d.get("Issues detected", 0.0))))
+    confirmed = max(0.0, _safe_float(d.get("issues_confirmed", d.get("Issues confirmed", 0.0))))
+    baseline = _optional_float(d.get("baseline_rework_hours", d.get("Baseline rework hours")))
+    post = _optional_float(d.get("post_rework_hours", d.get("Post rework hours")))
+    rate = (detected / confirmed * 100.0) if confirmed > 0 else 0.0
+    avoided = (baseline - post) if baseline is not None and post is not None else 0.0
+    return {"error_detection_rate_percent": rate, "rework_avoided_hours": avoided}
 
 def value_summary(values: pd.DataFrame) -> dict[str, float]:
     if values.empty:
@@ -588,6 +603,44 @@ def _render_value_evidence(owner: str) -> None:
     st.markdown('<div class="venture-note">ROI = (verified annualized economic benefit − implementation cost) / implementation cost. Payback uses the same measured annualized benefit. Replace every input with pilot data before presenting ROI.</div>',unsafe_allow_html=True)
 
 
+    st.markdown("#### 🧪 Error detection & rework evidence")
+    quality=_query("SELECT quality_id,pilot_id,issues_detected,issues_confirmed,baseline_rework_hours,post_rework_hours,source_ref,source_date,confidence,notes,updated_at FROM venture_quality_metrics WHERE owner=? AND pilot_id=? ORDER BY updated_at DESC LIMIT 20",(owner,pilot_id))
+    if not quality.empty:
+        qrow=quality.iloc[0]
+        qcalc=quality_evidence_calculation(qrow)
+        qc1,qc2=st.columns(2)
+        qc1.metric("Error Detection Rate",f"{qcalc['error_detection_rate_percent']:.1f}%" if qrow['issues_confirmed'] else "N/A")
+        qc2.metric("Rework avoided",f"{qcalc['rework_avoided_hours']:.1f} h" if pd.notna(qrow['baseline_rework_hours']) and pd.notna(qrow['post_rework_hours']) else "N/A")
+        qplot=pd.DataFrame({"Measure":["Issues detected","Issues confirmed"],"Value":[qrow['issues_detected'] or 0,qrow['issues_confirmed'] or 0]})
+        _show_fig(px.bar(qplot,x="Measure",y="Value",text="Value"),280,"Data-quality issues detected vs ground truth")
+        rqplot=pd.DataFrame({"Stage":["Baseline","Post"],"Hours":[qrow['baseline_rework_hours'],qrow['post_rework_hours']]})
+        if rqplot['Hours'].notna().all(): _show_fig(px.bar(rqplot,x="Stage",y="Hours",text="Hours"),280,"Rework hours before vs after")
+    else:
+        st.info("Enter confirmed issue counts and rework hours to activate the controlled quality-value metrics.")
+    with st.form("venture_quality_metrics_form"):
+        q1,q2,q3=st.columns(3)
+        issues_detected=q1.number_input("Issues detected before analysis",min_value=0.0,value=float(quality.iloc[0]['issues_detected']) if not quality.empty and pd.notna(quality.iloc[0]['issues_detected']) else 0.0,step=1.0)
+        issues_confirmed=q2.number_input("Issues confirmed in ground truth",min_value=0.0,value=float(quality.iloc[0]['issues_confirmed']) if not quality.empty and pd.notna(quality.iloc[0]['issues_confirmed']) else 0.0,step=1.0)
+        baseline_rework=q3.number_input("Baseline rework hours",min_value=0.0,value=float(quality.iloc[0]['baseline_rework_hours']) if not quality.empty and pd.notna(quality.iloc[0]['baseline_rework_hours']) else 0.0,step=0.5)
+        post_rework=st.number_input("Post-deployment rework hours",min_value=0.0,value=float(quality.iloc[0]['post_rework_hours']) if not quality.empty and pd.notna(quality.iloc[0]['post_rework_hours']) else 0.0,step=0.5)
+        qref,qdate,qconf=st.columns(3)
+        q_source=qref.text_input("Quality evidence source reference",value=str(quality.iloc[0]['source_ref']) if not quality.empty else "")
+        q_date=qdate.text_input("Quality evidence source date",value=str(quality.iloc[0]['source_date']) if not quality.empty else "")
+        q_conf=qconf.selectbox("Quality evidence confidence",CONFIDENCE,index=CONFIDENCE.index(str(quality.iloc[0]['confidence'])) if not quality.empty and str(quality.iloc[0]['confidence']) in CONFIDENCE else 1)
+        q_notes=st.text_area("Quality evidence notes",value=str(quality.iloc[0]['notes']) if not quality.empty else "",height=60)
+        qsave=st.form_submit_button("💾 Save quality evidence",type="primary",use_container_width=True)
+    if qsave:
+        if not q_source.strip(): st.error("A source reference is required for quality evidence.")
+        else:
+            stamp=_now()
+            with _db() as conn:
+                conn.execute("DELETE FROM venture_quality_metrics WHERE owner=? AND pilot_id=?",(owner,pilot_id))
+                conn.execute("INSERT INTO venture_quality_metrics VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",(_id("QLT"),owner,pilot_id,issues_detected,issues_confirmed,baseline_rework,post_rework,q_source[:300],q_date[:32],q_conf,q_notes[:1200],stamp,stamp))
+                conn.commit()
+            track_event(owner,"quality_evidence_saved","Value Evidence Center",details={"pilot_id":pilot_id})
+            st.success("Error-detection and rework evidence saved.")
+            st.rerun()
+
 def _artifact_df(owner: str) -> pd.DataFrame:
     return _query("SELECT artifact_id,category,title,version,source_url,source_date,confidence,checksum,updated_at FROM venture_artifacts WHERE owner=? ORDER BY category,title",(owner,))
 
@@ -614,6 +667,7 @@ def _room_export(owner:str)->bytes:
         "hypotheses.csv":_query("SELECT * FROM venture_hypotheses WHERE owner=?",(owner,)),
         "evidence.csv":_query("SELECT * FROM venture_evidence WHERE owner=?",(owner,)),
         "value_measurements.csv":_query("SELECT * FROM venture_value_measurements WHERE owner=?",(owner,)),
+        "quality_metrics.csv":_query("SELECT * FROM venture_quality_metrics WHERE owner=?",(owner,)),
         "artifacts.csv":_artifact_df(owner),
         "market_claims.csv":_query("SELECT * FROM venture_market_claims WHERE owner=?",(owner,)),
         "case_studies.csv":_query("SELECT * FROM venture_case_studies WHERE owner=?",(owner,)),
