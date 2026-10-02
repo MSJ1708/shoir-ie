@@ -681,7 +681,10 @@ def render_facility_layout(tier: str, username: str) -> None:
                     reason2=st.text_input("Reason / process step",str(current["reason"] or ""))
                     up=st.form_submit_button("💾 Update connection",type="primary",use_container_width=True)
                 if up:
-                    if frm2==to2: st.error("From and To departments must be different.")
+                    if frm2==to2:
+                        st.error("From and To departments must be different.")
+                    elif not flows.empty and ((flows["from_id"].astype(str)==frm2) & (flows["to_id"].astype(str)==to2) & (flows["flow_id"].astype(str)!=fid)).any():
+                        st.warning("That directed connection already exists. Edit that connection instead of creating a duplicate.")
                     else:
                         with _db() as conn:
                             conn.execute(
