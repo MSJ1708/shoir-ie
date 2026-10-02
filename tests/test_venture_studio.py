@@ -116,3 +116,13 @@ def test_value_summary_does_not_treat_unpriced_measurements_as_economic_value():
     assert result["priced_rows"] == 0
     assert result["annualized_benefit"] == 0
     assert result["roi_percent"] == 0
+
+def test_quality_evidence_calculates_error_detection_and_rework_avoided():
+    result = vs.quality_evidence_calculation({
+        "issues_detected": 8,
+        "issues_confirmed": 10,
+        "baseline_rework_hours": 14,
+        "post_rework_hours": 6,
+    })
+    assert np.isclose(result["error_detection_rate_percent"], 80.0)
+    assert np.isclose(result["rework_avoided_hours"], 8.0)
