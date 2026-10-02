@@ -1470,6 +1470,68 @@ if not st.session_state.get("current_user"):
             "They show the kinds of operational outcomes industrial organizations are pursuing."
         )
 
+        st.markdown("---")
+        st.markdown("## 🚀 Venture Studio")
+        st.markdown(
+            "### Turn an industrial idea into customer evidence, a measurable pilot, and an investable story."
+        )
+        st.markdown(
+            "Venture Studio is Shoir-IE's business-building workspace for teams that need to prove "
+            "that an industrial problem is real, that a solution creates measurable value, and that "
+            "the evidence is strong enough to support pilots, customers, partnerships and investment."
+        )
+
+        _venture_cols = st.columns(4)
+        _venture_items = [
+            ("🎯 CUSTOMER", "Capture the real problem", "Record target users, stakeholders, pain severity, current workarounds and the evidence behind the problem."),
+            ("🧪 PILOT", "Turn hypotheses into tests", "Define pilot stages, baselines, hypotheses, success criteria and comparable experiment results."),
+            ("💰 VALUE", "Make the business case", "Connect operational improvements to quantified ROI, value evidence, pricing and customer outcomes."),
+            ("📈 INVESTOR", "Build evidence for growth", "Bring traction, market intelligence, readiness, case studies and controlled investor artifacts into one place."),
+        ]
+        for _col, (_kicker, _headline, _body) in zip(_venture_cols, _venture_items):
+            with _col:
+                st.markdown(
+                    f'<div class="value-strip"><div class="kicker">{_kicker}</div>'
+                    f'<b>{_headline}</b><span>{_body}</span></div>',
+                    unsafe_allow_html=True
+                )
+
+        st.markdown("### What Venture Studio helps you answer")
+        _venture_questions = [
+            ("Is the problem worth solving?", "Connect customer interviews, pain frequency, process burden and evidence instead of relying on assumptions."),
+            ("Does the solution create value?", "Compare a baseline with pilot outcomes and preserve the evidence supporting the value claim."),
+            ("Will customers adopt it?", "Track pilots, stakeholders, feedback, readiness and the next evidence required to move forward."),
+            ("Can we explain the business?", "Connect the problem, solution, market, pricing, ROI, traction and case-study evidence into a coherent story."),
+        ]
+        for _idx in range(0, len(_venture_questions), 2):
+            _pair=_venture_questions[_idx:_idx+2]
+            _qcols=st.columns(len(_pair))
+            for _qcol, (_q, _a) in zip(_qcols, _pair):
+                with _qcol:
+                    st.markdown(
+                        f'<div class="module-value-card"><div class="module-name">{html.escape(_q)}</div>'
+                        f'<div class="module-when">{html.escape(_a)}</div></div>',
+                        unsafe_allow_html=True
+                    )
+
+        with st.expander("See a Venture Studio example"):
+            st.markdown(
+                '<div class="module-example"><b>Example:</b> An industrial team identifies a recurring '
+                'production bottleneck, records the customer and baseline evidence, defines a pilot, '
+                'compares before/after performance, calculates customer-specific value, captures the '
+                'result as a case study, and packages the supporting evidence for a partner or investor.</div>',
+                unsafe_allow_html=True
+            )
+
+        _venture_catalog = next(
+            (m for m in MODULE_CATALOG if str(m.get("name","")).strip().lower()=="venture studio"),
+            None
+        )
+        if _venture_catalog:
+            st.caption("Venture Studio is also included in the complete capability catalog below.")
+        else:
+            st.warning("Venture Studio is not currently present in the capability catalog.")
+
         st.markdown("### Find the capability for the problem you have")
         _tier_options = ["All capabilities", "Starter", "Mid-Tier Pro", "Enterprise", "Research Pack"]
         _browse_tier = st.selectbox(
