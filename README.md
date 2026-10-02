@@ -255,253 +255,340 @@ Do not present Shoir-IE as a tour of buttons. Present one industrial problem fro
 
 ## 💼 Investor & Incubator Overview
 
-### Shoir-IE
+# Shoir-IE — Industrial Engineering Operating System
 
-**Industrial Engineering Operating System & Decision Intelligence Platform**
+### **From Industrial Data to Verified Decisions**
 
-Shoir-IE connects the industrial workflow from **data to decision to verified outcome**.
+Shoir-IE is a unified industrial engineering and decision-intelligence platform designed to connect the work that is traditionally distributed across spreadsheets, engineering calculations, optimization tools, simulation environments, quality systems and management reports.
 
-Industrial organizations generate enormous amounts of information across spreadsheets, ERP/MES systems, engineering calculations, quality systems, maintenance records, planning tools, simulation models and operational reports. The result is often fragmented analysis, duplicated effort, slow scenario testing and limited traceability between a decision and the outcome that follows.
+`Industrial Data → Data Intelligence → Industrial Engineering → Scenario Intelligence → Decision → Verification → Business Value`
 
-Shoir-IE is designed to provide a unified environment for:
+The platform brings industrial engineering disciplines into one connected environment while creating a foundation for AI-assisted analysis, digital-thread traceability, industrial simulation, optimization and measurable value creation.
 
-`Industrial Data → Validation → Industrial Model → Engineering → Simulation / Optimization → Scenarios → Decision → Verification → Executive Output`
-
-### Investment Thesis
-
-> **Industrial engineering has no shortage of formulas and specialist software. The opportunity is to connect the fragmented workflow surrounding those tools into a single decision environment.**
-
-Shoir-IE combines industrial engineering, operations research, simulation, optimization, quality, reliability, supply chain, facilities, workforce, economics, sustainability, research workflows and AI-assisted decision support within one product architecture.
-
-The platform is positioned around a measurable business outcome:
-
-**reduce the time, cost, rework and decision friction created by fragmented industrial analysis.**
+> **Shoir-IE turns industrial complexity into an executable decision workflow.**
 
 ---
 
-## 🌍 The Industrial Problem
+## 🌍 The Opportunity
 
-### Fragmented industrial decision-making
+Industrial organizations do not lack data, formulas or specialist software. The larger opportunity is the fragmented workflow between them.
 
-A typical engineering study can require:
+A typical improvement project can span:
 
-`Excel → Data Cleaning → Manual Mapping → Separate Engineering Model → Scenario Copies → Charts → Report → Meeting → Revision → New Spreadsheet`
+`Excel → Manual Cleaning → Separate Analysis → Model Rebuild → Scenario Copies → Charts → Report → Review → Revision`
 
-Every handoff creates opportunities for:
+Shoir-IE is designed to compress that workflow into:
 
-- duplicated work;
-- inconsistent assumptions;
-- data-quality defects;
-- version confusion;
-- manual re-entry;
-- delayed scenario analysis;
-- disconnected evidence;
-- repeated reporting.
+`Import → Validate → Model → Analyze → Simulate → Optimize → Compare → Decide → Verify`
 
-Shoir-IE changes the workflow to:
+This creates a large and repeatable software opportunity across manufacturing, logistics, supply chain, quality, reliability, facilities, workforce, energy and sustainability.
 
-`Industrial Data → Validated Dataset → Shared Industrial Model → Engineering Methods → Scenario Laboratory → Decision Center → Verification`
+NIST has estimated interoperability-related costs associated with varying data formats at **$20.9B–$42.9B in U.S. discrete manufacturing**, while identifying additional value associated with better digital information flows.  
+[Source: NIST](https://www.nist.gov/news-events/news/2020/02/inadequate-modeling-data-costs-billions-us-manufacturers)
 
-The central proposition is **workflow compression with traceability**.
-
-### The economic opportunity
-
-NIST estimates the costs associated with interoperability and varying data formats in U.S. discrete manufacturing at **$20.9 billion–$42.9 billion**, while estimating additional potential savings from better digital data flows and seamless information transmission. NIST also notes that industry-level information on some of these costs remains incomplete. citeturn536340search0
-
-Downtime creates another major industrial value pool. Siemens' 2024 research reported that surveyed automotive manufacturers could lose **$2.3 million for every unproductive hour**. This figure is an external industry benchmark, not a Shoir-IE savings claim. citeturn536340search61turn536340search2
+Downtime represents another significant industrial value pool. Siemens' 2024 research reported an automotive-sector benchmark of **$2.3M per unproductive hour** among surveyed manufacturers.  
+[Source: Siemens — Total Cost of Downtime](https://assets.new.siemens.com/siemens/assets/api/uuid%3A1b43afb5-2d07-47f7-9eb7-893fe7d0bc59/TCOD-2024_original.pdf)
 
 ---
 
-## ⚡ The Shoir-IE Solution
+## ⚡ The Shoir-IE Advantage
 
-### One industrial workspace
+### One platform. One industrial context. One decision trail.
 
-Shoir-IE brings together the workflow normally distributed across multiple applications:
+Shoir-IE connects:
 
-| Layer | Shoir-IE capability |
+| Capability | Platform value |
 |---|---|
-| **Data** | Industrial Workbook, Excel ingestion, validation and data-quality workflows |
-| **Model** | Shared industrial data structures and Digital Thread foundations |
-| **Engineering** | IE, OR, quality, reliability, production, facilities and workforce methods |
-| **Optimization** | MILP, assignment, routing, network, scheduling and optimization workflows |
-| **Simulation** | Monte Carlo, sensitivity, experiment and digital-twin foundations |
-| **Scenarios** | Baseline vs alternatives, what-if analysis and scenario versioning |
-| **Decision** | KPI comparison, drivers, assumptions, evidence and decision records |
-| **Verification** | Expected vs actual outcome tracking and evidence-oriented validation |
-| **AI** | Copilot, recommendations and agentic workflow foundations |
-| **Reporting** | Executive outputs, analytical workbooks and reusable evidence packages |
+| **Industrial Data Intelligence** | Import, clean, validate, map and activate industrial datasets |
+| **Industrial Workbook** | Reusable inputs, calculations, KPIs, scenarios and decision context |
+| **Operations Research** | Optimization, MILP, assignment, routing, network and scheduling workflows |
+| **Production Engineering** | Capacity, PPC, line balance, lean and shop-floor analysis |
+| **Supply Chain** | Inventory, MEIO, supplier risk, network design, routing and warehouse analytics |
+| **Quality & Reliability** | SPC, capability, Six Sigma, reliability and quality-engineering workflows |
+| **Facilities** | Layout, material flow, From/To, SLP and route what-if analysis |
+| **Workforce Engineering** | Staffing, work measurement, ergonomics and balance analysis |
+| **Simulation & Risk** | Monte Carlo, sensitivity, experiments and digital-twin foundations |
+| **Economics** | NPV, IRR, payback, CAPEX/OPEX and investment analysis |
+| **Sustainability** | Energy, carbon, Green IE, LCA and resource-efficiency workflows |
+| **Digital Thread** | Shared industrial context connecting assets, processes, products, materials and outcomes |
+| **AI Copilot** | Natural-language access to industrial analysis and engineering workflows |
+| **Decision Intelligence** | Scenarios, comparisons, evidence, decisions and verification |
+| **Reporting** | Executive-ready outputs, analytical workbooks and evidence packages |
 
-### Industrial Workbook
+The differentiation is not the number of individual tools. It is the **connected workflow across them**.
 
-The Industrial Workbook is the product's connective workspace:
+---
 
-`Inputs | Data | Calculations | KPIs | Simulation | Optimization | Scenarios | Decisions | Dashboard`
+## 🧠 The Industrial Decision Engine
 
-Data becomes reusable engineering context instead of a one-time spreadsheet export.
+The core product loop is:
+
+`DATA`
+↓  
+`VALIDATE`
+↓  
+`MODEL`
+↓  
+`ENGINEER`
+↓  
+`SIMULATE / OPTIMIZE`
+↓  
+`COMPARE`
+↓  
+`DECIDE`
+↓  
+`IMPLEMENT`
+↓  
+`MEASURE`
+↓  
+`VERIFY`
+↓  
+`LEARN`
+
+Each completed study can become reusable organizational intelligence rather than a one-time analysis.
 
 ### Digital Thread
 
-The long-term architecture connects:
-
 `Asset → Process → Product → Material → Order → Workforce → Quality → Maintenance → Energy → Cost → Scenario → Decision → Outcome`
 
-This creates a common context in which engineering analyses can be connected to operational decisions and subsequent results.
+The Digital Thread creates the foundation for connecting operational reality with engineering models and management decisions.
 
 ---
 
-## 📊 Demonstrable Business Value
+## 💼 The Commercialization Platform
 
-Shoir-IE is designed to turn industrial improvement into measurable evidence.
+The next product layer extends Shoir-IE from an engineering platform into a complete industrial innovation and commercialization environment.
 
-### Time
+### Customer & Stakeholder Hub
+
+A structured customer intelligence layer connects the technical solution to the people and organizations that use, fund, adopt or benefit from it.
+
+`Customer → Problem → Workflow → Evidence → Requirement → Pilot → Adoption`
+
+Core records include:
+
+- target customer and end user;
+- beneficiary and adopting organization;
+- problem statement;
+- current workflow and workaround;
+- stakeholder map;
+- process time and cost;
+- pain frequency and severity;
+- error burden;
+- adoption pathway;
+- objections;
+- requested capabilities;
+- engagement history;
+- pilot status.
+
+### Pilot Manager
+
+`Discovery → Baseline → Pilot Setup → Deployment → Measurement → Feedback → Decision`
+
+Pilot execution becomes a structured product capability rather than a separate consulting process.
+
+---
+
+## 🔬 Hypothesis → Evidence
+
+Shoir-IE is extending its decision architecture with a first-class evidence model:
+
+`Hypothesis → Metric → Baseline → Experiment → Result → Evidence → Decision`
+
+The same evidence structure can support:
+
+**industrial studies, customer discovery, pilot measurements, experiments, simulations, optimization studies, research projects and business cases.**
+
+This creates a persistent bridge between **what is believed, what was measured and what was decided**.
+
+---
+
+## 💰 Value Evidence Engine
+
+Shoir-IE converts engineering improvement into measurable business value.
+
+### Time value
 
 `Hours Saved = Baseline Study Time − Shoir-IE Study Time`
 
 `Annual Capacity Released = Hours Saved × Studies Per Year`
 
-Illustrative example:
-
-- 50 studies per year
-- 8 baseline hours per study
-- 3 hours with the connected Shoir-IE workflow
-
-`(8 − 3) × 50 = 250 hours/year`
-
-At an illustrative loaded engineering cost of $50/hour:
-
-`250 × $50 = $12,500/year`
-
-This example demonstrates the value methodology. Actual customer value is established from measured baselines and deployment results.
-
-### Cost
+### Financial value
 
 `Verified Economic Benefit = Baseline Cost − Post-Deployment Cost − Implementation Cost`
 
-Potential value categories include:
+### Industrial value metrics
 
-**engineering labor, data preparation, reporting, downtime, scrap, rework, inventory, transport, overtime, energy and carbon.**
+**Engineering Hours**
 
-### Errors and rework
+**Planning-Cycle Time**
 
-Shoir-IE provides a foundation for measuring:
+**Scenario Turnaround**
 
-`Data Defects → Validation Failures → Rework → Decision Risk`
+**Report-Production Time**
 
-Core measurable indicators include:
+**Data-Quality Defects**
 
-- data defects detected before analysis;
-- duplicate or conflicting records detected;
-- invalid values rejected;
-- unit and semantic mismatches identified;
-- model-input inconsistencies;
-- manual re-entry steps eliminated;
-- revision cycles;
-- rework hours.
+**Rework Cycles**
 
-`Error Detection Rate = Confirmed Issues Detected / Confirmed Issues in Ground Truth`
+**Inventory Impact**
 
-`Rework Avoided = Baseline Rework Hours − Post-Deployment Rework Hours`
+**Transport Distance / Cost**
 
-The platform's value model therefore focuses on **measured improvement rather than unsupported universal savings percentages**.
+**Scrap & Rework Value**
 
----
+**Downtime Exposure**
 
-## 🏭 Flagship Demonstration
+**Energy Consumption**
 
-### From raw Excel to an industrial decision
+**Carbon Impact**
 
-A single end-to-end demonstration can show the full value proposition:
+**ROI**
 
-**01 — Industrial Data**
+**Payback**
 
-Messy workbook → table discovery → validation → cleaning → semantic mapping
-
-↓
-
-**02 — Industrial Workbook**
-
-Validated data → calculations → KPIs → reusable analysis context
-
-↓
-
-**03 — Facility & Material Flow**
-
-Departments → From/To relationships → material flow → SLP-style analysis → route what-if
-
-↓
-
-**04 — Engineering Analysis**
-
-Capacity, inventory, routing, scheduling, quality, reliability, optimization, simulation or economics
-
-↓
-
-**05 — Scenario Laboratory**
-
-Baseline → Alternative A → Alternative B → sensitivity → uncertainty → trade-offs
-
-↓
-
-**06 — Decision Center**
-
-Recommended operating alternative → KPI impact → assumptions → evidence
-
-↓
-
-**07 — Verification**
-
-Expected outcome → actual outcome → variance → reusable evidence
-
-↓
-
-**08 — Executive Output**
-
-Decision summary → financial impact → charts → technical evidence → report
-
-### The demonstration message
-
-> **One industrial question. One connected workflow. One evidence trail.**
+The value engine is designed around customer-specific baselines so that financial impact is linked to measurable industrial conditions.
 
 ---
 
-## 🧠 AI + Industrial Engineering
+## 🗂️ Investor Data Room
 
-Shoir-IE is designed so AI operates inside an engineering context rather than as a standalone conversational layer.
+A dedicated Investor Data Room creates a structured evidence package around the venture:
 
-`Natural Language → Engineering Intent → Relevant Method → Data Context → Analysis → Evidence → Decision`
+`Product → Problem → Market → Customer Evidence → Pilots → ROI → Traction → Security → Financial Model → Roadmap`
 
-Example requests include:
+The data architecture supports:
 
-> “Compare these production scenarios.”
+- controlled evidence;
+- source links;
+- timestamps;
+- confidence metadata;
+- version history;
+- pilot records;
+- product milestones;
+- commercial metrics;
+- financial assumptions;
+- customer evidence.
 
-> “Identify the largest drivers of cost.”
-
-> “Check this process for quality drift.”
-
-> “Evaluate this investment case.”
-
-> “Prepare the executive decision package.”
-
-The AI layer is intended to accelerate engineering work while keeping assumptions, methods and evidence visible.
+This turns product development into a continuously updated **investment evidence system**.
 
 ---
 
-## 🦺 Industrial Safety & Risk Intelligence
+## 📈 Product-Market-Fit & Readiness Intelligence
 
-Industrial safety represents a major human and economic impact area.
+A unified readiness layer connects technical development with commercial execution.
 
-The ILO's global estimates report **2.78 million work-related deaths annually**, with work-related injuries and illnesses representing an economic burden of approximately **3.94% of global GDP**. These are global estimates announced in 2017, rather than a current-year accident count. citeturn536340search3turn536340search1
+| Dimension | Platform view |
+|---|---|
+| **Problem Validation** | Documented industrial problem and evidence |
+| **ICP** | Target customer and use-case definition |
+| **MVP** | Product capability readiness |
+| **Data Readiness** | Quality, structure and accessibility |
+| **Deployment Readiness** | Operational implementation readiness |
+| **Security** | Governance and access readiness |
+| **Pilot Readiness** | Ability to execute measurable proofs of value |
+| **Customer Evidence** | Discovery, feedback and pilot records |
+| **Commercial Evidence** | Adoption and willingness-to-pay signals |
+| **Repeatability** | Templates, workflows and reusable deployment patterns |
+| **Adoption** | Expansion across teams, sites and use cases |
 
-Hong Kong's official 2025 occupational safety statistics recorded **6,486 industrial accidents across all industrial undertakings**, including **686 in manufacturing**. citeturn536340search60turn536340search5
+---
 
-Shoir-IE's safety direction connects:
+## 📊 Product & Traction Intelligence
 
-`Hazard → Process → Location → Task → Exposure → Risk → Control → Incident / Near Miss → Corrective Action → Verification`
+Platform analytics create a continuous product-learning loop:
 
-Potential safety intelligence capabilities include:
+`Usage → Insight → Product Improvement → Customer Value → Adoption`
+
+Key measures include:
+
+- active workspaces;
+- studies created;
+- datasets activated;
+- analyses executed;
+- scenarios compared;
+- reports exported;
+- time-to-first-result;
+- repeat usage;
+- pilot conversion;
+- feature adoption.
+
+These metrics provide the foundation for product-led growth, customer success and commercial forecasting.
+
+---
+
+## 🎬 Executive Demo Mode
+
+Shoir-IE is designed to deliver a deterministic, executive-quality product demonstration from a single industrial scenario.
+
+### The flagship journey
+
+`Raw Excel`
+→ `Data Quality`
+→ `Industrial Workbook`
+→ `Facility / Material Flow`
+→ `Engineering Analysis`
+→ `Scenario Comparison`
+→ `Optimization / Simulation`
+→ `Decision`
+→ `ROI`
+→ `Executive Report`
+
+### Seven-minute investor experience
+
+| Time | Experience |
+|---|---|
+| **0:00–0:45** | Industrial problem and fragmented workflow |
+| **0:45–1:30** | Raw Excel import, discovery, validation and cleaning |
+| **1:30–2:20** | Industrial Workbook and reusable engineering context |
+| **2:20–3:20** | Facility, material flow and route what-if |
+| **3:20–4:20** | One focused engineering analysis |
+| **4:20–5:20** | Baseline vs alternative scenarios |
+| **5:20–6:10** | Evidence, assumptions and decision trace |
+| **6:10–7:00** | Value, ROI and executive output |
+
+### The presentation principle
+
+> **One industrial problem. One connected workflow. One evidence trail.**
+
+---
+
+## 🏭 Flagship Use Case: Factory Performance
+
+A representative factory workflow demonstrates the complete value chain:
+
+`Industrial Workbook`
+↓
+`Data Intelligence`
+↓
+`Facility & Material Flow`
+↓
+`Capacity / Production Analysis`
+↓
+`Scenario Laboratory`
+↓
+`Optimization / Simulation`
+↓
+`Decision Center`
+↓
+`Value Evidence`
+↓
+`Verification`
+
+A single industrial question can therefore move from raw operational data to a quantified decision without rebuilding the analysis across disconnected applications.
+
+---
+
+## 🦺 Safety, Quality & Risk Intelligence
+
+Shoir-IE extends the same architecture into operational risk:
+
+`Hazard → Task → Process → Location → Exposure → Risk → Control → Incident / Near Miss → Corrective Action → Verification`
+
+The safety and risk roadmap includes:
 
 - risk registers;
-- JSA/JHA workflows;
+- JSA / JHA workflows;
 - incident and near-miss analytics;
 - risk matrices;
 - leading indicators;
@@ -511,219 +598,254 @@ Potential safety intelligence capabilities include:
 - training evidence;
 - safety decision traceability.
 
-The software role is **risk identification, analysis, prioritization and verification** rather than a claim that software alone prevents accidents.
+The ILO has estimated **2.78 million work-related deaths annually** and a work-related economic burden of approximately **3.94% of global GDP**.  
+[Source: ILO](https://www.ilo.org/topics-and-sectors/occupational-safety-and-health-guide-labour-inspectors-and-other/introduction-and-acknowledgements)
+
+Hong Kong's Labour Department recorded **6,486 industrial accidents across industrial undertakings in 2025**, including **686 in manufacturing**.  
+[Source: Hong Kong Labour Department — OSH Statistics 2025](https://www.labour.gov.hk/common/osh/pdf/OSH_Statistics_2025_en.pdf)
+
+Safety intelligence becomes part of the same broader product vision: **understand the system, quantify risk, evaluate alternatives and verify outcomes.**
 
 ---
 
-## 🇸🇦 Saudi Industrial Opportunity
+## 🌱 Sustainability & Resource Efficiency
 
-Shoir-IE aligns naturally with Saudi Arabia's industrial and digital-transformation direction.
+Industrial improvement is increasingly measured across both financial and environmental dimensions.
 
-The National Industrial Development and Logistics Program identifies the ambition of transforming the Kingdom into a leading industrial powerhouse and global logistics hub, with emphasis on local content and adoption of the Fourth Industrial Revolution. NIDLP also identifies optimum resource utilization, investment attraction and industrial competitiveness among its aspirations. citeturn536340search6
+Shoir-IE connects:
 
-Shoir-IE can support this ecosystem through:
+`Production → Energy → Materials → Waste → Carbon → Cost → Improvement`
 
-**Industrial productivity**
+Representative capabilities include:
 
-**Industry 4.0**
+- energy intensity;
+- carbon intensity;
+- resource efficiency;
+- waste analysis;
+- Green IE;
+- lifecycle analysis;
+- sustainability scenarios;
+- financial + environmental trade-off analysis.
 
-**Decision intelligence**
-
-**Resource efficiency**
-
-**Digital engineering**
-
-**Supply-chain optimization**
-
-**Quality and reliability**
-
-**Sustainability**
-
-**Research commercialization**
-
-**Institutional and government innovation**
+This allows operational decisions to be evaluated through multiple value dimensions rather than a single KPI.
 
 ---
 
-## 🔬 Research → Technology → Application → Adoption
+## 🇸🇦 Saudi Industrial & National Opportunity
 
-Shoir-IE is also structured to support research-driven commercialization:
+Shoir-IE aligns with the Kingdom's industrial transformation and Fourth Industrial Revolution agenda.
 
-`Research Question → Data → Model → Experiment → Evidence → Application → Value → Pilot → Adoption`
+The National Industrial Development and Logistics Program identifies the objective of transforming Saudi Arabia into an industrial powerhouse and global logistics hub, increasing local content and adopting Fourth Industrial Revolution technologies. NIDLP also highlights optimum resource utilization, investment attraction and industrial competitiveness.
 
-Research workflows can connect technical findings with:
+[Source: NIDLP / Daleel](https://5172733bde8a.nidlp.gov.sa/about-us/)
 
-- practical applications;
-- target users;
-- adopting organizations;
-- measurable value;
-- reproducible experiments;
-- pilot design;
-- commercialization pathways.
+The NIDLP Fourth Industrial Revolution Capabilities Center specifically describes support for factories through:
 
-This creates a bridge between **academic research and industrial deployment**.
+- improved production planning;
+- predictive maintenance;
+- more intelligent decisions;
+- digital transformation;
+- innovative industrial solutions.
+
+[Source: NIDLP — Fourth Industrial Revolution Capabilities Center](https://4ir.nidlp.gov.sa/)
+
+Shoir-IE's architecture directly intersects with this ecosystem:
+
+**Industrial Productivity · Industry 4.0 · Digital Engineering · AI · Decision Intelligence · Supply Chain · Quality · Reliability · Sustainability · Research Commercialization**
 
 ---
 
-## 🚀 Commercial Model
+## 🔬 Research → Technology → Industrial Adoption
 
-Shoir-IE supports multiple potential revenue pathways:
+Shoir-IE also provides a pathway for research-driven ventures:
 
-| Commercial offering | Value delivered |
+`Research Question → Data → Model → Experiment → Evidence → Application → Pilot → Adoption`
+
+Research becomes connected to:
+
+**reproducibility**
+
+**simulation**
+
+**statistical analysis**
+
+**industrial application**
+
+**measurable value**
+
+**pilot design**
+
+**commercialization**
+
+This creates a practical bridge between **university research, industrial engineering and market deployment**.
+
+---
+
+## 🧪 Case Study & Proof Engine
+
+A completed industrial engagement can be converted into a reusable evidence package:
+
+`Problem → Baseline → Intervention → Result → Evidence → ROI → Approval → Before / After`
+
+The same structure can power:
+
+- customer case studies;
+- pilot reports;
+- executive presentations;
+- investor evidence;
+- research outputs;
+- technical reports;
+- adoption proposals.
+
+Every successful deployment can therefore contribute to the next customer acquisition, product improvement and commercialization cycle.
+
+---
+
+## 🌐 Market & Competitive Intelligence
+
+The commercialization layer also connects product strategy with external market intelligence.
+
+### Market intelligence
+
+- market segment mapping;
+- industrial use-case discovery;
+- customer alternatives;
+- competitor capability mapping;
+- substitute workflows;
+- spreadsheet-based alternatives;
+- software categories;
+- pricing signals;
+- adoption signals;
+- sourced market evidence.
+
+### Strategic positioning
+
+`Spreadsheet → Point Tool → Disconnected Stack → Shoir-IE Connected Workflow`
+
+The platform competes not only against individual software products, but against the fragmented workflow itself.
+
+---
+
+## 💳 Commercial Model
+
+Shoir-IE supports a scalable multi-layer commercial model:
+
+| Offering | Commercial value |
 |---|---|
-| **Industrial Pilot** | Fixed-scope proof of value with measurable baseline and outcome |
+| **Industrial Pilot** | Proof of value for a defined industrial problem |
 | **Team Platform** | Recurring engineering and operations workspace |
-| **Enterprise Platform** | Governance, collaboration, integrations and multi-team deployment |
-| **Professional Services** | Modeling, implementation, training and industrial transformation |
-| **Research / University** | Engineering research, simulation and reproducible analytical workflows |
+| **Enterprise Platform** | Multi-team deployment, governance and integration |
+| **Professional Services** | Modeling, implementation, integration and training |
+| **Research / University** | Engineering research, simulation and reproducible analysis |
 
-The primary commercial objective is recurring value: the same customer workflow should become easier, faster and more valuable with continued use.
-
----
-
-## 📈 Product Expansion Roadmap
-
-### Customer & Market Evidence
-
-**Customer & Stakeholder Hub**
-
-Problem discovery → interviews → requirements → stakeholder evidence → adoption pathway
-
-**Pilot Manager**
-
-Discovery → baseline → deployment → measurement → feedback → expansion
-
-### Evidence & Economics
-
-**Hypothesis → Evidence**
-
-Hypothesis → metric → baseline → experiment → result → evidence → decision
-
-**ROI / Value Evidence Center**
-
-Hours → labor capacity → quality → downtime → inventory → logistics → energy → carbon → financial value
-
-**Evidence Vault**
-
-Sources → baseline → experiment → result → approval → verification
-
-### Commercial Readiness
-
-**Investor Data Room**
-
-Product → market → customer evidence → pilots → ROI → traction → security → financial model → roadmap
-
-**PMF / Readiness Dashboard**
-
-Problem validation → product readiness → pilot readiness → adoption readiness → commercial readiness
-
-**Product & Traction Analytics**
-
-Workspaces → studies → datasets → analyses → scenarios → reports → repeat usage → adoption
-
-### Demonstration & Growth
-
-**End-to-End Demo Mode**
-
-A deterministic industrial scenario that demonstrates the complete journey from raw data to verified business value.
-
-**Case Study Studio**
-
-Problem → baseline → intervention → result → evidence → ROI → before / after
-
-**Market & Competitive Intelligence**
-
-Competitor landscape → substitutes → customer alternatives → pricing signals → market evidence
+The model supports a progression from **pilot revenue → recurring platform revenue → enterprise expansion**.
 
 ---
 
-## 🎯 Incubator Outcome
+## 📈 Scale Architecture
 
-The Shoir-IE venture journey is represented by:
+The commercial expansion path is:
 
-`Problem → Validation → MVP → Pilot → Measured Outcome → Customer Evidence → Commercialization → Adoption`
+`Single Study`
+→ `Pilot`
+→ `Team`
+→ `Department`
+→ `Plant`
+→ `Enterprise`
+→ `Multi-Site Industrial Platform`
 
-The product itself embodies the same principle:
-
-`Data → Engineering → Evidence → Decision → Outcome]
-
-Every successful deployment can generate reusable evidence for:
-
-**customer acquisition, product improvement, ROI validation, partnerships, institutional adoption and investment readiness.**
-
----
-
-## 📌 Investment Story
-
-### The problem
-
-Industrial decisions are distributed across disconnected data, spreadsheets, specialist software and reporting workflows.
-
-### The product
-
-Shoir-IE provides a unified industrial engineering and decision-intelligence environment.
-
-### The differentiation
-
-**Connected workflow + engineering depth + scenario analysis + evidence traceability + AI assistance**
-
-### The value
-
-**Faster analysis + less duplicated work + earlier error detection + more scenarios + stronger decision traceability + measurable operational impact**
-
-### The market path
-
-**Pilot → measurable ROI → repeatable workflow → team adoption → enterprise deployment**
-
-### The long-term vision
-
-`Industrial Data → Digital Thread → Engineering → AI → Simulation → Optimization → Decision → Execution → Measurement → Verification → Learning]
-
-> **Shoir-IE — The Industrial Engineering Operating System for turning industrial data into better decisions and measurable outcomes.**
+Each stage increases the amount of shared data, reusable engineering knowledge, decision history and organizational intelligence captured by the platform.
 
 ---
 
-## 📚 Evidence Base
+## 🚀 Product Expansion Roadmap
 
-The following sources establish the scale of industrial data, interoperability, downtime and safety challenges. They do not represent Shoir-IE customer results.
+### Commercial Intelligence
+**Customer & Stakeholder Hub · Pilot Manager · Hypothesis → Evidence · Value Evidence Center · Investor Data Room**
 
-| Source | Relevant evidence |
-|---|---|
-| **NIST** | U.S. discrete-manufacturing interoperability/data-format costs estimated at $20.9B–$42.9B; additional potential value identified from improved digital information flows. citeturn536340search0 |
-| **Siemens, 2024** | Survey-based automotive downtime benchmark of $2.3M per unproductive hour. citeturn536340search61turn536340search2 |
-| **ILO** | Global estimate of 2.78M work-related deaths annually and economic burden of 3.94% of global GDP; global estimate announced in 2017. citeturn536340search3turn536340search1 |
-| **Hong Kong Labour Department, 2025** | 6,486 industrial accidents across all industrial undertakings; 686 in manufacturing. citeturn536340search60turn536340search5 |
-| **NIDLP / Daleel** | Saudi industrial transformation, Industry 4.0, resource utilization and investment objectives. citeturn536340search6 |
+### Product Intelligence
+**PMF / Readiness Dashboard · Product Analytics · Traction Intelligence · Case Study Studio**
 
-> **Evidence standard:** external statistics provide market context. Shoir-IE performance claims are established through customer baselines, controlled pilots, reproducible calculations and post-deployment verification.
+### Executive Experience
+**End-to-End Demo Mode · Executive Decision Center · Automated Value Evidence · Investor Presentation Outputs**
+
+### Enterprise Intelligence
+**ERP / MES / WMS / SCADA / IoT connectivity · Digital Twin synchronization · Enterprise governance · Multi-site deployment**
+
+### AI & Engineering
+**Advanced Engineering Copilot · agentic workflows · predictive analytics · scenario intelligence · model registry · experiment lineage**
 
 ---
 
-## 🏁 Incubator Presentation Snapshot
+## 📌 Investment Narrative
 
-**SHOIR-IE**
+### **A large industrial problem**
+
+Industrial organizations operate with increasingly complex data, processes and physical systems.
+
+### **A unified software layer**
+
+Shoir-IE connects industrial data, engineering methods, scenarios, AI and decisions inside one environment.
+
+### **A measurable value proposition**
+
+The platform is built around measurable reductions in:
+
+**analysis time · duplicated work · rework · data friction · scenario turnaround · decision latency**
+
+and measurable improvements in:
+
+**visibility · engineering capacity · decision quality · traceability · operational performance**
+
+### **A scalable commercial model**
+
+`Pilot → Team SaaS → Enterprise → Multi-Site`
+
+### **A defensible product architecture**
+
+`Industrial Data + Engineering Knowledge + Digital Thread + Scenario History + Evidence + AI`
+
+The more industrial workflows a customer connects, the more valuable the shared context and decision history become.
+
+### **A long-term category vision**
+
+> **Shoir-IE is building the Industrial Engineering Operating System: a digital environment where industrial teams can move from data, to engineering, to scenarios, to decisions, to measurable outcomes — in one connected workflow.**
+
+---
+
+## 🏁 Investor Snapshot
+
+### **SHOIR-IE**
 
 **Industrial Engineering Operating System**
 
-**From industrial data to verified decisions.**
+**From Industrial Data to Verified Decisions**
 
-**Core promise**
+**Problem**
 
-`Clean the data. Build the model. Test the alternatives. Explain the decision. Verify the outcome.`
+Fragmented industrial data, engineering tools, spreadsheets, simulations and reporting create unnecessary decision friction.
 
-**Flagship workflow**
+**Solution**
 
-`Excel → Data Intelligence → Industrial Workbook → Engineering → Scenario → Optimization / Simulation → Decision → ROI → Verification`
+A unified platform connecting data intelligence, industrial engineering, optimization, simulation, AI, scenarios, decision intelligence and verification.
 
-**Business value**
+**Core Workflow**
 
-`Time ↓`  `Rework ↓`  `Decision Cycle ↓`  `Scenario Capacity ↑`  `Traceability ↑`  `Measured Operational Value ↑`
+`Data → Model → Engineer → Simulate → Optimize → Decide → Verify`
 
-**Commercial path**
+**Flagship Experience**
 
-`Pilot → Proof of Value → Recurring Platform → Enterprise Deployment`
+`Raw Excel → Clean Data → Industrial Workbook → Facility / Flow → Engineering → Scenario → Optimization / Simulation → ROI → Executive Decision`
 
-**Strategic vision**
+**Commercial Path**
+
+`Pilot → Team Platform → Enterprise → Multi-Site`
+
+**Strategic Position**
+
+**Industrial Engineering + AI + Decision Intelligence + Digital Thread**
+
+**Vision**
 
 > **Connect the industrial system. Quantify the decision. Verify the outcome.**
 
