@@ -800,7 +800,8 @@ def render_adoption_center(username: str, tier: str, initial_tab: str = "Home") 
     top[4].metric("Current table", f"{len(data):,} × {len(data.columns):,}")
 
     if st.button("Open Industrial Workbook", type="primary", use_container_width=True, key="adoption_open_workbook"):
-        st.session_state["force_workbook_module"] = True
+        st.session_state["_shoir_requested_module"] = "Industrial Workbook"
+        st.session_state["shoir_shell_section"] = "WORKBENCH"
         st.rerun()
 
     with st.expander("Commandable workflow", expanded=True):

@@ -274,6 +274,24 @@ def summarize_module_dataframe(df: pd.DataFrame) -> dict[str, Any]:
 def _seed_from_known_module_table(module: str, keys: dict[str, str]) -> None:
     if isinstance(st.session_state.get(keys["data"]), pd.DataFrame) and not st.session_state[keys["data"]].empty:
         return
+
+    # The Data Hub is the shared handoff point. When a user has already loaded
+    # data on Home/Data, every module should start from that active dataset
+    # rather than presenting a disconnected empty state or requiring another upload.
+    shared = st.session_state.get("universal_active_dataset")
+    if isinstance(shared, pd.DataFrame) and not shared.empty:
+        seed = shared.copy(deep=True)
+        st.session_state[keys["data"]] = seed
+        st.session_state[keys["original"]] = seed.copy(deep=True)
+        st.session_state[keys["validation"]] = validate_module_dataframe(seed)
+        st.session_state[keys["results"]] = summarize_module_dataframe(seed)
+        st.session_state[keys["meta"]] = {
+            "source": "Shared Data Hub",
+            "source_sheet": str(st.session_state.get("shoir_active_workbook_sheet", "")),
+            "imported_at": datetime.now(timezone.utc).isoformat(),
+        }
+        return
+
     try:
         from shoir_live_visuals import _MODULE_KEYS
         for state_key in _MODULE_KEYS.get(module, []):
@@ -317,7 +335,23 @@ def _init_state(module: str) -> dict[str, str]:
 def _import_workbook(uploaded: Any) -> tuple[dict[str, pd.DataFrame], str]:
     raw = uploaded.getvalue()
     signature = cached_bytes_sha256(raw)
-    books = cached_workbook_read(raw, uploaded.name)
+    try:
+        # Reuse the production Excel Intelligence pipeline so module uploads
+        # receive the same header detection, cleaning and governance treatment
+        # as the dedicated Excel Data Cleaning Studio.
+        from shoir_excel_studio import process_uploaded_workbook
+        processed = process_uploaded_workbook(raw, uploaded.name)
+        books = processed.get("cleaned_sheets") or processed.get("raw_sheets") or {}
+        books = {
+            str(name): frame.copy(deep=True)
+            for name, frame in books.items()
+            if isinstance(frame, pd.DataFrame) and not frame.empty
+        }
+        signature = str(processed.get("signature") or signature)
+    except Exception:
+        # Keep the fast cached reader as a compatibility fallback if the full
+        # governance pipeline is unavailable for a specific file.
+        books = cached_workbook_read(raw, uploaded.name)
     if not books:
         raise ValueError("The uploaded workbook contains no readable sheets.")
     return books, signature
@@ -325,8 +359,6 @@ def _import_workbook(uploaded: Any) -> tuple[dict[str, pd.DataFrame], str]:
 
 def _store_import(module: str, raw_df: pd.DataFrame, filename: str, sheet: str, signature: str) -> None:
     keys = parity_keys(module)
-    # One immutable imported snapshot is enough; avoid keeping two full deep
-    # copies of a potentially very large workbook in session state.
     st.session_state[keys["data"]] = raw_df
     st.session_state[keys["original"]] = raw_df.copy(deep=True)
     st.session_state[keys["signature"]] = signature
@@ -338,6 +370,20 @@ def _store_import(module: str, raw_df: pd.DataFrame, filename: str, sheet: str, 
         "source_sheet": sheet,
         "imported_at": datetime.now(timezone.utc).isoformat(),
     }
+
+    # Publish the same uploaded table to the shared data contract so the rest
+    # of Shoir-IE can consume it without forcing a second upload.
+    st.session_state["universal_active_dataset"] = raw_df.copy(deep=True)
+    st.session_state["excel_studio_visual_df"] = raw_df.copy(deep=True)
+    st.session_state["data_platform_latest_df"] = raw_df.copy(deep=True)
+    st.session_state["unified_data"] = raw_df.copy(deep=True)
+    st.session_state["industrial_workbook_current_df"] = raw_df.copy(deep=True)
+    st.session_state["shoir_data_status"] = "IMPORTED"
+    st.session_state["shoir_data_source_key"] = "upload"
+    st.session_state["shoir_data_source"] = f"{filename} · {sheet}" if sheet else str(filename)
+    st.session_state["shoir_data_version"] = str(signature)[:12]
+    st.session_state["shoir_data_hash"] = str(signature)
+    st.session_state["shoir_active_workbook_sheet"] = str(sheet)
 
 
 def _apply_module_edit(module: str, edited: pd.DataFrame) -> None:
@@ -429,7 +475,7 @@ def _render_prepare(module: str, keys: dict[str, str]) -> None:
 
     up = st.file_uploader(
         "📤 Import Excel / CSV",
-        type=["xlsx", "csv"],
+        type=["xlsx", "xlsm", "xls", "csv", "tsv", "txt"],
         key=f"module_parity_upload_{token}",
         help="The imported dataset is kept separate from authentication secrets and is included in workspace persistence.",
     )

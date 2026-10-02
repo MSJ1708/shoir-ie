@@ -55,6 +55,23 @@ def test_workspace_does_not_restore_streamlit_action_widget_keys(tmp_path: Path)
     source = {
         "sidebar_edit_acc": True,
         "btn_confirm_pay": True,
+        "shoir_shell_new_study": True,
+        "shoir_shell_present": True,
+        "shoir_shell_trust": True,
+        "shoir_shell_runs": True,
+        "shoir_shell_copilot": True,
+        "shoir_shell_os": True,
+        "shoir_shell_excellence": True,
+        "shoir_shell_edit_account": True,
+        "shoir_shell_logout": True,
+        "shoir_create_study": True,
+        "shoir_presentation_return": True,
+        "shoir_global_module_0": True,
+        "shoir_home_open_workbook": True,
+        "shoir_home_open_excel": True,
+        "shoir_home_open_core": True,
+        "shoir_data_hub_upload": "transient",
+        "shoir_data_hub_sheet": "Sheet1",
         "enterprise_module_selector": "Inventory · EOQ",
         "research_title": "My Study",
         "research_question": "A durable question that should be restored.",
@@ -66,7 +83,24 @@ def test_workspace_does_not_restore_streamlit_action_widget_keys(tmp_path: Path)
 
     assert "sidebar_edit_acc" not in restored
     assert "btn_confirm_pay" not in restored
+    for key in (
+        "shoir_shell_new_study",
+        "shoir_shell_present",
+        "shoir_shell_trust",
+        "shoir_shell_runs",
+        "shoir_shell_copilot",
+        "shoir_shell_os",
+        "shoir_shell_excellence",
+        "shoir_shell_edit_account",
+        "shoir_shell_logout",
+        "shoir_create_study",
+        "shoir_presentation_return",
+    ):
+        assert key not in restored
     assert "global_command_open_inventory" not in restored
+    assert "shoir_global_module_0" not in restored
+    for key in ("shoir_home_open_workbook", "shoir_home_open_excel", "shoir_home_open_core", "shoir_data_hub_upload", "shoir_data_hub_sheet"):
+        assert key not in restored
     assert restored["enterprise_module_selector"] == "Inventory · EOQ"
     assert restored["research_title"] == "My Study"
 

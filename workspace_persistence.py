@@ -55,7 +55,14 @@ _PREFIX_EXCLUDE = (
     "payment_",
     "uploaded_",
     "_workspace_",
+    # Home/data-hub controls are transient Streamlit widgets, not durable values.
+    "shoir_home_",
+    "shoir_data_hub_",
     # Streamlit action widgets are event controls, not durable workspace values.
+    # The unified shell uses a consistent shoir_shell_* namespace for UI
+    # controls and transient surface state; none of it belongs in persistence.
+    "shoir_shell_",
+    "shoir_global_module_",
     "upgrade_clean_",
     "upgrade_reset_",
     "upgrade_uploader_",
@@ -101,6 +108,20 @@ _ACTION_KEYS = {
     "btn_remove_landmark",
     "run_monte_carlo_btn",
     "payment_screenshot_upload",
+    "shoir_create_study",
+    "shoir_presentation_return",
+    # Unified application-shell actions are ephemeral Streamlit button state.
+    # Persisting any of these keys would hydrate a button before its widget is
+    # instantiated on the next run, which Streamlit rejects.
+    "shoir_shell_new_study",
+    "shoir_shell_present",
+    "shoir_shell_trust",
+    "shoir_shell_runs",
+    "shoir_shell_copilot",
+    "shoir_shell_os",
+    "shoir_shell_excellence",
+    "shoir_shell_edit_account",
+    "shoir_shell_logout",
 }
 
 def _excluded(key: str) -> bool:

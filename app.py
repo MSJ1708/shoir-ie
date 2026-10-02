@@ -1498,6 +1498,7 @@ if st.session_state.pop("force_workbook_module", False):
     wb = "Industrial Workbook"
     if wb in allowed_modules:
         st.session_state["_shoir_requested_module"] = wb
+        st.session_state["shoir_shell_section"] = "WORKBENCH"
 if st.session_state.pop("force_adoption_center", False):
     st.session_state["shoir_shell_surface"] = "workbench"
 if st.session_state.pop("force_unified_workspace", False):
