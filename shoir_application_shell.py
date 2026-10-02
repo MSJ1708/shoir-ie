@@ -1209,7 +1209,7 @@ def render_trust_center(username: str, tier: str) -> None:
             coverage_counts = matrix["coverage"].value_counts().rename_axis("Coverage").reset_index(name="Features")
             if not coverage_counts.empty:
                 st.plotly_chart(
-                    px.donut(coverage_counts, names="Coverage", values="Features", title="Capability evidence coverage", hole=0.58),
+                    px.pie(coverage_counts, names="Coverage", values="Features", title="Capability evidence coverage", hole=0.58),
                     use_container_width=True,
                     config={"displayModeBar": False},
                 )
