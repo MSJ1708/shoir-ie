@@ -2012,6 +2012,15 @@ try:
 except Exception as _commercial_error:
     st.caption(f"Integrated workspace enrichment unavailable: {_commercial_error}")
 
+# Non-stopping modules reach this common tail after rendering their result.
+try:
+    render_value_receipt(
+        st.session_state.get("selected_module", "Default"),
+        st.session_state.get("current_user", "unknown"),
+    )
+except Exception:
+    pass
+
 # =====================================================================
 # AUTOSAVE LAST KNOWN USER WORKSPACE STATE
 # =====================================================================
