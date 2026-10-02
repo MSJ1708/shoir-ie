@@ -2133,8 +2133,8 @@ def create_generic_audit_event(username: str, event_type: str, detail: str, work
     return record_artifact(username, "audit_event", event_type, {"detail": detail, "timestamp": now_iso()}, workspace)
 
 
-def render_enterprise_integration_surface(module: str, username: str, tier: str) -> None:
-    """Render shared enterprise capabilities inside the relevant existing module flow."""
+def _render_enterprise_integration_surface_base(module: str, username: str, tier: str) -> None:
+    """Render the established enterprise capabilities for the selected module."""
     import streamlit as st
     import plotly.express as px
 
@@ -2784,7 +2784,7 @@ def _render_enterprise_visual_evidence(module: str, username: str, workspace: st
                 break
 
 
-_BASE_ENTERPRISE_RENDER = render_enterprise_integration_surface
+_BASE_ENTERPRISE_RENDER = _render_enterprise_integration_surface_base
 
 
 def render_enterprise_integration_surface(module: str, username: str, tier: str) -> None:
