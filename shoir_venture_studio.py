@@ -1,4 +1,8 @@
-"""Shoir-IE Venture Studio: durable incubator / investment evidence workspace."""
+"""Shoir-IE Venture Studio: durable incubator / investment evidence workspace.
+
+The workspace is intentionally evidence-first and graph-friendly: persisted commercial facts
+feed the executive charts, readiness diagnostics, value calculations, and investor exports.
+"""
 
 from __future__ import annotations
 
