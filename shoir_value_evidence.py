@@ -244,7 +244,7 @@ def result_button_should_track(label: str = "", button_type: str = "", form_subm
         "recommend", "refresh", "start", "create", "design", "model", "inspect",
         "classify", "benchmark", "check", "map", "route", "plan", "search",
     )
-    return bool(form_submit or any(x in text for x in keywords) or str(button_type).casefold() == "primary")
+    return bool(any(x in text for x in keywords))
 
 def begin_result_timer(module: str, label: str) -> None:
     """Start timing the user's result-generation action."""
@@ -272,16 +272,17 @@ def render_value_receipt(module: str, username: str) -> None:
     traditional_minutes = _safe_float(saved.get("baseline_minutes", profile["baseline_minutes"]))
     traditional_hours = traditional_minutes / 60.0
     time_saved = traditional_hours - (elapsed / 3600.0)
-    saved_positive = max(0.0, time_saved)
-    saved_pct = (saved_positive / traditional_hours * 100.0) if traditional_hours > 0 else 0.0
+    signed_time_delta = time_saved
+    saved_positive = max(0.0, signed_time_delta)
+    saved_pct = abs(signed_time_delta) / traditional_hours * 100.0 if traditional_hours > 0 else 0.0
 
     studies = max(1.0, _safe_float(saved.get("studies_per_year", 1.0), 1.0))
     hourly = _safe_float(saved.get("hourly_rate", 250.0), 250.0)
     if hourly <= 0:
         hourly = 250.0
     currency = str(saved.get("currency", "SAR") or "SAR").upper()
-    annual_hours = saved_positive * studies
-    labor_value = saved_positive * hourly
+    annual_hours = signed_time_delta * studies
+    labor_value = signed_time_delta * hourly
     annual_labor_value = annual_hours * hourly
 
     st.markdown(
@@ -295,12 +296,17 @@ def render_value_receipt(module: str, username: str) -> None:
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Traditional time", f"{traditional_hours:,.2f} h")
     c2.metric("Shoir-IE actual time", f"{elapsed / 3600.0:,.2f} h")
-    c3.metric("Time saved", f"{saved_positive:,.2f} h", delta=f"{saved_pct:,.0f}% less time" if traditional_hours > 0 else None)
-    c4.metric(f"Est. labor value · {currency}", f"{currency} {labor_value:,.0f}")
+    c3.metric(
+        "Time saved",
+        f"{signed_time_delta:,.2f} h",
+        delta=(f"{saved_pct:,.0f}% less time" if signed_time_delta >= 0 else f"{saved_pct:,.0f}% more time"),
+        delta_color=("normal" if signed_time_delta >= 0 else "inverse"),
+    )
+    c4.metric(f"Est. labor-value difference · {currency}", f"{currency} {labor_value:,.0f}")
 
     a1, a2, a3 = st.columns(3)
     a1.metric("Annual capacity released", f"{annual_hours:,.1f} h")
-    a2.metric("Annual labor-value equivalent", f"{currency} {annual_labor_value:,.0f}")
+    a2.metric("Annual labor-value difference", f"{currency} {annual_labor_value:,.0f}")
     a3.metric("Result action", str(run.get("label", "Result generation"))[:55])
 
     with st.expander("Calibrate the traditional-time and money baseline", expanded=False):
@@ -335,8 +341,8 @@ def render_value_receipt(module: str, username: str) -> None:
     st.caption(
         f"Measured at {elapsed:,.2f}s after '{str(run.get('label','result'))[:80]}'. "
         f"Traditional reference: {traditional_minutes:,.0f} min. "
-        f"Time released: {saved_positive:,.2f} h. "
-        f"Money shown is an estimated labor-value equivalent using {currency} {hourly:,.0f}/h."
+        f"Time difference: {signed_time_delta:,.2f} h. "
+        f"Money shown is an estimated labor-value difference using {currency} {hourly:,.0f}/h."
     )
     try:
         record_time_snapshot(
@@ -346,7 +352,7 @@ def render_value_receipt(module: str, username: str) -> None:
             {
                 "baseline_hours": traditional_hours,
                 "shoir_hours": elapsed / 3600.0,
-                "hours_saved": saved_positive,
+                "hours_saved": signed_time_delta,
                 "annual_capacity_hours": annual_hours,
                 "annual_time_value": annual_labor_value,
                 "currency": currency,
