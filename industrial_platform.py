@@ -1509,7 +1509,119 @@ def render_module(module: str, tier: str, username: str):
         if "benchmark_result" in st.session_state: st.dataframe(st.session_state["benchmark_result"],use_container_width=True)
         render_export_bar(module,[("Actual",actual),("Benchmarks",bench),("Comparison",st.session_state.get("benchmark_result",pd.DataFrame()))],tier,username)
     elif module=="Engineering Validation Center":
-        pass
+        st.subheader("✅ Engineering Validation Center")
+        st.caption("Validate structure, required fields, numeric ranges, data quality, model feasibility and result health before using a module output in a decision.")
+        default_validation = st.session_state.setdefault(
+            "validation_df",
+            pd.DataFrame({
+                "Metric":["Cost","Service Level","Capacity","Lead Time"],
+                "Value":[100000,95,12000,7],
+                "Unit":["USD","%","units","days"],
+            }),
+        )
+        validation_df = st.data_editor(
+            default_validation,
+            num_rows="dynamic",
+            use_container_width=True,
+            hide_index=True,
+            key="validation_editor_v2",
+        )
+        st.session_state["validation_df"] = validation_df.copy(deep=True)
+
+        st.markdown("#### Numeric validation limits")
+        default_ranges = st.session_state.setdefault(
+            "validation_ranges_df",
+            pd.DataFrame({
+                "Field":["Value"],
+                "Minimum":[0.0],
+                "Maximum":[1000000.0],
+            }),
+        )
+        ranges_df = st.data_editor(
+            default_ranges,
+            num_rows="dynamic",
+            use_container_width=True,
+            hide_index=True,
+            key="validation_ranges_editor",
+        )
+        st.session_state["validation_ranges_df"] = ranges_df.copy(deep=True)
+
+        if st.button("🔎 Validate dataset & model health", type="primary", use_container_width=True, key="validation_run_v2"):
+            required = ["Metric","Value","Unit"]
+            numeric_ranges = {}
+            for row in ranges_df.to_dict("records"):
+                field = str(row.get("Field","")).strip()
+                if not field:
+                    continue
+                try:
+                    lo = float(row.get("Minimum"))
+                    hi = float(row.get("Maximum"))
+                except (TypeError, ValueError):
+                    continue
+                if lo > hi:
+                    lo, hi = hi, lo
+                numeric_ranges[field] = (lo, hi)
+            result = validate_table(validation_df, required=required, numeric_ranges=numeric_ranges)
+            health = model_health(
+                validation_df,
+                feasible=bool(result["valid"]),
+                solver_status="Validated" if result["valid"] else "Blocked",
+                stability="Assessed from deterministic validation rules",
+                uncertainty="Not assessed unless explicitly recorded",
+                reproducible=True,
+            )
+            st.session_state["validation_result"] = result
+            st.session_state["validation_health"] = health
+
+        result = st.session_state.get("validation_result")
+        health = st.session_state.get("validation_health")
+        if isinstance(result, dict):
+            q = result.get("quality", {})
+            c1,c2,c3,c4 = st.columns(4)
+            c1.metric("Validation", "PASS" if result.get("valid") else "BLOCKED")
+            c2.metric("Data quality", f'{float(q.get("score",0)):.1f}%')
+            c3.metric("Errors", f'{len(result.get("errors",[])):,}')
+            c4.metric("Warnings", f'{len(result.get("warnings",[])):,}')
+
+            if health:
+                health_df = pd.DataFrame([
+                    {"Check":"Data quality","Status":health.get("data_quality","—")},
+                    {"Check":"Feasibility","Status":health.get("feasibility","—")},
+                    {"Check":"Model stability","Status":health.get("model_stability","—")},
+                    {"Check":"Reproducibility","Status":health.get("reproducible","—")},
+                ])
+                st.dataframe(health_df, use_container_width=True, hide_index=True)
+                numeric_health = pd.DataFrame({
+                    "Metric":["Data quality","Errors","Warnings"],
+                    "Value":[
+                        float(q.get("score",0)),
+                        float(len(result.get("errors",[]))),
+                        float(len(result.get("warnings",[]))),
+                    ],
+                })
+                st.plotly_chart(
+                    px.bar(numeric_health, x="Metric", y="Value", title="Validation health overview"),
+                    use_container_width=True,
+                )
+            if result.get("errors"):
+                for item in result["errors"]:
+                    st.error(item)
+            if result.get("warnings"):
+                for item in result["warnings"]:
+                    st.warning(item)
+            if not result.get("errors") and not result.get("warnings"):
+                st.success("No validation errors or data-quality warnings were detected.")
+        st.dataframe(validation_df, use_container_width=True, hide_index=True)
+        render_export_bar(
+            module,
+            [
+                ("Validation Table", validation_df),
+                ("Validation Ranges", ranges_df),
+                ("Validation Health", pd.DataFrame([health]) if isinstance(health, dict) else pd.DataFrame()),
+            ],
+            tier,
+            username=username,
+        )
     elif module=="Advanced Engineering Copilot":
         st.info("Advanced Copilot orchestration is configured through the main AI Copilot module. Use the AI Copilot to approve multi-step workflows; this module exposes governance and execution history.")
         st.write("Available tool families:",[x["name"] for x in PLATFORM_CATALOG if x["tier"] in ("Starter","Mid-Tier Pro","Professional","Enterprise")][:20])
