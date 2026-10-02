@@ -499,6 +499,22 @@ def render_inspector(module: str, username: str, tier: str) -> None:
             st.markdown("**Warnings**")
             for warning in metrics["warnings"]:
                 st.warning(warning)
+
+            snapshot = pd.DataFrame([
+                {"Signal":"Data readiness","Value":f"{metrics['data_readiness']:.1f}%","Evidence":"Deterministic dataset completeness/duplicate checks"},
+                {"Signal":"Provenance","Value":provenance,"Evidence":"Explicit workspace data-state contract"},
+                {"Signal":"Platform health","Value":f"{metrics['platform_health']:.1f}%","Evidence":"Recorded platform health snapshot"},
+                {"Signal":"Verified capabilities","Value":f"{metrics['verified_capabilities']}/{metrics['capabilities']}","Evidence":"Capability evidence matrix"},
+                {"Signal":"Assumptions","Value":str(metrics['assumptions']),"Evidence":"Workspace assumption records"},
+            ])
+            st.download_button(
+                "📥 Export evidence snapshot",
+                data=snapshot.to_csv(index=False).encode("utf-8"),
+                file_name="shoir_ie_knowledge_trust_snapshot.csv",
+                mime="text/csv",
+                use_container_width=True,
+                key="kt_export_snapshot",
+            )
         with st.expander("Provenance details", expanded=False):
             st.json({
                 "state": metrics["provenance"],
