@@ -1186,8 +1186,7 @@ def _render_demo(owner:str)->None:
     step_index = st.selectbox("Demo step", range(len(DEMO_STORY)), format_func=lambda i: story_labels[i], key="venture_demo_step")
     timebox, title, narrative = DEMO_STORY[step_index]
     st.progress((step_index + 1) / len(DEMO_STORY))
-    st.info(f"**{timebox} · {title}**  
-{narrative}")
+    st.info(f"**{timebox} · {title}**\n\n{narrative}")
     if st.button("🚀 Load deterministic demo into Shoir-IE", type="primary", use_container_width=True, key="venture_demo_load"):
         st.session_state["universal_active_dataset"] = data["clean"].copy()
         st.session_state["industrial_workbook_current_df"] = data["clean"].copy()
