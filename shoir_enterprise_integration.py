@@ -7,6 +7,7 @@ an explicit live connector implementation.
 from __future__ import annotations
 
 import io
+import math
 import re
 import sqlite3
 from datetime import datetime, timezone
