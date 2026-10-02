@@ -1477,9 +1477,6 @@ research_pack_features = tier3_features + [
     "🔄 Autonomous Epistemic Cross-Disciplinary Falsification Matrix (AE-FRESM)",
     "Autonomous Cognitive Operations & Zero-Knowledge Mesh (ACO-ZKMS)", "⚡ ACO-ZKMS Master Engine"
 ]
-if is_admin:
-    tier3_features.append("Admin Panel")
-
 if "Research" in tier_val:
     allowed_modules = research_pack_features
 elif "Enterprise Plus" in tier_val or "Industrial Enterprise" in tier_val:
@@ -1492,6 +1489,14 @@ elif "Pro" in tier_val or "Trial" in tier_val:
     allowed_modules = tier2_features
 else:
     allowed_modules = tier1_features
+
+# Administration is an explicit privilege, never a normal tier feature.
+# This prevents stale session state or tier membership from exposing the
+# administrative module to ordinary users.
+if is_admin:
+    allowed_modules = list(allowed_modules)
+    if "Admin Panel" not in allowed_modules:
+        allowed_modules.append("Admin Panel")
 
 # Deep-link compatibility from the existing global product dock.
 if st.session_state.pop("force_workbook_module", False):
@@ -7323,244 +7328,21 @@ if selected_module == "Quality Control, Six Sigma & Reliability":
 
     st.stop()
 # ==============================================================================
-# SHOIR-IE: ELITE FACILITY LAYOUT, MATERIAL HANDLING & WAREHOUSING SUITE (V2.8)
+# SHOIR-IE: FACILITY LAYOUT, MATERIAL HANDLING & WAREHOUSING
 # ==============================================================================
 if selected_module in ["Facility Layout & Warehousing", "Facility Layout, Material Handling & Warehousing"]:
-    
-    import streamlit as st
-    import pandas as pd
-    import plotly.express as px
-    import plotly.graph_objects as go
-    import numpy as np
-
-    # 1. Initialize Session State for Facility Modules with CRUD Support
-    if "facility_depts" not in st.session_state:
-        st.session_state.facility_depts = [
-            {"id": "D1", "name": "Receiving & Unloading", "x": 10, "y": 80, "area_sqm": 450},
-            {"id": "D2", "name": "Raw Material Storage", "x": 30, "y": 80, "area_sqm": 600},
-            {"id": "D3", "name": "CNC Machining Center", "x": 30, "y": 50, "area_sqm": 800},
-            {"id": "D4", "name": "Sub-Assembly Line", "x": 70, "y": 50, "area_sqm": 700},
-            {"id": "D5", "name": "Quality Testing & QC", "x": 70, "y": 20, "area_sqm": 350},
-            {"id": "D6", "name": "Finished Goods & Shipping", "x": 90, "y": 20, "area_sqm": 500}
-        ]
-
-    # 2. Astonishing Glassmorphism Header Banner
-    st.markdown("""
-    <div style="background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #312e81 100%); padding: 30px; border-radius: 16px; color: white; margin-bottom: 24px; box-shadow: 0 10px 25px rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.08);">
-        <div style="display: flex; align-items: center; justify-content: space-between;">
-            <div>
-                <span style="background: rgba(56, 189, 248, 0.25); color: #38bdf8; padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;">Tier 1: Facility Design & Logistics</span>
-                <h1 style="margin:8px 0 4px 0; color: #ffffff; font-size: 26px; font-weight: 800; letter-spacing: -0.025em;">🏭 Facility Layout, Material Handling & SLP Suite</h1>
-                <p style="margin:0; color: #9ca3af; font-size: 13px;">Dynamic CRUD Layout Manager &bull; From-To Flow Matrix &bull; SLP Chart &bull; Warehouse Slotting</p>
-            </div>
-            <div style="background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.4); padding: 8px 16px; border-radius: 30px; color: #34d399; font-weight: 600; font-size: 12px; display: flex; align-items: center; gap: 6px;">
-                <span style="width: 8px; height: 8px; background: #34d399; border-radius: 50%; display: inline-block; box-shadow: 0 0 8px #34d399;"></span> Layout Engine Active
-            </div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    df_layout = pd.DataFrame(st.session_state.facility_depts)
-    total_footprint = df_layout["area_sqm"].sum() if not df_layout.empty else 0
-    dept_count = len(df_layout)
-
-    # 3. Executive KPI Metrics Row
-    c1, c2, c3, c4 = st.columns(4)
-    with c1:
-        st.metric(label="Total Material Handling Cost", value="$14,850 / Mo", delta="-8.4% vs old layout")
-    with c2:
-        st.metric(label="Active Plant Departments", value=f"{dept_count} Depts", delta="Fully Configured")
-    with c3:
-        st.metric(label="Total Plant Footprint", value=f"{total_footprint:,} m²", delta="Optimized Sizing")
-    with c4:
-        st.metric(label="SLP Closeness Rating", value="88.5% (A/E)", delta="World Class Standard")
-
-    st.markdown("<div style='margin: 16px 0;'></div>", unsafe_allow_html=True)
-
-    # 4. Multi-Tab Navigation Architecture
-    tab_fromto, tab_slp, tab_layout, tab_mh, tab_slot = st.tabs([
-        "🔄 From-To Flow Chart", 
-        "📐 Systematic Layout Planning (SLP)", 
-        "🗺️ Facility Block Layout & CRUD", 
-        "🚜 Material Handling Estimator", 
-        "📦 Warehouse ABC Slotting"
-    ])
-
-    # TAB 1: From-To Flow Chart & Load-Distance Matrix
-    with tab_fromto:
-        st.markdown("#### 🔄 From-To Chart & Load-Distance Matrix")
-        st.markdown("""
-        <div style="background: rgba(31, 41, 55, 0.5); padding: 12px; border-radius: 8px; border-left: 3px solid #38bdf8; font-size: 12px; color: #d1d5db; margin-bottom: 16px;">
-            <b>Flow Analysis:</b> Quantifies material movement intensity (loads/day) between departmental pairs to minimize transportation costs.
-        </div>
-        """, unsafe_allow_html=True)
-
-        flow_matrix_data = pd.DataFrame({
-            "From / To": ["Receiving (D1)", "Raw Material (D2)", "CNC Machining (D3)", "Sub-Assembly (D4)", "QC Testing (D5)", "Shipping (D6)"],
-            "D1": [0, 120, 10, 0, 0, 0],
-            "D2": [0, 0, 150, 20, 0, 0],
-            "D3": [0, 0, 0, 180, 15, 0],
-            "D4": [0, 0, 0, 0, 160, 30],
-            "D5": [0, 0, 0, 0, 0, 170],
-            "D6": [0, 0, 0, 0, 0, 0]
-        })
-        st.dataframe(flow_matrix_data, use_container_width=True, hide_index=True)
-
-        flow_summary = pd.DataFrame({
-            "Department Pair": ["D2 -> D3 (Raw to CNC)", "D3 -> D4 (CNC to Assembly)", "D4 -> D5 (Assembly to QC)", "D5 -> D6 (QC to Ship)"],
-            "Daily Load (Units)": [150, 180, 160, 170]
-        })
-        fig_flow = px.bar(flow_summary, x="Department Pair", y="Daily Load (Units)", title="Top High-Volume Inter-Departmental Material Flows")
-        fig_flow.update_layout(plot_bgcolor="#0b0f19", paper_bgcolor="#0b0f19", font=dict(color="#f3f4f6"), height=320)
-        st.plotly_chart(fig_flow, use_container_width=True)
-
-    # TAB 2: Systematic Layout Planning (SLP)
-    with tab_slp:
-        st.markdown("#### 📐 Systematic Layout Planning (SLP) & Relationship Chart (REL)")
-        st.markdown("""
-        <div style="background: rgba(31, 41, 55, 0.5); padding: 12px; border-radius: 8px; border-left: 3px solid #34d399; font-size: 12px; color: #d1d5db; margin-bottom: 16px;">
-            <b>SLP Methodology:</b> Uses Muther's Relationship Chart assigning qualitative closeness values: <b>A</b> (Absolute), <b>E</b> (Especially), <b>I</b> (Important), <b>O</b> (Ordinary), <b>U</b> (Unimportant), <b>X</b> (Undesirable).
-        </div>
-        """, unsafe_allow_html=True)
-
-        rel_data = pd.DataFrame({
-            "Department Pair": ["D1 & D2 (Receiving & Storage)", "D2 & D3 (Storage & Machining)", "D3 & D4 (Machining & Assembly)", "D4 & D5 (Assembly & QC)", "D5 & D6 (QC & Shipping)"],
-            "Closeness Rating": ["A (Absolute)", "A (Absolute)", "E (Especially)", "A (Absolute)", "E (Especially)"],
-            "Score Value": [4, 4, 3, 4, 3],
-            "Primary Reason": ["Material flow continuity", "High transfer volume", "Sequential workflow", "Inspection handoff", "Direct staging"]
-        })
-        st.dataframe(rel_data, use_container_width=True, hide_index=True)
-
-    # TAB 3: Facility Block Layout & Full CRUD Manager
-    with tab_layout:
-        st.markdown("#### 🗺️ 2D Facility Block Layout & Department Manager (CRUD)")
-        st.markdown("""
-        <div style="background: rgba(31, 41, 55, 0.5); padding: 12px; border-radius: 8px; border-left: 3px solid #38bdf8; font-size: 12px; color: #d1d5db; margin-bottom: 16px;">
-            <b>Interactive Layout Engine:</b> View the plant floor map below. Use the management panel on the right to <b>Add</b> a new department, <b>Edit</b> coordinates/area, or <b>Remove</b> a department.
-        </div>
-        """, unsafe_allow_html=True)
-
-        col_map_main, col_map_ctrl = st.columns([2, 1])
-
-        with col_map_main:
-            if not df_layout.empty:
-                fig_map = px.scatter(
-                    df_layout, x="x", y="y", size="area_sqm", color="name", text="id",
-                    title="Plant Floor Departmental Block Layout Topology",
-                    labels={"x": "Plant X-Coordinate (Meters)", "y": "Plant Y-Coordinate (Meters)"}
-                )
-                fig_map.update_traces(textposition="top center", marker=dict(opacity=0.85, line=dict(width=2, color="white")))
-                fig_map.update_layout(plot_bgcolor="#0b0f19", paper_bgcolor="#0b0f19", font=dict(color="#f3f4f6"), height=380)
-                st.plotly_chart(fig_map, use_container_width=True)
-
-                st.markdown("##### Current Department Siting Register")
-                st.dataframe(df_layout.rename(columns={
-                    "id": "Dept ID", "name": "Department Name", "x": "X Coord", "y": "Y Coord", "area_sqm": "Area (m²)"
-                }), use_container_width=True, hide_index=True)
-            else:
-                st.warning("No departments registered on the plant floor. Add one using the control panel.")
-
-        with col_map_ctrl:
-            st.markdown("##### 🛠️ Layout CRUD Controls")
-            action_add, action_edit, action_del = st.tabs(["➕ Add", "✏️ Edit", "🗑️ Remove"])
-
-            # 1. ADD DEPARTMENT
-            with action_add:
-                with st.form("add_dept_form"):
-                    new_id = st.text_input("Dept ID (e.g., D7)", value="D7")
-                    new_name = st.text_input("Department Name", value="Packaging & Palletizing")
-                    new_x = st.slider("X Coordinate", 0, 100, 50, 5)
-                    new_y = st.slider("Y Coordinate", 0, 100, 50, 5)
-                    new_area = st.number_input("Footprint Area (m²)", 50, 5000, 400, 50)
-
-                    if st.form_submit_button("🚀 Add Department", use_container_width=True):
-                        # Check if ID already exists
-                        existing_ids = [d["id"] for d in st.session_state.facility_depts]
-                        if new_id in existing_ids:
-                            st.error(f"Department ID **{new_id}** already exists!")
-                        else:
-                            st.session_state.facility_depts.append({
-                                "id": new_id, "name": new_name, "x": int(new_x), "y": int(new_y), "area_sqm": int(new_area)
-                            })
-                            st.success(f"Department **{new_name} ({new_id})** added successfully!")
-                            st.rerun()
-
-            # 2. EDIT DEPARTMENT
-            with action_edit:
-                with st.form("edit_dept_form"):
-                    dept_ids = [d["id"] for d in st.session_state.facility_depts] if st.session_state.facility_depts else []
-                    selected_id = st.selectbox("Select Dept ID to Edit", dept_ids if dept_ids else ["None"])
-
-                    # Find current values
-                    current_dept = next((d for d in st.session_state.facility_depts if d["id"] == selected_id), None)
-                    
-                    edit_name = st.text_input("New Name", value=current_dept["name"] if current_dept else "")
-                    edit_x = st.slider("New X Coord", 0, 100, int(current_dept["x"]) if current_dept else 50, 5)
-                    edit_y = st.slider("New Y Coord", 0, 100, int(current_dept["y"]) if current_dept else 50, 5)
-                    edit_area = st.number_input("New Area (m²)", 50, 5000, int(current_dept["area_sqm"]) if current_dept else 400, 50)
-
-                    if st.form_submit_button("💾 Save Changes", use_container_width=True):
-                        if selected_id != "None" and current_dept:
-                            for d in st.session_state.facility_depts:
-                                if d["id"] == selected_id:
-                                    d["name"] = edit_name
-                                    d["x"] = int(edit_x)
-                                    d["y"] = int(edit_y)
-                                    d["area_sqm"] = int(edit_area)
-                            st.success(f"Department **{selected_id}** updated successfully!")
-                            st.rerun()
-                        else:
-                            st.warning("No valid department selected.")
-
-            # 3. REMOVE / DECOMMISSION DEPARTMENT
-            with action_del:
-                with st.form("remove_dept_form"):
-                    dept_ids_del = [d["id"] for d in st.session_state.facility_depts] if st.session_state.facility_depts else []
-                    target_to_remove = st.selectbox("Select Dept ID to Remove", dept_ids_del if dept_ids_del else ["None"])
-
-                    if st.form_submit_button("🗑️ Decommission Dept", use_container_width=True):
-                        if dept_ids_del and target_to_remove != "None":
-                            st.session_state.facility_depts = [
-                                d for d in st.session_state.facility_depts if d["id"] != target_to_remove
-                            ]
-                            st.success(f"Department **{target_to_remove}** successfully decommissioned and removed!")
-                            st.rerun()
-                        else:
-                            st.warning("No departments available to remove.")
-
-    # TAB 4: Material Handling Equipment Cost Estimator
-    with tab_mh:
-        st.markdown("#### 🚜 Material Handling Equipment Selector & Cost Estimator")
-        
-        col_m1, col_m2 = st.columns(2)
-        with col_m1:
-            st.markdown("##### Operating Parameters")
-            daily_trips = st.slider("Daily Transfer Trips", 50, 1000, 320, 20)
-            avg_distance_m = st.slider("Average Haul Distance (Meters)", 10, 200, 65, 5)
-            eq_type = st.selectbox("Selected Handling Equipment", ["Autonomous Mobile Robot (AMR)", "Electric Forklift", "Powered Pallet Jack", "Overhead Conveyor Line"])
-            
-        with col_m2:
-            cost_per_meter_trip = 0.04 if "AMR" in eq_type else (0.07 if "Forklift" in eq_type else 0.03)
-            monthly_mh_cost = daily_trips * avg_distance_m * cost_per_meter_trip * 22
-            
-            st.markdown("##### Cost & Efficiency Breakdown")
-            st.metric(label="Estimated Monthly MH Cost", value=f"${monthly_mh_cost:,.2f}", delta="Optimized Route")
-            st.metric(label="Fleet Utilization Rate", value="84.2%", delta="Balanced Workload")
-
-    # TAB 5: Warehouse ABC Slotting Optimization
-    with tab_slot:
-        st.markdown("#### 📦 Warehouse ABC Inventory Slotting & Storage Optimization")
-        
-        slot_data = pd.DataFrame({
-            "Storage Class": ["Class A (High Velocity)", "Class B (Medium Velocity)", "Class C (Low Velocity)"],
-            "SKU Percentage (%)": ["15%", "35%", "50%"],
-            "Picking Activity (%)": ["75%", "20%", "5%"],
-            "Warehouse Zone": ["Zone 1: Golden Zone (Near Dock)", "Zone 2: Mid-Rack Aisles", "Zone 3: High-Bay Upper Racks"]
-        })
-        st.dataframe(slot_data, use_container_width=True, hide_index=True)
-
+    from shoir_facility_layout import render_facility_layout
+    try:
+        render_facility_layout(
+            str(st.session_state.get("user_tier", "Starter Tier")),
+            str(st.session_state.get("current_user", "unknown")),
+        )
+    except Exception as exc:
+        st.error("Facility Layout encountered a recoverable rendering issue.")
+        with st.expander("Facility Layout diagnostic", expanded=False):
+            st.code(f"{type(exc).__name__}: {exc}")
     st.stop()
-    
+
 # ==============================================================================
 # SHOIR-IE: ELITE HUMAN FACTORS, ERGONOMICS & SAFETY ENGINEERING (V3.1)
 # ==============================================================================
@@ -8725,11 +8507,19 @@ if selected_module in ["Green IE & Sustainability", "Sustainability & Circular E
     st.stop()
 
 # ==============================================================================
-# SHOIR-IE: ENTERPRISE INTEGRATION, REPORTING & RBAC SUITE (V4.7 - MASTER)
+# SHOIR-IE: ENTERPRISE INTEGRATION & COLLABORATION
 # ==============================================================================
 if selected_module in ["Enterprise Integration & Collaboration", "Enterprise Integration", "Collaboration Suite"]:
-    # One canonical implementation for connectors, persistence, collaboration and security.
-    _render_post_module_layers("Enterprise Integration & Collaboration")
+    from shoir_enterprise_integration import render_enterprise_integration
+    try:
+        render_enterprise_integration(
+            str(st.session_state.get("user_tier", "Starter Tier")),
+            str(st.session_state.get("current_user", "unknown")),
+        )
+    except Exception as exc:
+        st.error("Enterprise Integration & Collaboration encountered a recoverable rendering issue.")
+        with st.expander("Enterprise Integration diagnostic", expanded=False):
+            st.code(f"{type(exc).__name__}: {exc}")
     st.stop()
 
 def render_data_editor(df, key_name):
