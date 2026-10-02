@@ -18,7 +18,7 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-SHELL_VERSION = "3.0"
+SHELL_VERSION = "3.1"
 
 NAV_GROUPS = {
     "HOME": "⌂ Home",
@@ -499,6 +499,22 @@ def render_inspector(module: str, username: str, tier: str) -> None:
             st.markdown("**Warnings**")
             for warning in metrics["warnings"]:
                 st.warning(warning)
+
+            snapshot = pd.DataFrame([
+                {"Signal":"Data readiness","Value":f"{metrics['data_readiness']:.1f}%","Evidence":"Deterministic dataset completeness/duplicate checks"},
+                {"Signal":"Provenance","Value":provenance,"Evidence":"Explicit workspace data-state contract"},
+                {"Signal":"Platform health","Value":f"{metrics['platform_health']:.1f}%","Evidence":"Recorded platform health snapshot"},
+                {"Signal":"Verified capabilities","Value":f"{metrics['verified_capabilities']}/{metrics['capabilities']}","Evidence":"Capability evidence matrix"},
+                {"Signal":"Assumptions","Value":str(metrics['assumptions']),"Evidence":"Workspace assumption records"},
+            ])
+            st.download_button(
+                "📥 Export evidence snapshot",
+                data=snapshot.to_csv(index=False).encode("utf-8"),
+                file_name="shoir_ie_knowledge_trust_snapshot.csv",
+                mime="text/csv",
+                use_container_width=True,
+                key="kt_export_snapshot",
+            )
         with st.expander("Provenance details", expanded=False):
             st.json({
                 "state": metrics["provenance"],
@@ -718,6 +734,13 @@ def render_application_shell(
     ensure_shell_schema()
     render_shell_css()
 
+    # Defense in depth: the admin navigation and module cannot enter a non-admin session,
+    # even if an older session contains stale allowed_modules state.
+    safe_allowed_modules = tuple(
+        str(x) for x in allowed_modules
+        if is_admin or str(x).strip().casefold() not in {"admin panel", "admin"}
+    )
+    allowed_modules = safe_allowed_modules
     nav_labels = [key for key in NAV_GROUPS.keys() if is_admin or key != "ADMIN"]
     current_section = str(st.session_state.get("shoir_shell_section", "HOME"))
     if not is_admin and current_section == "ADMIN":

@@ -715,40 +715,88 @@ def module_reset(module: str, st) -> None:
             st.session_state.pop(key,None)
 
 def render_module_data_exchange(module: str, st, tier: str, username: str) -> None:
-    slug=_module_slug(module)
-    has_module_tables=any(key in st.session_state for key in MODULE_TABLE_KEYS.get(module,[]))
-    if not has_module_tables:
-        st.markdown("### 📥 First-load Data Import")
-        st.caption("Upload an Excel/CSV file and Shoir-IE will map matching column names into this module's table.")
-        up=st.file_uploader("Import Excel / CSV",type=["xlsx","csv"],key=f"{slug}_first_upload")
+    """Provide one consistent, safe import/activation surface for every module.
+
+    Specialist modules can consume compatible tables through MODULE_TABLE_KEYS;
+    modules without an explicit table contract can still publish the imported
+    frame to the shared industrial dataset used by workbook/Copilot surfaces.
+    """
+    slug = _module_slug(module)
+    table_keys = list(MODULE_TABLE_KEYS.get(module, []))
+    target_exists = any(isinstance(st.session_state.get(key), pd.DataFrame) for key in table_keys)
+
+    with st.expander("📥 Import / activate module data", expanded=not target_exists):
+        st.caption(
+            "Bring Excel, CSV, TSV or TXT data directly into this module. "
+            "Nothing is overwritten until you explicitly apply or activate it."
+        )
+        up = st.file_uploader(
+            "Choose a dataset",
+            type=["xlsx", "xlsm", "xls", "csv", "tsv", "txt"],
+            key=f"{slug}_first_upload",
+            help="Workbook files expose their sheets before activation; delimited files are loaded as a single table.",
+        )
         if up is not None:
             try:
                 from shoir_upgrade import read_uploaded_workbook
-                books=read_uploaded_workbook(up.getvalue(),up.name)
-                sheet=st.selectbox("Sheet",list(books),key=f"{slug}_import_sheet")
-                st.session_state[f"{slug}_import_df"]=books[sheet].copy(deep=True)
-                st.success(f"Loaded {len(books[sheet]):,} rows × {len(books[sheet].columns):,} columns.")
+                books = read_uploaded_workbook(up.getvalue(), up.name)
+                if not books:
+                    raise ValueError("No readable sheets/tables were found in the uploaded file.")
+                sheet = st.selectbox("Source sheet / table", list(books), key=f"{slug}_import_sheet")
+                imported_frame = books[sheet].copy(deep=True)
+                if imported_frame.empty:
+                    st.warning("The selected sheet contains no rows.")
+                else:
+                    st.session_state[f"{slug}_import_df"] = imported_frame
+                    st.session_state[f"{slug}_import_source"] = f"{up.name} · {sheet}"
             except Exception as exc:
-                st.error(f"Import failed safely: {exc}")
-    imported=st.session_state.get(f"{slug}_import_df")
-    if isinstance(imported,pd.DataFrame) and has_module_tables:
-        if st.button("🔄 Apply imported table",use_container_width=True,key=f"{slug}_apply_import"):
-            applied=0
-            for key in MODULE_TABLE_KEYS.get(module,[]):
-                target=st.session_state.get(key)
-                if isinstance(target,pd.DataFrame) and len(set(imported.columns)&set(target.columns)):
-                    st.session_state[key]=align_imported_table(imported,target)
-                    st.session_state.pop(key.replace("_df","_editor"),None)
-                    applied+=1
-            if applied:
-                st.success(f"Imported data applied to {applied} compatible table(s).")
-                st.rerun()
+                st.error(f"Import failed safely: {type(exc).__name__}: {exc}")
+
+        imported = st.session_state.get(f"{slug}_import_df")
+        if isinstance(imported, pd.DataFrame) and not imported.empty:
+            source = st.session_state.get(f"{slug}_import_source", "Imported dataset")
+            st.success(f"{source} · {len(imported):,} rows × {len(imported.columns):,} columns staged.")
+            st.dataframe(imported.head(12), use_container_width=True, hide_index=True)
+
+            actions = st.columns(2)
+            if target_exists:
+                with actions[0]:
+                    if st.button("🔄 Apply to module tables", use_container_width=True, key=f"{slug}_apply_import"):
+                        applied = 0
+                        for key in table_keys:
+                            target = st.session_state.get(key)
+                            if isinstance(target, pd.DataFrame) and len(set(imported.columns) & set(target.columns)):
+                                st.session_state[key] = align_imported_table(imported, target)
+                                st.session_state.pop(key.replace("_df", "_editor"), None)
+                                applied += 1
+                        if applied:
+                            st.session_state["universal_active_dataset"] = imported.copy(deep=True)
+                            st.session_state["industrial_workbook_current_df"] = imported.copy(deep=True)
+                            st.session_state["shoir_data_status"] = "IMPORTED"
+                            st.session_state["shoir_data_source"] = source
+                            st.success(f"Imported data applied to {applied} compatible module table(s).")
+                            st.rerun()
+                        else:
+                            st.warning("The uploaded columns do not match this module's editable tables.")
             else:
-                st.warning("No compatible table was found. Review the expected columns.")
-    st.markdown("### ⚙️ Module Workspace")
-    if st.button("↩️ Reset Entire Module Workspace",use_container_width=True,key=f"{slug}_reset"):
-        module_reset(module,st)
-        st.rerun()
+                with actions[0]:
+                    st.info("This module does not expose a dedicated table contract; the imported data can still drive shared platform analysis.")
+
+            with actions[1]:
+                if st.button("⚡ Activate as shared dataset", type="primary", use_container_width=True, key=f"{slug}_activate_import"):
+                    st.session_state["universal_active_dataset"] = imported.copy(deep=True)
+                    st.session_state["industrial_workbook_current_df"] = imported.copy(deep=True)
+                    st.session_state["shoir_data_status"] = "IMPORTED"
+                    st.session_state["shoir_data_source"] = source
+                    st.session_state["shoir_data_source_key"] = f"module:{slug}"
+                    st.session_state["shoir_data_version"] = f"module-import:{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+                    st.success("Dataset activated in the shared industrial workspace. Downstream shared surfaces can now reuse it.")
+
+    with st.expander("⚙️ Module workspace controls", expanded=False):
+        st.caption("Reset only this module's transient state; durable account, dataset and project records remain untouched.")
+        if st.button("↩️ Reset module workspace", use_container_width=True, key=f"{slug}_reset"):
+            module_reset(module, st)
+            st.rerun()
 
 def ml_demand_forecast(
     df: pd.DataFrame,
@@ -893,13 +941,11 @@ def render_module(module: str, tier: str, username: str):
         render_industrial_workbook(tier, username)
         return
     render_module_data_exchange(module, st, tier, username)
-    render_experience_shell(module, tier, username)
     if module == "Experiment Lab":
         # Experiment Lab is a dedicated research workspace. Its UI and
         # persistence are rendered by render_research_workspace, so do not
         # append the old generic scenario screen underneath it.
         return
-    st.caption("Workflow: Prepare → Validate → Run → Inspect → Explain → Export")
     if module=="Experiment Engine":
         render_experiment_engine(tier, username)
         return
@@ -1511,14 +1557,18 @@ def render_module(module: str, tier: str, username: str):
     elif module=="Engineering Validation Center":
         st.subheader("✅ Engineering Validation Center")
         st.caption("Validate structure, required fields, numeric ranges, data quality, model feasibility and result health before using a module output in a decision.")
-        default_validation = st.session_state.setdefault(
-            "validation_df",
-            pd.DataFrame({
-                "Metric":["Cost","Service Level","Capacity","Lead Time"],
-                "Value":[100000,95,12000,7],
-                "Unit":["USD","%","units","days"],
-            }),
-        )
+        staged_validation = st.session_state.get(f"{_module_slug(module)}_import_df")
+        if "validation_df" not in st.session_state:
+            st.session_state["validation_df"] = (
+                staged_validation.copy(deep=True)
+                if isinstance(staged_validation, pd.DataFrame) and not staged_validation.empty
+                else pd.DataFrame({
+                    "Metric":["Cost","Service Level","Capacity","Lead Time"],
+                    "Value":[100000,95,12000,7],
+                    "Unit":["USD","%","units","days"],
+                })
+            )
+        default_validation = st.session_state["validation_df"]
         validation_df = st.data_editor(
             default_validation,
             num_rows="dynamic",
@@ -1736,4 +1786,5 @@ def render_module(module: str, tier: str, username: str):
             st.dataframe(audit,use_container_width=True,hide_index=True)
             render_export_bar(module,[("Roles",role),("Security Events",audit)],tier,username)
     else:
+        render_experience_shell(module, tier, username)
         render_blank_module_studio(module, tier, username)

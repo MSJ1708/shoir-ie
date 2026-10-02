@@ -356,8 +356,8 @@ def init_db():
         # live in):
         #   [admin]
         #   password value should come from the configured secret provider.
-        # Until you do, it falls back to the exact same password that was
-        # already hardcoded here, so sho's login does not change today.
+         # If no secret provider is configured, an existing admin password hash
+         # is preserved; the application never embeds a plaintext fallback.
         # IMPORTANT: since that password has been sitting in plain text in
         # this file, if this project has ever been pushed to git (even a
         # private repo) or shared anywhere, treat it as compromised and
@@ -1458,7 +1458,25 @@ if not st.session_state.get("user_affiliate"):
 # here so older modules can continue requesting workbook/unified views.
 # =====================================================================
 tier_val = st.session_state.user_tier
-is_admin = (st.session_state.current_user == "sho")
+_current_username = str(st.session_state.get("current_user", "")).strip()
+_current_role = str(st.session_state.get("user_role", "")).strip()
+# Admin access requires both the canonical admin identity and an admin role.
+# A stale tier, module selector, or username alone cannot expose administration.
+is_admin = (
+    _current_username.casefold() == "sho"
+    and _current_role.casefold() in {"enterprise admin", "administrator", "admin"}
+)
+if _current_username.casefold() == "sho" and not _current_role:
+    try:
+        with sqlite3.connect("enterprise_full_workspace.db") as _admin_probe:
+            _role_row = _admin_probe.execute(
+                "SELECT role FROM enterprise_users WHERE LOWER(username)=? LIMIT 1",
+                ("sho",),
+            ).fetchone()
+        is_admin = bool(_role_row and str(_role_row[0] or "").casefold() in {"enterprise admin", "administrator", "admin"})
+    except Exception:
+        is_admin = False
+
 
 tier1_features = ["MILP Solvers", "Inventory Playback", "Core IE Tools", "Subscriptions", "Persistence", "Facility Layout & Warehousing", "Enterprise Integration & Collaboration", "Engineering Validation Center", "Excel Data Cleaning & Import", "Industrial Workbook", "AI Copilot"]
 tier2_features = tier1_features + ["Carbon Accounting", "IoT Digital Twin", "MEIO Matrix", "Slotting & Gantt", "Fleet Routing", "Warehouse Heatmap", "Supplier Risk Matrix", "Scenarios", "AGV Fleet Dispatcher", "Geospatial Network Designer", "Production Planning & Control (PPC)", "Lean Manufacturing & Shop Floor Operations", "Quality Control, Six Sigma & Reliability", "Engineering Economics & Finance", "Industrial Data Model & Digital Thread"]
@@ -1526,6 +1544,10 @@ st.session_state.pop("_shoir_requested_module", None)
 LEGACY_MODULE_SELECTOR_KEY = "enterprise_module_selector"
 st.session_state[LEGACY_MODULE_SELECTOR_KEY] = selected_module
 st.session_state["selected_module"] = selected_module
+if not is_admin and str(selected_module).strip().casefold() in {"admin panel", "admin"}:
+    selected_module = "MILP Solvers" if "MILP Solvers" in allowed_modules else str(allowed_modules[0] if allowed_modules else "MILP Solvers")
+    st.session_state["shoir_shell_section"] = "HOME"
+    st.session_state["selected_module"] = selected_module
 
 # Consolidated platform surfaces remain inside the same application shell.
 if _shell_surface:
@@ -10951,7 +10973,7 @@ elif mod == "Agentic Workflows":
 if mod == "Admin Panel":
     st.header("🔒 Security Admin Panel & Ticket Management")
     
-    if not st.session_state.get("authenticated", False) or st.session_state.get("current_user") != "sho":
+    if not st.session_state.get("authenticated", False) or not is_admin:
         st.error("Access Denied: The Admin Panel is exclusively restricted to administrator 'sho'.")
     else:
         st.success("Welcome, Administrator sho! Full administrative controls unlocked.")

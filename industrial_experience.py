@@ -1817,7 +1817,8 @@ def render_experience_shell(module: str, tier: str, username: str) -> None:
             "SELECT COUNT(*) FROM experience_jobs WHERE owner=? AND status IN ('Queued','Running')", (username,)
         ).fetchone()[0])
 
-    sample = _starter_data(module)
+    active = st.session_state.get("universal_active_dataset")
+    sample = active.copy(deep=True) if isinstance(active, pd.DataFrame) and not active.empty else _starter_data(module)
     result = generic_result(sample)
 
     st.markdown(
@@ -1921,37 +1922,12 @@ def render_blank_module_studio(module: str, tier: str, username: str) -> None:
     ensure_experience_db()
     key = _safe_key(module)
     data_key = "sx_blank_data_" + key
+    active = st.session_state.get("universal_active_dataset")
     if data_key not in st.session_state:
-        st.session_state[data_key] = _starter_data(module)
-
-    upload = st.file_uploader(
-        "📥 Import module data (Excel / CSV / TSV)",
-        type=["xlsx","xlsm","xls","csv","tsv"],
-        key="sx_blank_upload_" + key,
-        help="Import a dataset into this module canvas. The editor and charts below update from the imported table.",
-    )
-    if upload is not None:
-        try:
-            raw = upload.getvalue()
-            if str(upload.name).lower().endswith(".csv"):
-                imported = pd.read_csv(io.BytesIO(raw))
-            elif str(upload.name).lower().endswith(".tsv"):
-                imported = pd.read_csv(io.BytesIO(raw), sep="\t")
-            else:
-                imported = pd.read_excel(io.BytesIO(raw))
-            if imported.empty:
-                st.warning("The imported file contained no rows.")
-            else:
-                st.session_state[data_key] = imported.copy(deep=True)
-                st.session_state["universal_active_dataset"] = imported.copy(deep=True)
-                st.session_state["industrial_workbook_current_df"] = imported.copy(deep=True)
-                st.session_state["shoir_data_status"] = "IMPORTED"
-                st.session_state["shoir_data_source_key"] = "upload"
-                st.session_state["shoir_data_source"] = str(upload.name)
-                st.success(f"Imported {len(imported):,} rows × {len(imported.columns):,} columns from {upload.name}.")
-                st.rerun()
-        except Exception as exc:
-            st.error(f"Module data import failed safely: {type(exc).__name__}: {exc}")
+        if isinstance(active, pd.DataFrame) and not active.empty:
+            st.session_state[data_key] = active.copy(deep=True)
+        else:
+            st.session_state[data_key] = _starter_data(module)
 
     df = st.data_editor(
         st.session_state[data_key],
