@@ -19,6 +19,8 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
 import streamlit as st
 
 from industrial_experience import ensure_experience_db
@@ -28,6 +30,16 @@ PILOT_STAGES = ["Discovery", "Baseline", "Pilot Setup", "Deployment", "Measureme
 PILOT_STATUSES = ["Active", "Complete", "Converted", "Paused", "Not Proceeding"]
 CONFIDENCE = ["Low", "Medium", "High", "Audited"]
 ARTIFACT_CATEGORIES = ["Product", "Problem", "Market", "Customer Evidence", "Pilots", "ROI", "Traction", "Roadmap", "Security", "Financial Model"]
+DEMO_STORY = [
+    ("01 · 0:00–1:00", "Raw workbook", "Start with the messy operational workbook and expose missing values and duplicate rows."),
+    ("02 · 1:00–2:00", "Data quality", "Show the evidence-preserving cleanup: findings first, remediation second, activated dataset third."),
+    ("03 · 2:00–3:00", "Industrial Workbook", "Move into Inputs → Data → Calculations → KPIs → Simulation → Optimization → Scenarios → Decisions → Dashboard."),
+    ("04 · 3:00–4:00", "Facility / Flow", "Trace material movement through a compact Sankey-style process path."),
+    ("05 · 4:00–5:00", "Scenario comparison", "Compare baseline and alternative operating states using the same deterministic dataset."),
+    ("06 · 5:00–6:00", "Value evidence", "Show measured baseline/post logic and an illustrative value bridge without claiming universal savings."),
+    ("07 · 6:00–7:00", "Decision / report", "Close with a reproducible executive report and a clear handoff into real customer evidence."),
+]
+
 VALUE_METRIC_TEMPLATES = [
     ("Hours saved", "Time", "lower_is_better", "hours"),
     ("Planning-cycle time reduced", "Time", "lower_is_better", "hours"),
@@ -177,6 +189,19 @@ def _safe_float(value: Any, fallback: float = 0.0) -> float:
         return fallback
 
 
+def _optional_float(value: Any) -> float | None:
+    """Parse a numeric value while preserving an unmeasured/blank state as None."""
+    if value is None:
+        return None
+    if isinstance(value, str) and not value.strip():
+        return None
+    try:
+        x = float(value)
+        return x if math.isfinite(x) else None
+    except Exception:
+        return None
+
+
 def _maybe_first_result(owner: str) -> None:
     """Record first successful Venture Studio result once per session."""
     if st.session_state.get("venture_first_result_recorded"):
@@ -202,50 +227,129 @@ def track_event(owner: str, event_type: str, feature: str = "", value: float | N
         pass
 
 
-def value_calculation(row: pd.Series | dict[str, Any]) -> dict[str, float]:
+def value_calculation(row: pd.Series | dict[str, Any]) -> dict[str, Any]:
+    """Calculate measured operational effect without inventing missing measurements."""
     d = row.to_dict() if isinstance(row, pd.Series) else dict(row)
-    baseline = _safe_float(d.get("baseline_value", d.get("Baseline")))
-    post = _safe_float(d.get("post_value", d.get("Post")))
-    frequency = max(0.0, _safe_float(d.get("frequency_per_year", d.get("Frequency / year")), 1.0))
-    unit_value = max(0.0, _safe_float(d.get("unit_value", d.get("Unit value")), 0.0))
-    implementation = max(0.0, _safe_float(d.get("implementation_cost", 0.0), 0.0))
-    direction = str(d.get("direction", d.get("Direction", "lower_is_better")))
-    effect = (baseline - post) if direction == "lower_is_better" else (post - baseline)
+    baseline = _optional_float(d.get("baseline_value", d.get("Baseline")))
+    post = _optional_float(d.get("post_value", d.get("Post")))
+    frequency_raw = _optional_float(d.get("frequency_per_year", d.get("Frequency / year")))
+    frequency = max(0.0, frequency_raw if frequency_raw is not None else 1.0)
+    unit_value_raw = _optional_float(d.get("unit_value", d.get("Unit value")))
+    unit_value = max(0.0, unit_value_raw) if unit_value_raw is not None else None
+    implementation_raw = _optional_float(d.get("implementation_cost", 0.0))
+    implementation = max(0.0, implementation_raw if implementation_raw is not None else 0.0)
+    direction = str(d.get("direction", d.get("Direction", "lower_is_better"))).strip().lower()
+
+    valid = baseline is not None and post is not None and direction in {"lower_is_better", "higher_is_better"}
+    effect = 0.0
+    if valid:
+        effect = (baseline - post) if direction == "lower_is_better" else (post - baseline)
+    annualized_effect = effect * frequency if valid else 0.0
+    economic_value = annualized_effect * unit_value if valid and unit_value is not None else 0.0
+
     return {
+        "valid": 1.0 if valid else 0.0,
+        "priced": 1.0 if valid and unit_value is not None else 0.0,
         "delta": effect,
-        "annualized_effect": effect * frequency,
-        "economic_value": effect * frequency * unit_value,
+        "annualized_effect": annualized_effect,
+        "economic_value": economic_value,
         "implementation_cost": implementation,
+        "currency": str(d.get("currency", d.get("Currency", "")) or "").strip().upper(),
     }
 
 
 def quality_evidence_calculation(row: pd.Series | dict[str, Any]) -> dict[str, float]:
     d = row.to_dict() if isinstance(row, pd.Series) else dict(row)
-    detected = max(0.0, _safe_float(d.get("issues_detected", d.get("Issues detected", 0.0))))
-    confirmed = max(0.0, _safe_float(d.get("issues_confirmed", d.get("Issues confirmed", 0.0))))
+    detected_raw = _optional_float(d.get("issues_detected", d.get("Issues detected")))
+    confirmed_raw = _optional_float(d.get("issues_confirmed", d.get("Issues confirmed")))
     baseline = _optional_float(d.get("baseline_rework_hours", d.get("Baseline rework hours")))
     post = _optional_float(d.get("post_rework_hours", d.get("Post rework hours")))
+    detected = max(0.0, detected_raw if detected_raw is not None else 0.0)
+    confirmed = max(0.0, confirmed_raw if confirmed_raw is not None else 0.0)
     rate = (detected / confirmed * 100.0) if confirmed > 0 else 0.0
     avoided = (baseline - post) if baseline is not None and post is not None else 0.0
-    return {"error_detection_rate_percent": rate, "rework_avoided_hours": avoided}
+    return {
+        "error_detection_rate_percent": rate,
+        "rework_avoided_hours": avoided,
+    }
 
-def value_summary(values: pd.DataFrame) -> dict[str, float]:
+
+def value_summary(values: pd.DataFrame) -> dict[str, Any]:
+    """Summarize measured value and block silent aggregation of mixed currencies."""
+    empty = {
+        "measured_rows": 0.0,
+        "priced_rows": 0.0,
+        "annualized_benefit": 0.0,
+        "implementation_cost": 0.0,
+        "net_value": 0.0,
+        "roi_percent": 0.0,
+        "payback_months": 0.0,
+        "currency": "",
+        "mixed_currency": 0.0,
+    }
     if values.empty:
-        return {"measured_rows": 0.0, "priced_rows": 0.0, "annualized_benefit": 0.0, "implementation_cost": 0.0, "net_value": 0.0, "roi_percent": 0.0, "payback_months": 0.0}
+        return empty
+
     calc = values.apply(value_calculation, axis=1, result_type="expand")
-    valid_mask = calc["valid"] > 0
+    valid_mask = calc["valid"].gt(0)
     valid = calc.loc[valid_mask]
-    if "unit_value" in values.columns:
-        priced_mask = values.reset_index(drop=True).loc[valid_mask.to_numpy(), "unit_value"].map(_optional_float).notna().to_numpy()
-        priced = valid.loc[priced_mask]
+
+    unit_col = "unit_value" if "unit_value" in values.columns else "Unit value" if "Unit value" in values.columns else None
+    currency_col = "currency" if "currency" in values.columns else "Currency" if "Currency" in values.columns else None
+    if unit_col is not None:
+        priced_mask = valid_mask & values[unit_col].map(_optional_float).notna()
+        priced = calc.loc[priced_mask]
     else:
-        priced = valid.iloc[0:0]
-    benefit = float(priced["economic_value"].sum()) if not priced.empty else 0.0
+        priced_mask = pd.Series(False, index=values.index)
+        priced = calc.iloc[0:0]
+
+    currencies: list[str] = []
+    if currency_col is not None and not priced.empty:
+        currencies = sorted({
+            str(x).strip().upper()
+            for x in values.loc[priced_mask, currency_col].tolist()
+            if str(x).strip()
+        })
+    mixed_currency = len(currencies) > 1
+
+    benefit = 0.0 if mixed_currency else float(priced["economic_value"].sum())
     implementation = float(valid["implementation_cost"].max()) if not valid.empty else 0.0
     net = benefit - implementation
-    roi = (net / implementation * 100.0) if implementation > 0 and benefit != 0 else 0.0
-    payback = (implementation / (benefit / 12.0)) if benefit > 0 and implementation > 0 else 0.0
-    return {"measured_rows": float(len(valid)), "priced_rows": float(len(priced)), "annualized_benefit": benefit, "implementation_cost": implementation, "net_value": net, "roi_percent": roi, "payback_months": payback}
+    roi = (net / implementation * 100.0) if implementation > 0 and benefit != 0 and not mixed_currency else 0.0
+    payback = (implementation / (benefit / 12.0)) if benefit > 0 and implementation > 0 and not mixed_currency else 0.0
+    currency = "MIXED" if mixed_currency else (currencies[0] if currencies else "")
+
+    return {
+        "measured_rows": float(len(valid)),
+        "priced_rows": float(len(priced)),
+        "annualized_benefit": benefit,
+        "implementation_cost": implementation,
+        "net_value": net,
+        "roi_percent": roi,
+        "payback_months": payback,
+        "currency": currency,
+        "mixed_currency": 1.0 if mixed_currency else 0.0,
+    }
+
+
+def _style_fig(fig: go.Figure, height: int = 320) -> go.Figure:
+    fig.update_layout(
+        height=height,
+        margin=dict(l=20, r=20, t=54, b=20),
+        template="plotly_white",
+        hoverlabel=dict(namelength=-1),
+    )
+    return fig
+
+
+def _show_fig(fig: go.Figure, height: int = 320, title: str = "") -> None:
+    if title:
+        fig.update_layout(title=dict(text=html.escape(title), x=0.0, xanchor="left"))
+    st.plotly_chart(
+        _style_fig(fig, height),
+        use_container_width=True,
+        config={"displaylogo": False, "responsive": True},
+    )
 
 def _customer_df(owner: str) -> pd.DataFrame:
     return _query(
@@ -315,6 +419,90 @@ def _render_header(owner: str) -> None:
     c4.metric("Controlled artifacts", f"{artifact_count:,}")
 
 
+def _render_overview(owner: str) -> None:
+    """Executive evidence cockpit: show the venture proof chain without inventing traction."""
+    customers = int(_scalar("SELECT COUNT(*) FROM venture_customers WHERE owner=?", (owner,)))
+    pilots = int(_scalar("SELECT COUNT(*) FROM venture_pilots WHERE owner=?", (owner,)))
+    completed = int(_scalar("SELECT COUNT(*) FROM venture_pilots WHERE owner=? AND status IN ('Complete','Converted')", (owner,)))
+    hypotheses = int(_scalar("SELECT COUNT(*) FROM venture_hypotheses WHERE owner=?", (owner,)))
+    evidence = int(_scalar("SELECT COUNT(*) FROM venture_evidence WHERE owner=?", (owner,)))
+    value_rows = int(_scalar("SELECT COUNT(*) FROM venture_value_measurements WHERE owner=?", (owner,)))
+    artifacts = int(_scalar("SELECT COUNT(*) FROM venture_artifacts WHERE owner=?", (owner,)))
+    cases = int(_scalar("SELECT COUNT(*) FROM venture_case_studies WHERE owner=?", (owner,)))
+
+    metrics = [
+        ("Customers", customers),
+        ("Active pilots", max(0, pilots - completed)),
+        ("Completed pilots", completed),
+        ("Hypotheses", hypotheses),
+        ("Evidence", evidence),
+        ("Value rows", value_rows),
+        ("Artifacts", artifacts),
+        ("Case studies", cases),
+    ]
+    cards = st.columns(4)
+    for i, (label, value) in enumerate(metrics):
+        cards[i % 4].metric(label, f"{value:,}")
+
+    pipeline = pd.DataFrame(
+        {
+            "Proof stage": ["Customers", "Pilots", "Completed pilots", "Hypotheses", "Evidence", "Measured value", "Controlled artifacts", "Case studies"],
+            "Records": [customers, pilots, completed, hypotheses, evidence, value_rows, artifacts, cases],
+        }
+    )
+    _show_fig(
+        px.bar(pipeline, x="Records", y="Proof stage", orientation="h", text="Records", range_x=[0, max(1, int(pipeline["Records"].max()))]),
+        360,
+        "Venture proof pipeline",
+    )
+
+    c1, c2 = st.columns(2)
+    with c1:
+        stages = _query("SELECT stage FROM venture_pilots WHERE owner=?", (owner,))
+        if not stages.empty:
+            stage_counts = stages["stage"].value_counts().reindex(PILOT_STAGES).fillna(0).reset_index()
+            stage_counts.columns = ["Stage", "Pilots"]
+            _show_fig(px.bar(stage_counts, x="Stage", y="Pilots", text="Pilots"), 300, "Pilot stage distribution")
+    with c2:
+        confidence = _query("SELECT confidence FROM venture_evidence WHERE owner=? AND confidence IS NOT NULL AND TRIM(confidence)<>''", (owner,))
+        if not confidence.empty:
+            confidence_counts = confidence["confidence"].value_counts().reindex(CONFIDENCE).fillna(0).reset_index()
+            confidence_counts.columns = ["Confidence", "Evidence"]
+            _show_fig(px.bar(confidence_counts, x="Confidence", y="Evidence", text="Evidence"), 300, "Evidence confidence mix")
+
+    values = _query("SELECT * FROM venture_value_measurements WHERE owner=?", (owner,))
+    summary = value_summary(values)
+    if summary["mixed_currency"]:
+        st.warning("Value evidence contains multiple currencies. Economic benefit, ROI and payback are intentionally withheld until the value set is currency-consistent.")
+    elif summary["priced_rows"] > 0:
+        st.metric(
+            f"Measured annualized benefit · {summary['currency'] or 'currency'}",
+            f"{summary['annualized_benefit']:,.2f}",
+        )
+        value_chart = values.copy()
+        value_chart["Value"] = pd.to_numeric(value_chart["economic_value"], errors="coerce")
+        value_chart = value_chart.dropna(subset=["Value"]).loc[value_chart["Value"] != 0].head(12)
+        if not value_chart.empty:
+            _show_fig(px.bar(value_chart, x="Value", y="metric", orientation="h", text="Value"), 330, "Measured economic value")
+
+    actions: list[dict[str, str]] = []
+    customer_actions = _query(
+        "SELECT target_customer AS Record, next_action AS NextAction FROM venture_customers WHERE owner=? AND TRIM(COALESCE(next_action,''))<>''",
+        (owner,),
+    )
+    pilot_actions = _query(
+        "SELECT title AS Record, next_action AS NextAction FROM venture_pilots WHERE owner=? AND TRIM(COALESCE(next_action,''))<>''",
+        (owner,),
+    )
+    for _, row in pd.concat([customer_actions, pilot_actions], ignore_index=True).head(8).iterrows():
+        actions.append({"Record": str(row.get("Record", "")), "Next action": str(row.get("NextAction", ""))})
+    if actions:
+        st.markdown("#### Next-action queue")
+        st.dataframe(pd.DataFrame(actions), use_container_width=True, hide_index=True)
+    else:
+        st.info("No next actions are recorded yet. Add a customer or pilot follow-up to make the operating queue actionable.")
+
+
 def _render_customer(owner: str) -> None:
     st.markdown("### 👥 Customer & Stakeholder Hub")
     st.caption("Customer records capture the problem, workaround, process burden, buying path, objections, requested features, pilot status and source metadata.")
@@ -324,12 +512,14 @@ def _render_customer(owner: str) -> None:
         c1, c2 = st.columns(2)
         pain_plot = df[["target_customer", "pain_severity"]].copy()
         pain_plot["target_customer"] = pain_plot["target_customer"].fillna("Unnamed").astype(str)
-        _show_fig(px.bar(pain_plot, x="target_customer", y="pain_severity", text="pain_severity"), 300, "Pain severity by stakeholder")
+        with c1:
+            _show_fig(px.bar(pain_plot, x="target_customer", y="pain_severity", text="pain_severity"), 300, "Pain severity by stakeholder")
         scatter = df[["pain_severity", "current_process_time_hours"]].apply(pd.to_numeric, errors="coerce").dropna()
-        if len(scatter) >= 2:
-            _show_fig(px.scatter(scatter, x="current_process_time_hours", y="pain_severity"), 300, "Pain vs current process burden")
-        else:
-            c2.info("Add at least two customer records with process time to activate the burden relationship chart.")
+        with c2:
+            if len(scatter) >= 2:
+                _show_fig(px.scatter(scatter, x="current_process_time_hours", y="pain_severity"), 300, "Pain vs current process burden")
+            else:
+                st.info("Add at least two customer records with process time to activate the burden relationship chart.")
     options = ["➕ New customer"] + ([] if df.empty else [str(x) for x in df["customer_id"]])
     selected = st.selectbox("Customer record", options, key="venture_customer_select")
     existing = _customer_record(owner, None if selected.startswith("➕") else selected)
@@ -529,7 +719,25 @@ def _render_hypothesis_evidence(owner: str) -> None:
 
 
 def _default_value_table() -> pd.DataFrame:
-    return pd.DataFrame([{"Metric":m,"Category":c,"Direction":d,"Unit":u,"Baseline":0.0,"Post":0.0,"Frequency / year":1.0,"Unit value":0.0,"Currency":"SAR","Source ref":"","Source date":"","Confidence":"Medium","Notes":""} for m,c,d,u in VALUE_METRIC_TEMPLATES])
+    """Return blank measurement fields so zero is never confused with an unmeasured value."""
+    return pd.DataFrame([
+        {
+            "Metric": m,
+            "Category": c,
+            "Direction": d,
+            "Unit": u,
+            "Baseline": np.nan,
+            "Post": np.nan,
+            "Frequency / year": 1.0,
+            "Unit value": np.nan,
+            "Currency": "SAR",
+            "Source ref": "",
+            "Source date": "",
+            "Confidence": "Medium",
+            "Notes": "",
+        }
+        for m, c, d, u in VALUE_METRIC_TEMPLATES
+    ])
 
 
 def _render_value_evidence(owner: str) -> None:
@@ -564,9 +772,15 @@ def _render_value_evidence(owner: str) -> None:
         c1,c2,c3,c4,c5=st.columns(5)
         c1.metric("Measured rows",f"{s['measured_rows']:.0f}")
         c2.metric("Priced rows",f"{s['priced_rows']:.0f}")
-        c3.metric("Annualized benefit",f"{s['annualized_benefit']:,.2f} SAR")
-        c4.metric("Pilot ROI",f"{s['roi_percent']:,.1f}%" if s["implementation_cost"] > 0 and s["annualized_benefit"] != 0 else "N/A")
-        c5.metric("Payback",f"{s['payback_months']:,.1f} months" if s["payback_months"] else "N/A")
+        if s["mixed_currency"]:
+            c3.metric("Annualized benefit", "N/A · mixed currency")
+            c4.metric("Pilot ROI", "N/A")
+            c5.metric("Payback", "N/A")
+        else:
+            currency_label = s["currency"] or "currency"
+            c3.metric(f"Annualized benefit · {currency_label}", f"{s['annualized_benefit']:,.2f}")
+            c4.metric("Pilot ROI", f"{s['roi_percent']:,.1f}%" if s["implementation_cost"] > 0 and s["annualized_benefit"] != 0 else "N/A")
+            c5.metric("Payback", f"{s['payback_months']:,.1f} months" if s["payback_months"] else "N/A")
         valid_plot=norm.copy()
         valid_plot["baseline_value"]=pd.to_numeric(valid_plot["baseline_value"],errors="coerce")
         valid_plot["post_value"]=pd.to_numeric(valid_plot["post_value"],errors="coerce")
@@ -604,7 +818,7 @@ def _render_value_evidence(owner: str) -> None:
         msg="Customer-specific value evidence saved."
         if skipped: msg += f" {skipped} incomplete rows were not stored because baseline/post and source reference are required."
         st.success(msg); st.rerun()
-    st.markdown('<div class="venture-note">ROI = (verified annualized economic benefit − implementation cost) / implementation cost. Payback uses the same measured annualized benefit. Replace every input with pilot data before presenting ROI.</div>',unsafe_allow_html=True)
+    st.markdown('<div class="venture-note">ROI = (verified annualized economic benefit − implementation cost) / implementation cost. Payback uses the same measured annualized benefit. Mixed currencies are blocked. Replace every input with pilot data before presenting ROI.</div>',unsafe_allow_html=True)
 
 
     st.markdown("#### 🧪 Error detection & rework evidence")
@@ -854,6 +1068,13 @@ def _render_demo(owner:str)->None:
         track_event(owner,"demo_viewed","End-to-End Demo Mode")
         st.session_state["venture_demo_viewed"]=True
     data=_demo_data()
+    st.markdown("#### 7-minute presenter controller")
+    story_labels = [f"{i+1}. {title} · {timebox}" for i, (timebox, title, _) in enumerate(DEMO_STORY)]
+    step_index = st.selectbox("Demo step", range(len(DEMO_STORY)), format_func=lambda i: story_labels[i], key="venture_demo_step")
+    timebox, title, narrative = DEMO_STORY[step_index]
+    st.progress((step_index + 1) / len(DEMO_STORY))
+    st.info(f"**{timebox} · {title}**  
+{narrative}")
     if st.button("🚀 Load deterministic demo into Shoir-IE", type="primary", use_container_width=True, key="venture_demo_load"):
         st.session_state["universal_active_dataset"] = data["clean"].copy()
         st.session_state["industrial_workbook_current_df"] = data["clean"].copy()
