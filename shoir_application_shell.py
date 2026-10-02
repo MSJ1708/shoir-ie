@@ -47,7 +47,7 @@ MODULE_GROUP_RULES = (
     ("Research", ("research", "experiment", "hypothesis", "regression", "paper", "latex", "literature", "falsification", "isomorphism", "zero-knowledge", "quantum-classical")),
     ("AI & Automation", ("copilot", "agentic", "automation", "ai")),
     ("Operations", ("control center", "control tower", "execution", "mes", "connectivity", "iot", "telemetry")),
-    ("Platform & Governance", ("admin", "security", "governance", "persistence", "rbac", "benchmark", "digital thread", "decision")),
+    ("Platform & Governance", ("admin", "security", "governance", "persistence", "rbac", "benchmark", "digital thread", "decision", "venture")),
 )
 
 PROVENANCE_STATES = ("LIVE", "IMPORTED", "SIMULATED", "DEMO")
