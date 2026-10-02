@@ -53,7 +53,28 @@ from shoir_adoption_engine import render_adoption_center
 from shoir_universal_engine import render_universal_engine_surface, postflight_contract
 from shoir_commercial import render_module_enrichment
 from shoir_value_evidence import render_value_pulse, ensure_value_evidence_db, result_button_should_track, begin_result_timer, render_value_receipt
-\n# Central result-action timer: every result-generating button starts a run clock.\nif not st.session_state.get("_shoir_value_controls_wrapped"):\n    _shoir_original_button = st.button\n    _shoir_original_form_submit = st.form_submit_button\n\n    def _shoir_tracked_button(label, *args, **kwargs):\n        clicked = _shoir_original_button(label, *args, **kwargs)\n        if clicked and result_button_should_track(label, kwargs.get("type", ""), form_submit=False):\n            begin_result_timer(st.session_state.get("selected_module", "Default"), label)\n        return clicked\n\n    def _shoir_tracked_form_submit(label="Submit", *args, **kwargs):\n        submitted = _shoir_original_form_submit(label, *args, **kwargs)\n        if submitted and result_button_should_track(label, kwargs.get("type", ""), form_submit=True):\n            begin_result_timer(st.session_state.get("selected_module", "Default"), label)\n        return submitted\n\n    st.button = _shoir_tracked_button\n    st.form_submit_button = _shoir_tracked_form_submit\n    st.session_state["_shoir_value_controls_wrapped"] = True\nfrom shoir_venture_studio import render_venture_studio
+
+# Central result-action timer: every result-generating button starts a run clock.
+if not st.session_state.get("_shoir_value_controls_wrapped"):
+    _shoir_original_button = st.button
+    _shoir_original_form_submit = st.form_submit_button
+
+    def _shoir_tracked_button(label, *args, **kwargs):
+        clicked = _shoir_original_button(label, *args, **kwargs)
+        if clicked and result_button_should_track(label, kwargs.get("type", ""), form_submit=False):
+            begin_result_timer(st.session_state.get("selected_module", "Default"), label)
+        return clicked
+
+    def _shoir_tracked_form_submit(label="Submit", *args, **kwargs):
+        submitted = _shoir_original_form_submit(label, *args, **kwargs)
+        if submitted and result_button_should_track(label, kwargs.get("type", ""), form_submit=True):
+            begin_result_timer(st.session_state.get("selected_module", "Default"), label)
+        return submitted
+
+    st.button = _shoir_tracked_button
+    st.form_submit_button = _shoir_tracked_form_submit
+    st.session_state["_shoir_value_controls_wrapped"] = True
+from shoir_venture_studio import render_venture_studio
 from shoir_160 import init_160_platform, render_160_command_center
 from shoir_enterprise_ops import (
     render_digital_twin_extension, render_control_tower_extension,
