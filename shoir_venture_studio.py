@@ -168,6 +168,19 @@ def _safe_float(value: Any, fallback: float = 0.0) -> float:
         return fallback
 
 
+def _maybe_first_result(owner: str) -> None:
+    """Record first successful Venture Studio result once per session."""
+    if st.session_state.get("venture_first_result_recorded"):
+        return
+    try:
+        start = datetime.fromisoformat(str(st.session_state.get("venture_session_started_at")))
+        seconds = max(0.0, (datetime.now(timezone.utc) - start).total_seconds())
+    except Exception:
+        seconds = 0.0
+    st.session_state["venture_first_result_recorded"] = True
+    track_event(owner, "first_result", "Venture Studio", details={"time_to_first_result_seconds": seconds})
+
+
 def track_event(owner: str, event_type: str, feature: str = "", value: float | None = None, details: dict[str, Any] | None = None) -> None:
     try:
         with _db() as conn:
@@ -334,6 +347,7 @@ def _render_customer(owner: str) -> None:
                 )
             conn.commit()
         track_event(owner, "customer_saved", "Customer & Stakeholder Hub")
+        _maybe_first_result(owner)
         st.success(f"Customer evidence saved · {customer_id}")
         st.rerun()
 
@@ -392,6 +406,7 @@ def _render_pilots(owner: str) -> None:
                 )
             conn.commit()
         track_event(owner, "pilot_saved", "Pilot Manager")
+        _maybe_first_result(owner)
         st.success(f"Pilot saved · {pilot_id}")
         st.rerun()
     if selected and not selected.startswith("➕"):
@@ -432,6 +447,7 @@ def _render_hypothesis_evidence(owner: str) -> None:
                     conn.execute("INSERT INTO venture_hypotheses VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",(hid,owner,statement,metric,baseline,unit,experiment,result,decision,status,confidence,source_ref,_now(),_now()))
                     conn.commit()
                 track_event(owner,"hypothesis_saved","Hypothesis & Evidence")
+                _maybe_first_result(owner)
                 st.success(f"Hypothesis saved · {hid}")
                 st.rerun()
     with h2:
@@ -456,6 +472,7 @@ def _render_hypothesis_evidence(owner: str) -> None:
                     conn.execute("INSERT INTO venture_evidence VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",(eid,owner,title[:180],evidence_type,source[:300],source_date[:32],confidence,description[:1000],link_type,link_id[:120],artifact_url[:1000],content,_hash(content+source+source_date),_now()))
                     conn.commit()
                 track_event(owner,"evidence_saved","Evidence Vault")
+                _maybe_first_result(owner)
                 st.success(f"Evidence preserved · {eid}")
                 st.rerun()
     if not hyp.empty:
@@ -513,6 +530,7 @@ def _render_value_evidence(owner: str) -> None:
                 )
             conn.commit()
         track_event(owner,"value_evidence_saved","Value Evidence Center")
+        _maybe_first_result(owner)
         st.success("Customer-specific value evidence saved."); st.rerun()
     st.markdown('<div class="venture-note">ROI = (verified annualized economic benefit − implementation cost) / implementation cost. Payback uses the same measured annualized benefit. Replace every input with pilot data before presenting ROI.</div>',unsafe_allow_html=True)
 
@@ -552,6 +570,10 @@ def _room_export(owner:str)->bytes:
     buf=io.BytesIO()
     with zipfile.ZipFile(buf,"w",zipfile.ZIP_DEFLATED) as z:
         for name,frame in frames.items(): z.writestr(name,frame.to_csv(index=False).encode("utf-8"))
+        detailed=_query("SELECT artifact_id,category,title,content,source_url,source_date,confidence,version,checksum,updated_at FROM venture_artifacts WHERE owner=? ORDER BY category,title",(owner,))
+        versions=_query("SELECT * FROM venture_artifact_versions WHERE artifact_id IN (SELECT artifact_id FROM venture_artifacts WHERE owner=?) ORDER BY artifact_id,version",(owner,))
+        z.writestr("artifact_content.json",json.dumps(detailed.to_dict("records"),indent=2,default=str).encode("utf-8"))
+        z.writestr("artifact_versions.csv",versions.to_csv(index=False).encode("utf-8"))
         z.writestr("manifest.json",json.dumps(manifest,indent=2).encode("utf-8"))
     return buf.getvalue()
 
@@ -580,7 +602,14 @@ def _render_data_room(owner:str)->None:
         else:
             aid=save_artifact(owner,category,title,content,source_url,source_date,confidence)
             track_event(owner,"artifact_saved",category)
+            _maybe_first_result(owner)
             st.success(f"Artifact saved · {aid}"); st.rerun()
+    if not artifacts.empty:
+        selected_artifact=st.selectbox("Artifact version history",["None"]+list(artifacts["artifact_id"].astype(str)),key="venture_artifact_history")
+        if selected_artifact!="None":
+            versions=_query("SELECT version,source_url,source_date,confidence,checksum,saved_at FROM venture_artifact_versions WHERE artifact_id=? ORDER BY version DESC",(selected_artifact,))
+            if versions.empty: st.caption("Version 1 · initial artifact")
+            else: st.dataframe(versions,use_container_width=True,hide_index=True)
     st.download_button("📦 Download Investor Data Room package",_room_export(owner),file_name="shoir_ie_investor_data_room.zip",mime="application/zip",type="primary",use_container_width=True,key="venture_room_export")
 
 
@@ -699,7 +728,9 @@ def _render_demo(owner:str)->None:
     with tabs[5]:
         st.dataframe(data["scenarios"],use_container_width=True,hide_index=True)
         st.bar_chart(data["scenarios"].set_index("Scenario")[["Throughput units/day","Travel distance m/day","Planning hours"]])
-        track_event(owner,"scenario_compared","End-to-End Demo Mode")
+        if not st.session_state.get("venture_demo_scenario_recorded"):
+            track_event(owner,"scenario_compared","End-to-End Demo Mode")
+            st.session_state["venture_demo_scenario_recorded"]=True
     with tabs[6]:
         r=data["roi"]; c=st.columns(4)
         c[0].metric("Hours saved / study",f"{r['Hours saved / study']:.1f}")
@@ -727,7 +758,7 @@ def _render_market(owner:str)->None:
             cid=_id("MKT")
             with _db() as conn:
                 conn.execute("INSERT INTO venture_market_claims VALUES(?,?,?,?,?,?,?,?,?,?,?)",(cid,owner,competitor,claim_type,claim[:1200],source_url[:1000],source_date[:32],confidence,notes[:1200],_now(),_now())); conn.commit()
-            track_event(owner,"market_claim_saved","Market & Competitive Intelligence"); st.success(f"Market evidence saved · {cid}"); st.rerun()
+            track_event(owner,"market_claim_saved","Market & Competitive Intelligence"); _maybe_first_result(owner); st.success(f"Market evidence saved · {cid}"); st.rerun()
 
 
 def _render_case_study(owner:str)->None:
@@ -790,7 +821,7 @@ Generated only after baseline, evidence and measured value records are preserved
         cid=_id("CASE")
         with _db() as conn:
             conn.execute("INSERT INTO venture_case_studies VALUES(?,?,?,?,?,?,?)",(cid,owner,selected,title[:180],content,0,_now())); conn.commit()
-        track_event(owner,"case_study_generated","Case Study Studio"); st.success(f"Case study package prepared · {cid}")
+        track_event(owner,"case_study_generated","Case Study Studio"); _maybe_first_result(owner); st.success(f"Case study package prepared · {cid}")
     st.download_button("📄 Download case study draft",content.encode("utf-8"),file_name="shoir_ie_case_study.md",mime="text/markdown",use_container_width=True,key="venture_case_download")
 
 
@@ -817,7 +848,7 @@ def _render_business_model(owner:str)->None:
                        notes=excluded.notes,updated_at=excluded.updated_at""",
                     (_id("BM"),owner,offering[:180],target[:300],billing,price,currency,motion[:500],evidence_required[:700],notes[:1200],_now()),
                 ); conn.commit()
-            track_event(owner,"pricing_hypothesis_saved","Business Model + Pricing"); st.success("Pricing hypothesis saved.")
+            track_event(owner,"pricing_hypothesis_saved","Business Model + Pricing"); _maybe_first_result(owner); st.success("Pricing hypothesis saved.")
 
 
 def render_venture_studio(tier:str,username:str,current_module:str="Venture Studio")->None:
