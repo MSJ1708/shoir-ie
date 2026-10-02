@@ -301,8 +301,27 @@ def render_enterprise_integration(tier: str, username: str) -> None:
 
         if not connectors.empty:
             st.dataframe(connectors.rename(columns={"connector_id":"ID","name":"System","system_type":"Protocol","endpoint":"Endpoint / DSN","last_validated":"Validated","updated_at":"Updated"}),use_container_width=True,hide_index=True)
-            sel=st.selectbox("Select connector to validate",connectors["connector_id"].astype(str).tolist(),key="ei_validate_select")
+            sel=st.selectbox("Select connector",connectors["connector_id"].astype(str).tolist(),key="ei_validate_select")
             selected=connectors[connectors["connector_id"].astype(str)==sel].iloc[0]
+            with st.expander("✏️ Edit selected connector",expanded=False):
+                with st.form("ei_edit_connector_form"):
+                    e1,e2,e3=st.columns(3)
+                    with e1:
+                        edit_name=st.text_input("System name",value=str(selected["name"]))
+                    with e2:
+                        protocol_options=["SAP","Oracle","SQL","REST","MQTT","OPC-UA","WMS","MES","ERP","Other"]
+                        edit_system=st.selectbox("System / protocol",protocol_options,index=(protocol_options.index(str(selected["system_type"])) if str(selected["system_type"]) in protocol_options else 9))
+                    with e3:
+                        edit_endpoint=st.text_input("Endpoint / DSN",value=str(selected["endpoint"] or ""))
+                        edit_notes=st.text_input("Notes",value=str(selected["notes"] or ""))
+                    save_edit=st.form_submit_button("💾 Save connector changes",type="primary",use_container_width=True)
+                if save_edit:
+                    edit_status,detail=_validate_endpoint(edit_endpoint)
+                    with _db() as conn:
+                        conn.execute("UPDATE workspace_connectors SET name=?,system_type=?,endpoint=?,status=?,last_validated=NULL,notes=?,updated_at=? WHERE owner=? AND workspace=? AND connector_id=?",(edit_name.strip() or str(selected["name"]),edit_system,edit_endpoint.strip(),edit_status,edit_notes.strip(),_now(),owner,workspace,sel))
+                        conn.commit()
+                    st.success(f"Connector updated · {edit_status}. {detail}")
+                    st.rerun()
             if st.button("✓ Validate configuration",type="primary",use_container_width=True,key="ei_validate_btn"):
                 status,detail=_validate_endpoint(selected["endpoint"])
                 with _db() as conn:
