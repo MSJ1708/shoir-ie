@@ -531,34 +531,60 @@ def _render_value_evidence(owner: str) -> None:
     for _,row in edited.iterrows():
         calc=value_calculation(row)
         preview.append({"Metric":row.get("Metric",""),"Delta":calc["delta"],"Annualized effect":calc["annualized_effect"],"Economic value":calc["economic_value"]})
-    if preview:
-        st.markdown("#### Calculated impact"); st.dataframe(pd.DataFrame(preview),use_container_width=True,hide_index=True)
+    preview_df = pd.DataFrame(preview)
+    if not preview_df.empty:
+        st.markdown("#### Calculated impact")
+        st.dataframe(preview_df,use_container_width=True,hide_index=True)
+        chartable = preview_df[preview_df["Metric"].astype(str).str.strip()!=""].copy()
+        if not chartable.empty:
+            _show_fig(px.bar(chartable, x="Economic value", y="Metric", orientation="h", text_auto=".2f"), 340, "Annualized economic value by metric")
     norm=edited.rename(columns={"Baseline":"baseline_value","Post":"post_value","Frequency / year":"frequency_per_year","Unit value":"unit_value","Direction":"direction"}).copy()
     if not norm.empty:
         norm["implementation_cost"]=implementation_cost
         s=value_summary(norm)
-        c1,c2,c3,c4=st.columns(4)
-        c1.metric("Annualized benefit",f"{s['annualized_benefit']:,.2f} SAR")
-        c2.metric("Net value",f"{s['net_value']:,.2f} SAR")
-        c3.metric("Pilot ROI",f"{s['roi_percent']:,.1f}%")
-        c4.metric("Payback",f"{s['payback_months']:,.1f} months" if s["payback_months"] else "—")
+        c1,c2,c3,c4,c5=st.columns(5)
+        c1.metric("Measured rows",f"{s['measured_rows']:.0f}")
+        c2.metric("Priced rows",f"{s['priced_rows']:.0f}")
+        c3.metric("Annualized benefit",f"{s['annualized_benefit']:,.2f} SAR")
+        c4.metric("Pilot ROI",f"{s['roi_percent']:,.1f}%" if s["implementation_cost"] > 0 and s["annualized_benefit"] != 0 else "N/A")
+        c5.metric("Payback",f"{s['payback_months']:,.1f} months" if s["payback_months"] else "N/A")
+        valid_plot=norm.copy()
+        valid_plot["baseline_value"]=pd.to_numeric(valid_plot["baseline_value"],errors="coerce")
+        valid_plot["post_value"]=pd.to_numeric(valid_plot["post_value"],errors="coerce")
+        valid_plot=valid_plot.dropna(subset=["baseline_value","post_value"])
+        if not valid_plot.empty:
+            melted=valid_plot[["Metric","baseline_value","post_value"]].melt(id_vars="Metric",var_name="Stage",value_name="Value")
+            melted["Stage"]=melted["Stage"].map({"baseline_value":"Baseline","post_value":"Post"})
+            _show_fig(px.bar(melted,x="Metric",y="Value",color="Stage",barmode="group"),360,"Baseline vs post-deployment")
+        if s["implementation_cost"] > 0:
+            wf=go.Figure(go.Waterfall(orientation="h",measure=["relative","total"],y=["Measured annualized benefit","Net value"],x=[s["annualized_benefit"],s["net_value"]],text=[f"{s['annualized_benefit']:,.0f}",f"{s['net_value']:,.0f}"],textposition="outside"))
+            _show_fig(wf,300,"Value bridge")
     if st.button("💾 Save value evidence set",type="primary",use_container_width=True,key="venture_value_save"):
         with _db() as conn:
             conn.execute("DELETE FROM venture_value_measurements WHERE owner=? AND pilot_id=?",(owner,pilot_id))
+            skipped=0
             for _,row in edited.iterrows():
                 metric=str(row.get("Metric","")).strip()
                 if not metric: continue
+                if _optional_float(row.get("Baseline")) is None or _optional_float(row.get("Post")) is None:
+                    skipped += 1
+                    continue
+                if not str(row.get("Source ref","")).strip():
+                    skipped += 1
+                    continue
                 conn.execute(
                     """INSERT INTO venture_value_measurements VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     (_id("VAL"),owner,pilot_id,metric[:150],str(row.get("Category",""))[:80],str(row.get("Direction","lower_is_better")),str(row.get("Unit",""))[:40],
-                     _safe_float(row.get("Baseline")),_safe_float(row.get("Post")),_safe_float(row.get("Frequency / year"),1),
-                     _safe_float(row.get("Unit value")),str(row.get("Currency","SAR"))[:8],implementation_cost,str(row.get("Source ref",""))[:300],
+                     _optional_float(row.get("Baseline")),_optional_float(row.get("Post")),_optional_float(row.get("Frequency / year")),
+                     _optional_float(row.get("Unit value")),str(row.get("Currency","SAR"))[:8],implementation_cost,str(row.get("Source ref",""))[:300],
                      str(row.get("Source date",""))[:32],str(row.get("Confidence","Medium")),str(row.get("Notes",""))[:1000],_now(),_now())
                 )
             conn.commit()
-        track_event(owner,"value_evidence_saved","Value Evidence Center")
+        track_event(owner,"value_evidence_saved","Value Evidence Center",details={"saved_rows": int(max(0, len(edited)-skipped)), "skipped_rows": int(skipped)})
         _maybe_first_result(owner)
-        st.success("Customer-specific value evidence saved."); st.rerun()
+        msg="Customer-specific value evidence saved."
+        if skipped: msg += f" {skipped} incomplete rows were not stored because baseline/post and source reference are required."
+        st.success(msg); st.rerun()
     st.markdown('<div class="venture-note">ROI = (verified annualized economic benefit − implementation cost) / implementation cost. Payback uses the same measured annualized benefit. Replace every input with pilot data before presenting ROI.</div>',unsafe_allow_html=True)
 
 
