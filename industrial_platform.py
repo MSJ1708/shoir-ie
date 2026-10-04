@@ -943,7 +943,11 @@ def render_module(module: str, tier: str, username: str):
         from shoir_industrial_workbook import render_industrial_workbook
         render_industrial_workbook(tier, username)
         return
-    render_module_data_exchange(module, st, tier, username)
+    # The investor Control Center has its own scenario controls and should
+    # open directly into the command experience instead of the generic import
+    # surface. Specialist modules continue to use the shared import/activate UX.
+    if module != "Industrial Control Center":
+        render_module_data_exchange(module, st, tier, username)
     if module == "Experiment Lab":
         # Experiment Lab is a dedicated research workspace. Its UI and
         # persistence are rendered by render_research_workspace, so do not
