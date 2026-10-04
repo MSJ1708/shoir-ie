@@ -33,6 +33,6 @@ def test_process_fast_rejects_unsupported_large_upload_before_parsing():
     try:
         process_fast(raw, "too_large.xlsx")
     except ValueError as exc:
-        assert "too large" in str(exc).lower()
+        assert "limited to 75 mb" in str(exc).lower()
     else:
         raise AssertionError("Large uploads must be rejected before workbook parsing.")
