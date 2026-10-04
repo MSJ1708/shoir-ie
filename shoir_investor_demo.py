@@ -479,8 +479,9 @@ def _persist_decision(username: str, decision: Dict[str, Any]) -> None:
 
 def _run_all(username: str) -> None:
     _set("started", True)
-    plant = _state("plant")
-    _set("risk", _risk_analysis())
+    inputs = _state("inputs", _default_inputs())
+    _set("plant", _plant_from_inputs(inputs))
+    _set("risk", _risk_analysis(inputs))
     _mark("risk")
     _set("thread", _twin_frame())
     _set("tower", build_control_tower_health(
@@ -498,11 +499,11 @@ def _run_all(username: str) -> None:
     ))
     _persist_twin(username)
     _mark("thread")
-    _set("maintenance", _predictive_maintenance())
+    _set("maintenance", _predictive_maintenance(inputs))
     _mark("maintenance")
-    _set("simulation", _simulation())
+    _set("simulation", _simulation(inputs))
     _mark("simulation")
-    _set("optimization", _optimization())
+    _set("optimization", _optimization(inputs))
     _mark("optimization")
     _set("decision", _decision())
     _persist_decision(username, _state("decision"))
@@ -571,6 +572,99 @@ def _render_stage_rail() -> None:
                 f"</div>",
                 unsafe_allow_html=True,
             )
+
+
+def _render_plant_controls(username: str) -> None:
+    """Interactive plant scenario controls; edits feed every downstream stage."""
+    values = dict(_state("inputs", _default_inputs()))
+    st.markdown("### 🎛️ Change Plant Situation")
+    st.caption(
+        "Edit the synthetic operating conditions below. Shoir-IE will recalculate risk, "
+        "maintenance, simulation, optimization, ROI and verification from the new state."
+    )
+
+    p1, p2, p3 = st.columns(3)
+    production = p1.slider(
+        "Line 2 OEE (%)", 50.0, 99.0, float(values["production_oee"]), 0.5,
+        key=f"{DEMO_KEY}_input_production"
+    )
+    maintenance = p2.slider(
+        "C-204 maintenance risk (%)", 5.0, 99.0, float(values["maintenance_risk"]), 1.0,
+        key=f"{DEMO_KEY}_input_maintenance"
+    )
+    quality = p3.slider(
+        "Quality yield (%)", 85.0, 99.9, float(values["quality_yield"]), 0.1,
+        key=f"{DEMO_KEY}_input_quality"
+    )
+    p4, p5, p6 = st.columns(3)
+    inventory = p4.slider(
+        "Bearing inventory cover (days)", 0.5, 7.0, float(values["inventory_cover"]), 0.1,
+        key=f"{DEMO_KEY}_input_inventory"
+    )
+    order = p5.slider(
+        "72h customer order protection (%)", 50.0, 100.0, float(values["order_protection"]), 1.0,
+        key=f"{DEMO_KEY}_input_order"
+    )
+    demand = p6.slider(
+        "Demand multiplier", 0.80, 1.50, float(values["demand_multiplier"]), 0.05,
+        key=f"{DEMO_KEY}_input_demand"
+    )
+    energy = st.slider(
+        "Specific energy (kWh / unit)", 0.80, 2.50, float(values["energy_kwh_unit"]), 0.01,
+        key=f"{DEMO_KEY}_input_energy"
+    )
+
+    a, b, c, d = st.columns([1.2, 1, 1, 1])
+    with a:
+        if st.button(
+            "▶ Apply Plant Changes",
+            type="primary",
+            use_container_width=True,
+            key=f"{DEMO_KEY}_apply_inputs",
+        ):
+            _apply_inputs(
+                {
+                    "production_oee": production,
+                    "quality_yield": quality,
+                    "maintenance_risk": maintenance,
+                    "inventory_cover": inventory,
+                    "order_protection": order,
+                    "demand_multiplier": demand,
+                    "energy_kwh_unit": energy,
+                },
+                username,
+            )
+            st.success("Plant state updated. Downstream results have been cleared for re-analysis.")
+            st.rerun()
+    with b:
+        if st.button("⚠️ Compressor deterioration", use_container_width=True, key=f"{DEMO_KEY}_preset_bad"):
+            _apply_inputs(_preset("Compressor deterioration"), username)
+            st.rerun()
+    with c:
+        if st.button("📈 Demand surge", use_container_width=True, key=f"{DEMO_KEY}_preset_surge"):
+            _apply_inputs(_preset("Demand surge"), username)
+            st.rerun()
+    with d:
+        if st.button("🟢 Stable recovery", use_container_width=True, key=f"{DEMO_KEY}_preset_good"):
+            _apply_inputs(_preset("Stable recovery"), username)
+            st.rerun()
+
+    current = _plant_from_inputs(
+        {
+            "production_oee": production,
+            "quality_yield": quality,
+            "maintenance_risk": maintenance,
+            "inventory_cover": inventory,
+            "order_protection": order,
+            "demand_multiplier": demand,
+            "energy_kwh_unit": energy,
+        }
+    )
+    st.dataframe(current, use_container_width=True, hide_index=True)
+    st.caption(
+        "Demo safety: these controls change only the synthetic investor scenario. "
+        "They do not modify a connected plant."
+    )
 
 
 def _render_header() -> None:
@@ -825,6 +919,7 @@ def render_investor_control_center(tier: str, username: str) -> None:
     """Render the investor-facing front door for the industrial platform."""
     _ensure_defaults()
     _render_header()
+    _render_plant_controls(username)
     _render_stage_rail()
 
     with st.expander("🎬 Presentation controls", expanded=not _state("started")):
