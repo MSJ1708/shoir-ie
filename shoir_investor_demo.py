@@ -1035,11 +1035,34 @@ def _render_impact() -> None:
         return
     st.markdown("### 💰 07 · ROI / Impact")
     impact = _state("impact")
+    rescue = _state("rescue_case", _rescue_case())
+    baseline = rescue["baseline"]
+    intervention = rescue["intervention"]
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Gross exposure avoided", _format_sar(impact["avoided_exposure"]))
-    c2.metric("Intervention cost", _format_sar(_state("decision")["intervention_cost"]))
+    c1.metric("Avoided exposure", _format_sar(rescue["avoided_exposure"]))
+    c2.metric("Intervention cost", _format_sar(rescue["intervention_cost"]))
     c3.metric("Net modelled value", _format_sar(impact["net_value"]))
     c4.metric("Modelled ROI", f"{impact['roi']:.0f}%")
+    st.markdown("#### 🆚 Business result")
+    result_df = pd.DataFrame({
+        "Metric": [
+            "Customer delivery", "Production shortfall", "Unplanned downtime",
+            "Scrap change", "Overtime", "Energy change", "Financial exposure",
+        ],
+        "Do Nothing": [
+            baseline["Customer delivery"], f"{baseline['Production shortfall %']:.1f}%",
+            f"{baseline['Unplanned downtime h']:.1f} h", f"+{baseline['Scrap change %']:.1f}%",
+            _format_sar(baseline["Overtime SAR"]), f"+{baseline['Energy change %']:.1f}%",
+            _format_sar(baseline["Financial exposure SAR"]),
+        ],
+        "Shoir-IE Decision": [
+            intervention["Customer delivery"], f"{intervention['Production shortfall %']:.1f}%",
+            f"{intervention['Unplanned downtime h']:.1f} h", f"+{intervention['Scrap change %']:.1f}%",
+            _format_sar(intervention["Overtime SAR"]), f"+{intervention['Energy change %']:.1f}%",
+            _format_sar(intervention["Financial exposure SAR"]),
+        ],
+    })
+    st.dataframe(result_df, use_container_width=True, hide_index=True)
     st.markdown("#### ⏱️ Workflow time compression")
     t1, t2 = st.columns(2)
     with t1:
