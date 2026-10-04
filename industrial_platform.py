@@ -921,8 +921,10 @@ def render_module(module: str, tier: str, username: str):
         return
 
     if module=="Excel Data Cleaning & Import":
-        from shoir_excel_studio import render_excel_data_cleaning_studio
-        render_excel_data_cleaning_studio(tier, username)
+        # Use the safe/lazy renderer so upload itself never builds the full
+        # XLSX + ZIP evidence package and takes down the Streamlit process.
+        from shoir_excel_runtime import render_excel_intelligence_safe
+        render_excel_intelligence_safe(tier, username)
         return
 
     if module=="Research AI":
