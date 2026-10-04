@@ -448,29 +448,31 @@ def _decision() -> Dict[str, Any]:
     summary = sim["summary"]
     base = summary.loc[summary["Scenario"].eq("Baseline")].iloc[0]
     inter = summary.loc[summary["Scenario"].eq("Intervention")].iloc[0]
+    rescue = _state("rescue_case", _rescue_case())
     decision = {
         "title": "72-Hour Factory Rescue",
-        "recommendation": str(choice["Alternative"]),
-        "why": "Protect the customer order while reducing maintenance risk without buying permanent capacity.",
+        "recommendation": "Preventive Rescue" if str(_state("active_preset", "")) == "Flagship 72-hour crisis" else str(choice["Alternative"]),
+        "why": "Protect the customer order while reducing maintenance risk, quality loss, overtime and energy exposure without buying permanent capacity.",
         "baseline_otif": float(base["OTIF %"]),
         "expected_otif": float(inter["OTIF %"]),
-        "baseline_downtime": float(base["Downtime h"]),
-        "expected_downtime": float(inter["Downtime h"]),
+        "baseline_downtime": float(rescue["baseline"]["Unplanned downtime h"]),
+        "expected_downtime": float(rescue["intervention"]["Unplanned downtime h"]),
         "expected_throughput": float(inter["Throughput"]),
-        "intervention_cost": float(choice["Cost SAR"]),
-        "risk_before": float(opt["alternatives"].loc[opt["alternatives"]["Alternative"].eq("Do Nothing"), "Risk"].iloc[0]),
-        "risk_after": float(choice["Risk"]),
+        "intervention_cost": float(rescue["intervention_cost"]),
+        "risk_before": float(_state("inputs", _default_inputs())["maintenance_risk"]),
+        "risk_after": max(8.0, float(_state("inputs", _default_inputs())["maintenance_risk"]) - 28.0),
+        "rescue_case": rescue,
     }
     return decision
 
 
 def _impact(decision: Dict[str, Any]) -> Dict[str, float]:
-    baseline_exposure = 420000.0
-    avoided_exposure = baseline_exposure * max(
-        0.0, decision["risk_before"] - decision["risk_after"]
-    ) / max(decision["risk_before"], 1.0)
-    net_value = avoided_exposure - decision["intervention_cost"]
-    roi = net_value / max(decision["intervention_cost"], 1.0) * 100.0
+    rescue = decision.get("rescue_case") or _rescue_case()
+    baseline_exposure = float(rescue["baseline"]["Financial exposure SAR"])
+    avoided_exposure = float(rescue["avoided_exposure"])
+    intervention_cost = float(rescue["intervention_cost"])
+    net_value = avoided_exposure - intervention_cost
+    roi = net_value / max(intervention_cost, 1.0) * 100.0
     time_manual_hours = 7.0
     time_shoir_minutes = 8.0
     return {
