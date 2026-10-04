@@ -725,7 +725,7 @@ def _render_plant_controls(username: str) -> None:
         key=f"{DEMO_KEY}_input_energy"
     )
 
-    with st.expander("Advanced crisis factors", expanded=False):
+    with st.expander("⚙️ Advanced crisis factors", expanded=True):
         q1, q2, q3, q4 = st.columns(4)
         scrap = q1.number_input(
             "Scrap change (%)", 0.0, 15.0, float(values.get("scrap_pct", 3.8)), 0.1,
