@@ -35,6 +35,7 @@ from shoir_engine_studio import (
     render_experiment_engine, render_forecasting_studio,
     render_optimization_studio, render_decision_center_studio,
 )
+from shoir_investor_demo import render_investor_control_center
 
 PLATFORM_CATALOG = [
     {"tier":"Starter","category":"AI & Automation","name":"Excel Data Cleaning & Import",
@@ -1411,15 +1412,7 @@ def render_module(module: str, tier: str, username: str):
         st.dataframe(st.session_state.get("experiment_results",scenarios),use_container_width=True)
         render_export_bar(module,[("Scenarios",scenarios),("Experiment Results",st.session_state.get("experiment_results",pd.DataFrame()))],tier,username)
     elif module=="Industrial Control Center":
-        st.subheader("Unified Operations Health")
-        entities={}
-        for key,label in [("customers_list","Demand / Customers"),("warehouses_list","Facilities / Warehouses"),("fleet_list","Fleet"),("meio_data","MEIO"),("slotting_data","Warehouse Slotting")]:
-            val=st.session_state.get(key); entities[label]=len(val) if isinstance(val,(list,pd.DataFrame)) else 0
-        metrics=pd.DataFrame({"Area":list(entities.keys()),"Records":list(entities.values())}); metrics["Health"]=np.where(metrics["Records"]>0,"Ready","Needs Data")
-        st.session_state["control_center_metrics"] = metrics.copy(deep=True)
-        st.dataframe(metrics,use_container_width=True,hide_index=True)
-        st.metric("Data quality score",f"{data_quality_report(metrics)['score']:.1f}%")
-        render_export_bar(module,[("Control Center",metrics)],tier,username)
+        render_investor_control_center(tier, username)
     elif module=="Engineering Decision Center":
         st.subheader("🎯 Governed Engineering Decision Center")
         st.caption("Baseline → alternatives → constraints → KPIs → uncertainty → evidence → approval → verification.")
