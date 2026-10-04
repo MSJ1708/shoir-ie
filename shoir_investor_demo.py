@@ -259,11 +259,12 @@ def _twin_frame() -> pd.DataFrame:
 def _thread_figure() -> go.Figure:
     labels = [
         "Facility", "Line 2", "Compressor C-204", "Bearing Material",
-        "72h Order", "Quality Signal", "Decision", "Verified Outcome"
+        "72h Order", "Quality Signal", "Supplier", "Workforce",
+        "Energy", "Production Plan", "Decision", "Verified Outcome"
     ]
-    source = [0, 1, 2, 3, 4, 5, 6]
-    target = [1, 2, 6, 2, 6, 6, 7]
-    value = [3, 4, 2, 2, 5, 2, 6]
+    source = [0, 1, 2, 3, 4, 5, 6, 7, 2, 1, 9]
+    target = [1, 2, 10, 2, 10, 10, 4, 10, 8, 9, 11]
+    value = [3, 4, 5, 2, 6, 3, 2, 2, 2, 4, 6]
     fig = go.Figure(
         go.Sankey(
             arrangement="snap",
@@ -899,8 +900,8 @@ def _render_thread() -> None:
         return
     st.markdown("### 🧬 02 · Digital Thread")
     c1, c2, c3 = st.columns(3)
-    c1.metric("Entities connected", "8", "facility → outcome")
-    c2.metric("Relationships", "7", "explicit links")
+    c1.metric("Entities connected", "12", "facility → outcome")
+    c2.metric("Relationships", "11", "explicit links")
     c3.metric("Twin snapshot", "Saved", "replayable")
     a, b = st.columns([1, 1.2])
     with a:
@@ -1011,8 +1012,8 @@ def _render_decision() -> None:
     )
     evidence = pd.DataFrame(
         [
-            ["Plant risk", "4 cross-domain risk signals", "Traceable"],
-            ["Digital Thread", "8 entities / 7 links", "Persisted"],
+            ["Plant risk", f"{len(_state('risk', pd.DataFrame()))} cross-domain risk signals", "Traceable"],
+            ["Digital Thread", "12 entities / 11 links", "Persisted"],
             ["Simulation", f"{_state('simulation')['reps']:,} replications", "Reproducible"],
             ["Optimization", d["recommendation"], "Governed"],
         ],
