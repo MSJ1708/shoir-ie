@@ -183,13 +183,17 @@ def _format_sar(value: float) -> str:
     return f"SAR {_pretty_number(value)}"
 
 
-def _risk_analysis() -> pd.DataFrame:
+def _risk_analysis(inputs: dict[str, float] | None = None) -> pd.DataFrame:
+    v = inputs or _state("inputs", _default_inputs())
+    production_risk = float(np.clip(100.0 - v["production_oee"], 5.0, 95.0))
+    inventory_risk = float(np.clip(75.0 - v["inventory_cover"] * 8.0, 10.0, 90.0))
+    quality_risk = float(np.clip((100.0 - v["quality_yield"]) * 14.0, 5.0, 80.0))
     return pd.DataFrame(
         [
-            ["C-204", "Compressor", 82, "Vibration + temperature trend", "High", "Maintenance"],
-            ["LINE-02", "Production line", 67, "OEE deterioration + stops", "Medium", "Production"],
-            ["INV-MTR", "Bearing stock", 58, "2.1 days cover", "Medium", "Inventory"],
-            ["Q-07", "Quality signal", 49, "Process mean drift", "Medium", "Quality"],
+            ["C-204", "Compressor", round(v["maintenance_risk"], 1), "Vibration + temperature trend", "Critical" if v["maintenance_risk"] >= 75 else "Medium", "Maintenance"],
+            ["LINE-02", "Production line", round(production_risk, 1), "OEE deterioration + stops", "High" if production_risk >= 20 else "Medium", "Production"],
+            ["INV-MTR", "Bearing stock", round(inventory_risk, 1), "Days of bearing cover", "High" if inventory_risk >= 60 else "Medium", "Inventory"],
+            ["Q-07", "Quality signal", round(quality_risk, 1), "Yield / process drift", "High" if quality_risk >= 35 else "Medium", "Quality"],
         ],
         columns=["Asset", "Type", "Risk %", "Evidence", "Severity", "Domain"],
     )
@@ -234,32 +238,39 @@ def _thread_figure() -> go.Figure:
     return fig
 
 
-def _predictive_maintenance() -> pd.DataFrame:
+def _predictive_maintenance(inputs: dict[str, float] | None = None) -> pd.DataFrame:
+    v = inputs or _state("inputs", _default_inputs())
     hours = np.arange(0, 72, 6)
     rng = np.random.default_rng(20261004)
     rows = []
     for asset, start, slope in [
-        ("C-204", 46.0, 0.49),
-        ("LINE-02", 31.0, 0.30),
-        ("MTR-117", 22.0, 0.16),
+        ("C-204", float(v["maintenance_risk"]) * 0.56, 0.49),
+        ("LINE-02", float(100.0 - v["production_oee"]) + 18.0, 0.30),
+        ("MTR-117", max(10.0, float(75.0 - v["inventory_cover"] * 10.0)), 0.16),
     ]:
         noise = rng.normal(0, 1.2, len(hours))
-        risk = np.clip(start + slope * hours + noise, 0, 99)
+        risk = np.clip(start + slope * hours, 0, 99) + noise
         for h, r in zip(hours, risk):
-            rows.append([asset, int(h), float(r)])
+            rows.append([asset, int(h), float(np.clip(r, 0, 99))])
     return pd.DataFrame(rows, columns=["Asset", "Hour", "Risk %"])
 
 
-def _simulation(seed: int = 20261004) -> Dict[str, Any]:
+def _simulation(inputs: dict[str, float] | None = None, seed: int = 20261004) -> Dict[str, Any]:
+    v = inputs or _state("inputs", _default_inputs())
     rng = np.random.default_rng(seed)
     reps = 1500
     horizon = 72
-    demand = 9000.0
+    demand = 9000.0 * float(v["demand_multiplier"])
     capacity = 130.0
-
+    baseline_availability = float(np.clip(v["production_oee"] / 100.0, 0.55, 0.99))
+    intervention_availability = float(np.clip(
+        baseline_availability + 0.06 + (v["maintenance_risk"] / 100.0) * 0.05, 0.60, 0.995
+    ))
+    baseline_quality = float(np.clip(v["quality_yield"] / 100.0, 0.80, 0.999))
+    intervention_quality = float(np.clip(baseline_quality + 0.015, 0.82, 0.999))
     scenarios = {
-        "Baseline": {"availability": 0.83, "quality": 0.962, "energy": 1.32},
-        "Intervention": {"availability": 0.93, "quality": 0.979, "energy": 1.24},
+        "Baseline": {"availability": baseline_availability, "quality": baseline_quality, "energy": float(v["energy_kwh_unit"])},
+        "Intervention": {"availability": intervention_availability, "quality": intervention_quality, "energy": max(0.85, float(v["energy_kwh_unit"]) - 0.08)},
     }
     summary = []
     samples = {}
@@ -295,17 +306,26 @@ def _simulation(seed: int = 20261004) -> Dict[str, Any]:
     return {"summary": result, "samples": samples, "reps": reps, "horizon": horizon}
 
 
-def _optimization() -> Dict[str, Any]:
+def _optimization(inputs: dict[str, float] | None = None) -> Dict[str, Any]:
+    v = inputs or _state("inputs", _default_inputs())
+    sim = _state("simulation")
+    if sim is not None:
+        base_otif = float(sim["summary"].loc[sim["summary"]["Scenario"].eq("Baseline"), "OTIF %"].iloc[0])
+    else:
+        base_otif = float(np.clip(v["order_protection"], 50.0, 99.0))
+    base_risk = float(v["maintenance_risk"])
     alternatives = pd.DataFrame(
         [
-            ["Do Nothing", 0, 1190, 32, 87, "No intervention"],
-            ["Preventive Rescue", 152000, 1120, 11, 95, "Inspect C-204 + stage bearing kit"],
-            ["Reroute + Rescue", 167000, 1180, 8, 97, "Rescue + order reroute"],
-            ["Capacity Expansion", 210000, 1220, 14, 98, "Add temporary capacity"],
+            ["Do Nothing", 0, 1190, base_risk, round(base_otif, 1), "No intervention"],
+            ["Preventive Rescue", 152000, 1120, max(8.0, base_risk - 28.0), min(99.0, base_otif + 7.0), "Inspect C-204 + stage bearing kit"],
+            ["Reroute + Rescue", 167000, 1180, max(6.0, base_risk - 34.0), min(99.0, base_otif + 9.0), "Rescue + order reroute"],
+            ["Capacity Expansion", 210000, 1220, max(5.0, base_risk - 24.0), min(99.0, base_otif + 11.0), "Add temporary capacity"],
         ],
         columns=["Alternative", "Cost SAR", "Carbon kg", "Risk", "Service %", "Intervention"],
     )
     feasible = alternatives[alternatives["Service %"] >= 95].copy()
+    if feasible.empty:
+        feasible = alternatives.sort_values("Service %", ascending=False).head(1).copy()
     scored = pareto_weight_sweep(
         feasible,
         ["Cost SAR", "Risk", "Carbon kg"],
