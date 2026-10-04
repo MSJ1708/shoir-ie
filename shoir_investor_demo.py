@@ -54,13 +54,17 @@ def _set(key: str, value: Any) -> None:
 
 def _default_inputs() -> dict[str, float]:
     return {
-        "production_oee": 83.0,
+        "production_oee": 76.0,
         "quality_yield": 96.2,
-        "maintenance_risk": 82.0,
-        "inventory_cover": 2.1,
-        "order_protection": 91.0,
+        "maintenance_risk": 90.0,
+        "inventory_cover": 1.4,
+        "order_protection": 86.0,
         "demand_multiplier": 1.0,
-        "energy_kwh_unit": 1.32,
+        "energy_kwh_unit": 1.48,
+        "scrap_pct": 3.8,
+        "maintenance_backlog_h": 42.0,
+        "supplier_delay_h": 18.0,
+        "overtime_sar": 86000.0,
     }
 
 
@@ -71,16 +75,23 @@ def _plant_from_inputs(values: dict[str, float]) -> pd.DataFrame:
     inventory = float(values["inventory_cover"])
     order = float(values["order_protection"])
     energy = float(values["energy_kwh_unit"])
+    scrap = float(values.get("scrap_pct", 3.8))
+    backlog = float(values.get("maintenance_backlog_h", 42.0))
+    supplier_delay = float(values.get("supplier_delay_h", 18.0))
 
-    quality_health = float(np.clip(100.0 - max(0.0, 96.5 - quality) * 18.0, 40.0, 100.0))
-    inventory_health = float(np.clip(inventory / 5.0 * 100.0, 25.0, 100.0))
-    energy_health = float(np.clip(100.0 - max(0.0, energy - 1.0) * 120.0, 35.0, 100.0))
+    quality_health = float(np.clip(100.0 - scrap * 12.0, 25.0, 100.0))
+    inventory_health = float(np.clip(inventory / 5.0 * 100.0, 20.0, 100.0))
+    energy_health = float(np.clip(100.0 - max(0.0, energy - 1.0) * 120.0, 25.0, 100.0))
+    workforce_health = float(np.clip(100.0 - backlog * 1.2, 25.0, 100.0))
+    supply_health = float(np.clip(100.0 - supplier_delay * 2.0, 20.0, 100.0))
     rows = [
         ["Production", round(production, 1), "Attention" if production < 88 else "Healthy", "Line 2 OEE", f"{production:.0f}% OEE"],
-        ["Quality", round(quality_health, 1), "Review" if quality_health < 92 else "Healthy", "Process yield", f"{quality:.1f}% yield"],
-        ["Maintenance", round(100.0 - maintenance * 0.22, 1), "Critical" if maintenance >= 75 else ("Review" if maintenance >= 50 else "Healthy"), "Compressor C-204", f"{maintenance:.0f}% risk"],
-        ["Inventory", round(inventory_health, 1), "Review" if inventory < 3 else "Healthy", "Motor bearings", f"{inventory:.1f} days cover"],
-        ["Energy", round(energy_health, 1), "Review" if energy > 1.45 else "Healthy", "Specific energy", f"{energy:.2f} kWh/unit"],
+        ["Supply", round(supply_health, 1), "At Risk" if supply_health < 70 else "Healthy", "Supplier delay", f"{supplier_delay:.0f} h late"],
+        ["Quality", round(quality_health, 1), "Critical" if scrap >= 4.0 else "Review", "Scrap rate", f"+{scrap:.1f}%"],
+        ["Maintenance", round(100.0 - maintenance * 0.18, 1), "Critical" if maintenance >= 75 else ("Review" if maintenance >= 50 else "Healthy"), "Compressor C-204", f"{maintenance:.0f}% risk"],
+        ["Inventory", round(inventory_health, 1), "At Risk" if inventory < 2 else "Review", "Motor bearings", f"{inventory:.1f} days cover"],
+        ["Workforce", round(workforce_health, 1), "At Risk" if backlog >= 30 else "Healthy", "Maintenance backlog", f"{backlog:.0f} h"],
+        ["Energy", round(energy_health, 1), "At Risk" if energy > 1.40 else "Healthy", "Specific energy", f"{energy:.2f} kWh/unit"],
         ["Customer Order", round(order, 1), "At Risk" if order < 90 else "Protected", "72h order", f"{order:.0f}% protected"],
     ]
     return pd.DataFrame(rows, columns=["Area", "Health %", "Status", "Primary Signal", "KPI"])
@@ -100,8 +111,11 @@ def _ensure_defaults() -> None:
 def _reset_flow_only() -> None:
     for key in ("started", "completed", "risk", "thread", "tower", "maintenance",
                 "simulation", "optimization", "decision", "impact", "verification",
-                "decision_persisted", "twin_persistence_warning", "decision_persistence_warning"):
+                "rescue_case", "decision_persisted", "twin_persistence_warning", "decision_persistence_warning"):
         st.session_state.pop(f"{DEMO_KEY}_{key}", None)
+    for key in list(st.session_state.keys()):
+        if str(key).startswith(f"{DEMO_KEY}_input_"):
+            st.session_state.pop(key, None)
     _set("started", False)
     _set("completed", [])
 
@@ -142,6 +156,20 @@ def _preset(name: str) -> dict[str, float]:
             "order_protection": 78.0,
             "demand_multiplier": 1.20,
             "energy_kwh_unit": 1.36,
+        },
+        "Flagship 72-hour crisis": {
+            **base,
+            "production_oee": 76.0,
+            "quality_yield": 96.2,
+            "maintenance_risk": 90.0,
+            "inventory_cover": 1.4,
+            "order_protection": 86.0,
+            "demand_multiplier": 1.0,
+            "energy_kwh_unit": 1.48,
+            "scrap_pct": 3.8,
+            "maintenance_backlog_h": 42.0,
+            "supplier_delay_h": 18.0,
+            "overtime_sar": 86000.0,
         },
         "Stable recovery": {
             **base,
@@ -236,6 +264,70 @@ def _thread_figure() -> go.Figure:
         margin=dict(l=10, r=10, t=50, b=10),
     )
     return fig
+
+
+
+def _rescue_case(inputs: dict[str, float] | None = None) -> dict[str, Any]:
+    """Return the repeatable flagship case study and intervention impact."""
+    v = inputs or _state("inputs", _default_inputs())
+    flagship = str(_state("active_preset", "")) == "Flagship 72-hour crisis"
+    if flagship:
+        baseline = {
+            "Customer delivery": "AT RISK",
+            "Production shortfall %": 9.4,
+            "Unplanned downtime h": 14.2,
+            "Scrap change %": 3.8,
+            "Overtime SAR": 86000.0,
+            "Energy change %": 8.1,
+            "Financial exposure SAR": 1520000.0,
+        }
+        intervention = {
+            "Customer delivery": "PROTECTED",
+            "Production shortfall %": 0.8,
+            "Unplanned downtime h": 3.1,
+            "Scrap change %": 0.9,
+            "Overtime SAR": 29000.0,
+            "Energy change %": 2.4,
+            "Financial exposure SAR": 210000.0,
+        }
+    else:
+        severity = float(np.clip((100.0 - v["production_oee"]) / 24.0 + v["maintenance_risk"] / 120.0, 0.5, 2.0))
+        baseline = {
+            "Customer delivery": "AT RISK" if v["order_protection"] < 90 else "PROTECTED",
+            "Production shortfall %": round(5.0 * severity, 1),
+            "Unplanned downtime h": round(7.1 * severity, 1),
+            "Scrap change %": round(v.get("scrap_pct", 2.5), 1),
+            "Overtime SAR": round(v.get("overtime_sar", 60000.0), 0),
+            "Energy change %": round(max(0.0, (v["energy_kwh_unit"] - 1.20) * 28.0), 1),
+            "Financial exposure SAR": round(850000.0 * severity, 0),
+        }
+        baseline["Customer delivery"] = "AT RISK" if baseline["Production shortfall %"] > 5 else baseline["Customer delivery"]
+        intervention = {
+            "Customer delivery": "PROTECTED",
+            "Production shortfall %": round(max(0.4, baseline["Production shortfall %"] * 0.16), 1),
+            "Unplanned downtime h": round(max(2.4, baseline["Unplanned downtime h"] * 0.22), 1),
+            "Scrap change %": round(max(0.4, baseline["Scrap change %"] * 0.24), 1),
+            "Overtime SAR": round(max(20000.0, baseline["Overtime SAR"] * 0.34), 0),
+            "Energy change %": round(max(1.2, baseline["Energy change %"] * 0.30), 1),
+            "Financial exposure SAR": round(baseline["Financial exposure SAR"] * 0.14, 0),
+        }
+    return {
+        "baseline": baseline,
+        "intervention": intervention,
+        "intervention_cost": 152000.0,
+        "avoided_exposure": max(0.0, baseline["Financial exposure SAR"] - intervention["Financial exposure SAR"]),
+        "action_plan": [
+            "Move maintenance into the next planned micro-window",
+            "Reallocate two technicians to C-204",
+            "Reserve critical bearing inventory",
+            "Re-sequence production across Lines 2 and 3",
+            "Shift selected jobs to Line 3",
+            "Adjust compressor operating parameters",
+            "Increase temporary quality inspection",
+            "Recalculate the 72-hour production schedule",
+            "Monitor C-204 and the order continuously",
+        ],
+    }
 
 
 def _predictive_maintenance(inputs: dict[str, float] | None = None) -> pd.DataFrame:
