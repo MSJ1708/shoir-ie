@@ -217,29 +217,40 @@ def _risk_analysis(inputs: dict[str, float] | None = None) -> pd.DataFrame:
     v = inputs or _state("inputs", _default_inputs())
     production_risk = float(np.clip(100.0 - v["production_oee"], 5.0, 95.0))
     inventory_risk = float(np.clip(75.0 - v["inventory_cover"] * 8.0, 10.0, 90.0))
-    quality_risk = float(np.clip((100.0 - v["quality_yield"]) * 14.0, 5.0, 80.0))
+    quality_risk = float(np.clip((100.0 - v["quality_yield"]) * 14.0 + v.get("scrap_pct", 0.0) * 2.0, 5.0, 90.0))
+    supply_risk = float(np.clip(v.get("supplier_delay_h", 0.0) * 2.2, 5.0, 95.0))
+    workforce_risk = float(np.clip(v.get("maintenance_backlog_h", 0.0) * 1.5, 5.0, 95.0))
+    energy_risk = float(np.clip(max(0.0, v.get("energy_kwh_unit", 1.2) - 1.15) * 55.0, 5.0, 90.0))
     return pd.DataFrame(
         [
             ["C-204", "Compressor", round(v["maintenance_risk"], 1), "Vibration + temperature trend", "Critical" if v["maintenance_risk"] >= 75 else "Medium", "Maintenance"],
             ["LINE-02", "Production line", round(production_risk, 1), "OEE deterioration + stops", "High" if production_risk >= 20 else "Medium", "Production"],
-            ["INV-MTR", "Bearing stock", round(inventory_risk, 1), "Days of bearing cover", "High" if inventory_risk >= 60 else "Medium", "Inventory"],
-            ["Q-07", "Quality signal", round(quality_risk, 1), "Yield / process drift", "High" if quality_risk >= 35 else "Medium", "Quality"],
+            ["INV-MTR", "Bearing stock", round(inventory_risk, 1), "Low critical-spares cover", "High" if inventory_risk >= 60 else "Medium", "Inventory"],
+            ["Q-07", "Quality signal", round(quality_risk, 1), "Scrap / process drift", "High" if quality_risk >= 35 else "Medium", "Quality"],
+            ["SUP-18", "Supplier delivery", round(supply_risk, 1), "Late critical-part delivery", "High" if supply_risk >= 40 else "Medium", "Supply"],
+            ["MW-BACKLOG", "Maintenance workforce", round(workforce_risk, 1), "Maintenance backlog", "High" if workforce_risk >= 40 else "Medium", "Workforce"],
+            ["COMP-ENERGY", "Energy signal", round(energy_risk, 1), "Compressor loading / energy", "High" if energy_risk >= 30 else "Medium", "Energy"],
         ],
         columns=["Asset", "Type", "Risk %", "Evidence", "Severity", "Domain"],
     )
 
 
 def _twin_frame() -> pd.DataFrame:
+    v = _state("inputs", _default_inputs())
     return pd.DataFrame(
         [
             ["FAC-RYD-01", "Facility", "Al Noor Advanced Manufacturing", "Operational"],
             ["LINE-01", "Process", "Assembly Line 1", "Healthy"],
-            ["LINE-02", "Process", "Assembly Line 2", "At Risk"],
-            ["C-204", "Asset", "Main Air Compressor", "Elevated Risk"],
-            ["WO-4821", "Order", "Customer Order · 72h horizon", "Protected 91%"],
-            ["MAT-BRG-08", "Material", "Motor Bearing", "2.1 days cover"],
-            ["Q-07", "Quality", "Seal inspection characteristic", "Drift detected"],
-            ["OUT-72H", "Outcome", "Next-shift service outcome", "Tracking"],
+            ["LINE-02", "Process", "Assembly Line 2", f"OEE {v['production_oee']:.0f}% · At Risk"],
+            ["LINE-03", "Process", "Assembly Line 3", "Available for re-sequencing"],
+            ["C-204", "Asset", "Main Air Compressor", f"{v['maintenance_risk']:.0f}% maintenance risk"],
+            ["WO-4821", "Order", "Customer Order · 72h horizon", f"{v['order_protection']:.0f}% protected"],
+            ["MAT-BRG-08", "Material", "Motor Bearing", f"{v['inventory_cover']:.1f} days cover"],
+            ["Q-07", "Quality", "Seal inspection characteristic", f"Scrap +{v.get('scrap_pct', 3.8):.1f}%"],
+            ["SUP-18", "Supplier", "Critical component supplier", f"{v.get('supplier_delay_h', 18.0):.0f} h late"],
+            ["MW-BACKLOG", "Workforce", "Maintenance team", f"{v.get('maintenance_backlog_h', 42.0):.0f} h backlog"],
+            ["ENERGY-01", "Energy", "Compressor energy signal", f"{v.get('energy_kwh_unit', 1.48):.2f} kWh/unit"],
+            ["OUT-72H", "Outcome", "Customer delivery outcome", "Tracking"],
         ],
         columns=["ID", "Type", "Name", "State"],
     )
