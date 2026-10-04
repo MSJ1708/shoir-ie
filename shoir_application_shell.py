@@ -563,19 +563,24 @@ def _activate_shared_dataset(
 
 
 def _process_home_upload(uploaded: Any) -> tuple[dict[str, pd.DataFrame], str]:
+    """Use the safe/lazy ingestion path for the shared Data Hub.
+
+    Home only needs clean DataFrames. It should not build the full XLSX + ZIP
+    evidence package during the upload event because doing so can exhaust
+    memory on large workbooks and take down the Streamlit process.
+    """
+    from shoir_excel_runtime import process_upload_for_data_hub
+
     raw = uploaded.getvalue()
-    from shoir_excel_studio import process_uploaded_workbook
-    result = process_uploaded_workbook(raw, str(uploaded.name))
-    sheets = result.get("cleaned_sheets") or result.get("raw_sheets") or {}
+    sheets, signature = process_upload_for_data_hub(raw, str(uploaded.name))
     cleaned = {
         str(name): frame.copy(deep=True)
         for name, frame in sheets.items()
-        if isinstance(frame, pd.DataFrame)
+        if isinstance(frame, pd.DataFrame) and not frame.empty
     }
-    cleaned = {name: frame for name, frame in cleaned.items() if not frame.empty}
     if not cleaned:
         raise ValueError("The uploaded file contained no usable data tables after inspection.")
-    return cleaned, str(result.get("signature") or "")
+    return cleaned, str(signature or "")
 
 
 def render_data_hub(username: str, tier: str) -> None:
@@ -595,28 +600,43 @@ def render_data_hub(username: str, tier: str) -> None:
         import hashlib
         signature = hashlib.sha256(upload.getvalue()).hexdigest()
         if signature != st.session_state.get("_shoir_data_hub_signature"):
-            with st.spinner("Inspecting, cleaning and connecting your data…"):
-                sheets, processed_signature = _process_home_upload(upload)
-                st.session_state["industrial_workbook"] = sheets
-                st.session_state["industrial_workbook_formulas"] = {name: {} for name in sheets}
-                st.session_state["industrial_workbook_variables"] = {}
-                st.session_state["industrial_workbook_id"] = None
-                st.session_state["_shoir_data_hub_signature"] = signature
-                st.session_state["_shoir_data_hub_filename"] = str(upload.name)
-                first_sheet = next(iter(sheets))
-                _activate_shared_dataset(
-                    sheets[first_sheet],
-                    filename=str(upload.name),
-                    sheet=first_sheet,
-                    signature=processed_signature or signature,
+            try:
+                with st.spinner("Inspecting, cleaning and connecting your data…"):
+                    sheets, processed_signature = _process_home_upload(upload)
+            except Exception as exc:
+                # A bad/unsupported/large workbook must never terminate the
+                # entire Streamlit process. Keep the workspace usable.
+                st.error(
+                    f"Excel upload could not be loaded safely: "
+                    f"{type(exc).__name__}: {exc}"
                 )
-                st.session_state["industrial_workbook_current_df"] = sheets[first_sheet].copy(deep=True)
-                st.session_state["industrial_workbook_last_upload_signature"] = signature
-                st.success(
-                    f"Connected {len(sheets):,} cleaned sheet(s) from **{upload.name}**. "
-                    "The active dataset is now available to downstream engineering tools."
+                st.caption(
+                    "Your workspace is still running. Try saving a legacy workbook as "
+                    ".xlsx or upload a smaller logical workbook when the source is very large."
                 )
-                st.rerun()
+                return
+
+            st.session_state["industrial_workbook"] = sheets
+            st.session_state["industrial_workbook_formulas"] = {name: {} for name in sheets}
+            st.session_state["industrial_workbook_variables"] = {}
+            st.session_state["industrial_workbook_id"] = None
+            st.session_state["_shoir_data_hub_signature"] = signature
+            st.session_state["_shoir_data_hub_filename"] = str(upload.name)
+            first_sheet = next(iter(sheets))
+            _activate_shared_dataset(
+                sheets[first_sheet],
+                filename=str(upload.name),
+                sheet=first_sheet,
+                signature=processed_signature or signature,
+            )
+            st.session_state["industrial_workbook_current_df"] = sheets[first_sheet].copy(deep=True)
+            st.session_state["industrial_workbook_last_upload_signature"] = signature
+            st.session_state.pop("_shoir_data_hub_error_signature", None)
+            st.success(
+                f"Connected {len(sheets):,} cleaned sheet(s) from **{upload.name}**. "
+                "The active dataset is now available to downstream engineering tools."
+            )
+            st.rerun()
 
     sheets = st.session_state.get("industrial_workbook", {})
     if isinstance(sheets, Mapping) and sheets:
