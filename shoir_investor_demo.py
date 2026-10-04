@@ -1,0 +1,771 @@
+"""Investor-grade Industrial Control Center demo.
+
+This module deliberately keeps the incubator story in one place:
+Plant Risk -> Digital Thread -> Predictive Maintenance -> Simulation
+-> Multi-Objective Optimization -> Decision -> ROI -> Verification.
+
+The scenario is synthetic/demo data. It is designed to demonstrate workflow,
+evidence traceability and business impact without pretending that live plant
+data exists when it does not.
+"""
+from __future__ import annotations
+
+import hashlib
+import time
+from typing import Any, Dict
+
+import numpy as np
+import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
+import streamlit as st
+
+from shoir_enterprise_layer import (
+    build_control_tower_health,
+    save_twin_snapshot,
+    save_twin_scenario,
+    twin_what_if,
+    twin_replay,
+)
+from shoir_optimization import pareto_weight_sweep
+from shoir_enterprise_services import record_workspace_artifact
+
+
+DEMO_KEY = "investor_control_center"
+STAGES = [
+    ("risk", "🚨", "Plant Risk"),
+    ("thread", "🧬", "Digital Thread"),
+    ("maintenance", "🛠️", "Predictive Maintenance"),
+    ("simulation", "🧪", "Simulation"),
+    ("optimization", "⚖️", "Optimization"),
+    ("decision", "🎯", "Decision"),
+    ("impact", "💰", "ROI / Impact"),
+    ("verification", "✅", "Verified Result"),
+]
+
+
+def _state(key: str, default: Any = None) -> Any:
+    return st.session_state.get(f"{DEMO_KEY}_{key}", default)
+
+
+def _set(key: str, value: Any) -> None:
+    st.session_state[f"{DEMO_KEY}_{key}"] = value
+
+
+def _ensure_defaults() -> None:
+    if _state("started") is None:
+        _set("started", False)
+    if _state("completed") is None:
+        _set("completed", [])
+    if _state("plant") is None:
+        _set(
+            "plant",
+            pd.DataFrame(
+                [
+                    ["Production", 83, "Attention", "Line 2 OEE", "83% OEE"],
+                    ["Quality", 88, "Review", "Process drift", "1.8× baseline"],
+                    ["Maintenance", 62, "Critical", "Compressor C-204", "82% risk"],
+                    ["Inventory", 76, "Review", "Motor bearings", "2.1 days cover"],
+                    ["Energy", 84, "Healthy", "Specific energy", "1.32 kWh/unit"],
+                    ["Customer Order", 91, "Protected", "72h order", "91% protected"],
+                ],
+                columns=["Area", "Health %", "Status", "Primary Signal", "KPI"],
+            ),
+        )
+
+
+def _mark(stage: str) -> None:
+    completed = list(_state("completed", []))
+    if stage not in completed:
+        completed.append(stage)
+        _set("completed", completed)
+
+
+def _is_done(stage: str) -> bool:
+    return stage in _state("completed", [])
+
+
+def _reset() -> None:
+    prefix = f"{DEMO_KEY}_"
+    for key in list(st.session_state.keys()):
+        if str(key).startswith(prefix):
+            st.session_state.pop(key, None)
+
+
+def _pretty_number(value: float, digits: int = 0) -> str:
+    return f"{float(value):,.{digits}f}"
+
+
+def _format_sar(value: float) -> str:
+    return f"SAR {_pretty_number(value)}"
+
+
+def _risk_analysis() -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            ["C-204", "Compressor", 82, "Vibration + temperature trend", "High", "Maintenance"],
+            ["LINE-02", "Production line", 67, "OEE deterioration + stops", "Medium", "Production"],
+            ["INV-MTR", "Bearing stock", 58, "2.1 days cover", "Medium", "Inventory"],
+            ["Q-07", "Quality signal", 49, "Process mean drift", "Medium", "Quality"],
+        ],
+        columns=["Asset", "Type", "Risk %", "Evidence", "Severity", "Domain"],
+    )
+
+
+def _twin_frame() -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            ["FAC-RYD-01", "Facility", "Al Noor Advanced Manufacturing", "Operational"],
+            ["LINE-01", "Process", "Assembly Line 1", "Healthy"],
+            ["LINE-02", "Process", "Assembly Line 2", "At Risk"],
+            ["C-204", "Asset", "Main Air Compressor", "Elevated Risk"],
+            ["WO-4821", "Order", "Customer Order · 72h horizon", "Protected 91%"],
+            ["MAT-BRG-08", "Material", "Motor Bearing", "2.1 days cover"],
+            ["Q-07", "Quality", "Seal inspection characteristic", "Drift detected"],
+            ["OUT-72H", "Outcome", "Next-shift service outcome", "Tracking"],
+        ],
+        columns=["ID", "Type", "Name", "State"],
+    )
+
+
+def _thread_figure() -> go.Figure:
+    labels = [
+        "Facility", "Line 2", "Compressor C-204", "Bearing Material",
+        "72h Order", "Quality Signal", "Decision", "Verified Outcome"
+    ]
+    source = [0, 1, 2, 3, 4, 5, 6]
+    target = [1, 2, 6, 2, 6, 6, 7]
+    value = [3, 4, 2, 2, 5, 2, 6]
+    fig = go.Figure(
+        go.Sankey(
+            arrangement="snap",
+            node=dict(label=labels, pad=18, thickness=18),
+            link=dict(source=source, target=target, value=value),
+        )
+    )
+    fig.update_layout(
+        title="Digital Thread · Asset → Process → Order → Decision → Outcome",
+        height=360,
+        margin=dict(l=10, r=10, t=50, b=10),
+    )
+    return fig
+
+
+def _predictive_maintenance() -> pd.DataFrame:
+    hours = np.arange(0, 72, 6)
+    rng = np.random.default_rng(20261004)
+    rows = []
+    for asset, start, slope in [
+        ("C-204", 46.0, 0.49),
+        ("LINE-02", 31.0, 0.30),
+        ("MTR-117", 22.0, 0.16),
+    ]:
+        noise = rng.normal(0, 1.2, len(hours))
+        risk = np.clip(start + slope * hours + noise, 0, 99)
+        for h, r in zip(hours, risk):
+            rows.append([asset, int(h), float(r)])
+    return pd.DataFrame(rows, columns=["Asset", "Hour", "Risk %"])
+
+
+def _simulation(seed: int = 20261004) -> Dict[str, Any]:
+    rng = np.random.default_rng(seed)
+    reps = 1500
+    horizon = 72
+    demand = 9000.0
+    capacity = 130.0
+
+    scenarios = {
+        "Baseline": {"availability": 0.83, "quality": 0.962, "energy": 1.32},
+        "Intervention": {"availability": 0.93, "quality": 0.979, "energy": 1.24},
+    }
+    summary = []
+    samples = {}
+    for name, p in scenarios.items():
+        hourly = np.clip(
+            rng.normal(p["availability"], 0.035, (reps, horizon)), 0.55, 0.995
+        )
+        gross = hourly.sum(axis=1) * capacity
+        output = gross * p["quality"]
+        downtime = horizon * (1.0 - hourly.mean(axis=1))
+        otif = np.clip(output / demand * 100.0, 0, 100)
+        energy = output * p["energy"]
+        summary.append(
+            [
+                name,
+                float(np.mean(output)),
+                float(np.percentile(output, 10)),
+                float(np.percentile(output, 90)),
+                float(np.mean(otif)),
+                float(np.mean(downtime)),
+                float(np.mean(energy)),
+            ]
+        )
+        samples[name] = output
+
+    result = pd.DataFrame(
+        summary,
+        columns=[
+            "Scenario", "Throughput", "P10 Throughput", "P90 Throughput",
+            "OTIF %", "Downtime h", "Energy kWh",
+        ],
+    )
+    return {"summary": result, "samples": samples, "reps": reps, "horizon": horizon}
+
+
+def _optimization() -> Dict[str, Any]:
+    alternatives = pd.DataFrame(
+        [
+            ["Do Nothing", 0, 1190, 32, 87, "No intervention"],
+            ["Preventive Rescue", 152000, 1120, 11, 95, "Inspect C-204 + stage bearing kit"],
+            ["Reroute + Rescue", 167000, 1180, 8, 97, "Rescue + order reroute"],
+            ["Capacity Expansion", 210000, 1220, 14, 98, "Add temporary capacity"],
+        ],
+        columns=["Alternative", "Cost SAR", "Carbon kg", "Risk", "Service %", "Intervention"],
+    )
+    feasible = alternatives[alternatives["Service %"] >= 95].copy()
+    scored = pareto_weight_sweep(
+        feasible,
+        ["Cost SAR", "Risk", "Carbon kg"],
+        weights=[0.45, 0.35, 0.20],
+        minimize=[True, True, True],
+    )
+    choice = scored.iloc[0].to_dict()
+    return {"alternatives": alternatives, "scored": scored, "choice": choice}
+
+
+def _decision() -> Dict[str, Any]:
+    opt = _state("optimization")
+    choice = opt["choice"]
+    sim = _state("simulation")
+    summary = sim["summary"]
+    base = summary.loc[summary["Scenario"].eq("Baseline")].iloc[0]
+    inter = summary.loc[summary["Scenario"].eq("Intervention")].iloc[0]
+    decision = {
+        "title": "72-Hour Factory Rescue",
+        "recommendation": str(choice["Alternative"]),
+        "why": "Protect the customer order while reducing maintenance risk without buying permanent capacity.",
+        "baseline_otif": float(base["OTIF %"]),
+        "expected_otif": float(inter["OTIF %"]),
+        "baseline_downtime": float(base["Downtime h"]),
+        "expected_downtime": float(inter["Downtime h"]),
+        "expected_throughput": float(inter["Throughput"]),
+        "intervention_cost": float(choice["Cost SAR"]),
+        "risk_before": float(opt["alternatives"].loc[opt["alternatives"]["Alternative"].eq("Do Nothing"), "Risk"].iloc[0]),
+        "risk_after": float(choice["Risk"]),
+    }
+    return decision
+
+
+def _impact(decision: Dict[str, Any]) -> Dict[str, float]:
+    baseline_exposure = 420000.0
+    avoided_exposure = baseline_exposure * max(
+        0.0, decision["risk_before"] - decision["risk_after"]
+    ) / max(decision["risk_before"], 1.0)
+    net_value = avoided_exposure - decision["intervention_cost"]
+    roi = net_value / max(decision["intervention_cost"], 1.0) * 100.0
+    time_manual_hours = 7.0
+    time_shoir_minutes = 8.0
+    return {
+        "baseline_exposure": baseline_exposure,
+        "avoided_exposure": avoided_exposure,
+        "net_value": net_value,
+        "roi": roi,
+        "manual_hours": time_manual_hours,
+        "shoir_minutes": time_shoir_minutes,
+        "time_saved_hours": time_manual_hours - time_shoir_minutes / 60.0,
+    }
+
+
+def _verify(decision: Dict[str, Any]) -> pd.DataFrame:
+    # A deterministic post-decision verification realization, not a claim of
+    # real plant performance.
+    expected = {
+        "Throughput": decision["expected_throughput"],
+        "OTIF %": decision["expected_otif"],
+        "Downtime h": decision["expected_downtime"],
+        "Maintenance risk": decision["risk_after"],
+    }
+    actual = {
+        "Throughput": expected["Throughput"] * 0.998,
+        "OTIF %": expected["OTIF %"] - 0.25,
+        "Downtime h": expected["Downtime h"] + 0.18,
+        "Maintenance risk": expected["Maintenance risk"] + 0.8,
+    }
+    targets = {
+        "Throughput": (9000.0, "≥", 50.0),
+        "OTIF %": (95.0, "≥", 0.5),
+        "Downtime h": (6.5, "≤", 0.6),
+        "Maintenance risk": (15.0, "≤", 2.0),
+    }
+    rows = []
+    for metric, value in actual.items():
+        target, direction, tolerance = targets[metric]
+        passed = value >= target - tolerance if direction == "≥" else value <= target + tolerance
+        rows.append(
+            [
+                metric,
+                expected[metric],
+                value,
+                target,
+                direction,
+                "PASS" if passed else "REVIEW",
+            ]
+        )
+    return pd.DataFrame(
+        rows,
+        columns=["KPI", "Expected", "Verified", "Target", "Rule", "Status"],
+    )
+
+
+def _persist_twin(username: str) -> None:
+    try:
+        twin = _twin_frame().rename(columns={"ID": "Asset"})
+        twin["Scenario"] = "Investor Demo · Live"
+        twin["Value"] = twin["State"]
+        save_twin_snapshot(
+            username,
+            twin[["Asset", "Type", "Name", "Value", "Scenario"]],
+            source="investor-demo",
+            scenario_name="Investor Demo · Live",
+        )
+        save_twin_scenario(
+            username,
+            "72-Hour Factory Rescue",
+            {
+                "scenario": "Synthetic plant rescue",
+                "plant": "Al Noor Advanced Manufacturing",
+                "seed": 20261004,
+                "horizon_hours": 72,
+            },
+            parent_name="Live",
+            notes="Investor demo scenario; synthetic data only.",
+        )
+    except Exception as exc:
+        _set("twin_persistence_warning", f"{type(exc).__name__}: {exc}")
+
+
+def _persist_decision(username: str, decision: Dict[str, Any]) -> None:
+    try:
+        payload = {
+            "title": decision["title"],
+            "recommendation": decision["recommendation"],
+            "expected_otif": round(decision["expected_otif"], 2),
+            "expected_throughput": round(decision["expected_throughput"], 1),
+            "intervention_cost": round(decision["intervention_cost"], 2),
+            "risk_before": decision["risk_before"],
+            "risk_after": decision["risk_after"],
+            "source": "investor-demo",
+        }
+        record_workspace_artifact(
+            "investor_decision",
+            "72-Hour Factory Rescue",
+            username,
+            payload,
+        )
+        save_twin_scenario(
+            username,
+            "72-Hour Factory Rescue · Approved",
+            payload,
+            parent_name="72-Hour Factory Rescue",
+            notes="Decision record created by the investor demonstration flow.",
+        )
+        _set("decision_persisted", True)
+    except Exception as exc:
+        _set("decision_persistence_warning", f"{type(exc).__name__}: {exc}")
+
+
+def _run_all(username: str) -> None:
+    _set("started", True)
+    plant = _state("plant")
+    _set("risk", _risk_analysis())
+    _mark("risk")
+    _set("thread", _twin_frame())
+    _set("tower", build_control_tower_health(
+        {
+            "Production": {"records": 128, "alerts": 4, "status": "Attention", "kpi": "83% OEE"},
+            "Supply": {"records": 41, "alerts": 1, "status": "Review", "kpi": "95% supplier fill"},
+            "Inventory": {"records": 84, "alerts": 2, "status": "Review", "kpi": "2.1 days bearing cover"},
+            "Quality": {"records": 67, "alerts": 1, "status": "Review", "kpi": "1.8× drift signal"},
+            "Maintenance": {"records": 22, "alerts": 3, "status": "Attention", "kpi": "82% C-204 risk"},
+            "Transport": {"records": 19, "alerts": 0, "status": "Healthy", "kpi": "94% route readiness"},
+            "Workforce": {"records": 58, "alerts": 1, "status": "Review", "kpi": "97% staffing"},
+            "Energy": {"records": 72, "alerts": 0, "status": "Healthy", "kpi": "1.32 kWh/unit"},
+            "Carbon": {"records": 9, "alerts": 0, "status": "Healthy", "kpi": "1.19 tCO2e modelled"},
+        }
+    ))
+    _persist_twin(username)
+    _mark("thread")
+    _set("maintenance", _predictive_maintenance())
+    _mark("maintenance")
+    _set("simulation", _simulation())
+    _mark("simulation")
+    _set("optimization", _optimization())
+    _mark("optimization")
+    _set("decision", _decision())
+    _persist_decision(username, _state("decision"))
+    _mark("decision")
+    _set("impact", _impact(_state("decision")))
+    _mark("impact")
+    _set("verification", _verify(_state("decision")))
+    _mark("verification")
+
+
+def _button(stage: str, label: str) -> None:
+    disabled = False
+    if stage != "risk":
+        previous = STAGES[[x[0] for x in STAGES].index(stage) - 1][0]
+        disabled = not _is_done(previous)
+    if st.button(label, type="primary", use_container_width=True, disabled=disabled, key=f"{DEMO_KEY}_btn_{stage}"):
+        _run_single(stage)
+
+
+def _run_single(stage: str) -> None:
+    # Single-step mode intentionally uses the same deterministic functions as
+    # full-flow mode so the evidence is identical regardless of presentation style.
+    username = str(st.session_state.get("current_user") or "demo_user")
+    if stage == "risk":
+        _set("started", True)
+        _set("risk", _risk_analysis())
+        _mark("risk")
+    elif stage == "thread":
+        _set("thread", _twin_frame())
+        _persist_twin(username)
+        _mark("thread")
+    elif stage == "maintenance":
+        _set("maintenance", _predictive_maintenance())
+        _mark("maintenance")
+    elif stage == "simulation":
+        _set("simulation", _simulation())
+        _mark("simulation")
+    elif stage == "optimization":
+        _set("optimization", _optimization())
+        _mark("optimization")
+    elif stage == "decision":
+        _set("decision", _decision())
+        _persist_decision(username, _state("decision"))
+        _mark("decision")
+    elif stage == "impact":
+        if _state("decision") is None:
+            _set("decision", _decision())
+        _set("impact", _impact(_state("decision")))
+        _mark("impact")
+    elif stage == "verification":
+        _set("verification", _verify(_state("decision")))
+        _mark("verification")
+
+
+def _render_stage_rail() -> None:
+    cols = st.columns(len(STAGES))
+    for col, (key, icon, label) in zip(cols, STAGES):
+        with col:
+            done = _is_done(key)
+            marker = "✓" if done else icon
+            st.markdown(
+                f"<div style='text-align:center;padding:8px 3px;border-radius:12px;"
+                f"border:1px solid rgba(120,120,120,.25);min-height:62px;'>"
+                f"<div style='font-size:22px'>{marker}</div>"
+                f"<div style='font-size:11px;font-weight:600'>{label}</div>"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
+
+
+def _render_header() -> None:
+    st.markdown(
+        """
+        <div style="padding:22px 24px;border-radius:18px;margin-bottom:16px;
+                    background:linear-gradient(135deg,rgba(34,42,54,.96),rgba(19,28,39,.96));
+                    border:1px solid rgba(255,255,255,.10);">
+          <div style="font-size:13px;letter-spacing:.12em;text-transform:uppercase;opacity:.72;">
+            SHOIR-IE · ENTERPRISE PLUS · INVESTOR MODE
+          </div>
+          <div style="font-size:30px;font-weight:800;margin-top:4px;">
+            🏭 Plant Command Center — 72-Hour Factory Rescue
+          </div>
+          <div style="font-size:15px;opacity:.82;margin-top:8px;max-width:900px;">
+            Give Shoir-IE an industrial situation. It finds the risk, connects the evidence,
+            tests the future, selects the intervention, quantifies impact and verifies the outcome.
+          </div>
+          <div style="font-size:12px;opacity:.6;margin-top:9px;">
+            DEMO SCENARIO · Al Noor Advanced Manufacturing · Synthetic data · Seed 2026-10-04
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _render_landing() -> None:
+    plant = _state("plant")
+    m = st.columns(4)
+    m[0].metric("Customer order", "91%", "72h horizon")
+    m[1].metric("Plant health", "78%", "attention detected")
+    m[2].metric("Critical assets", "1", "C-204")
+    m[3].metric("Decision window", "72 h", "next-shift priority")
+    st.markdown("### 🚨 What the Command Center sees")
+    left, right = st.columns([1.2, 1])
+    with left:
+        st.dataframe(plant, use_container_width=True, hide_index=True)
+    with right:
+        fig = px.bar(
+            plant.sort_values("Health %"),
+            x="Health %",
+            y="Area",
+            orientation="h",
+            range_x=[0, 100],
+            title="Operational health map",
+        )
+        st.plotly_chart(fig, use_container_width=True)
+    st.info(
+        "This is the investor demo entry point. Nothing here is represented as a live plant connection; "
+        "the point is to demonstrate the complete industrial decision loop."
+    )
+    c1, c2 = st.columns([2, 1])
+    with c1:
+        if st.button("🚨 ANALYZE PLANT RISK", type="primary", use_container_width=True, key=f"{DEMO_KEY}_start"):
+            _run_all(str(st.session_state.get("current_user") or "demo_user"))
+            st.rerun()
+    with c2:
+        if st.button("↺ Reset Demo", use_container_width=True, key=f"{DEMO_KEY}_reset_landing"):
+            _reset()
+            st.rerun()
+
+
+def _render_risk() -> None:
+    if not _is_done("risk"):
+        return
+    st.markdown("### 🚨 01 · Plant risk detected")
+    risk = _state("risk")
+    c1, c2, c3 = st.columns(3)
+    top = risk.sort_values("Risk %", ascending=False).iloc[0]
+    c1.metric("Highest-risk asset", str(top["Asset"]), f"{float(top['Risk %']):.0f}% risk")
+    c2.metric("Risk signals", f"{len(risk)}", "cross-domain")
+    c3.metric("Customer order", "91%", "protected")
+    st.dataframe(risk, use_container_width=True, hide_index=True)
+    fig = px.bar(risk.sort_values("Risk %"), x="Risk %", y="Asset", orientation="h", title="Risk ranking · traceable signals")
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def _render_thread() -> None:
+    if not _is_done("thread"):
+        return
+    st.markdown("### 🧬 02 · Digital Thread")
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Entities connected", "8", "facility → outcome")
+    c2.metric("Relationships", "7", "explicit links")
+    c3.metric("Twin snapshot", "Saved", "replayable")
+    a, b = st.columns([1, 1.2])
+    with a:
+        st.dataframe(_state("thread"), use_container_width=True, hide_index=True)
+    with b:
+        st.plotly_chart(_thread_figure(), use_container_width=True)
+    if _state("twin_persistence_warning"):
+        st.caption(f"Local persistence note: {_state('twin_persistence_warning')}")
+    try:
+        replay = twin_replay(str(st.session_state.get("current_user") or "demo_user"), "Investor Demo · Live", limit=3)
+        if not replay.empty:
+            st.caption(f"Replay history available · {len(replay)} recent snapshot(s)")
+    except Exception:
+        pass
+
+
+def _render_maintenance() -> None:
+    if not _is_done("maintenance"):
+        return
+    st.markdown("### 🛠️ 03 · Predictive Maintenance")
+    df = _state("maintenance")
+    latest = df.sort_values("Hour").groupby("Asset").tail(1).sort_values("Risk %", ascending=False)
+    c1, c2, c3 = st.columns(3)
+    c1.metric("C-204 projected risk", f"{latest.iloc[0]['Risk %']:.0f}%")
+    c2.metric("Inspection window", "Before next shift", "recommended")
+    c3.metric("Signals combined", "3", "trend + condition + context")
+    fig = px.line(df, x="Hour", y="Risk %", color="Asset", markers=True, title="Maintenance risk trajectory · 72 hours")
+    fig.add_hline(y=70, line_dash="dash", annotation_text="High-risk threshold")
+    st.plotly_chart(fig, use_container_width=True)
+    st.dataframe(latest.rename(columns={"Hour": "Horizon h"}), use_container_width=True, hide_index=True)
+    st.caption("Risk is a deterministic demo score from synthetic telemetry-style signals; it is not a live failure prediction.")
+
+
+def _render_simulation() -> None:
+    if not _is_done("simulation"):
+        return
+    st.markdown("### 🧪 04 · Industrial Simulation Lab")
+    sim = _state("simulation")
+    s = sim["summary"]
+    baseline = s[s["Scenario"].eq("Baseline")].iloc[0]
+    intervention = s[s["Scenario"].eq("Intervention")].iloc[0]
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Throughput", _pretty_number(intervention["Throughput"]), f"{intervention['Throughput']-baseline['Throughput']:+.0f}")
+    c2.metric("OTIF", f"{intervention['OTIF %']:.1f}%", f"{intervention['OTIF %']-baseline['OTIF %']:+.1f} pp")
+    c3.metric("Downtime", f"{intervention['Downtime h']:.1f} h", f"{intervention['Downtime h']-baseline['Downtime h']:+.1f} h")
+    c4.metric("Replications", f"{sim['reps']:,}", "72h horizon")
+    st.dataframe(s.round(2), use_container_width=True, hide_index=True)
+    plot_df = pd.DataFrame(
+        [{"Scenario": k, "Throughput": v} for k, arr in sim["samples"].items() for v in np.quantile(arr, np.linspace(.1, .9, 9))]
+    )
+    fig = px.box(plot_df, x="Scenario", y="Throughput", points=False, title="Simulated throughput distribution · baseline vs intervention")
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def _render_optimization() -> None:
+    if not _is_done("optimization"):
+        return
+    st.markdown("### ⚖️ 05 · Multi-Objective Optimization")
+    opt = _state("optimization")
+    choice = opt["choice"]
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Recommended", choice["Alternative"])
+    c2.metric("Service", f"{choice['Service %']:.0f}%")
+    c3.metric("Risk", f"{choice['Risk']:.0f}", "index")
+    c4.metric("Intervention", _format_sar(choice["Cost SAR"]))
+    st.dataframe(opt["scored"].round(2), use_container_width=True, hide_index=True)
+    fig = px.scatter(
+        opt["alternatives"],
+        x="Cost SAR",
+        y="Risk",
+        size="Service %",
+        hover_name="Alternative",
+        color="Service %",
+        title="Trade-off surface · cost × risk × service",
+    )
+    st.plotly_chart(fig, use_container_width=True)
+    st.success(f"Optimizer recommendation: **{choice['Alternative']}** — best feasible composite under the demo policy weights.")
+
+
+def _render_decision() -> None:
+    if not _is_done("decision"):
+        return
+    st.markdown("### 🎯 06 · Engineering Decision Center")
+    d = _state("decision")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Decision", "Ready")
+    c2.metric("Expected OTIF", f"{d['expected_otif']:.1f}%")
+    c3.metric("Expected throughput", _pretty_number(d["expected_throughput"]))
+    c4.metric("Risk reduction", f"{d['risk_before']-d['risk_after']:.0f} pts")
+    st.markdown(
+        f"""
+        **Recommendation:** {d['recommendation']}  
+        **Why:** {d['why']}  
+        **Intervention cost:** {_format_sar(d['intervention_cost'])}
+        """
+    )
+    evidence = pd.DataFrame(
+        [
+            ["Plant risk", "4 cross-domain risk signals", "Traceable"],
+            ["Digital Thread", "8 entities / 7 links", "Persisted"],
+            ["Simulation", f"{_state('simulation')['reps']:,} replications", "Reproducible"],
+            ["Optimization", d["recommendation"], "Governed"],
+        ],
+        columns=["Evidence", "Result", "State"],
+    )
+    st.dataframe(evidence, use_container_width=True, hide_index=True)
+    if _state("decision_persisted"):
+        st.success("Decision artifact persisted to the enterprise workspace.")
+
+
+def _render_impact() -> None:
+    if not _is_done("impact"):
+        return
+    st.markdown("### 💰 07 · ROI / Impact")
+    impact = _state("impact")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Gross exposure avoided", _format_sar(impact["avoided_exposure"]))
+    c2.metric("Intervention cost", _format_sar(_state("decision")["intervention_cost"]))
+    c3.metric("Net modelled value", _format_sar(impact["net_value"]))
+    c4.metric("Modelled ROI", f"{impact['roi']:.0f}%")
+    st.markdown("#### ⏱️ Workflow time compression")
+    t1, t2 = st.columns(2)
+    with t1:
+        st.metric("Manual analyst estimate", "7.0 h")
+        st.progress(1.0)
+    with t2:
+        st.metric("Shoir-IE demo workflow", "8 min")
+        st.progress(8 / 420)
+    st.success(
+        f"**Estimated time saved:** {impact['time_saved_hours']:.1f} hours "
+        f"({impact['time_saved_hours']/impact['manual_hours']*100:.0f}%). "
+        "These are demonstration assumptions, not customer claims."
+    )
+
+
+def _render_verification() -> None:
+    if not _is_done("verification"):
+        return
+    st.markdown("### ✅ 08 · Verified Result")
+    ver = _state("verification")
+    pass_count = int(ver["Status"].eq("PASS").sum())
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Verification", "PASS" if pass_count == len(ver) else "REVIEW")
+    c2.metric("KPIs checked", f"{len(ver)}")
+    c3.metric("Passed", f"{pass_count}/{len(ver)}")
+    st.dataframe(ver.round(2), use_container_width=True, hide_index=True)
+    st.success(
+        "The demonstration closes the loop: the chosen intervention has explicit targets, "
+        "a verification record and a traceable outcome."
+    )
+    try:
+        username = str(st.session_state.get("current_user") or "demo_user")
+        digest = hashlib.sha256(ver.to_csv(index=False).encode("utf-8")).hexdigest()
+        save_twin_scenario(
+            username,
+            "72-Hour Factory Rescue · Verified",
+            {"verification_sha256": digest, "status": "PASS" if pass_count == len(ver) else "REVIEW"},
+            parent_name="72-Hour Factory Rescue · Approved",
+            notes="Verification record generated by investor demo.",
+        )
+        st.caption(f"Verification evidence hash: {digest[:16]}…")
+    except Exception as exc:
+        st.caption(f"Verification persistence note: {type(exc).__name__}")
+
+
+def render_investor_control_center(tier: str, username: str) -> None:
+    """Render the investor-facing front door for the industrial platform."""
+    _ensure_defaults()
+    _render_header()
+    _render_stage_rail()
+
+    with st.expander("🎬 Presentation controls", expanded=not _state("started")):
+        c1, c2 = st.columns([2, 1])
+        with c1:
+            st.caption(
+                "Recommended live presentation: press ANALYZE PLANT RISK once. "
+                "The flow populates the same evidence that can also be run one stage at a time."
+            )
+            if st.button("🚀 RUN FULL RESCUE FLOW", type="primary", use_container_width=True, key=f"{DEMO_KEY}_full"):
+                _run_all(username)
+                st.rerun()
+        with c2:
+            if st.button("↺ Reset", use_container_width=True, key=f"{DEMO_KEY}_reset"):
+                _reset()
+                st.rerun()
+
+    if not _state("started"):
+        _render_landing()
+        return
+
+    _render_risk()
+    _render_thread()
+    _render_maintenance()
+    _render_simulation()
+    _render_optimization()
+    _render_decision()
+    _render_impact()
+    _render_verification()
+
+    if not _is_done("verification"):
+        current = next((x for x, _, _ in STAGES if not _is_done(x)), "risk")
+        st.divider()
+        st.markdown(f"### Next action · {dict((x, l) for x, _, l in STAGES).get(current, current)}")
+        labels = {
+            "risk": "🚨 Analyze plant risk",
+            "thread": "🧬 Build Digital Thread",
+            "maintenance": "🛠️ Run predictive maintenance",
+            "simulation": "🧪 Run factory simulation",
+            "optimization": "⚖️ Optimize intervention",
+            "decision": "🎯 Create decision",
+            "impact": "💰 Quantify ROI",
+            "verification": "✅ Verify outcome",
+        }
+        if st.button(labels[current], type="primary", use_container_width=True, key=f"{DEMO_KEY}_next"):
+            _run_single(current)
+            st.rerun()
