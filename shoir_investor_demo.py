@@ -694,10 +694,13 @@ def _render_header() -> None:
 
 def _render_landing() -> None:
     plant = _state("plant")
+    values = _state("inputs", _default_inputs())
+    plant_health = float(pd.to_numeric(_state("plant")["Health %"], errors="coerce").mean())
+    critical_assets = int(_state("plant")["Status"].astype(str).str.contains("Critical", case=False).sum())
     m = st.columns(4)
-    m[0].metric("Customer order", "91%", "72h horizon")
-    m[1].metric("Plant health", "78%", "attention detected")
-    m[2].metric("Critical assets", "1", "C-204")
+    m[0].metric("Customer order", f"{values['order_protection']:.0f}%", "72h horizon")
+    m[1].metric("Plant health", f"{plant_health:.0f}%", "calculated from current inputs")
+    m[2].metric("Critical assets", f"{critical_assets}", "current state")
     m[3].metric("Decision window", "72 h", "next-shift priority")
     st.markdown("### 🚨 What the Command Center sees")
     left, right = st.columns([1.2, 1])
@@ -735,9 +738,10 @@ def _render_risk() -> None:
     risk = _state("risk")
     c1, c2, c3 = st.columns(3)
     top = risk.sort_values("Risk %", ascending=False).iloc[0]
+    order_protection = float(_state("inputs", _default_inputs())["order_protection"])
     c1.metric("Highest-risk asset", str(top["Asset"]), f"{float(top['Risk %']):.0f}% risk")
     c2.metric("Risk signals", f"{len(risk)}", "cross-domain")
-    c3.metric("Customer order", "91%", "protected")
+    c3.metric("Customer order", f"{order_protection:.0f}%", "protected" if order_protection >= 90 else "at risk")
     st.dataframe(risk, use_container_width=True, hide_index=True)
     fig = px.bar(risk.sort_values("Risk %"), x="Risk %", y="Asset", orientation="h", title="Risk ranking · traceable signals")
     st.plotly_chart(fig, use_container_width=True)
