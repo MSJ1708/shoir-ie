@@ -52,26 +52,109 @@ def _set(key: str, value: Any) -> None:
     st.session_state[f"{DEMO_KEY}_{key}"] = value
 
 
+def _default_inputs() -> dict[str, float]:
+    return {
+        "production_oee": 83.0,
+        "quality_yield": 96.2,
+        "maintenance_risk": 82.0,
+        "inventory_cover": 2.1,
+        "order_protection": 91.0,
+        "demand_multiplier": 1.0,
+        "energy_kwh_unit": 1.32,
+    }
+
+
+def _plant_from_inputs(values: dict[str, float]) -> pd.DataFrame:
+    production = float(values["production_oee"])
+    quality = float(values["quality_yield"])
+    maintenance = float(values["maintenance_risk"])
+    inventory = float(values["inventory_cover"])
+    order = float(values["order_protection"])
+    energy = float(values["energy_kwh_unit"])
+
+    quality_health = float(np.clip(100.0 - max(0.0, 96.5 - quality) * 18.0, 40.0, 100.0))
+    inventory_health = float(np.clip(inventory / 5.0 * 100.0, 25.0, 100.0))
+    energy_health = float(np.clip(100.0 - max(0.0, energy - 1.0) * 120.0, 35.0, 100.0))
+    rows = [
+        ["Production", round(production, 1), "Attention" if production < 88 else "Healthy", "Line 2 OEE", f"{production:.0f}% OEE"],
+        ["Quality", round(quality_health, 1), "Review" if quality_health < 92 else "Healthy", "Process yield", f"{quality:.1f}% yield"],
+        ["Maintenance", round(100.0 - maintenance * 0.22, 1), "Critical" if maintenance >= 75 else ("Review" if maintenance >= 50 else "Healthy"), "Compressor C-204", f"{maintenance:.0f}% risk"],
+        ["Inventory", round(inventory_health, 1), "Review" if inventory < 3 else "Healthy", "Motor bearings", f"{inventory:.1f} days cover"],
+        ["Energy", round(energy_health, 1), "Review" if energy > 1.45 else "Healthy", "Specific energy", f"{energy:.2f} kWh/unit"],
+        ["Customer Order", round(order, 1), "At Risk" if order < 90 else "Protected", "72h order", f"{order:.0f}% protected"],
+    ]
+    return pd.DataFrame(rows, columns=["Area", "Health %", "Status", "Primary Signal", "KPI"])
+
+
 def _ensure_defaults() -> None:
     if _state("started") is None:
         _set("started", False)
     if _state("completed") is None:
         _set("completed", [])
+    if _state("inputs") is None:
+        _set("inputs", _default_inputs())
     if _state("plant") is None:
-        _set(
-            "plant",
-            pd.DataFrame(
-                [
-                    ["Production", 83, "Attention", "Line 2 OEE", "83% OEE"],
-                    ["Quality", 88, "Review", "Process drift", "1.8× baseline"],
-                    ["Maintenance", 62, "Critical", "Compressor C-204", "82% risk"],
-                    ["Inventory", 76, "Review", "Motor bearings", "2.1 days cover"],
-                    ["Energy", 84, "Healthy", "Specific energy", "1.32 kWh/unit"],
-                    ["Customer Order", 91, "Protected", "72h order", "91% protected"],
-                ],
-                columns=["Area", "Health %", "Status", "Primary Signal", "KPI"],
-            ),
+        _set("plant", _plant_from_inputs(_state("inputs")))
+
+
+def _reset_flow_only() -> None:
+    for key in ("started", "completed", "risk", "thread", "tower", "maintenance",
+                "simulation", "optimization", "decision", "impact", "verification",
+                "decision_persisted", "twin_persistence_warning", "decision_persistence_warning"):
+        st.session_state.pop(f"{DEMO_KEY}_{key}", None)
+    _set("started", False)
+    _set("completed", [])
+
+
+def _apply_inputs(values: dict[str, float], username: str) -> None:
+    _set("inputs", {k: float(v) for k, v in values.items()})
+    _set("plant", _plant_from_inputs(_state("inputs")))
+    _reset_flow_only()
+    try:
+        save_twin_scenario(
+            username,
+            "Investor Demo · Custom Plant State",
+            _state("inputs"),
+            parent_name="Live",
+            notes="User-adjusted synthetic demo assumptions.",
         )
+    except Exception:
+        pass
+
+
+def _preset(name: str) -> dict[str, float]:
+    base = _default_inputs()
+    presets = {
+        "Compressor deterioration": {
+            **base,
+            "production_oee": 76.0,
+            "maintenance_risk": 90.0,
+            "inventory_cover": 1.4,
+            "order_protection": 86.0,
+            "energy_kwh_unit": 1.48,
+        },
+        "Demand surge": {
+            **base,
+            "production_oee": 84.0,
+            "quality_yield": 96.0,
+            "maintenance_risk": 68.0,
+            "inventory_cover": 2.0,
+            "order_protection": 78.0,
+            "demand_multiplier": 1.20,
+            "energy_kwh_unit": 1.36,
+        },
+        "Stable recovery": {
+            **base,
+            "production_oee": 93.0,
+            "quality_yield": 98.2,
+            "maintenance_risk": 24.0,
+            "inventory_cover": 4.5,
+            "order_protection": 98.0,
+            "demand_multiplier": 1.00,
+            "energy_kwh_unit": 1.16,
+        },
+    }
+    return presets.get(name, base)
 
 
 def _mark(stage: str) -> None:
