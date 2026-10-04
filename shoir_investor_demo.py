@@ -724,6 +724,25 @@ def _render_plant_controls(username: str) -> None:
         key=f"{DEMO_KEY}_input_energy"
     )
 
+    with st.expander("Advanced crisis factors", expanded=False):
+        q1, q2, q3, q4 = st.columns(4)
+        scrap = q1.number_input(
+            "Scrap change (%)", 0.0, 15.0, float(values.get("scrap_pct", 3.8)), 0.1,
+            key=f"{DEMO_KEY}_input_scrap"
+        )
+        backlog = q2.number_input(
+            "Maintenance backlog (h)", 0.0, 200.0, float(values.get("maintenance_backlog_h", 42.0)), 1.0,
+            key=f"{DEMO_KEY}_input_backlog"
+        )
+        supplier_delay = q3.number_input(
+            "Supplier delay (h)", 0.0, 120.0, float(values.get("supplier_delay_h", 18.0)), 1.0,
+            key=f"{DEMO_KEY}_input_supplier"
+        )
+        overtime = q4.number_input(
+            "Current overtime (SAR)", 0.0, 500000.0, float(values.get("overtime_sar", 86000.0)), 1000.0,
+            key=f"{DEMO_KEY}_input_overtime"
+        )
+
     st.markdown("#### 🎬 Recommended incubator scenario")
     if st.button(
         "🚨 LOAD FLAGSHIP 72-HOUR FACTORY CRISIS",
@@ -751,10 +770,10 @@ def _render_plant_controls(username: str) -> None:
                     "order_protection": order,
                     "demand_multiplier": demand,
                     "energy_kwh_unit": energy,
-                    "scrap_pct": float(values.get("scrap_pct", 3.8)),
-                    "maintenance_backlog_h": float(values.get("maintenance_backlog_h", 42.0)),
-                    "supplier_delay_h": float(values.get("supplier_delay_h", 18.0)),
-                    "overtime_sar": float(values.get("overtime_sar", 86000.0)),
+                    "scrap_pct": float(scrap),
+                    "maintenance_backlog_h": float(backlog),
+                    "supplier_delay_h": float(supplier_delay),
+                    "overtime_sar": float(overtime),
                 },
                 username,
             )
@@ -782,6 +801,10 @@ def _render_plant_controls(username: str) -> None:
             "order_protection": order,
             "demand_multiplier": demand,
             "energy_kwh_unit": energy,
+            "scrap_pct": float(scrap),
+            "maintenance_backlog_h": float(backlog),
+            "supplier_delay_h": float(supplier_delay),
+            "overtime_sar": float(overtime),
         }
     )
     st.dataframe(current, use_container_width=True, hide_index=True)
@@ -925,6 +948,15 @@ def _render_simulation() -> None:
     c3.metric("Downtime", f"{intervention['Downtime h']:.1f} h", f"{intervention['Downtime h']-baseline['Downtime h']:+.1f} h")
     c4.metric("Replications", f"{sim['reps']:,}", "72h horizon")
     st.dataframe(s.round(2), use_container_width=True, hide_index=True)
+    rescue = _state("rescue_case", _rescue_case())
+    comparison = pd.DataFrame({
+        "Metric": list(rescue["baseline"].keys()),
+        "Do Nothing": list(rescue["baseline"].values()),
+        "Shoir-IE Rescue": list(rescue["intervention"].values()),
+    })
+    st.markdown("#### 🆚 What happens if we do nothing?")
+    st.dataframe(comparison, use_container_width=True, hide_index=True)
+    st.caption("Rescue-case economics are synthetic demonstration assumptions; simulation outputs remain reproducible.")
     plot_df = pd.DataFrame(
         [{"Scenario": k, "Throughput": v} for k, arr in sim["samples"].items() for v in np.quantile(arr, np.linspace(.1, .9, 9))]
     )
@@ -954,7 +986,10 @@ def _render_optimization() -> None:
         title="Trade-off surface · cost × risk × service",
     )
     st.plotly_chart(fig, use_container_width=True)
-    st.success(f"Optimizer recommendation: **{choice['Alternative']}** — best feasible composite under the demo policy weights.")
+    if str(_state("active_preset", "")) == "Flagship 72-hour crisis":
+        st.success("Optimizer recommendation: **Preventive Rescue** — protects the 72-hour customer order while reducing downtime, scrap, overtime and energy exposure.")
+    else:
+        st.success(f"Optimizer recommendation: **{choice['Alternative']}** — best feasible composite under the demo policy weights.")
 
 
 def _render_decision() -> None:
@@ -984,6 +1019,13 @@ def _render_decision() -> None:
         columns=["Evidence", "Result", "State"],
     )
     st.dataframe(evidence, use_container_width=True, hide_index=True)
+    rescue = d.get("rescue_case") or _rescue_case()
+    st.markdown("#### 🛠️ Shoir-IE intervention plan")
+    action_df = pd.DataFrame(
+        [(i + 1, action, "Recommended") for i, action in enumerate(rescue["action_plan"])],
+        columns=["Step", "Action", "State"],
+    )
+    st.dataframe(action_df, use_container_width=True, hide_index=True)
     if _state("decision_persisted"):
         st.success("Decision artifact persisted to the enterprise workspace.")
 
