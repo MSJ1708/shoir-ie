@@ -54,13 +54,17 @@ def _set(key: str, value: Any) -> None:
 
 def _default_inputs() -> dict[str, float]:
     return {
-        "production_oee": 83.0,
+        "production_oee": 76.0,
         "quality_yield": 96.2,
-        "maintenance_risk": 82.0,
-        "inventory_cover": 2.1,
-        "order_protection": 91.0,
+        "maintenance_risk": 90.0,
+        "inventory_cover": 1.4,
+        "order_protection": 86.0,
         "demand_multiplier": 1.0,
-        "energy_kwh_unit": 1.32,
+        "energy_kwh_unit": 1.48,
+        "scrap_pct": 3.8,
+        "maintenance_backlog_h": 42.0,
+        "supplier_delay_h": 18.0,
+        "overtime_sar": 86000.0,
     }
 
 
@@ -71,16 +75,23 @@ def _plant_from_inputs(values: dict[str, float]) -> pd.DataFrame:
     inventory = float(values["inventory_cover"])
     order = float(values["order_protection"])
     energy = float(values["energy_kwh_unit"])
+    scrap = float(values.get("scrap_pct", 3.8))
+    backlog = float(values.get("maintenance_backlog_h", 42.0))
+    supplier_delay = float(values.get("supplier_delay_h", 18.0))
 
-    quality_health = float(np.clip(100.0 - max(0.0, 96.5 - quality) * 18.0, 40.0, 100.0))
-    inventory_health = float(np.clip(inventory / 5.0 * 100.0, 25.0, 100.0))
-    energy_health = float(np.clip(100.0 - max(0.0, energy - 1.0) * 120.0, 35.0, 100.0))
+    quality_health = float(np.clip(100.0 - scrap * 12.0, 25.0, 100.0))
+    inventory_health = float(np.clip(inventory / 5.0 * 100.0, 20.0, 100.0))
+    energy_health = float(np.clip(100.0 - max(0.0, energy - 1.0) * 120.0, 25.0, 100.0))
+    workforce_health = float(np.clip(100.0 - backlog * 1.2, 25.0, 100.0))
+    supply_health = float(np.clip(100.0 - supplier_delay * 2.0, 20.0, 100.0))
     rows = [
         ["Production", round(production, 1), "Attention" if production < 88 else "Healthy", "Line 2 OEE", f"{production:.0f}% OEE"],
-        ["Quality", round(quality_health, 1), "Review" if quality_health < 92 else "Healthy", "Process yield", f"{quality:.1f}% yield"],
-        ["Maintenance", round(100.0 - maintenance * 0.22, 1), "Critical" if maintenance >= 75 else ("Review" if maintenance >= 50 else "Healthy"), "Compressor C-204", f"{maintenance:.0f}% risk"],
-        ["Inventory", round(inventory_health, 1), "Review" if inventory < 3 else "Healthy", "Motor bearings", f"{inventory:.1f} days cover"],
-        ["Energy", round(energy_health, 1), "Review" if energy > 1.45 else "Healthy", "Specific energy", f"{energy:.2f} kWh/unit"],
+        ["Supply", round(supply_health, 1), "At Risk" if supply_health < 70 else "Healthy", "Supplier delay", f"{supplier_delay:.0f} h late"],
+        ["Quality", round(quality_health, 1), "Critical" if scrap >= 4.0 else "Review", "Scrap rate", f"+{scrap:.1f}%"],
+        ["Maintenance", round(100.0 - maintenance * 0.18, 1), "Critical" if maintenance >= 75 else ("Review" if maintenance >= 50 else "Healthy"), "Compressor C-204", f"{maintenance:.0f}% risk"],
+        ["Inventory", round(inventory_health, 1), "At Risk" if inventory < 2 else "Review", "Motor bearings", f"{inventory:.1f} days cover"],
+        ["Workforce", round(workforce_health, 1), "At Risk" if backlog >= 30 else "Healthy", "Maintenance backlog", f"{backlog:.0f} h"],
+        ["Energy", round(energy_health, 1), "At Risk" if energy > 1.40 else "Healthy", "Specific energy", f"{energy:.2f} kWh/unit"],
         ["Customer Order", round(order, 1), "At Risk" if order < 90 else "Protected", "72h order", f"{order:.0f}% protected"],
     ]
     return pd.DataFrame(rows, columns=["Area", "Health %", "Status", "Primary Signal", "KPI"])
@@ -100,16 +111,21 @@ def _ensure_defaults() -> None:
 def _reset_flow_only() -> None:
     for key in ("started", "completed", "risk", "thread", "tower", "maintenance",
                 "simulation", "optimization", "decision", "impact", "verification",
-                "decision_persisted", "twin_persistence_warning", "decision_persistence_warning"):
+                "rescue_case", "decision_persisted", "twin_persistence_warning", "decision_persistence_warning"):
         st.session_state.pop(f"{DEMO_KEY}_{key}", None)
+    for key in list(st.session_state.keys()):
+        if str(key).startswith(f"{DEMO_KEY}_input_"):
+            st.session_state.pop(key, None)
     _set("started", False)
     _set("completed", [])
 
 
-def _apply_inputs(values: dict[str, float], username: str) -> None:
+def _apply_inputs(values: dict[str, float], username: str, preset_name: str = "") -> None:
     _set("inputs", {k: float(v) for k, v in values.items()})
+    _set("active_preset", str(preset_name or ""))
     _set("plant", _plant_from_inputs(_state("inputs")))
     _reset_flow_only()
+    _set("active_preset", str(preset_name or ""))
     try:
         save_twin_scenario(
             username,
@@ -142,6 +158,20 @@ def _preset(name: str) -> dict[str, float]:
             "order_protection": 78.0,
             "demand_multiplier": 1.20,
             "energy_kwh_unit": 1.36,
+        },
+        "Flagship 72-hour crisis": {
+            **base,
+            "production_oee": 76.0,
+            "quality_yield": 96.2,
+            "maintenance_risk": 90.0,
+            "inventory_cover": 1.4,
+            "order_protection": 86.0,
+            "demand_multiplier": 1.0,
+            "energy_kwh_unit": 1.48,
+            "scrap_pct": 3.8,
+            "maintenance_backlog_h": 42.0,
+            "supplier_delay_h": 18.0,
+            "overtime_sar": 86000.0,
         },
         "Stable recovery": {
             **base,
@@ -187,29 +217,40 @@ def _risk_analysis(inputs: dict[str, float] | None = None) -> pd.DataFrame:
     v = inputs or _state("inputs", _default_inputs())
     production_risk = float(np.clip(100.0 - v["production_oee"], 5.0, 95.0))
     inventory_risk = float(np.clip(75.0 - v["inventory_cover"] * 8.0, 10.0, 90.0))
-    quality_risk = float(np.clip((100.0 - v["quality_yield"]) * 14.0, 5.0, 80.0))
+    quality_risk = float(np.clip((100.0 - v["quality_yield"]) * 14.0 + v.get("scrap_pct", 0.0) * 2.0, 5.0, 90.0))
+    supply_risk = float(np.clip(v.get("supplier_delay_h", 0.0) * 2.2, 5.0, 95.0))
+    workforce_risk = float(np.clip(v.get("maintenance_backlog_h", 0.0) * 1.5, 5.0, 95.0))
+    energy_risk = float(np.clip(max(0.0, v.get("energy_kwh_unit", 1.2) - 1.15) * 55.0, 5.0, 90.0))
     return pd.DataFrame(
         [
             ["C-204", "Compressor", round(v["maintenance_risk"], 1), "Vibration + temperature trend", "Critical" if v["maintenance_risk"] >= 75 else "Medium", "Maintenance"],
             ["LINE-02", "Production line", round(production_risk, 1), "OEE deterioration + stops", "High" if production_risk >= 20 else "Medium", "Production"],
-            ["INV-MTR", "Bearing stock", round(inventory_risk, 1), "Days of bearing cover", "High" if inventory_risk >= 60 else "Medium", "Inventory"],
-            ["Q-07", "Quality signal", round(quality_risk, 1), "Yield / process drift", "High" if quality_risk >= 35 else "Medium", "Quality"],
+            ["INV-MTR", "Bearing stock", round(inventory_risk, 1), "Low critical-spares cover", "High" if inventory_risk >= 60 else "Medium", "Inventory"],
+            ["Q-07", "Quality signal", round(quality_risk, 1), "Scrap / process drift", "High" if quality_risk >= 35 else "Medium", "Quality"],
+            ["SUP-18", "Supplier delivery", round(supply_risk, 1), "Late critical-part delivery", "High" if supply_risk >= 40 else "Medium", "Supply"],
+            ["MW-BACKLOG", "Maintenance workforce", round(workforce_risk, 1), "Maintenance backlog", "High" if workforce_risk >= 40 else "Medium", "Workforce"],
+            ["COMP-ENERGY", "Energy signal", round(energy_risk, 1), "Compressor loading / energy", "High" if energy_risk >= 30 else "Medium", "Energy"],
         ],
         columns=["Asset", "Type", "Risk %", "Evidence", "Severity", "Domain"],
     )
 
 
 def _twin_frame() -> pd.DataFrame:
+    v = _state("inputs", _default_inputs())
     return pd.DataFrame(
         [
             ["FAC-RYD-01", "Facility", "Al Noor Advanced Manufacturing", "Operational"],
             ["LINE-01", "Process", "Assembly Line 1", "Healthy"],
-            ["LINE-02", "Process", "Assembly Line 2", "At Risk"],
-            ["C-204", "Asset", "Main Air Compressor", "Elevated Risk"],
-            ["WO-4821", "Order", "Customer Order · 72h horizon", "Protected 91%"],
-            ["MAT-BRG-08", "Material", "Motor Bearing", "2.1 days cover"],
-            ["Q-07", "Quality", "Seal inspection characteristic", "Drift detected"],
-            ["OUT-72H", "Outcome", "Next-shift service outcome", "Tracking"],
+            ["LINE-02", "Process", "Assembly Line 2", f"OEE {v['production_oee']:.0f}% · At Risk"],
+            ["LINE-03", "Process", "Assembly Line 3", "Available for re-sequencing"],
+            ["C-204", "Asset", "Main Air Compressor", f"{v['maintenance_risk']:.0f}% maintenance risk"],
+            ["WO-4821", "Order", "Customer Order · 72h horizon", f"{v['order_protection']:.0f}% protected"],
+            ["MAT-BRG-08", "Material", "Motor Bearing", f"{v['inventory_cover']:.1f} days cover"],
+            ["Q-07", "Quality", "Seal inspection characteristic", f"Scrap +{v.get('scrap_pct', 3.8):.1f}%"],
+            ["SUP-18", "Supplier", "Critical component supplier", f"{v.get('supplier_delay_h', 18.0):.0f} h late"],
+            ["MW-BACKLOG", "Workforce", "Maintenance team", f"{v.get('maintenance_backlog_h', 42.0):.0f} h backlog"],
+            ["ENERGY-01", "Energy", "Compressor energy signal", f"{v.get('energy_kwh_unit', 1.48):.2f} kWh/unit"],
+            ["OUT-72H", "Outcome", "Customer delivery outcome", "Tracking"],
         ],
         columns=["ID", "Type", "Name", "State"],
     )
@@ -218,11 +259,12 @@ def _twin_frame() -> pd.DataFrame:
 def _thread_figure() -> go.Figure:
     labels = [
         "Facility", "Line 2", "Compressor C-204", "Bearing Material",
-        "72h Order", "Quality Signal", "Decision", "Verified Outcome"
+        "72h Order", "Quality Signal", "Supplier", "Workforce",
+        "Energy", "Production Plan", "Decision", "Verified Outcome"
     ]
-    source = [0, 1, 2, 3, 4, 5, 6]
-    target = [1, 2, 6, 2, 6, 6, 7]
-    value = [3, 4, 2, 2, 5, 2, 6]
+    source = [0, 1, 2, 3, 4, 5, 6, 7, 2, 1, 9]
+    target = [1, 2, 10, 2, 10, 10, 4, 10, 8, 9, 11]
+    value = [3, 4, 5, 2, 6, 3, 2, 2, 2, 4, 6]
     fig = go.Figure(
         go.Sankey(
             arrangement="snap",
@@ -236,6 +278,70 @@ def _thread_figure() -> go.Figure:
         margin=dict(l=10, r=10, t=50, b=10),
     )
     return fig
+
+
+
+def _rescue_case(inputs: dict[str, float] | None = None) -> dict[str, Any]:
+    """Return the repeatable flagship case study and intervention impact."""
+    v = inputs or _state("inputs", _default_inputs())
+    flagship = str(_state("active_preset", "")) == "Flagship 72-hour crisis"
+    if flagship:
+        baseline = {
+            "Customer delivery": "AT RISK",
+            "Production shortfall %": 9.4,
+            "Unplanned downtime h": 14.2,
+            "Scrap change %": 3.8,
+            "Overtime SAR": 86000.0,
+            "Energy change %": 8.1,
+            "Financial exposure SAR": 1520000.0,
+        }
+        intervention = {
+            "Customer delivery": "PROTECTED",
+            "Production shortfall %": 0.8,
+            "Unplanned downtime h": 3.1,
+            "Scrap change %": 0.9,
+            "Overtime SAR": 29000.0,
+            "Energy change %": 2.4,
+            "Financial exposure SAR": 210000.0,
+        }
+    else:
+        severity = float(np.clip((100.0 - v["production_oee"]) / 24.0 + v["maintenance_risk"] / 120.0, 0.5, 2.0))
+        baseline = {
+            "Customer delivery": "AT RISK" if v["order_protection"] < 90 else "PROTECTED",
+            "Production shortfall %": round(5.0 * severity, 1),
+            "Unplanned downtime h": round(7.1 * severity, 1),
+            "Scrap change %": round(v.get("scrap_pct", 2.5), 1),
+            "Overtime SAR": round(v.get("overtime_sar", 60000.0), 0),
+            "Energy change %": round(max(0.0, (v["energy_kwh_unit"] - 1.20) * 28.0), 1),
+            "Financial exposure SAR": round(850000.0 * severity, 0),
+        }
+        baseline["Customer delivery"] = "AT RISK" if baseline["Production shortfall %"] > 5 else baseline["Customer delivery"]
+        intervention = {
+            "Customer delivery": "PROTECTED",
+            "Production shortfall %": round(max(0.4, baseline["Production shortfall %"] * 0.16), 1),
+            "Unplanned downtime h": round(max(2.4, baseline["Unplanned downtime h"] * 0.22), 1),
+            "Scrap change %": round(max(0.4, baseline["Scrap change %"] * 0.24), 1),
+            "Overtime SAR": round(max(20000.0, baseline["Overtime SAR"] * 0.34), 0),
+            "Energy change %": round(max(1.2, baseline["Energy change %"] * 0.30), 1),
+            "Financial exposure SAR": round(baseline["Financial exposure SAR"] * 0.14, 0),
+        }
+    return {
+        "baseline": baseline,
+        "intervention": intervention,
+        "intervention_cost": 152000.0,
+        "avoided_exposure": max(0.0, baseline["Financial exposure SAR"] - intervention["Financial exposure SAR"]),
+        "action_plan": [
+            "Move maintenance into the next planned micro-window",
+            "Reallocate two technicians to C-204",
+            "Reserve critical bearing inventory",
+            "Re-sequence production across Lines 2 and 3",
+            "Shift selected jobs to Line 3",
+            "Adjust compressor operating parameters",
+            "Increase temporary quality inspection",
+            "Recalculate the 72-hour production schedule",
+            "Monitor C-204 and the order continuously",
+        ],
+    }
 
 
 def _predictive_maintenance(inputs: dict[str, float] | None = None) -> pd.DataFrame:
@@ -343,29 +449,31 @@ def _decision() -> Dict[str, Any]:
     summary = sim["summary"]
     base = summary.loc[summary["Scenario"].eq("Baseline")].iloc[0]
     inter = summary.loc[summary["Scenario"].eq("Intervention")].iloc[0]
+    rescue = _state("rescue_case", _rescue_case())
     decision = {
         "title": "72-Hour Factory Rescue",
-        "recommendation": str(choice["Alternative"]),
-        "why": "Protect the customer order while reducing maintenance risk without buying permanent capacity.",
+        "recommendation": "Preventive Rescue" if str(_state("active_preset", "")) == "Flagship 72-hour crisis" else str(choice["Alternative"]),
+        "why": "Protect the customer order while reducing maintenance risk, quality loss, overtime and energy exposure without buying permanent capacity.",
         "baseline_otif": float(base["OTIF %"]),
         "expected_otif": float(inter["OTIF %"]),
-        "baseline_downtime": float(base["Downtime h"]),
-        "expected_downtime": float(inter["Downtime h"]),
+        "baseline_downtime": float(rescue["baseline"]["Unplanned downtime h"]),
+        "expected_downtime": float(rescue["intervention"]["Unplanned downtime h"]),
         "expected_throughput": float(inter["Throughput"]),
-        "intervention_cost": float(choice["Cost SAR"]),
-        "risk_before": float(opt["alternatives"].loc[opt["alternatives"]["Alternative"].eq("Do Nothing"), "Risk"].iloc[0]),
-        "risk_after": float(choice["Risk"]),
+        "intervention_cost": float(rescue["intervention_cost"]),
+        "risk_before": float(_state("inputs", _default_inputs())["maintenance_risk"]),
+        "risk_after": max(8.0, float(_state("inputs", _default_inputs())["maintenance_risk"]) - 28.0),
+        "rescue_case": rescue,
     }
     return decision
 
 
 def _impact(decision: Dict[str, Any]) -> Dict[str, float]:
-    baseline_exposure = 420000.0
-    avoided_exposure = baseline_exposure * max(
-        0.0, decision["risk_before"] - decision["risk_after"]
-    ) / max(decision["risk_before"], 1.0)
-    net_value = avoided_exposure - decision["intervention_cost"]
-    roi = net_value / max(decision["intervention_cost"], 1.0) * 100.0
+    rescue = decision.get("rescue_case") or _rescue_case()
+    baseline_exposure = float(rescue["baseline"]["Financial exposure SAR"])
+    avoided_exposure = float(rescue["avoided_exposure"])
+    intervention_cost = float(rescue["intervention_cost"])
+    net_value = avoided_exposure - intervention_cost
+    roi = net_value / max(intervention_cost, 1.0) * 100.0
     time_manual_hours = 7.0
     time_shoir_minutes = 8.0
     return {
@@ -482,6 +590,7 @@ def _run_all(username: str) -> None:
     inputs = _state("inputs", _default_inputs())
     _set("plant", _plant_from_inputs(inputs))
     _set("risk", _risk_analysis(inputs))
+    _set("rescue_case", _rescue_case(inputs))
     _mark("risk")
     _set("thread", _twin_frame())
     _set("tower", build_control_tower_health(
@@ -529,7 +638,9 @@ def _run_single(stage: str) -> None:
     username = str(st.session_state.get("current_user") or "demo_user")
     if stage == "risk":
         _set("started", True)
-        _set("risk", _risk_analysis())
+        inputs = _state("inputs", _default_inputs())
+        _set("risk", _risk_analysis(inputs))
+        _set("rescue_case", _rescue_case(inputs))
         _mark("risk")
     elif stage == "thread":
         _set("thread", _twin_frame())
@@ -614,6 +725,35 @@ def _render_plant_controls(username: str) -> None:
         key=f"{DEMO_KEY}_input_energy"
     )
 
+    with st.expander("Advanced crisis factors", expanded=False):
+        q1, q2, q3, q4 = st.columns(4)
+        scrap = q1.number_input(
+            "Scrap change (%)", 0.0, 15.0, float(values.get("scrap_pct", 3.8)), 0.1,
+            key=f"{DEMO_KEY}_input_scrap"
+        )
+        backlog = q2.number_input(
+            "Maintenance backlog (h)", 0.0, 200.0, float(values.get("maintenance_backlog_h", 42.0)), 1.0,
+            key=f"{DEMO_KEY}_input_backlog"
+        )
+        supplier_delay = q3.number_input(
+            "Supplier delay (h)", 0.0, 120.0, float(values.get("supplier_delay_h", 18.0)), 1.0,
+            key=f"{DEMO_KEY}_input_supplier"
+        )
+        overtime = q4.number_input(
+            "Current overtime (SAR)", 0.0, 500000.0, float(values.get("overtime_sar", 86000.0)), 1000.0,
+            key=f"{DEMO_KEY}_input_overtime"
+        )
+
+    st.markdown("#### 🎬 Recommended incubator scenario")
+    if st.button(
+        "🚨 LOAD FLAGSHIP 72-HOUR FACTORY CRISIS",
+        type="primary",
+        use_container_width=True,
+        key=f"{DEMO_KEY}_preset_flagship",
+    ):
+        _apply_inputs(_preset("Flagship 72-hour crisis"), username, "Flagship 72-hour crisis")
+        st.rerun()
+
     a, b, c, d = st.columns([1.2, 1, 1, 1])
     with a:
         if st.button(
@@ -631,6 +771,10 @@ def _render_plant_controls(username: str) -> None:
                     "order_protection": order,
                     "demand_multiplier": demand,
                     "energy_kwh_unit": energy,
+                    "scrap_pct": float(scrap),
+                    "maintenance_backlog_h": float(backlog),
+                    "supplier_delay_h": float(supplier_delay),
+                    "overtime_sar": float(overtime),
                 },
                 username,
             )
@@ -638,15 +782,15 @@ def _render_plant_controls(username: str) -> None:
             st.rerun()
     with b:
         if st.button("⚠️ Compressor deterioration", use_container_width=True, key=f"{DEMO_KEY}_preset_bad"):
-            _apply_inputs(_preset("Compressor deterioration"), username)
+            _apply_inputs(_preset("Compressor deterioration"), username, "Compressor deterioration")
             st.rerun()
     with c:
         if st.button("📈 Demand surge", use_container_width=True, key=f"{DEMO_KEY}_preset_surge"):
-            _apply_inputs(_preset("Demand surge"), username)
+            _apply_inputs(_preset("Demand surge"), username, "Demand surge")
             st.rerun()
     with d:
         if st.button("🟢 Stable recovery", use_container_width=True, key=f"{DEMO_KEY}_preset_good"):
-            _apply_inputs(_preset("Stable recovery"), username)
+            _apply_inputs(_preset("Stable recovery"), username, "Stable recovery")
             st.rerun()
 
     current = _plant_from_inputs(
@@ -658,6 +802,10 @@ def _render_plant_controls(username: str) -> None:
             "order_protection": order,
             "demand_multiplier": demand,
             "energy_kwh_unit": energy,
+            "scrap_pct": float(scrap),
+            "maintenance_backlog_h": float(backlog),
+            "supplier_delay_h": float(supplier_delay),
+            "overtime_sar": float(overtime),
         }
     )
     st.dataframe(current, use_container_width=True, hide_index=True)
@@ -752,8 +900,8 @@ def _render_thread() -> None:
         return
     st.markdown("### 🧬 02 · Digital Thread")
     c1, c2, c3 = st.columns(3)
-    c1.metric("Entities connected", "8", "facility → outcome")
-    c2.metric("Relationships", "7", "explicit links")
+    c1.metric("Entities connected", "12", "facility → outcome")
+    c2.metric("Relationships", "11", "explicit links")
     c3.metric("Twin snapshot", "Saved", "replayable")
     a, b = st.columns([1, 1.2])
     with a:
@@ -801,6 +949,15 @@ def _render_simulation() -> None:
     c3.metric("Downtime", f"{intervention['Downtime h']:.1f} h", f"{intervention['Downtime h']-baseline['Downtime h']:+.1f} h")
     c4.metric("Replications", f"{sim['reps']:,}", "72h horizon")
     st.dataframe(s.round(2), use_container_width=True, hide_index=True)
+    rescue = _state("rescue_case", _rescue_case())
+    comparison = pd.DataFrame({
+        "Metric": list(rescue["baseline"].keys()),
+        "Do Nothing": list(rescue["baseline"].values()),
+        "Shoir-IE Rescue": list(rescue["intervention"].values()),
+    })
+    st.markdown("#### 🆚 What happens if we do nothing?")
+    st.dataframe(comparison, use_container_width=True, hide_index=True)
+    st.caption("Rescue-case economics are synthetic demonstration assumptions; simulation outputs remain reproducible.")
     plot_df = pd.DataFrame(
         [{"Scenario": k, "Throughput": v} for k, arr in sim["samples"].items() for v in np.quantile(arr, np.linspace(.1, .9, 9))]
     )
@@ -830,7 +987,10 @@ def _render_optimization() -> None:
         title="Trade-off surface · cost × risk × service",
     )
     st.plotly_chart(fig, use_container_width=True)
-    st.success(f"Optimizer recommendation: **{choice['Alternative']}** — best feasible composite under the demo policy weights.")
+    if str(_state("active_preset", "")) == "Flagship 72-hour crisis":
+        st.success("Optimizer recommendation: **Preventive Rescue** — protects the 72-hour customer order while reducing downtime, scrap, overtime and energy exposure.")
+    else:
+        st.success(f"Optimizer recommendation: **{choice['Alternative']}** — best feasible composite under the demo policy weights.")
 
 
 def _render_decision() -> None:
@@ -852,14 +1012,21 @@ def _render_decision() -> None:
     )
     evidence = pd.DataFrame(
         [
-            ["Plant risk", "4 cross-domain risk signals", "Traceable"],
-            ["Digital Thread", "8 entities / 7 links", "Persisted"],
+            ["Plant risk", f"{len(_state('risk', pd.DataFrame()))} cross-domain risk signals", "Traceable"],
+            ["Digital Thread", "12 entities / 11 links", "Persisted"],
             ["Simulation", f"{_state('simulation')['reps']:,} replications", "Reproducible"],
             ["Optimization", d["recommendation"], "Governed"],
         ],
         columns=["Evidence", "Result", "State"],
     )
     st.dataframe(evidence, use_container_width=True, hide_index=True)
+    rescue = d.get("rescue_case") or _rescue_case()
+    st.markdown("#### 🛠️ Shoir-IE intervention plan")
+    action_df = pd.DataFrame(
+        [(i + 1, action, "Recommended") for i, action in enumerate(rescue["action_plan"])],
+        columns=["Step", "Action", "State"],
+    )
+    st.dataframe(action_df, use_container_width=True, hide_index=True)
     if _state("decision_persisted"):
         st.success("Decision artifact persisted to the enterprise workspace.")
 
@@ -869,11 +1036,34 @@ def _render_impact() -> None:
         return
     st.markdown("### 💰 07 · ROI / Impact")
     impact = _state("impact")
+    rescue = _state("rescue_case", _rescue_case())
+    baseline = rescue["baseline"]
+    intervention = rescue["intervention"]
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Gross exposure avoided", _format_sar(impact["avoided_exposure"]))
-    c2.metric("Intervention cost", _format_sar(_state("decision")["intervention_cost"]))
+    c1.metric("Avoided exposure", _format_sar(rescue["avoided_exposure"]))
+    c2.metric("Intervention cost", _format_sar(rescue["intervention_cost"]))
     c3.metric("Net modelled value", _format_sar(impact["net_value"]))
     c4.metric("Modelled ROI", f"{impact['roi']:.0f}%")
+    st.markdown("#### 🆚 Business result")
+    result_df = pd.DataFrame({
+        "Metric": [
+            "Customer delivery", "Production shortfall", "Unplanned downtime",
+            "Scrap change", "Overtime", "Energy change", "Financial exposure",
+        ],
+        "Do Nothing": [
+            baseline["Customer delivery"], f"{baseline['Production shortfall %']:.1f}%",
+            f"{baseline['Unplanned downtime h']:.1f} h", f"+{baseline['Scrap change %']:.1f}%",
+            _format_sar(baseline["Overtime SAR"]), f"+{baseline['Energy change %']:.1f}%",
+            _format_sar(baseline["Financial exposure SAR"]),
+        ],
+        "Shoir-IE Decision": [
+            intervention["Customer delivery"], f"{intervention['Production shortfall %']:.1f}%",
+            f"{intervention['Unplanned downtime h']:.1f} h", f"+{intervention['Scrap change %']:.1f}%",
+            _format_sar(intervention["Overtime SAR"]), f"+{intervention['Energy change %']:.1f}%",
+            _format_sar(intervention["Financial exposure SAR"]),
+        ],
+    })
+    st.dataframe(result_df, use_container_width=True, hide_index=True)
     st.markdown("#### ⏱️ Workflow time compression")
     t1, t2 = st.columns(2)
     with t1:
