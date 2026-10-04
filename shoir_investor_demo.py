@@ -120,10 +120,12 @@ def _reset_flow_only() -> None:
     _set("completed", [])
 
 
-def _apply_inputs(values: dict[str, float], username: str) -> None:
+def _apply_inputs(values: dict[str, float], username: str, preset_name: str = "") -> None:
     _set("inputs", {k: float(v) for k, v in values.items()})
+    _set("active_preset", str(preset_name or ""))
     _set("plant", _plant_from_inputs(_state("inputs")))
     _reset_flow_only()
+    _set("active_preset", str(preset_name or ""))
     try:
         save_twin_scenario(
             username,
@@ -574,6 +576,7 @@ def _run_all(username: str) -> None:
     inputs = _state("inputs", _default_inputs())
     _set("plant", _plant_from_inputs(inputs))
     _set("risk", _risk_analysis(inputs))
+    _set("rescue_case", _rescue_case(inputs))
     _mark("risk")
     _set("thread", _twin_frame())
     _set("tower", build_control_tower_health(
@@ -621,7 +624,9 @@ def _run_single(stage: str) -> None:
     username = str(st.session_state.get("current_user") or "demo_user")
     if stage == "risk":
         _set("started", True)
-        _set("risk", _risk_analysis())
+        inputs = _state("inputs", _default_inputs())
+        _set("risk", _risk_analysis(inputs))
+        _set("rescue_case", _rescue_case(inputs))
         _mark("risk")
     elif stage == "thread":
         _set("thread", _twin_frame())
@@ -706,6 +711,16 @@ def _render_plant_controls(username: str) -> None:
         key=f"{DEMO_KEY}_input_energy"
     )
 
+    st.markdown("#### 🎬 Recommended incubator scenario")
+    if st.button(
+        "🚨 LOAD FLAGSHIP 72-HOUR FACTORY CRISIS",
+        type="primary",
+        use_container_width=True,
+        key=f"{DEMO_KEY}_preset_flagship",
+    ):
+        _apply_inputs(_preset("Flagship 72-hour crisis"), username, "Flagship 72-hour crisis")
+        st.rerun()
+
     a, b, c, d = st.columns([1.2, 1, 1, 1])
     with a:
         if st.button(
@@ -723,6 +738,10 @@ def _render_plant_controls(username: str) -> None:
                     "order_protection": order,
                     "demand_multiplier": demand,
                     "energy_kwh_unit": energy,
+                    "scrap_pct": float(values.get("scrap_pct", 3.8)),
+                    "maintenance_backlog_h": float(values.get("maintenance_backlog_h", 42.0)),
+                    "supplier_delay_h": float(values.get("supplier_delay_h", 18.0)),
+                    "overtime_sar": float(values.get("overtime_sar", 86000.0)),
                 },
                 username,
             )
@@ -730,15 +749,15 @@ def _render_plant_controls(username: str) -> None:
             st.rerun()
     with b:
         if st.button("⚠️ Compressor deterioration", use_container_width=True, key=f"{DEMO_KEY}_preset_bad"):
-            _apply_inputs(_preset("Compressor deterioration"), username)
+            _apply_inputs(_preset("Compressor deterioration"), username, "Compressor deterioration")
             st.rerun()
     with c:
         if st.button("📈 Demand surge", use_container_width=True, key=f"{DEMO_KEY}_preset_surge"):
-            _apply_inputs(_preset("Demand surge"), username)
+            _apply_inputs(_preset("Demand surge"), username, "Demand surge")
             st.rerun()
     with d:
         if st.button("🟢 Stable recovery", use_container_width=True, key=f"{DEMO_KEY}_preset_good"):
-            _apply_inputs(_preset("Stable recovery"), username)
+            _apply_inputs(_preset("Stable recovery"), username, "Stable recovery")
             st.rerun()
 
     current = _plant_from_inputs(
