@@ -247,7 +247,7 @@ def _policy_alternatives(values: dict[str, float]) -> pd.DataFrame:
     base_cost = 152000.0
     rows = [
         ["Do Nothing", 0.0, max(5.0, risk + 17.0), max(45.0, service - 6.0), 1190.0, "Accept current exposure"],
-        ["Preventive Rescue", base_cost, max(5.0, risk - 28.0), min(99.0, service + 7.0), 1120.0, "C-204 micro-window + bearing reserve"],
+        ["Preventive Rescue", base_cost, max(5.0, risk - 28.0), min(99.0, service + 10.0), 1120.0, "C-204 micro-window + bearing reserve"],
         ["Reroute + Rescue", 167000.0, max(4.0, risk - 34.0), min(99.0, service + 9.0), 1180.0, "Rescue + line/customer reroute"],
         ["Capacity Expansion", 210000.0, max(3.0, risk - 24.0), min(99.0, service + 11.0), 1220.0, "Temporary capacity uplift"],
     ]
