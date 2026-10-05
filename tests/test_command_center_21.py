@@ -181,3 +181,13 @@ def test_platform_router_has_command_center_fail_open_boundary():
     assert "render_investor_control_center_21(tier, username)" in section
     assert "_render_customization()" in section
     assert "Command Center diagnostic" in section
+
+
+
+def test_primary_command_center_path_uses_stable_builder():
+    import pathlib
+    source = pathlib.Path("shoir_command_center_21.py").read_text(encoding="utf-8")
+    assert "def _render_customization_stable()" in source
+    renderer = source[source.find("def render_investor_control_center_21"):source.find("def render_investor_control_center_21") + 1200]
+    assert "_render_customization_stable()" in renderer
+    assert "_render_customization()" not in renderer
