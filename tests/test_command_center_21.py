@@ -191,3 +191,40 @@ def test_primary_command_center_path_uses_stable_builder():
     renderer = source[source.find("def render_investor_control_center_21"):source.find("def render_investor_control_center_21") + 1200]
     assert "_render_customization_stable()" in renderer
     assert "_render_customization()" not in renderer
+
+
+def test_investor_value_snapshot_restores_time_and_financial_proof():
+    snap = cc._investor_value_snapshot()
+    assert snap["baseline_exposure"] == 1_520_000.0
+    assert snap["intervention_exposure"] == 210_000.0
+    assert snap["avoided_exposure"] == 1_310_000.0
+    assert snap["intervention_cost"] == 152_000.0
+    assert round(float(snap["net_value"])) == 1_158_000
+    assert round(float(snap["roi"])) == 762
+    assert round(float(snap["time_saved_hours"]), 2) == 6.87
+    assert round(float(snap["time_saved_pct"]), 1) == 98.1
+    assert snap["time_saved_label"] == "6h 52m"
+
+
+def test_investor_renderer_is_presentation_first_and_does_not_duplicate_stage_flow():
+    source = inspect.getsource(cc.render_investor_control_center_21)
+    assert "_render_investor_result_board()" in source
+    assert "_render_investor_journey()" in source
+    assert 'Scenario Setup & Plant Builder' in source
+    # The legacy per-stage renderers are owned by the journey now, not rendered a second time below it.
+    assert source.count("demo._render_simulation()") == 0
+    assert source.count("demo._render_impact()") == 0
+
+
+def test_investor_result_board_contains_business_and_time_value_surfaces():
+    source = inspect.getsource(cc._render_investor_result_board)
+    for required in [
+        "Before vs After",
+        "Modelled improvement vs Do Nothing",
+        "Financial exposure",
+        "Workflow compression",
+        "Estimated time saved",
+        "End-to-end study workflow time",
+        "Synthetic demonstration assumptions",
+    ]:
+        assert required in source

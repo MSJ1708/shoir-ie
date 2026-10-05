@@ -1166,102 +1166,406 @@ def _render_evidence_and_governance() -> None:
     st.markdown("#### 🛡️ Decision governance")
     demo._render_decision_governance()
 
+
+def _demo_duration_label(hours: float) -> str:
+    total_minutes = max(0, int(round(float(hours) * 60.0)))
+    h, m = divmod(total_minutes, 60)
+    if h and m:
+        return f"{h}h {m}m"
+    if h:
+        return f"{h}h"
+    return f"{m} min"
+
+
+def _investor_value_snapshot() -> dict[str, float | str]:
+    """Build the single investor-facing value snapshot from the live demo state."""
+    rescue = _dynamic_rescue(_inputs())
+    impact = demo._state("impact", {}) or {}
+    manual_hours = float(impact.get("manual_hours", 7.0))
+    shoir_minutes = float(impact.get("shoir_minutes", 8.0))
+    saved_hours = max(0.0, manual_hours - shoir_minutes / 60.0)
+    saved_pct = (saved_hours / manual_hours * 100.0) if manual_hours else 0.0
+    baseline = rescue["baseline"]
+    intervention = rescue["intervention"]
+    avoided = float(rescue["avoided_exposure"])
+    intervention_cost = float(rescue["intervention_cost"])
+    return {
+        "baseline_exposure": float(baseline["Financial exposure SAR"]),
+        "intervention_exposure": float(intervention["Financial exposure SAR"]),
+        "avoided_exposure": avoided,
+        "intervention_cost": intervention_cost,
+        "net_value": max(0.0, avoided - intervention_cost),
+        "roi": max(0.0, (avoided - intervention_cost) / max(intervention_cost, 1.0) * 100.0),
+        "manual_hours": manual_hours,
+        "shoir_minutes": shoir_minutes,
+        "time_saved_hours": saved_hours,
+        "time_saved_pct": saved_pct,
+        "time_saved_label": _demo_duration_label(saved_hours),
+    }
+
+
+def _render_investor_result_board() -> None:
+    """Investor-first results surface: business impact, workflow compression and live charts."""
+    if not demo._state("started"):
+        return
+
+    rescue = _dynamic_rescue(_inputs())
+    value = _investor_value_snapshot()
+    baseline = rescue["baseline"]
+    intervention = rescue["intervention"]
+
+    st.markdown(
+        """
+        <div style="margin-top:18px;padding:20px 22px;border-radius:18px;
+                    background:linear-gradient(135deg,#0f172a,#12233f 60%,#0f766e);
+                    color:white;border:1px solid rgba(148,163,184,.22);
+                    box-shadow:0 12px 30px rgba(15,23,42,.14);">
+          <div style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;opacity:.72;">
+            INVESTOR RESULT BOARD · LIVE FROM CURRENT SCENARIO
+          </div>
+          <div style="font-size:27px;font-weight:850;margin-top:5px;">
+            One factory problem → one decision → measurable modelled value
+          </div>
+          <div style="font-size:13px;opacity:.82;margin-top:7px;">
+            Every number below is recalculated from the active synthetic plant state.
+            Nothing here is a customer claim or a live plant outcome.
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    m1, m2, m3, m4, m5 = st.columns(5)
+    m1.metric(
+        "Customer delivery",
+        intervention["Customer delivery"],
+        f"from {baseline['Customer delivery']}",
+    )
+    m2.metric(
+        "Financial exposure",
+        demo._format_sar(intervention["Financial exposure SAR"]),
+        f"−{demo._format_sar(value['avoided_exposure'])}",
+    )
+    m3.metric(
+        "Time saved",
+        value["time_saved_label"],
+        f"{value['time_saved_pct']:.1f}% faster",
+    )
+    m4.metric(
+        "Net modelled value",
+        demo._format_sar(value["net_value"]),
+        f"ROI {value['roi']:.0f}%",
+    )
+    m5.metric(
+        "Decision",
+        str(demo._state("decision", {}).get("recommendation", "Preventive Rescue")),
+        "recommended",
+    )
+
+    st.markdown("### 💰 Before vs After · the result management actually cares about")
+    result_df = pd.DataFrame(
+        {
+            "Metric": [
+                "Customer delivery",
+                "Production shortfall",
+                "Unplanned downtime",
+                "Scrap change",
+                "Overtime",
+                "Energy change",
+                "Financial exposure",
+            ],
+            "Do Nothing": [
+                baseline["Customer delivery"],
+                f"{baseline['Production shortfall %']:.1f}%",
+                f"{baseline['Unplanned downtime h']:.1f} h",
+                f"+{baseline['Scrap change %']:.1f}%",
+                demo._format_sar(baseline["Overtime SAR"]),
+                f"+{baseline['Energy change %']:.1f}%",
+                demo._format_sar(baseline["Financial exposure SAR"]),
+            ],
+            "Shoir-IE Rescue": [
+                intervention["Customer delivery"],
+                f"{intervention['Production shortfall %']:.1f}%",
+                f"{intervention['Unplanned downtime h']:.1f} h",
+                f"+{intervention['Scrap change %']:.1f}%",
+                demo._format_sar(intervention["Overtime SAR"]),
+                f"+{intervention['Energy change %']:.1f}%",
+                demo._format_sar(intervention["Financial exposure SAR"]),
+            ],
+        }
+    )
+    st.dataframe(result_df, use_container_width=True, hide_index=True)
+
+    improvements = pd.DataFrame(
+        [
+            ["Production shortfall", baseline["Production shortfall %"], intervention["Production shortfall %"],
+             (baseline["Production shortfall %"] - intervention["Production shortfall %"]) / max(baseline["Production shortfall %"], 0.1) * 100.0],
+            ["Unplanned downtime", baseline["Unplanned downtime h"], intervention["Unplanned downtime h"],
+             (baseline["Unplanned downtime h"] - intervention["Unplanned downtime h"]) / max(baseline["Unplanned downtime h"], 0.1) * 100.0],
+            ["Scrap change", baseline["Scrap change %"], intervention["Scrap change %"],
+             (baseline["Scrap change %"] - intervention["Scrap change %"]) / max(baseline["Scrap change %"], 0.1) * 100.0],
+            ["Overtime", baseline["Overtime SAR"], intervention["Overtime SAR"],
+             (baseline["Overtime SAR"] - intervention["Overtime SAR"]) / max(baseline["Overtime SAR"], 1.0) * 100.0],
+            ["Energy change", baseline["Energy change %"], intervention["Energy change %"],
+             (baseline["Energy change %"] - intervention["Energy change %"]) / max(baseline["Energy change %"], 0.1) * 100.0],
+            ["Financial exposure", baseline["Financial exposure SAR"], intervention["Financial exposure SAR"],
+             (baseline["Financial exposure SAR"] - intervention["Financial exposure SAR"]) / max(baseline["Financial exposure SAR"], 1.0) * 100.0],
+        ],
+        columns=["Metric", "Do Nothing", "Shoir-IE Rescue", "Improvement %"],
+    )
+
+    chart_a, chart_b = st.columns(2)
+    with chart_a:
+        fig = px.bar(
+            improvements.sort_values("Improvement %"),
+            x="Improvement %",
+            y="Metric",
+            orientation="h",
+            text="Improvement %",
+            title="Modelled improvement vs Do Nothing",
+        )
+        fig.update_traces(texttemplate="%{text:.1f}%", textposition="outside")
+        fig.update_layout(height=380, margin=dict(l=10, r=20, t=60, b=10), xaxis_range=[0, max(100, float(improvements["Improvement %"].max()) + 10)])
+        st.plotly_chart(fig, use_container_width=True, key=f"{CC21_KEY}_value_improvement")
+
+    with chart_b:
+        fig = go.Figure()
+        fig.add_bar(
+            x=["Do Nothing", "Shoir-IE Rescue"],
+            y=[baseline["Financial exposure SAR"], intervention["Financial exposure SAR"]],
+            text=[demo._format_sar(baseline["Financial exposure SAR"]), demo._format_sar(intervention["Financial exposure SAR"])],
+            textposition="outside",
+            name="Exposure",
+        )
+        fig.update_layout(
+            title="Financial exposure · modelled",
+            yaxis_title="SAR",
+            height=380,
+            margin=dict(l=10, r=10, t=60, b=10),
+            showlegend=False,
+        )
+        st.plotly_chart(fig, use_container_width=True, key=f"{CC21_KEY}_value_exposure")
+
+    st.markdown("### ⏱️ Workflow compression · make the time saving impossible to miss")
+    time_a, time_b, time_c = st.columns(3)
+    time_a.metric("Manual analyst estimate", _demo_duration_label(value["manual_hours"]))
+    time_b.metric("Shoir-IE demo workflow", _demo_duration_label(value["shoir_minutes"] / 60.0))
+    time_c.metric("Estimated time saved", value["time_saved_label"], f"{value['time_saved_pct']:.1f}%")
+
+    time_df = pd.DataFrame(
+        {
+            "Workflow": ["Manual analyst", "Shoir-IE"],
+            "Minutes": [value["manual_hours"] * 60.0, value["shoir_minutes"]],
+        }
+    )
+    fig = px.bar(
+        time_df,
+        x="Workflow",
+        y="Minutes",
+        text="Minutes",
+        title="End-to-end study workflow time",
+    )
+    fig.update_traces(texttemplate="%{text:.0f} min", textposition="outside")
+    fig.update_layout(height=330, margin=dict(l=10, r=10, t=60, b=20), showlegend=False)
+    st.plotly_chart(fig, use_container_width=True, key=f"{CC21_KEY}_workflow_time")
+
+    st.info(
+        f"**Modelled value bridge:** {demo._format_sar(value['baseline_exposure'])} baseline exposure "
+        f"→ {demo._format_sar(value['intervention_exposure'])} intervention exposure · "
+        f"{demo._format_sar(value['avoided_exposure'])} avoided exposure · "
+        f"{demo._format_sar(value['intervention_cost'])} intervention cost · "
+        f"{demo._format_sar(value['net_value'])} net modelled value. "
+        "All financial and time figures are synthetic demonstration assumptions."
+    )
+
+
+def _render_investor_journey() -> None:
+    """Show the preserved stage renderers as a clear, scrollable decision story."""
+    st.markdown("### 🧭 Live Decision Journey")
+    st.caption(
+        "Each panel is the original industrial engine, now presented in investor order. "
+        "Completed stages stay visible with their live table and chart outputs."
+    )
+
+    stage_defs = [
+        ("risk", "01", "🚨 Plant Risk", "What is going wrong, and where?"),
+        ("thread", "02", "🧬 Digital Thread", "How are the signals connected?"),
+        ("maintenance", "03", "🛠️ Predictive Maintenance", "When should we intervene?"),
+        ("simulation", "04", "🧪 Industrial Simulation Lab", "What happens over the next 72 hours?"),
+        ("optimization", "05", "⚖️ Multi-Objective Optimization", "Which intervention balances the trade-offs?"),
+        ("decision", "06", "🎯 Engineering Decision Center", "What should management do?"),
+        ("impact", "07", "💰 ROI / Impact", "What value does the decision create?"),
+        ("verification", "08", "✅ Verified Result", "Did the selected KPIs meet the governed targets?"),
+    ]
+
+    completed = {key for key, *_ in stage_defs if demo._is_done(key)}
+    progress = len(completed) / len(stage_defs)
+    st.progress(progress)
+    st.caption(f"{len(completed)}/{len(stage_defs)} decision stages complete · live session state")
+
+    for key, number, title, subtitle in stage_defs:
+        if key == "risk":
+            renderer = demo._render_risk
+        elif key == "thread":
+            renderer = demo._render_thread
+        elif key == "maintenance":
+            renderer = demo._render_maintenance
+        elif key == "simulation":
+            renderer = demo._render_simulation
+        elif key == "optimization":
+            renderer = demo._render_optimization
+        elif key == "decision":
+            renderer = demo._render_decision
+        elif key == "impact":
+            renderer = demo._render_impact
+        else:
+            renderer = demo._render_verification
+
+        status = "✓ COMPLETE" if key in completed else "PENDING"
+        with st.expander(f"{number} · {title} · {status}", expanded=(key in completed)):
+            st.caption(subtitle)
+            if key in completed:
+                renderer()
+            else:
+                st.info("Run the next stage below to populate this result panel.")
+
+    if not demo._is_done("verification"):
+        current = next((x for x, _, _ in demo.STAGES if not demo._is_done(x)), "risk")
+        labels = {
+            "risk": "🚨 Analyze plant risk",
+            "thread": "🧬 Build Digital Thread",
+            "maintenance": "🛠️ Run predictive maintenance",
+            "simulation": "🧪 Run factory simulation",
+            "optimization": "⚖️ Optimize intervention",
+            "decision": "🎯 Create decision",
+            "impact": "💰 Quantify ROI",
+            "verification": "✅ Verify outcome",
+        }
+        st.markdown("#### Next investor action")
+        if st.button(labels[current], type="primary", use_container_width=True, key=f"{CC21_KEY}_journey_next"):
+            demo._run_single(current)
+            st.rerun()
+
+
 def render_investor_control_center_21(tier: str, username: str) -> None:
-    """Render the upgraded Command Center while preserving all original stages."""
+    """Render a presentation-first Command Center without removing the industrial engines."""
     _ensure_state()
     demo._ensure_defaults()
     demo._init_ui_state()
 
+    _inject_command_center_css()
     _render_cockpit()
-    _render_palette()
 
-    # The Plant Builder is a primary capability, so it renders before optional
-    # role lenses. A role-specific visualization must never hide it.
-    _render_customization_stable()
+    with st.expander("⌘ Command Center controls", expanded=False):
+        _render_palette()
 
+    # Scenario setup is available but deliberately secondary to the investor story.
     try:
-        _render_role_workspace()
+        with st.expander("🎛️ Scenario Setup & Plant Builder", expanded=not demo._state("started")):
+            demo._render_header()
+            demo._render_plant_controls(username)
+            try:
+                _render_customization_stable()
+            except Exception as exc:
+                st.warning("Plant Builder is temporarily unavailable; the investor decision story remains active.")
+                with st.expander("Plant Builder diagnostic", expanded=False):
+                    st.code(f"{type(exc).__name__}: {exc}")
     except Exception as exc:
-        st.warning(
-            "Role workspace visualization is temporarily unavailable; "
-            "the Plant Builder and core Command Center remain active."
-        )
-        with st.expander("Role workspace diagnostic", expanded=False):
+        st.warning("Scenario setup is temporarily unavailable; the investor decision story remains active.")
+        with st.expander("Scenario setup diagnostic", expanded=False):
             st.code(f"{type(exc).__name__}: {exc}")
 
-    _render_focus_panel()
-    _render_policy_controls()
+    if not demo._state("started"):
+        st.markdown("---")
+        demo._render_landing()
+        return
 
-    with st.expander("⚖️ Intervention alternatives & recommendation policy", expanded=bool(_ui_get("alternatives_open", False))):
-        st.caption("Tune the decision policy above, compare all available interventions, then send the preferred alternative into the preserved engineering decision flow.")
-        alt = _policy_alternatives(_inputs())
-        st.dataframe(alt.round(2), use_container_width=True, hide_index=True)
-        _plotly(px.scatter(alt, x="Cost SAR", y="Risk", size="Service %", hover_name="Alternative", text="Alternative", title="Configurable intervention frontier"), key=f"{CC21_KEY}_alternatives")
-        if not alt.empty and st.button(f"🎯 Use {alt.iloc[0]['Alternative']} as working policy choice", type="primary", use_container_width=True, key=f"{CC21_KEY}_use_alt"):
-            _ui_set("last_action", f"Policy choice · {alt.iloc[0]['Alternative']}")
-            st.success(f"Working recommendation set to {alt.iloc[0]['Alternative']}. Existing optimization and decision stages remain authoritative for execution.")
+    # The business result is the primary post-run surface.
+    _render_investor_result_board()
+    _render_investor_journey()
 
-    with st.expander("🧠 Why this recommendation?", expanded=False):
-        demo._render_why_recommendation()
-    demo._render_scenario_library(username)
+    # Secondary operational tooling must never prevent the investor result board from rendering.
+    with st.expander("🔬 Operating Workspace · What-If, alternatives, roles & plant map", expanded=False):
+        try:
+            try:
+                _render_role_workspace()
+            except Exception as exc:
+                st.warning("Role workspace visualization is temporarily unavailable; the result board remains active.")
+                with st.expander("Role workspace diagnostic", expanded=False):
+                    st.code(f"{type(exc).__name__}: {exc}")
 
-    st.markdown("### 🏭 Industrial Situation Map")
-    _render_thread_and_floor()
-    _render_inspector()
-    _render_what_if()
+            _render_focus_panel()
+            _render_policy_controls()
 
-    with st.expander("🔗 Evidence & Decision Governance", expanded=bool(_ui_get("evidence_open", False) or _ui_get("governance_open", False))):
-        _render_evidence_and_governance()
-        with st.expander("Original evidence trace", expanded=False):
-            demo._render_evidence_chain()
-    with st.expander("🧑‍💼 Executive View", expanded=_ui_get("role","Command Center")=="Executive"):
-        demo._render_executive_summary()
-    with st.expander("🔄 Closed-loop lifecycle", expanded=False):
-        demo._render_closed_loop()
+            with st.expander("⚖️ Intervention alternatives & recommendation policy", expanded=False):
+                alt = _policy_alternatives(_inputs())
+                st.dataframe(alt.round(2), use_container_width=True, hide_index=True)
+                _plotly(
+                    px.scatter(
+                        alt,
+                        x="Cost SAR",
+                        y="Risk",
+                        size="Service %",
+                        hover_name="Alternative",
+                        text="Alternative",
+                        title="Configurable intervention frontier",
+                    ),
+                    key=f"{CC21_KEY}_operating_alternatives",
+                )
+                if not alt.empty and st.button(
+                    f"🎯 Use {alt.iloc[0]['Alternative']} as working policy choice",
+                    type="primary",
+                    use_container_width=True,
+                    key=f"{CC21_KEY}_use_alt",
+                ):
+                    _ui_set("last_action", f"Policy choice · {alt.iloc[0]['Alternative']}")
+                    st.success(
+                        f"Working recommendation set to {alt.iloc[0]['Alternative']}. "
+                        "Existing optimization and decision stages remain authoritative for execution."
+                    )
+
+            with st.expander("🧠 Why this recommendation?", expanded=False):
+                demo._render_why_recommendation()
+            demo._render_scenario_library(username)
+            st.markdown("### 🏭 Industrial Situation Map")
+            _render_thread_and_floor()
+            _render_inspector()
+            _render_what_if()
+
+            with st.expander("🔗 Evidence & Decision Governance", expanded=False):
+                _render_evidence_and_governance()
+                with st.expander("Original evidence trace", expanded=False):
+                    demo._render_evidence_chain()
+            with st.expander("🧑‍💼 Executive View", expanded=False):
+                demo._render_executive_summary()
+            with st.expander("🔄 Closed-loop lifecycle", expanded=False):
+                demo._render_closed_loop()
+        except Exception as exc:
+            st.warning("Secondary Operating Workspace is temporarily unavailable; investor results remain fully available.")
+            with st.expander("Operating workspace diagnostic", expanded=False):
+                st.code(f"{type(exc).__name__}: {exc}")
 
     st.markdown("---")
-    st.markdown("### Existing Industrial Decision Flow · preserved")
-    demo._render_header()
-    demo._render_plant_controls(username)
-    demo._render_stage_rail()
-
-    with st.expander("🎬 Presentation controls", expanded=not demo._state("started")):
-        c1,c2 = st.columns([2,1])
+    with st.expander("🎬 Presentation controls & reset", expanded=False):
+        c1, c2, c3 = st.columns([2.2, 1, 1])
         with c1:
-            st.caption("The original step-by-step flow and one-click rescue flow are preserved unchanged below the 2.1 cockpit.")
             if st.button("🚀 RUN FULL RESCUE FLOW", type="primary", use_container_width=True, key=f"{CC21_KEY}_full"):
                 demo._run_all(username)
                 st.rerun()
         with c2:
             if st.button("↺ Reset", use_container_width=True, key=f"{CC21_KEY}_reset"):
                 demo._reset()
-                _ui_set("inspector_open", True)
-                _ui_set("palette_open", False)
+                _reset_upgrade_view()
                 st.rerun()
+        with c3:
+            st.caption("Synthetic demo only. Connected plants are not modified.")
 
-    if not demo._state("started"):
-        demo._render_landing()
-        return
-
-    demo._render_risk()
-    demo._render_thread()
-    demo._render_maintenance()
-    demo._render_simulation()
-    demo._render_optimization()
-    demo._render_decision()
-    demo._render_impact()
-    demo._render_verification()
-
+    # Keep the original one-stage rail/state contract available to compatibility callers,
+    # but do not duplicate every stage a second time on the visible page.
     if not demo._is_done("verification"):
         current = next((x for x, _, _ in demo.STAGES if not demo._is_done(x)), "risk")
-        st.divider()
-        st.markdown(f"### Next action · {dict((x, l) for x, _, l in demo.STAGES).get(current, current)}")
-        labels = {
-            "risk": "🚨 Analyze plant risk", "thread": "🧬 Build Digital Thread",
-            "maintenance": "🛠️ Run predictive maintenance", "simulation": "🧪 Run factory simulation",
-            "optimization": "⚖️ Optimize intervention", "decision": "🎯 Create decision",
-            "impact": "💰 Quantify ROI", "verification": "✅ Verify outcome",
-        }
-        if st.button(labels[current], type="primary", use_container_width=True, key=f"{CC21_KEY}_next"):
-            demo._run_single(current)
-            st.rerun()
+        st.caption(
+            f"Next stage: {dict((x, l) for x, _, l in demo.STAGES).get(current, current)} · "
+            "Use the primary action inside Live Decision Journey."
+        )
+
