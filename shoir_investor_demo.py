@@ -121,6 +121,9 @@ def _reset_flow_only() -> None:
             st.session_state.pop(key, None)
     _set("started", False)
     _set("completed", [])
+    # A new plant state invalidates the prior decision lifecycle and isolated what-if result.
+    _ui_set("decision_status", "RECOMMENDED")
+    _ui_set("whatif_result", None)
 
 
 def _apply_inputs(values: dict[str, float], username: str, preset_name: str = "") -> None:
@@ -1006,7 +1009,7 @@ def _render_top_cockpit() -> None:
                     _ui_set("evidence_open", True)
                     st.rerun()
             with b2:
-                if st.button("🧪 Re-test the rescue", use_container_width=True, key=f"{CC_UI_KEY}_retest"):
+                if st.button("🧪 Re-test the rescue", use_container_width=True, disabled=not _state("started"), key=f"{CC_UI_KEY}_retest"):
                     inputs = _state("inputs", _default_inputs())
                     _set("simulation", _simulation(inputs))
                     _set("optimization", _optimization(inputs))
