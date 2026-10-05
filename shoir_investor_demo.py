@@ -1655,7 +1655,7 @@ def _render_landing() -> None:
     c1, c2 = st.columns([2, 1])
     with c1:
         if st.button("🚨 ANALYZE PLANT RISK", type="primary", use_container_width=True, key=f"{DEMO_KEY}_start"):
-            _run_all(str(st.session_state.get("current_user") or "demo_user"))
+            _run_single("risk")
             st.rerun()
     with c2:
         if st.button("↺ Reset Demo", use_container_width=True, key=f"{DEMO_KEY}_reset_landing"):
