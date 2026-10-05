@@ -35,7 +35,7 @@ from shoir_engine_studio import (
     render_experiment_engine, render_forecasting_studio,
     render_optimization_studio, render_decision_center_studio,
 )
-from shoir_command_center_21 import render_investor_control_center_21
+from shoir_investor_demo import render_investor_control_center
 
 PLATFORM_CATALOG = [
     {"tier":"Starter","category":"AI & Automation","name":"Excel Data Cleaning & Import",
@@ -1416,27 +1416,7 @@ def render_module(module: str, tier: str, username: str):
         st.dataframe(st.session_state.get("experiment_results",scenarios),use_container_width=True)
         render_export_bar(module,[("Scenarios",scenarios),("Experiment Results",st.session_state.get("experiment_results",pd.DataFrame()))],tier,username)
     elif module=="Industrial Control Center":
-        # Fail-open boundary: the Plant Builder remains usable even when a
-        # secondary visualization in the upgraded Command Center raises.
-        try:
-            render_investor_control_center_21(tier, username)
-        except Exception as exc:
-            st.error(
-                "The Command Center visualization hit a recoverable error. "
-                "Your Plant Builder and configuration workspace remain available."
-            )
-            with st.expander("Command Center diagnostic", expanded=False):
-                st.code(f"{type(exc).__name__}: {exc}")
-            try:
-                from shoir_command_center_21 import _ensure_state, _render_customization_stable
-                _ensure_state()
-                _render_customization_stable()
-            except Exception as builder_exc:
-                st.error(
-                    "The Plant Builder itself could not be rendered safely in this session."
-                )
-                with st.expander("Builder diagnostic", expanded=False):
-                    st.code(f"{type(builder_exc).__name__}: {builder_exc}")
+        render_investor_control_center(tier, username)
     elif module=="Engineering Decision Center":
         st.subheader("🎯 Governed Engineering Decision Center")
         st.caption("Baseline → alternatives → constraints → KPIs → uncertainty → evidence → approval → verification.")
