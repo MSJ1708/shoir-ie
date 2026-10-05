@@ -1428,9 +1428,9 @@ def render_module(module: str, tier: str, username: str):
             with st.expander("Command Center diagnostic", expanded=False):
                 st.code(f"{type(exc).__name__}: {exc}")
             try:
-                from shoir_command_center_21 import _ensure_state, _render_customization
+                from shoir_command_center_21 import _ensure_state, _render_customization_stable
                 _ensure_state()
-                _render_customization()
+                _render_customization_stable()
             except Exception as builder_exc:
                 st.error(
                     "The Plant Builder itself could not be rendered safely in this session."
