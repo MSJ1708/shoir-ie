@@ -637,7 +637,7 @@ def _render_palette() -> None:
                     _ui_set("policy_open", True)
                 elif normalized == "reset":
                     _reset_upgrade_view()
-                demo._reset()
+                    demo._reset()
                 elif "thread" in normalized:
                     _ui_set("thread_selected", "LINE-02")
                 if normalized:
@@ -826,6 +826,9 @@ def _render_evidence_and_governance() -> None:
             digest = demo.hashlib.sha256(ver.to_csv(index=False).encode("utf-8")).hexdigest()
             st.caption(f"Verification evidence hash: {digest[:16]}…")
         st.markdown("#### 🛡️ Decision governance")
+        demo._render_decision_governance()
+    else:
+        st.caption("Generate the decision flow first to attach a verification hash. Governance records can still be staged below.")
         demo._render_decision_governance()
 
 
