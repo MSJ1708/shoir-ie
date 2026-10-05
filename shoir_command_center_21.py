@@ -213,6 +213,17 @@ def _dynamic_rescue_model(values_tuple: tuple[tuple[str, float], ...]) -> dict[s
         "roi": max(0.0, (avoided - 152000.0) / 152000.0 * 100.0),
         "severity": severity,
         "recovery": recovery,
+        "action_plan": [
+            "Move maintenance into the next planned micro-window",
+            "Reallocate two technicians to C-204",
+            "Reserve critical bearing inventory",
+            "Re-sequence production across Lines 2 and 3",
+            "Shift selected jobs to Line 3",
+            "Adjust compressor operating parameters",
+            "Increase temporary quality inspection",
+            "Recalculate the 72-hour production schedule",
+            "Monitor C-204 and the order continuously",
+        ],
     }
 
 
