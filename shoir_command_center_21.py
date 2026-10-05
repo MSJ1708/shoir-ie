@@ -7,7 +7,6 @@ Synthetic/modelled values remain clearly identified as demo assumptions.
 from __future__ import annotations
 
 import inspect
-import math
 import time
 from typing import Any
 
@@ -135,6 +134,9 @@ def _ensure_state() -> None:
         "last_action": "",
         "floor_metric": "Health",
         "thread_selected": "",
+        "policy_open": False,
+        "alternatives_open": False,
+        "governance_open": False,
     }
     for key, value in defaults.items():
         if _ui_get(key) is None:
@@ -173,16 +175,18 @@ def _dynamic_rescue_model(values_tuple: tuple[tuple[str, float], ...]) -> dict[s
         "Financial exposure SAR": round(1520000.0 * severity, 0),
     }
 
-    maintenance_resilience = float(np.clip((100.0 - v["maintenance_risk"]) / 100.0, 0.0, 1.0))
-    supply_resilience = float(np.clip(v["inventory_cover"] / 5.0, 0.0, 1.0))
+    maintenance_delta = float(np.clip((ref["maintenance_risk"] - v["maintenance_risk"]) / 50.0, -1.0, 1.0))
+    inventory_delta = float(np.clip((v["inventory_cover"] - ref["inventory_cover"]) / 3.0, -1.0, 1.0))
+    supplier_delta = float(np.clip((v.get("supplier_delay_h", 18.0) - ref.get("supplier_delay_h", 18.0)) / 18.0, -1.0, 1.0))
+    backlog_delta = float(np.clip((v.get("maintenance_backlog_h", 42.0) - ref.get("maintenance_backlog_h", 42.0)) / 42.0, -1.0, 1.0))
     recovery = float(np.clip(
         1.0
-        + 0.12 * maintenance_resilience
-        + 0.08 * supply_resilience
-        - 0.06 * np.clip(v.get("supplier_delay_h", 18.0) / 36.0, 0.0, 2.0)
-        - 0.04 * np.clip(v.get("maintenance_backlog_h", 42.0) / 84.0, 0.0, 2.0),
-        0.82,
-        1.12,
+        + 0.12 * maintenance_delta
+        + 0.08 * inventory_delta
+        - 0.06 * supplier_delta
+        - 0.04 * backlog_delta,
+        0.78,
+        1.22,
     ))
 
     intervention = {
@@ -448,6 +452,33 @@ def _role_data(role: str) -> tuple[str, str, list[tuple[str, str, str]], list[st
     )
 
 
+def _role_action(action: str) -> None:
+    normalized = str(action).strip().lower()
+    _ui_set("last_action", action)
+    if "what-if" in normalized:
+        _ui_set("whatif_open", True)
+    elif "evidence" in normalized or "recommendation" in normalized:
+        _ui_set("evidence_open", True)
+    elif "governance" in normalized:
+        _ui_set("governance_open", True)
+    elif "policy" in normalized or "carbon weight" in normalized:
+        _ui_set("policy_open", True)
+    elif "alternative" in normalized or "reroute" in normalized or "compare" in normalized:
+        _ui_set("alternatives_open", True)
+    elif "c-204" in normalized:
+        _open_inspector("C-204")
+    elif "bearing" in normalized:
+        _open_inspector("MAT-BRG-08")
+    elif "supplier" in normalized:
+        _open_inspector("SUP-18")
+    elif "q-07" in normalized:
+        _open_inspector("Q-07")
+    elif "risk" in normalized:
+        demo._run_single("risk")
+    elif "rescue" in normalized:
+        demo._run_all(str(st.session_state.get("current_user") or "demo_user"))
+
+
 def _render_role_workspace() -> None:
     role = str(_ui_get("role", "Command Center"))
     title, subtitle, metrics, actions = _role_data(role)
@@ -461,15 +492,7 @@ def _render_role_workspace() -> None:
     for idx, action in enumerate(actions[:3]):
         with buttons[idx]:
             if st.button(action, use_container_width=True, key=f"{CC21_KEY}_role_action_{idx}_{role}"):
-                _ui_set("last_action", action)
-                if "What-If" in action:
-                    _ui_set("whatif_open", True)
-                elif "Evidence" in action or "recommendation" in action.lower():
-                    _ui_set("evidence_open", True)
-                elif "governance" in action:
-                    _ui_set("governance_open", True)
-                elif "rescue" in action.lower():
-                    _ui_set("palette_command", "full rescue")
+                _role_action(action)
                 st.rerun()
     v = _inputs()
     if role == "Executive":
@@ -493,11 +516,51 @@ def _render_role_workspace() -> None:
         else:
             risk = risk[risk["Domain"].eq("Quality")]
         st.dataframe(risk, use_container_width=True, hide_index=True)
+    elif role == "Maintenance":
+        maintenance = demo._predictive_maintenance(v)
+        fig = px.line(maintenance, x="Hour", y="Risk %", color="Asset", markers=True, title="Reliability trajectory · next 72 hours")
+        fig.add_hline(y=float(_ui_get("risk_threshold",70.0)), line_dash="dash", annotation_text="Configured alert threshold")
+        _plotly(fig, key=f"{CC21_KEY}_role_maintenance")
+    elif role == "Supply Chain":
+        df = pd.DataFrame({
+            "Signal": ["Supplier delay", "Bearing cover", "Customer protection"],
+            "Current": [v.get("supplier_delay_h",18.0), v["inventory_cover"], v["order_protection"]],
+        })
+        st.dataframe(df.round(2), use_container_width=True, hide_index=True)
+        _plotly(px.bar(_policy_alternatives(v), x="Alternative", y="Service %", title="Service outcome by intervention"), key=f"{CC21_KEY}_role_supply")
+    elif role == "Quality":
+        q = float(np.clip(100 - v.get("scrap_pct",3.8) * 12, 20, 100))
+        fig = go.Figure(go.Bar(x=["Yield health","Quality health"], y=[v["quality_yield"], q]))
+        fig.update_layout(title="Quality stability · current state", yaxis=dict(range=[0,100]), height=290)
+        _plotly(fig, key=f"{CC21_KEY}_role_quality")
+    elif role == "Sustainability":
+        alt = _policy_alternatives(v)
+        _plotly(px.scatter(alt, x="Carbon kg", y="Risk", size="Service %", hover_name="Alternative", title="Carbon × risk trade-off"), key=f"{CC21_KEY}_role_sustainability")
     else:
         alt = _policy_alternatives(v)
         fig = px.scatter(alt, x="Risk", y="Service %", size="Cost SAR", hover_name="Alternative",
                          title="Decision frontier · configurable policy weights")
         _plotly(fig, key=f"{CC21_KEY}_role_frontier")
+
+
+def _render_focus_panel() -> None:
+    focus = str(_ui_get("focus", "Cross-domain"))
+    risk = demo._risk_analysis(_inputs())
+    if focus == "Cross-domain":
+        return
+    subset = risk[risk["Domain"].astype(str).eq(focus)]
+    st.markdown(f"#### 🎯 Focus lens · {focus}")
+    if subset.empty:
+        st.info(f"No dedicated signal is currently registered for {focus}. The cross-domain graph remains available.")
+        return
+    row = subset.sort_values("Risk %", ascending=False).iloc[0]
+    c1,c2,c3 = st.columns(3)
+    c1.metric("Primary signal", str(row["Asset"]))
+    c2.metric("Risk", f"{float(row['Risk %']):.0f}%")
+    c3.metric("Alert threshold", f"{float(_ui_get('risk_threshold',70.0)):.0f}%")
+    if st.button(f"🔍 Inspect {row['Asset']}", use_container_width=True, key=f"{CC21_KEY}_focus_inspect_{focus}"):
+        _open_inspector(str(row["Asset"]))
+        st.rerun()
 
 
 def _render_palette() -> None:
@@ -565,6 +628,12 @@ def _render_palette() -> None:
                     _ui_set("role", aliases.get(normalized, normalized.title() if normalized != "command center" else "Command Center"))
                 elif "evidence" in normalized:
                     _ui_set("evidence_open", True)
+                elif normalized in {"governance", "decision governance"}:
+                    _ui_set("governance_open", True)
+                elif "alternative" in normalized or "compare" in normalized:
+                    _ui_set("alternatives_open", True)
+                elif "policy" in normalized or "settings" in normalized:
+                    _ui_set("policy_open", True)
                 elif normalized == "reset":
                     demo._reset()
                 elif "thread" in normalized:
@@ -574,7 +643,7 @@ def _render_palette() -> None:
 
 
 def _render_policy_controls() -> None:
-    with st.expander("⚙️ Command Center 2.1 policy & display settings", expanded=False):
+    with st.expander("⚙️ Command Center 2.1 policy & display settings", expanded=bool(_ui_get("policy_open", False))):
         st.caption("These preferences change the Command Center lens and recommendation policy; they do not modify the industrial calculation engines.")
         c1,c2,c3,c4 = st.columns(4)
         rt = c1.slider("Risk alert threshold", 40.0, 90.0, float(_ui_get("risk_threshold",70)), 1.0, key=f"{CC21_KEY}_risk_threshold")
@@ -764,14 +833,24 @@ def render_investor_control_center_21(tier: str, username: str) -> None:
 
     _render_palette()
     _render_role_workspace()
+    _render_focus_panel()
     _render_policy_controls()
+
+    with st.expander("⚖️ Intervention alternatives & recommendation policy", expanded=bool(_ui_get("alternatives_open", False))):
+        st.caption("Tune the decision policy above, compare all available interventions, then send the preferred alternative into the preserved engineering decision flow.")
+        alt = _policy_alternatives(_inputs())
+        st.dataframe(alt.round(2), use_container_width=True, hide_index=True)
+        _plotly(px.scatter(alt, x="Cost SAR", y="Risk", size="Service %", hover_name="Alternative", text="Alternative", title="Configurable intervention frontier"), key=f"{CC21_KEY}_alternatives")
+        if not alt.empty and st.button(f"🎯 Use {alt.iloc[0]['Alternative']} as working policy choice", type="primary", use_container_width=True, key=f"{CC21_KEY}_use_alt"):
+            _ui_set("last_action", f"Policy choice · {alt.iloc[0]['Alternative']}")
+            st.success(f"Working recommendation set to {alt.iloc[0]['Alternative']}. Existing optimization and decision stages remain authoritative for execution.")
 
     st.markdown("### 🏭 Industrial Situation Map")
     _render_thread_and_floor()
     _render_inspector()
     _render_what_if()
 
-    with st.expander("🔗 Evidence & Decision Governance", expanded=False):
+    with st.expander("🔗 Evidence & Decision Governance", expanded=bool(_ui_get("evidence_open", False) or _ui_get("governance_open", False))):
         _render_evidence_and_governance()
 
     st.markdown("---")
