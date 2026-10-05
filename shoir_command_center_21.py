@@ -749,26 +749,26 @@ def _render_inspector() -> None:
     with st.container(border=True):
         st.markdown("**Inspector drawer actions**")
         a1,a2,a3 = st.columns(3)
-    with a1:
-        if st.button("🧪 Simulate this entity", use_container_width=True, key=f"{CC21_KEY}_inspect_whatif"):
-            _ui_set("whatif_open", True)
-            st.rerun()
-    with a2:
-        if st.button("📋 Explain its evidence", use_container_width=True, key=f"{CC21_KEY}_inspect_evidence"):
-            _ui_set("evidence_open", True)
-            st.rerun()
-    with a3:
-        if st.button("🗂️ Save current scenario", use_container_width=True, key=f"{CC21_KEY}_inspect_save"):
-            try:
-                demo.save_twin_scenario(
-                    str(st.session_state.get("current_user") or "demo_user"),
-                    f"Inspector · {selected} · {time.strftime('%Y-%m-%d %H:%M')}",
-                    _inputs(), parent_name="Command Center 2.1",
-                    notes=f"Saved from Inspector selection {selected}.",
-                )
-                st.success("Scenario saved to the enterprise workspace.")
-            except Exception as exc:
-                st.warning(f"Scenario save unavailable: {type(exc).__name__}")
+        with a1:
+            if st.button("🧪 Simulate this entity", use_container_width=True, key=f"{CC21_KEY}_inspect_whatif"):
+                _ui_set("whatif_open", True)
+                st.rerun()
+        with a2:
+            if st.button("📋 Explain its evidence", use_container_width=True, key=f"{CC21_KEY}_inspect_evidence"):
+                _ui_set("evidence_open", True)
+                st.rerun()
+        with a3:
+            if st.button("🗂️ Save current scenario", use_container_width=True, key=f"{CC21_KEY}_inspect_save"):
+                try:
+                    demo.save_twin_scenario(
+                        str(st.session_state.get("current_user") or "demo_user"),
+                        f"Inspector · {selected} · {time.strftime('%Y-%m-%d %H:%M')}",
+                        _inputs(), parent_name="Command Center 2.1",
+                        notes=f"Saved from Inspector selection {selected}.",
+                    )
+                    st.success("Scenario saved to the enterprise workspace.")
+                except Exception as exc:
+                    st.warning(f"Scenario save unavailable: {type(exc).__name__}")
 
 
 def _render_what_if() -> None:
