@@ -107,6 +107,8 @@ def _ensure_defaults() -> None:
         _set("inputs", _default_inputs())
     if _state("plant") is None:
         _set("plant", _plant_from_inputs(_state("inputs")))
+    if _state("active_preset") is None:
+        _set("active_preset", "Flagship 72-hour crisis")
 
 
 def _reset_flow_only() -> None:
@@ -623,6 +625,7 @@ def _run_all(username: str) -> None:
     _set("impact", _impact(_state("decision")))
     _mark("impact")
     _set("verification", _verify(_state("decision")))
+    _ui_set("decision_status", "VERIFIED")
     _mark("verification")
 
 
@@ -671,6 +674,7 @@ def _run_single(stage: str) -> None:
         _mark("impact")
     elif stage == "verification":
         _set("verification", _verify(_state("decision")))
+        _ui_set("decision_status", "VERIFIED")
         _mark("verification")
 
 
@@ -703,6 +707,7 @@ def _init_ui_state() -> None:
         "command_nonce": "",
         "inspector_open": False,
         "focus_domain": "Cross-domain",
+        "show_rescue_plan": False,
     }
     for key, value in defaults.items():
         if _ui_state(key) is None:
@@ -879,6 +884,9 @@ def _render_command_palette(username: str) -> None:
         elif "what" in normalized and "if" in normalized:
             _ui_set("whatif_open", True)
             st.rerun()
+        elif "rescue" in normalized and "plan" in normalized:
+            _ui_set("show_rescue_plan", True)
+            st.rerun()
         elif "evidence" in normalized:
             _ui_set("evidence_open", True)
             st.rerun()
@@ -904,6 +912,8 @@ def _render_top_cockpit() -> None:
     improved = float(intervention["Financial exposure SAR"])
     saved = float(rescue["avoided_exposure"])
     mode = _ui_state("view_mode", "Command Center")
+    live_decision = _state("decision")
+    recommendation = str(live_decision.get("recommendation")) if isinstance(live_decision, dict) else "Preventive Rescue"
 
     st.markdown(
         f"""
@@ -971,7 +981,7 @@ def _render_top_cockpit() -> None:
 
     left, right = st.columns([1.25, 1])
     with left:
-        st.markdown("#### 🧠 Recommended rescue")
+        st.markdown(f"#### 🧠 Recommended rescue · {recommendation}")
         st.markdown(
             f"""
             <div class="cc-card">
@@ -987,13 +997,13 @@ def _render_top_cockpit() -> None:
             unsafe_allow_html=True,
         )
         p = rescue["action_plan"]
-        with st.expander("View the 9-step rescue plan", expanded=False):
+        with st.expander("View the 9-step rescue plan", expanded=_ui_state("show_rescue_plan", False)):
             for i, action in enumerate(p, 1):
                 st.markdown(f"**{i:02d}** · {action}")
             b1, b2 = st.columns(2)
             with b1:
                 if st.button("🎯 Review decision evidence", use_container_width=True, key=f"{CC_UI_KEY}_jump_decision"):
-                    _ui_set("view_mode", "Engineering")
+                    _ui_set("evidence_open", True)
                     st.rerun()
             with b2:
                 if st.button("🧪 Re-test the rescue", use_container_width=True, key=f"{CC_UI_KEY}_retest"):
@@ -1127,7 +1137,9 @@ def _render_health_map_and_inspector() -> None:
             st.caption(related)
             a1, a2 = st.columns(2)
             with a1:
-                st.button("🧪 Simulate entity", use_container_width=True, key=f"{CC_UI_KEY}_inspect_sim")
+                if st.button("🧪 Simulate entity", use_container_width=True, key=f"{CC_UI_KEY}_inspect_sim"):
+                    _ui_set("whatif_open", True)
+                    st.rerun()
             with a2:
                 if st.button("📋 Explain evidence", use_container_width=True, key=f"{CC_UI_KEY}_inspect_explain"):
                     _ui_set("evidence_open", True)
@@ -1334,6 +1346,20 @@ def _render_decision_governance() -> None:
                 st.success("Governance state recorded.")
             except Exception as exc:
                 st.warning(f"Governance record unavailable: {type(exc).__name__}")
+    st.markdown("**Workflow actions**")
+    g1, g2, g3 = st.columns(3)
+    with g1:
+        if st.button("🔎 Send to review", use_container_width=True, key=f"{CC_UI_KEY}_send_review"):
+            _ui_set("decision_status", "UNDER REVIEW")
+            st.rerun()
+    with g2:
+        if st.button("✅ Approve decision", use_container_width=True, key=f"{CC_UI_KEY}_approve"):
+            _ui_set("decision_status", "APPROVED")
+            st.rerun()
+    with g3:
+        if st.button("🏁 Mark verified", use_container_width=True, key=f"{CC_UI_KEY}_mark_verified"):
+            _ui_set("decision_status", "VERIFIED")
+            st.rerun()
     timeline = status_options
     idx = timeline.index(new_status)
     st.progress((idx + 1) / len(timeline))
@@ -1405,7 +1431,8 @@ def _render_command_center_upgrade(username: str) -> None:
                 if not focus_risk.empty:
                     st.dataframe(focus_risk, use_container_width=True, hide_index=True)
         with f2:
-            st.radio("Preferred starting lens", ["Situation", "Recommendation", "Evidence"], horizontal=True, key=f"{CC_UI_KEY}_starting_lens")
+            st.markdown("**Role lenses**")
+            st.caption("Executive, Engineering, Maintenance, Supply Chain and Sustainability views adjust the Command Center readout while preserving the full engineering detail below.")
     _render_health_map_and_inspector()
     with st.expander("🧠 Explain the recommendation", expanded=False):
         _render_why_recommendation()
