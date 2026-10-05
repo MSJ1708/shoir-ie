@@ -131,3 +131,40 @@ def test_custom_zones_drive_spatial_map():
             cc.st.session_state.pop(f"{cc.CC21_KEY}_custom_config",None)
         else:
             cc.st.session_state[f"{cc.CC21_KEY}_custom_config"] = old
+
+ 
+ 
+def test_custom_zone_health_falls_back_instead_of_crashing():
+    old = cc.st.session_state.get(f"{cc.CC21_KEY}_custom_config")
+    try:
+        cfg = cc._default_custom_config()
+        cfg["zones"] = pd.DataFrame(
+            [["Investor Demo Extension", "Production", 10, 10, 20, 15]],
+            columns=["Zone","Domain","X","Y","Width","Height"],
+        )
+        cc.st.session_state[f"{cc.CC21_KEY}_custom_config"] = cfg
+        fig = cc._build_floor_map()
+        assert any("Investor Demo Extension" in str(getattr(t, "text", "")) for t in fig.data)
+    finally:
+        if old is None:
+            cc.st.session_state.pop(f"{cc.CC21_KEY}_custom_config", None)
+        else:
+            cc.st.session_state[f"{cc.CC21_KEY}_custom_config"] = old
+
+
+def test_custom_assets_are_spatially_rendered():
+    old = cc.st.session_state.get(f"{cc.CC21_KEY}_custom_config")
+    try:
+        cfg = cc._default_custom_config()
+        cfg["assets"] = pd.DataFrame(
+            [["INV-001", "Investor Showcase Asset", "Production", "High", "Production Line 1", 35, 60]],
+            columns=["ID","Name","Domain","Priority","Zone","X","Y"],
+        )
+        cc.st.session_state[f"{cc.CC21_KEY}_custom_config"] = cfg
+        fig = cc._build_floor_map()
+        assert any("INV-001" in str(getattr(t, "name", "")) for t in fig.data)
+    finally:
+        if old is None:
+            cc.st.session_state.pop(f"{cc.CC21_KEY}_custom_config", None)
+        else:
+            cc.st.session_state[f"{cc.CC21_KEY}_custom_config"] = old
