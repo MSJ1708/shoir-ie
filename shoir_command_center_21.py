@@ -505,17 +505,11 @@ def _render_role_workspace() -> None:
         ))
         fig.update_layout(title="Modelled exposure · executive view", yaxis_title="SAR", height=290)
         _plotly(fig, key=f"{CC21_KEY}_role_exec")
-    elif role in {"Engineering", "Maintenance", "Supply Chain", "Quality"}:
-        risk = demo._risk_analysis(v).copy()
-        if role == "Engineering":
-            risk = risk.sort_values("Risk %", ascending=False)
-        elif role == "Maintenance":
-            risk = risk[risk["Domain"].isin(["Maintenance", "Workforce", "Inventory"])]
-        elif role == "Supply Chain":
-            risk = risk[risk["Domain"].isin(["Supply", "Inventory"])]
-        else:
-            risk = risk[risk["Domain"].eq("Quality")]
+    elif role == "Engineering":
+        risk = demo._risk_analysis(v).copy().sort_values("Risk %", ascending=False)
         st.dataframe(risk, use_container_width=True, hide_index=True)
+        alt = _policy_alternatives(v)
+        _plotly(px.scatter(alt, x="Cost SAR", y="Risk", size="Service %", hover_name="Alternative", text="Alternative", title="Engineering trade-off frontier"), key=f"{CC21_KEY}_role_engineering")
     elif role == "Maintenance":
         maintenance = demo._predictive_maintenance(v)
         fig = px.line(maintenance, x="Hour", y="Risk %", color="Asset", markers=True, title="Reliability trajectory · next 72 hours")
@@ -561,6 +555,13 @@ def _render_focus_panel() -> None:
     if st.button(f"🔍 Inspect {row['Asset']}", use_container_width=True, key=f"{CC21_KEY}_focus_inspect_{focus}"):
         _open_inspector(str(row["Asset"]))
         st.rerun()
+
+
+def _reset_upgrade_view() -> None:
+    for key in list(st.session_state.keys()):
+        if str(key).startswith(f"{CC21_KEY}_"):
+            st.session_state.pop(key, None)
+    _ensure_state()
 
 
 def _render_palette() -> None:
@@ -635,7 +636,8 @@ def _render_palette() -> None:
                 elif "policy" in normalized or "settings" in normalized:
                     _ui_set("policy_open", True)
                 elif normalized == "reset":
-                    demo._reset()
+                    _reset_upgrade_view()
+                demo._reset()
                 elif "thread" in normalized:
                     _ui_set("thread_selected", "LINE-02")
                 if normalized:
@@ -823,6 +825,8 @@ def _render_evidence_and_governance() -> None:
         if isinstance(ver, pd.DataFrame):
             digest = demo.hashlib.sha256(ver.to_csv(index=False).encode("utf-8")).hexdigest()
             st.caption(f"Verification evidence hash: {digest[:16]}…")
+        st.markdown("#### 🛡️ Decision governance")
+        demo._render_decision_governance()
 
 
 def render_investor_control_center_21(tier: str, username: str) -> None:
