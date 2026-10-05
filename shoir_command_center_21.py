@@ -340,8 +340,17 @@ def _build_floor_map() -> go.Figure:
         fig.add_shape(type="rect", x0=x, y0=y, x1=x+w, y1=y+h,
                       line=dict(width=2), fillcolor="rgba(120,140,160,0.08)")
         fig.add_annotation(x=x+w/2, y=y+h-2, text=f"{value:.0f}%", showarrow=False, font=dict(size=11))
+    for entity_id, (zone, ex, ey) in ENTITY_POINTS.items():
+        domain = FLOOR[zone][4]
+        fig.add_trace(go.Scatter(
+            x=[ex], y=[ey], mode="markers",
+            marker=dict(size=11, opacity=0.95, symbol="diamond"),
+            customdata=[["ENTITY", entity_id, domain]],
+            hovertemplate="<b>%{customdata[1]}</b><br>Domain: %{customdata[2]}<extra>Click to inspect</extra>",
+            name=entity_id, showlegend=False,
+        ))
     fig.update_layout(
-        title="Plant spatial situation map · synthetic floor plan · click a zone",
+        title="Plant spatial situation map · synthetic floor plan · click a zone or entity",
         height=480, xaxis=dict(visible=False, range=[-3,100]),
         yaxis=dict(visible=False, range=[0,100]), margin=dict(l=5,r=5,t=55,b=5),
     )
@@ -353,6 +362,8 @@ def _entity_from_floor(point: dict[str, Any] | None) -> str | None:
         return None
     custom = point.get("customdata")
     if isinstance(custom, (list, tuple)) and custom:
+        if len(custom) >= 2 and str(custom[0]) == "ENTITY":
+            return str(custom[1])
         zone = str(custom[0])
         by_zone = {
             "Production Line 1": "LINE-01", "Production Line 2": "LINE-02",
@@ -433,7 +444,7 @@ def _role_data(role: str) -> tuple[str, str, list[tuple[str, str, str]], list[st
             "Energy, carbon trade-offs and resilience.",
             [
                 ("Specific energy", f"{v['energy_kwh_unit']:.2f}", "kWh/unit"),
-                ("Carbon proxy", f"{1120:,.0f}", "kg modelled"),
+                ("Carbon proxy", f"{float(_policy_alternatives(v)['Carbon kg'].min()):,.0f}", "kg modelled"),
                 ("Energy improvement", f"{max(0.0, v['energy_kwh_unit']-max(0.85,v['energy_kwh_unit']-0.08)):.2f}", "kWh/unit"),
                 ("Carbon weight", f"{_ui_get('carbon_weight',10.0):.0f}%", "policy"),
             ],
@@ -541,6 +552,16 @@ def _render_focus_panel() -> None:
     focus = str(_ui_get("focus", "Cross-domain"))
     risk = demo._risk_analysis(_inputs())
     if focus == "Cross-domain":
+        return
+    if focus == "Customer":
+        st.markdown("#### 🎯 Focus lens · Customer")
+        c1,c2,c3 = st.columns(3)
+        c1.metric("Order", "WO-4821")
+        c2.metric("Protection", f"{_inputs()['order_protection']:.0f}%")
+        c3.metric("Target", f"{float(_ui_get('service_target',95.0)):.0f}%")
+        if st.button("🔍 Inspect WO-4821", use_container_width=True, key=f"{CC21_KEY}_focus_customer"):
+            _open_inspector("WO-4821")
+            st.rerun()
         return
     subset = risk[risk["Domain"].astype(str).eq(focus)]
     st.markdown(f"#### 🎯 Focus lens · {focus}")
@@ -683,7 +704,7 @@ def _render_thread_and_floor() -> None:
         if entity:
             _open_inspector(entity)
             st.rerun()
-        st.caption("The floor plan is synthetic and geospatially neutral; it is designed to make operational zones and connected issues explorable.")
+        st.caption("The floor plan is synthetic and geospatially neutral; click a zone or an entity marker to follow the same Inspector used by the Digital Thread.")
 
 
 def _render_inspector() -> None:
@@ -725,7 +746,9 @@ def _render_inspector() -> None:
         "Q-07": "LINE-02 · C-204 · WO-4821",
     }.get(selected, "Facility · Process · Decision · Outcome")
     st.info(f"**Connected to:** {connections}")
-    a1,a2,a3 = st.columns(3)
+    with st.container(border=True):
+        st.markdown("**Inspector drawer actions**")
+        a1,a2,a3 = st.columns(3)
     with a1:
         if st.button("🧪 Simulate this entity", use_container_width=True, key=f"{CC21_KEY}_inspect_whatif"):
             _ui_set("whatif_open", True)
