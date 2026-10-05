@@ -727,14 +727,14 @@ def _inject_command_center_css() -> None:
         .cc-card {{
             border: 1px solid rgba(148,163,184,.18);
             border-radius: 18px;
-            padding: {pad}px 16px;
+            padding: {pad} 16px;
             background: linear-gradient(145deg, rgba(20,27,37,.96), rgba(13,19,28,.96));
             box-shadow: 0 8px 28px rgba(0,0,0,.12);
         }}
         .cc-card-soft {{
             border: 1px solid rgba(148,163,184,.14);
             border-radius: 16px;
-            padding: {pad}px 14px;
+            padding: {pad} 14px;
             background: rgba(20,27,37,.72);
         }}
         .cc-kicker {{
@@ -1448,8 +1448,10 @@ def _render_command_center_upgrade(username: str) -> None:
         _render_evidence_chain()
     with st.expander("🛡️ Decision Governance", expanded=False):
         _render_decision_governance()
-    _render_executive_summary()
-    _render_closed_loop()
+    with st.expander("🧑‍💼 Executive View", expanded=_ui_state("view_mode", "Command Center") == "Executive"):
+        _render_executive_summary()
+    with st.expander("🔄 Closed-loop lifecycle", expanded=False):
+        _render_closed_loop()
 
 def _render_stage_rail() -> None:
     cols = st.columns(len(STAGES))
