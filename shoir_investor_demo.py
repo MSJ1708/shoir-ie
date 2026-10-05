@@ -1402,7 +1402,7 @@ def _render_executive_summary() -> None:
           <div class="cc-kicker">Executive View</div>
           <div class="cc-value" style="font-size:24px;">72-HOUR CUSTOMER COMMITMENT</div>
           <div style="margin-top:10px;font-size:14px;">
-            The modelled situation is <b>{b["Customer delivery"]}</b>. Shoir-IE recommends <b>{str(_state("decision", {}).get("recommendation", "Preventive Rescue")).upper()}</b>.
+            The modelled situation is <b>{b['Customer delivery']}</b>. Shoir-IE recommends <b>{str(_state('decision', {}).get('recommendation', 'Preventive Rescue')).upper()}</b>.
           </div>
           <div style="margin-top:12px;">
             <b>{b['Production shortfall %']:.1f}% → {i['Production shortfall %']:.1f}%</b>
