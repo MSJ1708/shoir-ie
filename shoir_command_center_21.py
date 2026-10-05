@@ -1460,10 +1460,20 @@ def render_investor_control_center_21(tier: str, username: str) -> None:
         _render_palette()
 
     # Scenario setup is available but deliberately secondary to the investor story.
-    with st.expander("🎛️ Scenario Setup & Plant Builder", expanded=not demo._state("started")):
-        demo._render_header()
-        demo._render_plant_controls(username)
-        _render_customization_stable()
+    try:
+        with st.expander("🎛️ Scenario Setup & Plant Builder", expanded=not demo._state("started")):
+            demo._render_header()
+            demo._render_plant_controls(username)
+            try:
+                _render_customization_stable()
+            except Exception as exc:
+                st.warning("Plant Builder is temporarily unavailable; the investor decision story remains active.")
+                with st.expander("Plant Builder diagnostic", expanded=False):
+                    st.code(f"{type(exc).__name__}: {exc}")
+    except Exception as exc:
+        st.warning("Scenario setup is temporarily unavailable; the investor decision story remains active.")
+        with st.expander("Scenario setup diagnostic", expanded=False):
+            st.code(f"{type(exc).__name__}: {exc}")
 
     if not demo._state("started"):
         st.markdown("---")
@@ -1474,54 +1484,66 @@ def render_investor_control_center_21(tier: str, username: str) -> None:
     _render_investor_result_board()
     _render_investor_journey()
 
+    # Secondary operational tooling must never prevent the investor result board from rendering.
     with st.expander("🔬 Operating Workspace · What-If, alternatives, roles & plant map", expanded=False):
-        _render_role_workspace()
-        _render_focus_panel()
-        _render_policy_controls()
+        try:
+            try:
+                _render_role_workspace()
+            except Exception as exc:
+                st.warning("Role workspace visualization is temporarily unavailable; the result board remains active.")
+                with st.expander("Role workspace diagnostic", expanded=False):
+                    st.code(f"{type(exc).__name__}: {exc}")
 
-        with st.expander("⚖️ Intervention alternatives & recommendation policy", expanded=False):
-            alt = _policy_alternatives(_inputs())
-            st.dataframe(alt.round(2), use_container_width=True, hide_index=True)
-            _plotly(
-                px.scatter(
-                    alt,
-                    x="Cost SAR",
-                    y="Risk",
-                    size="Service %",
-                    hover_name="Alternative",
-                    text="Alternative",
-                    title="Configurable intervention frontier",
-                ),
-                key=f"{CC21_KEY}_operating_alternatives",
-            )
-            if not alt.empty and st.button(
-                f"🎯 Use {alt.iloc[0]['Alternative']} as working policy choice",
-                type="primary",
-                use_container_width=True,
-                key=f"{CC21_KEY}_use_alt",
-            ):
-                _ui_set("last_action", f"Policy choice · {alt.iloc[0]['Alternative']}")
-                st.success(
-                    f"Working recommendation set to {alt.iloc[0]['Alternative']}. "
-                    "Existing optimization and decision stages remain authoritative for execution."
+            _render_focus_panel()
+            _render_policy_controls()
+
+            with st.expander("⚖️ Intervention alternatives & recommendation policy", expanded=False):
+                alt = _policy_alternatives(_inputs())
+                st.dataframe(alt.round(2), use_container_width=True, hide_index=True)
+                _plotly(
+                    px.scatter(
+                        alt,
+                        x="Cost SAR",
+                        y="Risk",
+                        size="Service %",
+                        hover_name="Alternative",
+                        text="Alternative",
+                        title="Configurable intervention frontier",
+                    ),
+                    key=f"{CC21_KEY}_operating_alternatives",
                 )
+                if not alt.empty and st.button(
+                    f"🎯 Use {alt.iloc[0]['Alternative']} as working policy choice",
+                    type="primary",
+                    use_container_width=True,
+                    key=f"{CC21_KEY}_use_alt",
+                ):
+                    _ui_set("last_action", f"Policy choice · {alt.iloc[0]['Alternative']}")
+                    st.success(
+                        f"Working recommendation set to {alt.iloc[0]['Alternative']}. "
+                        "Existing optimization and decision stages remain authoritative for execution."
+                    )
 
-        with st.expander("🧠 Why this recommendation?", expanded=False):
-            demo._render_why_recommendation()
-        demo._render_scenario_library(username)
-        st.markdown("### 🏭 Industrial Situation Map")
-        _render_thread_and_floor()
-        _render_inspector()
-        _render_what_if()
+            with st.expander("🧠 Why this recommendation?", expanded=False):
+                demo._render_why_recommendation()
+            demo._render_scenario_library(username)
+            st.markdown("### 🏭 Industrial Situation Map")
+            _render_thread_and_floor()
+            _render_inspector()
+            _render_what_if()
 
-        with st.expander("🔗 Evidence & Decision Governance", expanded=False):
-            _render_evidence_and_governance()
-            with st.expander("Original evidence trace", expanded=False):
-                demo._render_evidence_chain()
-        with st.expander("🧑‍💼 Executive View", expanded=False):
-            demo._render_executive_summary()
-        with st.expander("🔄 Closed-loop lifecycle", expanded=False):
-            demo._render_closed_loop()
+            with st.expander("🔗 Evidence & Decision Governance", expanded=False):
+                _render_evidence_and_governance()
+                with st.expander("Original evidence trace", expanded=False):
+                    demo._render_evidence_chain()
+            with st.expander("🧑‍💼 Executive View", expanded=False):
+                demo._render_executive_summary()
+            with st.expander("🔄 Closed-loop lifecycle", expanded=False):
+                demo._render_closed_loop()
+        except Exception as exc:
+            st.warning("Secondary Operating Workspace is temporarily unavailable; investor results remain fully available.")
+            with st.expander("Operating workspace diagnostic", expanded=False):
+                st.code(f"{type(exc).__name__}: {exc}")
 
     st.markdown("---")
     with st.expander("🎬 Presentation controls & reset", expanded=False):
