@@ -986,7 +986,7 @@ def _render_top_cockpit() -> None:
             f"""
             <div class="cc-card">
               <div class="cc-kicker">Decision recommendation</div>
-              <div class="cc-value">PREVENTIVE RESCUE</div>
+              <div class="cc-value">{recommendation.upper()}</div>
               <div class="cc-label">Protect the 72-hour customer commitment while reducing operational exposure.</div>
               <div style="margin-top:12px;font-size:13px;">
                 <b>Modelled exposure:</b> {_format_sar(exposure)} → {_format_sar(improved)}
@@ -1267,7 +1267,9 @@ def _render_scenario_library(username: str) -> None:
                         import json
                         payload = json.loads(str(row.iloc[0]["parameters_json"]))
                         filtered = {k: float(val) for k, val in payload.items() if k in _default_inputs()}
-                        _apply_inputs(filtered, username, chosen)
+                        merged = _default_inputs()
+                        merged.update(filtered)
+                        _apply_inputs(merged, username, chosen)
                         st.rerun()
                 except Exception as exc:
                     st.warning(f"Scenario load unavailable: {type(exc).__name__}")
@@ -1397,7 +1399,7 @@ def _render_executive_summary() -> None:
           <div class="cc-kicker">Executive View</div>
           <div class="cc-value" style="font-size:24px;">72-HOUR CUSTOMER COMMITMENT</div>
           <div style="margin-top:10px;font-size:14px;">
-            The modelled situation is <b>AT RISK</b>. Shoir-IE recommends <b>PREVENTIVE RESCUE</b>.
+            The modelled situation is <b>{b["Customer delivery"]}</b>. Shoir-IE recommends <b>{str(_state("decision", {}).get("recommendation", "Preventive Rescue")).upper()}</b>.
           </div>
           <div style="margin-top:12px;">
             <b>{b['Production shortfall %']:.1f}% → {i['Production shortfall %']:.1f}%</b>
