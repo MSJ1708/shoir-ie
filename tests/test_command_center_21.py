@@ -77,7 +77,7 @@ def test_command_center_21_uses_native_interaction_support_when_available():
 
 
 def test_route_points_to_the_new_upgrade_layer():
-    source = cc.demo.inspect.getsource(cc.demo)
+    source = inspect.getsource(cc.demo)
     assert "Industrial Control Center" in source
     platform_source = open("industrial_platform.py", encoding="utf-8").read()
     assert "from shoir_command_center_21 import render_investor_control_center_21" in platform_source
