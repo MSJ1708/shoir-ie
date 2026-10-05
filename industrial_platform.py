@@ -35,7 +35,7 @@ from shoir_engine_studio import (
     render_experiment_engine, render_forecasting_studio,
     render_optimization_studio, render_decision_center_studio,
 )
-from shoir_investor_demo import render_investor_control_center
+from shoir_command_center_21 import render_investor_control_center_21
 
 PLATFORM_CATALOG = [
     {"tier":"Starter","category":"AI & Automation","name":"Excel Data Cleaning & Import",
@@ -1416,7 +1416,7 @@ def render_module(module: str, tier: str, username: str):
         st.dataframe(st.session_state.get("experiment_results",scenarios),use_container_width=True)
         render_export_bar(module,[("Scenarios",scenarios),("Experiment Results",st.session_state.get("experiment_results",pd.DataFrame()))],tier,username)
     elif module=="Industrial Control Center":
-        render_investor_control_center(tier, username)
+        render_investor_control_center_21(tier, username)
     elif module=="Engineering Decision Center":
         st.subheader("🎯 Governed Engineering Decision Center")
         st.caption("Baseline → alternatives → constraints → KPIs → uncertainty → evidence → approval → verification.")
