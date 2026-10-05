@@ -76,10 +76,18 @@ def _ui_set(key: str, value: Any) -> None:
 
 
 def _supports_kw(fn: Any, name: str) -> bool:
-    try:
-        return name in inspect.signature(fn).parameters
-    except Exception:
-        return False
+    """Detect keyword support through Shoir-IE wrappers as well as native callables."""
+    current = fn
+    seen: set[int] = set()
+    while callable(current) and id(current) not in seen:
+        seen.add(id(current))
+        try:
+            if name in inspect.signature(current).parameters:
+                return True
+        except (TypeError, ValueError):
+            pass
+        current = getattr(current, "__wrapped__", None)
+    return False
 
 
 def _button(label: str, *, key: str, shortcut: str | None = None, **kwargs: Any) -> bool:
