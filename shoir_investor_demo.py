@@ -111,7 +111,7 @@ def _ensure_defaults() -> None:
 def _reset_flow_only() -> None:
     for key in ("started", "completed", "risk", "thread", "tower", "maintenance",
                 "simulation", "optimization", "decision", "impact", "verification",
-                "rescue_case", "decision_persisted", "twin_persistence_warning", "decision_persistence_warning"):
+                "rescue_case", "decision_persisted", "twin_persistence_warning", "decision_persistence_warning", "optimization_warning", "simulation_chart_warning"):
         st.session_state.pop(f"{DEMO_KEY}_{key}", None)
     for key in list(st.session_state.keys()):
         if str(key).startswith(f"{DEMO_KEY}_input_"):
@@ -432,13 +432,35 @@ def _optimization(inputs: dict[str, float] | None = None) -> Dict[str, Any]:
     feasible = alternatives[alternatives["Service %"] >= 95].copy()
     if feasible.empty:
         feasible = alternatives.sort_values("Service %", ascending=False).head(1).copy()
-    scored = pareto_weight_sweep(
-        feasible,
-        ["Cost SAR", "Risk", "Carbon kg"],
-        weights=[0.45, 0.35, 0.20],
-        minimize=[True, True, True],
-    )
-    choice = scored.iloc[0].to_dict()
+    # The optimization layer is intentionally fail-safe: a numerical/solver/
+    # pandas edge case must never prevent the rest of the investor flow from
+    # rendering the already-computed risk and simulation evidence.
+    try:
+        scored = pareto_weight_sweep(
+            feasible,
+            ["Cost SAR", "Risk", "Carbon kg"],
+            weights=[0.45, 0.35, 0.20],
+            minimize=[True, True, True],
+        )
+        if scored.empty:
+            raise ValueError("Optimization returned no candidate alternatives.")
+        choice = scored.iloc[0].to_dict()
+    except Exception as exc:
+        _set("optimization_warning", f"{type(exc).__name__}: {exc}")
+        scored = feasible.copy()
+        if scored.empty:
+            scored = alternatives.head(1).copy()
+        cost = pd.to_numeric(scored["Cost SAR"], errors="coerce").fillna(0.0)
+        risk = pd.to_numeric(scored["Risk"], errors="coerce").fillna(100.0)
+        carbon = pd.to_numeric(scored["Carbon kg"], errors="coerce").fillna(999999.0)
+        scored["Composite Score"] = (
+            0.45 * cost.rank(pct=True, method="min")
+            + 0.35 * risk.rank(pct=True, method="min")
+            + 0.20 * carbon.rank(pct=True, method="min")
+        )
+        scored["Pareto Candidate"] = True
+        scored = scored.sort_values(["Composite Score", "Service %"], ascending=[True, False]).reset_index(drop=True)
+        choice = scored.iloc[0].to_dict()
     return {"alternatives": alternatives, "scored": scored, "choice": choice}
 
 
@@ -958,11 +980,29 @@ def _render_simulation() -> None:
     st.markdown("#### 🆚 What happens if we do nothing?")
     st.dataframe(comparison, use_container_width=True, hide_index=True)
     st.caption("Rescue-case economics are synthetic demonstration assumptions; simulation outputs remain reproducible.")
-    plot_df = pd.DataFrame(
-        [{"Scenario": k, "Throughput": v} for k, arr in sim["samples"].items() for v in np.quantile(arr, np.linspace(.1, .9, 9))]
-    )
-    fig = px.box(plot_df, x="Scenario", y="Throughput", points=False, title="Simulated throughput distribution · baseline vs intervention")
-    st.plotly_chart(fig, use_container_width=True)
+    # Plotly is a presentation layer only; if a chart-specific edge case occurs,
+    # keep the numeric simulation and downstream decision stages intact.
+    try:
+        plot_df = pd.DataFrame(
+            [
+                {"Scenario": k, "Throughput": float(v)}
+                for k, arr in sim["samples"].items()
+                for v in np.quantile(np.asarray(arr, dtype=float), np.linspace(.1, .9, 9))
+            ]
+        )
+        if plot_df.empty:
+            raise ValueError("No simulated throughput samples available for distribution chart.")
+        fig = px.box(
+            plot_df,
+            x="Scenario",
+            y="Throughput",
+            points=False,
+            title="Simulated throughput distribution · baseline vs intervention",
+        )
+        st.plotly_chart(fig, use_container_width=True)
+    except Exception as exc:
+        _set("simulation_chart_warning", f"{type(exc).__name__}: {exc}")
+        st.info("Simulation distribution chart is temporarily unavailable; the numeric simulation results above remain valid.")
 
 
 def _render_optimization() -> None:
@@ -976,6 +1016,8 @@ def _render_optimization() -> None:
     c2.metric("Service", f"{choice['Service %']:.0f}%")
     c3.metric("Risk", f"{choice['Risk']:.0f}", "index")
     c4.metric("Intervention", _format_sar(choice["Cost SAR"]))
+    if _state("optimization_warning"):
+        st.info("The optimization fallback selected the best available candidate; the remaining risk, simulation, decision and ROI evidence is unaffected.")
     st.dataframe(opt["scored"].round(2), use_container_width=True, hide_index=True)
     fig = px.scatter(
         opt["alternatives"],
