@@ -146,10 +146,131 @@ def _ensure_state() -> None:
         "policy_open": False,
         "alternatives_open": False,
         "governance_open": False,
+        "customization_open": False,
     }
     for key, value in defaults.items():
         if _ui_get(key) is None:
             _ui_set(key, value)
+
+
+def _default_custom_config() -> dict[str, Any]:
+    return {
+        "facility_name": "Al Noor Advanced Manufacturing Plant",
+        "facility_code": "FAC-RYD-01",
+        "zones": pd.DataFrame([
+            ["Receiving & Stores","Supply",0,75,24,17],["Production Line 1","Production",28,52,20,25],
+            ["Production Line 2","Production",51,52,20,25],["Production Line 3","Production",74,52,20,25],
+            ["Quality","Quality",28,22,20,19],["Maintenance","Maintenance",51,22,20,19],
+            ["Utilities","Energy",74,22,20,19],["Shipping","Customer",0,22,24,19],
+        ], columns=["Zone","Domain","X","Y","Width","Height"]),
+        "assets": pd.DataFrame([
+            ["C-204","Compressor","Maintenance","Critical"],["LINE-02","Production Line","Production","High"],
+            ["MAT-BRG-08","Bearing","Supply","High"],["Q-07","Quality Station","Quality","Medium"],
+            ["ENERGY-01","Energy Meter","Energy","Medium"],["WO-4821","72h Customer Order","Customer","Critical"],
+        ], columns=["ID","Name","Domain","Priority"]),
+        "connections": pd.DataFrame([
+            ["LINE-02","C-204","Maintenance dependency"],["C-204","MAT-BRG-08","Critical spare"],
+            ["LINE-02","Q-07","Quality control"],["LINE-02","WO-4821","Customer commitment"],
+            ["C-204","ENERGY-01","Energy signal"],
+        ], columns=["From","To","Relationship"]),
+        "kpis": pd.DataFrame([
+            ["Customer protection",95,"%","≥","Service"],["Risk alert",70,"%","≤","Risk"],
+            ["Line 2 OEE",76,"%","≥","Production"],["Bearing cover",1.4,"days","≥","Inventory"],
+        ], columns=["KPI","Target","Unit","Operator","Domain"]),
+        "actions": pd.DataFrame([
+            ["Analyze plant risk","risk","Analyze current plant risk"],
+            ["Run full rescue","rescue","Execute the 72-hour rescue flow"],
+            ["Run What-If","whatif","Open operational and financial scenario testing"],
+            ["Compare interventions","alternatives","Compare recommendation alternatives"],
+        ], columns=["Action","Command","Description"]),
+    }
+
+
+def _custom_config() -> dict[str, Any]:
+    key = f"{CC21_KEY}_custom_config"
+    if key not in st.session_state:
+        st.session_state[key] = _default_custom_config()
+    return st.session_state[key]
+
+
+def _custom_zones() -> dict[str, tuple[float,float,float,float,str]]:
+    df = _custom_config()["zones"]
+    out = {}
+    for _, row in df.iterrows():
+        try:
+            out[str(row["Zone"])] = (float(row["X"]),float(row["Y"]),float(row["Width"]),float(row["Height"]),str(row["Domain"]))
+        except (TypeError,ValueError):
+            pass
+    return out or FLOOR
+
+
+def _apply_custom_config() -> None:
+    for _, row in _custom_config()["kpis"].iterrows():
+        try: target = float(row["Target"])
+        except (TypeError,ValueError): continue
+        name = str(row["KPI"]).strip().lower()
+        if name == "customer protection": _ui_set("service_target", target)
+        if name == "risk alert": _ui_set("risk_threshold", target)
+
+
+def _render_customization() -> None:
+    with st.expander("🛠️ Plant Builder & Command Center Customization", expanded=bool(_ui_get("customization_open",False))):
+        st.caption("Add, edit or delete plant zones, assets, Digital Thread connections, KPI targets and operator actions. Changes are live in this Command Center workspace.")
+        cfg = _custom_config()
+        a,b,c = st.columns([2.4,1.2,1.2])
+        with a:
+            cfg["facility_name"] = st.text_input("Facility name",str(cfg["facility_name"]),key=f"{CC21_KEY}_facility_name").strip() or "Industrial Facility"
+            cfg["facility_code"] = st.text_input("Facility code",str(cfg["facility_code"]),key=f"{CC21_KEY}_facility_code").strip() or "FAC-001"
+        with b:
+            if st.button("➕ Add zone",use_container_width=True,key=f"{CC21_KEY}_add_zone"):
+                cfg["zones"] = pd.concat([cfg["zones"],pd.DataFrame([["New Zone","Production",5,5,18,12]],columns=cfg["zones"].columns)],ignore_index=True)
+                st.rerun()
+        with c:
+            if st.button("➕ Add asset",use_container_width=True,key=f"{CC21_KEY}_add_asset"):
+                cfg["assets"] = pd.concat([cfg["assets"],pd.DataFrame([["NEW-ASSET","New Asset","Production","Medium"]],columns=cfg["assets"].columns)],ignore_index=True)
+                st.rerun()
+
+        cfg["zones"] = st.data_editor(cfg["zones"],num_rows="dynamic",hide_index=True,use_container_width=True,
+            column_config={"Zone":st.column_config.TextColumn("Zone",required=True),
+                           "Domain":st.column_config.SelectboxColumn("Domain",options=["Production","Maintenance","Supply","Quality","Energy","Customer","Workforce"],required=True),
+                           "X":st.column_config.NumberColumn("X",min_value=0,max_value=100,step=1),
+                           "Y":st.column_config.NumberColumn("Y",min_value=0,max_value=100,step=1),
+                           "Width":st.column_config.NumberColumn("Width",min_value=5,max_value=50,step=1),
+                           "Height":st.column_config.NumberColumn("Height",min_value=5,max_value=40,step=1)},
+            key=f"{CC21_KEY}_zones_editor")
+        cfg["assets"] = st.data_editor(cfg["assets"],num_rows="dynamic",hide_index=True,use_container_width=True,
+            column_config={"ID":st.column_config.TextColumn("ID",required=True),"Name":st.column_config.TextColumn("Name",required=True),
+                           "Domain":st.column_config.SelectboxColumn("Domain",options=["Production","Maintenance","Supply","Quality","Energy","Customer","Workforce"],required=True),
+                           "Priority":st.column_config.SelectboxColumn("Priority",options=["Low","Medium","High","Critical"])},
+            key=f"{CC21_KEY}_assets_editor")
+        cfg["connections"] = st.data_editor(cfg["connections"],num_rows="dynamic",hide_index=True,use_container_width=True,
+            column_config={"From":st.column_config.TextColumn("From",required=True),"To":st.column_config.TextColumn("To",required=True),
+                           "Relationship":st.column_config.TextColumn("Relationship",required=True)},
+            key=f"{CC21_KEY}_connections_editor")
+        cfg["kpis"] = st.data_editor(cfg["kpis"],num_rows="dynamic",hide_index=True,use_container_width=True,
+            column_config={"KPI":st.column_config.TextColumn("KPI",required=True),"Target":st.column_config.NumberColumn("Target"),
+                           "Unit":st.column_config.TextColumn("Unit"),"Operator":st.column_config.SelectboxColumn("Operator",options=["≥","≤","="]),
+                           "Domain":st.column_config.TextColumn("Domain")},
+            key=f"{CC21_KEY}_kpis_editor")
+        _apply_custom_config()
+        cfg["actions"] = st.data_editor(cfg["actions"],num_rows="dynamic",hide_index=True,use_container_width=True,
+            column_config={"Action":st.column_config.TextColumn("Action",required=True),
+                           "Command":st.column_config.SelectboxColumn("Command",options=["risk","rescue","whatif","alternatives","evidence","governance","policy"]),
+                           "Description":st.column_config.TextColumn("Description")},
+            key=f"{CC21_KEY}_actions_editor")
+        x,y,z = st.columns(3)
+        with x:
+            if st.button("💾 Apply customization",type="primary",use_container_width=True,key=f"{CC21_KEY}_apply_custom"):
+                _apply_custom_config(); st.success(f"Applied to {cfg['facility_name']}: {len(cfg['zones'])} zones · {len(cfg['assets'])} assets · {len(cfg['connections'])} connections")
+        with y:
+            if st.button("↺ Restore default plant",use_container_width=True,key=f"{CC21_KEY}_restore_custom"):
+                st.session_state[f"{CC21_KEY}_custom_config"] = _default_custom_config(); _apply_custom_config(); st.rerun()
+        with z:
+            import json
+            payload={k:(v.to_dict("records") if isinstance(v,pd.DataFrame) else v) for k,v in cfg.items()}
+            st.download_button("⬇️ Export configuration JSON",data=json.dumps(payload,indent=2,default=str),
+                               file_name=f"{cfg['facility_code'].lower()}_command_center_config.json",mime="application/json",use_container_width=True)
+        st.success("Customization is active for this Command Center session.")
 
 
 def _inputs() -> dict[str, float]:
@@ -338,7 +459,7 @@ def _thread_label_to_entity(label: str) -> str:
 def _build_floor_map() -> go.Figure:
     values = _inputs()
     fig = go.Figure()
-    for name, (x, y, w, h, domain) in FLOOR.items():
+    for name, (x, y, w, h, domain) in _custom_zones().items():
         health = {
             "Production Line 1": 93.0,
             "Production Line 2": float(values["production_oee"]),
@@ -974,6 +1095,7 @@ def render_investor_control_center_21(tier: str, username: str) -> None:
     with st.expander("🧠 Why this recommendation?", expanded=False):
         demo._render_why_recommendation()
     demo._render_scenario_library(username)
+    _render_customization()
 
     st.markdown("### 🏭 Industrial Situation Map")
     _render_thread_and_floor()
