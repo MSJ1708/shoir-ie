@@ -82,7 +82,8 @@ def _supports_kw(fn: Any, name: str) -> bool:
     while callable(current) and id(current) not in seen:
         seen.add(id(current))
         try:
-            if name in inspect.signature(current).parameters:
+            parameters = inspect.signature(current).parameters
+            if name in parameters or any(parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in parameters.values()):
                 return True
         except (TypeError, ValueError):
             pass
