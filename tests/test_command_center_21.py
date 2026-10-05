@@ -179,7 +179,7 @@ def test_platform_router_has_command_center_fail_open_boundary():
     assert idx >= 0
     section = source[idx:idx + 1800]
     assert "render_investor_control_center_21(tier, username)" in section
-    assert "_render_customization()" in section
+    assert "_render_customization_stable()" in section
     assert "Command Center diagnostic" in section
 
 
@@ -225,6 +225,6 @@ def test_investor_result_board_contains_business_and_time_value_surfaces():
         "Workflow compression",
         "Estimated time saved",
         "End-to-end study workflow time",
-        "Synthetic demonstration assumptions",
+        "synthetic demonstration assumptions",
     ]:
         assert required in source
