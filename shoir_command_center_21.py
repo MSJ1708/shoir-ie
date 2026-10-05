@@ -250,8 +250,10 @@ def _policy_alternatives(values: dict[str, float]) -> pd.DataFrame:
         + weights["service"] * (df["Service %"] / 100.0)
         + weights["carbon"] * (1.0 - df["Carbon kg"] / carbon_max)
     ) * 100.0
-    if float(v["order_protection"]) < float(_ui_get("service_target", 95.0)):
-        df.loc[df["Service %"] < float(_ui_get("service_target", 95.0)), "Policy score"] -= 20.0
+    service_target = float(_ui_get("service_target", 95.0))
+    if float(v["order_protection"]) < service_target:
+        df.loc[df["Service %"] < service_target, "Policy score"] -= 20.0
+        df.loc[(df["Alternative"] == "Do Nothing") & (df["Service %"] < service_target), "Policy score"] -= 60.0
     return df.sort_values(["Policy score", "Service %"], ascending=[False, False]).reset_index(drop=True)
 
 
@@ -585,6 +587,81 @@ def _reset_upgrade_view() -> None:
     _ensure_state()
 
 
+def _render_cockpit() -> None:
+    v = _inputs()
+    plant = demo._plant_from_inputs(v)
+    risk = demo._risk_analysis(v)
+    econ = _dynamic_rescue(v)
+    alternatives = _policy_alternatives(v)
+    choice = alternatives.iloc[0] if not alternatives.empty else None
+    recommendation = str(choice["Alternative"]) if choice is not None else "Preventive Rescue"
+    conf = demo._cc_confidence_profile(risk)
+    plant_health = float(pd.to_numeric(plant["Health %"], errors="coerce").mean())
+    top = risk.sort_values("Risk %", ascending=False).iloc[0]
+
+    st.markdown(
+        """
+        <div style="padding:20px 22px;border-radius:18px;margin-bottom:14px;
+                    background:linear-gradient(145deg,rgba(20,27,37,.98),rgba(10,16,24,.98));
+                    border:1px solid rgba(148,163,184,.18);">
+          <div style="font-size:11px;letter-spacing:.13em;text-transform:uppercase;opacity:.66;">
+            INDUSTRIAL OPERATING SYSTEM · COMMAND CENTER 2.1
+          </div>
+          <div style="font-size:31px;font-weight:850;margin-top:4px;">Plant Situation Room</div>
+          <div style="font-size:14px;opacity:.76;margin-top:7px;">
+            See the situation, follow the evidence, test the future, choose the intervention,
+            quantify value and close the loop — without leaving the Command Center.
+          </div>
+          <div style="margin-top:10px;font-size:11px;opacity:.62;">
+            SYNTHETIC DEMO · 72-HOUR DECISION WINDOW · PARAMETERIZED ECONOMIC MODEL
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    k1,k2,k3,k4,k5 = st.columns(5)
+    k1.metric("Customer commitment", f"{v['order_protection']:.0f}%", "AT RISK" if v["order_protection"] < 90 else "PROTECTED")
+    k2.metric("Plant health", f"{plant_health:.0f}%", "calculated")
+    k3.metric("Highest risk", str(top["Asset"]), f"{float(top['Risk %']):.0f}%")
+    k4.metric("Do-nothing exposure", demo._format_sar(econ["baseline"]["Financial exposure SAR"]), "modelled")
+    k5.metric("Avoided exposure", demo._format_sar(econ["avoided_exposure"]), "modelled")
+
+    left,right = st.columns([1.35,1])
+    with left:
+        st.markdown(f"#### 🧠 Recommended rescue · **{recommendation}**")
+        st.success(
+            f"Protect the 72-hour customer commitment while balancing cost, risk, service and carbon. "
+            f"Modelled exposure moves from {demo._format_sar(econ['baseline']['Financial exposure SAR'])} "
+            f"to {demo._format_sar(econ['intervention']['Financial exposure SAR'])}."
+        )
+        with st.expander("View the 9-step rescue plan", expanded=False):
+            for i, action in enumerate(econ["action_plan"], 1):
+                st.markdown(f"**{i:02d}** · {action}")
+    with right:
+        st.markdown("#### 📊 Decision confidence")
+        c1,c2 = st.columns(2)
+        c1.metric("Model confidence", f"{conf['overall']:.0f}%")
+        c2.metric("Evidence completeness", f"{conf['completeness']:.0f}%")
+        st.progress(conf["overall"] / 100.0)
+        st.caption(
+            f"Freshness {conf['freshness']:.0f}% · conflict-free {conf['conflict_free']:.0f}% · "
+            f"model stability {conf['model_stability']:.0f}%. Synthetic demo profile."
+        )
+    driver = risk.nlargest(4, "Risk %")[["Asset","Risk %","Domain","Evidence"]].copy()
+    driver["Risk %"] = driver["Risk %"].map(lambda x: f"{float(x):.0f}%")
+    with st.expander("🔎 Top risk drivers", expanded=False):
+        st.dataframe(driver, use_container_width=True, hide_index=True)
+    st.markdown("#### 🧭 Decision pipeline")
+    stages = [
+        ("01","RISK",demo._is_done("risk")),("02","EVIDENCE",demo._is_done("thread")),
+        ("03","FUTURE",demo._is_done("simulation")),("04","ACTION",demo._is_done("decision")),
+        ("05","VALUE",demo._is_done("impact")),("06","VERIFY",demo._is_done("verification")),
+    ]
+    cols=st.columns(6)
+    for col,(num,label,done) in zip(cols,stages):
+        with col:
+            st.caption(("✓ " if done else f"{num} ") + label + (" · COMPLETE" if done else " · PENDING"))
+
 def _render_palette() -> None:
     st.markdown("#### ⌘ Command Center control")
     a, b, c = st.columns([1.3, 1.3, 2.6])
@@ -859,6 +936,7 @@ def render_investor_control_center_21(tier: str, username: str) -> None:
     demo._ensure_defaults()
     demo._init_ui_state()
 
+    _render_cockpit()
     _render_palette()
     _render_role_workspace()
     _render_focus_panel()
@@ -873,6 +951,10 @@ def render_investor_control_center_21(tier: str, username: str) -> None:
             _ui_set("last_action", f"Policy choice · {alt.iloc[0]['Alternative']}")
             st.success(f"Working recommendation set to {alt.iloc[0]['Alternative']}. Existing optimization and decision stages remain authoritative for execution.")
 
+    with st.expander("🧠 Why this recommendation?", expanded=False):
+        demo._render_why_recommendation()
+    demo._render_scenario_library(username)
+
     st.markdown("### 🏭 Industrial Situation Map")
     _render_thread_and_floor()
     _render_inspector()
@@ -880,6 +962,12 @@ def render_investor_control_center_21(tier: str, username: str) -> None:
 
     with st.expander("🔗 Evidence & Decision Governance", expanded=bool(_ui_get("evidence_open", False) or _ui_get("governance_open", False))):
         _render_evidence_and_governance()
+        with st.expander("Original evidence trace", expanded=False):
+            demo._render_evidence_chain()
+    with st.expander("🧑‍💼 Executive View", expanded=_ui_get("role","Command Center")=="Executive"):
+        demo._render_executive_summary()
+    with st.expander("🔄 Closed-loop lifecycle", expanded=False):
+        demo._render_closed_loop()
 
     st.markdown("---")
     st.markdown("### Existing Industrial Decision Flow · preserved")
