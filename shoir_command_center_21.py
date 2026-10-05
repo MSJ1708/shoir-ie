@@ -250,102 +250,101 @@ def _run_custom_action(command: str, username: str) -> None:
         _ui_set("policy_open", True)
 
 
-def _render_customization() -> None:
+def _render_customization_stable() -> None:
+    """Minimal, fail-safe builder used by the Command Center critical path."""
+    import json
     st.markdown("### 🛠️ Plant Builder & Command Center Customization")
-    with st.expander("Open Builder · add / edit / delete plant structure", expanded=bool(_ui_get("customization_open", True))):
-        st.caption("Add, edit or delete plant zones, assets, Digital Thread connections, KPI targets and operator actions. Changes are live in this Command Center workspace.")
-        cfg = _custom_config()
-        editor_version = int(_ui_get("custom_editor_version", 0) or 0)
-        a,b,c = st.columns([2.4,1.2,1.2])
-        with a:
-            cfg["facility_name"] = st.text_input("Facility name",str(cfg["facility_name"]),key=f"{CC21_KEY}_facility_name").strip() or "Industrial Facility"
-            cfg["facility_code"] = st.text_input("Facility code",str(cfg["facility_code"]),key=f"{CC21_KEY}_facility_code").strip() or "FAC-001"
-        with b:
-            if st.button("➕ Add zone",use_container_width=True,key=f"{CC21_KEY}_add_zone"):
-                cfg["zones"] = pd.concat([cfg["zones"],pd.DataFrame(
-                    [["New Zone","Production",5,5,18,12]],columns=cfg["zones"].columns
-                )],ignore_index=True)
-                _ui_set("custom_editor_version", editor_version + 1)
+    st.info("Edit the active plant configuration directly. Changes are session-backed and feed the Command Center map and policy.")
+    cfg = _custom_config()
+    s = st.columns(5)
+    s[0].metric("Zones", len(cfg["zones"]))
+    s[1].metric("Assets", len(cfg["assets"]))
+    s[2].metric("Connections", len(cfg["connections"]))
+    s[3].metric("KPI targets", len(cfg["kpis"]))
+    s[4].metric("Actions", len(cfg["actions"]))
+    a,b = st.columns(2)
+    with a:
+        facility_name = st.text_input("Facility name", str(cfg.get("facility_name","Industrial Facility")), key=f"{CC21_KEY}_stable_facility_name")
+    with b:
+        facility_code = st.text_input("Facility code", str(cfg.get("facility_code","FAC-001")), key=f"{CC21_KEY}_stable_facility_code")
+    if st.button("💾 Save facility", type="primary", use_container_width=True, key=f"{CC21_KEY}_stable_save_facility"):
+        cfg["facility_name"] = facility_name.strip() or "Industrial Facility"
+        cfg["facility_code"] = facility_code.strip() or "FAC-001"
+        st.success("Facility saved.")
+    tabs = st.tabs(["🏭 Zones","⚙️ Assets","🔗 Connections","🎯 KPIs","▶️ Actions","🧩 Full configuration"])
+    with tabs[0]:
+        st.markdown("#### Plant zones")
+        st.dataframe(cfg["zones"], use_container_width=True, hide_index=True)
+        new_zone = st.text_input("New zone name", "New Zone", key=f"{CC21_KEY}_stable_new_zone")
+        zone_domain = st.selectbox("Zone domain", ["Production","Maintenance","Supply","Quality","Energy","Customer","Workforce"], key=f"{CC21_KEY}_stable_zone_domain")
+        z1,z2,z3,z4 = st.columns(4)
+        zx = z1.number_input("X", 0.0, 100.0, 5.0, 1.0, key=f"{CC21_KEY}_stable_zx")
+        zy = z2.number_input("Y", 0.0, 100.0, 5.0, 1.0, key=f"{CC21_KEY}_stable_zy")
+        zw = z3.number_input("Width", 5.0, 50.0, 18.0, 1.0, key=f"{CC21_KEY}_stable_zw")
+        zh = z4.number_input("Height", 5.0, 40.0, 12.0, 1.0, key=f"{CC21_KEY}_stable_zh")
+        if st.button("➕ Add zone", type="primary", use_container_width=True, key=f"{CC21_KEY}_stable_add_zone"):
+            name = new_zone.strip() or "New Zone"
+            if name in cfg["zones"]["Zone"].astype(str).tolist():
+                st.error("That zone already exists.")
+            else:
+                cfg["zones"] = pd.concat([cfg["zones"], pd.DataFrame([[name,zone_domain,zx,zy,zw,zh]], columns=cfg["zones"].columns)], ignore_index=True)
+                st.success(f"Added zone: {name}")
                 st.rerun()
-        with c:
-            if st.button("➕ Add asset",use_container_width=True,key=f"{CC21_KEY}_add_asset"):
-                cfg["assets"] = pd.concat([cfg["assets"],pd.DataFrame(
-                    [["NEW-ASSET","New Asset","Production","Medium","Production Line 2",61,60]],
-                    columns=cfg["assets"].columns
-                )],ignore_index=True)
-                _ui_set("custom_editor_version", editor_version + 1)
+    with tabs[1]:
+        st.markdown("#### Plant assets")
+        st.dataframe(cfg["assets"], use_container_width=True, hide_index=True)
+        n1,n2,n3 = st.columns(3)
+        asset_id = n1.text_input("Asset ID", "NEW-ASSET", key=f"{CC21_KEY}_stable_asset_id")
+        asset_name = n2.text_input("Asset name", "New Asset", key=f"{CC21_KEY}_stable_asset_name")
+        asset_domain = n3.selectbox("Asset domain", ["Production","Maintenance","Supply","Quality","Energy","Customer","Workforce"], key=f"{CC21_KEY}_stable_asset_domain")
+        n4,n5,n6 = st.columns(3)
+        asset_priority = n4.selectbox("Priority", ["Low","Medium","High","Critical"], index=1, key=f"{CC21_KEY}_stable_asset_priority")
+        asset_zone = n5.text_input("Map zone", "Production Line 2", key=f"{CC21_KEY}_stable_asset_zone")
+        asset_x = n6.number_input("Map X", 0.0, 100.0, 61.0, 1.0, key=f"{CC21_KEY}_stable_asset_x")
+        asset_y = st.number_input("Map Y", 0.0, 100.0, 60.0, 1.0, key=f"{CC21_KEY}_stable_asset_y")
+        if st.button("➕ Add asset", type="primary", use_container_width=True, key=f"{CC21_KEY}_stable_add_asset"):
+            aid = asset_id.strip() or "NEW-ASSET"
+            if aid in cfg["assets"]["ID"].astype(str).tolist():
+                st.error("That asset ID already exists.")
+            else:
+                cfg["assets"] = pd.concat([cfg["assets"], pd.DataFrame([[aid,asset_name.strip() or "New Asset",asset_domain,asset_priority,asset_zone.strip() or "Production Line 2",asset_x,asset_y]], columns=cfg["assets"].columns)], ignore_index=True)
+                st.success(f"Added asset: {aid}")
                 st.rerun()
-
-        cfg["zones"] = st.data_editor(cfg["zones"],num_rows="dynamic",hide_index=True,use_container_width=True,
-            column_config={"Zone":st.column_config.TextColumn("Zone",required=True),
-                           "Domain":st.column_config.SelectboxColumn("Domain",options=["Production","Maintenance","Supply","Quality","Energy","Customer","Workforce"],required=True),
-                           "X":st.column_config.NumberColumn("X",min_value=0,max_value=100,step=1),
-                           "Y":st.column_config.NumberColumn("Y",min_value=0,max_value=100,step=1),
-                           "Width":st.column_config.NumberColumn("Width",min_value=5,max_value=50,step=1),
-                           "Height":st.column_config.NumberColumn("Height",min_value=5,max_value=40,step=1)},
-            key=f"{CC21_KEY}_zones_editor_{editor_version}")
-        cfg["assets"] = st.data_editor(cfg["assets"],num_rows="dynamic",hide_index=True,use_container_width=True,
-            column_config={"ID":st.column_config.TextColumn("ID",required=True),"Name":st.column_config.TextColumn("Name",required=True),
-                           "Domain":st.column_config.SelectboxColumn("Domain",options=["Production","Maintenance","Supply","Quality","Energy","Customer","Workforce"],required=True),
-                           "Priority":st.column_config.SelectboxColumn("Priority",options=["Low","Medium","High","Critical"])},
-            key=f"{CC21_KEY}_assets_editor_{editor_version}")
-        cfg["connections"] = st.data_editor(cfg["connections"],num_rows="dynamic",hide_index=True,use_container_width=True,
-            column_config={"From":st.column_config.TextColumn("From",required=True),"To":st.column_config.TextColumn("To",required=True),
-                           "Relationship":st.column_config.TextColumn("Relationship",required=True)},
-            key=f"{CC21_KEY}_connections_editor_{editor_version}")
-        cfg["kpis"] = st.data_editor(cfg["kpis"],num_rows="dynamic",hide_index=True,use_container_width=True,
-            column_config={"KPI":st.column_config.TextColumn("KPI",required=True),"Target":st.column_config.NumberColumn("Target"),
-                           "Unit":st.column_config.TextColumn("Unit"),"Operator":st.column_config.SelectboxColumn("Operator",options=["≥","≤","="]),
-                           "Domain":st.column_config.TextColumn("Domain")},
-            key=f"{CC21_KEY}_kpis_editor_{editor_version}")
-        _apply_custom_config()
-        cfg["actions"] = st.data_editor(cfg["actions"],num_rows="dynamic",hide_index=True,use_container_width=True,
-            column_config={"Action":st.column_config.TextColumn("Action",required=True),
-                           "Command":st.column_config.SelectboxColumn("Command",options=["risk","rescue","whatif","alternatives","evidence","governance","policy"]),
-                           "Description":st.column_config.TextColumn("Description")},
-            key=f"{CC21_KEY}_actions_editor_{editor_version}")
-        st.markdown("#### ▶️ Custom operator actions")
-        action_rows = cfg["actions"].to_dict("records") if isinstance(cfg.get("actions"), pd.DataFrame) else []
-        for start in range(0, len(action_rows), 3):
-            row = action_rows[start:start + 3]
-            cols = st.columns(len(row))
-            for col, action in zip(cols, row):
-                with col:
-                    label = str(action.get("Action", "Custom action"))
-                    if st.button(label, use_container_width=True,
-                                  key=f"{CC21_KEY}_custom_action_{start}_{label}"):
-                        _run_custom_action(
-                            str(action.get("Command", "")),
-                            str(st.session_state.get("current_user") or "demo_user"),
-                        )
-                        st.rerun()
-
-        x,y,z = st.columns(3)
-        with x:
-            if st.button("💾 Apply customization",type="primary",use_container_width=True,key=f"{CC21_KEY}_apply_custom"):
+    with tabs[2]:
+        st.dataframe(cfg["connections"], use_container_width=True, hide_index=True)
+        st.caption("Add, edit, or delete Digital Thread relationships in Full configuration.")
+    with tabs[3]:
+        st.dataframe(cfg["kpis"], use_container_width=True, hide_index=True)
+        st.caption("Customer protection and Risk alert targets are applied to Command Center policy.")
+    with tabs[4]:
+        st.dataframe(cfg["actions"], use_container_width=True, hide_index=True)
+        for i, action in enumerate(cfg["actions"].to_dict("records")):
+            if st.button(f"▶ {action.get('Action', 'Run action')}", use_container_width=True, key=f"{CC21_KEY}_stable_run_{i}"):
+                _run_custom_action(str(action.get("Command","")), str(st.session_state.get("current_user") or "demo_user"))
+                st.rerun()
+    with tabs[5]:
+        payload = {k:(v.to_dict("records") if isinstance(v,pd.DataFrame) else v) for k,v in cfg.items()}
+        raw = st.text_area("Plant configuration JSON", json.dumps(payload, indent=2, default=str), height=420, key=f"{CC21_KEY}_stable_json")
+        st.caption("Schema: facility_name, facility_code, zones, assets, connections, kpis, actions.")
+        if st.button("✅ Apply JSON configuration", type="primary", use_container_width=True, key=f"{CC21_KEY}_stable_apply_json"):
+            try:
+                data = json.loads(raw)
+                required = {"facility_name","facility_code","zones","assets","connections","kpis","actions"}
+                missing = required.difference(data)
+                if missing:
+                    raise ValueError("Missing sections: " + ", ".join(sorted(missing)))
+                for name in ("zones","assets","connections","kpis","actions"):
+                    data[name] = pd.DataFrame(data[name])
+                cfg.clear()
+                cfg.update(data)
                 _apply_custom_config()
-                st.success(
-                    f"Applied to {cfg['facility_name']}: "
-                    f"{len(cfg['zones'])} zones · {len(cfg['assets'])} assets · "
-                    f"{len(cfg['connections'])} connections"
-                )
-        with y:
-            if st.button("↺ Restore default plant",use_container_width=True,key=f"{CC21_KEY}_restore_custom"):
-                st.session_state[f"{CC21_KEY}_custom_config"] = _default_custom_config()
-                _ui_set("custom_editor_version", editor_version + 1)
-                _apply_custom_config()
+                st.success("Full configuration applied to this Command Center session.")
                 st.rerun()
-        with z:
-            import json
-            payload = {k:(v.to_dict("records") if isinstance(v,pd.DataFrame) else v)
-                       for k,v in cfg.items()}
-            st.download_button(
-                "⬇️ Export configuration JSON",
-                data=json.dumps(payload,indent=2,default=str),
-                file_name=f"{cfg['facility_code'].lower()}_command_center_config.json",
-                mime="application/json",use_container_width=True
-            )
-        st.success("Customization is active for this Command Center session.")
+            except Exception as exc:
+                st.error(f"Configuration rejected safely: {type(exc).__name__}: {exc}")
+    _apply_custom_config()
+    st.success("Plant Builder is active and independent of the advanced visualization renderer.")
+
 
 
 def _inputs() -> dict[str, float]:
@@ -1178,7 +1177,7 @@ def render_investor_control_center_21(tier: str, username: str) -> None:
 
     # The Plant Builder is a primary capability, so it renders before optional
     # role lenses. A role-specific visualization must never hide it.
-    _render_customization()
+    _render_customization_stable()
 
     try:
         _render_role_workspace()
