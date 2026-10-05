@@ -717,13 +717,14 @@ def _render_inspector() -> None:
     row = risk.loc[risk["Asset"].astype(str).eq(selected)]
     if not row.empty:
         st.dataframe(row, use_container_width=True, hide_index=True)
-    st.info(f"**Connected to:** {({
-        'C-204':'LINE-02 · MAT-BRG-08 · MW-BACKLOG · ENERGY-01 · WO-4821',
-        'LINE-02':'FAC-RYD-01 · C-204 · Q-07 · WO-4821 · LINE-03',
-        'SUP-18':'MAT-BRG-08 · WO-4821 · LINE-02',
-        'MAT-BRG-08':'C-204 · SUP-18 · MW-BACKLOG',
-        'Q-07':'LINE-02 · C-204 · WO-4821',
-    }).get(selected, 'Facility · Process · Decision · Outcome')}")
+    connections = {
+        "C-204": "LINE-02 · MAT-BRG-08 · MW-BACKLOG · ENERGY-01 · WO-4821",
+        "LINE-02": "FAC-RYD-01 · C-204 · Q-07 · WO-4821 · LINE-03",
+        "SUP-18": "MAT-BRG-08 · WO-4821 · LINE-02",
+        "MAT-BRG-08": "C-204 · SUP-18 · MW-BACKLOG",
+        "Q-07": "LINE-02 · C-204 · WO-4821",
+    }.get(selected, "Facility · Process · Decision · Outcome")
+    st.info(f"**Connected to:** {connections}")
     a1,a2,a3 = st.columns(3)
     with a1:
         if st.button("🧪 Simulate this entity", use_container_width=True, key=f"{CC21_KEY}_inspect_whatif"):
