@@ -805,32 +805,29 @@ def _render_what_if() -> None:
 
 
 def _render_evidence_and_governance() -> None:
-    with st.expander("🔗 Evidence & governance upgrade", expanded=bool(_ui_get("evidence_open", False))):
-        rescue = _dynamic_rescue(_inputs())
-        evidence = pd.DataFrame([
-            ["Scenario input", "Plant controls", "Synthetic / user-entered", "Current session"],
-            ["Risk evidence", "7 cross-domain signals", "Synthetic model", "Command Center risk state"],
-            ["Future model", "72h Monte Carlo", "Deterministic seed 20261004", "1,500 replications"],
-            ["Decision policy", "Cost / risk / service / carbon weights", "Configurable policy", "Workspace settings"],
-            ["Financial model", "Exposure → intervention → avoided exposure", "Calibrated demo model", "Parameterised sensitivity"],
-        ], columns=["Layer","Evidence","Source / method","Trace"])
-        st.dataframe(evidence, use_container_width=True, hide_index=True)
-        st.markdown("#### Modelled economic trace")
-        c1,c2,c3 = st.columns(3)
-        c1.metric("Baseline exposure", demo._format_sar(rescue["baseline"]["Financial exposure SAR"]))
-        c2.metric("Intervention exposure", demo._format_sar(rescue["intervention"]["Financial exposure SAR"]))
-        c3.metric("Avoided exposure", demo._format_sar(rescue["avoided_exposure"]))
-        st.caption("These economics are synthetic/modelled. They are deliberately not represented as verified customer savings.")
-        ver = demo._state("verification")
-        if isinstance(ver, pd.DataFrame):
-            digest = demo.hashlib.sha256(ver.to_csv(index=False).encode("utf-8")).hexdigest()
-            st.caption(f"Verification evidence hash: {digest[:16]}…")
-        st.markdown("#### 🛡️ Decision governance")
-        demo._render_decision_governance()
+    rescue = _dynamic_rescue(_inputs())
+    evidence = pd.DataFrame([
+        ["Scenario input", "Plant controls", "Synthetic / user-entered", "Current session"],
+        ["Risk evidence", "7 cross-domain signals", "Synthetic model", "Command Center risk state"],
+        ["Future model", "72h Monte Carlo", "Deterministic seed 20261004", "1,500 replications"],
+        ["Decision policy", "Cost / risk / service / carbon weights", "Configurable policy", "Workspace settings"],
+        ["Financial model", "Exposure → intervention → avoided exposure", "Calibrated parameterized demo model", "Sensitivity enabled"],
+    ], columns=["Layer","Evidence","Source / method","Trace"])
+    st.dataframe(evidence, use_container_width=True, hide_index=True)
+    st.markdown("#### Modelled economic trace")
+    c1,c2,c3 = st.columns(3)
+    c1.metric("Baseline exposure", demo._format_sar(rescue["baseline"]["Financial exposure SAR"]))
+    c2.metric("Intervention exposure", demo._format_sar(rescue["intervention"]["Financial exposure SAR"]))
+    c3.metric("Avoided exposure", demo._format_sar(rescue["avoided_exposure"]))
+    st.caption("These economics are synthetic/modelled. They are deliberately not represented as verified customer savings.")
+    ver = demo._state("verification")
+    if isinstance(ver, pd.DataFrame):
+        digest = demo.hashlib.sha256(ver.to_csv(index=False).encode("utf-8")).hexdigest()
+        st.caption(f"Verification evidence hash: {digest[:16]}…")
     else:
-        st.caption("Generate the decision flow first to attach a verification hash. Governance records can still be staged below.")
-        demo._render_decision_governance()
-
+        st.caption("Generate the decision flow to attach a verification hash. Governance controls are still available for staging.")
+    st.markdown("#### 🛡️ Decision governance")
+    demo._render_decision_governance()
 
 def render_investor_control_center_21(tier: str, username: str) -> None:
     """Render the upgraded Command Center while preserving all original stages."""
