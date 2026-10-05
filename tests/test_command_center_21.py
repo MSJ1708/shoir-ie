@@ -102,3 +102,32 @@ def test_upgrade_source_contains_all_seven_depth_upgrades():
     ]
     missing = [x for x in required if x not in source]
     assert not missing, missing
+
+
+def test_customization_defaults_are_complete():
+    cfg = cc._default_custom_config()
+    assert cfg["facility_name"]
+    assert {"Zone","Domain","X","Y","Width","Height"} <= set(cfg["zones"].columns)
+    assert {"ID","Name","Domain","Priority"} <= set(cfg["assets"].columns)
+    assert {"From","To","Relationship"} <= set(cfg["connections"].columns)
+    assert {"KPI","Target","Unit","Operator","Domain"} <= set(cfg["kpis"].columns)
+    assert {"Action","Command","Description"} <= set(cfg["actions"].columns)
+
+
+def test_custom_zones_drive_spatial_map():
+    old = cc.st.session_state.get(f"{cc.CC21_KEY}_custom_config")
+    try:
+        cfg = cc._default_custom_config()
+        cfg["zones"] = pd.DataFrame(
+            [["Custom Assembly","Production",10,10,30,20]],
+            columns=["Zone","Domain","X","Y","Width","Height"],
+        )
+        cc.st.session_state[f"{cc.CC21_KEY}_custom_config"] = cfg
+        assert "Custom Assembly" in cc._custom_zones()
+        fig = cc._build_floor_map()
+        assert any("Custom Assembly" in str(getattr(t,"text","")) for t in fig.data)
+    finally:
+        if old is None:
+            cc.st.session_state.pop(f"{cc.CC21_KEY}_custom_config",None)
+        else:
+            cc.st.session_state[f"{cc.CC21_KEY}_custom_config"] = old
