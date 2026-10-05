@@ -58,8 +58,12 @@ def test_spatial_map_and_entity_model_cover_the_whole_demo_thread():
     assert len(cc.ENTITY_POINTS) == 12
     assert {"C-204", "LINE-02", "MAT-BRG-08", "WO-4821", "OUT-72H"} <= set(cc.ENTITY_POINTS)
     fig = cc._build_floor_map()
-    marker_traces = [trace for trace in fig.data if getattr(trace, "customdata", None) is not None]
-    assert len(marker_traces) == len(cc.FLOOR)
+    custom_traces = [trace for trace in fig.data if getattr(trace, "customdata", None) is not None]
+    assert len(custom_traces) >= len(cc.FLOOR)
+    assert any(
+        any(str(item[0]) == "ENTITY" for item in (trace.customdata or []) if isinstance(item, (list, tuple)))
+        for trace in custom_traces
+    )
 
 
 def test_role_workspaces_exist_for_every_supported_role():
