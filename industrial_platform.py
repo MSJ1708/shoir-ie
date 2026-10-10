@@ -127,10 +127,14 @@ def normalize_tier(value: str) -> str:
     return "Starter"
 
 def tier_allows(current: str, required: str) -> bool:
-    # Research Pack is a distinct cumulative tier; never downgrade it to
-    # Enterprise Plus because that would unlock research tools incorrectly.
+    # The app's Research Pack menu is Enterprise-level functionality plus
+    # research tools. It must not imply the separate Enterprise Plus package.
     c=normalize_tier(current)
     r=normalize_tier(required)
+    if c == "Research Pack":
+        return r in {"Starter", "Mid-Tier Pro", "Professional", "Enterprise", "Research Pack"}
+    if r == "Research Pack":
+        return c == "Research Pack"
     return TIER_ORDER.index(c) >= TIER_ORDER.index(r)
 
 def init_platform_db(db_path: str="enterprise_full_workspace.db") -> bool:
