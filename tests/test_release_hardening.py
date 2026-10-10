@@ -190,26 +190,61 @@ def test_enterprise_integration_registry_survives_workspace_round_trip(tmp_path,
 
 
 def test_subscription_navigation_matches_declared_platform_tiers():
-    source = (Path(__file__).resolve().parents[1] / "app.py").read_text(encoding="utf-8")
+    root = Path(__file__).resolve().parents[1]
+    app_source = (root / "app.py").read_text(encoding="utf-8")
+    platform_source = (root / "industrial_platform.py").read_text(encoding="utf-8")
 
-    def direct_items(variable):
-        line = next((item for item in source.splitlines() if item.startswith(f"{variable} =")), None)
-        assert line, f"Could not locate {variable} tier declaration"
-        literal = line.split("[", 1)[1].rsplit("]", 1)[0]
+    def direct_items(variable, source):
+        lines = source.splitlines()
+        start_line = next((i for i, item in enumerate(lines) if item.startswith(f"{variable} =")), None)
+        assert start_line is not None, f"Could not locate {variable} declaration"
+        joined = "\n".join(lines[start_line:])
+        literal = joined.split("[", 1)[1].split("]", 1)[0]
         return re.findall(r'"([^"]+)"', literal)
-        assert match, f"Could not locate {variable} tier declaration"
-        return re.findall(r"[\"']([^\"']+)[\"']", match.group(1))
 
-    # Features explicitly introduced at Mid-Tier Pro must not be hidden until Professional.
-    tier2 = set(direct_items("tier2_features"))
-    assert "Scenario Versioning & Comparison" in tier2
-    assert "Localization & Multi-Currency" in tier2
+    starter = set(direct_items("tier1_features", app_source))
+    mid_tier = starter | set(direct_items("tier2_features", app_source))
+    professional = mid_tier | set(direct_items("professional_features", app_source))
+    enterprise = professional | set(direct_items("tier3_features", app_source))
+    enterprise_plus = enterprise | set(direct_items("tier4_features", app_source))
+    research = enterprise | set(direct_items("research_pack_features", app_source))
+    available_by_tier = {
+        "Starter": starter,
+        "Mid-Tier Pro": mid_tier,
+        "Professional": professional,
+        "Enterprise": enterprise,
+        "Enterprise Plus": enterprise_plus,
+        "Research Pack": research,
+    }
 
-    # Enterprise catalog items must be reachable from the Enterprise module list.
-    tier3 = set(direct_items("tier3_features"))
-    assert "Industrial Operating System" in tier3
-    assert "Industrial Data Platform" in tier3
+    # The product catalog is the access contract used by platform_tier_allows();
+    # the app navigation must introduce each catalog module at the same tier.
+    catalog_start = platform_source.index("PLATFORM_CATALOG = [")
+    catalog_end = platform_source.index("\nTIER_FEATURES =", catalog_start)
+    catalog_source = platform_source[catalog_start:catalog_end]
+    catalog_entries = re.findall(
+        r'\{"tier"\s*:\s*"([^"]+)"\s*,\s*"category"\s*:\s*"[^"]+"\s*,\s*"name"\s*:\s*"([^"]+)"',
+        catalog_source,
+    )
+    assert len(catalog_entries) >= 30, "Platform catalog parser did not find the expected module catalogue"
 
+    ordered_tiers = list(available_by_tier)
+    errors = []
+    for declared_tier, module in catalog_entries:
+        first_menu_tier = next(
+            (tier for tier in ordered_tiers if module in available_by_tier[tier]),
+            None,
+        )
+        if first_menu_tier != declared_tier:
+            errors.append(f"{module}: catalog={declared_tier}, first navigation tier={first_menu_tier}")
+    assert not errors, "Module entitlement/navigation mismatch:\n" + "\n".join(errors)
+
+    # Non-catalog first-class platform surfaces have dedicated app dispatch too.
+    assert "Industrial Operating System" in enterprise
+    assert "Industrial Operating System" in app_source
+    assert "Industrial Data Platform" in enterprise
+    assert "Scenario Versioning & Comparison" in mid_tier
+    assert "Localization & Multi-Currency" in mid_tier
 
 def test_enterprise_pdf_and_powerpoint_exports_are_valid_artifacts():
     tables = [("KPIs", pd.DataFrame({"Metric": ["OEE", "Scrap"], "Value": [82.5, 1.2]}))]
