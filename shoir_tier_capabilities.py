@@ -28,6 +28,11 @@ MODULE_REQUIREMENTS = {
     "Advanced Regression Analysis": "Research Pack",
     "Paper-to-Simulation Auto-Engine": "Research Pack",
     "Adversarial AI Peer-Review Swarm": "Research Pack",
+    # These are Enterprise Plus-only modules in app.py's tier4_features menu.
+    "Advanced Engineering Copilot": "Enterprise Plus",
+    "Live Industrial Digital Twin": "Enterprise Plus",
+    "Enterprise Security & Governance": "Enterprise Plus",
+    "Predictive Maintenance Digital Twin": "Enterprise Plus",
 }
 
 COPILOT_TOOL_REQUIREMENTS = {
@@ -60,6 +65,11 @@ COPILOT_TOOL_REQUIREMENTS = {
     "literature matrix": "Research Pack",
     "reproducible paper": "Research Pack",
     "paper-to-simulation": "Research Pack",
+    # Keep conversational actions aligned with the Enterprise Plus menu.
+    "advanced engineering copilot": "Enterprise Plus",
+    "live industrial digital twin": "Enterprise Plus",
+    "enterprise security & governance": "Enterprise Plus",
+    "predictive maintenance digital twin": "Enterprise Plus",
 }
 
 
@@ -79,23 +89,8 @@ def normalize_tier(value: str) -> str:
 
 
 def tier_allows(current: str, required: str) -> bool:
-    """Enforce the product menu: Research Pack inherits Enterprise, plus research.
-
-    Research Pack is an add-on package in the app, not a grant of the
-    Enterprise Plus-only tier. Keep research entitlement independent from
-    the ordinary tier ladder so one package never implies another add-on.
-    """
-    current_tier = normalize_tier(current)
-    required_tier = normalize_tier(required)
-
-    if current_tier == "Research Pack":
-        return required_tier in {
-            "Starter", "Mid-Tier Pro", "Professional", "Enterprise", "Research Pack"
-        }
-    if required_tier == "Research Pack":
-        return current_tier == "Research Pack"
-
-    return TIER_ORDER.index(current_tier) >= TIER_ORDER.index(required_tier)
+    """Cumulative package gate. Research Pack remains a distinct tier."""
+    return TIER_ORDER.index(normalize_tier(current)) >= TIER_ORDER.index(normalize_tier(required))
 
 
 def module_required_tier(module: str) -> Optional[str]:
