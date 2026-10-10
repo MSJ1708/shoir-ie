@@ -261,7 +261,8 @@ def read_uploaded_workbook(raw: bytes, filename: str) -> dict[str,pd.DataFrame]:
 
 def _excel_safe_name(raw_name: Any, used: set[str], fallback: str) -> str:
     """Create a legal, unique Excel worksheet name without ever raising."""
-    name = re.sub(r"[:\\/?*\\[\\]]+", "", str(raw_name or "")).strip()[:31] or fallback
+    # Excel forbids: \\ / ? * : [ ]. Keep the sanitizer simple and testable.
+    name = re.sub(r"[\\[\\]:*?/\\\\]+", "", str(raw_name or "")).strip()[:31] or fallback
     base = name
     n = 2
     while name in used:
