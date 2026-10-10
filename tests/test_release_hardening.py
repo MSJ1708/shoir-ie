@@ -193,7 +193,10 @@ def test_subscription_navigation_matches_declared_platform_tiers():
     source = (Path(__file__).resolve().parents[1] / "app.py").read_text(encoding="utf-8")
 
     def direct_items(variable):
-        match = re.search(rf"^{variable}\s*=.*?\[([^\]]*)\]", source, flags=re.MULTILINE | re.DOTALL)
+        line = next((item for item in source.splitlines() if item.startswith(f"{variable} =")), None)
+        assert line, f"Could not locate {variable} tier declaration"
+        literal = line.split("[", 1)[1].rsplit("]", 1)[0]
+        return re.findall(r'"([^"]+)"', literal)
         assert match, f"Could not locate {variable} tier declaration"
         return re.findall(r"[\"']([^\"']+)[\"']", match.group(1))
 
