@@ -36,6 +36,24 @@ def test_workspace_change_signature_detects_in_place_dataframe_edits():
     assert after != before
 
 
+def test_workspace_change_signature_detects_changes_past_long_collection_prefix():
+    records = [{"subject": ("x" * 180), "status": "Open"} for _ in range(12)]
+    state = {"ei_registry_v1_activity": records}
+    before = _workspace_change_signature(state)
+    # The changed value appears after more than 1,000 characters of repr output.
+    state["ei_registry_v1_activity"][-1]["status"] = "Done"
+    after = _workspace_change_signature(state)
+    assert after != before
+
+
+def test_workspace_change_signature_detects_in_place_series_edits():
+    series = pd.Series([10, 20, 30], name="demand")
+    state = {"demand_series": series}
+    before = _workspace_change_signature(state)
+    series.iloc[1] = 999
+    assert _workspace_change_signature(state) != before
+
+
 def test_workspace_save_persists_in_place_dataframe_edits(tmp_path):
     db = str(tmp_path / "workspace.db")
     frame = pd.DataFrame({"SKU": ["00123", "00456"], "Quantity": [4, 8]})
