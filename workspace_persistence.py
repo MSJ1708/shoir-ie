@@ -253,13 +253,43 @@ def _persist_domain_manifest(username: str, session_state: MutableMapping[str, A
         pass
 
 
-def _workspace_change_signature(session_state: MutableMapping[str, Any]) -> str:
-    """Cheap signature used to skip redundant full-session serialization.
+def _dataframe_content_signature(frame: pd.DataFrame) -> str:
+    """Hash DataFrame values and schema so in-place cell edits cannot be skipped.
 
-    DataFrames use object identity + shape/schema metadata rather than hashing
-    every cell. Streamlit normally replaces edited frames with a new object,
-    so this catches the expensive rerun pattern while keeping the normal save
-    path lossless when a workspace value is actually replaced.
+    pandas' vectorized hashing is materially faster than serializing a frame to
+    JSON. Object columns containing unhashable cells (lists/dicts) use a JSON
+    fallback. The caller still includes object identity to retain the existing
+    copy-vs-same-object behavior of the persistence change detector.
+    """
+    metadata = {
+        "shape": tuple(frame.shape),
+        "columns": [str(column) for column in frame.columns],
+        "dtypes": [str(dtype) for dtype in frame.dtypes],
+        "index_names": [str(name) if name is not None else None for name in frame.index.names],
+        "index_type": type(frame.index).__name__,
+    }
+    try:
+        value_bytes = pd.util.hash_pandas_object(frame, index=True, categorize=True).to_numpy().tobytes()
+    except Exception:
+        value_bytes = frame.to_json(
+            orient="split",
+            date_format="iso",
+            double_precision=15,
+            default_handler=str,
+        ).encode("utf-8", errors="replace")
+    digest = hashlib.sha256()
+    digest.update(json.dumps(metadata, sort_keys=True, ensure_ascii=False).encode("utf-8"))
+    digest.update(b"\0")
+    digest.update(value_bytes)
+    return digest.hexdigest()
+
+
+def _workspace_change_signature(session_state: MutableMapping[str, Any]) -> str:
+    """Stable change signature that detects in-place mutations as well as replacement.
+
+    Streamlit commonly replaces edited frames with new objects, but domain
+    modules can also modify a DataFrame in place. Hashing values prevents those
+    edits from being mistaken for an unchanged workspace and silently skipped.
     """
     parts: list[str] = []
     for key, value in session_state.items():
@@ -267,7 +297,9 @@ def _workspace_change_signature(session_state: MutableMapping[str, Any]) -> str:
         if _excluded(key) or key.startswith("_shoir_persist_"):
             continue
         if isinstance(value, pd.DataFrame):
-            parts.append(f"DF|{key}|{id(value)}|{value.shape}|{tuple(map(str, value.columns))}")
+            parts.append(
+                f"DF|{key}|{id(value)}|{_dataframe_content_signature(value)}"
+            )
         elif isinstance(value, pd.Series):
             parts.append(f"SER|{key}|{id(value)}|{len(value)}|{value.name}")
         else:
