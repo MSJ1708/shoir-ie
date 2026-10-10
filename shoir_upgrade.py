@@ -223,14 +223,14 @@ def read_uploaded_workbook(raw: bytes, filename: str) -> dict[str,pd.DataFrame]:
             if text is None:
                 raise ValueError("The delimited file encoding could not be decoded.") from last_error
 
-            sample = "\\n".join(text.splitlines()[:40])
+            sample = "\n".join(text.splitlines()[:40])
             if ext == "tsv":
-                delimiter = "\\t"
+                delimiter = "\t"
             else:
                 try:
-                    delimiter = csv.Sniffer().sniff(sample[:8192], delimiters=",;\\t|").delimiter
+                    delimiter = csv.Sniffer().sniff(sample[:8192], delimiters=",;\t|").delimiter
                 except csv.Error:
-                    delimiter = "\\t" if ext == "txt" and "\\t" in sample else ","
+                    delimiter = "\t" if ext == "txt" and "\t" in sample else ","
             frame = pd.read_csv(io.StringIO(text), sep=delimiter, dtype=object)
             if len(frame.columns) == 0:
                 raise ValueError("The delimited file contains no columns.")
