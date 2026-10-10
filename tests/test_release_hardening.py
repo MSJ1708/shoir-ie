@@ -1,4 +1,6 @@
 from io import BytesIO
+from pathlib import Path
+import re
 
 import pandas as pd
 import pytest
@@ -7,6 +9,7 @@ from shoir_tier_capabilities import MODULE_EXPLORER_TIERS, TIER_ORDER
 from shoir_upgrade import build_excel_report, read_uploaded_workbook
 from shoir_excel_runtime import _clear_previous_upload, _record_upload_failure
 from workspace_persistence import _workspace_change_signature, load_user_workspace, save_user_workspace
+from shoir_enterprise_integration import _registry_frame, _registry_key, _write_registry_frame
 
 
 def _xlsx_bytes() -> bytes:
@@ -120,3 +123,64 @@ def test_unsupported_and_empty_imports_fail_with_actionable_messages():
         read_uploaded_workbook(b"", "empty.csv")
     with pytest.raises(ValueError, match="Supported imports"):
         read_uploaded_workbook(b"some data", "plant.json")
+
+
+@pytest.mark.parametrize(
+    ("kind", "record"),
+    [
+        ("connectors", {
+            "connector_id": "MES-01", "name": "Plant MES", "system_type": "MES",
+            "endpoint": "https://mes.example.invalid", "status": "Validation-ready",
+            "last_validated": None, "notes": "Test record", "updated_at": "2026-10-10T00:00:00+00:00",
+        }),
+        ("activity", {
+            "id": 123456789, "kind": "Review", "subject": "Validate routing assumptions",
+            "details": "Check the baseline", "assignee": "engineer", "reviewer": "manager",
+            "status": "Open", "created_at": "2026-10-10T00:00:00+00:00",
+        }),
+        ("assets", {
+            "asset_id": "DATA-123", "filename": "plant.xlsx", "sheet": "Production",
+            "rows": 12, "columns": 4, "sha256": "a" * 64,
+            "created_at": "2026-10-10T00:00:00+00:00",
+        }),
+    ],
+)
+def test_enterprise_integration_registry_survives_workspace_round_trip(tmp_path, kind, record):
+    db = str(tmp_path / "registry-workspace.db")
+    state = {}
+    _write_registry_frame(kind, "Alice", "Plant-North", pd.DataFrame([record]), state=state)
+    registry_key = _registry_key(kind, "Alice", "Plant-North")
+    assert registry_key in state
+
+    # Workspace snapshots must carry registry rows; a SQLite-only cache would
+    # be lost on hosted deployments that use remote workspace persistence.
+    assert save_user_workspace("Alice", state, db)
+    restored = {}
+    assert load_user_workspace("Alice", restored, db)
+    frame = _registry_frame(kind, "Alice", "Plant-North", state=restored)
+    assert len(frame) == 1
+    for column, value in record.items():
+        if value is not None:
+            assert str(frame.iloc[0][column]) == str(value)
+
+    assert _registry_key(kind, "Bob", "Plant-North") != registry_key
+    assert _registry_key(kind, "Alice", "Plant-South") != registry_key
+
+
+def test_subscription_navigation_matches_declared_platform_tiers():
+    source = (Path(__file__).resolve().parents[1] / "app.py").read_text(encoding="utf-8")
+
+    def direct_items(variable):
+        match = re.search(rf"^{variable}\\s*=.*?\\[([^\\]]*)\\]", source, flags=re.MULTILINE | re.DOTALL)
+        assert match, f"Could not locate {variable} tier declaration"
+        return re.findall(r"[\"']([^\"']+)[\"']", match.group(1))
+
+    # Features explicitly introduced at Mid-Tier Pro must not be hidden until Professional.
+    tier2 = set(direct_items("tier2_features"))
+    assert "Scenario Versioning & Comparison" in tier2
+    assert "Localization & Multi-Currency" in tier2
+
+    # Enterprise catalog items must be reachable from the Enterprise module list.
+    tier3 = set(direct_items("tier3_features"))
+    assert "Industrial Operating System" in tier3
+    assert "Industrial Data Platform" in tier3
