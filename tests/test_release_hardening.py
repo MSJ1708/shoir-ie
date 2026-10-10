@@ -10,6 +10,8 @@ from shoir_upgrade import build_excel_report, read_uploaded_workbook
 from shoir_excel_runtime import _clear_previous_upload, _record_upload_failure
 from workspace_persistence import _workspace_change_signature, load_user_workspace, save_user_workspace
 from shoir_enterprise_integration import _registry_frame, _registry_key, _write_registry_frame
+from industrial_platform import export_pdf, export_pptx
+from pptx import Presentation
 
 
 def _xlsx_bytes() -> bytes:
@@ -189,7 +191,7 @@ def test_subscription_navigation_matches_declared_platform_tiers():
     source = (Path(__file__).resolve().parents[1] / "app.py").read_text(encoding="utf-8")
 
     def direct_items(variable):
-        match = re.search(rf"^{variable}\\s*=.*?\\[([^\\]]*)\\]", source, flags=re.MULTILINE | re.DOTALL)
+        match = re.search(rf"^{variable}\s*=.*?\[([^\]]*)\]", source, flags=re.MULTILINE | re.DOTALL)
         assert match, f"Could not locate {variable} tier declaration"
         return re.findall(r"[\"']([^\"']+)[\"']", match.group(1))
 
@@ -202,3 +204,15 @@ def test_subscription_navigation_matches_declared_platform_tiers():
     tier3 = set(direct_items("tier3_features"))
     assert "Industrial Operating System" in tier3
     assert "Industrial Data Platform" in tier3
+
+
+def test_enterprise_pdf_and_powerpoint_exports_are_valid_artifacts():
+    tables = [("KPIs", pd.DataFrame({"Metric": ["OEE", "Scrap"], "Value": [82.5, 1.2]}))]
+    pdf_payload = export_pdf("Release export verification", tables)
+    assert pdf_payload.startswith(b"%PDF-")
+    assert len(pdf_payload) > 500
+
+    pptx_payload = export_pptx("Release export verification", tables)
+    assert pptx_payload[:2] == b"PK"
+    presentation = Presentation(BytesIO(pptx_payload))
+    assert len(presentation.slides) >= 2
