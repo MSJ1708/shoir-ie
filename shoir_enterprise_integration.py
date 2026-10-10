@@ -97,49 +97,98 @@ def ensure_enterprise_workspace_schema() -> None:
         conn.commit()
 
 
-def _connectors(owner: str, workspace: str) -> pd.DataFrame:
+_REGISTRY_COLUMNS = {
+    "connectors": ["connector_id","name","system_type","endpoint","status","last_validated","notes","updated_at"],
+    "activity": ["id","kind","subject","details","assignee","reviewer","status","created_at"],
+    "assets": ["asset_id","filename","sheet","rows","columns","sha256","created_at"],
+}
+
+
+def _registry_key(kind: str, owner: str, workspace: str) -> str:
+    """Stable per-user/workspace cache key; values are included in workspace autosave."""
+    import hashlib
+    scope = f"{str(owner or '').strip().lower()}::{str(workspace or 'default').strip().lower()}"
+    digest = hashlib.sha256(scope.encode("utf-8")).hexdigest()[:24]
+    return f"ei_registry_v1_{kind}_{digest}"
+
+
+def _legacy_registry_frame(kind: str, owner: str, workspace: str) -> pd.DataFrame:
+    """One-time local SQLite migration path for records created before state-backed persistence."""
     ensure_enterprise_workspace_schema()
+    queries = {
+        "connectors": (
+            """SELECT connector_id,name,system_type,endpoint,status,last_validated,notes,updated_at
+               FROM workspace_connectors WHERE owner=? AND workspace=? ORDER BY updated_at DESC""",
+            (owner, workspace),
+        ),
+        "activity": (
+            """SELECT id,kind,subject,details,assignee,reviewer,status,created_at
+               FROM workspace_collaboration WHERE owner=? AND workspace=? ORDER BY id DESC LIMIT 250""",
+            (owner, workspace),
+        ),
+        "assets": (
+            """SELECT asset_id,filename,sheet,rows,columns,sha256,created_at
+               FROM workspace_data_assets WHERE owner=? AND workspace=? ORDER BY created_at DESC""",
+            (owner, workspace),
+        ),
+    }
+    if kind not in queries:
+        raise ValueError(f"Unknown integration registry: {kind}")
+    query, params = queries[kind]
     with _db() as conn:
-        return pd.read_sql_query(
-            """
-            SELECT connector_id,name,system_type,endpoint,status,last_validated,notes,updated_at
-            FROM workspace_connectors
-            WHERE owner=? AND workspace=?
-            ORDER BY updated_at DESC
-            """,
-            conn,
-            params=(owner,workspace),
-        )
+        return pd.read_sql_query(query, conn, params=params)
+
+
+def _registry_frame(kind: str, owner: str, workspace: str, state: Any = None) -> pd.DataFrame:
+    """Read a workspace-scoped registry from durable user state, seeding from SQLite once."""
+    state = st.session_state if state is None else state
+    if kind not in _REGISTRY_COLUMNS:
+        raise ValueError(f"Unknown integration registry: {kind}")
+    key = _registry_key(kind, owner, workspace)
+    if key in state:
+        cached = state.get(key)
+        if isinstance(cached, pd.DataFrame):
+            frame = cached.copy(deep=True)
+        elif isinstance(cached, list):
+            frame = pd.DataFrame(cached)
+        else:
+            frame = pd.DataFrame(columns=_REGISTRY_COLUMNS[kind])
+        return frame.reindex(columns=_REGISTRY_COLUMNS[kind])
+
+    frame = _legacy_registry_frame(kind, owner, workspace)
+    state[key] = frame.to_dict("records")
+    return frame.reindex(columns=_REGISTRY_COLUMNS[kind])
+
+
+def _write_registry_frame(kind: str, owner: str, workspace: str, frame: pd.DataFrame, state: Any = None) -> None:
+    """Stage a registry mutation in the user's persistent workspace snapshot."""
+    state = st.session_state if state is None else state
+    if kind not in _REGISTRY_COLUMNS:
+        raise ValueError(f"Unknown integration registry: {kind}")
+    normalized = frame.copy(deep=True).reindex(columns=_REGISTRY_COLUMNS[kind])
+    # Lists of scalar records serialize more predictably than widget-owned DataFrames.
+    state[_registry_key(kind, owner, workspace)] = normalized.to_dict("records")
+
+
+def _persist_owner_workspace(owner: str) -> bool:
+    """Persist immediately after a high-value integration mutation, not just on a later rerun."""
+    try:
+        from workspace_persistence import save_user_workspace
+        return bool(save_user_workspace(owner, st.session_state))
+    except Exception:
+        return False
+
+
+def _connectors(owner: str, workspace: str) -> pd.DataFrame:
+    return _registry_frame("connectors", owner, workspace)
 
 
 def _activity(owner: str, workspace: str) -> pd.DataFrame:
-    ensure_enterprise_workspace_schema()
-    with _db() as conn:
-        return pd.read_sql_query(
-            """
-            SELECT id,kind,subject,details,assignee,reviewer,status,created_at
-            FROM workspace_collaboration
-            WHERE owner=? AND workspace=?
-            ORDER BY id DESC LIMIT 250
-            """,
-            conn,
-            params=(owner,workspace),
-        )
+    return _registry_frame("activity", owner, workspace)
 
 
 def _asset_list(owner: str, workspace: str) -> pd.DataFrame:
-    ensure_enterprise_workspace_schema()
-    with _db() as conn:
-        return pd.read_sql_query(
-            """
-            SELECT asset_id,filename,sheet,rows,columns,sha256,created_at
-            FROM workspace_data_assets
-            WHERE owner=? AND workspace=?
-            ORDER BY created_at DESC
-            """,
-            conn,
-            params=(owner,workspace),
-        )
+    return _registry_frame("assets", owner, workspace)
 
 
 def _validate_endpoint(endpoint: str) -> tuple[str, str]:
