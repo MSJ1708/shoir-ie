@@ -260,7 +260,12 @@ def begin_result_timer(module: str, label: str) -> None:
     }
 
 def render_value_receipt(module: str, username: str) -> None:
-    """Show actual post-click execution time versus a traditional task baseline."""
+    """Show comparable task-value receipts; exclude modules whose outputs are not timed tasks."""
+    # ShadowShift measures real-world interruption/recovery. Streamlit render
+    # latency is not a comparable baseline and must never be presented as saved
+    # operational time or money.
+    if "shadowshift" in str(module or "").casefold():
+        return
     run = st.session_state.get("shoir_value_active_run")
     if not isinstance(run, dict) or str(run.get("module", "")) != str(module):
         return
