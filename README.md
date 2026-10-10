@@ -74,7 +74,6 @@ The differentiator is **integration and traceability**, not simply the number of
 | **Simulation & Risk** | Monte Carlo, sensitivity, discrete-event/digital-twin foundations, experiment workflows |
 | **Facilities** | Layout, warehousing, travel analysis, 3D factory foundations |
 | **Workforce** | Staffing, work measurement, ergonomics, human factors and balance |
-| **Operations Intelligence** | ShadowShift: interruption and recovery capture, observed-loss Pareto, evidence-gap ranking, registered experiments and evidence-hashed exports |
 | **Economics** | NPV, IRR, payback, CAPEX/OPEX and investment analysis |
 | **Sustainability** | Carbon, Green IE, LCA and sustainability-oriented engineering |
 | **Digital Thread** | Products, customers, suppliers, facilities, machines, people, materials, routes and orders |
@@ -175,7 +174,7 @@ Result + export / next action
 | **Starter** | Core IE, MILP, inventory, facility/layout, persistence, validation and Excel/data-cleaning foundations |
 | **Mid-Tier Pro** | Carbon, IoT/digital-twin foundations, MEIO, slotting/Gantt, routing, warehouse analytics, supplier risk, scenarios, AGV, geospatial design, PPC, lean, quality, economics and the Industrial Data Model |
 | **Professional** | APS, advanced quality/reliability, capital investment, workforce engineering, sustainability/LCA, benchmarking, scenario versioning and localization |
-| **Enterprise** | Copilot, API gateway, Monte Carlo, sensitivity, alerts, agentic workflows, control tower, predictive maintenance, human factors, DES/digital twin, MES foundations, simulation lab, 3D factory, connectivity, robust/multi-objective optimization, model registry, experiments, decision center, ML forecasting, workspaces/RBAC, executive reporting and ShadowShift micro-loss intelligence |
+| **Enterprise** | Copilot, API gateway, Monte Carlo, sensitivity, alerts, agentic workflows, control tower, predictive maintenance, human factors, DES/digital twin, MES foundations, simulation lab, 3D factory, connectivity, robust/multi-objective optimization, model registry, experiments, decision center, ML forecasting, workspaces/RBAC and executive reporting |
 | **Enterprise Plus** | Industrial Data Platform, Advanced Engineering Copilot, Live Industrial Digital Twin, Enterprise Security & Governance and Predictive Maintenance Digital Twin |
 | **Research Pack** | Statistical testing, LaTeX, literature/citation workflows, advanced regression, reproducible papers, paper-to-simulation, adversarial review/stress testing, formalization and advanced computation experiments |
 

@@ -81,7 +81,6 @@ _MODULE_KEYS = {
     "Industrial Workbook": ["industrial_workbook_current_df", "industrial_workbook_query_result_df", "industrial_workbook_analysis_df", "industrial_workbook_formula_audit_df", "industrial_workbook_semantic_map_df"],
     "Excel Data Cleaning & Import": ["excel_studio_visual_df", "excel_studio_result"],
     "Research AI": ["research_ai_dataset"],
-    "ShadowShift — Micro-Loss & Recovery Intelligence": ["shadowshift_event_df", "shadowshift_loss_summary_df", "shadowshift_next_experiments_df", "shadowshift_experiments_df"],
 }
 
 # Conflict-resolution registry: richer enterprise result aliases are additive.
@@ -1126,7 +1125,6 @@ MODULE_VISUAL_CONTRACTS = {
     "Connectivity": ("Bar", "Metric Trend", "Distribution"),
     "Geospatial": ("Network Map", "Sankey", "Scatter"),
     "Research": ("Scatter", "Distribution", "Sensitivity Plot"),
-    "ShadowShift": ("Pareto", "Anomaly Timeline", "Bar", "Distribution"),
 }
 
 

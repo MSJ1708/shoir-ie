@@ -16,7 +16,6 @@ TIER_ORDER = [
 
 MODULE_REQUIREMENTS = {
     "AI Copilot": "Starter",
-    "ShadowShift — Micro-Loss & Recovery Intelligence": "Enterprise",
     "Excel Data Cleaning & Import": "Starter",
     "Industrial Workbook": "Starter",
     "Research AI": "Research Pack",
@@ -28,7 +27,6 @@ MODULE_REQUIREMENTS = {
 }
 
 COPILOT_TOOL_REQUIREMENTS = {
-    "shadowshift": "Enterprise",
     "run milp": "Starter",
     "optimize the network": "Starter",
     "clean workbook": "Starter",
