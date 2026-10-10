@@ -253,30 +253,114 @@ def _persist_domain_manifest(username: str, session_state: MutableMapping[str, A
         pass
 
 
-def _workspace_change_signature(session_state: MutableMapping[str, Any]) -> str:
-    """Cheap signature used to skip redundant full-session serialization.
+def _dataframe_content_signature(frame: pd.DataFrame) -> str:
+    """Hash DataFrame values and schema so in-place cell edits cannot be skipped.
 
-    DataFrames use object identity + shape/schema metadata rather than hashing
-    every cell. Streamlit normally replaces edited frames with a new object,
-    so this catches the expensive rerun pattern while keeping the normal save
-    path lossless when a workspace value is actually replaced.
+    pandas' vectorized hashing is materially faster than serializing a frame to
+    JSON. Object columns containing unhashable cells (lists/dicts) use a JSON
+    fallback. The caller still includes object identity to retain the existing
+    copy-vs-same-object behavior of the persistence change detector.
     """
+    metadata = {
+        "shape": tuple(frame.shape),
+        "columns": [str(column) for column in frame.columns],
+        "dtypes": [str(dtype) for dtype in frame.dtypes],
+        "index_names": [str(name) if name is not None else None for name in frame.index.names],
+        "index_type": type(frame.index).__name__,
+    }
+    try:
+        value_bytes = pd.util.hash_pandas_object(frame, index=True, categorize=True).to_numpy().tobytes()
+    except Exception:
+        value_bytes = frame.to_json(
+            orient="split",
+            date_format="iso",
+            double_precision=15,
+            default_handler=str,
+        ).encode("utf-8", errors="replace")
+    digest = hashlib.sha256()
+    digest.update(json.dumps(metadata, sort_keys=True, ensure_ascii=False).encode("utf-8"))
+    digest.update(b"\0")
+    digest.update(value_bytes)
+    return digest.hexdigest()
+
+
+def _nested_value_signature(value: Any) -> str:
+    """Hash mutable state collections without truncating long repr() output.
+
+    DataFrames nested inside a dict/list are represented by their schema/value
+    digest, not serialized again as full JSON. This keeps registry, Copilot and
+    multi-step workspace records safe while avoiding false no-op saves after a
+    mutation beyond the first 1,000 characters.
+    """
+    def normalize(item: Any, depth: int = 0) -> Any:
+        if depth > 30:
+            return {"__type__": "depth-limit", "class": type(item).__name__}
+        if isinstance(item, pd.DataFrame):
+            return {"__type__": "dataframe", "digest": _dataframe_content_signature(item)}
+        if isinstance(item, pd.Series):
+            return {"__type__": "series", "digest": _series_content_signature(item)}
+        if isinstance(item, dict):
+            return {
+                "__type__": "dict",
+                "items": [
+                    [str(k), normalize(v, depth + 1)]
+                    for k, v in sorted(item.items(), key=lambda pair: str(pair[0]))
+                ],
+            }
+        if isinstance(item, (list, tuple)):
+            return {
+                "__type__": type(item).__name__,
+                "items": [normalize(v, depth + 1) for v in item],
+            }
+        if isinstance(item, set):
+            normalized = [normalize(v, depth + 1) for v in item]
+            normalized.sort(key=lambda v: json.dumps(v, sort_keys=True, ensure_ascii=False, default=str))
+            return {"__type__": "set", "items": normalized}
+        if item is None or isinstance(item, (str, int, float, bool)):
+            return item
+        if isinstance(item, (pd.Timestamp, _dt.datetime, _dt.date)):
+            return {"__type__": type(item).__name__, "value": item.isoformat()}
+        return {"__type__": type(item).__name__, "value": str(item)}
+
+    canonical = json.dumps(normalize(value), sort_keys=True, ensure_ascii=False, separators=(",", ":"), default=str)
+    return hashlib.sha256(canonical.encode("utf-8", errors="replace")).hexdigest()
+
+
+def _series_content_signature(series: pd.Series) -> str:
+    try:
+        raw = pd.util.hash_pandas_object(series, index=True, categorize=True).to_numpy().tobytes()
+    except Exception:
+        raw = series.to_json(date_format="iso", default_handler=str).encode("utf-8", errors="replace")
+    metadata = {
+        "name": str(series.name),
+        "dtype": str(series.dtype),
+        "length": len(series),
+    }
+    digest = hashlib.sha256(json.dumps(metadata, sort_keys=True).encode("utf-8"))
+    digest.update(b"\0")
+    digest.update(raw)
+    return digest.hexdigest()
+
+
+def _workspace_change_signature(session_state: MutableMapping[str, Any]) -> str:
+    """Stable content signature that detects in-place mutation of mutable state."""
     parts: list[str] = []
     for key, value in session_state.items():
         key = str(key)
         if _excluded(key) or key.startswith("_shoir_persist_"):
             continue
         if isinstance(value, pd.DataFrame):
-            parts.append(f"DF|{key}|{id(value)}|{value.shape}|{tuple(map(str, value.columns))}")
+            parts.append(f"DF|{key}|{id(value)}|{_dataframe_content_signature(value)}")
         elif isinstance(value, pd.Series):
-            parts.append(f"SER|{key}|{id(value)}|{len(value)}|{value.name}")
+            parts.append(f"SER|{key}|{id(value)}|{_series_content_signature(value)}")
+        elif isinstance(value, (dict, list, tuple, set)):
+            parts.append(f"C|{key}|{type(value).__name__}|{_nested_value_signature(value)}")
         else:
             try:
                 parts.append(f"V|{key}|{type(value).__name__}|{repr(value)[:1000]}")
             except Exception:
                 parts.append(f"V|{key}|{type(value).__name__}")
-    return hashlib.sha1("\\n".join(sorted(parts)).encode("utf-8", errors="replace")).hexdigest()
-
+    return hashlib.sha1("\n".join(sorted(parts)).encode("utf-8", errors="replace")).hexdigest()
 
 def save_user_workspace(
     username: str,

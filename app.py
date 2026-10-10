@@ -33,6 +33,7 @@ from workspace_persistence import ensure_workspace_state_db, load_user_workspace
 from shoir_visual_system import apply_shoir_design_system, render_workspace_status
 from shoir_live_visuals import render_live_visualization_studio, discover_visual_tables
 from shoir_module_parity import render_universal_module_parity
+from shoir_tier_capabilities import MODULE_EXPLORER_TIERS
 from shoir_copilot_orchestrator import build_workflow_plan, recommend_module, run_orchestration, stage_copilot_decision
 from shoir_digital_thread import render_global_project_digital_thread
 from shoir_enterprise_services import render_enterprise_bridge
@@ -811,6 +812,16 @@ TIER_BENEFITS = {
         "price": "$199",
         "pitch": "Adds automation, simulation-under-uncertainty, and a natural-language copilot - built for a team running live operations, not a single analyst running one-off studies.",
         "gain": "Moves from reactive (find out something broke) to proactive (get warned before it breaks), and from one person driving the tool to a team working off one shared, always-current picture.",
+    },
+    "Professional": {
+        "price": "Plan details",
+        "pitch": "For engineers who need deeper production, quality, workforce, sustainability and scenario workflows.",
+        "gain": "Use the module catalogue to check each capability and confirm your account's included access before planning a workflow.",
+    },
+    "Enterprise Plus": {
+        "price": "Plan details",
+        "pitch": "Extends the enterprise workspace with advanced copilot, digital-twin and governance capabilities.",
+        "gain": "Use the module catalogue to distinguish available product surfaces from integrations that still require deployment configuration.",
     },
     "Research Pack": {
         "price": "+$30 add-on",
@@ -1635,7 +1646,7 @@ if not st.session_state.get("current_user"):
         )
 
         st.markdown("### Find the capability for the problem you have")
-        _tier_options = ["All capabilities", "Starter", "Mid-Tier Pro", "Enterprise", "Research Pack"]
+        _tier_options = list(MODULE_EXPLORER_TIERS)
         _browse_tier = st.selectbox(
             "Plan / access level",
             _tier_options,
@@ -1836,9 +1847,9 @@ if _current_username.casefold() == "sho" and not _current_role:
 
 
 tier1_features = ["MILP Solvers", "Inventory Playback", "Core IE Tools", "Subscriptions", "Persistence", "Facility Layout & Warehousing", "Enterprise Integration & Collaboration", "Engineering Validation Center", "Excel Data Cleaning & Import", "Industrial Workbook", "AI Copilot", "Venture Studio"]
-tier2_features = tier1_features + ["Carbon Accounting", "IoT Digital Twin", "MEIO Matrix", "Slotting & Gantt", "Fleet Routing", "Warehouse Heatmap", "Supplier Risk Matrix", "Scenarios", "AGV Fleet Dispatcher", "Geospatial Network Designer", "Production Planning & Control (PPC)", "Lean Manufacturing & Shop Floor Operations", "Quality Control, Six Sigma & Reliability", "Engineering Economics & Finance", "Industrial Data Model & Digital Thread"]
-professional_features = tier2_features + ["Advanced Planning & Scheduling", "Quality Engineering & Reliability", "Capital Investment & Engineering Economics", "Workforce Engineering", "Industrial Sustainability & LCA", "Benchmarking & Engineering Standards", "Scenario Versioning & Comparison", "Localization & Multi-Currency"]
-tier3_features = professional_features + ["AI Copilot", "FastAPI Gateway", "Monte Carlo Sim", "Sensitivity Analysis", "Webhook Alerts", "Agentic Workflows", "Control Tower", "Cryptographic Ledger", "Predictive Maintenance Hub", "Human Factors & Ergonomics (NIOSH)", "Digital Twin & Discrete-Event Simulation", "Green IE & Sustainability", "Manufacturing Execution System", "Industrial Simulation Lab", "3D Factory Designer", "Industrial Connectivity Hub", "Multi-Objective Optimization", "Robust & Resilient Optimization", "Engineering Model Registry", "Experiment Lab", "Experiment Engine", "Industrial Control Center", "Engineering Decision Center", "Advanced ML Demand Forecasting", "Team Workspaces & RBAC", "Executive Report Center", "Global Project & Digital Thread", "ShadowShift — Micro-Loss & Recovery Intelligence"]
+tier2_features = tier1_features + ["Carbon Accounting", "IoT Digital Twin", "MEIO Matrix", "Slotting & Gantt", "Fleet Routing", "Warehouse Heatmap", "Supplier Risk Matrix", "Scenarios", "AGV Fleet Dispatcher", "Geospatial Network Designer", "Production Planning & Control (PPC)", "Lean Manufacturing & Shop Floor Operations", "Quality Control, Six Sigma & Reliability", "Engineering Economics & Finance", "Industrial Data Model & Digital Thread", "Scenario Versioning & Comparison", "Localization & Multi-Currency"]
+professional_features = tier2_features + ["Advanced Planning & Scheduling", "Quality Engineering & Reliability", "Capital Investment & Engineering Economics", "Workforce Engineering", "Industrial Sustainability & LCA", "Benchmarking & Engineering Standards"]
+tier3_features = professional_features + ["AI Copilot", "FastAPI Gateway", "Monte Carlo Sim", "Sensitivity Analysis", "Webhook Alerts", "Agentic Workflows", "Control Tower", "Cryptographic Ledger", "Predictive Maintenance Hub", "Human Factors & Ergonomics (NIOSH)", "Digital Twin & Discrete-Event Simulation", "Green IE & Sustainability", "Manufacturing Execution System", "Industrial Simulation Lab", "3D Factory Designer", "Industrial Connectivity Hub", "Multi-Objective Optimization", "Robust & Resilient Optimization", "Engineering Model Registry", "Experiment Lab", "Experiment Engine", "Industrial Control Center", "Engineering Decision Center", "Advanced ML Demand Forecasting", "Team Workspaces & RBAC", "Executive Report Center", "Global Project & Digital Thread", "ShadowShift — Micro-Loss & Recovery Intelligence", "Industrial Operating System", "Industrial Data Platform"]
 tier4_features = tier3_features + ["Industrial Data Platform", "Advanced Engineering Copilot", "Live Industrial Digital Twin", "Enterprise Security & Governance", "Predictive Maintenance Digital Twin"]
 research_pack_features = tier3_features + [
     "Research AI", "Statistical Hypothesis Testing", "Evidence Degradation & Decision-Readiness Lab",
@@ -9150,7 +9161,7 @@ else:
 
         upload_override = st.file_uploader(
             "📤 Optional data override (Excel / CSV)",
-            type=["xlsx", "csv"],
+            type=["xlsx", "xlsm", "xls", "csv", "tsv", "txt"],
             key="copilot_orchestrator_upload",
             help="Leave empty to let Copilot inspect the selected module's existing workspace data.",
         )

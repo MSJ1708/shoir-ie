@@ -5,7 +5,7 @@ reversible reset support, professional XLSX exports, and helper functions used b
 the Streamlit Copilot.
 """
 from __future__ import annotations
-import io, re, zipfile, html
+import csv, io, re, zipfile, html
 from datetime import datetime
 from typing import Iterable, Optional, Tuple, Sequence
 import pandas as pd
@@ -198,23 +198,71 @@ def apply_excel_function(df: pd.DataFrame, function_name: str, **kwargs) -> Tupl
     raise ValueError(f"Unsupported Excel function: {function_name}")
 
 def read_uploaded_workbook(raw: bytes, filename: str) -> dict[str,pd.DataFrame]:
-    """Read uploaded spreadsheets with one workbook parse for multi-sheet XLSX files."""
+    """Read common industrial spreadsheet formats without corrupting text identifiers.
+
+    Delimited files use object/string-compatible parsing so values such as SKU
+    "00123" and postal codes with leading zeroes are not silently converted to
+    integers before cleaning. XLS/XLSX/XLSM workbooks are parsed once per file.
+    """
     if not raw:
         raise ValueError("The uploaded file is empty.")
-    lower=filename.lower()
-    if lower.endswith(".csv"):
-        return {"CSV":pd.read_csv(io.BytesIO(raw))}
-    if lower.endswith(".xlsx"):
-        # Reuse the parsed ExcelFile instead of rebuilding a workbook parser
-        # for every sheet. This materially reduces first-import latency on
-        # multi-sheet and larger XLSX workbooks.
-        book=pd.ExcelFile(io.BytesIO(raw))
-        return {sheet:pd.read_excel(book,sheet_name=sheet) for sheet in book.sheet_names}
-    raise ValueError("Upload an .xlsx or .csv file.")
+
+    name = str(filename or "").strip()
+    lower = name.lower()
+    ext = lower.rsplit(".", 1)[-1] if "." in lower else ""
+    if ext in {"csv", "tsv", "txt"}:
+        try:
+            text = None
+            last_error = None
+            for encoding in ("utf-8-sig", "utf-8", "cp1252", "latin-1"):
+                try:
+                    text = raw.decode(encoding)
+                    break
+                except UnicodeDecodeError as exc:
+                    last_error = exc
+            if text is None:
+                raise ValueError("The delimited file encoding could not be decoded.") from last_error
+
+            sample = "\n".join(text.splitlines()[:40])
+            if ext == "tsv":
+                delimiter = "\t"
+            else:
+                try:
+                    delimiter = csv.Sniffer().sniff(sample[:8192], delimiters=",;\t|").delimiter
+                except csv.Error:
+                    delimiter = "\t" if ext == "txt" and "\t" in sample else ","
+            frame = pd.read_csv(io.StringIO(text), sep=delimiter, dtype=object)
+            if len(frame.columns) == 0:
+                raise ValueError("The delimited file contains no columns.")
+            return {"CSV" if ext == "csv" else ("TSV" if ext == "tsv" else "TXT"): frame}
+        except (pd.errors.EmptyDataError, UnicodeError) as exc:
+            raise ValueError("The delimited file contains no readable table.") from exc
+        except ValueError:
+            raise
+        except Exception as exc:
+            raise ValueError(f"Could not read the {ext.upper()} file: {exc}") from exc
+
+    if ext in {"xlsx", "xlsm", "xls"}:
+        try:
+            # Let pandas select openpyxl for OOXML and xlrd for legacy .xls.
+            book = pd.ExcelFile(io.BytesIO(raw))
+            return {
+                str(sheet): pd.read_excel(book, sheet_name=sheet, dtype=object)
+                for sheet in book.sheet_names
+            }
+        except ImportError as exc:
+            if ext == "xls":
+                raise ValueError("Legacy .xls support requires xlrd. Save the workbook as .xlsx and retry.") from exc
+            raise ValueError(f"Spreadsheet reader dependency is unavailable: {exc}") from exc
+        except Exception as exc:
+            raise ValueError(f"Could not open the {ext.upper()} workbook: {exc}") from exc
+
+    raise ValueError("Supported imports are .xlsx, .xlsm, .xls, .csv, .tsv and .txt.")
 
 def _excel_safe_name(raw_name: Any, used: set[str], fallback: str) -> str:
     """Create a legal, unique Excel worksheet name without ever raising."""
-    name = re.sub(r"[:\\/?*\\[\\]]+", "", str(raw_name or "")).strip()[:31] or fallback
+    invalid_chars = '[]:*?/\\'
+    name = "".join(ch for ch in str(raw_name or "") if ch not in invalid_chars).strip()[:31] or fallback
     base = name
     n = 2
     while name in used:

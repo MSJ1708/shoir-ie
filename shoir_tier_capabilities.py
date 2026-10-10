@@ -14,6 +14,9 @@ TIER_ORDER = [
     "Research Pack",
 ]
 
+# Shared by the public module explorer so no paid tier silently disappears from filters.
+MODULE_EXPLORER_TIERS = ("All capabilities", *TIER_ORDER)
+
 MODULE_REQUIREMENTS = {
     "AI Copilot": "Starter",
     "ShadowShift — Micro-Loss & Recovery Intelligence": "Enterprise",

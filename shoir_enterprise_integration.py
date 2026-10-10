@@ -97,49 +97,100 @@ def ensure_enterprise_workspace_schema() -> None:
         conn.commit()
 
 
-def _connectors(owner: str, workspace: str) -> pd.DataFrame:
+_REGISTRY_COLUMNS = {
+    "connectors": ["connector_id","name","system_type","endpoint","status","last_validated","notes","updated_at"],
+    "activity": ["id","kind","subject","details","assignee","reviewer","status","created_at"],
+    "assets": ["asset_id","filename","sheet","rows","columns","sha256","created_at"],
+}
+
+
+def _registry_key(kind: str, owner: str, workspace: str) -> str:
+    """Stable per-user/workspace cache key; values are included in workspace autosave."""
+    import hashlib
+    # Account names use the authentication system's case-insensitive identity;
+    # workspace labels are preserved exactly because local storage scopes them case-sensitively.
+    scope = f"{str(owner or '').strip().lower()}::{str(workspace or 'default').strip()}"
+    digest = hashlib.sha256(scope.encode("utf-8")).hexdigest()[:24]
+    return f"ei_registry_v1_{kind}_{digest}"
+
+
+def _legacy_registry_frame(kind: str, owner: str, workspace: str) -> pd.DataFrame:
+    """One-time local SQLite migration path for records created before state-backed persistence."""
     ensure_enterprise_workspace_schema()
+    queries = {
+        "connectors": (
+            """SELECT connector_id,name,system_type,endpoint,status,last_validated,notes,updated_at
+               FROM workspace_connectors WHERE owner=? AND workspace=? ORDER BY updated_at DESC""",
+            (owner, workspace),
+        ),
+        "activity": (
+            """SELECT id,kind,subject,details,assignee,reviewer,status,created_at
+               FROM workspace_collaboration WHERE owner=? AND workspace=? ORDER BY id DESC LIMIT 250""",
+            (owner, workspace),
+        ),
+        "assets": (
+            """SELECT asset_id,filename,sheet,rows,columns,sha256,created_at
+               FROM workspace_data_assets WHERE owner=? AND workspace=? ORDER BY created_at DESC""",
+            (owner, workspace),
+        ),
+    }
+    if kind not in queries:
+        raise ValueError(f"Unknown integration registry: {kind}")
+    query, params = queries[kind]
     with _db() as conn:
-        return pd.read_sql_query(
-            """
-            SELECT connector_id,name,system_type,endpoint,status,last_validated,notes,updated_at
-            FROM workspace_connectors
-            WHERE owner=? AND workspace=?
-            ORDER BY updated_at DESC
-            """,
-            conn,
-            params=(owner,workspace),
-        )
+        return pd.read_sql_query(query, conn, params=params)
+
+
+def _registry_frame(kind: str, owner: str, workspace: str, state: Any = None) -> pd.DataFrame:
+    """Read a workspace-scoped registry from durable user state, seeding from SQLite once."""
+    state = st.session_state if state is None else state
+    if kind not in _REGISTRY_COLUMNS:
+        raise ValueError(f"Unknown integration registry: {kind}")
+    key = _registry_key(kind, owner, workspace)
+    if key in state:
+        cached = state.get(key)
+        if isinstance(cached, pd.DataFrame):
+            frame = cached.copy(deep=True)
+        elif isinstance(cached, list):
+            frame = pd.DataFrame(cached)
+        else:
+            frame = pd.DataFrame(columns=_REGISTRY_COLUMNS[kind])
+        return frame.reindex(columns=_REGISTRY_COLUMNS[kind])
+
+    frame = _legacy_registry_frame(kind, owner, workspace)
+    state[key] = frame.to_dict("records")
+    return frame.reindex(columns=_REGISTRY_COLUMNS[kind])
+
+
+def _write_registry_frame(kind: str, owner: str, workspace: str, frame: pd.DataFrame, state: Any = None) -> None:
+    """Stage a registry mutation in the user's persistent workspace snapshot."""
+    state = st.session_state if state is None else state
+    if kind not in _REGISTRY_COLUMNS:
+        raise ValueError(f"Unknown integration registry: {kind}")
+    normalized = frame.copy(deep=True).reindex(columns=_REGISTRY_COLUMNS[kind])
+    # Lists of scalar records serialize more predictably than widget-owned DataFrames.
+    state[_registry_key(kind, owner, workspace)] = normalized.to_dict("records")
+
+
+def _persist_owner_workspace(owner: str) -> bool:
+    """Persist immediately after a high-value integration mutation, not just on a later rerun."""
+    try:
+        from workspace_persistence import save_user_workspace
+        return bool(save_user_workspace(owner, st.session_state))
+    except Exception:
+        return False
+
+
+def _connectors(owner: str, workspace: str) -> pd.DataFrame:
+    return _registry_frame("connectors", owner, workspace)
 
 
 def _activity(owner: str, workspace: str) -> pd.DataFrame:
-    ensure_enterprise_workspace_schema()
-    with _db() as conn:
-        return pd.read_sql_query(
-            """
-            SELECT id,kind,subject,details,assignee,reviewer,status,created_at
-            FROM workspace_collaboration
-            WHERE owner=? AND workspace=?
-            ORDER BY id DESC LIMIT 250
-            """,
-            conn,
-            params=(owner,workspace),
-        )
+    return _registry_frame("activity", owner, workspace)
 
 
 def _asset_list(owner: str, workspace: str) -> pd.DataFrame:
-    ensure_enterprise_workspace_schema()
-    with _db() as conn:
-        return pd.read_sql_query(
-            """
-            SELECT asset_id,filename,sheet,rows,columns,sha256,created_at
-            FROM workspace_data_assets
-            WHERE owner=? AND workspace=?
-            ORDER BY created_at DESC
-            """,
-            conn,
-            params=(owner,workspace),
-        )
+    return _registry_frame("assets", owner, workspace)
 
 
 def _validate_endpoint(endpoint: str) -> tuple[str, str]:
@@ -194,9 +245,18 @@ def _publish_active(df: pd.DataFrame, filename: str, sheet: str, digest: str = "
 def render_enterprise_integration(tier: str, username: str) -> None:
     owner,workspace=str(username),_workspace()
     ensure_enterprise_workspace_schema()
+    registry_keys = [
+        _registry_key("connectors", owner, workspace),
+        _registry_key("activity", owner, workspace),
+        _registry_key("assets", owner, workspace),
+    ]
+    migrate_legacy_registry = not all(key in st.session_state for key in registry_keys)
     connectors=_connectors(owner,workspace)
     activity=_activity(owner,workspace)
     assets=_asset_list(owner,workspace)
+    if migrate_legacy_registry and (not connectors.empty or not activity.empty or not assets.empty):
+        if _persist_owner_workspace(owner):
+            st.caption("Legacy local integration records were copied into the authenticated user workspace snapshot.")
 
     try:
         from shoir_enterprise_services import connector_health_frame, data_intelligence_profile
@@ -290,13 +350,31 @@ def render_enterprise_integration(tier: str, username: str) -> None:
                 save=st.form_submit_button("➕ Register connector",type="primary",use_container_width=True)
         if save:
             status,detail=_validate_endpoint(endpoint)
+            now = _now()
+            connector_id = cid.strip() or f"CON-{len(connectors)+1:03d}"
+            connector_row = {
+                "connector_id": connector_id,
+                "name": name.strip() or "Unnamed system",
+                "system_type": system,
+                "endpoint": endpoint.strip(),
+                "status": status,
+                "last_validated": None,
+                "notes": notes.strip(),
+                "updated_at": now,
+            }
             with _db() as conn:
                 conn.execute(
                     "INSERT OR REPLACE INTO workspace_connectors(owner,workspace,connector_id,name,system_type,endpoint,status,last_validated,notes,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
-                    (owner,workspace,cid.strip() or f"CON-{len(connectors)+1:03d}",name.strip() or "Unnamed system",system,endpoint.strip(),status,None,notes.strip(),_now()),
+                    (owner,workspace,connector_id,connector_row["name"],system,endpoint.strip(),status,None,notes.strip(),now),
                 )
                 conn.commit()
+            updated = connectors[connectors["connector_id"].astype(str) != connector_id].copy()
+            updated = pd.concat([updated, pd.DataFrame([connector_row])], ignore_index=True)
+            _write_registry_frame("connectors", owner, workspace, updated)
+            durable = _persist_owner_workspace(owner)
             st.success(f"Connector registered · {status}. {detail}")
+            if not durable:
+                st.warning("The connector was recorded in this session, but durable workspace storage did not confirm the save. Check your managed persistence configuration.")
             st.rerun()
 
         if not connectors.empty:
@@ -317,23 +395,56 @@ def render_enterprise_integration(tier: str, username: str) -> None:
                     save_edit=st.form_submit_button("💾 Save connector changes",type="primary",use_container_width=True)
                 if save_edit:
                     edit_status,detail=_validate_endpoint(edit_endpoint)
+                    now = _now()
+                    edit_values = {
+                        "name": edit_name.strip() or str(selected["name"]),
+                        "system_type": edit_system,
+                        "endpoint": edit_endpoint.strip(),
+                        "status": edit_status,
+                        "last_validated": None,
+                        "notes": edit_notes.strip(),
+                        "updated_at": now,
+                    }
                     with _db() as conn:
-                        conn.execute("UPDATE workspace_connectors SET name=?,system_type=?,endpoint=?,status=?,last_validated=NULL,notes=?,updated_at=? WHERE owner=? AND workspace=? AND connector_id=?",(edit_name.strip() or str(selected["name"]),edit_system,edit_endpoint.strip(),edit_status,edit_notes.strip(),_now(),owner,workspace,sel))
+                        conn.execute("UPDATE workspace_connectors SET name=?,system_type=?,endpoint=?,status=?,last_validated=NULL,notes=?,updated_at=? WHERE owner=? AND workspace=? AND connector_id=?",(edit_values["name"],edit_system,edit_endpoint.strip(),edit_status,edit_notes.strip(),now,owner,workspace,sel))
                         conn.commit()
+                    updated = connectors.copy()
+                    mask = updated["connector_id"].astype(str) == str(sel)
+                    for field, value in edit_values.items():
+                        updated.loc[mask, field] = value
+                    _write_registry_frame("connectors", owner, workspace, updated)
+                    durable = _persist_owner_workspace(owner)
                     st.success(f"Connector updated · {edit_status}. {detail}")
+                    if not durable:
+                        st.warning("The update is in the current session, but durable workspace storage did not confirm the save.")
                     st.rerun()
             if st.button("✓ Validate configuration",type="primary",use_container_width=True,key="ei_validate_btn"):
                 status,detail=_validate_endpoint(selected["endpoint"])
+                now = _now()
                 with _db() as conn:
-                    conn.execute("UPDATE workspace_connectors SET status=?,last_validated=?,updated_at=? WHERE owner=? AND workspace=? AND connector_id=?",(status,_now(),_now(),owner,workspace,sel))
+                    conn.execute("UPDATE workspace_connectors SET status=?,last_validated=?,updated_at=? WHERE owner=? AND workspace=? AND connector_id=?",(status,now,now,owner,workspace,sel))
                     conn.commit()
+                updated = connectors.copy()
+                mask = updated["connector_id"].astype(str) == str(sel)
+                updated.loc[mask, "status"] = status
+                updated.loc[mask, "last_validated"] = now
+                updated.loc[mask, "updated_at"] = now
+                _write_registry_frame("connectors", owner, workspace, updated)
+                durable = _persist_owner_workspace(owner)
                 st.success(f"{status}: {detail}")
+                if not durable:
+                    st.warning("The validation result is in the current session, but durable workspace storage did not confirm the save.")
                 st.rerun()
             if st.button("🗑️ Remove connector",use_container_width=True,key="ei_remove_connector"):
                 with _db() as conn:
                     conn.execute("DELETE FROM workspace_connectors WHERE owner=? AND workspace=? AND connector_id=?",(owner,workspace,sel))
                     conn.commit()
+                updated = connectors[connectors["connector_id"].astype(str) != str(sel)].copy()
+                _write_registry_frame("connectors", owner, workspace, updated)
+                durable = _persist_owner_workspace(owner)
                 st.success("Connector removed.")
+                if not durable:
+                    st.warning("The removal is in the current session, but durable workspace storage did not confirm the save.")
                 st.rerun()
         else:
             st.info("No connectors are registered.")
@@ -351,15 +462,32 @@ def render_enterprise_integration(tier: str, username: str) -> None:
                 if st.button("🔗 Publish sheet to shared workspace",type="primary",use_container_width=True,key="ei_publish_data"):
                     _publish_active(df,str(upload.name),sheet,digest)
                     asset_id="DATA-"+_hash_df(df)[:14].upper()
+                    asset_hash = _hash_df(df)
+                    created_at = _now()
+                    asset_row = {
+                        "asset_id": asset_id,
+                        "filename": str(upload.name),
+                        "sheet": str(sheet),
+                        "rows": int(len(df)),
+                        "columns": int(len(df.columns)),
+                        "sha256": asset_hash,
+                        "created_at": created_at,
+                    }
                     with _db() as conn:
-                        conn.execute("INSERT OR REPLACE INTO workspace_data_assets(owner,workspace,asset_id,filename,sheet,rows,columns,sha256,created_at) VALUES(?,?,?,?,?,?,?,?,?)",(owner,workspace,asset_id,str(upload.name),sheet,len(df),len(df.columns),_hash_df(df),_now()))
+                        conn.execute("INSERT OR REPLACE INTO workspace_data_assets(owner,workspace,asset_id,filename,sheet,rows,columns,sha256,created_at) VALUES(?,?,?,?,?,?,?,?,?)",(owner,workspace,asset_id,str(upload.name),sheet,len(df),len(df.columns),asset_hash,created_at))
                         conn.commit()
+                    updated_assets = assets[assets["asset_id"].astype(str) != asset_id].copy()
+                    updated_assets = pd.concat([updated_assets, pd.DataFrame([asset_row])], ignore_index=True)
+                    _write_registry_frame("assets", owner, workspace, updated_assets)
                     try:
                         from shoir_enterprise_services import record_workspace_artifact
-                        record_workspace_artifact("dataset",str(upload.name),owner,{"sheet":sheet,"rows":len(df),"columns":len(df.columns)})
+                        record_workspace_artifact("dataset",str(upload.name),owner,{"sheet":sheet,"rows":len(df),"columns":len(df.columns),"sha256":asset_hash})
                     except Exception:
                         pass
+                    durable = _persist_owner_workspace(owner)
                     st.success(f"{upload.name} · {sheet} is now the shared active dataset.")
+                    if not durable:
+                        st.warning("The dataset is active in this session, but durable workspace storage did not confirm the save.")
                     st.rerun()
                 st.dataframe(df.head(18),use_container_width=True,hide_index=True)
                 profile={"rows":len(df),"columns":len(df.columns),"quality_score":0}
@@ -392,10 +520,27 @@ def render_enterprise_integration(tier: str, username: str) -> None:
                 reviewer=st.text_input("Reviewer",placeholder="manager")
                 submit=st.form_submit_button("💬 Add work item",type="primary",use_container_width=True)
         if submit and subject.strip():
+            created_at = _now()
+            work_item_id = int(datetime.now(timezone.utc).timestamp() * 1_000_000)
+            activity_row = {
+                "id": work_item_id,
+                "kind": kind,
+                "subject": subject.strip(),
+                "details": details.strip(),
+                "assignee": assignee.strip(),
+                "reviewer": reviewer.strip(),
+                "status": "Open",
+                "created_at": created_at,
+            }
             with _db() as conn:
-                conn.execute("INSERT INTO workspace_collaboration(owner,workspace,kind,subject,details,assignee,reviewer,status,created_at) VALUES(?,?,?,?,?,?,?,?,?)",(owner,workspace,kind,subject.strip(),details.strip(),assignee.strip(),reviewer.strip(),"Open",_now()))
+                conn.execute("INSERT OR REPLACE INTO workspace_collaboration(id,owner,workspace,kind,subject,details,assignee,reviewer,status,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",(work_item_id,owner,workspace,kind,subject.strip(),details.strip(),assignee.strip(),reviewer.strip(),"Open",created_at))
                 conn.commit()
-            st.success("Collaboration item saved to the shared workspace.")
+            updated_activity = pd.concat([pd.DataFrame([activity_row]), activity], ignore_index=True)
+            _write_registry_frame("activity", owner, workspace, updated_activity)
+            durable = _persist_owner_workspace(owner)
+            st.success("Collaboration item saved to the workspace.")
+            if not durable:
+                st.warning("The item is in the current session, but durable workspace storage did not confirm the save.")
             st.rerun()
         if not activity.empty:
             st.dataframe(activity,use_container_width=True,hide_index=True)
@@ -410,7 +555,13 @@ def render_enterprise_integration(tier: str, username: str) -> None:
                         with _db() as conn:
                             conn.execute("UPDATE workspace_collaboration SET status=? WHERE id=? AND owner=? AND workspace=?",(new_status,int(pick),owner,workspace))
                             conn.commit()
+                        updated_activity = activity.copy()
+                        updated_activity.loc[updated_activity["id"].astype(str) == str(pick), "status"] = new_status
+                        _write_registry_frame("activity", owner, workspace, updated_activity)
+                        durable = _persist_owner_workspace(owner)
                         st.success("Work item updated.")
+                        if not durable:
+                            st.warning("The status change is in the current session, but durable workspace storage did not confirm the save.")
                         st.rerun()
         else:
             st.info("No collaboration items yet.")

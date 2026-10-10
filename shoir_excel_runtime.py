@@ -213,6 +213,24 @@ def _source_metadata(result: Mapping[str, Any]) -> list[dict[str, Any]]:
     return rows
 
 
+def _clear_previous_upload(session_state: Any) -> None:
+    """Clear any previous workbook before attempting to load a different upload."""
+    session_state["excel_studio_safe_result"] = None
+    session_state.pop("excel_studio_safe_signature", None)
+    session_state.pop("excel_studio_safe_error_signature", None)
+    session_state.pop("excel_studio_safe_error", None)
+
+
+def _record_upload_failure(session_state: Any, signature: str, error: Exception) -> str:
+    """Hide stale exports and cache a clear error for the currently selected file."""
+    session_state["excel_studio_safe_result"] = None
+    session_state.pop("excel_studio_safe_signature", None)
+    message = f"{type(error).__name__}: {error}"
+    session_state["excel_studio_safe_error_signature"] = str(signature)
+    session_state["excel_studio_safe_error"] = message
+    return message
+
+
 def prepare_exports(result: dict[str, Any]) -> None:
     if not isinstance(result, dict) or not result.get("cleaned_sheets"):
         raise ValueError("There is no processed workbook available to export.")
@@ -297,12 +315,20 @@ def render_excel_intelligence_safe(tier: str, username: str) -> None:
     if upload is not None:
         raw = upload.getvalue()
         signature = hashlib.sha256(raw).hexdigest()
-        if st.session_state.get("excel_studio_safe_signature") != signature:
+        current_signature = st.session_state.get("excel_studio_safe_signature")
+        cached_error_signature = st.session_state.get("excel_studio_safe_error_signature")
+
+        if current_signature != signature and cached_error_signature != signature:
+            # The newly selected file supersedes any previous workbook. Never
+            # leave an old workbook/export visible if this replacement fails.
+            _clear_previous_upload(st.session_state)
             try:
                 with st.spinner("Inspecting and cleaning your workbook…"):
                     result = process_fast(raw, upload.name)
                 st.session_state["excel_studio_safe_signature"] = signature
                 st.session_state["excel_studio_safe_result"] = result
+                st.session_state.pop("excel_studio_safe_error_signature", None)
+                st.session_state.pop("excel_studio_safe_error", None)
                 # Immediately make the first clean table available to downstream
                 # engineering tools without creating an export package.
                 first_sheet = next(iter(result["cleaned_sheets"]))
@@ -317,14 +343,19 @@ def render_excel_intelligence_safe(tier: str, username: str) -> None:
                     f"from **{result['filename']}** without blocking the application on export generation."
                 )
             except Exception as exc:
-                st.session_state["excel_studio_safe_error_signature"] = signature
-                st.error(
-                    f"Excel upload could not be loaded safely: {type(exc).__name__}: {exc}"
-                )
+                message = _record_upload_failure(st.session_state, signature, exc)
+                st.error(f"Excel upload could not be loaded safely: {message}")
+        elif cached_error_signature == signature and current_signature != signature:
+            cached_message = str(st.session_state.get("excel_studio_safe_error") or "This upload previously failed validation.")
+            st.error(f"Excel upload could not be loaded safely: {cached_message}")
 
     result = st.session_state.get("excel_studio_safe_result")
     if not isinstance(result, dict):
-        st.info("Upload a workbook to activate the safe Excel Intelligence workflow.")
+        st.info("Upload a valid workbook to activate the safe Excel Intelligence workflow.")
+        return
+    if upload is not None and str(result.get("signature") or "") != signature:
+        # Defence in depth: never expose downloads/results from any other upload.
+        st.info("The selected upload has not been processed successfully. Previous workbook results are hidden.")
         return
 
     cleaned = result.get("cleaned_sheets") or {}
