@@ -1,4 +1,4 @@
-from shoir_tier_capabilities import copilot_gate, module_required_tier, normalize_tier, tier_allows
+from shoir_tier_capabilities import available_modules, copilot_gate, module_required_tier, normalize_tier, tier_allows
 from industrial_platform import tier_allows as platform_tier_allows
 
 
@@ -28,6 +28,34 @@ def test_copilot_and_research_module_requirements():
     assert tier_allows("Starter", "Starter")
     assert not tier_allows("Starter", "Research Pack")
     assert not tier_allows("Enterprise", "Research Pack")
+
+
+
+
+def test_research_pack_cannot_access_enterprise_plus_modules_or_copilot_actions():
+    candidates = [
+        "Research AI",
+        "Advanced Engineering Copilot",
+        "Live Industrial Digital Twin",
+        "Enterprise Security & Governance",
+        "Predictive Maintenance Digital Twin",
+    ]
+    assert available_modules("Research Pack ($30 add-on)", candidates) == ["Research AI"]
+    assert available_modules("Enterprise Plus Tier ($399)", candidates) == [
+        "Advanced Engineering Copilot",
+        "Live Industrial Digital Twin",
+        "Enterprise Security & Governance",
+        "Predictive Maintenance Digital Twin",
+    ]
+
+    for phrase in (
+        "open Advanced Engineering Copilot",
+        "open Live Industrial Digital Twin",
+        "open Enterprise Security & Governance",
+        "open Predictive Maintenance Digital Twin",
+    ):
+        gate = copilot_gate(phrase, "Research Pack")
+        assert gate is not None and gate["required_tier"] == "Enterprise Plus"
 
 
 def test_copilot_blocks_package_gated_actions():
