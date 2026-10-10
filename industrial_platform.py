@@ -66,6 +66,7 @@ PLATFORM_CATALOG = [
     {"tier":"Enterprise","category":"Experimentation","name":"Experiment Lab","when":"Run many controlled scenarios and compare cost, service, risk, inventory, carbon and capacity.","example":"Batch-test baseline, demand surge, supplier outage and capacity-expansion cases."},
     {"tier":"Enterprise","category":"Research & Experimentation","name":"Experiment Engine","when":"Design randomized DOE, factorial experiments, replications, bootstrap studies, Monte Carlo uncertainty propagation, effect sizes and sensitivity analyses.","example":"Generate a reproducible factorial study, quantify effects, propagate uncertainty and export statistical evidence."},
     {"tier":"Enterprise","category":"Control","name":"Industrial Control Center","when":"See demand, inventory, production, supplier, transport, machine, quality, carbon, risk and finance health together.","example":"Click a red issue and jump into the module responsible for the underlying KPI."},
+    {"tier":"Enterprise","category":"Operations Intelligence","name":"ShadowShift — Micro-Loss & Recovery Intelligence","when":"Capture interruption and recovery separately, map observed micro-losses, rank evidence gaps and register the next low-cost experiment.","example":"Log a blocked assembly cycle, quantify recorded recovery burden, compare stations, register a testable hypothesis and export an evidence-hashed study without presenting modelled exposure as verified savings."},
     {"tier":"Enterprise","category":"Decisions","name":"Engineering Decision Center","when":"Turn model results into auditable decisions with assumptions, deltas, uncertainty and approvals.","example":"Create an approval-ready decision card from a network optimization run."},
     {"tier":"Enterprise","category":"Data Platform","name":"Industrial Data Platform","when":"Ingest, profile, hash, catalog and prepare operational datasets for downstream modules.","example":"Upload a multi-sheet workbook, validate schema and register a reusable dataset."},
     {"tier":"Enterprise Plus","category":"AI","name":"Advanced Engineering Copilot","when":"Orchestrate multi-step engineering workflows with preview, approval and tool execution.","example":"Clean a workbook, forecast demand, test risk, compare scenarios and prepare a report after one approval."},
@@ -98,7 +99,7 @@ TIER_FEATURES = {
         "Manufacturing Execution System","Industrial Simulation Lab","3D Factory Designer",
         "Industrial Connectivity Hub","Multi-Objective Optimization","Robust & Resilient Optimization",
         "Engineering Model Registry","Experiment Lab","Experiment Engine","Industrial Control Center","Engineering Decision Center",
-        "Industrial Data Platform","Advanced Planning & Scheduling","Quality Engineering & Reliability",
+        "Industrial Data Platform","ShadowShift — Micro-Loss & Recovery Intelligence","Advanced Planning & Scheduling","Quality Engineering & Reliability",
         "Capital Investment & Engineering Economics","Workforce Engineering","Industrial Sustainability & LCA",
         "Benchmarking & Engineering Standards","Industrial Data Model & Digital Thread",
         "AI Copilot","Monte Carlo Sim","Sensitivity Analysis","Digital Twin & Discrete-Event Simulation",
@@ -108,7 +109,7 @@ TIER_FEATURES = {
         "Manufacturing Execution System","Industrial Simulation Lab","3D Factory Designer",
         "Industrial Connectivity Hub","Multi-Objective Optimization","Robust & Resilient Optimization",
         "Engineering Model Registry","Experiment Lab","Experiment Engine","Industrial Control Center","Engineering Decision Center",
-        "Industrial Data Platform","Advanced Planning & Scheduling","Quality Engineering & Reliability",
+        "Industrial Data Platform","ShadowShift — Micro-Loss & Recovery Intelligence","Advanced Planning & Scheduling","Quality Engineering & Reliability",
         "Capital Investment & Engineering Economics","Workforce Engineering","Industrial Sustainability & LCA",
         "Benchmarking & Engineering Standards","Industrial Data Model & Digital Thread",
     ],
@@ -943,10 +944,14 @@ def render_module(module: str, tier: str, username: str):
         from shoir_industrial_workbook import render_industrial_workbook
         render_industrial_workbook(tier, username)
         return
+    if module=="ShadowShift — Micro-Loss & Recovery Intelligence":
+        from shoir_shadowshift import render_shadowshift
+        render_shadowshift(tier, username)
+        return
     # The investor Control Center has its own scenario controls and should
     # open directly into the command experience instead of the generic import
     # surface. Specialist modules continue to use the shared import/activate UX.
-    if module != "Industrial Control Center":
+    if module not in ("Industrial Control Center", "ShadowShift — Micro-Loss & Recovery Intelligence"):
         render_module_data_exchange(module, st, tier, username)
     if module == "Experiment Lab":
         # Experiment Lab is a dedicated research workspace. Its UI and

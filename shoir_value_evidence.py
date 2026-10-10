@@ -27,6 +27,7 @@ DB_PATH = "enterprise_full_workspace.db"
 
 # Reference planning benchmarks, not claimed industry averages.
 _TASK_PROFILES = [
+    ("ShadowShift — Micro-Loss & Recovery Intelligence", 0, 0, "Calibrate a traditional-versus-ShadowShift study time baseline from paired measured tasks before making time-saving claims."),
     ("Excel Data Cleaning & Import", 180, 15, "Clean, profile, repair and validate an operational workbook."),
     ("Industrial Workbook", 150, 10, "Build an engineering workbook from inputs through decisions."),
     ("Facility Layout & Warehousing", 300, 20, "Evaluate layout, storage, flow and department relationships."),
@@ -144,6 +145,7 @@ def task_profile(module: str) -> dict[str, Any]:
         label, baseline, shoir, purpose = exact
         return {"task": label, "baseline_minutes": baseline, "shoir_minutes": shoir, "purpose": purpose}
     keyword_map = [
+        (("shadowshift", "micro-loss", "micro loss"), "ShadowShift — Micro-Loss & Recovery Intelligence"),
         (("layout", "warehouse", "facility"), "Facility Layout & Warehousing"),
         (("schedule", "planning", "ppc"), "Production Planning & Control"),
         (("inventory", "stock"), "Inventory"),
@@ -258,7 +260,12 @@ def begin_result_timer(module: str, label: str) -> None:
     }
 
 def render_value_receipt(module: str, username: str) -> None:
-    """Show actual post-click execution time versus a traditional task baseline."""
+    """Show comparable task-value receipts; exclude modules whose outputs are not timed tasks."""
+    # ShadowShift measures real-world interruption/recovery. Streamlit render
+    # latency is not a comparable baseline and must never be presented as saved
+    # operational time or money.
+    if "shadowshift" in str(module or "").casefold():
+        return
     run = st.session_state.get("shoir_value_active_run")
     if not isinstance(run, dict) or str(run.get("module", "")) != str(module):
         return
