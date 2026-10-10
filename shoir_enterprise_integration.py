@@ -107,7 +107,9 @@ _REGISTRY_COLUMNS = {
 def _registry_key(kind: str, owner: str, workspace: str) -> str:
     """Stable per-user/workspace cache key; values are included in workspace autosave."""
     import hashlib
-    scope = f"{str(owner or '').strip().lower()}::{str(workspace or 'default').strip().lower()}"
+    # Account names use the authentication system's case-insensitive identity;
+    # workspace labels are preserved exactly because local storage scopes them case-sensitively.
+    scope = f"{str(owner or '').strip().lower()}::{str(workspace or 'default').strip()}"
     digest = hashlib.sha256(scope.encode("utf-8")).hexdigest()[:24]
     return f"ei_registry_v1_{kind}_{digest}"
 
