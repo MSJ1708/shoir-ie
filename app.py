@@ -880,7 +880,8 @@ def get_copilot_response(prompt, history):
             "operations research platform covering MILP/optimization, inventory, supply chain, APS/MES, "
             "facility layout, quality/reliability, simulation, digital twins, sustainability, economics, "
             "workforce, KPI Studio, engineering methods/equations, scenario versioning, process mining, "
-            "drift monitoring, decision verification, DMAIC/A3, templates and platform diagnostics. "
+            "drift monitoring, decision verification, DMAIC/A3, templates, platform diagnostics and ShadowShift — Micro-Loss & Recovery Intelligence. "
+            "Use ShadowShift for recording interruption and recovery separately, comparing observed loss patterns, ranking evidence gaps, registering small experiments and exporting traceable study snapshots. Clearly separate measured observations from projected shift or annual exposure and scenario-only stress; never present estimates as verified savings or a hypothesis as causal proof. "
             "Use the shared Platform Excellence layer as part of your operating context. " + copilot_context() + " Available governed Copilot tools are: " + ", ".join(t[0] for t in COPILOT_TOOLS) + ". " 
             "Recommend the most relevant existing module or workflow from the live platform catalog. "
             "Prefer validation, explainability, scenario analysis and auditable exports before action. "
@@ -903,6 +904,31 @@ def get_copilot_response(prompt, history):
         pass  # no key configured, package missing, or the call failed - fall through
 
     p = prompt.lower().strip()
+
+    # Give ShadowShift useful guidance even when no hosted language model is configured.
+    # Use the already tier-filtered module list so the fallback cannot imply unlocked access.
+    _shadowshift_terms = ("shadowshift", "micro-loss", "micro loss", "interruption recovery", "recovery burden")
+    if any(_term in p for _term in _shadowshift_terms):
+        _shadowshift_name = "ShadowShift — Micro-Loss & Recovery Intelligence"
+        if _shadowshift_name not in capabilities["modules"]:
+            return (
+                f"🔒 **{_shadowshift_name}** requires the **Enterprise** tier "
+                "(also included in Enterprise Plus). Your current package is "
+                f"**{capabilities['tier']}**. I can still help you design an observation protocol, "
+                "but opening the module requires an eligible tier."
+            )
+        return (
+            f"**{_shadowshift_name}** is the Shoir-IE workspace for investigating recurring small "
+            "interruptions and the time needed to recover to stable work.\n\n"
+            "**Recommended starting sequence**\n"
+            "1. Open ShadowShift and start an observation or review its clearly labelled demo data.\n"
+            "2. Record each event, affected station, people involved, suspected cause and evidence strength.\n"
+            "3. Compare interruption time with recovery time, then review the ranked next observations.\n"
+            "4. Register a small test with a hypothesis, prediction and outcome, and export the study record.\n\n"
+            "**Evidence boundary:** keep observed burden, modelled shift/annual exposure and scenario-only stress separate. "
+            "An estimate is not verified savings, and a ranked hypothesis is not proof of causation. "
+            "This module is available on Enterprise and Enterprise Plus."
+        )
 
     if any(w in p for w in ["hello", "hi", "hey", "what's up", "whats up"]):
         return (f"Hello {st.session_state.get('current_user', 'there')}! I can run the MILP optimizer, "
@@ -1570,6 +1596,44 @@ if not st.session_state.get("current_user"):
         else:
             st.warning("Venture Studio is not currently present in the capability catalog.")
 
+        st.markdown("---")
+        st.markdown("## ⏱️ ShadowShift — Micro-Loss & Recovery Intelligence")
+        st.markdown(
+            "### Make the small interruptions visible — then test what to change."
+        )
+        st.markdown(
+            "Short blockages, waiting and recovery time can repeat across a shift without standing out "
+            "in a high-level downtime report. ShadowShift gives industrial teams one place to capture "
+            "those events, compare their burden, examine evidence gaps and register the next experiment."
+        )
+        _shadowshift_cols = st.columns(4)
+        _shadowshift_items = [
+            ("CAPTURE", "Record the interruption", "Log the station, event type, duration, people affected, suspected cause and evidence strength."),
+            ("SEPARATE", "Measure recovery", "Keep interruption time distinct from the time needed to return to stable work."),
+            ("PRIORITIZE", "Choose the next observation", "Rank where additional evidence or a low-effort test may be most useful."),
+            ("TEST", "Preserve the learning", "Register a hypothesis and prediction, record the outcome and export a traceable study."),
+        ]
+        for _col, (_label, _title, _copy) in zip(_shadowshift_cols, _shadowshift_items):
+            with _col:
+                st.markdown(
+                    f'<div class="value-strip"><div class="kicker">{html.escape(_label)}</div>'
+                    f'<b>{html.escape(_title)}</b><span>{html.escape(_copy)}</span></div>',
+                    unsafe_allow_html=True
+                )
+
+        with st.expander("See a ShadowShift example"):
+            st.markdown(
+                '<div class="module-example"><b>Example:</b> A team notices recurring blockages at an assembly station. '
+                'It records each interruption and the separate recovery period, notes how many people were affected, '
+                'compares stations, and registers a short observation test for the suspected cause. The study can preserve '
+                'the event records and supporting evidence for later review.</div>',
+                unsafe_allow_html=True
+            )
+        st.caption(
+            "Plan access: Enterprise and Enterprise Plus. Observed records, projected shift/annual exposure and "
+            "scenario-only stress are shown as separate quantities; estimates are not verified savings."
+        )
+
         st.markdown("### Find the capability for the problem you have")
         _tier_options = ["All capabilities", "Starter", "Mid-Tier Pro", "Enterprise", "Research Pack"]
         _browse_tier = st.selectbox(
@@ -1579,7 +1643,7 @@ if not st.session_state.get("current_user"):
         )
         _search = st.text_input(
             "Search capabilities",
-            placeholder="Try: inventory, quality, warehouse, simulation, maintenance, research, sustainability…",
+            placeholder="Try: ShadowShift, micro-loss, recovery, inventory, quality, warehouse, simulation…",
             key="explore_module_search_v2"
         )
         _category_options = ["All categories"] + sorted({str(m.get("category","Other")) for m in MODULE_CATALOG})
