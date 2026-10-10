@@ -534,6 +534,18 @@ def render_shadowshift(tier: str, username: str) -> None:
         events = load_events(study_id, owner)
         metrics = calculate_loss_metrics(events, study["observation_window_min"], study["shift_window_min"],
             study["shifts_per_year"], study["loaded_hourly_rate_sar"], study["downstream_stress_factor"])
+        # Shared visualization registry uses these canonical, safe in-memory result tables.
+        # They contain only this authenticated workspace's current study results.
+        st.session_state["shadowshift_event_df"] = events.copy(deep=True)
+        st.session_state["shadowshift_loss_summary_df"] = pd.DataFrame([
+            {"Metric": "Observed interruption", "Value": metrics["interruption_minutes_observed"], "Status": "Observed"},
+            {"Metric": "Observed recovery", "Value": metrics["recovery_minutes_observed"], "Status": "Observed"},
+            {"Metric": "Observed total burden", "Value": metrics["observed_elapsed_burden_minutes"], "Status": "Observed"},
+            {"Metric": "Projected labor hours / shift", "Value": metrics["projected_labor_hours_per_shift"], "Status": "Modelled"},
+            {"Metric": "Annual gross labor exposure SAR", "Value": metrics["annual_gross_labor_exposure_sar"], "Status": "Modelled"},
+        ])
+        st.session_state["shadowshift_next_experiments_df"] = rank_next_experiments(events)
+        st.session_state["shadowshift_experiments_df"] = list_experiments(study_id, owner).drop(columns=["Result"], errors="ignore")
         cols = st.columns(5)
         cols[0].metric("Observed events", f'{metrics["event_count"]:,}')
         cols[1].metric("Interruption", f'{metrics["interruption_minutes_observed"]:,.1f} min')
