@@ -88,6 +88,27 @@ The differentiator is **integration and traceability**, not simply the number of
 
 ---
 
+## ⏱️ ShadowShift — Micro-Loss & Recovery Intelligence
+
+**Available on Enterprise and Enterprise Plus.** ShadowShift is Shoir-IE's dedicated workspace for finding small, recurring operational interruptions that can disappear inside daily averages or conventional downtime reports.
+
+### From a brief interruption to a testable improvement
+
+1. **Capture the event:** record the station, interruption type, timestamp or duration, people affected, suspected cause and evidence strength.
+2. **Separate interruption from recovery:** distinguish the time the work was blocked from the time needed to return to stable work.
+3. **Prioritize what to investigate next:** compare recurring patterns and use a transparent heuristic to rank the next useful observation or low-effort test.
+4. **Register an experiment:** document the hypothesis, expected result, test plan and outcome instead of jumping from a suspected cause straight to a permanent fix.
+5. **Export a traceable study:** review the event log, loss summaries, suggested observations and experiment records, and preserve a hash-linked evidence snapshot.
+
+### Keep measurement and estimates distinct
+
+ShadowShift can summarize **observed event burden**, estimate shift-level or annual exposure from the observation window and supplied assumptions, and show separate scenario-only stress. These are different quantities: projected exposure is not a verified saving, a prioritized hypothesis is not causal proof, and a small sample may not represent the whole operation. Validate improvements with matched observations or repeatable tests before changing standard work.
+
+**Example Copilot request:** “Help me investigate recurring assembly-station interruptions in ShadowShift. Separate observed interruption and recovery burden from projected shift exposure, rank the next best observation, and draft a low-cost experiment.”
+
+---
+---
+
 ## 🏗️ Platform architecture
 
 ~~~text
@@ -145,6 +166,7 @@ Example requests:
 - “Compare these scenarios.”
 - “Which engineering method fits this problem?”
 - “Check this process for drift.”
+- “Help me use ShadowShift to investigate recurring interruptions and register a testable experiment.”
 - “Analyze this investment case.”
 - “Prepare the executive output.”
 
