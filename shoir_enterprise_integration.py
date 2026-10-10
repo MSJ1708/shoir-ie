@@ -243,9 +243,18 @@ def _publish_active(df: pd.DataFrame, filename: str, sheet: str, digest: str = "
 def render_enterprise_integration(tier: str, username: str) -> None:
     owner,workspace=str(username),_workspace()
     ensure_enterprise_workspace_schema()
+    registry_keys = [
+        _registry_key("connectors", owner, workspace),
+        _registry_key("activity", owner, workspace),
+        _registry_key("assets", owner, workspace),
+    ]
+    migrate_legacy_registry = not all(key in st.session_state for key in registry_keys)
     connectors=_connectors(owner,workspace)
     activity=_activity(owner,workspace)
     assets=_asset_list(owner,workspace)
+    if migrate_legacy_registry and (not connectors.empty or not activity.empty or not assets.empty):
+        if _persist_owner_workspace(owner):
+            st.caption("Legacy local integration records were copied into the authenticated user workspace snapshot.")
 
     try:
         from shoir_enterprise_services import connector_health_frame, data_intelligence_profile
