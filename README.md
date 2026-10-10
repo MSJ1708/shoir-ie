@@ -107,7 +107,6 @@ ShadowShift can summarize **observed event burden**, estimate shift-level or ann
 **Example Copilot request:** “Help me investigate recurring assembly-station interruptions in ShadowShift. Separate observed interruption and recovery burden from projected shift exposure, rank the next best observation, and draft a low-cost experiment.”
 
 ---
----
 
 ## 🏗️ Platform architecture
 
