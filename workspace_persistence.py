@@ -284,31 +284,83 @@ def _dataframe_content_signature(frame: pd.DataFrame) -> str:
     return digest.hexdigest()
 
 
-def _workspace_change_signature(session_state: MutableMapping[str, Any]) -> str:
-    """Stable change signature that detects in-place mutations as well as replacement.
+def _nested_value_signature(value: Any) -> str:
+    """Hash mutable state collections without truncating long repr() output.
 
-    Streamlit commonly replaces edited frames with new objects, but domain
-    modules can also modify a DataFrame in place. Hashing values prevents those
-    edits from being mistaken for an unchanged workspace and silently skipped.
+    DataFrames nested inside a dict/list are represented by their schema/value
+    digest, not serialized again as full JSON. This keeps registry, Copilot and
+    multi-step workspace records safe while avoiding false no-op saves after a
+    mutation beyond the first 1,000 characters.
     """
+    def normalize(item: Any, depth: int = 0) -> Any:
+        if depth > 30:
+            return {"__type__": "depth-limit", "class": type(item).__name__}
+        if isinstance(item, pd.DataFrame):
+            return {"__type__": "dataframe", "digest": _dataframe_content_signature(item)}
+        if isinstance(item, pd.Series):
+            return {"__type__": "series", "digest": _series_content_signature(item)}
+        if isinstance(item, dict):
+            return {
+                "__type__": "dict",
+                "items": [
+                    [str(k), normalize(v, depth + 1)]
+                    for k, v in sorted(item.items(), key=lambda pair: str(pair[0]))
+                ],
+            }
+        if isinstance(item, (list, tuple)):
+            return {
+                "__type__": type(item).__name__,
+                "items": [normalize(v, depth + 1) for v in item],
+            }
+        if isinstance(item, set):
+            normalized = [normalize(v, depth + 1) for v in item]
+            normalized.sort(key=lambda v: json.dumps(v, sort_keys=True, ensure_ascii=False, default=str))
+            return {"__type__": "set", "items": normalized}
+        if item is None or isinstance(item, (str, int, float, bool)):
+            return item
+        if isinstance(item, (pd.Timestamp, _dt.datetime, _dt.date)):
+            return {"__type__": type(item).__name__, "value": item.isoformat()}
+        return {"__type__": type(item).__name__, "value": str(item)}
+
+    canonical = json.dumps(normalize(value), sort_keys=True, ensure_ascii=False, separators=(",", ":"), default=str)
+    return hashlib.sha256(canonical.encode("utf-8", errors="replace")).hexdigest()
+
+
+def _series_content_signature(series: pd.Series) -> str:
+    try:
+        raw = pd.util.hash_pandas_object(series, index=True, categorize=True).to_numpy().tobytes()
+    except Exception:
+        raw = series.to_json(date_format="iso", default_handler=str).encode("utf-8", errors="replace")
+    metadata = {
+        "name": str(series.name),
+        "dtype": str(series.dtype),
+        "length": len(series),
+    }
+    digest = hashlib.sha256(json.dumps(metadata, sort_keys=True).encode("utf-8"))
+    digest.update(b"\0")
+    digest.update(raw)
+    return digest.hexdigest()
+
+
+def _workspace_change_signature(session_state: MutableMapping[str, Any]) -> str:
+    """Stable content signature that detects in-place mutation of mutable state."""
     parts: list[str] = []
     for key, value in session_state.items():
         key = str(key)
         if _excluded(key) or key.startswith("_shoir_persist_"):
             continue
         if isinstance(value, pd.DataFrame):
-            parts.append(
-                f"DF|{key}|{id(value)}|{_dataframe_content_signature(value)}"
-            )
+            parts.append(f"DF|{key}|{id(value)}|{_dataframe_content_signature(value)}")
         elif isinstance(value, pd.Series):
-            parts.append(f"SER|{key}|{id(value)}|{len(value)}|{value.name}")
+            parts.append(f"SER|{key}|{id(value)}|{_series_content_signature(value)}")
+        elif isinstance(value, (dict, list, tuple, set)):
+            parts.append(f"C|{key}|{type(value).__name__}|{_nested_value_signature(value)}")
         else:
             try:
                 parts.append(f"V|{key}|{type(value).__name__}|{repr(value)[:1000]}")
             except Exception:
                 parts.append(f"V|{key}|{type(value).__name__}")
-    return hashlib.sha1("\\n".join(sorted(parts)).encode("utf-8", errors="replace")).hexdigest()
-
+    return hashlib.sha1("\n".join(sorted(parts)).encode("utf-8", errors="replace")).hexdigest()
 
 def save_user_workspace(
     username: str,
