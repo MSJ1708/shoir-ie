@@ -79,8 +79,23 @@ def normalize_tier(value: str) -> str:
 
 
 def tier_allows(current: str, required: str) -> bool:
-    """Cumulative package gate. Research Pack remains a distinct tier."""
-    return TIER_ORDER.index(normalize_tier(current)) >= TIER_ORDER.index(normalize_tier(required))
+    """Enforce the product menu: Research Pack inherits Enterprise, plus research.
+
+    Research Pack is an add-on package in the app, not a grant of the
+    Enterprise Plus-only tier. Keep research entitlement independent from
+    the ordinary tier ladder so one package never implies another add-on.
+    """
+    current_tier = normalize_tier(current)
+    required_tier = normalize_tier(required)
+
+    if current_tier == "Research Pack":
+        return required_tier in {
+            "Starter", "Mid-Tier Pro", "Professional", "Enterprise", "Research Pack"
+        }
+    if required_tier == "Research Pack":
+        return current_tier == "Research Pack"
+
+    return TIER_ORDER.index(current_tier) >= TIER_ORDER.index(required_tier)
 
 
 def module_required_tier(module: str) -> Optional[str]:
