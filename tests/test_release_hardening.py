@@ -185,6 +185,8 @@ def test_enterprise_integration_registry_survives_workspace_round_trip(tmp_path,
 
     assert _registry_key(kind, "Bob", "Plant-North") != registry_key
     assert _registry_key(kind, "Alice", "Plant-South") != registry_key
+    # Match SQLite's case-sensitive workspace predicate; these must not share cached rows.
+    assert _registry_key(kind, "Alice", "plant-north") != registry_key
 
 
 def test_subscription_navigation_matches_declared_platform_tiers():
