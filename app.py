@@ -33,6 +33,7 @@ from workspace_persistence import ensure_workspace_state_db, load_user_workspace
 from shoir_visual_system import apply_shoir_design_system, render_workspace_status
 from shoir_live_visuals import render_live_visualization_studio, discover_visual_tables
 from shoir_module_parity import render_universal_module_parity
+from shoir_tier_capabilities import MODULE_EXPLORER_TIERS
 from shoir_copilot_orchestrator import build_workflow_plan, recommend_module, run_orchestration, stage_copilot_decision
 from shoir_digital_thread import render_global_project_digital_thread
 from shoir_enterprise_services import render_enterprise_bridge
@@ -811,6 +812,16 @@ TIER_BENEFITS = {
         "price": "$199",
         "pitch": "Adds automation, simulation-under-uncertainty, and a natural-language copilot - built for a team running live operations, not a single analyst running one-off studies.",
         "gain": "Moves from reactive (find out something broke) to proactive (get warned before it breaks), and from one person driving the tool to a team working off one shared, always-current picture.",
+    },
+    "Professional": {
+        "price": "Plan details",
+        "pitch": "For engineers who need deeper production, quality, workforce, sustainability and scenario workflows.",
+        "gain": "Use the module catalogue to check each capability and confirm your account's included access before planning a workflow.",
+    },
+    "Enterprise Plus": {
+        "price": "Plan details",
+        "pitch": "Extends the enterprise workspace with advanced copilot, digital-twin and governance capabilities.",
+        "gain": "Use the module catalogue to distinguish available product surfaces from integrations that still require deployment configuration.",
     },
     "Research Pack": {
         "price": "+$30 add-on",
@@ -1635,7 +1646,7 @@ if not st.session_state.get("current_user"):
         )
 
         st.markdown("### Find the capability for the problem you have")
-        _tier_options = ["All capabilities", "Starter", "Mid-Tier Pro", "Enterprise", "Research Pack"]
+        _tier_options = list(MODULE_EXPLORER_TIERS)
         _browse_tier = st.selectbox(
             "Plan / access level",
             _tier_options,
@@ -9150,7 +9161,7 @@ else:
 
         upload_override = st.file_uploader(
             "📤 Optional data override (Excel / CSV)",
-            type=["xlsx", "csv"],
+            type=["xlsx", "xlsm", "xls", "csv", "tsv", "txt"],
             key="copilot_orchestrator_upload",
             help="Leave empty to let Copilot inspect the selected module's existing workspace data.",
         )
