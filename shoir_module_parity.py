@@ -42,6 +42,7 @@ from shoir_module_customization import (
 from industrial_experience import (
     FALLBACK_MODULE_BLUEPRINTS,
     analyze_fallback_module,
+    build_profiled_module_figure,
     fallback_module_blueprint,
     render_module_run_history,
     save_module_analysis_run,
