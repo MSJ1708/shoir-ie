@@ -995,8 +995,14 @@ def render_resilience_module(module: str, tier: str, username: str) -> None:
         return
 
     info = MODULE_DEFINITIONS[module]
-    st.title(info["category"] + " | " + module)
+    from shoir_module_customization import get_module_profile
+    profile = get_module_profile(st.session_state, module, username)
+    display_title = str(profile.get("display_name") or module)
+    st.title(info["category"] + " | " + display_title)
     st.write(info["when"])
+    project_context = " · ".join(str(profile.get(key) or "").strip() for key in ("project_name", "site_name", "owner_team") if str(profile.get(key) or "").strip())
+    if project_context:
+        st.caption("Workspace context: " + project_context)
     st.caption("Starter workspace uses editable synthetic data. All outputs are modeled estimates until validated against approved, dated source data.")
     with st.expander("Quick start", expanded=False):
         st.write("1. Review the sample values and replace them with your approved project data. 2. Change the scenario controls. 3. Review graphs and shortages, then export or save a snapshot. 4. Document assumptions before sharing.")
