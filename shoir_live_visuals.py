@@ -49,7 +49,7 @@ _MODULE_KEYS = {
     "3D Factory Designer": ["factory3d_df", "factory3d_dist_result"],
     "Multi-Objective Optimization": ["multiobj_df", "multiobj_result", "pareto", "optimization_pareto_df", "optimization_result_df"],
     "Robust & Resilient Optimization": ["robust_df", "robust_result", "robust_result_df"],
-    "Experiment Lab": ["experiment_df", "experiment_results", "experiment_doe_design", "experiment_factorial_effects", "experiment_factorial_summary", "experiment_mc_results", "experiment_mc_result_summary", "experiment_bootstrap_results", "experiment_bootstrap_summary", "experiment_replication_summary", "experiment_sensitivity_results"],
+    "Experiment Lab": ["research_scenario_lab_matrix", "research_scenario_lab_saved_results", "experiment_df", "experiment_results", "experiment_doe_design", "experiment_factorial_effects", "experiment_factorial_summary", "experiment_mc_results", "experiment_mc_result_summary", "experiment_bootstrap_results", "experiment_bootstrap_summary", "experiment_replication_summary", "experiment_sensitivity_results"],
     "Engineering Decision Center": ["decision_metrics_df", "decision_alternatives_df", "decision_kpi_df", "decision_verification_df", "decision_outcomes_df"],
     "Industrial Data Platform": ["data_platform_latest_df"],
     "Capital Investment & Engineering Economics": ["capex_df", "capex_result"],
