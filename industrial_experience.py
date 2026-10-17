@@ -1757,6 +1757,15 @@ def _safe_key(value: str) -> str:
 
 
 def _module_meta(module: str) -> dict:
+    if str(module) in FALLBACK_MODULE_BLUEPRINTS:
+        blueprint = fallback_module_blueprint(module)
+        return {
+            "name": str(module),
+            "category": blueprint["category"],
+            "tier": blueprint["tier"],
+            "when": blueprint["purpose"],
+            "example": blueprint["method"],
+        }
     try:
         from industrial_platform import PLATFORM_CATALOG
         return next((item for item in PLATFORM_CATALOG if str(item.get("name")) == str(module)), {})
@@ -1813,22 +1822,63 @@ FALLBACK_MODULE_BLUEPRINTS = {
     for name, family, focus, purpose, method, inputs, guardrail in FALLBACK_MODULE_BLUEPRINT_ROWS
 }
 
+# Keep these labels aligned with the actual subscription/module catalogue.
+# They are descriptive metadata only and do not replace the application's
+# tier-entitlement check.
+FALLBACK_MODULE_CATALOG_META = {
+    "Facility Layout & Warehousing": ("Facilities", "Starter"),
+    "Enterprise Integration & Collaboration": ("Platform", "Starter"),
+    "AGV Fleet Dispatcher": ("Logistics", "Mid-Tier Pro"),
+    "Geospatial Network Designer": ("Network Design", "Mid-Tier Pro"),
+    "Production Planning & Control (PPC)": ("Production", "Mid-Tier Pro"),
+    "Lean Manufacturing & Shop Floor Operations": ("Production", "Mid-Tier Pro"),
+    "Quality Control, Six Sigma & Reliability": ("Quality", "Mid-Tier Pro"),
+    "Engineering Economics & Finance": ("Finance", "Mid-Tier Pro"),
+    "Predictive Maintenance Hub": ("Operations", "Enterprise"),
+    "Human Factors & Ergonomics (NIOSH)": ("Human Factors", "Enterprise"),
+    "Digital Twin & Discrete-Event Simulation": ("Digital Twin", "Enterprise"),
+    "Green IE & Sustainability": ("Sustainability", "Enterprise"),
+    "Evidence Degradation & Decision-Readiness Lab": ("Research & Experimentation", "Research Pack"),
+    "Statistical Hypothesis Testing": ("Research Authoring", "Research Pack"),
+    "LaTeX Document Formatter": ("Research Authoring", "Research Pack"),
+    "Literature & Citation Matrix": ("Research Authoring", "Research Pack"),
+    "Advanced Regression Analysis": ("Research Authoring", "Research Pack"),
+    "Live Reproducible Paper Canvas": ("Research Authoring", "Research Pack"),
+    "Paper-to-Simulation Auto-Engine": ("Paper-to-Simulation Pipeline", "Research Pack"),
+    "Automated Theory-to-Code Formalizer": ("Paper-to-Simulation Pipeline", "Research Pack"),
+    "Automated Code-to-Formal-Proof Verifier": ("Paper-to-Simulation Pipeline", "Research Pack"),
+    "Adversarially Stressed Synthetic Industrial Twins": ("Paper-to-Simulation Pipeline", "Research Pack"),
+    "Adversarial AI Peer-Review Swarm": ("Peer Review & Stress-Testing", "Research Pack"),
+    "Adversarial Chaos & Shock Injector": ("Peer Review & Stress-Testing", "Research Pack"),
+    "Autonomous Parametric Surrogate Swarm": ("Peer Review & Stress-Testing", "Research Pack"),
+    "Real-Time Quantum-Classical Hybrid Optimization Router": ("Advanced Computation Infrastructure", "Research Pack"),
+    "Decentralized Cryptographic Reproducibility Vault": ("Advanced Computation Infrastructure", "Research Pack"),
+    "🔌 Edge-Connected IoT Digital Twin Bridge": ("Advanced Computation Infrastructure", "Research Pack"),
+    "🔌 Universal Cross-Domain Mathematical Isomorphism Engine (UCMIE)": ("Advanced Computation Infrastructure", "Research Pack"),
+    "🔄 Autonomous Epistemic Cross-Disciplinary Falsification Matrix (AE-FRESM)": ("Advanced Computation Infrastructure", "Research Pack"),
+    "Autonomous Cognitive Operations & Zero-Knowledge Mesh (ACO-ZKMS)": ("Advanced Computation Infrastructure", "Research Pack"),
+    "⚡ ACO-ZKMS Master Engine": ("Advanced Computation Infrastructure", "Research Pack"),
+}
+
 
 def fallback_module_blueprint(module: str) -> dict[str, Any]:
     """Return a specific, conservative workflow definition for a generic fallback module."""
-    blueprint = FALLBACK_MODULE_BLUEPRINTS.get(str(module))
-    if blueprint:
-        return dict(blueprint)
-    return {
-        "module": str(module),
-        "family": "generic",
-        "focus": "Industrial engineering analysis",
-        "purpose": "Prepare, validate, compare and export the data for this module.",
-        "method": "Baseline / scenario comparison",
-        "inputs": "Name rows clearly and provide a numeric KPI or measure.",
-        "guardrail": "Confirm assumptions and verify results against the real operating context before acting.",
-        "first_run": "Replace illustrative values with observed data and record the source and units.",
-    }
+    name = str(module)
+    blueprint = dict(FALLBACK_MODULE_BLUEPRINTS.get(name, {}))
+    category, required_tier = FALLBACK_MODULE_CATALOG_META.get(
+        name, ("Industrial Engineering", "Starter")
+    )
+    blueprint.setdefault("module", name)
+    blueprint.setdefault("family", "generic")
+    blueprint.setdefault("focus", "Industrial engineering analysis")
+    blueprint.setdefault("purpose", "Prepare, validate, compare and export the data for this module.")
+    blueprint.setdefault("method", "Baseline / scenario comparison")
+    blueprint.setdefault("inputs", "Name rows clearly and provide a numeric KPI or measure.")
+    blueprint.setdefault("guardrail", "Confirm assumptions and verify results against the real operating context before acting.")
+    blueprint.setdefault("first_run", "Replace illustrative values with observed data and record the source and units.")
+    blueprint["category"] = category
+    blueprint["tier"] = required_tier
+    return blueprint
 
 
 def analyze_fallback_module(module: str, frame: pd.DataFrame) -> dict[str, Any]:
