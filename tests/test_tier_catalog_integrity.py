@@ -1,9 +1,11 @@
 """Regression checks for subscription menus and the public module catalogue."""
 
 import ast
+import re
 from pathlib import Path
 
 from industrial_platform import PLATFORM_CATALOG
+from industrial_experience import FALLBACK_MODULE_BLUEPRINTS
 from shoir_tier_capabilities import unique_modules
 
 
@@ -151,3 +153,29 @@ def test_legacy_module_stop_hook_keeps_shared_results_and_autosave():
     assert 'active_module in set(map(str, allowed))' in stop_hook
     assert 'render_universal_module_parity(active_module, phase="results")' in stop_hook
     assert 'save_user_workspace(st.session_state["current_user"], st.session_state)' in stop_hook
+
+
+
+def test_every_catalogued_module_has_a_specialist_route_or_named_fallback_blueprint():
+    app_source = APP_PATH.read_text(encoding="utf-8")
+    platform_source = (APP_PATH.parent / "industrial_platform.py").read_text(encoding="utf-8")
+    tree = ast.parse(app_source, filename=str(APP_PATH))
+    catalogue = _catalogue_entries(_top_level_assignments(tree))
+
+    app_renderer_names = set(re.findall(
+        r"""(?:if|elif)\s+mod\s*==\s*['"]([^'"]+)['"]""",
+        app_source,
+    ))
+    platform_renderer_names = set(re.findall(
+        r"""(?:if|elif)\s+module\s*==\s*['"]([^'"]+)['"]""",
+        platform_source,
+    ))
+    specialist_names = app_renderer_names | platform_renderer_names
+    named_fallback_names = set(FALLBACK_MODULE_BLUEPRINTS)
+    catalogue_names = set(catalogue)
+
+    assert len(catalogue_names) >= 85
+    uncovered = catalogue_names - specialist_names - named_fallback_names
+    assert not uncovered, {
+        "modules_without_specialist_route_or_named_fallback": sorted(uncovered)
+    }
