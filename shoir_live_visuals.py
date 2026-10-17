@@ -27,6 +27,12 @@ from shoir_performance import (
     limit_categories,
     sample_for_plot,
 )
+from shoir_module_customization import (
+    apply_display_labels,
+    display_field_label,
+    evaluate_kpi_target,
+    get_module_profile,
+)
 
 
 _MODULE_KEYS = {
@@ -616,9 +622,15 @@ _FRAGMENT = getattr(st, "fragment", lambda fn: fn)
 @_FRAGMENT
 def render_live_visualization_studio(module: str, *, expanded: bool = False, preferred_key: str | None = None) -> None:
     """Render the live chart studio beneath an active module."""
+    username = str(st.session_state.get("current_user", "unknown"))
+    profile = get_module_profile(st.session_state, module, username)
+    display_name = profile["display_name"]
     tables = discover_visual_tables(module, preferred_key=preferred_key)
-    with st.expander("📊 Live Engineering Visualization Studio", expanded=expanded):
-        st.caption("Charts use the current module/workspace data. Edit a table, change the controls, and the visualization updates on the next Streamlit rerun.")
+    with st.expander(f"📊 Live Engineering Visualization Studio · {display_name}", expanded=expanded):
+        st.caption("Charts use the current module/workspace data. Edit a table, change the controls, and the visualization updates on the next Streamlit rerun. Display labels and units affect presentation only.")
+        context = [x for x in (profile.get("project_name"), profile.get("site_name"), profile.get("owner_team")) if x]
+        if context:
+            st.caption(" · ".join(str(x) for x in context))
         if not tables:
             st.info("No result table is available yet. The workflow visual below shows the governed engineering path; it is not a measurement.")
             steps = ["Import", "Validate", "Analyze", "Visualize", "Decide", "Export"]
@@ -637,7 +649,7 @@ def render_live_visualization_studio(module: str, *, expanded: bool = False, pre
                 )
             )
             workflow_fig.update_layout(
-                title=f"{module} · Engineering workflow",
+                title=f"{display_name} · Engineering workflow",
                 height=260,
                 xaxis={"showgrid": False, "showticklabels": False, "zeroline": False},
                 yaxis={"visible": False},
@@ -657,8 +669,10 @@ def render_live_visualization_studio(module: str, *, expanded: bool = False, pre
             if preferred_labels:
                 default_source_index = preferred_labels[0]
         table_label = st.selectbox("Data source", labels, index=default_source_index, key=f"liveviz_source_{hash(module) & 0xFFFF:04x}")
-        df = tables[labels.index(table_label)][2]
-        _render_auto_kpi_dashboard(module, df, f"{hash(module) & 0xFFFF:04x}")
+        raw_df = tables[labels.index(table_label)][2]
+        profile = get_module_profile(st.session_state, module, username)
+        df = apply_display_labels(raw_df, profile)
+        _render_auto_kpi_dashboard(display_name, df, f"{hash(module) & 0xFFFF:04x}")
 
         nums = _numeric_columns(df)
         cats = _categorical_columns(df)
@@ -688,11 +702,13 @@ def render_live_visualization_studio(module: str, *, expanded: bool = False, pre
         c4, c5, c6 = st.columns([1.2, 1.2, 1.4])
         with c4:
             suggestions = ["Auto", "Line", "Bar", "Area", "Scatter", "Distribution", "Histogram", "Box", "Pie", "Pareto", "Waterfall", "Sankey", "Heatmap", "Correlation Heatmap", "Health Heatmap", "Control Chart", "SPC", "Anomaly Timeline", "Metric Trend", "Sensitivity Plot", "Gantt", "Network Map", "3D Scatter"]
-            chart_choice = st.selectbox("Visualization", suggestions, key=f"liveviz_chart_{hash(module) & 0xFFFF:04x}")
+            preferred_chart = profile.get("preferred_chart", "Auto")
+            chart_default = suggestions.index(preferred_chart) if preferred_chart in suggestions else 0
+            chart_choice = st.selectbox("Visualization", suggestions, index=chart_default, key=f"liveviz_chart_{hash(module) & 0xFFFF:04x}")
         with c5:
             aggregation = st.selectbox("Aggregation", ["Raw", "Mean", "Median", "Sum", "Count"], key=f"liveviz_agg_{hash(module) & 0xFFFF:04x}")
         with c6:
-            title = st.text_input("Chart title", value=f"{module} · {y or 'relationships'}", key=f"liveviz_title_{hash(module) & 0xFFFF:04x}")
+            title = st.text_input("Chart title", value=f"{display_name} · {y or 'relationships'}", key=f"liveviz_title_{hash(module) & 0xFFFF:04x}")
 
         filter_col = st.selectbox("Optional filter", ["(none)"] + cols, key=f"liveviz_filtercol_{hash(module) & 0xFFFF:04x}")
         filter_value = "All"
@@ -711,6 +727,22 @@ def render_live_visualization_studio(module: str, *, expanded: bool = False, pre
                 st.warning("No truthful visualization could be generated from the selected table.")
                 return
             actual_chart = "Universal Fallback"
+
+        # If this chart uses the configured primary KPI, draw the explicit
+        # user target as a reference line for supported two-dimensional views.
+        target_column = str(profile.get("primary_kpi") or "")
+        target_summary = None
+        if target_column and target_column in raw_df.columns and y == display_field_label(target_column, profile):
+            target_summary = evaluate_kpi_target(raw_df[target_column], profile)
+        if target_summary and actual_chart not in {"Pie", "Sankey", "Network Map", "3D Scatter", "Heatmap", "Correlation Heatmap", "Health Heatmap", "Gantt"}:
+            try:
+                fig.add_hline(
+                    y=float(target_summary["target"]),
+                    line_dash="dash",
+                    annotation_text=f"Target: {float(target_summary['target']):,.{int(profile.get('decimal_places', 2))}f} {target_summary.get('unit') or ''}".strip(),
+                )
+            except Exception:
+                pass
 
         q1, q2, q3, q4 = st.columns(4)
         q1.metric("Rows visualized", f"{len(prepared):,}")
