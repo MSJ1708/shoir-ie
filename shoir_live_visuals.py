@@ -98,6 +98,12 @@ _MODULE_KEYS = {
     "Excel Data Cleaning & Import": ["excel_studio_visual_df", "excel_studio_result"],
     "Research AI": ["research_ai_dataset"],
     "ShadowShift — Micro-Loss & Recovery Intelligence": ["shadowshift_event_df", "shadowshift_loss_summary_df", "shadowshift_next_experiments_df", "shadowshift_experiments_df"],
+    "Autonomous Global Supply Chain & Resilient Logistics Network": ["resilience_global_supply_routes_df", "resilience_global_supply_shortages_df", "resilience_global_supply_capacity_df"],
+    "Zero-Waste Closed-Loop Mega-Factory (Industrial Symbiosis Engine)": ["industrial_symbiosis_result_df"],
+    "Real-Time Urban Mobility & Smart Infrastructure Grid": ["urban_mobility_result_df"],
+    "Fully Automated Emergency Response & Humanitarian Disaster Logistics System": ["humanitarian_allocations_df", "humanitarian_gaps_df", "humanitarian_depot_utilization_df"],
+    "Autonomous Kinetic-Digital Twin (AKDT) for Industrial Logistics Resilience": ["akdt_asset_health_df", "akdt_supply_routes_df", "akdt_supply_shortages_df"],
+    "L-SIMS — Local Capability & Dynamic Industrial Readiness Simulator": ["lsims_local_allocations_df", "lsims_local_gaps_df", "lsims_supplier_capacity_df"],
 }
 
 # Conflict-resolution registry: richer enterprise result aliases are additive.
