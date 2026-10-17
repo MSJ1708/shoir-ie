@@ -43,6 +43,8 @@ from industrial_experience import (
     FALLBACK_MODULE_BLUEPRINTS,
     analyze_fallback_module,
     fallback_module_blueprint,
+    render_module_run_history,
+    save_module_analysis_run,
 )
 
 LARGE_TABLE_ROWS = 50_000
@@ -778,17 +780,35 @@ def _render_results(module: str, keys: dict[str, str]) -> None:
                 key=f"module_playbook_run_{token}",
                 disabled=result_df.empty,
             ):
+                playbook_started_ns = time.perf_counter_ns()
                 try:
                     playbook_analysis = analyze_fallback_module(module, result_df)
+                    run_record = None
+                    try:
+                        run_record = save_module_analysis_run(
+                            module, username, profile, result_df, playbook_analysis,
+                            duration_ms=max(0.0, (time.perf_counter_ns() - playbook_started_ns) / 1_000_000.0),
+                            status="Completed",
+                        )
+                    except Exception as persist_exc:
+                        st.warning(
+                            "The review completed, but saved history could not be updated: "
+                            f"{type(persist_exc).__name__}: {persist_exc}"
+                        )
                     st.session_state[result_key] = {
                         "signature": result_signature,
                         "data_signature": lightweight_frame_signature(result_df),
                         "source_key": result_state_key,
                         "analysis": playbook_analysis,
+                        "run_id": run_record.get("run_id") if run_record else None,
+                        "input_hash": run_record.get("input_hash") if run_record else None,
                     }
                     cached_playbook = st.session_state[result_key]
                     expand_playbook = True
-                    st.success("Module-specific review completed against the selected result dataset.")
+                    st.success(
+                        "Module-specific review completed"
+                        + (f" and saved as {run_record['run_id']}." if run_record else ".")
+                    )
                 except (TypeError, ValueError, KeyError, ZeroDivisionError) as exc:
                     st.session_state.pop(result_key, None)
                     cached_playbook = None
@@ -829,19 +849,17 @@ def _render_results(module: str, keys: dict[str, str]) -> None:
                         numeric_candidates = [str(column) for column in display_analysis.columns if pd.api.types.is_numeric_dtype(display_analysis[column])]
                         y_label = numeric_candidates[-1] if numeric_candidates else None
                     if y_label:
-                        preferred = profile.get("preferred_chart", "Auto")
-                        if preferred not in {"Line", "Bar", "Area", "Scatter"}:
-                            preferred = str(analysis.get("chart_kind", "bar")).title()
-                        title = f"{profile['display_name']} · {y_label}"
-                        if preferred == "Line" and x_label:
-                            fig = px.line(display_analysis, x=x_label, y=y_label, markers=True, title=title)
-                        elif preferred == "Area" and x_label:
-                            fig = px.area(display_analysis, x=x_label, y=y_label, title=title)
-                        elif preferred == "Scatter" and x_label:
-                            fig = px.scatter(display_analysis, x=x_label, y=y_label, title=title)
-                        else:
-                            fig = px.bar(display_analysis, x=x_label, y=y_label, title=title) if x_label else px.bar(display_analysis, y=y_label, title=title)
-                        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": True, "responsive": True})
+                        fig, actual_chart, chart_notice = build_profiled_module_figure(
+                            analysis_df, chart_x, chart_y, profile,
+                            f"{profile['display_name']} · {y_label}",
+                        )
+                        if chart_notice:
+                            st.info(chart_notice)
+                        if fig is not None:
+                            st.caption(f"Visualization: {actual_chart} · configured for this module profile.")
+                            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": True, "responsive": True})
+                        if cached_playbook.get("run_id"):
+                            st.caption(f"Saved run: {cached_playbook['run_id']} · Input SHA-256: {cached_playbook.get('input_hash', 'unavailable')}")
                 st.warning(analysis.get("guardrail", blueprint["guardrail"]))
                 st.caption("Calculated output is based on the selected result table, not an independent verification of real-world performance.")
 
@@ -954,6 +972,55 @@ def _render_results(module: str, keys: dict[str, str]) -> None:
             st.download_button("🗂️ Download evidence bundle", data=zip_bytes, file_name=f"shoir_ie_{_slug(module)}_evidence.zip", mime="application/zip", use_container_width=True, key=f"module_parity_zip_{token}")
 
     st.caption("Persistence: the parity dataset, validation snapshot and results summary live in workspace state and are captured by Shoir-IE autosave; the configured durable backend remains authoritative in managed deployments.")
+
+
+    st.markdown("### 💾 Run history")
+    st.caption(
+        "Save the selected result table with its input hash, configured profile, data-quality checks and a dated snapshot. "
+        "This action does not re-run the native module calculation."
+    )
+    save_col, note_col = st.columns([1.0, 2.0])
+    with save_col:
+        save_snapshot = st.button(
+            "📌 Save result snapshot",
+            type="primary",
+            use_container_width=True,
+            disabled=result_df.empty,
+            key=f"module_parity_save_run_{token}",
+        )
+    with note_col:
+        st.caption("Snapshots are private to your account and module. Oversized payloads retain schema and hash even if raw data is omitted.")
+    if save_snapshot:
+        try:
+            snapshot_analysis = {
+                "result": result_df.copy(deep=True),
+                "metrics": {
+                    "Source dataset": selected_label,
+                    "Rows": int(len(result_df)),
+                    "Columns": int(len(result_df.columns)),
+                    "Numeric measures": int(summary.get("Numeric Measures", 0)),
+                    "Data quality score": float(validation.get("score", 0.0)),
+                    "Readiness": str(summary.get("Readiness", "REVIEW")),
+                    "Validation status": str(validation.get("status", "REVIEW")),
+                },
+                "method": "Universal module result snapshot",
+                "guardrail": (
+                    "This record captures the selected result table and validation summary. "
+                    "It does not re-run a native calculation or independently verify operational outcomes."
+                ),
+            }
+            saved_run = save_module_analysis_run(
+                module, username, profile, result_df, snapshot_analysis,
+                duration_ms=0.0, status="Snapshot",
+            )
+            st.session_state[f"module_parity_last_run_{token}"] = saved_run["run_id"]
+            st.success(f"Result snapshot saved as {saved_run['run_id']}.")
+            if saved_run["snapshot_status"] != "Complete":
+                st.info(saved_run["snapshot_status"] + ". Run metadata and hash were retained.")
+        except Exception as exc:
+            st.error(f"Result snapshot could not be saved: {type(exc).__name__}: {exc}")
+
+    render_module_run_history(module, username, key_suffix=token)
 
 
 def render_universal_module_parity(module: str, *, phase: str = "prepare") -> None:
