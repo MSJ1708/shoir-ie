@@ -10,6 +10,9 @@ from industrial_platform import (
     tier_allows, normalize_tier, PLATFORM_CATALOG, ml_demand_forecast, predictive_maintenance_score, currency_convert, save_scenario, scenario_table,
     analyze_experiment_scenarios, save_experiment,
 )
+from shoir_tier_capabilities import unique_modules
+
+)
 
 def test_catalog_and_tiers():
     names={x["name"] for x in PLATFORM_CATALOG}
@@ -163,3 +166,10 @@ def test_save_experiment_persists_all_seven_columns(tmp_path):
     assert row[0] == experiment_id
     assert row[2] == "Experiment Lab"
     assert row[5] == "tester"
+
+
+
+def test_unique_modules_preserves_order_and_removes_duplicates():
+    assert unique_modules(["MILP Solvers", "AI Copilot", "MILP Solvers", "", None, "AI Copilot"]) == [
+        "MILP Solvers", "AI Copilot"
+    ]
