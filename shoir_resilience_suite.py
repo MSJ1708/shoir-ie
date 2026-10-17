@@ -16,7 +16,7 @@ from typing import Any, Mapping, Sequence
 
 import numpy as np
 import pandas as pd
-from scipy.optimize import linprog
+from scipy.optimize import Bounds, LinearConstraint, milp
 
 
 GLOBAL_SUPPLY = "Autonomous Global Supply Chain & Resilient Logistics Network"
@@ -98,8 +98,9 @@ def solve_transport_allocation(
     risk_weight: float = 0.25,
     carbon_weight: float = 0.0,
     route_adjustments: Mapping[tuple[str, str], float] | None = None,
+    integer_units: bool = True,
 ) -> dict[str, Any]:
-    """Solve a transportation LP with explicit shortage variables and finite penalties.
+    """Solve a transportation MILP/LP with explicit shortage variables and finite penalties.
 
     The shortage variables ensure the model stays feasible when demand exceeds capacity;
     shortages are visible outputs and never silently treated as delivered units.
@@ -121,6 +122,10 @@ def solve_transport_allocation(
     effective_capacity = _number(s, "Capacity").to_numpy() * max(0.0, float(capacity_scale))
     effective_capacity = np.asarray([0.0 if name in disabled else cap for name, cap in zip(s_names, effective_capacity)])
     raw_demand = _number(d, "Demand").to_numpy() * max(0.0, float(demand_scale))
+    if integer_units:
+        # The default represents countable units; round fractional demand upward
+        # so the solver never silently under-plans a partial unit.
+        raw_demand = np.ceil(np.maximum(0.0, raw_demand) - 1e-9)
     priorities = np.clip(_number(d, "Priority", 1.0).to_numpy(), 1.0, 5.0)
     due = _number(d, "Due Days").to_numpy()
     routes_adjust = route_adjustments or {}
@@ -154,7 +159,25 @@ def solve_transport_allocation(
             a_eq[j, i * nd + j] = 1.0
         a_eq[j, shipment_count + j] = 1.0
     b_eq = raw_demand
-    result = linprog(objective, A_ub=a_ub, b_ub=b_ub, A_eq=a_eq, b_eq=b_eq, bounds=(0, None), method="highs")
+    constraint_matrix = np.vstack([a_ub, a_eq])
+    lower_bounds = np.concatenate([np.full(ns, -np.inf, dtype=float), b_eq])
+    upper_bounds = np.concatenate([b_ub, b_eq])
+    integrality = np.ones(shipment_count + nd, dtype=np.int32) if integer_units else np.zeros(shipment_count + nd, dtype=np.int32)
+    try:
+        result = milp(
+            c=objective,
+            integrality=integrality,
+            bounds=Bounds(np.zeros(shipment_count + nd), np.full(shipment_count + nd, np.inf)),
+            constraints=LinearConstraint(constraint_matrix, lower_bounds, upper_bounds),
+            options={"time_limit": 10.0},
+        )
+    except Exception as exc:
+        return {
+            "status": f"Solver issue: {type(exc).__name__}",
+            "routes": pd.DataFrame(), "shortages": pd.DataFrame(), "supplier_summary": pd.DataFrame(),
+            "metrics": {"service_level_pct": 0.0, "unmet_demand": float(raw_demand.sum())},
+            "message": "The optimizer could not solve these inputs. Review values and try again.",
+        }
 
     if not result.success:
         return {
@@ -214,7 +237,7 @@ def solve_transport_allocation(
 
 def simulate_disruption_scenarios(
     suppliers: pd.DataFrame, demands: pd.DataFrame, *, iterations: int = 50, seed: int = 17,
-    outage_probability: float = 0.12, demand_cv: float = 0.12,
+    outage_probability: float = 0.12, demand_cv: float = 0.12, integer_units: bool = True,
 ) -> pd.DataFrame:
     """Small, reproducible Monte Carlo stress-test over synthetic supply shocks."""
     rng = np.random.default_rng(int(seed))
@@ -227,7 +250,7 @@ def simulate_disruption_scenarios(
         disabled = [name for name in names if rng.random() < outage_probability]
         demand_factor = max(0.0, float(rng.normal(1.0, demand_cv)))
         cap_factor = float(np.clip(rng.normal(0.94, 0.10), 0.20, 1.15))
-        result = solve_transport_allocation(suppliers, demands, disabled_suppliers=disabled, capacity_scale=cap_factor, demand_scale=demand_factor)
+        result = solve_transport_allocation(suppliers, demands, disabled_suppliers=disabled, capacity_scale=cap_factor, demand_scale=demand_factor, integer_units=integer_units)
         m = result["metrics"]
         rows.append({
             "Iteration": iteration, "Service %": float(m.get("service_level_pct", 0.0)),
@@ -678,12 +701,14 @@ def _render_transport(module: str, tier: str, username: str, *, humanitarian: bo
         disabled = st.selectbox("Temporarily unavailable supplier / depot", labels, index=0, key=_state_key(module, "disabled"))
         risk_weight = st.slider("Supplier risk importance", 0.0, 5.0, 0.25, 0.1, key=_state_key(module, "risk_weight"))
         cost_weight = st.slider("Direct-cost importance", 0.0, 5.0, 1.0, 0.1, key=_state_key(module, "cost_weight"))
+        allow_fractional = st.checkbox("Allow fractional shipment units (LP instead of MILP)", value=False, key=_state_key(module, "fractional_units"))
         if humanitarian:
             st.info("Priorities represent relief urgency in this sandbox. Confirmed local needs, access constraints and humanitarian coordination always take precedence over model rankings.")
     model = solve_transport_allocation(
         suppliers, demands, disabled_suppliers=[] if disabled == disabled_default else [disabled],
         capacity_scale=1.0 - capacity_loss / 100.0, demand_scale=max(0.0, 1.0 + demand_shock / 100.0),
         cost_weight=cost_weight, lead_weight=lead_weight, risk_weight=risk_weight, carbon_weight=carbon_weight,
+        integer_units=not allow_fractional,
     )
     if humanitarian:
         st.session_state["humanitarian_allocations_df"] = model["routes"].copy(deep=True)
@@ -704,7 +729,7 @@ def _render_transport(module: str, tier: str, username: str, *, humanitarian: bo
             seed = st.number_input("Reproducible random seed", min_value=0, max_value=999999, value=17, step=1, key=_state_key(module, "mc_seed"))
         with right:
             if st.button("Run stress test", type="primary", key=_state_key(module, "mc_run")):
-                sim = simulate_disruption_scenarios(suppliers, demands, iterations=int(reps), seed=int(seed), outage_probability=outage_p, demand_cv=demand_cv)
+                sim = simulate_disruption_scenarios(suppliers, demands, iterations=int(reps), seed=int(seed), outage_probability=outage_p, demand_cv=demand_cv, integer_units=not allow_fractional)
                 st.session_state[_state_key(module, "mc_results")] = sim
             sim = st.session_state.get(_state_key(module, "mc_results"))
             if isinstance(sim, pd.DataFrame) and not sim.empty:
@@ -715,7 +740,7 @@ def _render_transport(module: str, tier: str, username: str, *, humanitarian: bo
             else:
                 st.caption("Run the stress test to create a reproducible uncertainty distribution.")
     with method_tab:
-        st.write("The allocation uses a linear transportation model with supply-capacity limits, destination demand balance and explicit shortage variables. Route scores blend user-weighted cost, lead days, supplier risk and a carbon-intensity proxy.")
+        st.write("The default is a mixed-integer transportation model with supply-capacity limits, destination demand balance and explicit shortage variables. It allocates whole units; fractional mode switches to a linear program. Route scores blend user-weighted cost, lead days, supplier risk and a carbon-intensity proxy.")
         st.write("Monte Carlo trials vary demand and available capacity and may disable suppliers. They are synthetic sensitivity tests; they do not represent a calibrated forecast, live availability or a guarantee that all demand can be fulfilled.")
         if humanitarian:
             st.warning("Humanitarian aid quantities and urgency weights must be validated with qualified local coordinators. This screen does not determine real deployment routes or replace safety and access assessments.")
