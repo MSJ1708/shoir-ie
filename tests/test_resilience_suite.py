@@ -71,6 +71,28 @@ def test_integer_mode_allocates_whole_units_and_lp_mode_can_fractionate():
     assert abs(float(fractional_result["metrics"]["total_demand"]) - 2.2) < 1e-7
 
 
+def test_empty_supplier_table_keeps_all_demand_visible_as_shortage():
+    demands = pd.DataFrame([{"Destination": "D1", "Demand": 7, "Priority": 5, "Due Days": 2}])
+    result = solve_transport_allocation(pd.DataFrame(), demands)
+    assert result["status"] == "No suppliers available"
+    assert result["metrics"]["total_demand"] == 7
+    assert result["metrics"]["unmet_demand"] == 7
+    assert float(result["shortages"].iloc[0]["Shortage"]) == 7
+
+
+def test_local_content_weight_can_prefer_a_higher_local_share_supplier():
+    suppliers = pd.DataFrame([
+        {"Supplier": "Import-like source", "Capacity": 10, "Unit Cost": 100, "Lead Days": 1, "Risk %": 0, "Carbon kg/unit": 0, "Local Share %": 0},
+        {"Supplier": "Local source", "Capacity": 10, "Unit Cost": 100, "Lead Days": 1, "Risk %": 0, "Carbon kg/unit": 0, "Local Share %": 100},
+    ])
+    demands = pd.DataFrame([{"Destination": "Plant", "Demand": 5, "Priority": 3, "Due Days": 5}])
+    without_preference = solve_transport_allocation(suppliers, demands, local_content_weight=0)
+    with_preference = solve_transport_allocation(suppliers, demands, local_content_weight=1)
+    assert without_preference["status"] == "Optimal"
+    assert with_preference["status"] == "Optimal"
+    assert with_preference["routes"]["Supplier"].eq("Local source").all()
+
+
 def test_supplier_disruption_does_not_hide_lost_capacity():
     suppliers = _default_data(GLOBAL_SUPPLY)["suppliers"]
     demands = _default_data(GLOBAL_SUPPLY)["demands"]
