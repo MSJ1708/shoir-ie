@@ -411,7 +411,7 @@ def _build_export_xlsx(module: str, df: pd.DataFrame, validation: dict[str, Any]
         results_df = pd.DataFrame()
 
     username = str(st.session_state.get("current_user", "unknown"))
-    profile = get_module_profile(st.session_state, module, username, valid_columns=list(df.columns))
+    profile = get_module_profile(st.session_state, module, username)
     profile_rows = [
         {"Setting": key.replace("_", " ").title(), "Value": json.dumps(value, ensure_ascii=False, default=_json_default) if isinstance(value, (dict, list)) else str(value)}
         for key, value in profile.items()
@@ -679,10 +679,7 @@ def _render_results(module: str, keys: dict[str, str]) -> None:
     st.session_state[keys["validation"]] = validation
 
     username = str(st.session_state.get("current_user", "unknown"))
-    profile = get_module_profile(
-        st.session_state, module, username,
-        valid_columns=list(result_df.columns) if not result_df.empty else None,
-    )
+    profile = get_module_profile(st.session_state, module, username)
     st.markdown(f"### 📈 Results — {html.escape(profile['display_name'])}")
     context = [x for x in (profile["project_name"], profile["site_name"], profile["owner_team"]) if x]
     if context:
@@ -704,7 +701,8 @@ def _render_results(module: str, keys: dict[str, str]) -> None:
         target_text = f"{target_result['target']:,.{precision}f}" + (f" {html.escape(unit)}" if unit else "")
         delta_text = f"{target_result['difference']:+,.{precision}f} vs target"
         target_cols = st.columns(3)
-        target_cols[0].metric(f"{metric_label} · {target_result['statistic']}", actual_text, delta=delta_text)
+        delta_color = "normal" if target_result["direction"] == "At least" else "inverse" if target_result["direction"] == "At most" else "off"
+        target_cols[0].metric(f"{metric_label} · {target_result['statistic']}", actual_text, delta=delta_text, delta_color=delta_color)
         target_cols[1].metric("Configured target", target_text, delta=target_result["direction"])
         target_cols[2].metric("Target check", "MEETS TARGET" if target_result["passed"] else "REVIEW")
         note = (
