@@ -4,6 +4,8 @@ import ast
 import re
 from pathlib import Path
 
+import pandas as pd
+
 from industrial_platform import PLATFORM_CATALOG
 from industrial_experience import FALLBACK_MODULE_BLUEPRINTS
 from shoir_tier_capabilities import unique_modules
