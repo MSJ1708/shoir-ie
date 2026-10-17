@@ -22,6 +22,9 @@ from industrial_experience import (
     research_runs_frame,
     save_project,
     analyze_fallback_module,
+    fallback_module_blueprint,
+    _starter_data,
+    FALLBACK_MODULE_BLUEPRINTS,
 )
 
 
@@ -301,3 +304,23 @@ def test_production_fallback_coerces_excel_numeric_strings_without_mutating_inpu
     assert result["metrics"]["Weighted good-unit yield (%)"] == 91.67
     assert result["result"]["Good_Unit_Yield_pct"].round(2).tolist() == [95.0, 90.0]
     pd.testing.assert_frame_equal(source, original)
+
+
+
+def test_all_named_fallback_modules_run_on_their_starter_data():
+    failures = []
+    for module in sorted(FALLBACK_MODULE_BLUEPRINTS):
+        starter = _starter_data(module)
+        try:
+            analysis = analyze_fallback_module(module, starter)
+            result = analysis.get("result")
+            metrics = analysis.get("metrics")
+            if not isinstance(result, pd.DataFrame) or result.empty:
+                failures.append(f"{module}: analysis returned no result rows")
+            if not isinstance(metrics, dict):
+                failures.append(f"{module}: analysis returned no metrics dictionary")
+            if not analysis.get("method") or not analysis.get("guardrail"):
+                failures.append(f"{module}: missing method or interpretation guardrail")
+        except Exception as exc:
+            failures.append(f"{module}: {type(exc).__name__}: {exc}")
+    assert not failures, "\\n".join(failures)
