@@ -1865,6 +1865,14 @@ def analyze_fallback_module(module: str, frame: pd.DataFrame) -> dict[str, Any]:
                 return found
         return next((str(c) for c in result.columns if not pd.api.types.is_numeric_dtype(result[c])), None)
 
+    def record_completeness(columns: list[str]) -> pd.Series:
+        block = result[columns]
+        present = block.notna().copy()
+        for field in columns:
+            if pd.api.types.is_object_dtype(block[field]) or pd.api.types.is_string_dtype(block[field]):
+                present[field] = present[field] & block[field].astype(str).str.strip().ne("")
+        return present.mean(axis=1) * 100.0
+
     if family == "quality":
         measured = column("Measured_Value", "Measurement", "Value")
         low_name, high_name = column("Lower_Spec", "LSL"), column("Upper_Spec", "USL")
@@ -2047,7 +2055,7 @@ def analyze_fallback_module(module: str, frame: pd.DataFrame) -> dict[str, Any]:
         field_names = [name for name in ("Section", "Source_Data_Linked", "Equation_Check", "Reference_Check", "Review_Status") if name in result.columns]
         if not field_names:
             raise ValueError("For document checks, include sections plus source/equation/reference/review status fields.")
-        result["Field_Completeness_pct"] = result[field_names].notna().mean(axis=1)*100
+        result["Field_Completeness_pct"] = record_completeness(field_names)
         metrics["Artifacts / sections reviewed"] = len(result)
         metrics["Mean field completeness (%)"] = round(float(result["Field_Completeness_pct"].mean()), 2)
         chart_x, chart_y = first_categorical("Section", "Artifact_ID", "Document"), "Field_Completeness_pct"
@@ -2055,7 +2063,7 @@ def analyze_fallback_module(module: str, frame: pd.DataFrame) -> dict[str, Any]:
         field_names = [name for name in ("Assumptions", "Proof_Status", "Test_Status", "Claim", "Equation_Reference") if name in result.columns]
         if not field_names:
             raise ValueError("For formalization review, include claims, assumptions and proof/test status fields.")
-        result["Verification_Record_Completeness_pct"] = result[field_names].notna().mean(axis=1)*100
+        result["Verification_Record_Completeness_pct"] = record_completeness(field_names)
         metrics["Claims / artifacts reviewed"] = len(result)
         metrics["Mean verification-record completeness (%)"] = round(float(result["Verification_Record_Completeness_pct"].mean()), 2)
         chart_x, chart_y = first_categorical("Artifact_ID", "Claim"), "Verification_Record_Completeness_pct"
@@ -2063,7 +2071,7 @@ def analyze_fallback_module(module: str, frame: pd.DataFrame) -> dict[str, Any]:
         field_names = [name for name in ("Artifact_ID", "Artifact_Type", "Owner", "SHA256", "Signature_Status", "Verification_Status") if name in result.columns]
         if not field_names:
             raise ValueError("For provenance review, include artifact identity, owner and verification-status fields.")
-        result["Provenance_Metadata_Completeness_pct"] = result[field_names].notna().mean(axis=1)*100
+        result["Provenance_Metadata_Completeness_pct"] = record_completeness(field_names)
         metrics["Artifacts reviewed"] = len(result)
         metrics["Mean provenance metadata completeness (%)"] = round(float(result["Provenance_Metadata_Completeness_pct"].mean()), 2)
         chart_x, chart_y = first_categorical("Artifact_ID", "Artifact_Type"), "Provenance_Metadata_Completeness_pct"
@@ -2086,7 +2094,7 @@ def analyze_fallback_module(module: str, frame: pd.DataFrame) -> dict[str, Any]:
         field_names = [name for name in ("Dimensional_Compatible", "Constraint_Preserved", "Correspondence", "Evidence_Note") if name in result.columns]
         if not field_names:
             raise ValueError("For cross-domain mapping, include correspondence, dimension compatibility or constraint preservation fields.")
-        result["Mapping_Record_Completeness_pct"] = result[field_names].notna().mean(axis=1)*100
+        result["Mapping_Record_Completeness_pct"] = record_completeness(field_names)
         metrics["Mappings reviewed"] = len(result)
         metrics["Mean mapping-record completeness (%)"] = round(float(result["Mapping_Record_Completeness_pct"].mean()), 2)
         chart_x, chart_y = first_categorical("Source_Entity", "Source_Domain", "Mapping_ID"), "Mapping_Record_Completeness_pct"
