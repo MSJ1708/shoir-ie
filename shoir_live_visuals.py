@@ -662,13 +662,20 @@ def render_live_visualization_studio(module: str, *, expanded: bool = False, pre
             )
             return
 
+        def _reset_stale_choice(key: str, options: list[Any]) -> None:
+            current = st.session_state.get(key)
+            if key in st.session_state and current not in options:
+                st.session_state.pop(key, None)
+
         labels = [label for label, _, _ in tables]
         default_source_index = 0
         if preferred_key:
             preferred_labels = [i for i, (_, key, _) in enumerate(tables) if key == preferred_key]
             if preferred_labels:
                 default_source_index = preferred_labels[0]
-        table_label = st.selectbox("Data source", labels, index=default_source_index, key=f"liveviz_source_{hash(module) & 0xFFFF:04x}")
+        source_key = f"liveviz_source_{hash(module) & 0xFFFF:04x}"
+        _reset_stale_choice(source_key, labels)
+        table_label = st.selectbox("Data source", labels, index=default_source_index, key=source_key)
         raw_df = tables[labels.index(table_label)][2]
         profile = get_module_profile(st.session_state, module, username)
         df = apply_display_labels(raw_df, profile)
@@ -687,13 +694,20 @@ def render_live_visualization_studio(module: str, *, expanded: bool = False, pre
         x_options = ["(none)"] + cols
         default_x = next((c for c in dates if c != default_y), next((c for c in cats if c != default_y), "(none)"))
 
+        x_key = f"liveviz_x_{hash(module) & 0xFFFF:04x}"
+        y_key = f"liveviz_y_{hash(module) & 0xFFFF:04x}"
+        z_key = f"liveviz_z_{hash(module) & 0xFFFF:04x}"
+        y_options = ["(none)"] + nums
+        _reset_stale_choice(x_key, x_options)
+        _reset_stale_choice(y_key, y_options)
+        _reset_stale_choice(z_key, y_options)
         c1, c2, c3 = st.columns([1.25, 1.25, 1])
         with c1:
-            x_choice = st.selectbox("X-axis", x_options, index=x_options.index(default_x), key=f"liveviz_x_{hash(module) & 0xFFFF:04x}")
+            x_choice = st.selectbox("X-axis", x_options, index=x_options.index(default_x), key=x_key)
         with c2:
-            y_choice = st.selectbox("Y-axis", ["(none)"] + nums, index=1 if default_y else 0, key=f"liveviz_y_{hash(module) & 0xFFFF:04x}")
+            y_choice = st.selectbox("Y-axis", y_options, index=1 if default_y else 0, key=y_key)
         with c3:
-            z_choice = st.selectbox("3D Z-axis", ["(none)"] + nums, index=0, key=f"liveviz_z_{hash(module) & 0xFFFF:04x}")
+            z_choice = st.selectbox("3D Z-axis", y_options, index=0, key=z_key)
 
         x = None if x_choice == "(none)" else x_choice
         y = None if y_choice == "(none)" else y_choice
@@ -704,18 +718,29 @@ def render_live_visualization_studio(module: str, *, expanded: bool = False, pre
             suggestions = ["Auto", "Line", "Bar", "Area", "Scatter", "Distribution", "Histogram", "Box", "Pie", "Pareto", "Waterfall", "Sankey", "Heatmap", "Correlation Heatmap", "Health Heatmap", "Control Chart", "SPC", "Anomaly Timeline", "Metric Trend", "Sensitivity Plot", "Gantt", "Network Map", "3D Scatter"]
             preferred_chart = profile.get("preferred_chart", "Auto")
             chart_default = suggestions.index(preferred_chart) if preferred_chart in suggestions else 0
-            chart_choice = st.selectbox("Visualization", suggestions, index=chart_default, key=f"liveviz_chart_{hash(module) & 0xFFFF:04x}")
+            chart_key = f"liveviz_chart_{hash(module) & 0xFFFF:04x}"
+            _reset_stale_choice(chart_key, suggestions)
+            chart_choice = st.selectbox("Visualization", suggestions, index=chart_default, key=chart_key)
         with c5:
-            aggregation = st.selectbox("Aggregation", ["Raw", "Mean", "Median", "Sum", "Count"], key=f"liveviz_agg_{hash(module) & 0xFFFF:04x}")
+            aggregation_options = ["Raw", "Mean", "Median", "Sum", "Count"]
+            aggregation_key = f"liveviz_agg_{hash(module) & 0xFFFF:04x}"
+            _reset_stale_choice(aggregation_key, aggregation_options)
+            aggregation = st.selectbox("Aggregation", aggregation_options, key=aggregation_key)
         with c6:
             title = st.text_input("Chart title", value=f"{display_name} · {y or 'relationships'}", key=f"liveviz_title_{hash(module) & 0xFFFF:04x}")
 
-        filter_col = st.selectbox("Optional filter", ["(none)"] + cols, key=f"liveviz_filtercol_{hash(module) & 0xFFFF:04x}")
+        filter_options = ["(none)"] + cols
+        filter_key = f"liveviz_filtercol_{hash(module) & 0xFFFF:04x}"
+        _reset_stale_choice(filter_key, filter_options)
+        filter_col = st.selectbox("Optional filter", filter_options, key=filter_key)
         filter_value = "All"
         if filter_col != "(none)":
             filter_values_source = sample_for_plot(df, max_points=20000, chart="filter")
             values = limit_categories(filter_values_source[filter_col], 500)
-            filter_value = st.selectbox("Filter value", ["All"] + values, key=f"liveviz_filterval_{hash(module) & 0xFFFF:04x}")
+            filter_value_options = ["All"] + values
+            filter_value_key = f"liveviz_filterval_{hash(module) & 0xFFFF:04x}"
+            _reset_stale_choice(filter_value_key, filter_value_options)
+            filter_value = st.selectbox("Filter value", filter_value_options, key=filter_value_key)
 
         actual_chart = _suggest_chart(df, x, y) if chart_choice == "Auto" else chart_choice
         prepared = _prepare(df, x, y, aggregation, None if filter_col == "(none)" else filter_col, filter_value)
