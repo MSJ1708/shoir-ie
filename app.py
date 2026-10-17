@@ -33,7 +33,7 @@ from workspace_persistence import ensure_workspace_state_db, load_user_workspace
 from shoir_visual_system import apply_shoir_design_system, render_workspace_status
 from shoir_live_visuals import render_live_visualization_studio, discover_visual_tables
 from shoir_module_parity import render_universal_module_parity
-from shoir_tier_capabilities import MODULE_EXPLORER_TIERS
+from shoir_tier_capabilities import MODULE_EXPLORER_TIERS, unique_modules
 from shoir_copilot_orchestrator import build_workflow_plan, recommend_module, run_orchestration, stage_copilot_decision
 from shoir_digital_thread import render_global_project_digital_thread
 from shoir_enterprise_services import render_enterprise_bridge
@@ -1881,7 +1881,7 @@ else:
 
 # Cumulative tier lists inherit prior features. Keep one entry per module so
 # navigation and tier search never show repeated options.
-allowed_modules = list(dict.fromkeys(allowed_modules))
+allowed_modules = unique_modules(allowed_modules)
 
 # Administration is an explicit privilege, never a normal tier feature.
 # This prevents stale session state or tier membership from exposing the
