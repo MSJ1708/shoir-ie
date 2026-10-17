@@ -276,3 +276,24 @@ def test_quality_maintenance_and_sustainability_fallback_outputs_are_explicit():
     assert "Calculated_tCO2e" in sustainability["result"]
     assert "Calculated total tCO2e" in sustainability["metrics"]
     assert "emission factors" in sustainability["guardrail"].lower() or "emission factor" in sustainability["guardrail"].lower()
+
+
+
+def test_fallback_blueprint_categories_and_tiers_match_the_catalogue():
+    from industrial_experience import FALLBACK_MODULE_BLUEPRINTS, FALLBACK_MODULE_CATALOG_META
+
+    assignments = _app_assignments()
+    app_catalogue = ast.literal_eval(assignments["MODULE_CATALOG"])
+    app_catalogue.extend(PLATFORM_CATALOG)
+    for extra in ("_IOS_CATALOG_ENTRY", "_VENTURE_CATALOG_ENTRY"):
+        if extra in assignments:
+            app_catalogue.append(ast.literal_eval(assignments[extra]))
+    unique_catalogue = {}
+    for entry in app_catalogue:
+        unique_catalogue.setdefault(entry["name"], entry)
+
+    assert set(FALLBACK_MODULE_BLUEPRINTS) == set(FALLBACK_MODULE_CATALOG_META)
+    for module, (category, tier) in FALLBACK_MODULE_CATALOG_META.items():
+        assert module in unique_catalogue, module
+        assert unique_catalogue[module]["category"] == category, module
+        assert unique_catalogue[module]["tier"] == tier, module
