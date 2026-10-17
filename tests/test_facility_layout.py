@@ -1,6 +1,6 @@
 import pandas as pd
 
-from shoir_facility_layout import _flow_matrix, _slp_frame, _matrix
+from shoir_facility_layout import _flow_matrix, _slp_frame, _matrix, _slp_heatmap_values
 
 
 def _departments():
@@ -72,3 +72,30 @@ def test_route_scenario_respects_from_to_direction():
     path, distance, _ = _shortest_path(flows, "D2", "D1")
     assert path == []
     assert distance == float("inf")
+
+
+
+def test_slp_heatmap_conversion_is_pandas_compatible_and_preserves_unconnected_cells():
+    matrix = pd.DataFrame(
+        {
+            "D1": ["", "A", "X"],
+            "D2": ["E", "—", "U"],
+            "D3": ["I", "O", ""],
+        },
+        index=["D1", "D2", "D3"],
+    )
+
+    heatmap = _slp_heatmap_values(matrix)
+
+    assert list(heatmap.columns) == list(matrix.columns)
+    assert list(heatmap.index) == list(matrix.index)
+    assert heatmap.loc["D2", "D1"] == 4
+    assert heatmap.loc["D3", "D1"] == -1
+    assert heatmap.loc["D1", "D2"] == 3
+    assert heatmap.loc["D3", "D2"] == 0
+    assert heatmap.loc["D1", "D3"] == 2
+    assert heatmap.loc["D2", "D3"] == 1
+    assert pd.isna(heatmap.loc["D1", "D1"])
+    assert pd.isna(heatmap.loc["D2", "D2"])
+    assert pd.isna(heatmap.loc["D3", "D3"])
+    assert all(pd.api.types.is_numeric_dtype(dtype) for dtype in heatmap.dtypes)

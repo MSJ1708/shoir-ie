@@ -391,6 +391,16 @@ def _matrix(depts: pd.DataFrame, slp: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+def _slp_heatmap_values(matrix: pd.DataFrame) -> pd.DataFrame:
+    """Convert SLP relationship codes to scores without deprecated DataFrame.applymap.
+
+    Series.map is supported across the pandas versions used by Shoir-IE and maps
+    unknown/unconnected cells to NaN so Plotly renders those cells as blank.
+    """
+    scores = {"A": 4, "E": 3, "I": 2, "O": 1, "U": 0, "X": -1}
+    return matrix.apply(lambda column: column.map(scores))
+
+
 def _shortest_path(
     flows: pd.DataFrame,
     start: str,
@@ -717,8 +727,7 @@ def render_facility_layout(tier: str, username: str) -> None:
             if not numeric.empty:
                 st.plotly_chart(px.bar(numeric,x="REL",y="Connections",text="Connections",title="SLP relationship mix"),use_container_width=True,config={"displayModeBar":False})
             if not slp.empty:
-                heat=matrix.replace("",float("nan")).replace("—",float("nan"))
-                heat=heat.applymap({"A":4,"E":3,"I":2,"O":1,"U":0,"X":-1}.get)
+                heat = _slp_heatmap_values(matrix)
                 st.plotly_chart(px.imshow(heat,text_auto=True,aspect="auto",title="SLP closeness heatmap · A=4 … X=-1"),use_container_width=True,config={"displayModeBar":False})
 
     with tabs[3]:
