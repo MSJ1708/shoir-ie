@@ -46,6 +46,12 @@ MODULE_REQUIREMENTS = {
     "Live Industrial Digital Twin": "Enterprise Plus",
     "Enterprise Security & Governance": "Enterprise Plus",
     "Predictive Maintenance Digital Twin": "Enterprise Plus",
+    "Autonomous Global Supply Chain & Resilient Logistics Network": "Enterprise",
+    "Zero-Waste Closed-Loop Mega-Factory (Industrial Symbiosis Engine)": "Enterprise",
+    "Real-Time Urban Mobility & Smart Infrastructure Grid": "Enterprise",
+    "Fully Automated Emergency Response & Humanitarian Disaster Logistics System": "Enterprise",
+    "L-SIMS — Local Capability & Dynamic Industrial Readiness Simulator": "Enterprise",
+    "Autonomous Kinetic-Digital Twin (AKDT) for Industrial Logistics Resilience": "Enterprise Plus",
 }
 
 COPILOT_TOOL_REQUIREMENTS = {
@@ -83,6 +89,14 @@ COPILOT_TOOL_REQUIREMENTS = {
     "live industrial digital twin": "Enterprise Plus",
     "enterprise security & governance": "Enterprise Plus",
     "predictive maintenance digital twin": "Enterprise Plus",
+    "autonomous global supply chain": "Enterprise",
+    "closed-loop mega-factory": "Enterprise",
+    "industrial symbiosis": "Enterprise",
+    "urban mobility grid": "Enterprise",
+    "humanitarian disaster logistics": "Enterprise",
+    "local capability simulator": "Enterprise",
+    "l-sims": "Enterprise",
+    "industrial logistics resilience twin": "Enterprise Plus",
 }
 
 
