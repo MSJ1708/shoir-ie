@@ -2288,10 +2288,15 @@ def analyze_fallback_module(module: str, frame: pd.DataFrame) -> dict[str, Any]:
         planned, good = numeric(planned_name), numeric(good_name)
         valid = planned.gt(0) & good.notna()
         result["Good_Unit_Yield_pct"] = np.where(valid, good/planned*100, np.nan)
-        metrics["Weighted good-unit yield (%)"] = round(float(result.loc[valid, good_name].sum()/result.loc[valid, planned_name].sum()*100), 2) if valid.any() and result.loc[valid, planned_name].sum() else None
+        # Use the numeric-coerced series for the weighted calculation. Imported
+        # Excel columns often arrive as object/string dtype, whose .sum() may
+        # concatenate values or fail instead of calculating a numeric yield.
+        total_planned = float(planned.loc[valid].sum())
+        total_good = float(good.loc[valid].sum())
+        metrics["Weighted good-unit yield (%)"] = round(total_good / total_planned * 100, 2) if valid.any() and total_planned > 0 else None
         if scrap_name:
             scrap = numeric(scrap_name)
-            result["Scrap_Rate_pct"] = np.where(valid, scrap/planned*100, np.nan)
+            result["Scrap_Rate_pct"] = np.where(valid & scrap.notna(), scrap/planned*100, np.nan)
             metrics["Mean scrap rate (%)"] = round(float(result.loc[valid, "Scrap_Rate_pct"].mean()), 2) if valid.any() else None
         chart_x, chart_y = first_categorical("Line", "Product", "Work_Order"), "Good_Unit_Yield_pct"
     elif family == "sustainability":
