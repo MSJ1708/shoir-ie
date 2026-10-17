@@ -11,6 +11,7 @@ module provides a consistent cross-module data/evidence contract around them.
 from __future__ import annotations
 
 import hashlib
+import html
 import io
 import json
 import re
@@ -30,6 +31,13 @@ from shoir_performance import (
     cached_workbook_read,
     lightweight_frame_signature,
     sample_preview,
+)
+from shoir_module_customization import (
+    apply_display_labels,
+    display_field_label,
+    evaluate_kpi_target,
+    get_module_profile,
+    render_module_customization,
 )
 
 LARGE_TABLE_ROWS = 50_000
@@ -402,13 +410,20 @@ def _build_export_xlsx(module: str, df: pd.DataFrame, validation: dict[str, Any]
     if not isinstance(results_df, pd.DataFrame):
         results_df = pd.DataFrame()
 
+    username = str(st.session_state.get("current_user", "unknown"))
+    profile = get_module_profile(st.session_state, module, username, valid_columns=list(df.columns))
+    profile_rows = [
+        {"Setting": key.replace("_", " ").title(), "Value": json.dumps(value, ensure_ascii=False, default=_json_default) if isinstance(value, (dict, list)) else str(value)}
+        for key, value in profile.items()
+    ]
     tables = [
         ("Module Data", df),
         ("Validation", validation_df),
         ("Results Summary", results_df),
+        ("Module Personalization", pd.DataFrame(profile_rows)),
     ]
     figures = [("Live Engineering Chart", figure)] if figure is not None else []
-    return build_excel_report("Shoir-IE | " + module + " | Universal Parity", tables, figures)
+    return build_excel_report("Shoir-IE | " + profile["display_name"] + " | Universal Parity", tables, figures)
 
 
 def _build_export_zip(
@@ -439,15 +454,25 @@ def _build_export_zip(
             except Exception:
                 pass
 
+        username = str(st.session_state.get("current_user", "unknown"))
+        profile = get_module_profile(st.session_state, module, username, valid_columns=list(df.columns))
+        zf.writestr(
+            f"{safe}_module_profile.json",
+            json.dumps(profile, indent=2, ensure_ascii=False, default=_json_default).encode("utf-8"),
+        )
         manifest = {
             "module": module,
+            "display_name": profile["display_name"],
+            "project_name": profile["project_name"],
+            "site_name": profile["site_name"],
             "generated_at": datetime.now(timezone.utc).isoformat(),
-            "contract": ["import", "validation", "live_graph", "results", "export", "persistence"],
+            "contract": ["import", "validate", "analyze", "visualize", "decide", "export", "persist"],
             "observation_rows": int(len(df)),
             "observation_columns": int(len(df.columns)),
             "data_quality_score": validation.get("score"),
+            "module_profile_included": True,
         }
-        zf.writestr("manifest.json", json.dumps(manifest, indent=2).encode("utf-8"))
+        zf.writestr("manifest.json", json.dumps(manifest, indent=2, ensure_ascii=False).encode("utf-8"))
 
     return buf.getvalue()
 
@@ -470,8 +495,19 @@ def _render_validation_card(validation: dict[str, Any]) -> None:
 def _render_prepare(module: str, keys: dict[str, str]) -> None:
     token = module_token(module)
     st.markdown("## 📦 Universal Module Studio")
-    st.caption("A consistent engineering workspace for every module: Import → Validate → Analyze → Export → Persist.")
-    st.markdown(f"**Active module:** {module}  ·  **Workspace contract:** PARITY-{token.upper()}")
+    st.caption("A consistent engineering workspace for every module: Import → Validate → Analyze → Visualize → Decide → Export → Persist.")
+    profile = get_module_profile(
+        st.session_state,
+        module,
+        str(st.session_state.get("current_user", "unknown")),
+    )
+    display_name = html.escape(profile["display_name"])
+    st.markdown(f"**Active module:** {display_name}  ·  **Workspace contract:** PARITY-{token.upper()}")
+    if profile["display_name"] != module:
+        st.caption(f"Internal module identity: {html.escape(module)} · Subscription access and calculations remain unchanged.")
+    context = [x for x in (profile["project_name"], profile["site_name"], profile["owner_team"]) if x]
+    if context:
+        st.caption(" · ".join(html.escape(str(x)) for x in context))
 
     up = st.file_uploader(
         "📤 Import Excel / CSV",
@@ -522,6 +558,12 @@ def _render_prepare(module: str, keys: dict[str, str]) -> None:
         _apply_module_edit(module, edited)
         df = edited
         current_validation = st.session_state[keys["validation"]]
+
+    render_module_customization(
+        module,
+        str(st.session_state.get("current_user", "unknown")),
+        df,
+    )
 
     if not isinstance(current_validation, dict):
         current_validation = validate_module_dataframe(df)
@@ -636,7 +678,47 @@ def _render_results(module: str, keys: dict[str, str]) -> None:
     st.session_state[keys["results"]] = summary
     st.session_state[keys["validation"]] = validation
 
-    st.markdown("### 📈 Results")
+    username = str(st.session_state.get("current_user", "unknown"))
+    profile = get_module_profile(
+        st.session_state, module, username,
+        valid_columns=list(result_df.columns) if not result_df.empty else None,
+    )
+    st.markdown(f"### 📈 Results — {html.escape(profile['display_name'])}")
+    context = [x for x in (profile["project_name"], profile["site_name"], profile["owner_team"]) if x]
+    if context:
+        st.caption(" · ".join(html.escape(str(x)) for x in context))
+
+    target_result = None
+    kpi_column = profile.get("primary_kpi")
+    if (
+        profile.get("target_enabled")
+        and kpi_column in result_df.columns
+        and pd.api.types.is_numeric_dtype(result_df[kpi_column])
+    ):
+        target_result = evaluate_kpi_target(result_df[kpi_column], profile)
+    if target_result:
+        metric_label = html.escape(display_field_label(kpi_column, profile))
+        precision = int(profile.get("decimal_places", 2))
+        unit = str(target_result.get("unit") or "")
+        actual_text = f"{target_result['actual']:,.{precision}f}" + (f" {html.escape(unit)}" if unit else "")
+        target_text = f"{target_result['target']:,.{precision}f}" + (f" {html.escape(unit)}" if unit else "")
+        delta_text = f"{target_result['difference']:+,.{precision}f} vs target"
+        target_cols = st.columns(3)
+        target_cols[0].metric(f"{metric_label} · {target_result['statistic']}", actual_text, delta=delta_text)
+        target_cols[1].metric("Configured target", target_text, delta=target_result["direction"])
+        target_cols[2].metric("Target check", "MEETS TARGET" if target_result["passed"] else "REVIEW")
+        note = (
+            f"User-configured rule: {target_result['direction']} · tolerance {target_result['tolerance']:,.{precision}f} · "
+            f"{target_result['observations']:,} usable observations. This is a calculated comparison, not an independently verified operational outcome."
+        )
+        st.caption(note)
+        if target_result["passed"]:
+            st.success("The selected dataset satisfies the configured KPI target rule.")
+        else:
+            st.warning("The selected dataset does not satisfy the configured KPI target rule.")
+    elif profile.get("target_enabled") and profile.get("primary_kpi"):
+        st.info("The configured KPI target is not shown because the selected result table does not contain that numeric field. Choose a compatible result dataset or update the module profile.")
+
     c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("Rows", f'{summary["Rows"]:,}')
     c2.metric("Columns", f'{summary["Columns"]:,}')
