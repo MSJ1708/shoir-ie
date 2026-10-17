@@ -10,8 +10,8 @@ def optimize_supply_flow(demand_dict, capacity_dict, cost_matrix, penalty_cost=5
     # Decision variables: Shipment quantities
     prob = pulp.LpProblem("AEGIS_Dynamic_ReRouting", pulp.LpMinimize)
     
-    ship = pulp.LpVariable.dicts("Ship", ((w, d) for w in warehouses for d in demand_zones), lowBound=0, cat='Integer')
-    unmet = pulp.LpVariable.dicts("Unmet", demand_zones, lowBound=0, cat='Integer')
+    ship = prob.add_variable_dicts("Ship", ((w, d) for w in warehouses for d in demand_zones), lowBound=0, cat=pulp.LpInteger)
+    unmet = prob.add_variable_dicts("Unmet", demand_zones, lowBound=0, cat=pulp.LpInteger)
 
     # Objective: Minimize sum of shipping costs + stockout penalty costs
     prob += (
@@ -27,7 +27,7 @@ def optimize_supply_flow(demand_dict, capacity_dict, cost_matrix, penalty_cost=5
     for d in demand_zones:
         prob += pulp.lpSum(ship[w, d] for w in warehouses) + unmet[d] == demand_dict[d]
 
-    prob.solve(pulp.PULP_CBC_CMD(msg=False))
+    prob.solve(pulp.COIN_CMD(msg=False))
 
     results = {
         "status": pulp.LpStatus[prob.status],

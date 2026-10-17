@@ -530,7 +530,7 @@ def solve_lp_or_milp(
             if bool(r["Binary"]):
                 low, up = 0.0, 1.0
             cat = pulp.LpBinary if bool(r["Binary"]) else (pulp.LpInteger if bool(r["Integer"]) else pulp.LpContinuous)
-            vars_[r["Variable"]] = pulp.LpVariable(r["Variable"], lowBound=low, upBound=up, cat=cat)
+            vars_[r["Variable"]] = prob.add_variable(r["Variable"], lowBound=low, upBound=up, cat=cat)
         objective = pulp.lpSum(float(r["Objective Coef"]) * vars_[r["Variable"]] for _, r in d.iterrows())
         prob += objective
         for cname, csense, rhs, coeffs in cons:
@@ -541,7 +541,7 @@ def solve_lp_or_milp(
                 prob += expr >= rhs, cname
             else:
                 prob += expr == rhs, cname
-        status_code = prob.solve(pulp.PULP_CBC_CMD(msg=False))
+        status_code = prob.solve(pulp.COIN_CMD(msg=False))
         status = pulp.LpStatus.get(status_code, "Unknown")
         if status != "Optimal":
             raise ValueError(f"MILP solver status: {status}")

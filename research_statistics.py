@@ -179,7 +179,7 @@ def groupable_columns(df: pd.DataFrame, max_unique: int = 30) -> list[str]:
         name = str(col)
         identifier_like = bool(
             pd.Series([name]).str.contains(
-                r"(^|[ _-])(id|identifier|index|key)([ _-]|$)",
+                r"(?:^|[ _-])(?:id|identifier|index|key)(?:[ _-]|$)",
                 case=False,
                 regex=True,
             ).iloc[0]

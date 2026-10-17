@@ -6,7 +6,7 @@ the Streamlit Copilot.
 """
 from __future__ import annotations
 import csv, io, re, zipfile, html
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Iterable, Optional, Tuple, Sequence
 import pandas as pd
 import numpy as np
@@ -317,7 +317,7 @@ def build_excel_report(title: str, tables: Iterable[Tuple[str,pd.DataFrame]], fi
             safe.to_excel(writer,index=False,sheet_name=safe_name,startrow=3)
             ws=writer.sheets[safe_name]
             ws.write(0,0,str(title),title_fmt)
-            ws.write(1,0,f"Generated {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}",subtitle_fmt)
+            ws.write(1,0,f"Generated {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}",subtitle_fmt)
             for j,col in enumerate(safe.columns): ws.write(3,j,str(col),header_fmt)
             ws.freeze_panes(4,0)
             if len(safe.columns) and len(safe):

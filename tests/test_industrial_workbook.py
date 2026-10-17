@@ -275,7 +275,7 @@ def test_workbook_scenario_branch_preserves_source(tmp_path):
     assert len(saved) == 2
     assert any(saved["ID"].astype(str).eq(parent))
     assert any(saved["ID"].astype(str).eq(child))
-    assert any(saved["Name"].astype(str).str.contains("Demand \+5%", regex=True))
+    assert any(saved["Name"].astype(str).str.contains(r"Demand \+5%", regex=True))
 
 
 def test_query_filters_do_not_evaluate_unselected_operators():

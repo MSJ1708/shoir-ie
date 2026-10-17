@@ -11,7 +11,7 @@ and return explicit diagnostics rather than inventing data.
 """
 from __future__ import annotations
 import io, json, math, os, re, sqlite3, hashlib, heapq, time, html
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from itertools import product
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
@@ -196,7 +196,7 @@ def init_platform_db(db_path: str="enterprise_full_workspace.db") -> bool:
     return True
 
 def _now() -> str:
-    return datetime.utcnow().isoformat(timespec="seconds")
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 def log_security_event(username: str, event_type: str, details: str="", db_path: str="enterprise_full_workspace.db"):
     try:

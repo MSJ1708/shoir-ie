@@ -339,6 +339,37 @@ def remember_module(module: str) -> None:
     st.session_state["shoir_recent_modules"] = recent[:8]
 
 
+def _preferred_module(choices: Sequence[str], current_module: str | None = None, recent_choice: str | None = None) -> str | None:
+    """Choose only from the currently filtered choices; never invent a fallback."""
+    if current_module and current_module in choices:
+        return str(current_module)
+    if recent_choice and recent_choice in choices:
+        return str(recent_choice)
+    return str(choices[0]) if choices else None
+
+
+def _module_target_section(module: str, module_metadata: Mapping[str, Any] | None = None) -> str:
+    """Route a global-search result to a section that actually contains it."""
+    group = module_group(module, module_metadata)
+    if group == "Data":
+        return "DATA"
+    if group == "Research":
+        return "RESEARCH"
+    if group == "Simulation":
+        return "SIMULATE"
+    if group == "Optimization":
+        return "OPTIMIZE"
+    if group in {"Economics", "Sustainability"}:
+        return "ANALYZE"
+    if group == "Platform & Governance":
+        return "DECISIONS"
+    if group == "AI & Automation":
+        return "KNOWLEDGE"
+    if group in {"Operations", "Maintenance", "Facilities", "Production", "Supply Chain", "Workforce", "Quality"}:
+        return "OPERATIONS"
+    return "WORKBENCH"
+
+
 def render_global_search(
     allowed_modules: Sequence[str],
     module_metadata: Mapping[str, Any] | None = None,
@@ -387,6 +418,8 @@ def render_global_search(
             for idx, name in enumerate(module_hits[:12]):
                 if st.button(f"Open · {name}", key=f"shoir_global_module_{idx}", use_container_width=True):
                     st.session_state["_shoir_requested_module"] = str(name)
+                    st.session_state["shoir_shell_section"] = _module_target_section(str(name), module_metadata)
+                    st.session_state.pop("shoir_shell_section_radio", None)
                     st.session_state["shoir_shell_global_search"] = ""
                     st.rerun()
         if not dataset_hits.empty:
@@ -624,13 +657,13 @@ def render_inspector(module: str, username: str, tier: str) -> None:
         st.markdown("### Inspector")
         st.markdown(f"**Module:** {module}")
         st.markdown(f"**Data state:** {provenance_badge(metrics['provenance'])}", unsafe_allow_html=True)
-        st.markdown(f"**Dataset source:** \`{source_key or 'none'}\`")
-        st.markdown(f"**Readiness:** \`{metrics['data_readiness']:.1f}%\`")
-        st.markdown(f"**Rows × columns:** \`{len(df):,} × {len(df.columns):,}\`")
-        st.markdown(f"**Assumptions:** \`{metrics['assumptions']}\`")
-        st.markdown(f"**Platform health:** \`{metrics['platform_health']:.0f}%\`")
-        st.markdown(f"**Run ID:** \`{st.session_state.get('shoir_latest_run_id') or st.session_state.get('last_run_id') or 'not assigned'}\`")
-        st.markdown(f"**Version:** \`{st.session_state.get('shoir_data_version', 'session/latest')}\`")
+        st.markdown(f"**Dataset source:** `{source_key or 'none'}`")
+        st.markdown(f"**Readiness:** `{metrics['data_readiness']:.1f}%`")
+        st.markdown(f"**Rows × columns:** `{len(df):,} × {len(df.columns):,}`")
+        st.markdown(f"**Assumptions:** `{metrics['assumptions']}`")
+        st.markdown(f"**Platform health:** `{metrics['platform_health']:.0f}%`")
+        st.markdown(f"**Run ID:** `{st.session_state.get('shoir_latest_run_id') or st.session_state.get('last_run_id') or 'not assigned'}`")
+        st.markdown(f"**Version:** `{st.session_state.get('shoir_data_version', 'session/latest')}`")
         if metrics["warnings"]:
             st.markdown("**Warnings**")
             for warning in metrics["warnings"]:
@@ -973,12 +1006,7 @@ def render_application_shell(
             )
 
         choices = _module_choices(allowed_modules, section, search, module_metadata)
-        if current_module and current_module in choices:
-            default_module = current_module
-        elif recent_choice != "—":
-            default_module = recent_choice
-        else:
-            default_module = choices[0] if choices else (list(allowed_modules)[0] if allowed_modules else "MILP Solvers")
+        default_module = _preferred_module(choices, current_module, recent_choice)
 
         default_index = choices.index(default_module) if default_module in choices else 0
         labels = {str(module): f"{module_group(str(module), module_metadata)} · {str(module)}" for module in choices}
@@ -996,7 +1024,9 @@ def render_application_shell(
             )
             remember_module(selected_label)
         else:
-            selected_label = current_module if current_module in allowed_modules else (allowed_modules[0] if allowed_modules else None)
+            # An empty filtered list is a real empty state. Never open the first
+            # unrelated module just because the current section has no matches.
+            selected_label = None
             st.caption(f"No modules match this section and search for the {tier} plan. Clear the search or switch sections.")
 
         st.markdown("---")
@@ -1042,8 +1072,9 @@ def render_application_shell(
         st.markdown("---")
         st.caption(f"Shoir-IE shell v{SHELL_VERSION}")
 
-    selected_module = str(selected_label or current_module or (list(allowed_modules)[0] if allowed_modules else "MILP Solvers"))
     surface = st.session_state.pop("shoir_shell_surface", None)
+    if not choices and not explicit_module_request and surface is None:
+        surface = "search_empty" if search.strip() else "navigation_empty"
 
     if surface == "edit_account":
         st.session_state["selected_nav"] = "Edit Account"
@@ -1075,6 +1106,11 @@ def render_application_shell(
         surface = "new_study"
     if st.session_state.pop("shoir_shell_logout_requested", False):
         surface = "logout"
+
+    if surface in {"navigation_empty", "search_empty"}:
+        selected_module = ""
+    else:
+        selected_module = str(selected_label or current_module or (list(allowed_modules)[0] if allowed_modules else "MILP Solvers"))
 
     render_application_header(username, tier, selected_module)
     render_global_search(allowed_modules, module_metadata)
@@ -1142,10 +1178,10 @@ def render_data_catalog(username: str, tier: str) -> None:
             c4.metric("State", infer_provenance())
             st.dataframe(active.head(250), use_container_width=True, hide_index=True)
     with st.expander("Dataset details", expanded=False):
-        st.markdown(f"**Source key:** \`{source_key or 'none'}\`")
-        st.markdown(f"**Source:** \`{st.session_state.get('shoir_data_source', 'not declared')}\`")
-        st.markdown(f"**Version:** \`{st.session_state.get('shoir_data_version', 'session/latest')}\`")
-        st.markdown(f"**Hash:** \`{st.session_state.get('shoir_data_hash', 'not available')}\`")
+        st.markdown(f"**Source key:** `{source_key or 'none'}`")
+        st.markdown(f"**Source:** `{st.session_state.get('shoir_data_source', 'not declared')}`")
+        st.markdown(f"**Version:** `{st.session_state.get('shoir_data_version', 'session/latest')}`")
+        st.markdown(f"**Hash:** `{st.session_state.get('shoir_data_hash', 'not available')}`")
         st.caption("The catalog is additive and reuses the existing dataset registry rather than creating a competing storage model.")
 
 
@@ -1566,7 +1602,19 @@ def render_new_study(username: str, tier: str, current_module: str) -> None:
 
 def render_shell_surface(surface: str, username: str, tier: str, module: str, allowed_modules: Sequence[str], is_admin: bool = False) -> None:
     surface = str(surface or "")
-    if surface == "home":
+    if surface in {"navigation_empty", "search_empty"}:
+        section = str(st.session_state.get("shoir_shell_section", "WORKBENCH"))
+        section_label = NAV_GROUPS.get(section, section.title())
+        st.markdown("## Module selection")
+        if surface == "search_empty":
+            st.info(f"No accessible module matched the current search in {section_label}.")
+            st.caption("Clear the module search or try a shorter term. Access restrictions remain in effect for your plan.")
+        else:
+            st.info(f"No modules are available in {section_label} for the {tier} plan.")
+            st.caption("Choose another navigation section, or use the global search to find a module available to your account.")
+        st.markdown("### Next steps")
+        st.write("Use **Home** for the workspace overview, **Workbench** for the complete set of modules allowed by your plan, or select a section that matches the task you want to perform.")
+    elif surface == "home":
         render_industrial_home(username, tier)
     elif surface == "catalog":
         render_data_catalog(username, tier)

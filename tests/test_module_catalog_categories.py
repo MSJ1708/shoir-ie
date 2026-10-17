@@ -12,6 +12,8 @@ from shoir_application_shell import (
     _module_choices,
     build_module_index,
     module_group,
+    _module_target_section,
+    _preferred_module,
 )
 
 
@@ -116,6 +118,30 @@ def test_every_subscription_module_is_discoverable_in_a_relevant_primary_section
         if not visible_in:
             missing.append(name)
     assert not missing, f"Modules are not discoverable from any categorized section: {missing}"
+
+
+def test_empty_filtered_section_does_not_fall_back_to_an_unrelated_module():
+    allowed = ["MILP Solvers"]
+    metadata = {"MILP Solvers": {"category": "Core Optimization"}}
+
+    choices = _module_choices(allowed, "RESEARCH", "", metadata)
+    assert choices == []
+    assert _preferred_module(choices, current_module="MILP Solvers") is None
+
+
+def test_global_search_routes_modules_to_matching_primary_sections():
+    metadata = {
+        "Excel Data Cleaning & Import": {"category": "Data Platform"},
+        "MILP Solvers": {"category": "Core Optimization"},
+        "Statistical Hypothesis Testing": {"category": "Research & Experimentation"},
+        "Digital Twin & Discrete-Event Simulation": {"category": "Digital Twin"},
+        "Engineering Decision Center": {"category": "Decisions"},
+    }
+    assert _module_target_section("Excel Data Cleaning & Import", metadata) == "DATA"
+    assert _module_target_section("MILP Solvers", metadata) == "OPTIMIZE"
+    assert _module_target_section("Statistical Hypothesis Testing", metadata) == "RESEARCH"
+    assert _module_target_section("Digital Twin & Discrete-Event Simulation", metadata) == "OPERATIONS"
+    assert _module_target_section("Engineering Decision Center", metadata) == "DECISIONS"
 
 
 def test_recently_added_resilience_tools_have_meaningful_shell_groups():
