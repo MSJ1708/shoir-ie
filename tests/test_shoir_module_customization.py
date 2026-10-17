@@ -267,7 +267,7 @@ def test_quality_maintenance_and_sustainability_fallback_outputs_are_explicit():
     )
     assert "Relative_Triage_Index_0_100" in maintenance["result"]
     assert "Mean relative triage index" in maintenance["metrics"]
-    assert "Relative" in maintenance["guardrail"]
+    assert "relative" in maintenance["guardrail"].lower()
 
     sustainability = analyze_fallback_module(
         "Green IE & Sustainability",
