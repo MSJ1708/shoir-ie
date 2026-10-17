@@ -17,6 +17,20 @@ TIER_ORDER = [
 # Shared by the public module explorer so no paid tier silently disappears from filters.
 MODULE_EXPLORER_TIERS = ("All capabilities", *TIER_ORDER)
 
+__all__ = [
+    "MODULE_EXPLORER_TIERS",
+    "MODULE_REQUIREMENTS",
+    "COPILOT_TOOL_REQUIREMENTS",
+    "unique_modules",
+    "normalize_tier",
+    "tier_allows",
+    "module_required_tier",
+    "available_modules",
+    "copilot_gate",
+    "copilot_capabilities",
+]
+
+
 
 def unique_modules(modules: Iterable[str]) -> list[str]:
     """Return non-empty module labels once, preserving their first-seen order."""
