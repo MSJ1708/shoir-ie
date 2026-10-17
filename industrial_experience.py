@@ -1823,9 +1823,10 @@ def render_research_workspace(module: str, tier: str, username: str) -> None:
             baseline_scenario = None
             st.info("Add a non-empty scenario name to select a baseline.")
 
-        current_signature = hashlib.sha256(
-            scenarios.to_csv(index=False).encode("utf-8")
-        ).hexdigest()
+        # Include the selected baseline in the signature so changing the
+        # reference point invalidates the prior saved-result attachment.
+        signature_source = scenarios.to_csv(index=False) + "\\nBASELINE=" + str(baseline_scenario)
+        current_signature = hashlib.sha256(signature_source.encode("utf-8")).hexdigest()
         analysis_df = pd.DataFrame()
         try:
             analysis_df = analyze_experiment_scenarios(scenarios, baseline_scenario)
@@ -1868,6 +1869,15 @@ def render_research_workspace(module: str, tier: str, username: str) -> None:
                 st.success(f"Scenario experiment saved: {experiment_id}")
             except Exception as exc:
                 st.error(f"Scenario analysis could not be saved safely: {type(exc).__name__}: {exc}")
+
+        saved_results = st.session_state.get("research_scenario_lab_saved_results", pd.DataFrame())
+        saved_results_is_current = (
+            isinstance(saved_results, pd.DataFrame)
+            and not saved_results.empty
+            and st.session_state.get("research_scenario_lab_saved_signature") == current_signature
+        )
+        if isinstance(saved_results, pd.DataFrame) and not saved_results.empty and not saved_results_is_current:
+            st.info("The saved scenario analysis belongs to an earlier input table or baseline. It remains in saved history, but it will not be attached to the current inputs export.")
 
         if not analysis_df.empty:
             if len(scenarios) < 2:
@@ -1925,13 +1935,12 @@ def render_research_workspace(module: str, tier: str, username: str) -> None:
 
                 st.markdown("#### Calculated results")
                 st.dataframe(analysis_df, use_container_width=True, hide_index=True)
-                saved_results = st.session_state.get("research_scenario_lab_saved_results", pd.DataFrame())
                 tables = [
                     ("Scenario Inputs", scenarios),
                     ("Live Scenario Analysis", analysis_df),
                 ]
-                if isinstance(saved_results, pd.DataFrame) and not saved_results.empty:
-                    tables.append(("Last Saved Analysis", saved_results))
+                if saved_results_is_current:
+                    tables.append(("Saved Analysis for Current Inputs", saved_results))
                 render_export_bar("Experiment Lab", tables, figure_exports, tier, username)
 
         st.markdown("#### 🗃️ Saved scenario experiments")
@@ -1950,6 +1959,55 @@ def render_research_workspace(module: str, tier: str, username: str) -> None:
                 st.info("No scenario experiments are saved yet.")
             else:
                 st.dataframe(scenario_history, use_container_width=True, hide_index=True)
+                history_labels = {
+                    str(row["Experiment ID"]): f"{row['Name']} · {row['Created At']} · {row['Experiment ID']}"
+                    for _, row in scenario_history.iterrows()
+                }
+                open_key = "research_scenario_lab_history_open"
+                if open_key in st.session_state and str(st.session_state[open_key]) not in history_labels:
+                    st.session_state.pop(open_key, None)
+                selected_experiment_id = st.selectbox(
+                    "Inspect saved experiment",
+                    list(history_labels),
+                    format_func=lambda value: history_labels[str(value)],
+                    key=open_key,
+                )
+                with sqlite3.connect("enterprise_full_workspace.db") as detail_conn:
+                    stored = detail_conn.execute(
+                        """SELECT scenarios_json, results_json, created_at
+                           FROM platform_experiments
+                           WHERE experiment_id=? AND module=? AND created_by=?""",
+                        (selected_experiment_id, "Experiment Lab", username),
+                    ).fetchone()
+                if stored:
+                    try:
+                        stored_inputs = pd.DataFrame(json.loads(stored[0]))
+                        stored_results_payload = json.loads(stored[1])
+                        stored_results = pd.DataFrame(stored_results_payload.get("scenario_results", []))
+                        with st.expander("Saved experiment inputs and results", expanded=False):
+                            st.caption(f"Saved at {stored[2]} · {selected_experiment_id}")
+                            detail_tabs = st.tabs(["Inputs", "Calculated results", "Trade-off chart"])
+                            with detail_tabs[0]:
+                                st.dataframe(stored_inputs, use_container_width=True, hide_index=True)
+                            with detail_tabs[1]:
+                                if stored_results.empty:
+                                    st.info("No calculated results were found in this saved record.")
+                                else:
+                                    st.dataframe(stored_results, use_container_width=True, hide_index=True)
+                            with detail_tabs[2]:
+                                if {"Cost", "Service"}.issubset(stored_results.columns) and not stored_results.empty:
+                                    saved_tradeoff = px.scatter(
+                                        stored_results,
+                                        x="Cost",
+                                        y="Service",
+                                        color="Scenario",
+                                        title="Saved cost versus service trade-off",
+                                    )
+                                    st.plotly_chart(saved_tradeoff, use_container_width=True, config={"displayModeBar": True, "responsive": True})
+                                else:
+                                    st.info("This saved result does not contain both Cost and Service for a trade-off chart.")
+                    except Exception as exc:
+                        st.warning(f"Saved experiment could not be decoded safely: {type(exc).__name__}: {exc}")
         except Exception as exc:
             st.warning(f"Saved scenario history is temporarily unavailable: {type(exc).__name__}: {exc}")
 
