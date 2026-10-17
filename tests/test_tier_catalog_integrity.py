@@ -208,6 +208,8 @@ def test_experiment_lab_routes_to_full_research_workspace_with_scenario_lab():
         "Inspect saved experiment",
         "research_scenario_lab_saved_signature",
         "Saved experiment inputs and results",
+        "stored_results_payload, dict",
+        "stored_results_payload, list",
         "Cost versus service trade-off",
     ):
         assert required_piece in scenario_lab
