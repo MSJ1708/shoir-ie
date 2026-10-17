@@ -1075,10 +1075,6 @@ def render_application_shell(
     surface = st.session_state.pop("shoir_shell_surface", None)
     if not choices and not explicit_module_request and surface is None:
         surface = "search_empty" if search.strip() else "navigation_empty"
-    if surface in {"navigation_empty", "search_empty"}:
-        selected_module = ""
-    else:
-        selected_module = str(selected_label or current_module or (list(allowed_modules)[0] if allowed_modules else "MILP Solvers"))
 
     if surface == "edit_account":
         st.session_state["selected_nav"] = "Edit Account"
@@ -1110,6 +1106,11 @@ def render_application_shell(
         surface = "new_study"
     if st.session_state.pop("shoir_shell_logout_requested", False):
         surface = "logout"
+
+    if surface in {"navigation_empty", "search_empty"}:
+        selected_module = ""
+    else:
+        selected_module = str(selected_label or current_module or (list(allowed_modules)[0] if allowed_modules else "MILP Solvers"))
 
     render_application_header(username, tier, selected_module)
     render_global_search(allowed_modules, module_metadata)
