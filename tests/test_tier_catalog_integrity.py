@@ -122,25 +122,26 @@ def test_every_module_has_one_shared_live_visualization_surface():
 
 def test_experiment_lab_renderer_is_reachable_and_charted():
     platform_source = (APP_PATH.parent / "industrial_platform.py").read_text(encoding="utf-8")
+    experience_source = (APP_PATH.parent / "industrial_experience.py").read_text(encoding="utf-8")
     dispatcher_start = platform_source.index("def render_module(")
-    experiment_branch = platform_source.index('elif module=="Experiment Lab":', dispatcher_start)
+    experiment_route = platform_source.index('if module == "Experiment Lab":', dispatcher_start)
+    generic_import = platform_source.index("render_module_data_exchange(module, st, tier, username)", dispatcher_start)
 
-    # Regression guard for the original defect: no earlier Experiment Lab
-    # special case may return before the dedicated renderer branch is reached.
-    bypass = platform_source.find(
-        'if module == "Experiment Lab":',
-        dispatcher_start,
-        experiment_branch,
-    )
-    assert bypass == -1
-    renderer = platform_source[experiment_branch:platform_source.index(
-        'elif module=="Industrial Control Center":', experiment_branch
-    )]
-    assert "analyze_experiment_scenarios(" in renderer
-    assert "st.plotly_chart(" in renderer
-    assert "Analyze & Save Experiment" in renderer
-    assert "Saved experiment history" in renderer
+    # Experiment Lab must route to the persistent research workspace before
+    # generic module import/activation. The old duplicate scenario branch must
+    # stay removed so there is one canonical Scenario Lab implementation.
+    assert experiment_route < generic_import
+    assert "render_research_workspace(module, tier, username)" in platform_source[experiment_route:generic_import]
+    assert "return" in platform_source[experiment_route:generic_import]
+    assert 'elif module=="Experiment Lab":' not in platform_source[dispatcher_start:]
 
+    workspace_start = experience_source.index('with tabs[6]:', experience_source.index("def render_research_workspace"))
+    workspace_end = experience_source.index("def _safe_key", workspace_start)
+    scenario_lab = experience_source[workspace_start:workspace_end]
+    assert "analyze_experiment_scenarios(" in scenario_lab
+    assert "st.plotly_chart(" in scenario_lab
+    assert "Analyze & Save" in scenario_lab
+    assert "Saved scenario experiments" in scenario_lab
 
 
 def test_legacy_module_stop_hook_keeps_shared_results_and_autosave():
