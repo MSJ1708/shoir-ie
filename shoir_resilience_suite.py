@@ -396,7 +396,7 @@ def score_asset_health(assets: pd.DataFrame, *, telemetry_dropout_pct: float = 0
     return {"results": result, "metrics": metrics}
 
 
-def analyze_local_capability(suppliers: pd.DataFrame, demands: pd.DataFrame, *, disabled_suppliers: Sequence[str] = (), capacity_scale: float = 1.0, demand_scale: float = 1.0) -> dict[str, Any]:
+def analyze_local_capability(suppliers: pd.DataFrame, demands: pd.DataFrame, *, disabled_suppliers: Sequence[str] = (), capacity_scale: float = 1.0, demand_scale: float = 1.0, local_content_weight: float = 1.0) -> dict[str, Any]:
     """Aggregate local industrial spare-parts capability by generic part family."""
     supplier_df = suppliers.copy(deep=True)
     demand_df = demands.copy(deep=True)
@@ -445,7 +445,7 @@ def analyze_local_capability(suppliers: pd.DataFrame, demands: pd.DataFrame, *, 
                 "Priority": _number(dd, "Priority", 1.0).clip(1, 5),
                 "Due Days": _number(dd, "Due days"),
             })
-            model = solve_transport_allocation(mapped, dd_work, disabled_suppliers=disabled_suppliers, demand_scale=1.0)
+            model = solve_transport_allocation(mapped, dd_work, disabled_suppliers=disabled_suppliers, demand_scale=1.0, local_content_weight=local_content_weight)
         if not model["routes"].empty:
             model["routes"]["Part family"] = family
             # Domestic local-content shares are supplied as editable, not externally certified claims.
@@ -723,6 +723,7 @@ def _render_transport(module: str, tier: str, username: str, *, humanitarian: bo
         disabled = st.selectbox("Temporarily unavailable supplier / depot", labels, index=0, key=_state_key(module, "disabled"))
         risk_weight = st.slider("Supplier risk importance", 0.0, 5.0, 0.25, 0.1, key=_state_key(module, "risk_weight"))
         cost_weight = st.slider("Direct-cost importance", 0.0, 5.0, 1.0, 0.1, key=_state_key(module, "cost_weight"))
+        local_weight = st.slider("Local-content preference", 0.0, 2.0, 0.0, 0.1, key=_state_key(module, "local_content_weight"))
         allow_fractional = st.checkbox("Allow fractional shipment units (LP instead of MILP)", value=False, key=_state_key(module, "fractional_units"))
         if humanitarian:
             st.info("Priorities represent relief urgency in this sandbox. Confirmed local needs, access constraints and humanitarian coordination always take precedence over model rankings.")
@@ -730,8 +731,38 @@ def _render_transport(module: str, tier: str, username: str, *, humanitarian: bo
         suppliers, demands, disabled_suppliers=[] if disabled == disabled_default else [disabled],
         capacity_scale=1.0 - capacity_loss / 100.0, demand_scale=max(0.0, 1.0 + demand_shock / 100.0),
         cost_weight=cost_weight, lead_weight=lead_weight, risk_weight=risk_weight, carbon_weight=carbon_weight,
-        integer_units=not allow_fractional,
+        local_content_weight=local_weight, integer_units=not allow_fractional,
     )
+    baseline_model = solve_transport_allocation(
+        suppliers, demands, cost_weight=cost_weight, lead_weight=lead_weight, risk_weight=risk_weight,
+        carbon_weight=carbon_weight, local_content_weight=local_weight, integer_units=not allow_fractional,
+    )
+    impact_rows = []
+    for metric, label, unit in (
+        ("service_level_pct", "Service level", "%"),
+        ("unmet_demand", "Unmet demand", "units"),
+        ("modeled_cost", "Direct cost", "user currency"),
+        ("carbon_proxy_kg", "Carbon proxy", "kg"),
+    ):
+        baseline_value = float(baseline_model["metrics"].get(metric, 0.0))
+        scenario_value = float(model["metrics"].get(metric, 0.0))
+        impact_rows.append({"Metric": label, "Unit": unit, "Baseline": baseline_value, "Current scenario": scenario_value, "Delta": scenario_value - baseline_value})
+    scenario_comparison = pd.DataFrame(impact_rows)
+    st.markdown("### Baseline vs current scenario")
+    graph_cols = st.columns(3)
+    for target, metric_key, title, y_title in (
+        (graph_cols[0], "service_level_pct", "Service level comparison", "Service (%)"),
+        (graph_cols[1], "unmet_demand", "Shortage comparison", "Unmet units"),
+        (graph_cols[2], "modeled_cost", "Direct cost comparison", "User currency"),
+    ):
+        chart_df = pd.DataFrame({
+            "Case": ["Baseline", "Current scenario"],
+            "Value": [float(baseline_model["metrics"].get(metric_key, 0.0)), float(model["metrics"].get(metric_key, 0.0))],
+        })
+        with target:
+            import plotly.express as px
+            st.plotly_chart(px.bar(chart_df, x="Case", y="Value", title=title, labels={"Value": y_title}, template="plotly_white"), use_container_width=True)
+    st.dataframe(scenario_comparison, use_container_width=True, hide_index=True)
     if humanitarian:
         st.session_state["humanitarian_allocations_df"] = model["routes"].copy(deep=True)
         st.session_state["humanitarian_gaps_df"] = model["shortages"].copy(deep=True)
@@ -751,7 +782,7 @@ def _render_transport(module: str, tier: str, username: str, *, humanitarian: bo
             seed = st.number_input("Reproducible random seed", min_value=0, max_value=999999, value=17, step=1, key=_state_key(module, "mc_seed"))
         with right:
             if st.button("Run stress test", type="primary", key=_state_key(module, "mc_run")):
-                sim = simulate_disruption_scenarios(suppliers, demands, iterations=int(reps), seed=int(seed), outage_probability=outage_p, demand_cv=demand_cv, integer_units=not allow_fractional)
+                sim = simulate_disruption_scenarios(suppliers, demands, iterations=int(reps), seed=int(seed), outage_probability=outage_p, demand_cv=demand_cv, integer_units=not allow_fractional, local_content_weight=local_weight)
                 st.session_state[_state_key(module, "mc_results")] = sim
             sim = st.session_state.get(_state_key(module, "mc_results"))
             if isinstance(sim, pd.DataFrame) and not sim.empty:
@@ -930,15 +961,17 @@ def _render_l_sims(module: str, username: str) -> None:
     with right:
         st.markdown("### Aggregated spare-part demand")
         demands = _get_editor(st, module, "demands", defaults["demands"])
-    c1, c2, c3 = st.columns(3)
+    c1, c2, c3, c4 = st.columns(4)
     with c1:
         capacity_scale = st.slider("Available local capacity (%)", 0, 130, 100, 5, key=_state_key(module, "local_capacity")) / 100.0
     with c2:
         demand_scale = st.slider("Monthly industrial demand (%)", 50, 180, 100, 5, key=_state_key(module, "local_demand")) / 100.0
     with c3:
         conf_floor = st.slider("Qualification-confidence filter (%)", 0, 100, 70, 5, key=_state_key(module, "confidence_floor"))
+    with c4:
+        local_weight = st.slider("Local-content preference", 0.0, 2.0, 1.0, 0.1, key=_state_key(module, "lsims_local_content_weight"))
     excluded = suppliers.loc[_number(suppliers, "Qualification confidence %") < conf_floor, "Supplier"].astype(str).tolist() if "Qualification confidence %" in suppliers else []
-    analysis = analyze_local_capability(suppliers, demands, disabled_suppliers=excluded, capacity_scale=capacity_scale, demand_scale=demand_scale)
+    analysis = analyze_local_capability(suppliers, demands, disabled_suppliers=excluded, capacity_scale=capacity_scale, demand_scale=demand_scale, local_content_weight=local_weight)
     st.session_state["lsims_local_allocations_df"] = analysis["routes"].copy(deep=True)
     st.session_state["lsims_local_gaps_df"] = analysis["shortages"].copy(deep=True)
     st.session_state["lsims_supplier_capacity_df"] = analysis["supplier_summary"].copy(deep=True)
