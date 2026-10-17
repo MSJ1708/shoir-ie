@@ -93,3 +93,19 @@ def test_all_subscription_modules_are_catalogued_with_the_correct_tier():
         if catalogue[name].get("tier") != first_tier[name]
     }
     assert not mismatches, mismatches
+
+
+def test_platform_modules_have_a_shared_live_visualization_surface():
+    app_source = APP_PATH.read_text(encoding="utf-8")
+    dispatcher_start = app_source.index(
+        'elif mod in {x["name"] for x in PLATFORM_CATALOG}:'
+    )
+    dispatcher_end = app_source.index(
+        "# CARBON ACCOUNTING & NET-ZERO STUDIO",
+        dispatcher_start,
+    )
+    platform_dispatcher = app_source[dispatcher_start:dispatcher_end]
+
+    assert "render_industrial_module(" in platform_dispatcher
+    assert "render_live_visualization_studio(str(mod), expanded=True)" in platform_dispatcher
+    assert "Chart studio diagnostic" in platform_dispatcher
