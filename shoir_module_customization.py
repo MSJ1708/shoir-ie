@@ -264,7 +264,8 @@ def render_module_customization(
     import streamlit as st
 
     frame = frame if isinstance(frame, pd.DataFrame) else pd.DataFrame()
-    profile = get_module_profile(st.session_state, module, username, valid_columns=list(frame.columns))
+    valid_columns = list(frame.columns) if not frame.empty else None
+    profile = get_module_profile(st.session_state, module, username, valid_columns=valid_columns)
     notice = st.session_state.pop("shoir_module_profile_saved_notice", None)
     if isinstance(notice, dict) and notice.get("username") == str(username).casefold() and notice.get("module") == module:
         st.success(f"Personalization saved for {profile['display_name']}.")
@@ -345,7 +346,10 @@ def render_module_customization(
                 "owner_team": owner_team,
                 "baseline_label": baseline_label,
                 "scenario_label": scenario_label,
-                "primary_kpi": "" if primary_kpi == "(Not configured)" else primary_kpi,
+                "primary_kpi": (
+                    ("" if primary_kpi == "(Not configured)" else primary_kpi)
+                    if numeric_columns else profile["primary_kpi"]
+                ),
                 "target_enabled": target_enabled,
                 "target_value": target_value,
                 "target_direction": target_direction,
@@ -356,11 +360,12 @@ def render_module_customization(
                 "decimal_places": decimal_places,
                 "tags": tags_text,
                 "notes": notes,
-                "field_labels": field_labels,
-                "field_units": field_units,
+                "field_labels": field_labels if can_map else profile["field_labels"],
+                "field_units": field_units if can_map else profile["field_units"],
             }
             profile = save_module_profile(
-                st.session_state, module, username, candidate, valid_columns=source_names
+                st.session_state, module, username, candidate,
+                valid_columns=source_names if can_map else None,
             )
             # Persist immediately before rerendering; don't rely only on the
             # bottom-of-page autosave path for this explicit Save action.
