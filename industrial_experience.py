@@ -2600,11 +2600,15 @@ def render_blank_module_studio(module: str, tier: str, username: str) -> None:
     st.session_state[data_key] = df
     profile = get_module_profile(st.session_state, module, username, valid_columns=list(df.columns))
     display_df = apply_display_labels(df, profile)
+    blueprint = fallback_module_blueprint(module)
     st.caption(
         f"Working profile: {profile['display_name']}"
         + (f" · {profile['project_name']}" if profile.get("project_name") else "")
         + (f" · {profile['site_name']}" if profile.get("site_name") else "")
     )
+    st.markdown(f"#### {html.escape(blueprint['focus'])}")
+    st.caption(blueprint["purpose"])
+    st.caption(f"Recommended first method: **{blueprint['method']}**")
 
     tabs = st.tabs(["📊 Overview", "🧮 Analysis", "✅ Verification", "🧠 Decision", "📤 Export"])
     with tabs[0]:
@@ -2614,6 +2618,12 @@ def render_blank_module_studio(module: str, tier: str, username: str) -> None:
         c2.metric("Columns", "{:,}".format(result["columns"]))
         c3.metric("Data quality", "{:.1f}%".format(result["quality"]))
         c4.metric("Numeric fields", "{:,}".format(result["numeric_fields"]))
+        with st.expander("ℹ️ Workflow, required inputs and interpretation limits", expanded=False):
+            st.markdown(f"**Purpose:** {blueprint['purpose']}")
+            st.markdown(f"**Recommended method:** {blueprint['method']}")
+            st.markdown(f"**Useful input fields:** {blueprint['inputs']}")
+            st.warning(blueprint["guardrail"])
+            st.caption("When this module is seeded without an imported dataset, its sample rows are illustrative templates. They are not live plant measurements or verified outcomes.")
         numbers = [column for column in df.columns if pd.api.types.is_numeric_dtype(df[column])]
         if numbers:
             metric = st.selectbox("Metric", numbers, format_func=lambda value: display_field_label(value, profile), key="sx_metric_" + key)
@@ -2627,6 +2637,82 @@ def render_blank_module_studio(module: str, tier: str, username: str) -> None:
                 )
 
     with tabs[1]:
+        st.markdown(f"### {html.escape(blueprint['method'])}")
+        st.caption(blueprint["purpose"])
+        st.caption(f"Inputs to verify: {blueprint['inputs']}")
+        domain_result_key = "sx_domain_analysis_" + key
+        input_signature = hashlib.sha256(
+            df.to_json(orient="split", date_format="iso", default_handler=str).encode("utf-8")
+        ).hexdigest()
+        if st.button(
+            "▶ Run module-specific review",
+            type="primary",
+            use_container_width=True,
+            key="sx_domain_run_" + key,
+        ):
+            try:
+                analysis = analyze_fallback_module(module, df)
+                st.session_state[domain_result_key] = {
+                    "input_signature": input_signature,
+                    "analysis": analysis,
+                }
+                st.success("Module-specific calculation completed using the current table.")
+            except (TypeError, ValueError, KeyError, ZeroDivisionError) as exc:
+                st.session_state.pop(domain_result_key, None)
+                st.warning(f"The current table is not ready for this method: {exc}")
+            except Exception as exc:
+                st.session_state.pop(domain_result_key, None)
+                st.error(f"Module analysis stopped safely: {type(exc).__name__}: {exc}")
+
+        saved_domain_result = st.session_state.get(domain_result_key)
+        if isinstance(saved_domain_result, dict):
+            if saved_domain_result.get("input_signature") != input_signature:
+                st.info("Inputs have changed since the last module-specific review. Run the review again before using its previous results.")
+            else:
+                analysis = saved_domain_result.get("analysis", {})
+                analyzed_df = analysis.get("result", pd.DataFrame())
+                analysis_metrics = analysis.get("metrics", {})
+                if analysis_metrics:
+                    metric_items = list(analysis_metrics.items())
+                    metric_cols = st.columns(min(4, len(metric_items)))
+                    for metric_index, (metric_name, metric_value) in enumerate(metric_items):
+                        if metric_value is None:
+                            display_value = "N/A"
+                        elif isinstance(metric_value, (float, np.floating)):
+                            display_value = f"{float(metric_value):,.2f}"
+                        elif isinstance(metric_value, (int, np.integer)):
+                            display_value = f"{int(metric_value):,}"
+                        else:
+                            display_value = str(metric_value)
+                        metric_cols[metric_index % len(metric_cols)].metric(str(metric_name), display_value)
+                if isinstance(analyzed_df, pd.DataFrame) and not analyzed_df.empty:
+                    st.dataframe(apply_display_labels(analyzed_df, profile), use_container_width=True, hide_index=True)
+                    x_column = analysis.get("chart_x")
+                    y_column = analysis.get("chart_y")
+                    display_result = apply_display_labels(analyzed_df, profile)
+                    x_display = display_field_label(x_column, profile) if x_column and x_column in df.columns else x_column
+                    y_display = display_field_label(y_column, profile) if y_column and y_column in df.columns else y_column
+                    if not y_display or y_display not in display_result.columns:
+                        candidates = [str(c) for c in display_result.columns if pd.api.types.is_numeric_dtype(display_result[c])]
+                        y_display = candidates[-1] if candidates else None
+                    if x_display and x_display not in display_result.columns:
+                        x_display = None
+                    if y_display and pd.api.types.is_numeric_dtype(display_result[y_display]):
+                        chart_choice = profile.get("preferred_chart", "Auto")
+                        if chart_choice not in {"Line", "Bar", "Area", "Scatter"}:
+                            chart_choice = analysis.get("chart_kind", "bar").title()
+                        if chart_choice == "Line" and x_display:
+                            chart = px.line(display_result, x=x_display, y=y_display, markers=True, title=f"{profile['display_name']} · {y_display}")
+                        elif chart_choice == "Area" and x_display:
+                            chart = px.area(display_result, x=x_display, y=y_display, title=f"{profile['display_name']} · {y_display}")
+                        elif chart_choice == "Scatter" and x_display:
+                            chart = px.scatter(display_result, x=x_display, y=y_display, title=f"{profile['display_name']} · {y_display}")
+                        else:
+                            chart = px.bar(display_result, x=x_display, y=y_display, title=f"{profile['display_name']} · {y_display}") if x_display else px.bar(display_result, y=y_display, title=f"{profile['display_name']} · {y_display}")
+                        st.plotly_chart(chart, use_container_width=True, config={"displayModeBar": True, "responsive": True})
+                st.warning(analysis.get("guardrail", blueprint["guardrail"]))
+                st.caption("Outputs are calculated from the selected table and current assumptions. Save and independently verify any operational decision before implementation.")
+
         numbers = [column for column in df.columns if pd.api.types.is_numeric_dtype(df[column])]
         if len(numbers) >= 2:
             baseline = st.selectbox(
