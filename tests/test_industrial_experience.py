@@ -21,6 +21,7 @@ from industrial_experience import (
     import_research_run_csv,
     research_runs_frame,
     save_project,
+    analyze_fallback_module,
 )
 
 
@@ -283,3 +284,20 @@ def test_previous_lab_csv_can_be_imported_into_research_registry(monkeypatch):
         frame = research_runs_frame("PRJ-IMPORT", owner="alice")
         assert len(frame) == 1
         assert frame.iloc[0]["Experiment"] == "001I"
+
+
+
+def test_production_fallback_coerces_excel_numeric_strings_without_mutating_input():
+    source = pd.DataFrame({
+        "Line": ["A", "B"],
+        "Planned_Units": ["100", "200"],
+        "Good_Units": ["95", "180"],
+        "Scrap_Units": ["5", "20"],
+    })
+    original = source.copy(deep=True)
+
+    result = analyze_fallback_module("Lean Manufacturing & Shop Floor Operations", source)
+
+    assert result["metrics"]["Weighted good-unit yield (%)"] == 91.67
+    assert result["result"]["Good_Unit_Yield_pct"].round(2).tolist() == [95.0, 90.0]
+    pd.testing.assert_frame_equal(source, original)
