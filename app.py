@@ -708,6 +708,9 @@ MODULE_CATALOG = [
     {"tier": "Starter", "category": "Platform", "name": "Persistence",
      "when": "You're mid-analysis and need to save your exact workspace state to come back to later, or share with a teammate.",
      "example": "Save a named project - \"Q3 Riyadh Network Redesign\" - with every warehouse, customer, and fleet setting intact, and reload it next week exactly as you left it."},
+    {"tier": "Starter", "category": "Innovation & Commercialization", "name": "Venture Studio",
+     "when": "You are turning an industrial engineering idea into a testable pilot and need customer discovery, hypotheses, dated evidence, value calculations and an investor-ready story in one place.",
+     "example": "Create a pilot record, define the hypothesis and success measure, attach dated evidence, compare baseline and post-deployment costs, and prepare a traceable commercialization summary without treating modeled benefits as verified results."},
     {"tier": "Starter", "category": "Facilities", "name": "Facility Layout & Warehousing",
      "when": "You're planning or reorganizing a physical warehouse floor and need to test layouts before moving a single rack.",
      "example": "Compare a U-shaped flow against a straight-through flow for a 40,000 sq ft facility and see the estimated travel-distance difference before committing a crew to move shelving."},
@@ -1974,6 +1977,7 @@ selected_module, _shell_surface = render_application_shell(
     allowed_modules=allowed_modules,
     current_module=str(_current_module) if _current_module else None,
     is_admin=is_admin,
+    module_catalog=MODULE_CATALOG,
 )
 st.session_state.pop("_shoir_requested_module", None)
 # Compatibility contract retained for existing smoke tests and legacy integrations.
