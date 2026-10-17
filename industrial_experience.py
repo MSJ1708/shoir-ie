@@ -1938,11 +1938,11 @@ def render_research_workspace(module: str, tier: str, username: str) -> None:
         try:
             with sqlite3.connect("enterprise_full_workspace.db") as scenario_conn:
                 scenario_history = pd.read_sql_query(
-                    \"\"\"SELECT experiment_id AS "Experiment ID", name AS Name, module AS Module,
+                    """SELECT experiment_id AS "Experiment ID", name AS Name, module AS Module,
                                       created_by AS "Created By", created_at AS "Created At"
                                FROM platform_experiments
                                WHERE module=? AND created_by=?
-                               ORDER BY created_at DESC LIMIT 25\"\"\",
+                               ORDER BY created_at DESC LIMIT 25""",
                     scenario_conn,
                     params=("Experiment Lab", username),
                 )
