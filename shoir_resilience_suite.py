@@ -403,9 +403,21 @@ def analyze_local_capability(suppliers: pd.DataFrame, demands: pd.DataFrame, *, 
         if dd.empty:
             continue
         if ss.empty:
-            empty_supply = pd.DataFrame(columns=["Supplier", "Capacity", "Unit Cost", "Lead Days", "Risk %", "Carbon kg/unit", "Local Share %"])
-            dd_work = dd.rename(columns={"Plant / depot": "Destination", "Monthly demand": "Demand", "Priority": "Priority", "Due days": "Due Days"})
-            model = solve_transport_allocation(empty_supply, dd_work)
+            # Keep the part-family shortfall visible even when no domestic supplier
+            # exists for that family; a zero-capacity sentinel permits the solver to
+            # return a full shortage ledger instead of dropping the demand row.
+            empty_supply = pd.DataFrame([{
+                "Supplier": "No qualified supplier for family",
+                "Capacity": 0.0, "Unit Cost": 0.0, "Lead Days": 0.0,
+                "Risk %": 100.0, "Carbon kg/unit": 0.0, "Local Share %": 0.0,
+            }])
+            dd_work = pd.DataFrame({
+                "Destination": dd["Plant / depot"].astype(str) if "Plant / depot" in dd else dd.index.astype(str),
+                "Demand": _number(dd, "Monthly demand") * max(0.0, demand_scale),
+                "Priority": _number(dd, "Priority", 1.0).clip(1, 5),
+                "Due Days": _number(dd, "Due days"),
+            })
+            model = solve_transport_allocation(empty_supply, dd_work, capacity_scale=0.0)
         else:
             conf = _number(ss, "Qualification confidence %").clip(0, 100)
             mapped = pd.DataFrame({
@@ -835,15 +847,14 @@ def _render_closed_loop(module: str, username: str) -> None:
             st.plotly_chart(px.bar(analysis["results"], x="Process", y="Recovered heat kWh", title="Heat recovery potential", template="plotly_white"), use_container_width=True)
         with cols[1]:
             st.plotly_chart(px.bar(analysis["results"], x="Process", y=["Reused water m3", "Residual water m3"], barmode="stack", title="Water recovery: reuse vs residual", template="plotly_white"), use_container_width=True)
-            labels = ["Recoverable material", "Reuse loop", "Residual material", "Recoverable heat", "Recovered heat", "Water reclaimed"]
+            labels = ["Recoverable material (kg)", "Material reused (kg)", "Residual material (kg)"]
             fig = go.Figure(go.Sankey(
                 node={"label": labels},
-                link={"source": [0, 0, 3, 4], "target": [1, 2, 4, 5], "value": [
+                link={"source": [0, 0], "target": [1, 2], "value": [
                     max(0.01, m["material_reused_kg"]), max(0.01, m["residual_material_kg"]),
-                    max(0.01, m["recovered_heat_kwh"]), max(0.01, m["water_reused_m3"]),
                 ]},
             ))
-            fig.update_layout(title="Conceptual circular-flow summary (separate units; visual only)")
+            fig.update_layout(title="Material circularity flow (kg only); heat and water are charted separately")
             st.plotly_chart(fig, use_container_width=True)
     with tabs[1]:
         st.dataframe(analysis["results"], use_container_width=True, hide_index=True)
