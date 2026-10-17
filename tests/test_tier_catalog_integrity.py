@@ -138,3 +138,16 @@ def test_experiment_lab_renderer_is_reachable_and_charted():
     assert "st.plotly_chart(" in renderer
     assert "Analyze & Save Experiment" in renderer
     assert "Saved experiment history" in renderer
+
+
+
+def test_legacy_module_stop_hook_keeps_shared_results_and_autosave():
+    app_source = APP_PATH.read_text(encoding="utf-8")
+    start = app_source.index("def _shoir_module_stop():")
+    end = app_source.index("from shoir_venture_studio import", start)
+    stop_hook = app_source[start:end]
+
+    assert 'and not globals().get("_shell_surface")' in stop_hook
+    assert 'active_module in set(map(str, allowed))' in stop_hook
+    assert 'render_universal_module_parity(active_module, phase="results")' in stop_hook
+    assert 'save_user_workspace(st.session_state["current_user"], st.session_state)' in stop_hook
