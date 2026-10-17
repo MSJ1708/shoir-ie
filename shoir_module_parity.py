@@ -33,10 +33,16 @@ from shoir_performance import (
     sample_preview,
 )
 from shoir_module_customization import (
+    apply_display_labels,
     display_field_label,
     evaluate_kpi_target,
     get_module_profile,
     render_module_customization,
+)
+from industrial_experience import (
+    FALLBACK_MODULE_BLUEPRINTS,
+    analyze_fallback_module,
+    fallback_module_blueprint,
 )
 
 LARGE_TABLE_ROWS = 50_000
@@ -715,6 +721,94 @@ def _render_results(module: str, keys: dict[str, str]) -> None:
             st.warning("The selected dataset does not satisfy the configured KPI target rule.")
     elif profile.get("target_enabled") and profile.get("primary_kpi"):
         st.info("The configured KPI target is not shown because the selected result table does not contain that numeric field. Choose a compatible result dataset or update the module profile.")
+
+    # Named domain playbooks extend legacy/specialist modules that do not share
+    # the platform renderer. If the same module already rendered its native
+    # fallback playbook earlier in this script, avoid presenting it twice.
+    native_fallback_module = st.session_state.pop("shoir_native_fallback_module_active", None)
+    if module in FALLBACK_MODULE_BLUEPRINTS and native_fallback_module != module:
+        blueprint = fallback_module_blueprint(module)
+        result_key = f"module_playbook_result_{token}"
+        cached_playbook = st.session_state.get(result_key)
+        expand_playbook = bool(
+            isinstance(cached_playbook, dict)
+            and cached_playbook.get("signature") == result_signature
+        )
+        with st.expander(f"🧰 Module playbook · {blueprint['focus']}", expanded=expand_playbook):
+            st.caption(blueprint["purpose"])
+            st.caption(f"**Recommended method:** {blueprint['method']}")
+            st.caption(f"**Expected inputs:** {blueprint['inputs']}")
+            if st.button(
+                "▶ Run module-specific review on this result dataset",
+                type="primary",
+                use_container_width=True,
+                key=f"module_playbook_run_{token}",
+                disabled=result_df.empty,
+            ):
+                try:
+                    playbook_analysis = analyze_fallback_module(module, result_df)
+                    st.session_state[result_key] = {
+                        "signature": result_signature,
+                        "analysis": playbook_analysis,
+                    }
+                    cached_playbook = st.session_state[result_key]
+                    expand_playbook = True
+                    st.success("Module-specific review completed against the selected result dataset.")
+                except (TypeError, ValueError, KeyError, ZeroDivisionError) as exc:
+                    st.session_state.pop(result_key, None)
+                    cached_playbook = None
+                    st.info(f"This dataset does not yet meet the module's input contract: {exc}")
+                except Exception as exc:
+                    st.session_state.pop(result_key, None)
+                    cached_playbook = None
+                    st.error(f"Module-specific review stopped safely: {type(exc).__name__}: {exc}")
+
+            if isinstance(cached_playbook, dict) and cached_playbook.get("signature") == result_signature:
+                analysis = cached_playbook.get("analysis", {})
+                analysis_df = analysis.get("result", pd.DataFrame())
+                metrics = analysis.get("metrics", {})
+                if isinstance(metrics, dict) and metrics:
+                    metric_items = list(metrics.items())
+                    metric_columns = st.columns(min(4, len(metric_items)))
+                    for metric_index, (metric_name, metric_value) in enumerate(metric_items):
+                        if metric_value is None:
+                            metric_display = "N/A"
+                        elif isinstance(metric_value, (float, np.floating)):
+                            metric_display = f"{float(metric_value):,.2f}"
+                        elif isinstance(metric_value, (int, np.integer)):
+                            metric_display = f"{int(metric_value):,}"
+                        else:
+                            metric_display = str(metric_value)
+                        metric_columns[metric_index % len(metric_columns)].metric(str(metric_name), metric_display)
+                if isinstance(analysis_df, pd.DataFrame) and not analysis_df.empty:
+                    st.dataframe(apply_display_labels(analysis_df, profile), use_container_width=True, hide_index=True)
+                    import plotly.express as px
+                    chart_x = analysis.get("chart_x")
+                    chart_y = analysis.get("chart_y")
+                    display_analysis = apply_display_labels(analysis_df, profile)
+                    x_label = display_field_label(chart_x, profile) if chart_x and chart_x in result_df.columns else chart_x
+                    y_label = display_field_label(chart_y, profile) if chart_y and chart_y in result_df.columns else chart_y
+                    if x_label and x_label not in display_analysis.columns:
+                        x_label = None
+                    if not y_label or y_label not in display_analysis.columns or not pd.api.types.is_numeric_dtype(display_analysis[y_label]):
+                        numeric_candidates = [str(column) for column in display_analysis.columns if pd.api.types.is_numeric_dtype(display_analysis[column])]
+                        y_label = numeric_candidates[-1] if numeric_candidates else None
+                    if y_label:
+                        preferred = profile.get("preferred_chart", "Auto")
+                        if preferred not in {"Line", "Bar", "Area", "Scatter"}:
+                            preferred = str(analysis.get("chart_kind", "bar")).title()
+                        title = f"{profile['display_name']} · {y_label}"
+                        if preferred == "Line" and x_label:
+                            fig = px.line(display_analysis, x=x_label, y=y_label, markers=True, title=title)
+                        elif preferred == "Area" and x_label:
+                            fig = px.area(display_analysis, x=x_label, y=y_label, title=title)
+                        elif preferred == "Scatter" and x_label:
+                            fig = px.scatter(display_analysis, x=x_label, y=y_label, title=title)
+                        else:
+                            fig = px.bar(display_analysis, x=x_label, y=y_label, title=title) if x_label else px.bar(display_analysis, y=y_label, title=title)
+                        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": True, "responsive": True})
+                st.warning(analysis.get("guardrail", blueprint["guardrail"]))
+                st.caption("Calculated output is based on the selected result table, not an independent verification of real-world performance.")
 
     c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("Rows", f'{summary["Rows"]:,}')
