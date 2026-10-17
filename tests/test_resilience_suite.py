@@ -44,6 +44,21 @@ def test_transport_model_makes_shortages_explicit_and_respects_capacity():
     assert 0 <= result["metrics"]["service_level_pct"] <= 100
 
 
+def test_integer_mode_allocates_whole_units_and_lp_mode_can_fractionate():
+    suppliers = pd.DataFrame([{
+        "Supplier": "S1", "Capacity": 2.7, "Unit Cost": 1, "Lead Days": 1,
+        "Risk %": 1, "Carbon kg/unit": 1, "Local Share %": 100,
+    }])
+    demands = pd.DataFrame([{"Destination": "D1", "Demand": 2.2, "Priority": 3, "Due Days": 4}])
+    integer_result = solve_transport_allocation(suppliers, demands, integer_units=True)
+    assert integer_result["status"] == "Optimal"
+    assert integer_result["routes"]["Allocated units"].map(lambda x: abs(float(x) - round(float(x))) < 1e-8).all()
+    assert integer_result["metrics"]["total_demand"] == 3.0
+    fractional_result = solve_transport_allocation(suppliers, demands, integer_units=False)
+    assert fractional_result["status"] == "Optimal"
+    assert abs(float(fractional_result["metrics"]["total_demand"]) - 2.2) < 1e-7
+
+
 def test_supplier_disruption_does_not_hide_lost_capacity():
     suppliers = _default_data(GLOBAL_SUPPLY)["suppliers"]
     demands = _default_data(GLOBAL_SUPPLY)["demands"]
@@ -98,12 +113,22 @@ def test_asset_health_and_edge_buffering_have_bounded_scores():
 
 def test_local_capability_matches_by_part_family_and_exposes_shortage():
     data = _default_data(LSIMS)
+    data["demands"] = pd.concat([
+        data["demands"],
+        pd.DataFrame([{
+            "Plant / depot": "Unmatched plant", "Part family": "Uncovered family",
+            "Monthly demand": 55, "Priority": 4, "Due days": 9,
+        }]),
+    ], ignore_index=True)
     result = analyze_local_capability(data["suppliers"], data["demands"])
     assert result["metrics"]["supplier_count"] == len(data["suppliers"])
     assert result["metrics"]["demand_fulfilled_pct"] >= 0
     assert result["metrics"]["local_content_proxy_pct"] <= 100
-    if not result["shortages"].empty:
-        assert {"Part family", "Shortage", "Demand"} <= set(result["shortages"].columns)
+    assert not result["shortages"].empty
+    assert {"Part family", "Shortage", "Demand"} <= set(result["shortages"].columns)
+    missing_family = result["shortages"].loc[result["shortages"]["Part family"] == "Uncovered family"]
+    assert len(missing_family) == 1
+    assert float(missing_family.iloc[0]["Shortage"]) == 55
 
 
 def test_run_snapshots_are_owner_and_module_scoped(tmp_path):
