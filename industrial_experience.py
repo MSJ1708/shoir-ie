@@ -3441,8 +3441,6 @@ def render_blank_module_studio(module: str, tier: str, username: str) -> None:
                     config={"displayModeBar": True, "responsive": True},
                 )
 
-        render_module_run_history(module, username, key_suffix=key)
-
     with tabs[2]:
         output = st.session_state.get("sx_result_" + key, df)
         check = verification_snapshot(output)
