@@ -34,20 +34,94 @@ NAV_GROUPS = {
     "ADMIN": "⚙ Admin",
 }
 
+# Catalog categories are translated into stable shell groups. This prevents newly added
+# modules from falling into an unclassified bucket just because their display name uses
+# new wording (e.g. urban mobility, industrial symbiosis, local capability or AKDT).
+MODULE_CATEGORY_GROUPS = {
+    "ai": "AI & Automation",
+    "ai & automation": "AI & Automation",
+    "ai & forecasting": "AI & Automation",
+    "advanced computation infrastructure": "Research",
+    "benchmarking": "Platform & Governance",
+    "circular manufacturing": "Sustainability",
+    "collaboration": "Platform & Governance",
+    "connectivity": "Operations",
+    "control": "Operations",
+    "core optimization": "Optimization",
+    "core platform": "Platform & Governance",
+    "data platform": "Data",
+    "decisions": "Platform & Governance",
+    "digital twin": "Maintenance",
+    "economics": "Economics",
+    "experimentation": "Research",
+    "facilities": "Facilities",
+    "finance": "Economics",
+    "global operations": "Supply Chain",
+    "governance": "Platform & Governance",
+    "human factors": "Workforce",
+    "humanitarian logistics": "Supply Chain",
+    "industrial digital twin": "Maintenance",
+    "industrial model": "Data",
+    "innovation & commercialization": "Platform & Governance",
+    "inventory": "Supply Chain",
+    "local manufacturing capability": "Production",
+    "logistics": "Supply Chain",
+    "maintenance": "Maintenance",
+    "manufacturing": "Production",
+    "network design": "Supply Chain",
+    "operations": "Operations",
+    "operations intelligence": "Operations",
+    "optimization": "Optimization",
+    "paper-to-simulation pipeline": "Research",
+    "peer review & stress-testing": "Research",
+    "platform": "Platform & Governance",
+    "planning": "Production",
+    "production": "Production",
+    "project & traceability": "Platform & Governance",
+    "quality": "Quality",
+    "reporting": "Platform & Governance",
+    "research & experimentation": "Research",
+    "research ai": "Research",
+    "research authoring": "Research",
+    "risk": "Supply Chain",
+    "risk & simulation": "Simulation",
+    "scenario management": "Simulation",
+    "security": "Platform & Governance",
+    "simulation": "Simulation",
+    "supply chain resilience": "Supply Chain",
+    "sustainability": "Sustainability",
+    "trust & security": "Platform & Governance",
+    "urban systems": "Operations",
+    "workforce": "Workforce",
+}
+MODULE_GROUP_OVERRIDES = {
+    # Specific workspaces whose product purpose is more informative than the
+    # original marketing category assigned to them.
+    "AI Copilot": "AI & Automation",
+    "Engineering Validation Center": "Data",
+    "Excel Data Cleaning & Import": "Data",
+    "Industrial Workbook": "Data",
+    "MILP Solvers": "Optimization",
+    "Research AI": "Research",
+    "Venture Studio": "Platform & Governance",
+}
+
 MODULE_GROUP_RULES = (
-    ("Data", ("excel", "data", "workbook", "dataset", "inventory playback")),
-    ("Production", ("production", "manufacturing", "shop floor", "line balancing", "planning", "scheduling", "capacity")),
-    ("Quality", ("quality", "six sigma", "reliability", "spc", "defect")),
-    ("Supply Chain", ("supply", "supplier", "inventory", "warehouse", "logistics", "fleet", "routing", "meio")),
-    ("Maintenance", ("maintenance", "predictive", "digital twin")),
-    ("Facilities", ("facility", "layout", "slotting", "agv", "geospatial")),
+    ("Data", ("excel", "data", "workbook", "dataset", "data model", "inventory playback", "validation center")),
+    ("Production", ("production", "manufacturing", "shop floor", "line balancing", "planning", "scheduling", "capacity", "factory")),
+    ("Quality", ("quality", "six sigma", "reliability", "spc", "defect", "fmea")),
+    ("Supply Chain", ("supply", "supplier", "inventory", "warehouse", "logistics", "fleet", "routing", "meio", "local capability")),
+    ("Maintenance", ("maintenance", "predictive", "digital twin", "asset health")),
+    ("Facilities", ("facility", "layout", "slotting", "agv", "geospatial", "3d factory")),
     ("Workforce", ("workforce", "human factors", "ergonomics")),
-    ("Economics", ("economics", "finance", "capital investment", "roi", "cost")),
-    ("Sustainability", ("carbon", "sustainability", "green ie", "lca", "energy")),
-    ("Research", ("research", "experiment", "hypothesis", "regression", "paper", "latex", "literature", "falsification", "isomorphism", "zero-knowledge", "quantum-classical")),
-    ("AI & Automation", ("copilot", "agentic", "automation", "ai")),
-    ("Operations", ("control center", "control tower", "execution", "mes", "connectivity", "iot", "telemetry")),
-    ("Platform & Governance", ("admin", "security", "governance", "persistence", "rbac", "benchmark", "digital thread", "decision", "venture")),
+    ("Economics", ("economics", "finance", "capital investment", "roi", "cost", "currency")),
+    ("Sustainability", ("carbon", "sustainability", "green ie", "lca", "energy", "waste", "circular", "symbiosis", "net-zero")),
+    ("Research", ("research", "experiment", "hypothesis", "regression", "paper", "latex", "literature", "falsification", "isomorphism", "zero-knowledge", "quantum-classical", "peer-review", "formal-proof", "theory-to-code", "adversarial", "shock injector", "surrogate swarm")),
+    ("Simulation", ("simulation", "simulator", "monte carlo", "scenario", "sensitivity analysis", "robust optimization", "chaos injector")),
+    ("Optimization", ("optimiz", "milp", "solver", "sensitivity analysis", "robust & resilient")),
+    ("AI & Automation", ("copilot", "agentic", "automation", "ai", "webhook", "fastapi", "forecast")),
+    ("Operations", ("control center", "control tower", "execution", "mes", "connectivity", "iot", "telemetry", "operating system", "shadowshift", "urban mobility", "infrastructure", "emergency response", "humanitarian")),
+    ("Platform & Governance", ("admin", "security", "governance", "persistence", "rbac", "benchmark", "digital thread", "decision", "venture", "subscription", "cryptographic", "ledger", "report center", "localization")),
 )
 
 PROVENANCE_STATES = ("LIVE", "IMPORTED", "SIMULATED", "DEMO")
@@ -212,18 +286,42 @@ def data_readiness(df: pd.DataFrame) -> dict[str, Any]:
     }
 
 
-def module_group(module: str) -> str:
-    value = str(module or "").lower()
+def module_group(
+    module: str,
+    module_metadata: Mapping[str, Any] | None = None,
+) -> str:
+    """Return the canonical shell group, using catalog metadata before name heuristics."""
+    name = str(module or "").strip()
+    if name in MODULE_GROUP_OVERRIDES:
+        return MODULE_GROUP_OVERRIDES[name]
+
+    metadata = (module_metadata or {}).get(name, {})
+    if isinstance(metadata, Mapping):
+        category = str(metadata.get("category") or "").strip().casefold()
+    else:
+        category = str(metadata or "").strip().casefold()
+    if category in MODULE_CATEGORY_GROUPS:
+        return MODULE_CATEGORY_GROUPS[category]
+
+    value = name.casefold()
     for group, needles in MODULE_GROUP_RULES:
         if any(needle in value for needle in needles):
             return group
     return "Industrial Engineering"
 
 
-def build_module_index(allowed_modules: Sequence[str]) -> pd.DataFrame:
+def build_module_index(
+    allowed_modules: Sequence[str],
+    module_metadata: Mapping[str, Any] | None = None,
+) -> pd.DataFrame:
     return pd.DataFrame(
         [
-            {"Module": str(module), "Group": module_group(str(module)), "Purpose": "Specialist engineering engine", "Status": "Available"}
+            {
+                "Module": str(module),
+                "Group": module_group(str(module), module_metadata),
+                "Purpose": "Specialist engineering engine",
+                "Status": "Available",
+            }
             for module in allowed_modules
         ]
     )
@@ -241,7 +339,10 @@ def remember_module(module: str) -> None:
     st.session_state["shoir_recent_modules"] = recent[:8]
 
 
-def render_global_search(allowed_modules: Sequence[str]) -> None:
+def render_global_search(
+    allowed_modules: Sequence[str],
+    module_metadata: Mapping[str, Any] | None = None,
+) -> None:
     """Search modules and durable engineering objects from the same shell."""
     query = st.text_input(
         "⌘ Search Shoir-IE",
@@ -251,7 +352,10 @@ def render_global_search(allowed_modules: Sequence[str]) -> None:
     if not query.strip():
         return
     term = query.strip().lower()
-    module_hits = [m for m in allowed_modules if term in str(m).lower() or term in module_group(str(m)).lower()]
+    module_hits = [
+        m for m in allowed_modules
+        if term in str(m).lower() or term in module_group(str(m), module_metadata).lower()
+    ]
     dataset_hits = _query_df(
         """SELECT dataset_id,name,source,owner,updated_at
            FROM os160_datasets ORDER BY updated_at DESC LIMIT 500"""
@@ -298,39 +402,71 @@ def render_global_search(allowed_modules: Sequence[str]) -> None:
             st.info("No matching engineering objects were found.")
 
 
-def _module_choices(allowed_modules: Sequence[str], section: str, search: str) -> list[str]:
+def _module_choices(
+    allowed_modules: Sequence[str],
+    section: str,
+    search: str,
+    module_metadata: Mapping[str, Any] | None = None,
+) -> list[str]:
     modules = [str(x) for x in allowed_modules]
     q = str(search or "").strip().lower()
 
     def in_section(name: str) -> bool:
-        group = module_group(name)
+        group = module_group(name, module_metadata)
         low = name.lower()
         if section in {"HOME", "WORKBENCH"}:
             return True
         if section == "DATA":
             return group == "Data"
         if section == "ANALYZE":
-            return group in {"Production", "Quality", "Supply Chain", "Economics", "Sustainability", "Data"}
+            return group in {
+                "Production", "Quality", "Supply Chain", "Economics",
+                "Sustainability", "Data", "Workforce", "Facilities",
+                "Optimization", "Operations", "Maintenance", "Simulation",
+            }
         if section == "SIMULATE":
-            return any(k in low for k in ("simulation", "digital twin", "monte carlo", "scenario", "agv", "forecast"))
+            return group == "Simulation" or any(
+                k in low for k in ("simulation", "digital twin", "monte carlo", "scenario", "agv", "forecast", "simulator", "shock injector")
+            )
         if section == "OPTIMIZE":
-            return any(k in low for k in ("optimiz", "milp", "routing", "planning", "scheduling", "inventory", "meio", "fleet"))
+            return group in {"Optimization", "Supply Chain", "Production", "Facilities", "Economics", "Workforce"} or any(
+                k in low for k in ("optimiz", "milp", "routing", "planning", "scheduling", "inventory", "meio", "fleet", "robust", "sensitivity")
+            )
         if section == "OPERATIONS":
-            return group in {"Operations", "Maintenance", "Facilities", "Production"}
+            return group in {"Operations", "Maintenance", "Facilities", "Production", "Supply Chain", "Workforce", "Quality"}
         if section == "DECISIONS":
-            return any(k in low for k in ("decision", "economics", "scenario", "benchmark"))
+            return group in {"Platform & Governance", "Economics", "Sustainability", "Optimization"} or any(
+                k in low for k in ("decision", "economics", "scenario", "benchmark", "roi", "venture", "report")
+            )
         if section == "RESEARCH":
             return group == "Research" or "research" in low
         if section == "KNOWLEDGE":
-            return any(k in low for k in ("copilot", "knowledge", "benchmark", "standards", "literature"))
+            return group in {"Research", "AI & Automation", "Platform & Governance"} or any(
+                k in low for k in ("copilot", "knowledge", "benchmark", "standards", "literature")
+            )
         if section == "ADMIN":
-            return any(k in low for k in ("admin", "security", "governance", "subscription", "persistence", "connectivity"))
+            return any(k in low for k in ("admin", "security", "governance", "subscription", "persistence", "connectivity", "rbac", "audit"))
         return True
 
-    filtered = [x for x in modules if in_section(x) and (not q or q in x.lower() or q in module_group(x).lower())]
+    filtered = [
+        x for x in modules
+        if in_section(x)
+        and (
+            not q
+            or q in x.lower()
+            or q in module_group(x, module_metadata).lower()
+            or q in str(
+                (module_metadata or {}).get(x, {}).get("category", "")
+                if isinstance((module_metadata or {}).get(x, {}), Mapping)
+                else (module_metadata or {}).get(x, "")
+            ).lower()
+        )
+    ]
+    # A search may intentionally look across the whole accessible catalog. Without
+    # a search term, never silently show every module under an unrelated section.
     if not filtered and q:
         filtered = [x for x in modules if q in x.lower()]
-    return filtered or modules
+    return filtered
 
 
 def _badge(label: str, tone: str = "neutral") -> str:
@@ -750,6 +886,7 @@ def render_application_shell(
     allowed_modules: Sequence[str],
     current_module: str | None = None,
     is_admin: bool = False,
+    module_catalog: Sequence[Mapping[str, Any]] | None = None,
 ) -> tuple[str, str | None]:
     ensure_shell_schema()
     render_shell_css()
@@ -761,6 +898,15 @@ def render_application_shell(
         if is_admin or str(x).strip().casefold() not in {"admin panel", "admin"}
     )
     allowed_modules = safe_allowed_modules
+    # This metadata is built by the application from its full Explorer catalog
+    # (legacy and specialist platform modules), so the launcher and search share
+    # one category assignment instead of independently guessing from names.
+    module_metadata: dict[str, Any] = {}
+    for item in module_catalog or ():
+        if isinstance(item, Mapping):
+            name = str(item.get("name") or "").strip()
+            if name:
+                module_metadata[name] = item
     nav_labels = [key for key in NAV_GROUPS.keys() if is_admin or key != "ADMIN"]
     current_section = str(st.session_state.get("shoir_shell_section", "HOME"))
     if not is_admin and current_section == "ADMIN":
@@ -826,7 +972,7 @@ def render_application_shell(
                 label_visibility="collapsed",
             )
 
-        choices = _module_choices(allowed_modules, section, search)
+        choices = _module_choices(allowed_modules, section, search, module_metadata)
         if current_module and current_module in choices:
             default_module = current_module
         elif recent_choice != "—":
@@ -835,19 +981,23 @@ def render_application_shell(
             default_module = choices[0] if choices else (list(allowed_modules)[0] if allowed_modules else "MILP Solvers")
 
         default_index = choices.index(default_module) if default_module in choices else 0
-        labels = {str(module): f"{module_group(str(module))} · {str(module)}" for module in choices}
+        labels = {str(module): f"{module_group(str(module), module_metadata)} · {str(module)}" for module in choices}
         selector_key = f"shoir_shell_module_selector_{section}"
         if st.session_state.get(selector_key) not in choices:
             st.session_state.pop(selector_key, None)
-        selected_label = st.selectbox(
-            "Select module",
-            list(choices),
-            index=default_index,
-            format_func=lambda x: labels.get(str(x), str(x)),
-            key=selector_key,
-            label_visibility="collapsed",
-        )
-        remember_module(selected_label)
+        if choices:
+            selected_label = st.selectbox(
+                "Select module",
+                list(choices),
+                index=default_index,
+                format_func=lambda x: labels.get(str(x), str(x)),
+                key=selector_key,
+                label_visibility="collapsed",
+            )
+            remember_module(selected_label)
+        else:
+            selected_label = current_module if current_module in allowed_modules else (allowed_modules[0] if allowed_modules else None)
+            st.caption(f"No modules match this section and search for the {tier} plan. Clear the search or switch sections.")
 
         st.markdown("---")
         action_cols = st.columns(2)
@@ -927,7 +1077,7 @@ def render_application_shell(
         surface = "logout"
 
     render_application_header(username, tier, selected_module)
-    render_global_search(allowed_modules)
+    render_global_search(allowed_modules, module_metadata)
     return selected_module, surface
 
 
