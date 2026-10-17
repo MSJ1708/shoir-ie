@@ -1579,11 +1579,11 @@ def render_module(module: str, tier: str, username: str):
         if not analysis_df.empty:
             st.markdown("#### 📊 Scenario KPI comparison")
             kpi_cols = [column for column in EXPERIMENT_METRIC_COLUMNS if column in analysis_df.columns]
+            figure_exports = []
             if len(scenarios) < 2:
                 st.info("Add at least one more scenario to compare alternatives.")
             elif kpi_cols:
                 chart_tabs = st.tabs([f"{column} comparison" for column in kpi_cols])
-                figure_exports = []
                 for column, tab in zip(kpi_cols, chart_tabs):
                     with tab:
                         fig = px.bar(
@@ -1611,7 +1611,7 @@ def render_module(module: str, tier: str, username: str):
                         )
                         figure_exports.append((f"{column} comparison", fig))
 
-                if {"Cost", "Service"}.issubset(analysis_df.columns):
+                if len(scenarios) >= 2 and {"Cost", "Service"}.issubset(analysis_df.columns):
                     st.markdown("#### ⚖️ Cost vs. service trade-off")
                     hover_columns = [
                         column for column in ("Risk", "Inventory", "Carbon")
