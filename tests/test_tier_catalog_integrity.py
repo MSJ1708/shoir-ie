@@ -188,6 +188,7 @@ def test_experiment_lab_routes_to_full_research_workspace_with_scenario_lab():
     app_source = APP_PATH.read_text(encoding="utf-8")
     platform_source = (APP_PATH.parent / "industrial_platform.py").read_text(encoding="utf-8")
     experience_source = (APP_PATH.parent / "industrial_experience.py").read_text(encoding="utf-8")
+    live_visuals_source = (APP_PATH.parent / "shoir_live_visuals.py").read_text(encoding="utf-8")
 
     render_start = platform_source.index("def render_module(")
     experiment_route = platform_source.index('if module == "Experiment Lab":', render_start)
