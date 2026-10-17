@@ -179,3 +179,32 @@ def test_every_catalogued_module_has_a_specialist_route_or_named_fallback_bluepr
     assert not uncovered, {
         "modules_without_specialist_route_or_named_fallback": sorted(uncovered)
     }
+
+
+
+def test_experiment_lab_routes_to_full_research_workspace_with_scenario_lab():
+    app_source = APP_PATH.read_text(encoding="utf-8")
+    platform_source = (APP_PATH.parent / "industrial_platform.py").read_text(encoding="utf-8")
+    experience_source = (APP_PATH.parent / "industrial_experience.py").read_text(encoding="utf-8")
+
+    render_start = platform_source.index("def render_module(")
+    experiment_route = platform_source.index('if module == "Experiment Lab":', render_start)
+    generic_import = platform_source.index("render_module_data_exchange(module, st, tier, username)", render_start)
+    control_route = platform_source.index('elif module=="Industrial Control Center":', experiment_route)
+    assert experiment_route < generic_import
+    assert "render_research_workspace(module, tier, username)" in platform_source[experiment_route:generic_import]
+    assert "return" in platform_source[experiment_route:generic_import]
+    assert control_route > experiment_route
+    assert 'tabs = st.tabs(["📚 Studies & Recovery","📋 Protocol","🧪 Experiment Engine","🧪 Runs & Results","📝 Decisions","📦 Evidence & Export","📊 Scenario Lab"])' in experience_source
+
+    workspace_start = experience_source.index('with tabs[6]:', experience_source.index("def render_research_workspace"))
+    workspace_end = experience_source.index("def _safe_key", workspace_start)
+    scenario_lab = experience_source[workspace_start:workspace_end]
+    for required_piece in (
+        "analyze_experiment_scenarios(",
+        "save_experiment(",
+        "render_export_bar(",
+        "Saved scenario experiments",
+        "Cost versus service trade-off",
+    ):
+        assert required_piece in scenario_lab
