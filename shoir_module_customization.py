@@ -367,6 +367,9 @@ def render_module_customization(
                 st.session_state, module, username, candidate,
                 valid_columns=source_names if can_map else None,
             )
+            # Reapply the profile's chart default on the next rerun while
+            # preserving explicit module data and chart-source selections.
+            st.session_state.pop(f"liveviz_chart_{hash(module) & 0xFFFF:04x}", None)
             # Persist immediately before rerendering; don't rely only on the
             # bottom-of-page autosave path for this explicit Save action.
             persisted = False
@@ -382,4 +385,4 @@ def render_module_customization(
                 st.rerun()
             st.warning("Profile updated in this session, but durable workspace persistence could not be confirmed.")
 
-    return get_module_profile(st.session_state, module, username, valid_columns=list(frame.columns))
+    return get_module_profile(st.session_state, module, username, valid_columns=valid_columns)
