@@ -95,8 +95,9 @@ def test_all_subscription_modules_are_catalogued_with_the_correct_tier():
     assert not mismatches, mismatches
 
 
-def test_platform_modules_have_a_shared_live_visualization_surface():
+def test_every_module_has_one_shared_live_visualization_surface():
     app_source = APP_PATH.read_text(encoding="utf-8")
+    parity_source = (APP_PATH.parent / "shoir_module_parity.py").read_text(encoding="utf-8")
     dispatcher_start = app_source.index(
         'elif mod in {x["name"] for x in PLATFORM_CATALOG}:'
     )
@@ -105,10 +106,15 @@ def test_platform_modules_have_a_shared_live_visualization_surface():
         dispatcher_start,
     )
     platform_dispatcher = app_source[dispatcher_start:dispatcher_end]
+    results_start = parity_source.index("def _render_results(")
+    results_end = parity_source.index("def render_universal_module_parity(", results_start)
+    shared_results = parity_source[results_start:results_end]
 
     assert "render_industrial_module(" in platform_dispatcher
-    assert "render_live_visualization_studio(str(mod), expanded=True)" in platform_dispatcher
-    assert "Chart studio diagnostic" in platform_dispatcher
+    # Native module charts remain first; the shared studio is rendered once
+    # by the common results contract rather than duplicated by the dispatcher.
+    assert "render_live_visualization_studio" not in platform_dispatcher
+    assert "render_live_visualization_studio(module, expanded=True" in shared_results
 
 
 
