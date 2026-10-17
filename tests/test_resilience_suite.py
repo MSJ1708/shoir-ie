@@ -176,3 +176,40 @@ def test_run_snapshots_are_owner_and_module_scoped(tmp_path):
     assert load_resilience_run(saved["run_id"], GLOBAL_SUPPLY, "Alice", db_path=path)["inputs"]["inputs"][0]["value"] == 1.0
     assert load_resilience_run(saved["run_id"], GLOBAL_SUPPLY, "Bob", db_path=path) is None
     assert load_resilience_run(saved["run_id"], HUMANITARIAN, "Alice", db_path=path) is None
+
+
+def test_module_explorer_exports_and_resilience_catalog_are_in_sync():
+    from industrial_platform import PLATFORM_CATALOG, TIER_FEATURES
+    from shoir_tier_capabilities import (
+        MODULE_EXPLORER_TIERS,
+        available_modules,
+        module_required_tier,
+        unique_modules,
+    )
+
+    assert list(MODULE_EXPLORER_TIERS) == [
+        "All capabilities",
+        "Starter",
+        "Mid-Tier Pro",
+        "Professional",
+        "Enterprise",
+        "Enterprise Plus",
+        "Research Pack",
+    ]
+    assert unique_modules([" A ", "", None, "A", "B", "B "]) == ["A", "B"]
+
+    catalog = {item["name"]: item for item in PLATFORM_CATALOG}
+    for module in RESILIENCE_MODULES:
+        assert module in catalog, f"{module} is missing from the launcher catalog"
+        required = MODULE_DEFINITIONS[module]["tier"]
+        assert catalog[module]["tier"] == required
+        assert module_required_tier(module) == required
+        assert module in TIER_FEATURES[required]
+        assert available_modules(required, [module]) == [module]
+
+        if required == "Enterprise":
+            assert available_modules("Enterprise Plus", [module]) == [module]
+            assert available_modules("Research Pack", [module]) == [module]
+        else:
+            assert available_modules("Enterprise", [module]) == []
+            assert available_modules("Research Pack", [module]) == []
