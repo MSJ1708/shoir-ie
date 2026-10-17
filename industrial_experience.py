@@ -1858,6 +1858,15 @@ def _starter_data(module: str) -> pd.DataFrame:
             "Baseline_tCO2e": [5.04, 6.43, 1.50, 6.46],
             "Scenario_tCO2e": [4.25, 5.10, 1.20, 5.80],
         })
+    if any(word in lower for word in ("currency", "localization", "multi-currency", "trade rule", "customs")):
+        return pd.DataFrame({
+            "Item": ["Machine parts", "Industrial sensors", "Freight service", "Spare bearings"],
+            "Amount": [18000.0, 7250.0, 3400.0, 5600.0],
+            "Currency": ["SAR", "EUR", "USD", "SAR"],
+            "Region_From": ["SA", "DE", "US", "SA"],
+            "Region_To": ["SA", "SA", "SA", "SA"],
+            "Customs_Document_Ready": [True, False, True, True],
+        })
     if any(word in lower for word in ("economics", "finance", "capital", "investment", "npv", "benchmark")):
         return pd.DataFrame({
             "Alternative": ["Current state", "Option A", "Option B", "Option C"],
@@ -1876,7 +1885,17 @@ def _starter_data(module: str) -> pd.DataFrame:
             "Shift_Hours": [8, 8, 8, 8],
             "Headcount": [2, 1, 3, 2],
         })
-    if any(word in lower for word in ("research", "hypothesis", "regression", "literature", "paper", "peer review", "formal proof")):
+    if any(word in lower for word in ("experiment", "scenario", "monte carlo", "sensitivity")) or ("simulation" in lower and "digital twin" not in lower):
+        return pd.DataFrame({
+            "Scenario": ["Baseline", "Demand Surge", "Supplier Shock", "Capacity Expansion"],
+            "Demand_Units": [1000, 1250, 1000, 1100],
+            "Capacity_Units": [1100, 1100, 900, 1250],
+            "Cost_SAR": [100000, 125000, 142000, 115000],
+            "Service_pct": [95.0, 90.0, 82.0, 98.0],
+            "Risk_Score": [10, 18, 35, 8],
+            "Carbon_kgCO2e": [1000, 1100, 1300, 850],
+        })
+    if any(word in lower for word in ("research", "hypothesis", "regression", "literature", "paper", "peer review", "formal proof", "decision-readiness", "evidence degradation")):
         return pd.DataFrame({
             "Scenario": ["Baseline", "Treatment A", "Treatment B", "Stress Case"],
             "Sample_Size": [100, 100, 100, 100],
@@ -1894,7 +1913,7 @@ def _starter_data(module: str) -> pd.DataFrame:
             "Availability_pct": [98.5, 97.0, 91.2, 95.4],
             "Energy_kWh": [120, 128, 165, 142],
         })
-    if any(word in lower for word in ("decision", "control tower", "governance", "security", "audit", "ledger", "registry", "collaboration", "workspace", "integration", "platform", "data")):
+    if any(word in lower for word in ("decision", "control tower", "governance", "security", "audit", "ledger", "registry", "collaboration", "workspace", "integration", "platform", "data", "gateway", "api", "webhook", "copilot", "agentic", "venture", "subscription", "persistence")):
         return pd.DataFrame({
             "Entity_ID": ["FAC-001", "MCH-001", "WO-001", "SKU-001"],
             "Entity_Type": ["Facility", "Machine", "Work Order", "SKU"],
