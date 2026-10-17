@@ -22,7 +22,7 @@ The resilience suite adds six specialist workspaces to the industrial platform c
 
 ## Modeling notes and limitations
 
-The starter datasets are synthetic. The transportation model uses scipy.optimize.linprog with capacity limits, demand-balance equalities and explicit shortage variables. It optimizes a configurable weighted objective based on user-entered direct cost, lead days, risk and carbon-intensity proxies. A shortage remains visible rather than being mislabeled as delivered service.
+The starter datasets are synthetic. The transportation model uses scipy.optimize.milp by default, with capacity limits, demand-balance equalities and explicit shortage variables; an opt-in fractional-units control switches it to a continuous LP. The configurable weighted objective uses user-entered direct cost, lead days, supplier risk and carbon-intensity proxies. Countable-unit demand is rounded upward in integer mode, and a shortage remains visible rather than being mislabeled as delivered service.
 
 The closed-loop workspace calculates candidate reuse subject to capture efficiency and demand, with separate heat and water estimates. The urban mobility model uses aggregated corridor data and simple capacity-sensitive proxies. AKDT asset health is a transparent heuristic—not a trained remaining-useful-life model—and its edge/cloud control is conceptual. L-SIMS only compares aggregate domestic manufacturing and repair capability for generic industrial spare-part families.
 
