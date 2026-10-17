@@ -205,6 +205,9 @@ def test_experiment_lab_routes_to_full_research_workspace_with_scenario_lab():
         "save_experiment(",
         "render_export_bar(",
         "Saved scenario experiments",
+        "Inspect saved experiment",
+        "research_scenario_lab_saved_signature",
+        "Saved experiment inputs and results",
         "Cost versus service trade-off",
     ):
         assert required_piece in scenario_lab
