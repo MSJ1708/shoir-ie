@@ -35,6 +35,16 @@ from shoir_module_customization import (
 )
 
 
+def _module_widget_token(module: str) -> str:
+    """Return a stable, collision-resistant token for per-module widget state.
+
+    Python's built-in hash is randomized between processes and truncating it to
+    16 bits can collide across modules. Stable tokens keep each module's chart
+    controls isolated and predictable across app restarts.
+    """
+    return hashlib.sha256(str(module).encode("utf-8")).hexdigest()[:12]
+
+
 _MODULE_KEYS = {
     "Engineering Validation Center": ["validation_df", "validation_result"],
     "Industrial Operating System": ["os_compare_result", "os_process_result", "os_drift_result", "os_verify_result"],
@@ -673,13 +683,13 @@ def render_live_visualization_studio(module: str, *, expanded: bool = False, pre
             preferred_labels = [i for i, (_, key, _) in enumerate(tables) if key == preferred_key]
             if preferred_labels:
                 default_source_index = preferred_labels[0]
-        source_key = f"liveviz_source_{hash(module) & 0xFFFF:04x}"
+        source_key = f"liveviz_source_{_module_widget_token(module)}"
         _reset_stale_choice(source_key, labels)
         table_label = st.selectbox("Data source", labels, index=default_source_index, key=source_key)
         raw_df = tables[labels.index(table_label)][2]
         profile = get_module_profile(st.session_state, module, username)
         df = apply_display_labels(raw_df, profile)
-        _render_auto_kpi_dashboard(display_name, df, f"{hash(module) & 0xFFFF:04x}")
+        _render_auto_kpi_dashboard(display_name, df, f"{_module_widget_token(module)}")
 
         nums = _numeric_columns(df)
         cats = _categorical_columns(df)
@@ -694,9 +704,9 @@ def render_live_visualization_studio(module: str, *, expanded: bool = False, pre
         x_options = ["(none)"] + cols
         default_x = next((c for c in dates if c != default_y), next((c for c in cats if c != default_y), "(none)"))
 
-        x_key = f"liveviz_x_{hash(module) & 0xFFFF:04x}"
-        y_key = f"liveviz_y_{hash(module) & 0xFFFF:04x}"
-        z_key = f"liveviz_z_{hash(module) & 0xFFFF:04x}"
+        x_key = f"liveviz_x_{_module_widget_token(module)}"
+        y_key = f"liveviz_y_{_module_widget_token(module)}"
+        z_key = f"liveviz_z_{_module_widget_token(module)}"
         y_options = ["(none)"] + nums
         _reset_stale_choice(x_key, x_options)
         _reset_stale_choice(y_key, y_options)
@@ -718,19 +728,19 @@ def render_live_visualization_studio(module: str, *, expanded: bool = False, pre
             suggestions = ["Auto", "Line", "Bar", "Area", "Scatter", "Distribution", "Histogram", "Box", "Pie", "Pareto", "Waterfall", "Sankey", "Heatmap", "Correlation Heatmap", "Health Heatmap", "Control Chart", "SPC", "Anomaly Timeline", "Metric Trend", "Sensitivity Plot", "Gantt", "Network Map", "3D Scatter"]
             preferred_chart = profile.get("preferred_chart", "Auto")
             chart_default = suggestions.index(preferred_chart) if preferred_chart in suggestions else 0
-            chart_key = f"liveviz_chart_{hash(module) & 0xFFFF:04x}"
+            chart_key = f"liveviz_chart_{_module_widget_token(module)}"
             _reset_stale_choice(chart_key, suggestions)
             chart_choice = st.selectbox("Visualization", suggestions, index=chart_default, key=chart_key)
         with c5:
             aggregation_options = ["Raw", "Mean", "Median", "Sum", "Count"]
-            aggregation_key = f"liveviz_agg_{hash(module) & 0xFFFF:04x}"
+            aggregation_key = f"liveviz_agg_{_module_widget_token(module)}"
             _reset_stale_choice(aggregation_key, aggregation_options)
             aggregation = st.selectbox("Aggregation", aggregation_options, key=aggregation_key)
         with c6:
-            title = st.text_input("Chart title", value=f"{display_name} · {y or 'relationships'}", key=f"liveviz_title_{hash(module) & 0xFFFF:04x}")
+            title = st.text_input("Chart title", value=f"{display_name} · {y or 'relationships'}", key=f"liveviz_title_{_module_widget_token(module)}")
 
         filter_options = ["(none)"] + cols
-        filter_key = f"liveviz_filtercol_{hash(module) & 0xFFFF:04x}"
+        filter_key = f"liveviz_filtercol_{_module_widget_token(module)}"
         _reset_stale_choice(filter_key, filter_options)
         filter_col = st.selectbox("Optional filter", filter_options, key=filter_key)
         filter_value = "All"
@@ -738,7 +748,7 @@ def render_live_visualization_studio(module: str, *, expanded: bool = False, pre
             filter_values_source = sample_for_plot(df, max_points=20000, chart="filter")
             values = limit_categories(filter_values_source[filter_col], 500)
             filter_value_options = ["All"] + values
-            filter_value_key = f"liveviz_filterval_{hash(module) & 0xFFFF:04x}"
+            filter_value_key = f"liveviz_filterval_{_module_widget_token(module)}"
             _reset_stale_choice(filter_value_key, filter_value_options)
             filter_value = st.selectbox("Filter value", filter_value_options, key=filter_value_key)
 
