@@ -603,10 +603,87 @@ def save_model_snapshot(
         c.commit()
     return mid
 
+EXPERIMENT_METRIC_COLUMNS = ("Cost", "Service", "Risk", "Inventory", "Carbon")
+
+
+def analyze_experiment_scenarios(
+    scenarios: pd.DataFrame,
+    baseline_scenario: Optional[str] = None,
+) -> pd.DataFrame:
+    """Validate scenario inputs and calculate deltas against an explicit baseline.
+
+    The function is deliberately independent of Streamlit so scenario
+    validation and calculations can be covered by regression tests.
+    """
+    if not isinstance(scenarios, pd.DataFrame):
+        scenarios = pd.DataFrame(scenarios)
+    if scenarios.empty:
+        raise ValueError("Add at least one scenario before analyzing the experiment.")
+    if "Scenario" not in scenarios.columns:
+        raise ValueError("The scenario table must include a 'Scenario' column.")
+
+    result = scenarios.copy(deep=True)
+    names = result["Scenario"].fillna("").astype(str).str.strip()
+    if names.eq("").any():
+        raise ValueError("Every scenario needs a non-empty name.")
+    if names.duplicated().any():
+        duplicates = names[names.duplicated(keep=False)].drop_duplicates().tolist()
+        raise ValueError("Scenario names must be unique. Rename: " + ", ".join(duplicates))
+    result["Scenario"] = names
+
+    numeric_columns = [column for column in EXPERIMENT_METRIC_COLUMNS if column in result.columns]
+    if not numeric_columns:
+        raise ValueError(
+            "Include at least one numeric KPI column: Cost, Service, Risk, Inventory or Carbon."
+        )
+
+    for column in numeric_columns:
+        converted = pd.to_numeric(result[column], errors="coerce")
+        invalid = result[column].notna() & converted.isna()
+        if invalid.any():
+            raise ValueError(f"'{column}' contains non-numeric values. Correct those cells and retry.")
+        if converted.notna().sum() == 0:
+            raise ValueError(f"'{column}' needs at least one numeric value.")
+        result[column] = converted
+
+    if baseline_scenario is None:
+        baseline_scenario = str(result.iloc[0]["Scenario"])
+    baseline_matches = result.index[result["Scenario"].eq(str(baseline_scenario))].tolist()
+    if not baseline_matches:
+        raise ValueError(f"Baseline scenario '{baseline_scenario}' is not in the scenario table.")
+    baseline_index = baseline_matches[0]
+    baseline = result.loc[baseline_index]
+
+    for column in numeric_columns:
+        baseline_value = baseline[column]
+        if pd.isna(baseline_value):
+            raise ValueError(
+                f"The baseline scenario has no numeric value for '{column}'. "
+                "Enter a baseline value or choose another baseline."
+            )
+        result[f"{column}Delta"] = result[column] - float(baseline_value)
+
+    result["Baseline"] = result["Scenario"].eq(str(baseline_scenario))
+    return result
+
+
 def save_experiment(name: str, module: str, scenarios: list, results: dict, username: str, db_path="enterprise_full_workspace.db") -> str:
-    eid="EXP-"+hashlib.sha256((name+module+_now()).encode()).hexdigest()[:12].upper()
+    """Persist a complete experiment record using the explicit table schema."""
+    eid = "EXP-" + hashlib.sha256((name + module + _now()).encode()).hexdigest()[:12].upper()
+    created_at = _now()
     with sqlite3.connect(db_path) as c:
-        c.execute("INSERT INTO platform_experiments VALUES(?,?,?,?,?,?)",(eid,name,module,json.dumps(scenarios,default=str),json.dumps(results,default=str),username,_now())); c.commit()
+        c.execute(
+            """INSERT INTO platform_experiments
+               (experiment_id, name, module, scenarios_json, results_json, created_by, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (
+                eid, name, module,
+                json.dumps(scenarios, default=str),
+                json.dumps(results, default=str),
+                username, created_at,
+            ),
+        )
+        c.commit()
     return eid
 
 def export_pdf(title: str, tables: Sequence[Tuple[str,pd.DataFrame]], figures: Sequence[Tuple[str,Any]]=()) -> bytes:
@@ -957,11 +1034,9 @@ def render_module(module: str, tier: str, username: str):
     # surface. Specialist modules continue to use the shared import/activate UX.
     if module not in ("Industrial Control Center", "ShadowShift — Micro-Loss & Recovery Intelligence"):
         render_module_data_exchange(module, st, tier, username)
-    if module == "Experiment Lab":
-        # Experiment Lab is a dedicated research workspace. Its UI and
-        # persistence are rendered by render_research_workspace, so do not
-        # append the old generic scenario screen underneath it.
-        return
+    # Experiment Lab intentionally falls through to its dedicated renderer
+    # below. An earlier early-return here bypassed its editor, analysis,
+    # visualizations, persistence and exports, leaving a blank module body.
     if module=="Experiment Engine":
         render_experiment_engine(tier, username)
         return
@@ -1418,12 +1493,179 @@ def render_module(module: str, tier: str, username: str):
         st.dataframe(reg,use_container_width=True,hide_index=True)
         render_export_bar(module,[("Registry",df),("Persisted Models",reg)],tier,username)
     elif module=="Experiment Lab":
-        scenarios=st.data_editor(st.session_state.setdefault("experiment_df",pd.DataFrame({"Scenario":["Baseline","High Demand","Supplier Shock","Capacity Expansion"],"Cost":[100000,125000,142000,115000],"Service":[95,90,82,98],"Risk":[10,18,35,8],"Inventory":[5000,6200,7000,4700],"Carbon":[1000,1100,1300,850]})),num_rows="dynamic",use_container_width=True,key="experiment_editor")
-        if st.button("🧪 Analyze Scenario Set",type="primary",use_container_width=True,key="experiment_run"):
-            st.session_state["experiment_results"]=scenarios.assign(CostDelta=scenarios["Cost"]-scenarios["Cost"].iloc[0],ServiceDelta=scenarios["Service"]-scenarios["Service"].iloc[0],RiskDelta=scenarios["Risk"]-scenarios["Risk"].iloc[0])
-            expid=save_experiment("Scenario Matrix",module,scenarios.to_dict("records"),st.session_state["experiment_results"].to_dict("records"),username); st.success(f"Experiment saved: {expid}")
-        st.dataframe(st.session_state.get("experiment_results",scenarios),use_container_width=True)
-        render_export_bar(module,[("Scenarios",scenarios),("Experiment Results",st.session_state.get("experiment_results",pd.DataFrame()))],tier,username)
+        st.subheader("🧪 Experiment Lab")
+        st.caption(
+            "Edit the scenario matrix, choose a baseline, compare operational KPIs, "
+            "inspect trade-offs, and save a traceable experiment."
+        )
+        scenario_defaults = pd.DataFrame({
+            "Scenario": ["Baseline", "High Demand", "Supplier Shock", "Capacity Expansion"],
+            "Cost": [100000, 125000, 142000, 115000],
+            "Service": [95, 90, 82, 98],
+            "Risk": [10, 18, 35, 8],
+            "Inventory": [5000, 6200, 7000, 4700],
+            "Carbon": [1000, 1100, 1300, 850],
+        })
+        scenarios = st.data_editor(
+            st.session_state.setdefault("experiment_df", scenario_defaults),
+            num_rows="dynamic",
+            use_container_width=True,
+            hide_index=True,
+            key="experiment_editor",
+        )
+        st.session_state["experiment_df"] = scenarios.copy(deep=True)
+
+        scenario_names = (
+            scenarios["Scenario"].fillna("").astype(str).str.strip().tolist()
+            if "Scenario" in scenarios.columns else []
+        )
+        baseline_options = list(dict.fromkeys(name for name in scenario_names if name))
+        baseline_scenario = None
+        if baseline_options:
+            default_baseline = (
+                st.session_state.get("experiment_baseline")
+                if st.session_state.get("experiment_baseline") in baseline_options
+                else baseline_options[0]
+            )
+            baseline_scenario = st.selectbox(
+                "Baseline scenario",
+                options=baseline_options,
+                index=baseline_options.index(default_baseline),
+                key="experiment_baseline",
+                help="All KPI deltas are calculated relative to this scenario.",
+            )
+
+        analysis_df = pd.DataFrame()
+        try:
+            analysis_df = analyze_experiment_scenarios(scenarios, baseline_scenario)
+        except (TypeError, ValueError) as exc:
+            st.warning(f"Scenario analysis needs attention: {exc}")
+
+        col_run, col_hint = st.columns([1, 2])
+        with col_run:
+            run_experiment = st.button(
+                "🧪 Analyze & Save Experiment",
+                type="primary",
+                use_container_width=True,
+                key="experiment_run",
+            )
+        with col_hint:
+            st.caption(
+                "The charts below are a live preview. Use Analyze & Save to record the "
+                "current scenario inputs and calculated results."
+            )
+
+        if run_experiment:
+            try:
+                if len(scenarios) < 2:
+                    raise ValueError("Add at least two scenarios to compare before saving.")
+                saved_analysis = analyze_experiment_scenarios(scenarios, baseline_scenario)
+                experiment_id = save_experiment(
+                    "Scenario Matrix",
+                    module,
+                    scenarios.to_dict("records"),
+                    {
+                        "baseline_scenario": baseline_scenario,
+                        "scenario_results": saved_analysis.to_dict("records"),
+                    },
+                    username,
+                )
+                st.session_state["experiment_results"] = saved_analysis.copy(deep=True)
+                st.session_state["experiment_last_id"] = experiment_id
+                st.success(f"Experiment saved successfully: {experiment_id}")
+            except Exception as exc:
+                st.error(f"Experiment could not be analyzed or saved: {exc}")
+
+        if not analysis_df.empty:
+            st.markdown("#### 📊 Scenario KPI comparison")
+            kpi_cols = [column for column in EXPERIMENT_METRIC_COLUMNS if column in analysis_df.columns]
+            if len(scenarios) < 2:
+                st.info("Add at least one more scenario to compare alternatives.")
+            elif kpi_cols:
+                chart_tabs = st.tabs([f"{column} comparison" for column in kpi_cols])
+                figure_exports = []
+                for column, tab in zip(kpi_cols, chart_tabs):
+                    with tab:
+                        fig = px.bar(
+                            analysis_df,
+                            x="Scenario",
+                            y=column,
+                            color="Baseline",
+                            title=f"{column} by scenario",
+                            barmode="group",
+                            hover_data=["Scenario"],
+                        )
+                        baseline_row = analysis_df.loc[analysis_df["Baseline"]]
+                        if not baseline_row.empty:
+                            baseline_value = float(baseline_row.iloc[0][column])
+                            fig.add_hline(
+                                y=baseline_value,
+                                line_dash="dash",
+                                annotation_text=f"Baseline: {baseline_value:,.4g}",
+                            )
+                        fig.update_layout(height=380, legend_title_text="Selected baseline")
+                        st.plotly_chart(
+                            fig,
+                            use_container_width=True,
+                            config={"displayModeBar": True, "responsive": True},
+                        )
+                        figure_exports.append((f"{column} comparison", fig))
+
+                if {"Cost", "Service"}.issubset(analysis_df.columns):
+                    st.markdown("#### ⚖️ Cost vs. service trade-off")
+                    hover_columns = [
+                        column for column in ("Risk", "Inventory", "Carbon")
+                        if column in analysis_df.columns
+                    ]
+                    tradeoff = px.scatter(
+                        analysis_df,
+                        x="Cost",
+                        y="Service",
+                        color="Scenario",
+                        hover_data=hover_columns,
+                        title="Cost vs. service by scenario",
+                    )
+                    tradeoff.update_layout(height=420)
+                    st.plotly_chart(
+                        tradeoff,
+                        use_container_width=True,
+                        config={"displayModeBar": True, "responsive": True},
+                    )
+                    figure_exports.append(("Cost vs service trade-off", tradeoff))
+
+                st.markdown("#### Results table")
+                st.dataframe(analysis_df, use_container_width=True, hide_index=True)
+            else:
+                figure_exports = []
+                st.info("Add numeric KPI columns to enable scenario charts.")
+
+            saved_results = st.session_state.get("experiment_results", pd.DataFrame())
+            saved_tables = [
+                ("Scenario Inputs", scenarios),
+                ("Live Analysis Preview", analysis_df),
+            ]
+            if isinstance(saved_results, pd.DataFrame) and not saved_results.empty:
+                saved_tables.append(("Last Saved Experiment Results", saved_results))
+            render_export_bar(module, saved_tables, figure_exports, tier, username)
+
+        st.markdown("#### 🗃️ Saved experiment history")
+        try:
+            with sqlite3.connect("enterprise_full_workspace.db") as experiment_conn:
+                history = pd.read_sql_query(
+                    """SELECT experiment_id AS "Experiment ID", name AS Name, module AS Module,
+                              created_by AS "Created By", created_at AS "Created At"
+                       FROM platform_experiments
+                       WHERE module=? AND created_by=?
+                       ORDER BY created_at DESC LIMIT 25""",
+                    experiment_conn,
+                    params=(module, username),
+                )
+            if history.empty:
+                st.info("No saved experiments yet. Analyze and save a scenario set to create the first record.")
+            else:
+                st.dataframe(history, use_container_width=True, hide_index=True)
+        except Exception as exc:
+            st.warning(f"Saved experiment history is temporarily unavailable: {exc}")
     elif module=="Industrial Control Center":
         render_investor_control_center(tier, username)
     elif module=="Engineering Decision Center":
