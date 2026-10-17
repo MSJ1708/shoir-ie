@@ -123,6 +123,7 @@ def test_every_module_has_one_shared_live_visualization_surface():
 def test_experiment_lab_renderer_is_reachable_and_charted():
     platform_source = (APP_PATH.parent / "industrial_platform.py").read_text(encoding="utf-8")
     experience_source = (APP_PATH.parent / "industrial_experience.py").read_text(encoding="utf-8")
+    live_visuals_source = (APP_PATH.parent / "shoir_live_visuals.py").read_text(encoding="utf-8")
     dispatcher_start = platform_source.index("def render_module(")
     experiment_route = platform_source.index('if module == "Experiment Lab":', dispatcher_start)
     generic_import = platform_source.index("render_module_data_exchange(module, st, tier, username)", dispatcher_start)
@@ -197,6 +198,8 @@ def test_experiment_lab_routes_to_full_research_workspace_with_scenario_lab():
     assert "return" in platform_source[experiment_route:generic_import]
     assert control_route > experiment_route
     assert 'tabs = st.tabs(["📚 Studies & Recovery","📋 Protocol","🧪 Experiment Engine","🧪 Runs & Results","📝 Decisions","📦 Evidence & Export","📊 Scenario Lab"])' in experience_source
+    assert '"Experiment Lab":["research_scenario_lab_matrix"' in platform_source
+    assert '"Experiment Lab": ["research_scenario_lab_matrix", "research_scenario_lab_saved_results"' in live_visuals_source
 
     workspace_start = experience_source.index('with tabs[6]:', experience_source.index("def render_research_workspace"))
     workspace_end = experience_source.index("def _safe_key", workspace_start)
