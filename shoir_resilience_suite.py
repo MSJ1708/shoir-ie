@@ -555,6 +555,21 @@ def list_resilience_runs(module: str, username: str, db_path: str = "enterprise_
         )
 
 
+def load_resilience_run(run_id: str, module: str, username: str, db_path: str = "enterprise_full_workspace.db") -> dict[str, Any] | None:
+    """Load a snapshot only when both owner and immutable module identity match."""
+    with sqlite3.connect(db_path, timeout=10) as conn:
+        row = conn.execute(
+            "SELECT run_id, created_at, input_sha256, inputs_json, results_json FROM resilience_scenario_runs WHERE run_id=? AND username=? AND module=?",
+            (str(run_id), str(username or "unknown").casefold(), str(module)),
+        ).fetchone()
+    if not row:
+        return None
+    return {
+        "run_id": row[0], "created_at": row[1], "input_sha256": row[2],
+        "inputs": json.loads(row[3]), "results": json.loads(row[4]),
+    }
+
+
 def _state_key(module: str, name: str) -> str:
     token = hashlib.sha1(str(module).encode("utf-8")).hexdigest()[:10]
     return f"resilience_{token}_{name}"
@@ -930,6 +945,18 @@ def _render_snapshot_actions(st: Any, module: str, username: str, inputs: Mappin
             else:
                 st.dataframe(history, use_container_width=True, hide_index=True)
                 st.download_button("Download saved-run index", history.to_csv(index=False).encode("utf-8"), file_name="resilience_saved_runs.csv", mime="text/csv", key=_state_key(module, "history_csv"))
+                selected_run = st.selectbox("Snapshot to inspect", history["run_id"].astype(str).tolist(), format_func=lambda value: value[:12], key=_state_key(module, "inspect_run_id"))
+                if st.button("Inspect selected snapshot", key=_state_key(module, "inspect_run_button")):
+                    snapshot = load_resilience_run(selected_run, module, username)
+                    if snapshot is None:
+                        st.error("Snapshot not found for this user and module.")
+                    else:
+                        st.json({"run_id": snapshot["run_id"], "created_at": snapshot["created_at"], "input_sha256": snapshot["input_sha256"]})
+                        with st.expander("Saved input tables", expanded=True):
+                            st.json(snapshot["inputs"])
+                        with st.expander("Saved modeled results", expanded=True):
+                            st.json(snapshot["results"])
+                        st.download_button("Download selected snapshot JSON", json.dumps(snapshot, indent=2, default=str).encode("utf-8"), file_name=f"resilience_snapshot_{snapshot['run_id'][:12]}.json", mime="application/json", key=_state_key(module, "inspect_snapshot_json"))
         except Exception as exc:
             st.warning(f"Run history unavailable: {type(exc).__name__}: {exc}")
 
