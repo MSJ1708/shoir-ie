@@ -1764,6 +1764,395 @@ def _module_meta(module: str) -> dict:
         return {}
 
 
+FALLBACK_MODULE_BLUEPRINT_ROWS = [
+    ("Facility Layout & Warehousing", "facility", "Facilities & material flow", "Evaluate department area, from-to movement and travel burden.", "Layout / SLP review", "Department, area, from-to flow and travel-distance fields", "Coordinates and flows must come from the user's actual facility; starter values are illustrative."),
+    ("Enterprise Integration & Collaboration", "integration", "Enterprise integration", "Review connector ownership, last-test status, latency and successful synchronization evidence.", "Connector readiness review", "System, protocol, latency, success rate, owner and last-test evidence", "A row in the table does not prove that a connector is live; run a real endpoint test separately."),
+    ("AGV Fleet Dispatcher", "logistics", "AGV fleet dispatch", "Compare task demand with vehicle capacity and transport cost.", "Capacity and transport screening", "Task, origin, destination, demand, capacity and distance", "A capacity check is not a collision-free path plan; validate routes and safety controls in the live system."),
+    ("Geospatial Network Designer", "logistics", "Network and route design", "Compare site flows, distances, capacity utilization and illustrative transport exposure.", "Network cost / service screening", "Origins, destinations, demand, vehicle capacity, distance and cost", "Do not treat sample coordinates, routes or costs as live geography or quotes."),
+    ("Production Planning & Control (PPC)", "schedule", "Production planning & control", "Review work-order load and processing/setup workload by resource.", "Workload and dispatch review", "Work order, machine, quantity, processing time, setup time and due offset", "This fallback calculates workload indicators, not a constraint-validated finite-capacity schedule."),
+    ("Lean Manufacturing & Shop Floor Operations", "production", "Lean and shop-floor improvement", "Inspect good-unit yield, scrap and cycle-time patterns before selecting an improvement experiment.", "Yield and loss screening", "Planned/good/scrap units, downtime and cycle time", "A suspected loss is a hypothesis until supported by observed time-study or production evidence."),
+    ("Quality Control, Six Sigma & Reliability", "quality", "Quality and reliability", "Evaluate values against explicit specification limits and calculate defect-rate indicators when counts exist.", "Specification and defect review", "Measurements, lower/upper specification limits, defects and inspected quantity", "Capability indices and control limits require a suitable sampling design and assumptions; this fallback does not certify process capability."),
+    ("Engineering Economics & Finance", "economics", "Engineering economics", "Compare capital outlay with annual net benefit, simple payback and simple annual return.", "Investment screening", "CapEx, annual benefit, operating cost and project life", "Simple payback/return are not a discounted cash-flow NPV or a guarantee of realized savings."),
+    ("Predictive Maintenance Hub", "maintenance", "Maintenance condition triage", "Rank current rows using a transparent within-dataset index built from available condition indicators.", "Condition triage index", "Asset, runtime, temperature, vibration, downtime and failure counts", "The relative index is not a calibrated probability of failure, a diagnosis or a validated predictive model."),
+    ("Human Factors & Ergonomics (NIOSH)", "workforce", "Workforce and ergonomics", "Review task cycle time, headcount and recorded ergonomic screening scores.", "Work-content and ergonomic review", "Task, operator, cycle time, ergonomic score, shift hours and headcount", "Do not label a proxy as a validated NIOSH/RULA/REBA assessment; use the appropriate protocol and trained assessor."),
+    ("Digital Twin & Discrete-Event Simulation", "simulation", "Discrete-event simulation", "Compare scenario demand, capacity, service and operating outcomes from the current data table.", "Scenario feasibility screening", "Demand, capacity, lead time, downtime and scenario KPIs", "This generic fallback is a scenario screen, not a running discrete-event model unless a native simulation has been executed."),
+    ("Green IE & Sustainability", "sustainability", "Green industrial engineering", "Calculate emissions from explicit quantities and factors or compare supplied baseline/scenario footprints.", "Emissions and change review", "Activity, quantity, emission factor, scope and baseline/scenario tCO2e", "Use source-dated, boundary-appropriate emission factors; estimates are not audited ESG disclosures."),
+    ("Evidence Degradation & Decision-Readiness Lab", "research", "Evidence degradation research", "Inspect evidence-quality factors, outcome fields and experiment readiness before drawing a decision boundary.", "Research design and evidence review", "Completeness, freshness, conflicts, uncertainty, shock conditions and outcome", "A decision-readiness boundary must be estimated from experiments; it must not be hard-coded as a desired conclusion."),
+    ("Statistical Hypothesis Testing", "research", "Statistical analysis", "Inspect effect estimates, standard errors and study design; calculate an approximate interval when supported by inputs.", "Effect and interval review", "Outcome, group, sample size, effect estimate and standard error", "The generic fallback does not replace a correctly specified t-test/ANOVA/regression method or multiplicity review."),
+    ("LaTeX Document Formatter", "document", "Technical document preparation", "Track sections, equation checks, reference checks and review status before producing a manuscript.", "Document completeness check", "Section, source-data linkage, equation/reference checks and review status", "Completeness does not validate LaTeX compilation, scientific claims or citations."),
+    ("Literature & Citation Matrix", "literature", "Literature evidence management", "Organize papers, DOI metadata, methods, sample sizes and research gaps for review.", "Citation-matrix completeness", "Paper ID, title, authors/year, DOI, method, sample size and research gap", "Do not mark a citation verified unless it has been checked against a reliable source."),
+    ("Advanced Regression Analysis", "research", "Regression research", "Summarize supplied effect estimates and standard errors and expose missing inputs before a model is fitted.", "Effect-size and interval review", "Outcome, predictors, estimate, standard error and sample size", "The fallback must not present descriptive intervals as a fitted regression or causal result."),
+    ("Live Reproducible Paper Canvas", "document", "Reproducible paper workflow", "Link each manuscript section to data, code/run IDs, review status and reproducibility evidence.", "Reproducibility checklist", "Section, dataset/run reference, equation/reference checks and review status", "A complete checklist is not proof that the paper reruns unless the linked workflow was executed."),
+    ("Paper-to-Simulation Auto-Engine", "research", "Paper-to-simulation translation", "Record extracted assumptions, parameters, mappings and validation state before generating a simulation.", "Assumption-to-model mapping", "Parameter, value, unit, source passage, mapping status and test result", "Automated extraction is a draft; confirm units, assumptions and equations against the source paper."),
+    ("Automated Theory-to-Code Formalizer", "formal", "Theory-to-code formalization", "Track claims, assumptions, variables, equations, code links and verification status.", "Formalization readiness", "Claim, assumptions, equation/code reference, proof/test status", "A formalization status is not a machine-checked proof unless an actual proof backend completed successfully."),
+    ("Automated Code-to-Formal-Proof Verifier", "formal", "Code and proof verification", "Organize the verification claim, code version, assumptions, proof/test results and reviewer disposition.", "Verification evidence review", "Code version/hash, claim, assumptions, proof result and test result", "Do not claim a proof passed when the proof/test result is missing, pending or supplied only as text."),
+    ("Adversarially Stressed Synthetic Industrial Twins", "simulation", "Synthetic industrial twin stress testing", "Compare baseline and shock scenarios for demand, capacity, cost, service and risk.", "Shock-scenario comparison", "Baseline conditions, shock factors, seed, demand/capacity and outcome KPIs", "Synthetic results must be labelled synthetic and should not be generalized to a real plant without validation."),
+    ("Adversarial AI Peer-Review Swarm", "research", "Adversarial research review", "Track claims, evidence citations, reproducibility questions and reviewer findings in one triage queue.", "Claim/evidence review", "Claim, evidence reference, reproducibility status, severity and reviewer disposition", "AI review findings are suggestions for human review, not an authoritative peer-review acceptance decision."),
+    ("Adversarial Chaos & Shock Injector", "simulation", "Operational shock testing", "Define baseline and shock factors, run identifiers, affected constraints and observed output deltas.", "Shock and resilience review", "Shock type, severity, seed, affected process, baseline and outcome", "Do not inject shocks into live operations without an approved, isolated test environment."),
+    ("Autonomous Parametric Surrogate Swarm", "simulation", "Surrogate model experiments", "Track input ranges, surrogate predictions, validation residuals and domain-of-validity flags.", "Surrogate validation review", "Input parameters, predicted response, observed response and residual", "A surrogate prediction is not a validated physical outcome; validate against held-out observations."),
+    ("Real-Time Quantum-Classical Hybrid Optimization Router", "optimization", "Advanced optimization method routing", "Record problem structure, solver/method selection, feasibility, runtime and objective result.", "Solver suitability review", "Problem type, variables, constraints, method, status, runtime and objective", "The fallback is a routing/readiness checklist, not evidence of quantum hardware execution."),
+    ("Decentralized Cryptographic Reproducibility Vault", "security", "Reproducibility and provenance", "Inspect artifact identifiers, content hashes, signatures, owner and verification state.", "Provenance completeness", "Artifact ID/type, source version, hash, signature status and verifier result", "A populated hash field is not a verified signature or an immutable decentralized record."),
+    ("🔌 Edge-Connected IoT Digital Twin Bridge", "connectivity", "Edge telemetry bridge", "Review endpoint/protocol setup, telemetry freshness, latency and last-test results.", "Connector readiness review", "Asset, endpoint, protocol, latency, success rate, last test and owner", "Imported or sample telemetry does not prove that an edge device is connected now."),
+    ("🔌 Universal Cross-Domain Mathematical Isomorphism Engine (UCMIE)", "math", "Cross-domain model correspondence", "Record mappings between domain entities, units, invariants and constraint-preservation checks.", "Mapping and invariant review", "Source entity, target entity, dimension compatibility and preserved constraint", "A correspondence table is not proof of mathematical isomorphism unless required conditions are formally established."),
+    ("🔄 Autonomous Epistemic Cross-Disciplinary Falsification Matrix (AE-FRESM)", "research", "Cross-disciplinary falsification", "Record a claim, domain assumptions, falsifying tests, evidence coverage and reviewer disposition.", "Falsification plan review", "Claim, assumptions, proposed test, evidence reference and result status", "The module should report untested hypotheses as open, not as falsified or confirmed."),
+    ("Autonomous Cognitive Operations & Zero-Knowledge Mesh (ACO-ZKMS)", "security", "Governed operations and proof readiness", "Track operation IDs, approvals, artifact references and cryptographic-verification status.", "Governance and proof readiness", "Operation, owner, approval, artifact hash, proof status and audit reference", "A workflow ledger does not itself provide zero-knowledge security guarantees."),
+    ("⚡ ACO-ZKMS Master Engine", "security", "Governed orchestration", "Inspect dependencies, approvals, artifact lineage, execution state and verification evidence.", "Orchestration readiness review", "Workflow step, dependency, approval, artifact reference and result status", "Do not represent planned, demo or mocked steps as completed production actions."),
+]
+
+FALLBACK_MODULE_BLUEPRINTS = {
+    name: {
+        "module": name,
+        "family": family,
+        "focus": focus,
+        "purpose": purpose,
+        "method": method,
+        "inputs": inputs,
+        "guardrail": guardrail,
+        "first_run": f"Confirm that the input fields and assumptions for {focus.lower()} match your project before running the analysis.",
+    }
+    for name, family, focus, purpose, method, inputs, guardrail in FALLBACK_MODULE_BLUEPRINT_ROWS
+}
+
+
+def fallback_module_blueprint(module: str) -> dict[str, Any]:
+    """Return a specific, conservative workflow definition for a generic fallback module."""
+    blueprint = FALLBACK_MODULE_BLUEPRINTS.get(str(module))
+    if blueprint:
+        return dict(blueprint)
+    return {
+        "module": str(module),
+        "family": "generic",
+        "focus": "Industrial engineering analysis",
+        "purpose": "Prepare, validate, compare and export the data for this module.",
+        "method": "Baseline / scenario comparison",
+        "inputs": "Name rows clearly and provide a numeric KPI or measure.",
+        "guardrail": "Confirm assumptions and verify results against the real operating context before acting.",
+        "first_run": "Replace illustrative values with observed data and record the source and units.",
+    }
+
+
+def analyze_fallback_module(module: str, frame: pd.DataFrame) -> dict[str, Any]:
+    """Run a safe, input-driven module-specific analysis for the shared fallback canvas.
+
+    Calculations use only columns present in the user's table. They do not call
+    external systems or represent sample data as live data or verified outcomes.
+    """
+    if not isinstance(frame, pd.DataFrame) or frame.empty:
+        raise ValueError("Add a non-empty input table before running this module analysis.")
+    blueprint = fallback_module_blueprint(module)
+    family = blueprint["family"]
+    result = frame.copy(deep=True)
+    metrics: dict[str, Any] = {}
+    chart_x = None
+    chart_y = None
+    chart_kind = "bar"
+
+    def column(*candidates: str) -> str | None:
+        normalized = {str(c).strip().lower().replace(" ", "_"): str(c) for c in result.columns}
+        for candidate in candidates:
+            key = candidate.strip().lower().replace(" ", "_")
+            if key in normalized:
+                return normalized[key]
+        return None
+
+    def numeric(name: str | None) -> pd.Series | None:
+        return pd.to_numeric(result[name], errors="coerce") if name and name in result.columns else None
+
+    def first_categorical(*candidates: str) -> str | None:
+        for candidate in candidates:
+            found = column(candidate)
+            if found and not pd.api.types.is_numeric_dtype(result[found]):
+                return found
+        return next((str(c) for c in result.columns if not pd.api.types.is_numeric_dtype(result[c])), None)
+
+    if family == "quality":
+        measured = column("Measured_Value", "Measurement", "Value")
+        low_name, high_name = column("Lower_Spec", "LSL"), column("Upper_Spec", "USL")
+        defect_name, inspected_name = column("Defect_Count", "Defects"), column("Inspected_Count", "Inspected")
+        if measured and low_name and high_name:
+            val, low, high = numeric(measured), numeric(low_name), numeric(high_name)
+            valid = val.notna() & low.notna() & high.notna() & high.ge(low)
+            result["Within_Spec"] = valid & val.ge(low) & val.le(high)
+            result["Spec_Deviation"] = np.where(valid, np.maximum(low-val, 0) + np.maximum(val-high, 0), np.nan)
+            metrics["Within specification (%)"] = round(float(result.loc[valid, "Within_Spec"].mean() * 100), 2) if valid.any() else None
+            chart_x, chart_y = first_categorical("Part", "Workcenter", "Line"), measured
+        if defect_name and inspected_name:
+            defects, inspected = numeric(defect_name), numeric(inspected_name)
+            valid_counts = inspected.gt(0) & defects.notna()
+            result["Defect_Rate_pct"] = np.where(valid_counts, defects / inspected * 100, np.nan)
+            result["First_Pass_Yield_pct"] = np.where(valid_counts, 100 - result["Defect_Rate_pct"], np.nan)
+            metrics["Defect rate (%)"] = round(float(result.loc[valid_counts, "Defect_Rate_pct"].mean()), 2) if valid_counts.any() else None
+            if not chart_y:
+                chart_x, chart_y = first_categorical("Part", "Workcenter", "Line"), "Defect_Rate_pct"
+        if not any(k in result.columns for k in ("Within_Spec", "Defect_Rate_pct")):
+            raise ValueError("For quality analysis, provide measurement/specification columns or Defect_Count and Inspected_Count.")
+    elif family == "maintenance":
+        signal_names = [column("Temperature_C", "Temperature"), column("Vibration_mm_s", "Vibration"), column("Downtime_Hours", "Downtime"), column("Failure_Count", "Failures"), column("Runtime_Hours", "Runtime")]
+        signals = [name for name in signal_names if name and numeric(name) is not None and numeric(name).notna().any()]
+        if not signals:
+            raise ValueError("For maintenance triage, include at least one numeric condition indicator such as temperature, vibration, downtime or failure count.")
+        normalized = []
+        for name in signals:
+            values = numeric(name)
+            lo, hi = values.quantile(0.05), values.quantile(0.95)
+            score = pd.Series(50.0, index=values.index) if pd.isna(lo) or pd.isna(hi) or hi <= lo else ((values-lo)/(hi-lo)*100).clip(0,100)
+            normalized.append(score.fillna(0))
+        result["Relative_Triage_Index_0_100"] = pd.concat(normalized, axis=1).mean(axis=1)
+        result["Relative_Triage_Band"] = pd.cut(result["Relative_Triage_Index_0_100"], [-0.01, 33.333, 66.666, 100.01], labels=["Lower", "Middle", "Higher"]).astype(str)
+        metrics["Assets / rows reviewed"] = int(len(result))
+        metrics["Mean relative triage index"] = round(float(result["Relative_Triage_Index_0_100"].mean()), 2)
+        metrics["Condition indicators used"] = len(signals)
+        chart_x, chart_y = first_categorical("Asset", "Machine", "Equipment"), "Relative_Triage_Index_0_100"
+    elif family == "inventory":
+        onhand_name, demand_name = column("On_Hand_Units", "On_Hand", "Inventory"), column("Daily_Demand_Units", "Daily_Demand", "Demand")
+        lead_name, safety_name = column("Lead_Time_Days", "Lead_Time"), column("Safety_Stock_Units", "Safety_Stock")
+        if not onhand_name or not demand_name:
+            raise ValueError("For inventory review, include On_Hand_Units and Daily_Demand_Units.")
+        onhand, demand = numeric(onhand_name), numeric(demand_name)
+        valid = demand.gt(0) & onhand.notna()
+        result["Days_Of_Cover"] = np.where(valid, onhand / demand, np.nan)
+        lead = numeric(lead_name) if lead_name else pd.Series(0.0, index=result.index)
+        safety = numeric(safety_name).fillna(0) if safety_name else pd.Series(0.0, index=result.index)
+        lead = lead.fillna(0).clip(lower=0)
+        result["Reorder_Point_Units"] = lead * demand + safety
+        result["Reorder_Review"] = valid & onhand.lt(result["Reorder_Point_Units"])
+        metrics["SKUs below reorder point"] = int(result["Reorder_Review"].sum())
+        metrics["SKUs reviewed"] = int(valid.sum())
+        metrics["Mean days of cover"] = round(float(result.loc[valid, "Days_Of_Cover"].mean()), 2) if valid.any() else None
+        chart_x, chart_y = first_categorical("SKU", "Item", "Material"), "Days_Of_Cover"
+    elif family == "logistics":
+        demand_name, cap_name = column("Demand_Units", "DemandQty", "Demand"), column("Vehicle_Capacity", "Capacity_Units", "Capacity")
+        if demand_name and cap_name:
+            demand, cap = numeric(demand_name), numeric(cap_name)
+            valid = cap.gt(0) & demand.notna()
+            result["Capacity_Use_pct"] = np.where(valid, demand/cap*100, np.nan)
+            metrics["Rows exceeding vehicle capacity"] = int((valid & demand.gt(cap)).sum())
+            metrics["Mean capacity use (%)"] = round(float(result.loc[valid, "Capacity_Use_pct"].mean()), 2) if valid.any() else None
+            chart_y = "Capacity_Use_pct"
+        distance_name, cost_name = column("Distance_km", "Distance"), column("Cost_SAR_per_km", "Cost_per_km")
+        if distance_name and cost_name:
+            distance, unit_cost = numeric(distance_name), numeric(cost_name)
+            result["Estimated_Transport_Cost"] = distance * unit_cost
+            metrics["Estimated transport cost (table currency)"] = round(float(result["Estimated_Transport_Cost"].sum(skipna=True)), 2)
+            chart_y = chart_y or "Estimated_Transport_Cost"
+        if chart_y is None:
+            raise ValueError("For logistics analysis, include demand/capacity or distance/cost columns.")
+        chart_x = first_categorical("Task", "Route", "Origin", "Destination", "Vehicle")
+    elif family == "facility":
+        flow_name, distance_name = column("FromTo_Flows_per_Day", "Flow", "Trips_per_Day"), column("Travel_Distance_m", "Distance_m", "Distance")
+        if flow_name and distance_name:
+            flow, distance = numeric(flow_name), numeric(distance_name)
+            result["Weighted_Flow_Distance"] = flow * distance
+            metrics["Total weighted flow-distance (flow × metres)"] = round(float(result["Weighted_Flow_Distance"].sum(skipna=True)), 2)
+            chart_y = "Weighted_Flow_Distance"
+        area_name = column("Area_m2", "Area")
+        if area_name:
+            metrics["Total listed area (m²)"] = round(float(numeric(area_name).sum(skipna=True)), 2)
+            chart_y = chart_y or area_name
+        if chart_y is None:
+            raise ValueError("For facility analysis, include department area or from-to flow and distance fields.")
+        chart_x = first_categorical("Department", "Workcenter", "Area_Name")
+    elif family == "production":
+        planned_name, good_name = column("Planned_Units", "Planned_Qty"), column("Good_Units", "Good_Qty")
+        scrap_name = column("Scrap_Units", "Scrap_Qty")
+        if not planned_name or not good_name:
+            raise ValueError("For production analysis, include Planned_Units and Good_Units.")
+        planned, good = numeric(planned_name), numeric(good_name)
+        valid = planned.gt(0) & good.notna()
+        result["Good_Unit_Yield_pct"] = np.where(valid, good/planned*100, np.nan)
+        metrics["Weighted good-unit yield (%)"] = round(float(result.loc[valid, good_name].sum()/result.loc[valid, planned_name].sum()*100), 2) if valid.any() and result.loc[valid, planned_name].sum() else None
+        if scrap_name:
+            scrap = numeric(scrap_name)
+            result["Scrap_Rate_pct"] = np.where(valid, scrap/planned*100, np.nan)
+            metrics["Mean scrap rate (%)"] = round(float(result.loc[valid, "Scrap_Rate_pct"].mean()), 2) if valid.any() else None
+        chart_x, chart_y = first_categorical("Line", "Product", "Work_Order"), "Good_Unit_Yield_pct"
+    elif family == "sustainability":
+        quantity_name, factor_name = column("Quantity", "Quantity_Units"), column("Emission_Factor", "EmissionFactor")
+        baseline_name, scenario_name = column("Baseline_tCO2e", "Baseline_tCO2", "Baseline_Emissions"), column("Scenario_tCO2e", "Scenario_tCO2", "Scenario_Emissions")
+        if quantity_name and factor_name:
+            quantity, factor = numeric(quantity_name), numeric(factor_name)
+            result["Calculated_tCO2e"] = quantity * factor / 1000.0
+            metrics["Calculated total tCO2e"] = round(float(result["Calculated_tCO2e"].sum(skipna=True)), 4)
+            chart_y = "Calculated_tCO2e"
+        if baseline_name and scenario_name:
+            base, scenario = numeric(baseline_name), numeric(scenario_name)
+            result["Scenario_Change_tCO2e"] = scenario - base
+            result["Scenario_Change_pct"] = np.where(base.ne(0), (scenario-base)/base.abs()*100, np.nan)
+            metrics["Baseline total tCO2e"] = round(float(base.sum(skipna=True)), 4)
+            metrics["Scenario total tCO2e"] = round(float(scenario.sum(skipna=True)), 4)
+            metrics["Scenario change (%)"] = round(float((scenario.sum(skipna=True)-base.sum(skipna=True))/abs(base.sum(skipna=True))*100), 2) if base.sum(skipna=True) else None
+            chart_y = chart_y or "Scenario_Change_tCO2e"
+        if chart_y is None:
+            raise ValueError("For sustainability analysis, supply Quantity and Emission_Factor or baseline and scenario emissions.")
+        chart_x = first_categorical("Activity", "Scope", "Area", "Line")
+    elif family == "economics":
+        capex_name, benefit_name, opex_name = column("CapEx_SAR", "CapEx", "Capital_Cost"), column("Annual_Benefit_SAR", "Annual_Benefit", "Annual_Savings"), column("Annual_Operating_Cost_SAR", "Annual_Operating_Cost", "Annual_Opex")
+        if not capex_name or not benefit_name:
+            raise ValueError("For investment screening, include CapEx and Annual_Benefit columns.")
+        capex, benefit = numeric(capex_name), numeric(benefit_name)
+        opex = numeric(opex_name).fillna(0) if opex_name else pd.Series(0.0, index=result.index)
+        result["Annual_Net_Benefit"] = benefit - opex
+        valid = capex.gt(0) & result["Annual_Net_Benefit"].gt(0)
+        result["Simple_Payback_Years"] = np.where(valid, capex/result["Annual_Net_Benefit"], np.nan)
+        result["Simple_Annual_Return_pct"] = np.where(capex.gt(0), result["Annual_Net_Benefit"]/capex*100, np.nan)
+        metrics["Total initial CapEx"] = round(float(capex.sum(skipna=True)), 2)
+        metrics["Total annual net benefit"] = round(float(result["Annual_Net_Benefit"].sum(skipna=True)), 2)
+        metrics["Weighted simple payback (years)"] = round(float(capex.sum()/result["Annual_Net_Benefit"].sum()), 2) if capex.sum()>0 and result["Annual_Net_Benefit"].sum()>0 else None
+        chart_x, chart_y = first_categorical("Alternative", "Project", "Option"), "Annual_Net_Benefit"
+    elif family == "schedule":
+        process_name, setup_name = column("Processing_Min", "Processing_Time_Min"), column("Setup_Min", "Setup_Time_Min")
+        if not process_name:
+            raise ValueError("For scheduling workload review, include Processing_Min; Setup_Min is optional.")
+        result["Work_Content_Minutes"] = numeric(process_name).fillna(0) + (numeric(setup_name).fillna(0) if setup_name else 0)
+        machine_name = column("Machine", "Workcenter", "Resource")
+        if machine_name:
+            grouped = result.groupby(machine_name, dropna=False)["Work_Content_Minutes"].sum().reset_index(name="Total_Work_Content_Min")
+            chart_x, chart_y = machine_name, "Total_Work_Content_Min"
+            result = result.merge(grouped, on=machine_name, how="left")
+            metrics["Resources reviewed"] = int(grouped[machine_name].nunique(dropna=False))
+            metrics["Highest resource workload (min)"] = round(float(grouped["Total_Work_Content_Min"].max()), 2) if not grouped.empty else None
+        else:
+            chart_x, chart_y = first_categorical("Work_Order", "Order", "Product"), "Work_Content_Minutes"
+        metrics["Total work content (min)"] = round(float(result["Work_Content_Minutes"].sum()), 2)
+    elif family == "research":
+        estimate_name, se_name = column("Effect_Estimate", "Estimate", "Coefficient"), column("Standard_Error", "Std_Error", "SE")
+        if estimate_name and se_name:
+            estimate, standard_error = numeric(estimate_name), numeric(se_name)
+            valid = standard_error.gt(0) & estimate.notna()
+            result["Approx_Z_Ratio"] = np.where(valid, estimate/standard_error, np.nan)
+            result["Normal_Approx_CI95_Lower"] = np.where(valid, estimate-1.96*standard_error, np.nan)
+            result["Normal_Approx_CI95_Upper"] = np.where(valid, estimate+1.96*standard_error, np.nan)
+            metrics["Rows with valid effect/SE"] = int(valid.sum())
+            chart_x, chart_y = first_categorical("Scenario", "Study_ID", "Paper_ID", "Condition"), estimate_name
+        else:
+            numeric_columns = [str(c) for c in result.columns if pd.api.types.is_numeric_dtype(result[c])]
+            if not numeric_columns:
+                raise ValueError("For research analysis, include a numeric outcome, effect estimate or quality measure.")
+            metrics["Numeric fields available"] = len(numeric_columns)
+            metrics["Rows available"] = len(result)
+            chart_x, chart_y = first_categorical("Scenario", "Paper_ID", "Study_ID"), numeric_columns[0]
+    elif family == "literature":
+        expected = [name for name in ("Title", "Authors_Year", "DOI", "Method", "Research_Gap") if name in result.columns]
+        if not expected:
+            raise ValueError("For the literature matrix, include bibliographic metadata and a Research_Gap or DOI column.")
+        completeness = result[expected].notna() & result[expected].astype(str).apply(lambda col: col.str.strip().ne(""))
+        result["Metadata_Completeness_pct"] = completeness.mean(axis=1)*100
+        metrics["Papers reviewed"] = len(result)
+        metrics["Mean metadata completeness (%)"] = round(float(result["Metadata_Completeness_pct"].mean()), 2)
+        doi = column("DOI")
+        if doi:
+            metrics["Rows with DOI text"] = int(result[doi].fillna("").astype(str).str.strip().ne("").sum())
+        chart_x, chart_y = first_categorical("Paper_ID", "Title"), "Metadata_Completeness_pct"
+    elif family == "document":
+        field_names = [name for name in ("Section", "Source_Data_Linked", "Equation_Check", "Reference_Check", "Review_Status") if name in result.columns]
+        if not field_names:
+            raise ValueError("For document checks, include sections plus source/equation/reference/review status fields.")
+        result["Field_Completeness_pct"] = result[field_names].notna().mean(axis=1)*100
+        metrics["Artifacts / sections reviewed"] = len(result)
+        metrics["Mean field completeness (%)"] = round(float(result["Field_Completeness_pct"].mean()), 2)
+        chart_x, chart_y = first_categorical("Section", "Artifact_ID", "Document"), "Field_Completeness_pct"
+    elif family == "formal":
+        field_names = [name for name in ("Assumptions", "Proof_Status", "Test_Status", "Claim", "Equation_Reference") if name in result.columns]
+        if not field_names:
+            raise ValueError("For formalization review, include claims, assumptions and proof/test status fields.")
+        result["Verification_Record_Completeness_pct"] = result[field_names].notna().mean(axis=1)*100
+        metrics["Claims / artifacts reviewed"] = len(result)
+        metrics["Mean verification-record completeness (%)"] = round(float(result["Verification_Record_Completeness_pct"].mean()), 2)
+        chart_x, chart_y = first_categorical("Artifact_ID", "Claim"), "Verification_Record_Completeness_pct"
+    elif family == "security":
+        field_names = [name for name in ("Artifact_ID", "Artifact_Type", "Owner", "SHA256", "Signature_Status", "Verification_Status") if name in result.columns]
+        if not field_names:
+            raise ValueError("For provenance review, include artifact identity, owner and verification-status fields.")
+        result["Provenance_Metadata_Completeness_pct"] = result[field_names].notna().mean(axis=1)*100
+        metrics["Artifacts reviewed"] = len(result)
+        metrics["Mean provenance metadata completeness (%)"] = round(float(result["Provenance_Metadata_Completeness_pct"].mean()), 2)
+        chart_x, chart_y = first_categorical("Artifact_ID", "Artifact_Type"), "Provenance_Metadata_Completeness_pct"
+    elif family in {"connectivity", "integration"}:
+        latency_name, success_name, status_name = column("Latency_ms", "Latency"), column("Success_Rate_pct", "Success_Rate"), column("Status")
+        if not status_name and not latency_name and not success_name:
+            raise ValueError("For integration readiness, include Status, Latency_ms or Success_Rate_pct from an actual connector test.")
+        if success_name:
+            success = numeric(success_name)
+            result["Success_Rate_pct_numeric"] = success.clip(0, 100)
+            metrics["Mean recorded success rate (%)"] = round(float(success.mean()), 2) if success.notna().any() else None
+        if latency_name:
+            latency = numeric(latency_name)
+            metrics["Mean recorded latency (ms)"] = round(float(latency.mean()), 2) if latency.notna().any() else None
+        if status_name:
+            metrics["Rows with status marked connected/healthy"] = int(result[status_name].astype(str).str.casefold().isin({"connected","healthy","passed","success","ok"}).sum())
+        metrics["Connectors / rows reviewed"] = len(result)
+        chart_x, chart_y = first_categorical("Connector", "Target_System", "System", "Status"), (success_name if success_name else latency_name)
+    elif family == "math":
+        field_names = [name for name in ("Dimensional_Compatible", "Constraint_Preserved", "Correspondence", "Evidence_Note") if name in result.columns]
+        if not field_names:
+            raise ValueError("For cross-domain mapping, include correspondence, dimension compatibility or constraint preservation fields.")
+        result["Mapping_Record_Completeness_pct"] = result[field_names].notna().mean(axis=1)*100
+        metrics["Mappings reviewed"] = len(result)
+        metrics["Mean mapping-record completeness (%)"] = round(float(result["Mapping_Record_Completeness_pct"].mean()), 2)
+        chart_x, chart_y = first_categorical("Source_Entity", "Source_Domain", "Mapping_ID"), "Mapping_Record_Completeness_pct"
+    elif family == "optimization":
+        numeric_columns = [str(c) for c in result.columns if pd.api.types.is_numeric_dtype(result[c])]
+        if not numeric_columns:
+            raise ValueError("For optimization routing, supply numeric objective/constraint descriptors and record a solver run separately.")
+        result["Optimization_Input_Completeness_pct"] = result[numeric_columns].notna().mean(axis=1)*100
+        metrics["Alternatives / rows reviewed"] = len(result)
+        metrics["Numeric descriptors"] = len(numeric_columns)
+        chart_x, chart_y = first_categorical("Scenario", "Problem_Type", "Objective"), numeric_columns[0]
+    elif family == "simulation":
+        demand_name, capacity_name = column("Demand_Units", "Demand"), column("Capacity_Units", "Capacity")
+        if demand_name and capacity_name:
+            demand, capacity = numeric(demand_name), numeric(capacity_name)
+            valid = capacity.gt(0) & demand.notna()
+            result["Demand_to_Capacity_pct"] = np.where(valid, demand/capacity*100, np.nan)
+            result["Capacity_Shortfall_Units"] = np.maximum(demand-capacity, 0)
+            metrics["Rows with demand above capacity"] = int((valid & demand.gt(capacity)).sum())
+            metrics["Total capacity shortfall units"] = round(float(result["Capacity_Shortfall_Units"].sum(skipna=True)), 2)
+            chart_y = "Demand_to_Capacity_pct"
+        else:
+            numeric_columns = [str(c) for c in result.columns if pd.api.types.is_numeric_dtype(result[c])]
+            if not numeric_columns:
+                raise ValueError("For simulation review, include numeric scenario drivers or outcomes.")
+            chart_y = numeric_columns[0]
+        chart_x = first_categorical("Scenario", "Asset", "Condition", "Shock")
+    elif family == "workforce":
+        cycle_name, score_name, count_name = column("Cycle_Time_Sec", "Cycle_Time", "Observed_Time"), column("Ergonomic_Risk_Score", "Risk_Score"), column("Headcount", "Operators")
+        if cycle_name:
+            cycle = numeric(cycle_name)
+            metrics["Mean cycle time (sec)"] = round(float(cycle.mean()), 2) if cycle.notna().any() else None
+            result["Cycle_Time_Index"] = cycle
+            chart_y = "Cycle_Time_Index"
+        if score_name:
+            score = numeric(score_name)
+            metrics["Mean recorded ergonomic screening score"] = round(float(score.mean()), 2) if score.notna().any() else None
+            chart_y = chart_y or score_name
+        if count_name:
+            metrics["Total listed headcount"] = round(float(numeric(count_name).sum(skipna=True)), 2)
+        if chart_y is None:
+            raise ValueError("For workforce review, include cycle time, headcount or an explicitly sourced screening score.")
+        chart_x = first_categorical("Task", "Operator", "Workcenter")
+    else:
+        numeric_columns = [str(c) for c in result.columns if pd.api.types.is_numeric_dtype(result[c])]
+        if not numeric_columns:
+            raise ValueError("Add numeric measures to enable the fallback analysis for this module.")
+        baseline_name = numeric_columns[0]
+        baseline = numeric(baseline_name).iloc[0]
+        for name in numeric_columns[1:]:
+            result[f"{name}_Delta_vs_First_Row"] = numeric(name) - baseline
+        metrics["Rows reviewed"] = len(result)
+        metrics["Numeric measures"] = len(numeric_columns)
+        chart_x, chart_y = first_categorical(), numeric_columns[0]
+
+    return {
+        "result": result,
+        "metrics": metrics,
+        "chart_x": chart_x,
+        "chart_y": chart_y,
+        "chart_kind": chart_kind,
+        "method": blueprint["method"],
+        "guardrail": blueprint["guardrail"],
+    }
+
+
 def _starter_data(module: str) -> pd.DataFrame:
     """Return editable, domain-shaped demo inputs for generic module fallbacks.
 
@@ -1771,6 +2160,102 @@ def _starter_data(module: str) -> pd.DataFrame:
     expected schema but must never be presented as observations from a real plant.
     """
     lower = str(module).lower()
+    blueprint = fallback_module_blueprint(module)
+    family = blueprint["family"]
+
+    # Research/engineering infrastructure modules get purpose-built schemas
+    # so their fallback workspace is useful before users import real project data.
+    if family == "literature":
+        return pd.DataFrame({
+            "Paper_ID": ["P-001", "P-002", "P-003"],
+            "Title": ["Illustrative paper A", "Illustrative paper B", "Illustrative paper C"],
+            "Authors_Year": ["Example et al. (2023)", "Example et al. (2024)", "Example et al. (2025)"],
+            "DOI": ["", "", ""],
+            "Method": ["Simulation", "DOE", "Regression"],
+            "Sample_Size": [120, 80, 240],
+            "Research_Gap": ["Missing transfer test", "Unclear uncertainty bounds", "Limited external validation"],
+            "Citation_Verified": [False, False, False],
+        })
+    if family == "document":
+        return pd.DataFrame({
+            "Artifact_ID": ["DOC-001", "DOC-002", "DOC-003", "DOC-004"],
+            "Section": ["Problem statement", "Methods", "Results", "Limitations"],
+            "Source_Data_Linked": [True, True, False, True],
+            "Equation_Check": ["Pending", "Pending", "Pending", "Pending"],
+            "Reference_Check": ["Pending", "Pending", "Pending", "Pending"],
+            "Review_Status": ["Draft", "Draft", "Draft", "Draft"],
+        })
+    if family == "formal":
+        return pd.DataFrame({
+            "Artifact_ID": ["FORM-001", "FORM-002", "FORM-003"],
+            "Claim": ["Constraint identity is preserved", "Units remain consistent", "Output is reproducible"],
+            "Assumptions": ["Document inputs and scope", "Record units and mappings", "Pin data/code versions"],
+            "Equation_Reference": ["EQ-01", "EQ-02", "EQ-03"],
+            "Proof_Status": ["Pending", "Pending", "Pending"],
+            "Test_Status": ["Not run", "Not run", "Not run"],
+        })
+    if family == "security":
+        return pd.DataFrame({
+            "Artifact_ID": ["ART-001", "ART-002", "ART-003"],
+            "Artifact_Type": ["Dataset", "Model", "Run"],
+            "Owner": ["Operations", "Engineering", "Research"],
+            "SHA256": ["", "", ""],
+            "Signature_Status": ["Pending", "Pending", "Pending"],
+            "Verification_Status": ["Not verified", "Not verified", "Not verified"],
+        })
+    if family in {"connectivity", "integration"}:
+        return pd.DataFrame({
+            "Connector": ["MES demo", "ERP demo", "Telemetry demo"],
+            "Target_System": ["MES", "ERP", "IoT Gateway"],
+            "Protocol": ["REST", "SQL", "MQTT"],
+            "Latency_ms": [120, 240, 80],
+            "Success_Rate_pct": [99.0, 97.5, 98.0],
+            "Last_Test_UTC": ["", "", ""],
+            "Status": ["Sample only", "Sample only", "Sample only"],
+            "Owner": ["Operations", "IT", "Maintenance"],
+        })
+    if family == "math":
+        return pd.DataFrame({
+            "Mapping_ID": ["MAP-001", "MAP-002", "MAP-003"],
+            "Source_Domain": ["Production", "Inventory", "Energy"],
+            "Target_Domain": ["Quality", "Logistics", "Finance"],
+            "Source_Entity": ["Good output", "On-hand stock", "Electricity use"],
+            "Correspondence": ["Yield metric", "Coverage metric", "Emission metric"],
+            "Dimensional_Compatible": [False, False, False],
+            "Constraint_Preserved": [False, False, False],
+            "Evidence_Note": ["Needs review", "Needs review", "Needs review"],
+        })
+    if family == "optimization":
+        return pd.DataFrame({
+            "Problem_Type": ["Capacity allocation", "Network planning", "Energy scheduling"],
+            "Objective": ["Cost", "Service", "Carbon"],
+            "Variables": [12, 24, 18],
+            "Constraints": [8, 15, 11],
+            "Candidate_Method": ["MILP", "LP/MILP", "LP/Robust"],
+            "Solver_Status": ["Not run", "Not run", "Not run"],
+            "Runtime_ms": [None, None, None],
+        })
+    if family == "research":
+        return pd.DataFrame({
+            "Scenario": ["Baseline", "Treatment A", "Treatment B", "Stress Case"],
+            "Study_ID": ["STUDY-001"] * 4,
+            "Sample_Size": [100, 100, 100, 100],
+            "Effect_Estimate": [0.0, 0.18, 0.24, 0.07],
+            "Standard_Error": [0.08, 0.09, 0.10, 0.12],
+            "Confidence_Level": [0.95, 0.95, 0.95, 0.95],
+            "Protocol_Status": ["Draft", "Draft", "Draft", "Draft"],
+        })
+    if family == "simulation":
+        return pd.DataFrame({
+            "Scenario": ["Baseline", "Demand Surge", "Supplier Shock", "Capacity Expansion"],
+            "Demand_Units": [1000, 1250, 1000, 1100],
+            "Capacity_Units": [1100, 1100, 900, 1250],
+            "Lead_Time_Days": [6, 9, 12, 6],
+            "Downtime_Hours": [12, 18, 24, 8],
+            "Cost_SAR": [100000, 125000, 142000, 115000],
+            "Service_pct": [95.0, 90.0, 82.0, 98.0],
+            "Risk_Score": [10, 18, 35, 8],
+        })
 
     if any(word in lower for word in ("six sigma", "gage", "quality", "reliability", "spc", "fmea", "capability")):
         return pd.DataFrame({
