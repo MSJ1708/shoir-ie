@@ -17,6 +17,19 @@ TIER_ORDER = [
 # Shared by the public module explorer so no paid tier silently disappears from filters.
 MODULE_EXPLORER_TIERS = ("All capabilities", *TIER_ORDER)
 
+
+def unique_modules(modules: Iterable[str]) -> list[str]:
+    """Return non-empty module labels once, preserving their first-seen order."""
+    seen = set()
+    result = []
+    for module in modules:
+        label = str(module or "").strip()
+        if label and label not in seen:
+            seen.add(label)
+            result.append(label)
+    return result
+
+
 MODULE_REQUIREMENTS = {
     "AI Copilot": "Starter",
     "ShadowShift — Micro-Loss & Recovery Intelligence": "Enterprise",

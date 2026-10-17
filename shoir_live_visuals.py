@@ -27,6 +27,22 @@ from shoir_performance import (
     limit_categories,
     sample_for_plot,
 )
+from shoir_module_customization import (
+    apply_display_labels,
+    display_field_label,
+    evaluate_kpi_target,
+    get_module_profile,
+)
+
+
+def _module_widget_token(module: str) -> str:
+    """Return a stable, collision-resistant token for per-module widget state.
+
+    Python's built-in hash is randomized between processes and truncating it to
+    16 bits can collide across modules. Stable tokens keep each module's chart
+    controls isolated and predictable across app restarts.
+    """
+    return hashlib.sha256(str(module).encode("utf-8")).hexdigest()[:12]
 
 
 _MODULE_KEYS = {
@@ -43,7 +59,7 @@ _MODULE_KEYS = {
     "3D Factory Designer": ["factory3d_df", "factory3d_dist_result"],
     "Multi-Objective Optimization": ["multiobj_df", "multiobj_result", "pareto", "optimization_pareto_df", "optimization_result_df"],
     "Robust & Resilient Optimization": ["robust_df", "robust_result", "robust_result_df"],
-    "Experiment Lab": ["experiment_df", "experiment_results", "experiment_doe_design", "experiment_factorial_effects", "experiment_factorial_summary", "experiment_mc_results", "experiment_mc_result_summary", "experiment_bootstrap_results", "experiment_bootstrap_summary", "experiment_replication_summary", "experiment_sensitivity_results"],
+    "Experiment Lab": ["research_scenario_lab_matrix", "research_scenario_lab_saved_results", "experiment_df", "experiment_results", "experiment_doe_design", "experiment_factorial_effects", "experiment_factorial_summary", "experiment_mc_results", "experiment_mc_result_summary", "experiment_bootstrap_results", "experiment_bootstrap_summary", "experiment_replication_summary", "experiment_sensitivity_results"],
     "Engineering Decision Center": ["decision_metrics_df", "decision_alternatives_df", "decision_kpi_df", "decision_verification_df", "decision_outcomes_df"],
     "Industrial Data Platform": ["data_platform_latest_df"],
     "Capital Investment & Engineering Economics": ["capex_df", "capex_result"],
@@ -616,9 +632,15 @@ _FRAGMENT = getattr(st, "fragment", lambda fn: fn)
 @_FRAGMENT
 def render_live_visualization_studio(module: str, *, expanded: bool = False, preferred_key: str | None = None) -> None:
     """Render the live chart studio beneath an active module."""
+    username = str(st.session_state.get("current_user", "unknown"))
+    profile = get_module_profile(st.session_state, module, username)
+    display_name = profile["display_name"]
     tables = discover_visual_tables(module, preferred_key=preferred_key)
-    with st.expander("📊 Live Engineering Visualization Studio", expanded=expanded):
-        st.caption("Charts use the current module/workspace data. Edit a table, change the controls, and the visualization updates on the next Streamlit rerun.")
+    with st.expander(f"📊 Live Engineering Visualization Studio · {display_name}", expanded=expanded):
+        st.caption("Charts use the current module/workspace data. Edit a table, change the controls, and the visualization updates on the next Streamlit rerun. Display labels and units affect presentation only.")
+        context = [x for x in (profile.get("project_name"), profile.get("site_name"), profile.get("owner_team")) if x]
+        if context:
+            st.caption(" · ".join(str(x) for x in context))
         if not tables:
             st.info("No result table is available yet. The workflow visual below shows the governed engineering path; it is not a measurement.")
             steps = ["Import", "Validate", "Analyze", "Visualize", "Decide", "Export"]
@@ -637,7 +659,7 @@ def render_live_visualization_studio(module: str, *, expanded: bool = False, pre
                 )
             )
             workflow_fig.update_layout(
-                title=f"{module} · Engineering workflow",
+                title=f"{display_name} · Engineering workflow",
                 height=260,
                 xaxis={"showgrid": False, "showticklabels": False, "zeroline": False},
                 yaxis={"visible": False},
@@ -650,15 +672,24 @@ def render_live_visualization_studio(module: str, *, expanded: bool = False, pre
             )
             return
 
+        def _reset_stale_choice(key: str, options: list[Any]) -> None:
+            current = st.session_state.get(key)
+            if key in st.session_state and current not in options:
+                st.session_state.pop(key, None)
+
         labels = [label for label, _, _ in tables]
         default_source_index = 0
         if preferred_key:
             preferred_labels = [i for i, (_, key, _) in enumerate(tables) if key == preferred_key]
             if preferred_labels:
                 default_source_index = preferred_labels[0]
-        table_label = st.selectbox("Data source", labels, index=default_source_index, key=f"liveviz_source_{hash(module) & 0xFFFF:04x}")
-        df = tables[labels.index(table_label)][2]
-        _render_auto_kpi_dashboard(module, df, f"{hash(module) & 0xFFFF:04x}")
+        source_key = f"liveviz_source_{_module_widget_token(module)}"
+        _reset_stale_choice(source_key, labels)
+        table_label = st.selectbox("Data source", labels, index=default_source_index, key=source_key)
+        raw_df = tables[labels.index(table_label)][2]
+        profile = get_module_profile(st.session_state, module, username)
+        df = apply_display_labels(raw_df, profile)
+        _render_auto_kpi_dashboard(display_name, df, f"{_module_widget_token(module)}")
 
         nums = _numeric_columns(df)
         cats = _categorical_columns(df)
@@ -673,13 +704,20 @@ def render_live_visualization_studio(module: str, *, expanded: bool = False, pre
         x_options = ["(none)"] + cols
         default_x = next((c for c in dates if c != default_y), next((c for c in cats if c != default_y), "(none)"))
 
+        x_key = f"liveviz_x_{_module_widget_token(module)}"
+        y_key = f"liveviz_y_{_module_widget_token(module)}"
+        z_key = f"liveviz_z_{_module_widget_token(module)}"
+        y_options = ["(none)"] + nums
+        _reset_stale_choice(x_key, x_options)
+        _reset_stale_choice(y_key, y_options)
+        _reset_stale_choice(z_key, y_options)
         c1, c2, c3 = st.columns([1.25, 1.25, 1])
         with c1:
-            x_choice = st.selectbox("X-axis", x_options, index=x_options.index(default_x), key=f"liveviz_x_{hash(module) & 0xFFFF:04x}")
+            x_choice = st.selectbox("X-axis", x_options, index=x_options.index(default_x), key=x_key)
         with c2:
-            y_choice = st.selectbox("Y-axis", ["(none)"] + nums, index=1 if default_y else 0, key=f"liveviz_y_{hash(module) & 0xFFFF:04x}")
+            y_choice = st.selectbox("Y-axis", y_options, index=1 if default_y else 0, key=y_key)
         with c3:
-            z_choice = st.selectbox("3D Z-axis", ["(none)"] + nums, index=0, key=f"liveviz_z_{hash(module) & 0xFFFF:04x}")
+            z_choice = st.selectbox("3D Z-axis", y_options, index=0, key=z_key)
 
         x = None if x_choice == "(none)" else x_choice
         y = None if y_choice == "(none)" else y_choice
@@ -688,18 +726,31 @@ def render_live_visualization_studio(module: str, *, expanded: bool = False, pre
         c4, c5, c6 = st.columns([1.2, 1.2, 1.4])
         with c4:
             suggestions = ["Auto", "Line", "Bar", "Area", "Scatter", "Distribution", "Histogram", "Box", "Pie", "Pareto", "Waterfall", "Sankey", "Heatmap", "Correlation Heatmap", "Health Heatmap", "Control Chart", "SPC", "Anomaly Timeline", "Metric Trend", "Sensitivity Plot", "Gantt", "Network Map", "3D Scatter"]
-            chart_choice = st.selectbox("Visualization", suggestions, key=f"liveviz_chart_{hash(module) & 0xFFFF:04x}")
+            preferred_chart = profile.get("preferred_chart", "Auto")
+            chart_default = suggestions.index(preferred_chart) if preferred_chart in suggestions else 0
+            chart_key = f"liveviz_chart_{_module_widget_token(module)}"
+            _reset_stale_choice(chart_key, suggestions)
+            chart_choice = st.selectbox("Visualization", suggestions, index=chart_default, key=chart_key)
         with c5:
-            aggregation = st.selectbox("Aggregation", ["Raw", "Mean", "Median", "Sum", "Count"], key=f"liveviz_agg_{hash(module) & 0xFFFF:04x}")
+            aggregation_options = ["Raw", "Mean", "Median", "Sum", "Count"]
+            aggregation_key = f"liveviz_agg_{_module_widget_token(module)}"
+            _reset_stale_choice(aggregation_key, aggregation_options)
+            aggregation = st.selectbox("Aggregation", aggregation_options, key=aggregation_key)
         with c6:
-            title = st.text_input("Chart title", value=f"{module} · {y or 'relationships'}", key=f"liveviz_title_{hash(module) & 0xFFFF:04x}")
+            title = st.text_input("Chart title", value=f"{display_name} · {y or 'relationships'}", key=f"liveviz_title_{_module_widget_token(module)}")
 
-        filter_col = st.selectbox("Optional filter", ["(none)"] + cols, key=f"liveviz_filtercol_{hash(module) & 0xFFFF:04x}")
+        filter_options = ["(none)"] + cols
+        filter_key = f"liveviz_filtercol_{_module_widget_token(module)}"
+        _reset_stale_choice(filter_key, filter_options)
+        filter_col = st.selectbox("Optional filter", filter_options, key=filter_key)
         filter_value = "All"
         if filter_col != "(none)":
             filter_values_source = sample_for_plot(df, max_points=20000, chart="filter")
             values = limit_categories(filter_values_source[filter_col], 500)
-            filter_value = st.selectbox("Filter value", ["All"] + values, key=f"liveviz_filterval_{hash(module) & 0xFFFF:04x}")
+            filter_value_options = ["All"] + values
+            filter_value_key = f"liveviz_filterval_{_module_widget_token(module)}"
+            _reset_stale_choice(filter_value_key, filter_value_options)
+            filter_value = st.selectbox("Filter value", filter_value_options, key=filter_value_key)
 
         actual_chart = _suggest_chart(df, x, y) if chart_choice == "Auto" else chart_choice
         prepared = _prepare(df, x, y, aggregation, None if filter_col == "(none)" else filter_col, filter_value)
@@ -711,6 +762,22 @@ def render_live_visualization_studio(module: str, *, expanded: bool = False, pre
                 st.warning("No truthful visualization could be generated from the selected table.")
                 return
             actual_chart = "Universal Fallback"
+
+        # If this chart uses the configured primary KPI, draw the explicit
+        # user target as a reference line for supported two-dimensional views.
+        target_column = str(profile.get("primary_kpi") or "")
+        target_summary = None
+        if target_column and target_column in raw_df.columns and y == display_field_label(target_column, profile):
+            target_summary = evaluate_kpi_target(raw_df[target_column], profile)
+        if target_summary and actual_chart not in {"Pie", "Sankey", "Network Map", "3D Scatter", "Heatmap", "Correlation Heatmap", "Health Heatmap", "Gantt"}:
+            try:
+                fig.add_hline(
+                    y=float(target_summary["target"]),
+                    line_dash="dash",
+                    annotation_text=f"Target: {float(target_summary['target']):,.{int(profile.get('decimal_places', 2))}f} {target_summary.get('unit') or ''}".strip(),
+                )
+            except Exception:
+                pass
 
         q1, q2, q3, q4 = st.columns(4)
         q1.metric("Rows visualized", f"{len(prepared):,}")

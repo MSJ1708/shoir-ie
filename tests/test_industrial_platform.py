@@ -8,7 +8,10 @@ from industrial_platform import (
     weibull_analysis, queue_simulation, pareto_frontier, robust_risk_analysis,
     capital_metrics, line_balance, sustainability_accounting, benchmark_compare,
     tier_allows, normalize_tier, PLATFORM_CATALOG, ml_demand_forecast, predictive_maintenance_score, currency_convert, save_scenario, scenario_table,
+    analyze_experiment_scenarios, save_experiment,
 )
+from shoir_tier_capabilities import unique_modules
+
 
 def test_catalog_and_tiers():
     names={x["name"] for x in PLATFORM_CATALOG}
@@ -97,3 +100,75 @@ def test_forecast_maintenance_currency_and_scenarios(tmp_path):
     sid=save_scenario("Baseline","",{"x":1},{"Cost":100},"tester",db)
     assert sid.startswith("SCN-")
     assert len(scenario_table(db))==1
+
+
+
+def test_experiment_lab_analysis_uses_selected_baseline_and_computes_all_deltas():
+    scenarios = pd.DataFrame({
+        "Scenario": ["A", "B", "C"],
+        "Cost": [100.0, 80.0, 90.0],
+        "Service": [95.0, 90.0, 97.0],
+        "Risk": [10.0, 20.0, 8.0],
+        "Inventory": [500.0, 400.0, 450.0],
+        "Carbon": [40.0, 50.0, 35.0],
+    })
+
+    result = analyze_experiment_scenarios(scenarios, baseline_scenario="B")
+
+    assert result["Baseline"].tolist() == [False, True, False]
+    assert result["CostDelta"].tolist() == [20.0, 0.0, 10.0]
+    assert result["ServiceDelta"].tolist() == [5.0, 0.0, 7.0]
+    assert result["RiskDelta"].tolist() == [-10.0, 0.0, -12.0]
+    assert result["InventoryDelta"].tolist() == [100.0, 0.0, 50.0]
+    assert result["CarbonDelta"].tolist() == [-10.0, 0.0, -15.0]
+
+
+def test_experiment_lab_analysis_rejects_invalid_scenarios():
+    with pytest.raises(ValueError, match="non-empty name"):
+        analyze_experiment_scenarios(pd.DataFrame({
+            "Scenario": ["Baseline", ""], "Cost": [100.0, 90.0]
+        }))
+
+    with pytest.raises(ValueError, match="unique"):
+        analyze_experiment_scenarios(pd.DataFrame({
+            "Scenario": ["Baseline", "Baseline"], "Cost": [100.0, 90.0]
+        }))
+
+    with pytest.raises(ValueError, match="non-numeric"):
+        analyze_experiment_scenarios(pd.DataFrame({
+            "Scenario": ["Baseline", "Alternative"], "Cost": [100.0, "not-a-cost"]
+        }))
+
+
+def test_save_experiment_persists_all_seven_columns(tmp_path):
+    db = str(tmp_path / "experiment.db")
+    assert init_platform_db(db)
+
+    experiment_id = save_experiment(
+        "Scenario Matrix",
+        "Experiment Lab",
+        [{"Scenario": "Baseline", "Cost": 100.0}],
+        {"baseline_scenario": "Baseline", "scenario_results": [{"CostDelta": 0.0}]},
+        "tester",
+        db_path=db,
+    )
+
+    assert experiment_id.startswith("EXP-")
+    with sqlite3.connect(db) as conn:
+        row = conn.execute(
+            """SELECT experiment_id, name, module, scenarios_json, results_json, created_by, created_at
+               FROM platform_experiments WHERE experiment_id=?""",
+            (experiment_id,),
+        ).fetchone()
+
+    assert row is not None
+    assert row[0] == experiment_id
+    assert row[2] == "Experiment Lab"
+    assert row[5] == "tester"
+
+
+
+def test_unique_modules_preserves_order_and_removes_duplicates():
+    assert unique_modules(["MILP Solvers", "AI Copilot", "MILP Solvers", "", None, "AI Copilot"]) == [
+        "MILP Solvers", "AI Copilot"
+    ]

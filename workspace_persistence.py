@@ -77,6 +77,7 @@ _PREFIX_EXCLUDE = (
     "sx_dl_",
     # Universal Module Parity widget plumbing is intentionally transient;
     # the canonical parity data/results keys below are persisted instead.
+    "module_profile_widget_",
     "module_parity_upload_",
     "module_parity_workbook_",
     "module_parity_editor_",

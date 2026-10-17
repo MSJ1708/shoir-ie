@@ -603,10 +603,91 @@ def save_model_snapshot(
         c.commit()
     return mid
 
+EXPERIMENT_METRIC_COLUMNS = ("Cost", "Service", "Risk", "Inventory", "Carbon")
+
+
+def analyze_experiment_scenarios(
+    scenarios: pd.DataFrame,
+    baseline_scenario: Optional[str] = None,
+) -> pd.DataFrame:
+    """Validate scenario inputs and calculate deltas against an explicit baseline.
+
+    The function is deliberately independent of Streamlit so scenario
+    validation and calculations can be covered by regression tests.
+    """
+    if not isinstance(scenarios, pd.DataFrame):
+        scenarios = pd.DataFrame(scenarios)
+    if scenarios.empty:
+        raise ValueError("Add at least one scenario before analyzing the experiment.")
+    if "Scenario" not in scenarios.columns:
+        raise ValueError("The scenario table must include a 'Scenario' column.")
+
+    result = scenarios.copy(deep=True)
+    names = result["Scenario"].fillna("").astype(str).str.strip()
+    if names.eq("").any():
+        raise ValueError("Every scenario needs a non-empty name.")
+    if names.duplicated().any():
+        duplicates = names[names.duplicated(keep=False)].drop_duplicates().tolist()
+        raise ValueError("Scenario names must be unique. Rename: " + ", ".join(duplicates))
+    result["Scenario"] = names
+
+    numeric_columns = [column for column in EXPERIMENT_METRIC_COLUMNS if column in result.columns]
+    if not numeric_columns:
+        raise ValueError(
+            "Include at least one numeric KPI column: Cost, Service, Risk, Inventory or Carbon."
+        )
+
+    for column in numeric_columns:
+        converted = pd.to_numeric(result[column], errors="coerce")
+        invalid = result[column].notna() & converted.isna()
+        if invalid.any():
+            raise ValueError(f"'{column}' contains non-numeric values. Correct those cells and retry.")
+        if converted.notna().sum() == 0:
+            raise ValueError(f"'{column}' needs at least one numeric value.")
+        result[column] = converted
+
+    if baseline_scenario is None:
+        baseline_scenario = str(result.iloc[0]["Scenario"])
+    baseline_matches = result.index[result["Scenario"].eq(str(baseline_scenario))].tolist()
+    if not baseline_matches:
+        raise ValueError(f"Baseline scenario '{baseline_scenario}' is not in the scenario table.")
+    baseline_index = baseline_matches[0]
+    baseline = result.loc[baseline_index]
+
+    for column in numeric_columns:
+        baseline_value = baseline[column]
+        if pd.isna(baseline_value):
+            raise ValueError(
+                f"The baseline scenario has no numeric value for '{column}'. "
+                "Enter a baseline value or choose another baseline."
+            )
+        result[f"{column}Delta"] = result[column] - float(baseline_value)
+
+    result["Baseline"] = result["Scenario"].eq(str(baseline_scenario))
+    return result
+
+
 def save_experiment(name: str, module: str, scenarios: list, results: dict, username: str, db_path="enterprise_full_workspace.db") -> str:
-    eid="EXP-"+hashlib.sha256((name+module+_now()).encode()).hexdigest()[:12].upper()
+    """Persist a complete experiment record using the explicit table schema."""
+    # Nanosecond entropy prevents rapid repeated saves from colliding when
+    # multiple runs occur within the same second.
+    created_at = _now()
+    eid = "EXP-" + hashlib.sha256(
+        f"{name}|{module}|{username}|{time.time_ns()}".encode("utf-8")
+    ).hexdigest()[:12].upper()
     with sqlite3.connect(db_path) as c:
-        c.execute("INSERT INTO platform_experiments VALUES(?,?,?,?,?,?)",(eid,name,module,json.dumps(scenarios,default=str),json.dumps(results,default=str),username,_now())); c.commit()
+        c.execute(
+            """INSERT INTO platform_experiments
+               (experiment_id, name, module, scenarios_json, results_json, created_by, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (
+                eid, name, module,
+                json.dumps(scenarios, default=str),
+                json.dumps(results, default=str),
+                username, created_at,
+            ),
+        )
+        c.commit()
     return eid
 
 def export_pdf(title: str, tables: Sequence[Tuple[str,pd.DataFrame]], figures: Sequence[Tuple[str,Any]]=()) -> bytes:
@@ -698,7 +779,7 @@ MODULE_TABLE_KEYS = {
     "Multi-Objective Optimization":["multiobj_df","multiobj_result","pareto","optimization_pareto_df","optimization_result_df"],
     "Robust & Resilient Optimization":["robust_df","robust_result_df"],
     "Engineering Model Registry":["model_registry_df"],
-    "Experiment Lab":["experiment_df","experiment_doe_design","experiment_factorial_effects","experiment_factorial_summary","experiment_mc_results","experiment_mc_result_summary","experiment_bootstrap_results","experiment_bootstrap_summary","experiment_replication_summary","experiment_sensitivity_results"],
+    "Experiment Lab":["research_scenario_lab_matrix","experiment_df","experiment_doe_design","experiment_factorial_effects","experiment_factorial_summary","experiment_mc_results","experiment_mc_result_summary","experiment_bootstrap_results","experiment_bootstrap_summary","experiment_replication_summary","experiment_sensitivity_results"],
     "Industrial Data Platform":[],
     "Capital Investment & Engineering Economics":["capex_df"],
     "Workforce Engineering":["work_elements","skills_df"],
@@ -952,16 +1033,20 @@ def render_module(module: str, tier: str, username: str):
         from shoir_shadowshift import render_shadowshift
         render_shadowshift(tier, username)
         return
+    # Experiment Lab uses the full persistent Research Workspace, not the
+    # generic import/activation surface. That workspace now also contains the
+    # dedicated scenario matrix, KPI comparison charts, history and exports.
+    # Keep this route after the usage event and before generic data exchange.
+    if module == "Experiment Lab":
+        from industrial_experience import render_research_workspace
+        render_research_workspace(module, tier, username)
+        return
+
     # The investor Control Center has its own scenario controls and should
     # open directly into the command experience instead of the generic import
     # surface. Specialist modules continue to use the shared import/activate UX.
     if module not in ("Industrial Control Center", "ShadowShift — Micro-Loss & Recovery Intelligence"):
         render_module_data_exchange(module, st, tier, username)
-    if module == "Experiment Lab":
-        # Experiment Lab is a dedicated research workspace. Its UI and
-        # persistence are rendered by render_research_workspace, so do not
-        # append the old generic scenario screen underneath it.
-        return
     if module=="Experiment Engine":
         render_experiment_engine(tier, username)
         return
@@ -1417,13 +1502,6 @@ def render_module(module: str, tier: str, username: str):
         with sqlite3.connect("enterprise_full_workspace.db") as c: reg=pd.read_sql("SELECT * FROM platform_models ORDER BY created_at DESC",c)
         st.dataframe(reg,use_container_width=True,hide_index=True)
         render_export_bar(module,[("Registry",df),("Persisted Models",reg)],tier,username)
-    elif module=="Experiment Lab":
-        scenarios=st.data_editor(st.session_state.setdefault("experiment_df",pd.DataFrame({"Scenario":["Baseline","High Demand","Supplier Shock","Capacity Expansion"],"Cost":[100000,125000,142000,115000],"Service":[95,90,82,98],"Risk":[10,18,35,8],"Inventory":[5000,6200,7000,4700],"Carbon":[1000,1100,1300,850]})),num_rows="dynamic",use_container_width=True,key="experiment_editor")
-        if st.button("🧪 Analyze Scenario Set",type="primary",use_container_width=True,key="experiment_run"):
-            st.session_state["experiment_results"]=scenarios.assign(CostDelta=scenarios["Cost"]-scenarios["Cost"].iloc[0],ServiceDelta=scenarios["Service"]-scenarios["Service"].iloc[0],RiskDelta=scenarios["Risk"]-scenarios["Risk"].iloc[0])
-            expid=save_experiment("Scenario Matrix",module,scenarios.to_dict("records"),st.session_state["experiment_results"].to_dict("records"),username); st.success(f"Experiment saved: {expid}")
-        st.dataframe(st.session_state.get("experiment_results",scenarios),use_container_width=True)
-        render_export_bar(module,[("Scenarios",scenarios),("Experiment Results",st.session_state.get("experiment_results",pd.DataFrame()))],tier,username)
     elif module=="Industrial Control Center":
         render_investor_control_center(tier, username)
     elif module=="Engineering Decision Center":

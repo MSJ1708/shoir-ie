@@ -21,6 +21,10 @@ from industrial_experience import (
     import_research_run_csv,
     research_runs_frame,
     save_project,
+    analyze_fallback_module,
+    fallback_module_blueprint,
+    _starter_data,
+    FALLBACK_MODULE_BLUEPRINTS,
 )
 
 
@@ -283,3 +287,40 @@ def test_previous_lab_csv_can_be_imported_into_research_registry(monkeypatch):
         frame = research_runs_frame("PRJ-IMPORT", owner="alice")
         assert len(frame) == 1
         assert frame.iloc[0]["Experiment"] == "001I"
+
+
+
+def test_production_fallback_coerces_excel_numeric_strings_without_mutating_input():
+    source = pd.DataFrame({
+        "Line": ["A", "B"],
+        "Planned_Units": ["100", "200"],
+        "Good_Units": ["95", "180"],
+        "Scrap_Units": ["5", "20"],
+    })
+    original = source.copy(deep=True)
+
+    result = analyze_fallback_module("Lean Manufacturing & Shop Floor Operations", source)
+
+    assert result["metrics"]["Weighted good-unit yield (%)"] == 91.67
+    assert result["result"]["Good_Unit_Yield_pct"].round(2).tolist() == [95.0, 90.0]
+    pd.testing.assert_frame_equal(source, original)
+
+
+
+def test_all_named_fallback_modules_run_on_their_starter_data():
+    failures = []
+    for module in sorted(FALLBACK_MODULE_BLUEPRINTS):
+        starter = _starter_data(module)
+        try:
+            analysis = analyze_fallback_module(module, starter)
+            result = analysis.get("result")
+            metrics = analysis.get("metrics")
+            if not isinstance(result, pd.DataFrame) or result.empty:
+                failures.append(f"{module}: analysis returned no result rows")
+            if not isinstance(metrics, dict):
+                failures.append(f"{module}: analysis returned no metrics dictionary")
+            if not analysis.get("method") or not analysis.get("guardrail"):
+                failures.append(f"{module}: missing method or interpretation guardrail")
+        except Exception as exc:
+            failures.append(f"{module}: {type(exc).__name__}: {exc}")
+    assert not failures, "\\n".join(failures)

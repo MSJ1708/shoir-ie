@@ -11,6 +11,7 @@ module provides a consistent cross-module data/evidence contract around them.
 from __future__ import annotations
 
 import hashlib
+import html
 import io
 import json
 import re
@@ -30,6 +31,21 @@ from shoir_performance import (
     cached_workbook_read,
     lightweight_frame_signature,
     sample_preview,
+)
+from shoir_module_customization import (
+    apply_display_labels,
+    display_field_label,
+    evaluate_kpi_target,
+    get_module_profile,
+    render_module_customization,
+)
+from industrial_experience import (
+    FALLBACK_MODULE_BLUEPRINTS,
+    analyze_fallback_module,
+    build_profiled_module_figure,
+    fallback_module_blueprint,
+    render_module_run_history,
+    save_module_analysis_run,
 )
 
 LARGE_TABLE_ROWS = 50_000
@@ -402,13 +418,32 @@ def _build_export_xlsx(module: str, df: pd.DataFrame, validation: dict[str, Any]
     if not isinstance(results_df, pd.DataFrame):
         results_df = pd.DataFrame()
 
+    username = str(st.session_state.get("current_user", "unknown"))
+    profile = get_module_profile(st.session_state, module, username)
+    profile_rows = [
+        {"Setting": key.replace("_", " ").title(), "Value": json.dumps(value, ensure_ascii=False, default=_json_default) if isinstance(value, (dict, list)) else str(value)}
+        for key, value in profile.items()
+    ]
     tables = [
         ("Module Data", df),
         ("Validation", validation_df),
         ("Results Summary", results_df),
+        ("Module Personalization", pd.DataFrame(profile_rows)),
     ]
+    playbook_record = st.session_state.get(f"module_playbook_result_{module_token(module)}")
+    if (
+        isinstance(playbook_record, dict)
+        and playbook_record.get("data_signature") == lightweight_frame_signature(df)
+        and isinstance(playbook_record.get("analysis", {}).get("result"), pd.DataFrame)
+    ):
+        tables.append(("Module-Specific Analysis", apply_display_labels(playbook_record["analysis"]["result"], profile)))
+        metrics = playbook_record["analysis"].get("metrics", {})
+        tables.append((
+            "Module Analysis Metrics",
+            pd.DataFrame([{"Metric": name, "Value": value} for name, value in metrics.items()]),
+        ))
     figures = [("Live Engineering Chart", figure)] if figure is not None else []
-    return build_excel_report("Shoir-IE | " + module + " | Universal Parity", tables, figures)
+    return build_excel_report("Shoir-IE | " + profile["display_name"] + " | Universal Parity", tables, figures)
 
 
 def _build_export_zip(
@@ -429,6 +464,27 @@ def _build_export_zip(
             for k, v in results.items()
         }
         zf.writestr(f"{safe}_results.json", json.dumps(serializable_results, indent=2, default=_json_default).encode("utf-8"))
+        playbook_record = st.session_state.get(f"module_playbook_result_{module_token(module)}")
+        if (
+            isinstance(playbook_record, dict)
+            and playbook_record.get("data_signature") == lightweight_frame_signature(df)
+            and isinstance(playbook_record.get("analysis", {}).get("result"), pd.DataFrame)
+        ):
+            analysis = playbook_record["analysis"]
+            zf.writestr(
+                f"{safe}_module_specific_analysis.csv",
+                apply_display_labels(analysis["result"], get_module_profile(st.session_state, module, str(st.session_state.get("current_user", "unknown")))).to_csv(index=False).encode("utf-8"),
+            )
+            zf.writestr(
+                f"{safe}_module_analysis_metrics.json",
+                json.dumps({
+                    "method": analysis.get("method"),
+                    "metrics": analysis.get("metrics", {}),
+                    "guardrail": analysis.get("guardrail"),
+                    "source_key": playbook_record.get("source_key"),
+                    "source_signature": playbook_record.get("data_signature"),
+                }, indent=2, ensure_ascii=False, default=_json_default).encode("utf-8"),
+            )
         zf.writestr(f"{safe}_universal_parity.xlsx", xlsx)
 
         if figure_json:
@@ -439,15 +495,25 @@ def _build_export_zip(
             except Exception:
                 pass
 
+        username = str(st.session_state.get("current_user", "unknown"))
+        profile = get_module_profile(st.session_state, module, username)
+        zf.writestr(
+            f"{safe}_module_profile.json",
+            json.dumps(profile, indent=2, ensure_ascii=False, default=_json_default).encode("utf-8"),
+        )
         manifest = {
             "module": module,
+            "display_name": profile["display_name"],
+            "project_name": profile["project_name"],
+            "site_name": profile["site_name"],
             "generated_at": datetime.now(timezone.utc).isoformat(),
-            "contract": ["import", "validation", "live_graph", "results", "export", "persistence"],
+            "contract": ["import", "validate", "analyze", "visualize", "decide", "export", "persist"],
             "observation_rows": int(len(df)),
             "observation_columns": int(len(df.columns)),
             "data_quality_score": validation.get("score"),
+            "module_profile_included": True,
         }
-        zf.writestr("manifest.json", json.dumps(manifest, indent=2).encode("utf-8"))
+        zf.writestr("manifest.json", json.dumps(manifest, indent=2, ensure_ascii=False).encode("utf-8"))
 
     return buf.getvalue()
 
@@ -470,8 +536,19 @@ def _render_validation_card(validation: dict[str, Any]) -> None:
 def _render_prepare(module: str, keys: dict[str, str]) -> None:
     token = module_token(module)
     st.markdown("## 📦 Universal Module Studio")
-    st.caption("A consistent engineering workspace for every module: Import → Validate → Analyze → Export → Persist.")
-    st.markdown(f"**Active module:** {module}  ·  **Workspace contract:** PARITY-{token.upper()}")
+    st.caption("A consistent engineering workspace for every module: Import → Validate → Analyze → Visualize → Decide → Export → Persist.")
+    profile = get_module_profile(
+        st.session_state,
+        module,
+        str(st.session_state.get("current_user", "unknown")),
+    )
+    display_name = html.escape(profile["display_name"])
+    st.markdown(f"**Active module:** {display_name}  ·  **Workspace contract:** PARITY-{token.upper()}")
+    if profile["display_name"] != module:
+        st.caption(f"Internal module identity: {html.escape(module)} · Subscription access and calculations remain unchanged.")
+    context = [x for x in (profile["project_name"], profile["site_name"], profile["owner_team"]) if x]
+    if context:
+        st.caption(" · ".join(html.escape(str(x)) for x in context))
 
     up = st.file_uploader(
         "📤 Import Excel / CSV",
@@ -522,6 +599,12 @@ def _render_prepare(module: str, keys: dict[str, str]) -> None:
         _apply_module_edit(module, edited)
         df = edited
         current_validation = st.session_state[keys["validation"]]
+
+    render_module_customization(
+        module,
+        str(st.session_state.get("current_user", "unknown")),
+        df,
+    )
 
     if not isinstance(current_validation, dict):
         current_validation = validate_module_dataframe(df)
@@ -636,7 +719,151 @@ def _render_results(module: str, keys: dict[str, str]) -> None:
     st.session_state[keys["results"]] = summary
     st.session_state[keys["validation"]] = validation
 
-    st.markdown("### 📈 Results")
+    username = str(st.session_state.get("current_user", "unknown"))
+    profile = get_module_profile(st.session_state, module, username)
+    st.markdown(f"### 📈 Results — {html.escape(profile['display_name'])}")
+    context = [x for x in (profile["project_name"], profile["site_name"], profile["owner_team"]) if x]
+    if context:
+        st.caption(" · ".join(html.escape(str(x)) for x in context))
+
+    target_result = None
+    kpi_column = profile.get("primary_kpi")
+    if (
+        profile.get("target_enabled")
+        and kpi_column in result_df.columns
+        and pd.api.types.is_numeric_dtype(result_df[kpi_column])
+    ):
+        target_result = evaluate_kpi_target(result_df[kpi_column], profile)
+    if target_result:
+        metric_label = html.escape(display_field_label(kpi_column, profile))
+        precision = int(profile.get("decimal_places", 2))
+        unit = str(target_result.get("unit") or "")
+        actual_text = f"{target_result['actual']:,.{precision}f}" + (f" {html.escape(unit)}" if unit else "")
+        target_text = f"{target_result['target']:,.{precision}f}" + (f" {html.escape(unit)}" if unit else "")
+        delta_text = f"{target_result['difference']:+,.{precision}f} vs target"
+        target_cols = st.columns(3)
+        delta_color = "normal" if target_result["direction"] == "At least" else "inverse" if target_result["direction"] == "At most" else "off"
+        target_cols[0].metric(f"{metric_label} · {target_result['statistic']}", actual_text, delta=delta_text, delta_color=delta_color)
+        target_cols[1].metric("Configured target", target_text, delta=target_result["direction"])
+        target_cols[2].metric("Target check", "MEETS TARGET" if target_result["passed"] else "REVIEW")
+        note = (
+            f"User-configured rule: {target_result['direction']} · tolerance {target_result['tolerance']:,.{precision}f} · "
+            f"{target_result['observations']:,} usable observations. This is a calculated comparison, not an independently verified operational outcome."
+        )
+        st.caption(note)
+        if target_result["passed"]:
+            st.success("The selected dataset satisfies the configured KPI target rule.")
+        else:
+            st.warning("The selected dataset does not satisfy the configured KPI target rule.")
+    elif profile.get("target_enabled") and profile.get("primary_kpi"):
+        st.info("The configured KPI target is not shown because the selected result table does not contain that numeric field. Choose a compatible result dataset or update the module profile.")
+
+    # Named domain playbooks extend legacy/specialist modules that do not share
+    # the platform renderer. If the same module already rendered its native
+    # fallback playbook earlier in this script, avoid presenting it twice.
+    native_fallback_module = st.session_state.pop("shoir_native_fallback_module_active", None)
+    if module in FALLBACK_MODULE_BLUEPRINTS and native_fallback_module != module:
+        blueprint = fallback_module_blueprint(module)
+        result_key = f"module_playbook_result_{token}"
+        cached_playbook = st.session_state.get(result_key)
+        expand_playbook = bool(
+            isinstance(cached_playbook, dict)
+            and cached_playbook.get("signature") == result_signature
+        )
+        with st.expander(f"🧰 Module playbook · {blueprint['focus']}", expanded=expand_playbook):
+            st.caption(blueprint["purpose"])
+            st.caption(f"**Recommended method:** {blueprint['method']}")
+            st.caption(f"**Expected inputs:** {blueprint['inputs']}")
+            if st.button(
+                "▶ Run module-specific review on this result dataset",
+                type="primary",
+                use_container_width=True,
+                key=f"module_playbook_run_{token}",
+                disabled=result_df.empty,
+            ):
+                playbook_started_ns = time.perf_counter_ns()
+                try:
+                    playbook_analysis = analyze_fallback_module(module, result_df)
+                    run_record = None
+                    try:
+                        run_record = save_module_analysis_run(
+                            module, username, profile, result_df, playbook_analysis,
+                            duration_ms=max(0.0, (time.perf_counter_ns() - playbook_started_ns) / 1_000_000.0),
+                            status="Completed",
+                        )
+                    except Exception as persist_exc:
+                        st.warning(
+                            "The review completed, but saved history could not be updated: "
+                            f"{type(persist_exc).__name__}: {persist_exc}"
+                        )
+                    st.session_state[result_key] = {
+                        "signature": result_signature,
+                        "data_signature": lightweight_frame_signature(result_df),
+                        "source_key": result_state_key,
+                        "analysis": playbook_analysis,
+                        "run_id": run_record.get("run_id") if run_record else None,
+                        "input_hash": run_record.get("input_hash") if run_record else None,
+                    }
+                    cached_playbook = st.session_state[result_key]
+                    expand_playbook = True
+                    st.success(
+                        "Module-specific review completed"
+                        + (f" and saved as {run_record['run_id']}." if run_record else ".")
+                    )
+                except (TypeError, ValueError, KeyError, ZeroDivisionError) as exc:
+                    st.session_state.pop(result_key, None)
+                    cached_playbook = None
+                    st.info(f"This dataset does not yet meet the module's input contract: {exc}")
+                except Exception as exc:
+                    st.session_state.pop(result_key, None)
+                    cached_playbook = None
+                    st.error(f"Module-specific review stopped safely: {type(exc).__name__}: {exc}")
+
+            if isinstance(cached_playbook, dict) and cached_playbook.get("signature") == result_signature:
+                analysis = cached_playbook.get("analysis", {})
+                analysis_df = analysis.get("result", pd.DataFrame())
+                metrics = analysis.get("metrics", {})
+                if isinstance(metrics, dict) and metrics:
+                    metric_items = list(metrics.items())
+                    metric_columns = st.columns(min(4, len(metric_items)))
+                    for metric_index, (metric_name, metric_value) in enumerate(metric_items):
+                        if metric_value is None:
+                            metric_display = "N/A"
+                        elif isinstance(metric_value, (float, np.floating)):
+                            metric_display = f"{float(metric_value):,.2f}"
+                        elif isinstance(metric_value, (int, np.integer)):
+                            metric_display = f"{int(metric_value):,}"
+                        else:
+                            metric_display = str(metric_value)
+                        metric_columns[metric_index % len(metric_columns)].metric(str(metric_name), metric_display)
+                if isinstance(analysis_df, pd.DataFrame) and not analysis_df.empty:
+                    st.dataframe(apply_display_labels(analysis_df, profile), use_container_width=True, hide_index=True)
+                    import plotly.express as px
+                    chart_x = analysis.get("chart_x")
+                    chart_y = analysis.get("chart_y")
+                    display_analysis = apply_display_labels(analysis_df, profile)
+                    x_label = display_field_label(chart_x, profile) if chart_x and chart_x in result_df.columns else chart_x
+                    y_label = display_field_label(chart_y, profile) if chart_y and chart_y in result_df.columns else chart_y
+                    if x_label and x_label not in display_analysis.columns:
+                        x_label = None
+                    if not y_label or y_label not in display_analysis.columns or not pd.api.types.is_numeric_dtype(display_analysis[y_label]):
+                        numeric_candidates = [str(column) for column in display_analysis.columns if pd.api.types.is_numeric_dtype(display_analysis[column])]
+                        y_label = numeric_candidates[-1] if numeric_candidates else None
+                    if y_label:
+                        fig, actual_chart, chart_notice = build_profiled_module_figure(
+                            analysis_df, chart_x, chart_y, profile,
+                            f"{profile['display_name']} · {y_label}",
+                        )
+                        if chart_notice:
+                            st.info(chart_notice)
+                        if fig is not None:
+                            st.caption(f"Visualization: {actual_chart} · configured for this module profile.")
+                            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": True, "responsive": True})
+                        if cached_playbook.get("run_id"):
+                            st.caption(f"Saved run: {cached_playbook['run_id']} · Input SHA-256: {cached_playbook.get('input_hash', 'unavailable')}")
+                st.warning(analysis.get("guardrail", blueprint["guardrail"]))
+                st.caption("Calculated output is based on the selected result table, not an independent verification of real-world performance.")
+
     c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("Rows", f'{summary["Rows"]:,}')
     c2.metric("Columns", f'{summary["Columns"]:,}')
@@ -746,6 +973,55 @@ def _render_results(module: str, keys: dict[str, str]) -> None:
             st.download_button("🗂️ Download evidence bundle", data=zip_bytes, file_name=f"shoir_ie_{_slug(module)}_evidence.zip", mime="application/zip", use_container_width=True, key=f"module_parity_zip_{token}")
 
     st.caption("Persistence: the parity dataset, validation snapshot and results summary live in workspace state and are captured by Shoir-IE autosave; the configured durable backend remains authoritative in managed deployments.")
+
+
+    st.markdown("### 💾 Run history")
+    st.caption(
+        "Save the selected result table with its input hash, configured profile, data-quality checks and a dated snapshot. "
+        "This action does not re-run the native module calculation."
+    )
+    save_col, note_col = st.columns([1.0, 2.0])
+    with save_col:
+        save_snapshot = st.button(
+            "📌 Save result snapshot",
+            type="primary",
+            use_container_width=True,
+            disabled=result_df.empty,
+            key=f"module_parity_save_run_{token}",
+        )
+    with note_col:
+        st.caption("Snapshots are private to your account and module. Oversized payloads retain schema and hash even if raw data is omitted.")
+    if save_snapshot:
+        try:
+            snapshot_analysis = {
+                "result": result_df.copy(deep=True),
+                "metrics": {
+                    "Source dataset": selected_label,
+                    "Rows": int(len(result_df)),
+                    "Columns": int(len(result_df.columns)),
+                    "Numeric measures": int(summary.get("Numeric Measures", 0)),
+                    "Data quality score": float(validation.get("score", 0.0)),
+                    "Readiness": str(summary.get("Readiness", "REVIEW")),
+                    "Validation status": str(validation.get("status", "REVIEW")),
+                },
+                "method": "Universal module result snapshot",
+                "guardrail": (
+                    "This record captures the selected result table and validation summary. "
+                    "It does not re-run a native calculation or independently verify operational outcomes."
+                ),
+            }
+            saved_run = save_module_analysis_run(
+                module, username, profile, result_df, snapshot_analysis,
+                duration_ms=0.0, status="Snapshot",
+            )
+            st.session_state[f"module_parity_last_run_{token}"] = saved_run["run_id"]
+            st.success(f"Result snapshot saved as {saved_run['run_id']}.")
+            if saved_run["snapshot_status"] != "Complete":
+                st.info(saved_run["snapshot_status"] + ". Run metadata and hash were retained.")
+        except Exception as exc:
+            st.error(f"Result snapshot could not be saved: {type(exc).__name__}: {exc}")
+
+    render_module_run_history(module, username, key_suffix=token)
 
 
 def render_universal_module_parity(module: str, *, phase: str = "prepare") -> None:

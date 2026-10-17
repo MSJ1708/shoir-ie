@@ -31,9 +31,9 @@ from research_experiment_engine import apply_evidence_conflict
 from industrial_excellence_hub import render_platform_excellence_hub
 from workspace_persistence import ensure_workspace_state_db, load_user_workspace, save_user_workspace
 from shoir_visual_system import apply_shoir_design_system, render_workspace_status
-from shoir_live_visuals import render_live_visualization_studio, discover_visual_tables
+from shoir_live_visuals import discover_visual_tables
 from shoir_module_parity import render_universal_module_parity
-from shoir_tier_capabilities import MODULE_EXPLORER_TIERS
+from shoir_tier_capabilities import MODULE_EXPLORER_TIERS, unique_modules
 from shoir_copilot_orchestrator import build_workflow_plan, recommend_module, run_orchestration, stage_copilot_decision
 from shoir_digital_thread import render_global_project_digital_thread
 from shoir_enterprise_services import render_enterprise_bridge
@@ -90,6 +90,44 @@ def _shoir_module_stop():
         )
     except Exception:
         pass
+
+    # Several legacy module routes intentionally stop the script after their
+    # native UI. Ensure these routes still receive the shared results, charts,
+    # validation, and export surface that ordinary module routes render in the
+    # common tail below. Shell/settings surfaces are explicitly excluded.
+    active_module = str(globals().get("mod") or st.session_state.get("selected_module") or "").strip()
+    allowed = globals().get("allowed_modules", [])
+    try:
+        can_render_results = (
+            bool(active_module)
+            and bool(st.session_state.get("authenticated"))
+            and bool(st.session_state.get("current_user"))
+            and st.session_state.get("selected_nav", "Dashboard") == "Dashboard"
+            and not globals().get("_shell_surface")
+            and active_module in set(map(str, allowed))
+        )
+    except Exception:
+        can_render_results = False
+
+    if can_render_results:
+        try:
+            render_universal_module_parity(active_module, phase="results")
+        except Exception as exc:
+            st.warning("Universal Module Studio could not render the results surface; the native module remains available.")
+            with st.expander("Module parity diagnostic"):
+                st.code(f"{type(exc).__name__}: {exc}")
+        try:
+            save_user_workspace(st.session_state["current_user"], st.session_state)
+        except Exception:
+            pass
+    else:
+        # Shell/settings pages can stop before the module workspace exists, but
+        # their ordinary account/workspace data still follows the same saver.
+        if st.session_state.get("authenticated") and st.session_state.get("current_user"):
+            try:
+                save_user_workspace(st.session_state["current_user"], st.session_state)
+            except Exception:
+                pass
     st.stop()
 from shoir_venture_studio import render_venture_studio
 from shoir_160 import init_160_platform, render_160_command_center
@@ -738,6 +776,9 @@ MODULE_CATALOG = [
     {"tier": "Research Pack", "category": "Research AI", "name": "Research AI",
      "when": "You need a research-focused assistant for protocols, hypotheses, statistical planning, reproducibility, manuscript structure and peer-review preparation.",
      "example": "Ask Research AI to inspect your study design, identify the appropriate analysis plan, review reproducibility risks, and structure reviewer-facing evidence without inventing results or citations."},
+    {"tier": "Research Pack", "category": "Research & Experimentation", "name": "Evidence Degradation & Decision-Readiness Lab",
+     "when": "You need to test how incomplete, stale, conflicting or uncertain evidence changes an industrial decision under operational stress.",
+     "example": "Vary evidence completeness, freshness, conflicts, uncertainty and demand shocks; compare decision regret and identify the evidence conditions where a policy becomes unreliable."},
     {"tier": "Research Pack", "category": "Research Authoring", "name": "Statistical Hypothesis Testing",
      "when": "You're writing a paper and need a properly-run t-test, ANOVA, or chi-square test with the actual statistics, not a claimed result.",
      "example": "Test whether your new layout's cycle times are significantly faster than the baseline: get the test statistic, p-value, and a plain-language verdict - \"p = 0.031, reject H0 at α = 0.05\" - ready to cite."},
@@ -1875,6 +1916,10 @@ elif "Pro" in tier_val or "Trial" in tier_val:
     allowed_modules = tier2_features
 else:
     allowed_modules = tier1_features
+
+# Cumulative tier lists inherit prior features. Keep one entry per module so
+# navigation and tier search never show repeated options.
+allowed_modules = unique_modules(allowed_modules)
 
 # Administration is an explicit privilege, never a normal tier feature.
 # This prevents stale session state or tier membership from exposing the

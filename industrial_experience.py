@@ -5,7 +5,9 @@ surfaces for engineering modules without replacing their specialist logic.
 """
 from __future__ import annotations
 
+import gzip
 import hashlib
+import html
 import io
 import math
 import json
@@ -21,6 +23,12 @@ import pandas as pd
 import plotly.express as px
 
 from shoir_experiment_engine import render_experiment_engine
+from shoir_module_customization import (
+    apply_display_labels,
+    default_module_profile,
+    display_field_label,
+    get_module_profile,
+)
 
 try:
     from durable_account_store import (
@@ -142,6 +150,8 @@ def ensure_experience_db(path: str = "enterprise_full_workspace.db") -> None:
             "CREATE TABLE IF NOT EXISTS experience_jobs(job_id TEXT PRIMARY KEY,module TEXT,job_type TEXT,status TEXT,progress REAL,message TEXT,payload_json TEXT,started_at TEXT,finished_at TEXT)",
             "CREATE TABLE IF NOT EXISTS experience_copilot_actions(id INTEGER PRIMARY KEY AUTOINCREMENT,run_id TEXT,module TEXT,action TEXT,status TEXT,requires_approval INTEGER,evidence_json TEXT,actor TEXT,created_at TEXT)",
             "CREATE TABLE IF NOT EXISTS experience_observability(id INTEGER PRIMARY KEY AUTOINCREMENT,run_id TEXT,module TEXT,event_type TEXT,duration_ms REAL,details_json TEXT,created_at TEXT)",
+            "CREATE TABLE IF NOT EXISTS experience_module_runs(run_id TEXT PRIMARY KEY,module TEXT NOT NULL,owner TEXT NOT NULL,display_name TEXT NOT NULL,project_name TEXT,site_name TEXT,input_hash TEXT NOT NULL,input_rows INTEGER NOT NULL,input_columns_json TEXT NOT NULL,result_columns_json TEXT NOT NULL,input_snapshot_gzip BLOB,result_snapshot_gzip BLOB,profile_json TEXT NOT NULL,metrics_json TEXT NOT NULL,method TEXT,guardrail TEXT,duration_ms REAL NOT NULL,status TEXT NOT NULL,snapshot_status TEXT NOT NULL,created_at TEXT NOT NULL)",
+            "CREATE INDEX IF NOT EXISTS idx_exp_module_runs_owner ON experience_module_runs(owner,module,created_at DESC)",
             "CREATE TABLE IF NOT EXISTS experience_memory(memory_id TEXT PRIMARY KEY,problem TEXT,data_ref TEXT,model_ref TEXT,scenario_ref TEXT,decision_ref TEXT,actual_result TEXT,lesson TEXT,owner TEXT,created_at TEXT,updated_at TEXT)",
             "CREATE TABLE IF NOT EXISTS experience_research_studies(study_id TEXT PRIMARY KEY,research_id TEXT UNIQUE,title TEXT,objective TEXT,research_question TEXT,hypothesis TEXT,null_hypothesis TEXT,methodology TEXT,primary_domain TEXT,transfer_domain TEXT,primary_endpoint TEXT,secondary_metrics_json TEXT,independent_variables_json TEXT,controls_json TEXT,baseline_definition TEXT,treatment_definition TEXT,sample_size INTEGER,replications INTEGER,random_seed INTEGER,alpha REAL,confidence_level REAL,planned_tests_json TEXT,inclusion_criteria TEXT,exclusion_criteria TEXT,data_source TEXT,protocol_notes TEXT,protocol_hash TEXT,protocol_locked INTEGER DEFAULT 0,owner TEXT,created_at TEXT,updated_at TEXT)",
             "CREATE TABLE IF NOT EXISTS experience_research_runs(run_id TEXT PRIMARY KEY,study_id TEXT NOT NULL,research_id TEXT NOT NULL,owner TEXT NOT NULL,experiment_code TEXT NOT NULL,config_json TEXT NOT NULL,summary_json TEXT NOT NULL,results_csv TEXT NOT NULL,created_at TEXT NOT NULL)",
@@ -702,6 +712,327 @@ def verification_snapshot(df: pd.DataFrame) -> dict:
     }
     passed = sum(1 for value in checks.values() if value)
     return {"checks": checks, "passed": passed, "total": len(checks), "score": round(100.0 * passed / max(1, len(checks)), 1)}
+
+
+
+MODULE_RUN_SNAPSHOT_LIMIT_BYTES = 8 * 1024 * 1024
+
+
+def _module_run_json_safe(value: Any) -> Any:
+    """Convert NumPy/Pandas values to strict JSON-safe primitives."""
+    if value is None or value is pd.NA:
+        return None
+    if isinstance(value, (pd.Timestamp, datetime)):
+        return value.isoformat()
+    if isinstance(value, np.generic):
+        return _module_run_json_safe(value.item())
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    if isinstance(value, Mapping):
+        return {str(key): _module_run_json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_module_run_json_safe(item) for item in value]
+    if isinstance(value, (str, int, float, bool)):
+        return value
+    try:
+        if pd.isna(value):
+            return None
+    except (TypeError, ValueError):
+        pass
+    return str(value)
+
+
+def build_profiled_module_figure(
+    frame: pd.DataFrame,
+    chart_x: str | None,
+    chart_y: str | None,
+    profile: Mapping[str, Any] | None,
+    title: str,
+):
+    """Honor a module's preferred chart when the current data supports it.
+
+    Returns (figure, chart_name, notice). An incompatible preference receives
+    a clear fallback notice instead of silently ignoring the user's setting.
+    """
+    if not isinstance(frame, pd.DataFrame) or frame.empty:
+        return None, "Unavailable", "No result rows are available to chart."
+    profile = dict(profile or {})
+    display_frame = apply_display_labels(frame, profile)
+    x_display = display_field_label(chart_x, profile) if chart_x is not None and str(chart_x) in frame.columns else chart_x
+    y_display = display_field_label(chart_y, profile) if chart_y is not None and str(chart_y) in frame.columns else chart_y
+    if x_display not in display_frame.columns:
+        x_display = None
+    if y_display not in display_frame.columns:
+        y_display = None
+
+    requested = str(profile.get("preferred_chart", "Auto") or "Auto")
+    try:
+        from shoir_live_visuals import _make_figure, _suggest_chart
+        actual = _suggest_chart(display_frame, x_display, y_display) if requested == "Auto" else requested
+        figure = _make_figure(display_frame, actual, x_display, y_display, None, title)
+        if figure is not None:
+            return figure, actual, None
+        fallback_chart = _suggest_chart(display_frame, x_display, y_display)
+        if fallback_chart == actual:
+            fallback_chart = "Bar"
+        fallback = _make_figure(display_frame, fallback_chart, x_display, y_display, None, title)
+        if fallback is not None:
+            return fallback, fallback_chart, (
+                f"Your preferred chart ({actual}) needs fields that are not available in this result. "
+                f"Showing {fallback_chart} instead."
+            )
+    except Exception:
+        pass
+
+    try:
+        numeric = [str(column) for column in display_frame.columns if pd.api.types.is_numeric_dtype(display_frame[column])]
+        if not numeric:
+            return None, requested, f"{requested} is not compatible with this table; add a numeric measure or choose another chart."
+        y_column = y_display if y_display in numeric else numeric[-1]
+        from plotly import express as px
+        fallback = px.bar(display_frame, x=x_display, y=y_column, title=title) if x_display else px.bar(display_frame, y=y_column, title=title)
+        return fallback, "Bar", (
+            f"Your preferred chart ({requested}) could not be generated from the current fields. "
+            "Showing a compatible Bar chart instead."
+        )
+    except Exception as exc:
+        return None, requested, f"A chart could not be generated safely: {type(exc).__name__}: {exc}"
+
+
+def save_module_analysis_run(
+    module: str,
+    owner: str,
+    profile: Mapping[str, Any] | None,
+    input_frame: pd.DataFrame,
+    analysis: Mapping[str, Any],
+    duration_ms: float = 0.0,
+    status: str = "Completed",
+    db_path: str = "enterprise_full_workspace.db",
+) -> dict[str, Any]:
+    """Persist a user-scoped input/result snapshot, bounded to protect the app."""
+    if not isinstance(input_frame, pd.DataFrame):
+        raise TypeError("Module run inputs must be a pandas DataFrame.")
+    ensure_experience_db(db_path)
+    analysis = dict(analysis or {})
+    result_frame = analysis.get("result")
+    if not isinstance(result_frame, pd.DataFrame):
+        result_frame = pd.DataFrame()
+
+    input_raw = input_frame.to_json(orient="split", date_format="iso", default_handler=str).encode("utf-8")
+    result_raw = result_frame.to_json(orient="split", date_format="iso", default_handler=str).encode("utf-8")
+    input_hash = hashlib.sha256(input_raw).hexdigest()
+    compressed_input = gzip.compress(input_raw, compresslevel=6, mtime=0)
+    compressed_result = gzip.compress(result_raw, compresslevel=6, mtime=0)
+    input_blob = compressed_input if len(compressed_input) <= MODULE_RUN_SNAPSHOT_LIMIT_BYTES else None
+    result_blob = compressed_result if len(compressed_result) <= MODULE_RUN_SNAPSHOT_LIMIT_BYTES else None
+
+    if input_blob is not None and result_blob is not None:
+        snapshot_status = "Complete"
+    elif input_blob is None and result_blob is None:
+        snapshot_status = "Input and result snapshots omitted (size limit)"
+    elif input_blob is None:
+        snapshot_status = "Input snapshot omitted (size limit)"
+    else:
+        snapshot_status = "Result snapshot omitted (size limit)"
+
+    cleaned_profile = _module_run_json_safe(dict(profile or default_module_profile(module)))
+    metrics = _module_run_json_safe(dict(analysis.get("metrics") or {}))
+    run_id = "MRUN-" + uuid.uuid4().hex[:16].upper()
+    created_at = _now()
+    elapsed = max(0.0, float(duration_ms or 0.0))
+    values = (
+        run_id, str(module), str(owner),
+        str(cleaned_profile.get("display_name") or module),
+        str(cleaned_profile.get("project_name") or ""),
+        str(cleaned_profile.get("site_name") or ""),
+        input_hash, int(len(input_frame)),
+        json.dumps([str(column) for column in input_frame.columns], ensure_ascii=False),
+        json.dumps([str(column) for column in result_frame.columns], ensure_ascii=False),
+        input_blob, result_blob,
+        json.dumps(cleaned_profile, ensure_ascii=False, default=str),
+        json.dumps(metrics, ensure_ascii=False, default=str),
+        str(analysis.get("method") or "Module analysis"),
+        str(analysis.get("guardrail") or "Verify the result against independent evidence before implementation."),
+        elapsed, str(status or "Completed")[:40], snapshot_status, created_at,
+    )
+    with _db(db_path) as conn:
+        conn.execute(
+            """INSERT INTO experience_module_runs(
+                run_id,module,owner,display_name,project_name,site_name,input_hash,input_rows,
+                input_columns_json,result_columns_json,input_snapshot_gzip,result_snapshot_gzip,
+                profile_json,metrics_json,method,guardrail,duration_ms,status,snapshot_status,created_at
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            values,
+        )
+        conn.commit()
+    return {
+        "run_id": run_id,
+        "input_hash": input_hash,
+        "snapshot_status": snapshot_status,
+        "duration_ms": elapsed,
+        "created_at": created_at,
+    }
+
+
+def list_module_analysis_runs(
+    module: str,
+    owner: str,
+    limit: int = 20,
+    db_path: str = "enterprise_full_workspace.db",
+) -> pd.DataFrame:
+    """List only the current owner's runs for the exact module identifier."""
+    ensure_experience_db(db_path)
+    safe_limit = max(1, min(50, int(limit)))
+    with _db(db_path) as conn:
+        rows = conn.execute(
+            """SELECT run_id,display_name,project_name,site_name,input_rows,input_hash,
+                      method,status,snapshot_status,duration_ms,created_at
+               FROM experience_module_runs
+               WHERE module=? AND owner=?
+               ORDER BY created_at DESC, rowid DESC LIMIT ?""",
+            (str(module), str(owner), safe_limit),
+        ).fetchall()
+    return pd.DataFrame(rows, columns=[
+        "Run ID", "Workspace name", "Project", "Site", "Input rows", "Input SHA-256",
+        "Method", "Status", "Snapshot status", "Duration (ms)", "Created at",
+    ])
+
+
+def load_module_analysis_run(
+    run_id: str,
+    owner: str,
+    db_path: str = "enterprise_full_workspace.db",
+) -> dict[str, Any] | None:
+    """Load a saved run only for its owner, including whichever bounded snapshots exist."""
+    ensure_experience_db(db_path)
+    with _db(db_path) as conn:
+        row = conn.execute(
+            """SELECT run_id,module,owner,display_name,project_name,site_name,input_hash,
+                      input_rows,input_columns_json,result_columns_json,input_snapshot_gzip,
+                      result_snapshot_gzip,profile_json,metrics_json,method,guardrail,
+                      duration_ms,status,snapshot_status,created_at
+               FROM experience_module_runs WHERE run_id=? AND owner=?""",
+            (str(run_id), str(owner)),
+        ).fetchone()
+    if not row:
+        return None
+    (
+        saved_id,module,saved_owner,display_name,project_name,site_name,input_hash,
+        input_rows,input_columns_json,result_columns_json,input_blob,result_blob,
+        raw_profile,raw_metrics,method,guardrail,duration_ms,status,snapshot_status,created_at,
+    ) = row
+
+    def decode_json(raw: Any, fallback: Any) -> Any:
+        try:
+            return json.loads(raw or "")
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return fallback
+
+    def decode_frame(blob: Any, raw_columns: Any) -> pd.DataFrame:
+        columns = decode_json(raw_columns, [])
+        if not blob:
+            return pd.DataFrame(columns=columns if isinstance(columns, list) else [])
+        try:
+            decoded = gzip.decompress(blob).decode("utf-8")
+            return pd.read_json(io.StringIO(decoded), orient="split")
+        except Exception:
+            return pd.DataFrame(columns=columns if isinstance(columns, list) else [])
+
+    return {
+        "run_id": saved_id, "module": module, "owner": saved_owner,
+        "display_name": display_name, "project_name": project_name, "site_name": site_name,
+        "input_hash": input_hash, "input_rows": int(input_rows or 0),
+        "input_df": decode_frame(input_blob, input_columns_json),
+        "result_df": decode_frame(result_blob, result_columns_json),
+        "profile": decode_json(raw_profile, default_module_profile(module)),
+        "metrics": decode_json(raw_metrics, {}),
+        "method": method, "guardrail": guardrail,
+        "duration_ms": float(duration_ms or 0.0), "status": status,
+        "snapshot_status": snapshot_status, "created_at": created_at,
+    }
+
+
+def render_module_run_history(module: str, owner: str, key_suffix: str | None = None) -> None:
+    """Render private run history and downloadable snapshots without changing the module shell."""
+    import streamlit as st
+
+    ensure_experience_db()
+    token = str(key_suffix or hashlib.sha1(str(module).encode("utf-8")).hexdigest()[:10])
+    with st.expander("🗂️ Saved module runs & result history", expanded=False):
+        st.caption(
+            "History is scoped to your account and this module. A saved run documents the selected "
+            "inputs/results; it is not proof of a verified plant outcome."
+        )
+        history = list_module_analysis_runs(module, owner, limit=20)
+        if history.empty:
+            st.info("No saved runs are available for this module yet.")
+            return
+        st.dataframe(history.drop(columns=["Input SHA-256"]), use_container_width=True, hide_index=True)
+        run_ids = history["Run ID"].astype(str).tolist()
+        selector_key = f"module_run_history_selector_{token}"
+        if selector_key in st.session_state and str(st.session_state[selector_key]) not in run_ids:
+            st.session_state.pop(selector_key, None)
+        labels = {
+            str(row["Run ID"]): (
+                f"{row['Created at']} · {row['Status']} · {row['Workspace name']} · {row['Run ID']}"
+            )
+            for _, row in history.iterrows()
+        }
+        selected_id = st.selectbox(
+            "Inspect a saved run",
+            options=run_ids,
+            format_func=lambda value: labels.get(str(value), str(value)),
+            key=selector_key,
+        )
+        record = load_module_analysis_run(selected_id, owner)
+        if not record:
+            st.warning("This saved run is no longer available to the current account.")
+            return
+        context = [record["display_name"], record["project_name"], record["site_name"]]
+        st.caption(" · ".join(str(value) for value in context if value))
+        a,b,c = st.columns(3)
+        a.metric("Saved run", record["run_id"])
+        b.metric("Input rows", f"{record['input_rows']:,}")
+        c.metric("Calculation time", f"{record['duration_ms']:,.1f} ms")
+        st.caption(f"Input SHA-256: {record['input_hash']} · {record['snapshot_status']}")
+        st.caption(f"Method: {record['method']}")
+        if record["guardrail"]:
+            st.warning(record["guardrail"])
+        if record["snapshot_status"] != "Complete":
+            st.info("At least one data snapshot exceeded the 8 MiB compressed-payload limit. Metadata and input hash were preserved.")
+
+        st.markdown("**Saved inputs**")
+        if record["input_df"].empty and record["input_rows"]:
+            st.info("The input snapshot was omitted or could not be decoded; the schema and hash remain available.")
+        elif not record["input_df"].empty:
+            st.dataframe(apply_display_labels(record["input_df"], record["profile"]).head(300), use_container_width=True, hide_index=True)
+        st.markdown("**Saved calculated results**")
+        if record["result_df"].empty:
+            st.info("This record has no tabular result snapshot.")
+        else:
+            st.dataframe(apply_display_labels(record["result_df"], record["profile"]).head(500), use_container_width=True, hide_index=True)
+        if record["metrics"]:
+            with st.expander("Saved KPI summary", expanded=False):
+                st.json(record["metrics"])
+        dl1, dl2 = st.columns(2)
+        with dl1:
+            if not record["input_df"].empty:
+                st.download_button(
+                    "📥 Download saved inputs",
+                    record["input_df"].to_csv(index=False).encode("utf-8"),
+                    file_name=f"shoir_ie_{token}_{record['run_id'].lower()}_inputs.csv",
+                    mime="text/csv", use_container_width=True,
+                    key=f"module_run_inputs_download_{token}_{record['run_id']}",
+                )
+        with dl2:
+            if not record["result_df"].empty:
+                st.download_button(
+                    "📥 Download saved results",
+                    record["result_df"].to_csv(index=False).encode("utf-8"),
+                    file_name=f"shoir_ie_{token}_{record['run_id'].lower()}_results.csv",
+                    mime="text/csv", use_container_width=True,
+                    key=f"module_run_results_download_{token}_{record['run_id']}",
+                )
 
 
 def _research_list(value: Any) -> list[str]:
@@ -1486,7 +1817,7 @@ def render_research_workspace(module: str, tier: str, username: str) -> None:
     c3.metric("Runs for active study", len(runs))
     c4.metric("Decision records", len(decisions))
 
-    tabs = st.tabs(["📚 Studies & Recovery","📋 Protocol","🧪 Experiment Engine","🧪 Runs & Results","📝 Decisions","📦 Evidence & Export"])
+    tabs = st.tabs(["📚 Studies & Recovery","📋 Protocol","🧪 Experiment Engine","🧪 Runs & Results","📝 Decisions","📦 Evidence & Export","📊 Scenario Lab"])
 
     with tabs[0]:
         st.markdown("### Saved research studies")
@@ -1745,11 +2076,290 @@ def render_research_workspace(module: str, tier: str, username: str) -> None:
             )
             st.caption("The export contains persisted protocol, study index, run history and decision records. It is an evidence archive, not a scientific conclusion.")
 
+    with tabs[6]:
+        st.markdown("### 📊 Scenario Lab")
+        st.caption(
+            "Compare a baseline with controlled industrial alternatives. This scenario matrix complements the Research Protocol and DOE workspace; "
+            "it does not replace a validated simulation or an independently verified operating result."
+        )
+
+        try:
+            from industrial_platform import (
+                EXPERIMENT_METRIC_COLUMNS,
+                analyze_experiment_scenarios,
+                init_platform_db,
+                render_export_bar,
+                save_experiment,
+            )
+            init_platform_db()
+        except Exception as exc:
+            st.error(f"Scenario Lab services could not initialize safely: {type(exc).__name__}: {exc}")
+            return
+
+        scenario_defaults = pd.DataFrame({
+            "Scenario": ["Baseline", "High Demand", "Supplier Shock", "Capacity Expansion"],
+            "Cost": [100000, 125000, 142000, 115000],
+            "Service": [95, 90, 82, 98],
+            "Risk": [10, 18, 35, 8],
+            "Inventory": [5000, 6200, 7000, 4700],
+            "Carbon": [1000, 1100, 1300, 850],
+        })
+        scenario_editor_key = "research_scenario_lab_matrix"
+        previous_scenarios = st.session_state.get(scenario_editor_key)
+        if not isinstance(previous_scenarios, pd.DataFrame):
+            st.session_state[scenario_editor_key] = scenario_defaults.copy(deep=True)
+        scenarios = st.data_editor(
+            st.session_state[scenario_editor_key],
+            num_rows="dynamic",
+            use_container_width=True,
+            hide_index=True,
+            key="research_scenario_lab_editor",
+            column_config={
+                "Cost": st.column_config.NumberColumn("Cost", min_value=0.0, format="%.2f"),
+                "Service": st.column_config.NumberColumn("Service (%)", min_value=0.0, max_value=100.0, format="%.2f"),
+                "Risk": st.column_config.NumberColumn("Risk score", min_value=0.0, format="%.2f"),
+                "Inventory": st.column_config.NumberColumn("Inventory", min_value=0.0, format="%.2f"),
+                "Carbon": st.column_config.NumberColumn("Carbon", min_value=0.0, format="%.2f"),
+            },
+        )
+        st.session_state[scenario_editor_key] = scenarios.copy(deep=True)
+
+        scenario_names = (
+            scenarios["Scenario"].fillna("").astype(str).str.strip().tolist()
+            if "Scenario" in scenarios.columns else []
+        )
+        baseline_options = list(dict.fromkeys(name for name in scenario_names if name))
+        baseline_key = "research_scenario_lab_baseline"
+        if baseline_key in st.session_state and st.session_state[baseline_key] not in baseline_options:
+            st.session_state.pop(baseline_key, None)
+        if baseline_options:
+            baseline_default = st.session_state.get(baseline_key, baseline_options[0])
+            if baseline_default not in baseline_options:
+                baseline_default = baseline_options[0]
+            baseline_scenario = st.selectbox(
+                "Baseline scenario",
+                baseline_options,
+                index=baseline_options.index(baseline_default),
+                key=baseline_key,
+                help="All deltas are measured against this scenario. Change it to compare alternatives to a different reference point.",
+            )
+        else:
+            baseline_scenario = None
+            st.info("Add a non-empty scenario name to select a baseline.")
+
+        # Include the selected baseline in the signature so changing the
+        # reference point invalidates the prior saved-result attachment.
+        signature_source = scenarios.to_csv(index=False) + "\\nBASELINE=" + str(baseline_scenario)
+        current_signature = hashlib.sha256(signature_source.encode("utf-8")).hexdigest()
+        analysis_df = pd.DataFrame()
+        try:
+            analysis_df = analyze_experiment_scenarios(scenarios, baseline_scenario)
+        except (TypeError, ValueError) as exc:
+            st.warning(f"Scenario table needs attention before analysis: {exc}")
+
+        run_col, notes_col = st.columns([1.1, 2])
+        with run_col:
+            save_clicked = st.button(
+                "🧪 Analyze & Save",
+                type="primary",
+                use_container_width=True,
+                disabled=len(scenarios) < 2 or analysis_df.empty,
+                key="research_scenario_lab_save",
+            )
+        with notes_col:
+            st.caption(
+                "Live preview recalculates from the current table. Analyze & Save records the chosen baseline, inputs and computed results to the experiment registry."
+            )
+
+        if save_clicked:
+            try:
+                if len(scenarios) < 2:
+                    raise ValueError("At least two scenarios are required for a comparison.")
+                saved_analysis = analyze_experiment_scenarios(scenarios, baseline_scenario)
+                experiment_id = save_experiment(
+                    "Scenario Matrix",
+                    "Experiment Lab",
+                    scenarios.to_dict("records"),
+                    {
+                        "baseline_scenario": baseline_scenario,
+                        "input_signature": current_signature,
+                        "scenario_results": saved_analysis.to_dict("records"),
+                    },
+                    username,
+                )
+                st.session_state["research_scenario_lab_saved_id"] = experiment_id
+                st.session_state["research_scenario_lab_saved_signature"] = current_signature
+                st.session_state["research_scenario_lab_saved_results"] = saved_analysis.copy(deep=True)
+                st.success(f"Scenario experiment saved: {experiment_id}")
+            except Exception as exc:
+                st.error(f"Scenario analysis could not be saved safely: {type(exc).__name__}: {exc}")
+
+        saved_results = st.session_state.get("research_scenario_lab_saved_results", pd.DataFrame())
+        saved_results_is_current = (
+            isinstance(saved_results, pd.DataFrame)
+            and not saved_results.empty
+            and st.session_state.get("research_scenario_lab_saved_signature") == current_signature
+        )
+        if isinstance(saved_results, pd.DataFrame) and not saved_results.empty and not saved_results_is_current:
+            st.info("The saved scenario analysis belongs to an earlier input table or baseline. It remains in saved history, but it will not be attached to the current inputs export.")
+
+        if not analysis_df.empty:
+            if len(scenarios) < 2:
+                st.info("Add at least one alternative scenario to enable comparisons and saving.")
+            else:
+                st.markdown("#### 📈 KPI comparisons")
+                metric_columns = [column for column in EXPERIMENT_METRIC_COLUMNS if column in analysis_df.columns]
+                figure_exports = []
+                if metric_columns:
+                    chart_tabs = st.tabs([f"{column} comparison" for column in metric_columns])
+                    for metric_name, chart_tab in zip(metric_columns, chart_tabs):
+                        with chart_tab:
+                            fig = px.bar(
+                                analysis_df,
+                                x="Scenario",
+                                y=metric_name,
+                                color="Baseline",
+                                barmode="group",
+                                title=f"{metric_name} by scenario",
+                                hover_data=["Scenario"],
+                            )
+                            baseline_rows = analysis_df.loc[analysis_df["Baseline"]]
+                            if not baseline_rows.empty:
+                                fig.add_hline(
+                                    y=float(baseline_rows.iloc[0][metric_name]),
+                                    line_dash="dash",
+                                    annotation_text=f"Baseline: {float(baseline_rows.iloc[0][metric_name]):,.4g}",
+                                )
+                            fig.update_layout(height=380, legend_title_text="Selected baseline")
+                            st.plotly_chart(
+                                fig,
+                                use_container_width=True,
+                                config={"displayModeBar": True, "responsive": True},
+                            )
+                            figure_exports.append((f"{metric_name} comparison", fig))
+
+                if {"Cost", "Service"}.issubset(analysis_df.columns):
+                    st.markdown("#### ⚖️ Cost versus service trade-off")
+                    hover_columns = [column for column in ("Risk", "Inventory", "Carbon") if column in analysis_df.columns]
+                    tradeoff = px.scatter(
+                        analysis_df,
+                        x="Cost",
+                        y="Service",
+                        color="Scenario",
+                        hover_data=hover_columns,
+                        title="Cost versus service by scenario",
+                    )
+                    tradeoff.update_layout(height=420)
+                    st.plotly_chart(
+                        tradeoff,
+                        use_container_width=True,
+                        config={"displayModeBar": True, "responsive": True},
+                    )
+                    figure_exports.append(("Cost versus service trade-off", tradeoff))
+
+                st.markdown("#### Calculated results")
+                st.dataframe(analysis_df, use_container_width=True, hide_index=True)
+                tables = [
+                    ("Scenario Inputs", scenarios),
+                    ("Live Scenario Analysis", analysis_df),
+                ]
+                if saved_results_is_current:
+                    tables.append(("Saved Analysis for Current Inputs", saved_results))
+                render_export_bar("Experiment Lab", tables, figure_exports, tier, username)
+
+        st.markdown("#### 🗃️ Saved scenario experiments")
+        try:
+            with sqlite3.connect("enterprise_full_workspace.db") as scenario_conn:
+                scenario_history = pd.read_sql_query(
+                    """SELECT experiment_id AS "Experiment ID", name AS Name, module AS Module,
+                                      created_by AS "Created By", created_at AS "Created At"
+                               FROM platform_experiments
+                               WHERE module=? AND created_by=?
+                               ORDER BY created_at DESC LIMIT 25""",
+                    scenario_conn,
+                    params=("Experiment Lab", username),
+                )
+            if scenario_history.empty:
+                st.info("No scenario experiments are saved yet.")
+            else:
+                st.dataframe(scenario_history, use_container_width=True, hide_index=True)
+                history_labels = {
+                    str(row["Experiment ID"]): f"{row['Name']} · {row['Created At']} · {row['Experiment ID']}"
+                    for _, row in scenario_history.iterrows()
+                }
+                open_key = "research_scenario_lab_history_open"
+                if open_key in st.session_state and str(st.session_state[open_key]) not in history_labels:
+                    st.session_state.pop(open_key, None)
+                selected_experiment_id = st.selectbox(
+                    "Inspect saved experiment",
+                    list(history_labels),
+                    format_func=lambda value: history_labels[str(value)],
+                    key=open_key,
+                )
+                with sqlite3.connect("enterprise_full_workspace.db") as detail_conn:
+                    stored = detail_conn.execute(
+                        """SELECT scenarios_json, results_json, created_at
+                           FROM platform_experiments
+                           WHERE experiment_id=? AND module=? AND created_by=?""",
+                        (selected_experiment_id, "Experiment Lab", username),
+                    ).fetchone()
+                if stored:
+                    try:
+                        stored_inputs = pd.DataFrame(json.loads(stored[0]))
+                        stored_results_payload = json.loads(stored[1])
+                        # Earlier Experiment Lab versions saved the result rows
+                        # as a bare JSON list; current saves wrap them in a
+                        # baseline/signature object. Support both schemas.
+                        if isinstance(stored_results_payload, dict):
+                            stored_result_rows = stored_results_payload.get("scenario_results")
+                            if not isinstance(stored_result_rows, list):
+                                stored_result_rows = stored_results_payload.get("results", [])
+                        elif isinstance(stored_results_payload, list):
+                            stored_result_rows = stored_results_payload
+                        else:
+                            stored_result_rows = []
+                        stored_results = pd.DataFrame(stored_result_rows)
+                        with st.expander("Saved experiment inputs and results", expanded=False):
+                            st.caption(f"Saved at {stored[2]} · {selected_experiment_id}")
+                            detail_tabs = st.tabs(["Inputs", "Calculated results", "Trade-off chart"])
+                            with detail_tabs[0]:
+                                st.dataframe(stored_inputs, use_container_width=True, hide_index=True)
+                            with detail_tabs[1]:
+                                if stored_results.empty:
+                                    st.info("No calculated results were found in this saved record.")
+                                else:
+                                    st.dataframe(stored_results, use_container_width=True, hide_index=True)
+                            with detail_tabs[2]:
+                                if {"Cost", "Service"}.issubset(stored_results.columns) and not stored_results.empty:
+                                    saved_tradeoff = px.scatter(
+                                        stored_results,
+                                        x="Cost",
+                                        y="Service",
+                                        color="Scenario",
+                                        title="Saved cost versus service trade-off",
+                                    )
+                                    st.plotly_chart(saved_tradeoff, use_container_width=True, config={"displayModeBar": True, "responsive": True})
+                                else:
+                                    st.info("This saved result does not contain both Cost and Service for a trade-off chart.")
+                    except Exception as exc:
+                        st.warning(f"Saved experiment could not be decoded safely: {type(exc).__name__}: {exc}")
+        except Exception as exc:
+            st.warning(f"Saved scenario history is temporarily unavailable: {type(exc).__name__}: {exc}")
+
 def _safe_key(value: str) -> str:
     return hashlib.sha1(str(value).encode("utf-8")).hexdigest()[:10]
 
 
 def _module_meta(module: str) -> dict:
+    if str(module) in FALLBACK_MODULE_BLUEPRINTS:
+        blueprint = fallback_module_blueprint(module)
+        return {
+            "name": str(module),
+            "category": blueprint["category"],
+            "tier": blueprint["tier"],
+            "when": blueprint["purpose"],
+            "example": blueprint["method"],
+        }
     try:
         from industrial_platform import PLATFORM_CATALOG
         return next((item for item in PLATFORM_CATALOG if str(item.get("name")) == str(module)), {})
@@ -1757,26 +2367,729 @@ def _module_meta(module: str) -> dict:
         return {}
 
 
+FALLBACK_MODULE_BLUEPRINT_ROWS = [
+    ("Facility Layout & Warehousing", "facility", "Facilities & material flow", "Evaluate department area, from-to movement and travel burden.", "Layout / SLP review", "Department, area, from-to flow and travel-distance fields", "Coordinates and flows must come from the user's actual facility; starter values are illustrative."),
+    ("Enterprise Integration & Collaboration", "integration", "Enterprise integration", "Review connector ownership, last-test status, latency and successful synchronization evidence.", "Connector readiness review", "System, protocol, latency, success rate, owner and last-test evidence", "A row in the table does not prove that a connector is live; run a real endpoint test separately."),
+    ("AGV Fleet Dispatcher", "logistics", "AGV fleet dispatch", "Compare task demand with vehicle capacity and transport cost.", "Capacity and transport screening", "Task, origin, destination, demand, capacity and distance", "A capacity check is not a collision-free path plan; validate routes and safety controls in the live system."),
+    ("Geospatial Network Designer", "logistics", "Network and route design", "Compare site flows, distances, capacity utilization and illustrative transport exposure.", "Network cost / service screening", "Origins, destinations, demand, vehicle capacity, distance and cost", "Do not treat sample coordinates, routes or costs as live geography or quotes."),
+    ("Production Planning & Control (PPC)", "schedule", "Production planning & control", "Review work-order load and processing/setup workload by resource.", "Workload and dispatch review", "Work order, machine, quantity, processing time, setup time and due offset", "This fallback calculates workload indicators, not a constraint-validated finite-capacity schedule."),
+    ("Lean Manufacturing & Shop Floor Operations", "production", "Lean and shop-floor improvement", "Inspect good-unit yield, scrap and cycle-time patterns before selecting an improvement experiment.", "Yield and loss screening", "Planned/good/scrap units, downtime and cycle time", "A suspected loss is a hypothesis until supported by observed time-study or production evidence."),
+    ("Quality Control, Six Sigma & Reliability", "quality", "Quality and reliability", "Evaluate values against explicit specification limits and calculate defect-rate indicators when counts exist.", "Specification and defect review", "Measurements, lower/upper specification limits, defects and inspected quantity", "Capability indices and control limits require a suitable sampling design and assumptions; this fallback does not certify process capability."),
+    ("Engineering Economics & Finance", "economics", "Engineering economics", "Compare capital outlay with annual net benefit, simple payback and simple annual return.", "Investment screening", "CapEx, annual benefit, operating cost and project life", "Simple payback/return are not a discounted cash-flow NPV or a guarantee of realized savings."),
+    ("Predictive Maintenance Hub", "maintenance", "Maintenance condition triage", "Rank current rows using a transparent within-dataset index built from available condition indicators.", "Condition triage index", "Asset, runtime, temperature, vibration, downtime and failure counts", "The relative index is not a calibrated probability of failure, a diagnosis or a validated predictive model."),
+    ("Human Factors & Ergonomics (NIOSH)", "workforce", "Workforce and ergonomics", "Review task cycle time, headcount and recorded ergonomic screening scores.", "Work-content and ergonomic review", "Task, operator, cycle time, ergonomic score, shift hours and headcount", "Do not label a proxy as a validated NIOSH/RULA/REBA assessment; use the appropriate protocol and trained assessor."),
+    ("Digital Twin & Discrete-Event Simulation", "simulation", "Discrete-event simulation", "Compare scenario demand, capacity, service and operating outcomes from the current data table.", "Scenario feasibility screening", "Demand, capacity, lead time, downtime and scenario KPIs", "This generic fallback is a scenario screen, not a running discrete-event model unless a native simulation has been executed."),
+    ("Green IE & Sustainability", "sustainability", "Green industrial engineering", "Calculate emissions from explicit quantities and factors or compare supplied baseline/scenario footprints.", "Emissions and change review", "Activity, quantity, emission factor, scope and baseline/scenario tCO2e", "Use source-dated, boundary-appropriate emission factors; estimates are not audited ESG disclosures."),
+    ("Evidence Degradation & Decision-Readiness Lab", "research", "Evidence degradation research", "Inspect evidence-quality factors, outcome fields and experiment readiness before drawing a decision boundary.", "Research design and evidence review", "Completeness, freshness, conflicts, uncertainty, shock conditions and outcome", "A decision-readiness boundary must be estimated from experiments; it must not be hard-coded as a desired conclusion."),
+    ("Statistical Hypothesis Testing", "research", "Statistical analysis", "Inspect effect estimates, standard errors and study design; calculate an approximate interval when supported by inputs.", "Effect and interval review", "Outcome, group, sample size, effect estimate and standard error", "The generic fallback does not replace a correctly specified t-test/ANOVA/regression method or multiplicity review."),
+    ("LaTeX Document Formatter", "document", "Technical document preparation", "Track sections, equation checks, reference checks and review status before producing a manuscript.", "Document completeness check", "Section, source-data linkage, equation/reference checks and review status", "Completeness does not validate LaTeX compilation, scientific claims or citations."),
+    ("Literature & Citation Matrix", "literature", "Literature evidence management", "Organize papers, DOI metadata, methods, sample sizes and research gaps for review.", "Citation-matrix completeness", "Paper ID, title, authors/year, DOI, method, sample size and research gap", "Do not mark a citation verified unless it has been checked against a reliable source."),
+    ("Advanced Regression Analysis", "research", "Regression research", "Summarize supplied effect estimates and standard errors and expose missing inputs before a model is fitted.", "Effect-size and interval review", "Outcome, predictors, estimate, standard error and sample size", "The fallback must not present descriptive intervals as a fitted regression or causal result."),
+    ("Live Reproducible Paper Canvas", "document", "Reproducible paper workflow", "Link each manuscript section to data, code/run IDs, review status and reproducibility evidence.", "Reproducibility checklist", "Section, dataset/run reference, equation/reference checks and review status", "A complete checklist is not proof that the paper reruns unless the linked workflow was executed."),
+    ("Paper-to-Simulation Auto-Engine", "research", "Paper-to-simulation translation", "Record extracted assumptions, parameters, mappings and validation state before generating a simulation.", "Assumption-to-model mapping", "Parameter, value, unit, source passage, mapping status and test result", "Automated extraction is a draft; confirm units, assumptions and equations against the source paper."),
+    ("Automated Theory-to-Code Formalizer", "formal", "Theory-to-code formalization", "Track claims, assumptions, variables, equations, code links and verification status.", "Formalization readiness", "Claim, assumptions, equation/code reference, proof/test status", "A formalization status is not a machine-checked proof unless an actual proof backend completed successfully."),
+    ("Automated Code-to-Formal-Proof Verifier", "formal", "Code and proof verification", "Organize the verification claim, code version, assumptions, proof/test results and reviewer disposition.", "Verification evidence review", "Code version/hash, claim, assumptions, proof result and test result", "Do not claim a proof passed when the proof/test result is missing, pending or supplied only as text."),
+    ("Adversarially Stressed Synthetic Industrial Twins", "simulation", "Synthetic industrial twin stress testing", "Compare baseline and shock scenarios for demand, capacity, cost, service and risk.", "Shock-scenario comparison", "Baseline conditions, shock factors, seed, demand/capacity and outcome KPIs", "Synthetic results must be labelled synthetic and should not be generalized to a real plant without validation."),
+    ("Adversarial AI Peer-Review Swarm", "research", "Adversarial research review", "Track claims, evidence citations, reproducibility questions and reviewer findings in one triage queue.", "Claim/evidence review", "Claim, evidence reference, reproducibility status, severity and reviewer disposition", "AI review findings are suggestions for human review, not an authoritative peer-review acceptance decision."),
+    ("Adversarial Chaos & Shock Injector", "simulation", "Operational shock testing", "Define baseline and shock factors, run identifiers, affected constraints and observed output deltas.", "Shock and resilience review", "Shock type, severity, seed, affected process, baseline and outcome", "Do not inject shocks into live operations without an approved, isolated test environment."),
+    ("Autonomous Parametric Surrogate Swarm", "simulation", "Surrogate model experiments", "Track input ranges, surrogate predictions, validation residuals and domain-of-validity flags.", "Surrogate validation review", "Input parameters, predicted response, observed response and residual", "A surrogate prediction is not a validated physical outcome; validate against held-out observations."),
+    ("Real-Time Quantum-Classical Hybrid Optimization Router", "optimization", "Advanced optimization method routing", "Record problem structure, solver/method selection, feasibility, runtime and objective result.", "Solver suitability review", "Problem type, variables, constraints, method, status, runtime and objective", "The fallback is a routing/readiness checklist, not evidence of quantum hardware execution."),
+    ("Decentralized Cryptographic Reproducibility Vault", "security", "Reproducibility and provenance", "Inspect artifact identifiers, content hashes, signatures, owner and verification state.", "Provenance completeness", "Artifact ID/type, source version, hash, signature status and verifier result", "A populated hash field is not a verified signature or an immutable decentralized record."),
+    ("🔌 Edge-Connected IoT Digital Twin Bridge", "connectivity", "Edge telemetry bridge", "Review endpoint/protocol setup, telemetry freshness, latency and last-test results.", "Connector readiness review", "Asset, endpoint, protocol, latency, success rate, last test and owner", "Imported or sample telemetry does not prove that an edge device is connected now."),
+    ("🔌 Universal Cross-Domain Mathematical Isomorphism Engine (UCMIE)", "math", "Cross-domain model correspondence", "Record mappings between domain entities, units, invariants and constraint-preservation checks.", "Mapping and invariant review", "Source entity, target entity, dimension compatibility and preserved constraint", "A correspondence table is not proof of mathematical isomorphism unless required conditions are formally established."),
+    ("🔄 Autonomous Epistemic Cross-Disciplinary Falsification Matrix (AE-FRESM)", "research", "Cross-disciplinary falsification", "Record a claim, domain assumptions, falsifying tests, evidence coverage and reviewer disposition.", "Falsification plan review", "Claim, assumptions, proposed test, evidence reference and result status", "The module should report untested hypotheses as open, not as falsified or confirmed."),
+    ("Autonomous Cognitive Operations & Zero-Knowledge Mesh (ACO-ZKMS)", "security", "Governed operations and proof readiness", "Track operation IDs, approvals, artifact references and cryptographic-verification status.", "Governance and proof readiness", "Operation, owner, approval, artifact hash, proof status and audit reference", "A workflow ledger does not itself provide zero-knowledge security guarantees."),
+    ("⚡ ACO-ZKMS Master Engine", "security", "Governed orchestration", "Inspect dependencies, approvals, artifact lineage, execution state and verification evidence.", "Orchestration readiness review", "Workflow step, dependency, approval, artifact reference and result status", "Do not represent planned, demo or mocked steps as completed production actions."),
+]
+
+FALLBACK_MODULE_BLUEPRINTS = {
+    name: {
+        "module": name,
+        "family": family,
+        "focus": focus,
+        "purpose": purpose,
+        "method": method,
+        "inputs": inputs,
+        "guardrail": guardrail,
+        "first_run": f"Confirm that the input fields and assumptions for {focus.lower()} match your project before running the analysis.",
+    }
+    for name, family, focus, purpose, method, inputs, guardrail in FALLBACK_MODULE_BLUEPRINT_ROWS
+}
+
+# Keep these labels aligned with the actual subscription/module catalogue.
+# They are descriptive metadata only and do not replace the application's
+# tier-entitlement check.
+FALLBACK_MODULE_CATALOG_META = {
+    "Facility Layout & Warehousing": ("Facilities", "Starter"),
+    "Enterprise Integration & Collaboration": ("Platform", "Starter"),
+    "AGV Fleet Dispatcher": ("Logistics", "Mid-Tier Pro"),
+    "Geospatial Network Designer": ("Network Design", "Mid-Tier Pro"),
+    "Production Planning & Control (PPC)": ("Production", "Mid-Tier Pro"),
+    "Lean Manufacturing & Shop Floor Operations": ("Production", "Mid-Tier Pro"),
+    "Quality Control, Six Sigma & Reliability": ("Quality", "Mid-Tier Pro"),
+    "Engineering Economics & Finance": ("Finance", "Mid-Tier Pro"),
+    "Predictive Maintenance Hub": ("Operations", "Enterprise"),
+    "Human Factors & Ergonomics (NIOSH)": ("Human Factors", "Enterprise"),
+    "Digital Twin & Discrete-Event Simulation": ("Digital Twin", "Enterprise"),
+    "Green IE & Sustainability": ("Sustainability", "Enterprise"),
+    "Evidence Degradation & Decision-Readiness Lab": ("Research & Experimentation", "Research Pack"),
+    "Statistical Hypothesis Testing": ("Research Authoring", "Research Pack"),
+    "LaTeX Document Formatter": ("Research Authoring", "Research Pack"),
+    "Literature & Citation Matrix": ("Research Authoring", "Research Pack"),
+    "Advanced Regression Analysis": ("Research Authoring", "Research Pack"),
+    "Live Reproducible Paper Canvas": ("Research Authoring", "Research Pack"),
+    "Paper-to-Simulation Auto-Engine": ("Paper-to-Simulation Pipeline", "Research Pack"),
+    "Automated Theory-to-Code Formalizer": ("Paper-to-Simulation Pipeline", "Research Pack"),
+    "Automated Code-to-Formal-Proof Verifier": ("Paper-to-Simulation Pipeline", "Research Pack"),
+    "Adversarially Stressed Synthetic Industrial Twins": ("Paper-to-Simulation Pipeline", "Research Pack"),
+    "Adversarial AI Peer-Review Swarm": ("Peer Review & Stress-Testing", "Research Pack"),
+    "Adversarial Chaos & Shock Injector": ("Peer Review & Stress-Testing", "Research Pack"),
+    "Autonomous Parametric Surrogate Swarm": ("Peer Review & Stress-Testing", "Research Pack"),
+    "Real-Time Quantum-Classical Hybrid Optimization Router": ("Advanced Computation Infrastructure", "Research Pack"),
+    "Decentralized Cryptographic Reproducibility Vault": ("Advanced Computation Infrastructure", "Research Pack"),
+    "🔌 Edge-Connected IoT Digital Twin Bridge": ("Advanced Computation Infrastructure", "Research Pack"),
+    "🔌 Universal Cross-Domain Mathematical Isomorphism Engine (UCMIE)": ("Advanced Computation Infrastructure", "Research Pack"),
+    "🔄 Autonomous Epistemic Cross-Disciplinary Falsification Matrix (AE-FRESM)": ("Advanced Computation Infrastructure", "Research Pack"),
+    "Autonomous Cognitive Operations & Zero-Knowledge Mesh (ACO-ZKMS)": ("Advanced Computation Infrastructure", "Research Pack"),
+    "⚡ ACO-ZKMS Master Engine": ("Advanced Computation Infrastructure", "Research Pack"),
+}
+
+
+def fallback_module_blueprint(module: str) -> dict[str, Any]:
+    """Return a specific, conservative workflow definition for a generic fallback module."""
+    name = str(module)
+    blueprint = dict(FALLBACK_MODULE_BLUEPRINTS.get(name, {}))
+    category, required_tier = FALLBACK_MODULE_CATALOG_META.get(
+        name, ("Industrial Engineering", "Starter")
+    )
+    blueprint.setdefault("module", name)
+    blueprint.setdefault("family", "generic")
+    blueprint.setdefault("focus", "Industrial engineering analysis")
+    blueprint.setdefault("purpose", "Prepare, validate, compare and export the data for this module.")
+    blueprint.setdefault("method", "Baseline / scenario comparison")
+    blueprint.setdefault("inputs", "Name rows clearly and provide a numeric KPI or measure.")
+    blueprint.setdefault("guardrail", "Confirm assumptions and verify results against the real operating context before acting.")
+    blueprint.setdefault("first_run", "Replace illustrative values with observed data and record the source and units.")
+    blueprint["category"] = category
+    blueprint["tier"] = required_tier
+    return blueprint
+
+
+def analyze_fallback_module(module: str, frame: pd.DataFrame) -> dict[str, Any]:
+    """Run a safe, input-driven module-specific analysis for the shared fallback canvas.
+
+    Calculations use only columns present in the user's table. They do not call
+    external systems or represent sample data as live data or verified outcomes.
+    """
+    if not isinstance(frame, pd.DataFrame) or frame.empty:
+        raise ValueError("Add a non-empty input table before running this module analysis.")
+    blueprint = fallback_module_blueprint(module)
+    family = blueprint["family"]
+    result = frame.copy(deep=True)
+    metrics: dict[str, Any] = {}
+    chart_x = None
+    chart_y = None
+    chart_kind = "bar"
+
+    def column(*candidates: str) -> str | None:
+        normalized = {str(c).strip().lower().replace(" ", "_"): str(c) for c in result.columns}
+        for candidate in candidates:
+            key = candidate.strip().lower().replace(" ", "_")
+            if key in normalized:
+                return normalized[key]
+        return None
+
+    def numeric(name: str | None) -> pd.Series | None:
+        return pd.to_numeric(result[name], errors="coerce") if name and name in result.columns else None
+
+    def first_categorical(*candidates: str) -> str | None:
+        for candidate in candidates:
+            found = column(candidate)
+            if found and not pd.api.types.is_numeric_dtype(result[found]):
+                return found
+        return next((str(c) for c in result.columns if not pd.api.types.is_numeric_dtype(result[c])), None)
+
+    def record_completeness(columns: list[str]) -> pd.Series:
+        block = result[columns]
+        present = block.notna().copy()
+        for field in columns:
+            if pd.api.types.is_object_dtype(block[field]) or pd.api.types.is_string_dtype(block[field]):
+                present[field] = present[field] & block[field].astype(str).str.strip().ne("")
+        return present.mean(axis=1) * 100.0
+
+    if family == "quality":
+        measured = column("Measured_Value", "Measurement", "Value")
+        low_name, high_name = column("Lower_Spec", "LSL"), column("Upper_Spec", "USL")
+        defect_name, inspected_name = column("Defect_Count", "Defects"), column("Inspected_Count", "Inspected")
+        if measured and low_name and high_name:
+            val, low, high = numeric(measured), numeric(low_name), numeric(high_name)
+            valid = val.notna() & low.notna() & high.notna() & high.ge(low)
+            result["Within_Spec"] = valid & val.ge(low) & val.le(high)
+            result["Spec_Deviation"] = np.where(valid, np.maximum(low-val, 0) + np.maximum(val-high, 0), np.nan)
+            metrics["Within specification (%)"] = round(float(result.loc[valid, "Within_Spec"].mean() * 100), 2) if valid.any() else None
+            chart_x, chart_y = first_categorical("Part", "Workcenter", "Line"), measured
+        if defect_name and inspected_name:
+            defects, inspected = numeric(defect_name), numeric(inspected_name)
+            valid_counts = inspected.gt(0) & defects.notna()
+            result["Defect_Rate_pct"] = np.where(valid_counts, defects / inspected * 100, np.nan)
+            result["First_Pass_Yield_pct"] = np.where(valid_counts, 100 - result["Defect_Rate_pct"], np.nan)
+            metrics["Defect rate (%)"] = round(float(result.loc[valid_counts, "Defect_Rate_pct"].mean()), 2) if valid_counts.any() else None
+            if not chart_y:
+                chart_x, chart_y = first_categorical("Part", "Workcenter", "Line"), "Defect_Rate_pct"
+        if not any(k in result.columns for k in ("Within_Spec", "Defect_Rate_pct")):
+            raise ValueError("For quality analysis, provide measurement/specification columns or Defect_Count and Inspected_Count.")
+    elif family == "maintenance":
+        signal_names = [column("Temperature_C", "Temperature"), column("Vibration_mm_s", "Vibration"), column("Downtime_Hours", "Downtime"), column("Failure_Count", "Failures"), column("Runtime_Hours", "Runtime")]
+        signals = [name for name in signal_names if name and numeric(name) is not None and numeric(name).notna().any()]
+        if not signals:
+            raise ValueError("For maintenance triage, include at least one numeric condition indicator such as temperature, vibration, downtime or failure count.")
+        normalized = []
+        for name in signals:
+            values = numeric(name)
+            lo, hi = values.quantile(0.05), values.quantile(0.95)
+            score = pd.Series(50.0, index=values.index) if pd.isna(lo) or pd.isna(hi) or hi <= lo else ((values-lo)/(hi-lo)*100).clip(0,100)
+            normalized.append(score.fillna(0))
+        result["Relative_Triage_Index_0_100"] = pd.concat(normalized, axis=1).mean(axis=1)
+        result["Relative_Triage_Band"] = pd.cut(result["Relative_Triage_Index_0_100"], [-0.01, 33.333, 66.666, 100.01], labels=["Lower", "Middle", "Higher"]).astype(str)
+        metrics["Assets / rows reviewed"] = int(len(result))
+        metrics["Mean relative triage index"] = round(float(result["Relative_Triage_Index_0_100"].mean()), 2)
+        metrics["Condition indicators used"] = len(signals)
+        chart_x, chart_y = first_categorical("Asset", "Machine", "Equipment"), "Relative_Triage_Index_0_100"
+    elif family == "inventory":
+        onhand_name, demand_name = column("On_Hand_Units", "On_Hand", "Inventory"), column("Daily_Demand_Units", "Daily_Demand", "Demand")
+        lead_name, safety_name = column("Lead_Time_Days", "Lead_Time"), column("Safety_Stock_Units", "Safety_Stock")
+        if not onhand_name or not demand_name:
+            raise ValueError("For inventory review, include On_Hand_Units and Daily_Demand_Units.")
+        onhand, demand = numeric(onhand_name), numeric(demand_name)
+        valid = demand.gt(0) & onhand.notna()
+        result["Days_Of_Cover"] = np.where(valid, onhand / demand, np.nan)
+        lead = numeric(lead_name) if lead_name else pd.Series(0.0, index=result.index)
+        safety = numeric(safety_name).fillna(0) if safety_name else pd.Series(0.0, index=result.index)
+        lead = lead.fillna(0).clip(lower=0)
+        result["Reorder_Point_Units"] = lead * demand + safety
+        result["Reorder_Review"] = valid & onhand.lt(result["Reorder_Point_Units"])
+        metrics["SKUs below reorder point"] = int(result["Reorder_Review"].sum())
+        metrics["SKUs reviewed"] = int(valid.sum())
+        metrics["Mean days of cover"] = round(float(result.loc[valid, "Days_Of_Cover"].mean()), 2) if valid.any() else None
+        chart_x, chart_y = first_categorical("SKU", "Item", "Material"), "Days_Of_Cover"
+    elif family == "logistics":
+        demand_name, cap_name = column("Demand_Units", "DemandQty", "Demand"), column("Vehicle_Capacity", "Capacity_Units", "Capacity")
+        if demand_name and cap_name:
+            demand, cap = numeric(demand_name), numeric(cap_name)
+            valid = cap.gt(0) & demand.notna()
+            result["Capacity_Use_pct"] = np.where(valid, demand/cap*100, np.nan)
+            metrics["Rows exceeding vehicle capacity"] = int((valid & demand.gt(cap)).sum())
+            metrics["Mean capacity use (%)"] = round(float(result.loc[valid, "Capacity_Use_pct"].mean()), 2) if valid.any() else None
+            chart_y = "Capacity_Use_pct"
+        distance_name, cost_name = column("Distance_km", "Distance"), column("Cost_SAR_per_km", "Cost_per_km")
+        if distance_name and cost_name:
+            distance, unit_cost = numeric(distance_name), numeric(cost_name)
+            result["Estimated_Transport_Cost"] = distance * unit_cost
+            metrics["Estimated transport cost (table currency)"] = round(float(result["Estimated_Transport_Cost"].sum(skipna=True)), 2)
+            chart_y = chart_y or "Estimated_Transport_Cost"
+        if chart_y is None:
+            raise ValueError("For logistics analysis, include demand/capacity or distance/cost columns.")
+        chart_x = first_categorical("Task", "Route", "Origin", "Destination", "Vehicle")
+    elif family == "facility":
+        flow_name, distance_name = column("FromTo_Flows_per_Day", "Flow", "Trips_per_Day"), column("Travel_Distance_m", "Distance_m", "Distance")
+        if flow_name and distance_name:
+            flow, distance = numeric(flow_name), numeric(distance_name)
+            result["Weighted_Flow_Distance"] = flow * distance
+            metrics["Total weighted flow-distance (flow × metres)"] = round(float(result["Weighted_Flow_Distance"].sum(skipna=True)), 2)
+            chart_y = "Weighted_Flow_Distance"
+        area_name = column("Area_m2", "Area")
+        if area_name:
+            metrics["Total listed area (m²)"] = round(float(numeric(area_name).sum(skipna=True)), 2)
+            chart_y = chart_y or area_name
+        if chart_y is None:
+            raise ValueError("For facility analysis, include department area or from-to flow and distance fields.")
+        chart_x = first_categorical("Department", "Workcenter", "Area_Name")
+    elif family == "production":
+        planned_name, good_name = column("Planned_Units", "Planned_Qty"), column("Good_Units", "Good_Qty")
+        scrap_name = column("Scrap_Units", "Scrap_Qty")
+        if not planned_name or not good_name:
+            raise ValueError("For production analysis, include Planned_Units and Good_Units.")
+        planned, good = numeric(planned_name), numeric(good_name)
+        valid = planned.gt(0) & good.notna()
+        result["Good_Unit_Yield_pct"] = np.where(valid, good/planned*100, np.nan)
+        # Use the numeric-coerced series for the weighted calculation. Imported
+        # Excel columns often arrive as object/string dtype, whose .sum() may
+        # concatenate values or fail instead of calculating a numeric yield.
+        total_planned = float(planned.loc[valid].sum())
+        total_good = float(good.loc[valid].sum())
+        metrics["Weighted good-unit yield (%)"] = round(total_good / total_planned * 100, 2) if valid.any() and total_planned > 0 else None
+        if scrap_name:
+            scrap = numeric(scrap_name)
+            result["Scrap_Rate_pct"] = np.where(valid & scrap.notna(), scrap/planned*100, np.nan)
+            metrics["Mean scrap rate (%)"] = round(float(result.loc[valid, "Scrap_Rate_pct"].mean()), 2) if valid.any() else None
+        chart_x, chart_y = first_categorical("Line", "Product", "Work_Order"), "Good_Unit_Yield_pct"
+    elif family == "sustainability":
+        quantity_name, factor_name = column("Quantity", "Quantity_Units"), column("Emission_Factor", "EmissionFactor")
+        baseline_name, scenario_name = column("Baseline_tCO2e", "Baseline_tCO2", "Baseline_Emissions"), column("Scenario_tCO2e", "Scenario_tCO2", "Scenario_Emissions")
+        if quantity_name and factor_name:
+            quantity, factor = numeric(quantity_name), numeric(factor_name)
+            result["Calculated_tCO2e"] = quantity * factor / 1000.0
+            metrics["Calculated total tCO2e"] = round(float(result["Calculated_tCO2e"].sum(skipna=True)), 4)
+            chart_y = "Calculated_tCO2e"
+        if baseline_name and scenario_name:
+            base, scenario = numeric(baseline_name), numeric(scenario_name)
+            result["Scenario_Change_tCO2e"] = scenario - base
+            result["Scenario_Change_pct"] = np.where(base.ne(0), (scenario-base)/base.abs()*100, np.nan)
+            metrics["Baseline total tCO2e"] = round(float(base.sum(skipna=True)), 4)
+            metrics["Scenario total tCO2e"] = round(float(scenario.sum(skipna=True)), 4)
+            metrics["Scenario change (%)"] = round(float((scenario.sum(skipna=True)-base.sum(skipna=True))/abs(base.sum(skipna=True))*100), 2) if base.sum(skipna=True) else None
+            chart_y = chart_y or "Scenario_Change_tCO2e"
+        if chart_y is None:
+            raise ValueError("For sustainability analysis, supply Quantity and Emission_Factor or baseline and scenario emissions.")
+        chart_x = first_categorical("Activity", "Scope", "Area", "Line")
+    elif family == "economics":
+        capex_name, benefit_name, opex_name = column("CapEx_SAR", "CapEx", "Capital_Cost"), column("Annual_Benefit_SAR", "Annual_Benefit", "Annual_Savings"), column("Annual_Operating_Cost_SAR", "Annual_Operating_Cost", "Annual_Opex")
+        if not capex_name or not benefit_name:
+            raise ValueError("For investment screening, include CapEx and Annual_Benefit columns.")
+        capex, benefit = numeric(capex_name), numeric(benefit_name)
+        opex = numeric(opex_name).fillna(0) if opex_name else pd.Series(0.0, index=result.index)
+        result["Annual_Net_Benefit"] = benefit - opex
+        valid = capex.gt(0) & result["Annual_Net_Benefit"].gt(0)
+        result["Simple_Payback_Years"] = np.where(valid, capex/result["Annual_Net_Benefit"], np.nan)
+        result["Simple_Annual_Return_pct"] = np.where(capex.gt(0), result["Annual_Net_Benefit"]/capex*100, np.nan)
+        metrics["Total initial CapEx"] = round(float(capex.sum(skipna=True)), 2)
+        metrics["Total annual net benefit"] = round(float(result["Annual_Net_Benefit"].sum(skipna=True)), 2)
+        metrics["Weighted simple payback (years)"] = round(float(capex.sum()/result["Annual_Net_Benefit"].sum()), 2) if capex.sum()>0 and result["Annual_Net_Benefit"].sum()>0 else None
+        chart_x, chart_y = first_categorical("Alternative", "Project", "Option"), "Annual_Net_Benefit"
+    elif family == "schedule":
+        process_name, setup_name = column("Processing_Min", "Processing_Time_Min"), column("Setup_Min", "Setup_Time_Min")
+        if not process_name:
+            raise ValueError("For scheduling workload review, include Processing_Min; Setup_Min is optional.")
+        result["Work_Content_Minutes"] = numeric(process_name).fillna(0) + (numeric(setup_name).fillna(0) if setup_name else 0)
+        machine_name = column("Machine", "Workcenter", "Resource")
+        if machine_name:
+            grouped = result.groupby(machine_name, dropna=False)["Work_Content_Minutes"].sum().reset_index(name="Total_Work_Content_Min")
+            chart_x, chart_y = machine_name, "Total_Work_Content_Min"
+            result = result.merge(grouped, on=machine_name, how="left")
+            metrics["Resources reviewed"] = int(grouped[machine_name].nunique(dropna=False))
+            metrics["Highest resource workload (min)"] = round(float(grouped["Total_Work_Content_Min"].max()), 2) if not grouped.empty else None
+        else:
+            chart_x, chart_y = first_categorical("Work_Order", "Order", "Product"), "Work_Content_Minutes"
+        metrics["Total work content (min)"] = round(float(result["Work_Content_Minutes"].sum()), 2)
+    elif family == "research":
+        estimate_name, se_name = column("Effect_Estimate", "Estimate", "Coefficient"), column("Standard_Error", "Std_Error", "SE")
+        if estimate_name and se_name:
+            estimate, standard_error = numeric(estimate_name), numeric(se_name)
+            valid = standard_error.gt(0) & estimate.notna()
+            result["Approx_Z_Ratio"] = np.where(valid, estimate/standard_error, np.nan)
+            result["Normal_Approx_CI95_Lower"] = np.where(valid, estimate-1.96*standard_error, np.nan)
+            result["Normal_Approx_CI95_Upper"] = np.where(valid, estimate+1.96*standard_error, np.nan)
+            metrics["Rows with valid effect/SE"] = int(valid.sum())
+            chart_x, chart_y = first_categorical("Scenario", "Study_ID", "Paper_ID", "Condition"), estimate_name
+        else:
+            numeric_columns = [str(c) for c in result.columns if pd.api.types.is_numeric_dtype(result[c])]
+            if not numeric_columns:
+                raise ValueError("For research analysis, include a numeric outcome, effect estimate or quality measure.")
+            metrics["Numeric fields available"] = len(numeric_columns)
+            metrics["Rows available"] = len(result)
+            chart_x, chart_y = first_categorical("Scenario", "Paper_ID", "Study_ID"), numeric_columns[0]
+    elif family == "literature":
+        expected = [name for name in ("Title", "Authors_Year", "DOI", "Method", "Research_Gap") if name in result.columns]
+        if not expected:
+            raise ValueError("For the literature matrix, include bibliographic metadata and a Research_Gap or DOI column.")
+        completeness = result[expected].notna() & result[expected].astype(str).apply(lambda col: col.str.strip().ne(""))
+        result["Metadata_Completeness_pct"] = completeness.mean(axis=1)*100
+        metrics["Papers reviewed"] = len(result)
+        metrics["Mean metadata completeness (%)"] = round(float(result["Metadata_Completeness_pct"].mean()), 2)
+        doi = column("DOI")
+        if doi:
+            metrics["Rows with DOI text"] = int(result[doi].fillna("").astype(str).str.strip().ne("").sum())
+        chart_x, chart_y = first_categorical("Paper_ID", "Title"), "Metadata_Completeness_pct"
+    elif family == "document":
+        field_names = [name for name in ("Section", "Source_Data_Linked", "Equation_Check", "Reference_Check", "Review_Status") if name in result.columns]
+        if not field_names:
+            raise ValueError("For document checks, include sections plus source/equation/reference/review status fields.")
+        result["Field_Completeness_pct"] = record_completeness(field_names)
+        metrics["Artifacts / sections reviewed"] = len(result)
+        metrics["Mean field completeness (%)"] = round(float(result["Field_Completeness_pct"].mean()), 2)
+        chart_x, chart_y = first_categorical("Section", "Artifact_ID", "Document"), "Field_Completeness_pct"
+    elif family == "formal":
+        field_names = [name for name in ("Assumptions", "Proof_Status", "Test_Status", "Claim", "Equation_Reference") if name in result.columns]
+        if not field_names:
+            raise ValueError("For formalization review, include claims, assumptions and proof/test status fields.")
+        result["Verification_Record_Completeness_pct"] = record_completeness(field_names)
+        metrics["Claims / artifacts reviewed"] = len(result)
+        metrics["Mean verification-record completeness (%)"] = round(float(result["Verification_Record_Completeness_pct"].mean()), 2)
+        chart_x, chart_y = first_categorical("Artifact_ID", "Claim"), "Verification_Record_Completeness_pct"
+    elif family == "security":
+        field_names = [name for name in ("Artifact_ID", "Artifact_Type", "Owner", "SHA256", "Signature_Status", "Verification_Status") if name in result.columns]
+        if not field_names:
+            raise ValueError("For provenance review, include artifact identity, owner and verification-status fields.")
+        result["Provenance_Metadata_Completeness_pct"] = record_completeness(field_names)
+        metrics["Artifacts reviewed"] = len(result)
+        metrics["Mean provenance metadata completeness (%)"] = round(float(result["Provenance_Metadata_Completeness_pct"].mean()), 2)
+        chart_x, chart_y = first_categorical("Artifact_ID", "Artifact_Type"), "Provenance_Metadata_Completeness_pct"
+    elif family in {"connectivity", "integration"}:
+        latency_name, success_name, status_name = column("Latency_ms", "Latency"), column("Success_Rate_pct", "Success_Rate"), column("Status")
+        if not status_name and not latency_name and not success_name:
+            raise ValueError("For integration readiness, include Status, Latency_ms or Success_Rate_pct from an actual connector test.")
+        if success_name:
+            success = numeric(success_name)
+            result["Success_Rate_pct_numeric"] = success.clip(0, 100)
+            metrics["Mean recorded success rate (%)"] = round(float(success.mean()), 2) if success.notna().any() else None
+        if latency_name:
+            latency = numeric(latency_name)
+            metrics["Mean recorded latency (ms)"] = round(float(latency.mean()), 2) if latency.notna().any() else None
+        if status_name:
+            metrics["Rows with status marked connected/healthy"] = int(result[status_name].astype(str).str.casefold().isin({"connected","healthy","passed","success","ok"}).sum())
+        metrics["Connectors / rows reviewed"] = len(result)
+        chart_x, chart_y = first_categorical("Connector", "Target_System", "System", "Status"), (success_name if success_name else latency_name)
+    elif family == "math":
+        field_names = [name for name in ("Dimensional_Compatible", "Constraint_Preserved", "Correspondence", "Evidence_Note") if name in result.columns]
+        if not field_names:
+            raise ValueError("For cross-domain mapping, include correspondence, dimension compatibility or constraint preservation fields.")
+        result["Mapping_Record_Completeness_pct"] = record_completeness(field_names)
+        metrics["Mappings reviewed"] = len(result)
+        metrics["Mean mapping-record completeness (%)"] = round(float(result["Mapping_Record_Completeness_pct"].mean()), 2)
+        chart_x, chart_y = first_categorical("Source_Entity", "Source_Domain", "Mapping_ID"), "Mapping_Record_Completeness_pct"
+    elif family == "optimization":
+        numeric_columns = [str(c) for c in result.columns if pd.api.types.is_numeric_dtype(result[c])]
+        if not numeric_columns:
+            raise ValueError("For optimization routing, supply numeric objective/constraint descriptors and record a solver run separately.")
+        result["Optimization_Input_Completeness_pct"] = result[numeric_columns].notna().mean(axis=1)*100
+        metrics["Alternatives / rows reviewed"] = len(result)
+        metrics["Numeric descriptors"] = len(numeric_columns)
+        chart_x, chart_y = first_categorical("Scenario", "Problem_Type", "Objective"), numeric_columns[0]
+    elif family == "simulation":
+        demand_name, capacity_name = column("Demand_Units", "Demand"), column("Capacity_Units", "Capacity")
+        if demand_name and capacity_name:
+            demand, capacity = numeric(demand_name), numeric(capacity_name)
+            valid = capacity.gt(0) & demand.notna()
+            result["Demand_to_Capacity_pct"] = np.where(valid, demand/capacity*100, np.nan)
+            result["Capacity_Shortfall_Units"] = np.maximum(demand-capacity, 0)
+            metrics["Rows with demand above capacity"] = int((valid & demand.gt(capacity)).sum())
+            metrics["Total capacity shortfall units"] = round(float(result["Capacity_Shortfall_Units"].sum(skipna=True)), 2)
+            chart_y = "Demand_to_Capacity_pct"
+        else:
+            numeric_columns = [str(c) for c in result.columns if pd.api.types.is_numeric_dtype(result[c])]
+            if not numeric_columns:
+                raise ValueError("For simulation review, include numeric scenario drivers or outcomes.")
+            chart_y = numeric_columns[0]
+        chart_x = first_categorical("Scenario", "Asset", "Condition", "Shock")
+    elif family == "workforce":
+        cycle_name, score_name, count_name = column("Cycle_Time_Sec", "Cycle_Time", "Observed_Time"), column("Ergonomic_Risk_Score", "Risk_Score"), column("Headcount", "Operators")
+        if cycle_name:
+            cycle = numeric(cycle_name)
+            metrics["Mean cycle time (sec)"] = round(float(cycle.mean()), 2) if cycle.notna().any() else None
+            result["Cycle_Time_Index"] = cycle
+            chart_y = "Cycle_Time_Index"
+        if score_name:
+            score = numeric(score_name)
+            metrics["Mean recorded ergonomic screening score"] = round(float(score.mean()), 2) if score.notna().any() else None
+            chart_y = chart_y or score_name
+        if count_name:
+            metrics["Total listed headcount"] = round(float(numeric(count_name).sum(skipna=True)), 2)
+        if chart_y is None:
+            raise ValueError("For workforce review, include cycle time, headcount or an explicitly sourced screening score.")
+        chart_x = first_categorical("Task", "Operator", "Workcenter")
+    else:
+        numeric_columns = [str(c) for c in result.columns if pd.api.types.is_numeric_dtype(result[c])]
+        if not numeric_columns:
+            raise ValueError("Add numeric measures to enable the fallback analysis for this module.")
+        baseline_name = numeric_columns[0]
+        baseline = numeric(baseline_name).iloc[0]
+        for name in numeric_columns[1:]:
+            result[f"{name}_Delta_vs_First_Row"] = numeric(name) - baseline
+        metrics["Rows reviewed"] = len(result)
+        metrics["Numeric measures"] = len(numeric_columns)
+        chart_x, chart_y = first_categorical(), numeric_columns[0]
+
+    return {
+        "result": result,
+        "metrics": metrics,
+        "chart_x": chart_x,
+        "chart_y": chart_y,
+        "chart_kind": chart_kind,
+        "method": blueprint["method"],
+        "guardrail": blueprint["guardrail"],
+    }
+
+
 def _starter_data(module: str) -> pd.DataFrame:
+    """Return editable, domain-shaped demo inputs for generic module fallbacks.
+
+    These are clearly illustrative starter values. They help a user discover the
+    expected schema but must never be presented as observations from a real plant.
+    """
     lower = str(module).lower()
-    if any(word in lower for word in ("quality", "reliability", "maintenance")):
-        return pd.DataFrame({"Workcenter": ["WC-01", "WC-02", "WC-03"], "Baseline": [94, 91, 88], "Scenario": [96, 93, 92], "Unit": ["%"] * 3})
-    if any(word in lower for word in ("sustain", "carbon", "energy")):
-        return pd.DataFrame({"Area": ["Line A", "Line B", "Warehouse"], "Baseline": [120, 95, 80], "Scenario": [105, 84, 66], "Unit": ["tCO2e"] * 3})
-    if any(word in lower for word in ("planning", "schedule", "production")):
-        return pd.DataFrame({"Workcenter": ["M-01", "M-02", "M-03"], "Baseline": [82, 90, 76], "Scenario": [88, 92, 85], "Unit": ["% utilization"] * 3})
-    return pd.DataFrame({"Area": ["Demand", "Capacity", "Service", "Inventory", "Risk"], "Baseline": [100, 100, 95, 100, 10], "Scenario": [110, 108, 97, 92, 7], "Unit": ["index", "index", "%", "index", "index"]})
+    blueprint = fallback_module_blueprint(module)
+    family = blueprint["family"]
+
+    # Research/engineering infrastructure modules get purpose-built schemas
+    # so their fallback workspace is useful before users import real project data.
+    if family == "literature":
+        return pd.DataFrame({
+            "Paper_ID": ["P-001", "P-002", "P-003"],
+            "Title": ["Illustrative paper A", "Illustrative paper B", "Illustrative paper C"],
+            "Authors_Year": ["Example et al. (2023)", "Example et al. (2024)", "Example et al. (2025)"],
+            "DOI": ["", "", ""],
+            "Method": ["Simulation", "DOE", "Regression"],
+            "Sample_Size": [120, 80, 240],
+            "Research_Gap": ["Missing transfer test", "Unclear uncertainty bounds", "Limited external validation"],
+            "Citation_Verified": [False, False, False],
+        })
+    if family == "document":
+        return pd.DataFrame({
+            "Artifact_ID": ["DOC-001", "DOC-002", "DOC-003", "DOC-004"],
+            "Section": ["Problem statement", "Methods", "Results", "Limitations"],
+            "Source_Data_Linked": [True, True, False, True],
+            "Equation_Check": ["Pending", "Pending", "Pending", "Pending"],
+            "Reference_Check": ["Pending", "Pending", "Pending", "Pending"],
+            "Review_Status": ["Draft", "Draft", "Draft", "Draft"],
+        })
+    if family == "formal":
+        return pd.DataFrame({
+            "Artifact_ID": ["FORM-001", "FORM-002", "FORM-003"],
+            "Claim": ["Constraint identity is preserved", "Units remain consistent", "Output is reproducible"],
+            "Assumptions": ["Document inputs and scope", "Record units and mappings", "Pin data/code versions"],
+            "Equation_Reference": ["EQ-01", "EQ-02", "EQ-03"],
+            "Proof_Status": ["Pending", "Pending", "Pending"],
+            "Test_Status": ["Not run", "Not run", "Not run"],
+        })
+    if family == "security":
+        return pd.DataFrame({
+            "Artifact_ID": ["ART-001", "ART-002", "ART-003"],
+            "Artifact_Type": ["Dataset", "Model", "Run"],
+            "Owner": ["Operations", "Engineering", "Research"],
+            "SHA256": ["", "", ""],
+            "Signature_Status": ["Pending", "Pending", "Pending"],
+            "Verification_Status": ["Not verified", "Not verified", "Not verified"],
+        })
+    if family in {"connectivity", "integration"}:
+        return pd.DataFrame({
+            "Connector": ["MES demo", "ERP demo", "Telemetry demo"],
+            "Target_System": ["MES", "ERP", "IoT Gateway"],
+            "Protocol": ["REST", "SQL", "MQTT"],
+            "Latency_ms": [120, 240, 80],
+            "Success_Rate_pct": [99.0, 97.5, 98.0],
+            "Last_Test_UTC": ["", "", ""],
+            "Status": ["Sample only", "Sample only", "Sample only"],
+            "Owner": ["Operations", "IT", "Maintenance"],
+        })
+    if family == "math":
+        return pd.DataFrame({
+            "Mapping_ID": ["MAP-001", "MAP-002", "MAP-003"],
+            "Source_Domain": ["Production", "Inventory", "Energy"],
+            "Target_Domain": ["Quality", "Logistics", "Finance"],
+            "Source_Entity": ["Good output", "On-hand stock", "Electricity use"],
+            "Correspondence": ["Yield metric", "Coverage metric", "Emission metric"],
+            "Dimensional_Compatible": [False, False, False],
+            "Constraint_Preserved": [False, False, False],
+            "Evidence_Note": ["Needs review", "Needs review", "Needs review"],
+        })
+    if family == "optimization":
+        return pd.DataFrame({
+            "Problem_Type": ["Capacity allocation", "Network planning", "Energy scheduling"],
+            "Objective": ["Cost", "Service", "Carbon"],
+            "Variables": [12, 24, 18],
+            "Constraints": [8, 15, 11],
+            "Candidate_Method": ["MILP", "LP/MILP", "LP/Robust"],
+            "Solver_Status": ["Not run", "Not run", "Not run"],
+            "Runtime_ms": [None, None, None],
+        })
+    if family == "research":
+        return pd.DataFrame({
+            "Scenario": ["Baseline", "Treatment A", "Treatment B", "Stress Case"],
+            "Study_ID": ["STUDY-001"] * 4,
+            "Sample_Size": [100, 100, 100, 100],
+            "Effect_Estimate": [0.0, 0.18, 0.24, 0.07],
+            "Standard_Error": [0.08, 0.09, 0.10, 0.12],
+            "Confidence_Level": [0.95, 0.95, 0.95, 0.95],
+            "Protocol_Status": ["Draft", "Draft", "Draft", "Draft"],
+        })
+    if family == "simulation":
+        return pd.DataFrame({
+            "Scenario": ["Baseline", "Demand Surge", "Supplier Shock", "Capacity Expansion"],
+            "Demand_Units": [1000, 1250, 1000, 1100],
+            "Capacity_Units": [1100, 1100, 900, 1250],
+            "Lead_Time_Days": [6, 9, 12, 6],
+            "Downtime_Hours": [12, 18, 24, 8],
+            "Cost_SAR": [100000, 125000, 142000, 115000],
+            "Service_pct": [95.0, 90.0, 82.0, 98.0],
+            "Risk_Score": [10, 18, 35, 8],
+        })
+
+    if any(word in lower for word in ("six sigma", "gage", "quality", "reliability", "spc", "fmea", "capability")):
+        return pd.DataFrame({
+            "Part": ["P-100", "P-100", "P-200", "P-200"],
+            "Workcenter": ["WC-01", "WC-01", "WC-02", "WC-02"],
+            "Sample": [1, 2, 1, 2],
+            "Measured_Value": [10.02, 9.98, 10.14, 9.93],
+            "Lower_Spec": [9.5, 9.5, 9.5, 9.5],
+            "Upper_Spec": [10.5, 10.5, 10.5, 10.5],
+            "Defect_Count": [0, 0, 1, 0],
+            "Inspected_Count": [100, 100, 100, 100],
+        })
+    if any(word in lower for word in ("maintenance", "downtime", "asset health", "predictive")):
+        return pd.DataFrame({
+            "Asset": ["CNC-01", "Press-02", "Packing-01", "CNC-02"],
+            "Runtime_Hours": [1200, 3200, 2100, 1800],
+            "Temperature_C": [65.0, 82.0, 71.0, 68.0],
+            "Vibration_mm_s": [1.1, 3.8, 2.2, 1.6],
+            "Downtime_Hours": [4.0, 18.0, 7.0, 5.0],
+            "Failure_Count": [0, 2, 1, 0],
+        })
+    if any(word in lower for word in ("inventory", "meio", "replenishment", "stock", "warehouse heatmap", "slotting")):
+        return pd.DataFrame({
+            "SKU": ["SKU-100", "SKU-200", "SKU-300", "SKU-400"],
+            "On_Hand_Units": [820, 340, 1250, 90],
+            "Daily_Demand_Units": [72, 38, 95, 24],
+            "Lead_Time_Days": [6, 9, 4, 12],
+            "Safety_Stock_Units": [180, 150, 220, 160],
+            "Unit_Cost_SAR": [18.5, 42.0, 12.0, 86.0],
+        })
+    if any(word in lower for word in ("fleet", "routing", "logistics", "transport", "agv", "geospatial", "network design")):
+        return pd.DataFrame({
+            "Task": ["T-001", "T-002", "T-003", "T-004"],
+            "Origin": ["Plant", "Plant", "DC-01", "Plant"],
+            "Destination": ["DC-01", "DC-02", "Customer-A", "Customer-B"],
+            "Demand_Units": [120, 85, 60, 100],
+            "Vehicle_Capacity": [180, 180, 90, 180],
+            "Distance_km": [22.5, 34.0, 15.2, 28.7],
+            "Cost_SAR_per_km": [2.4, 2.4, 2.8, 2.4],
+            "CO2_kg": [8.1, 12.3, 6.2, 10.2],
+        })
+    if any(word in lower for word in ("facility", "layout", "factory designer", "from-to", "slp", "material handling")):
+        return pd.DataFrame({
+            "Department": ["Receiving", "Machining", "Assembly", "Quality", "Shipping"],
+            "X_m": [2, 12, 20, 29, 38],
+            "Y_m": [4, 8, 8, 5, 4],
+            "Area_m2": [120, 260, 310, 140, 180],
+            "FromTo_Flows_per_Day": [0, 240, 310, 190, 275],
+            "Travel_Distance_m": [18, 12, 9, 14, 10],
+        })
+    if any(word in lower for word in ("schedule", "planning", "production planning", "dispatch", "gantt", "mrp")):
+        return pd.DataFrame({
+            "Work_Order": ["WO-001", "WO-002", "WO-003", "WO-004"],
+            "Product": ["P-100", "P-200", "P-100", "P-300"],
+            "Machine": ["M-01", "M-01", "M-02", "M-03"],
+            "Quantity": [100, 160, 140, 90],
+            "Processing_Min": [32, 28, 25, 40],
+            "Setup_Min": [8, 12, 6, 10],
+            "Due_Offset_Hours": [8, 12, 16, 20],
+            "Priority": [1, 2, 1, 3],
+        })
+    if any(word in lower for word in ("production", "manufacturing", "lean", "shop floor", "mes", "oee")):
+        return pd.DataFrame({
+            "Line": ["Line-01", "Line-02", "Line-03", "Line-04"],
+            "Planned_Units": [1000, 900, 1100, 850],
+            "Good_Units": [948, 840, 1045, 790],
+            "Downtime_Min": [38, 52, 25, 63],
+            "Cycle_Time_Sec": [42.0, 45.5, 39.8, 48.0],
+            "Scrap_Units": [22, 35, 18, 27],
+        })
+    if any(word in lower for word in ("forecast", "demand", "time series")):
+        return pd.DataFrame({
+            "Period": pd.date_range("2026-01-01", periods=8, freq="MS"),
+            "Demand_Units": [520, 545, 560, 590, 575, 625, 650, 672],
+            "Capacity_Units": [600, 600, 620, 620, 620, 650, 650, 650],
+            "Lead_Time_Days": [6.3, 6.0, 6.4, 5.8, 6.1, 5.7, 5.5, 5.4],
+            "Inventory_Units": [830, 790, 760, 745, 710, 680, 650, 620],
+        })
+    if any(word in lower for word in ("sustain", "carbon", "energy", "lca", "environment", "green ie")):
+        return pd.DataFrame({
+            "Activity": ["Electricity", "Diesel", "Freight", "Natural Gas"],
+            "Scope": ["Scope 2", "Scope 1", "Scope 3", "Scope 1"],
+            "Quantity": [12000, 2400, 15000, 3200],
+            "Emission_Factor": [0.42, 2.68, 0.10, 2.02],
+            "Baseline_tCO2e": [5.04, 6.43, 1.50, 6.46],
+            "Scenario_tCO2e": [4.25, 5.10, 1.20, 5.80],
+        })
+    if any(word in lower for word in ("currency", "localization", "multi-currency", "trade rule", "customs")):
+        return pd.DataFrame({
+            "Item": ["Machine parts", "Industrial sensors", "Freight service", "Spare bearings"],
+            "Amount": [18000.0, 7250.0, 3400.0, 5600.0],
+            "Currency": ["SAR", "EUR", "USD", "SAR"],
+            "Region_From": ["SA", "DE", "US", "SA"],
+            "Region_To": ["SA", "SA", "SA", "SA"],
+            "Customs_Document_Ready": [True, False, True, True],
+        })
+    if any(word in lower for word in ("economics", "finance", "capital", "investment", "npv", "benchmark")):
+        return pd.DataFrame({
+            "Alternative": ["Current state", "Option A", "Option B", "Option C"],
+            "CapEx_SAR": [0, 180000, 240000, 125000],
+            "Annual_Benefit_SAR": [0, 95000, 112000, 72000],
+            "Annual_Operating_Cost_SAR": [0, 12000, 18000, 9000],
+            "Project_Life_Years": [5, 5, 7, 5],
+            "Risk_Score": [10, 14, 9, 12],
+        })
+    if any(word in lower for word in ("workforce", "human factors", "ergonomic", "labor", "time study")):
+        return pd.DataFrame({
+            "Task": ["Load", "Inspect", "Assemble", "Pack"],
+            "Operator": ["OP-01", "OP-02", "OP-03", "OP-01"],
+            "Cycle_Time_Sec": [42, 58, 75, 36],
+            "Ergonomic_Risk_Score": [3, 6, 4, 2],
+            "Shift_Hours": [8, 8, 8, 8],
+            "Headcount": [2, 1, 3, 2],
+        })
+    if any(word in lower for word in ("experiment", "scenario", "monte carlo", "sensitivity")) or ("simulation" in lower and "digital twin" not in lower):
+        return pd.DataFrame({
+            "Scenario": ["Baseline", "Demand Surge", "Supplier Shock", "Capacity Expansion"],
+            "Demand_Units": [1000, 1250, 1000, 1100],
+            "Capacity_Units": [1100, 1100, 900, 1250],
+            "Cost_SAR": [100000, 125000, 142000, 115000],
+            "Service_pct": [95.0, 90.0, 82.0, 98.0],
+            "Risk_Score": [10, 18, 35, 8],
+            "Carbon_kgCO2e": [1000, 1100, 1300, 850],
+        })
+    if any(word in lower for word in ("research", "hypothesis", "regression", "literature", "paper", "peer review", "formal proof", "decision-readiness", "evidence degradation")):
+        return pd.DataFrame({
+            "Scenario": ["Baseline", "Treatment A", "Treatment B", "Stress Case"],
+            "Sample_Size": [100, 100, 100, 100],
+            "Effect_Estimate": [0.0, 0.18, 0.24, 0.07],
+            "Standard_Error": [0.08, 0.09, 0.10, 0.12],
+            "Confidence_Level": [0.95, 0.95, 0.95, 0.95],
+            "Reproducible": [True, True, True, True],
+        })
+    if any(word in lower for word in ("digital twin", "iot", "telemetry", "connectivity", "sensor", "simulation")):
+        return pd.DataFrame({
+            "Asset": ["CNC-01", "CNC-02", "Press-01", "Conveyor-01"],
+            "Period": [1, 2, 3, 4],
+            "Temperature_C": [65.0, 68.2, 82.0, 71.5],
+            "Vibration_mm_s": [1.1, 1.6, 3.8, 2.2],
+            "Availability_pct": [98.5, 97.0, 91.2, 95.4],
+            "Energy_kWh": [120, 128, 165, 142],
+        })
+    if any(word in lower for word in ("decision", "control tower", "governance", "security", "audit", "ledger", "registry", "collaboration", "workspace", "integration", "platform", "data", "gateway", "api", "webhook", "copilot", "agentic", "venture", "subscription", "persistence")):
+        return pd.DataFrame({
+            "Entity_ID": ["FAC-001", "MCH-001", "WO-001", "SKU-001"],
+            "Entity_Type": ["Facility", "Machine", "Work Order", "SKU"],
+            "Status": ["Active", "Review", "Released", "Active"],
+            "Owner_Team": ["Operations", "Maintenance", "Production", "Planning"],
+            "Readiness_Score": [92, 76, 88, 95],
+            "Open_Issues": [0, 3, 1, 0],
+        })
+    return pd.DataFrame({
+        "Workstream": ["Demand", "Capacity", "Service", "Inventory"],
+        "Baseline": [100, 100, 95, 100],
+        "Scenario": [110, 108, 97, 92],
+        "Unit": ["index", "index", "%", "index"],
+    })
 
 
 def _evidence_bundle(module: str, df: pd.DataFrame, actor: str, research_protocol: Optional[Mapping[str, Any]] = None) -> bytes:
     result = generic_result(df)
     verification = verification_snapshot(df)
+    try:
+        import streamlit as st
+        profile = get_module_profile(st.session_state, module, actor)
+    except Exception:
+        profile = default_module_profile(module)
     manifest = {
         "module": module,
+        "display_name": profile.get("display_name", module),
+        "project_name": profile.get("project_name", ""),
+        "site_name": profile.get("site_name", ""),
         "actor": actor,
         "generated_at": _now(),
         "result": result,
         "verification": verification,
+        "module_profile": profile,
     }
     if research_protocol:
         manifest["research_protocol_hash"] = research_protocol.get("protocol_hash")
@@ -1784,7 +3097,9 @@ def _evidence_bundle(module: str, df: pd.DataFrame, actor: str, research_protoco
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
         archive.writestr("inputs.csv", df.to_csv(index=False).encode("utf-8"))
-        archive.writestr("manifest.json", json.dumps(manifest, indent=2, default=str).encode("utf-8"))
+        archive.writestr("display_inputs.csv", apply_display_labels(df, profile).to_csv(index=False).encode("utf-8"))
+        archive.writestr("module_profile.json", json.dumps(profile, indent=2, ensure_ascii=False, default=str).encode("utf-8"))
+        archive.writestr("manifest.json", json.dumps(manifest, indent=2, ensure_ascii=False, default=str).encode("utf-8"))
         archive.writestr("feature_manifest.csv", feature_catalog().to_csv(index=False).encode("utf-8"))
         if research_protocol:
             archive.writestr("research_protocol.json", json.dumps(dict(research_protocol), indent=2, ensure_ascii=False, default=str).encode("utf-8"))
@@ -1801,6 +3116,7 @@ def render_experience_shell(module: str, tier: str, username: str) -> None:
         return
 
     meta = _module_meta(module)
+    profile = get_module_profile(st.session_state, module, username)
     key = _safe_key(module)
     category = str(meta.get("category", "Industrial Engineering"))
     capability_tier = str(meta.get("tier", tier))
@@ -1839,8 +3155,9 @@ def render_experience_shell(module: str, tier: str, username: str) -> None:
         f"""
         <div class="mx-hero">
           <div class="mx-kicker">{html.escape(category)} · {html.escape(capability_tier)}</div>
-          <div class="mx-title">{html.escape(str(module))}</div>
+          <div class="mx-title">{html.escape(str(profile.get("display_name") or module))}</div>
           <div class="mx-sub">{html.escape(when)}</div>
+          <div class="mx-sub">{html.escape(" · ".join(str(x) for x in (profile.get("project_name"), profile.get("site_name"), profile.get("owner_team")) if x))}</div>
           <span class="mx-pill">Data-first</span><span class="mx-pill">Evidence-linked</span><span class="mx-pill">Human approval</span>
         </div>
         """,
@@ -1868,7 +3185,8 @@ def render_experience_shell(module: str, tier: str, username: str) -> None:
     action_cols = st.columns(4)
     with action_cols[0]:
         if st.button("💾 Save study", use_container_width=True, key="mx_save_" + key):
-            pid = save_project(module + " Study", module, username, {"module": module, "tier": tier})
+            project_title = str(profile.get("project_name") or (profile.get("display_name", module) + " Study"))
+            pid = save_project(project_title, module, username, {"module": module, "display_name": profile.get("display_name", module), "tier": tier, "profile": profile})
             st.session_state["sx_project_id"] = pid
             st.success("Study saved: " + pid)
     with action_cols[1]:
@@ -1881,7 +3199,7 @@ def render_experience_shell(module: str, tier: str, username: str) -> None:
     with action_cols[2]:
         if st.button("📝 Decision card", use_container_width=True, key="mx_decision_" + key):
             did = create_decision(
-                module + " decision", module,
+                str(profile.get("display_name") or module) + " decision", module,
                 {"rows": result["rows"], "quality": result["quality"]},
                 {"Tier": tier},
                 {"Uncertainty": "Module-specific; inspect source evidence"},
@@ -1919,6 +3237,9 @@ def render_experience_shell(module: str, tier: str, username: str) -> None:
 def render_blank_module_studio(module: str, tier: str, username: str) -> None:
     import streamlit as st
 
+    # The shared result layer uses this marker to avoid showing a duplicate
+    # module playbook when this native fallback canvas already has one.
+    st.session_state["shoir_native_fallback_module_active"] = module
     ensure_experience_db()
     key = _safe_key(module)
     data_key = "sx_blank_data_" + key
@@ -1937,6 +3258,17 @@ def render_blank_module_studio(module: str, tier: str, username: str) -> None:
         key="sx_blank_editor_" + key,
     )
     st.session_state[data_key] = df
+    profile = get_module_profile(st.session_state, module, username, valid_columns=list(df.columns))
+    display_df = apply_display_labels(df, profile)
+    blueprint = fallback_module_blueprint(module)
+    st.caption(
+        f"Working profile: {profile['display_name']}"
+        + (f" · {profile['project_name']}" if profile.get("project_name") else "")
+        + (f" · {profile['site_name']}" if profile.get("site_name") else "")
+    )
+    st.markdown(f"#### {html.escape(blueprint['focus'])}")
+    st.caption(blueprint["purpose"])
+    st.caption(f"Recommended first method: **{blueprint['method']}**")
 
     tabs = st.tabs(["📊 Overview", "🧮 Analysis", "✅ Verification", "🧠 Decision", "📤 Export"])
     with tabs[0]:
@@ -1946,31 +3278,168 @@ def render_blank_module_studio(module: str, tier: str, username: str) -> None:
         c2.metric("Columns", "{:,}".format(result["columns"]))
         c3.metric("Data quality", "{:.1f}%".format(result["quality"]))
         c4.metric("Numeric fields", "{:,}".format(result["numeric_fields"]))
+        primary_kpi = profile.get("primary_kpi")
+        if profile.get("target_enabled") and primary_kpi in df.columns and pd.api.types.is_numeric_dtype(df[primary_kpi]):
+            target_check = evaluate_kpi_target(df[primary_kpi], profile)
+            if target_check:
+                precision = int(profile.get("decimal_places", 2))
+                target_unit = str(target_check.get("unit") or "")
+                actual_text = f"{target_check['actual']:,.{precision}f}" + (f" {target_unit}" if target_unit else "")
+                goal_text = f"{target_check['target']:,.{precision}f}" + (f" {target_unit}" if target_unit else "")
+                target_cols = st.columns(3)
+                target_cols[0].metric(f"{display_field_label(primary_kpi, profile)} · {target_check['statistic']}", actual_text)
+                target_cols[1].metric("Configured target", goal_text, delta=target_check["direction"])
+                target_cols[2].metric("Target rule", "MEETS TARGET" if target_check["passed"] else "REVIEW")
+                st.caption("Configured target comparison only; this is not an independently verified operational outcome.")
+        with st.expander("ℹ️ Workflow, required inputs and interpretation limits", expanded=False):
+            st.markdown(f"**Purpose:** {blueprint['purpose']}")
+            st.markdown(f"**Recommended method:** {blueprint['method']}")
+            st.markdown(f"**Useful input fields:** {blueprint['inputs']}")
+            st.warning(blueprint["guardrail"])
+            st.caption("When this module is seeded without an imported dataset, its sample rows are illustrative templates. They are not live plant measurements or verified outcomes.")
         numbers = [column for column in df.columns if pd.api.types.is_numeric_dtype(df[column])]
         if numbers:
-            metric = st.selectbox("Metric", numbers, key="sx_metric_" + key)
-            plot = df[[df.columns[0], metric]].dropna()
+            metric = st.selectbox("Metric", numbers, format_func=lambda value: display_field_label(value, profile), key="sx_metric_" + key)
+            metric_index = list(df.columns).index(metric)
+            plot = display_df.iloc[:, [0, metric_index]].dropna().copy()
             if not plot.empty:
-                st.plotly_chart(px.bar(plot, x=df.columns[0], y=metric, title=module + " · " + metric), use_container_width=True)
+                st.plotly_chart(
+                    px.bar(plot, x=plot.columns[0], y=plot.columns[1], title=profile["display_name"] + " · " + plot.columns[1]),
+                    use_container_width=True,
+                    config={"displayModeBar": True, "responsive": True},
+                )
 
     with tabs[1]:
+        st.markdown(f"### {html.escape(blueprint['method'])}")
+        st.caption(blueprint["purpose"])
+        st.caption(f"Inputs to verify: {blueprint['inputs']}")
+        domain_result_key = "sx_domain_analysis_" + key
+        input_signature = hashlib.sha256(
+            df.to_json(orient="split", date_format="iso", default_handler=str).encode("utf-8")
+        ).hexdigest()
+        if st.button(
+            "▶ Run module-specific review",
+            type="primary",
+            use_container_width=True,
+            key="sx_domain_run_" + key,
+        ):
+            run_started_ns = time.perf_counter_ns()
+            try:
+                analysis = analyze_fallback_module(module, df)
+                elapsed_ms = max(0.0, (time.perf_counter_ns() - run_started_ns) / 1_000_000.0)
+                run_record = None
+                try:
+                    run_record = save_module_analysis_run(
+                        module, username, profile, df, analysis,
+                        duration_ms=elapsed_ms, status="Completed",
+                    )
+                except Exception as persist_exc:
+                    st.warning(
+                        "Analysis completed, but the run history could not be updated: "
+                        f"{type(persist_exc).__name__}: {persist_exc}"
+                    )
+                st.session_state[domain_result_key] = {
+                    "input_signature": input_signature,
+                    "analysis": analysis,
+                    "run_id": run_record.get("run_id") if run_record else None,
+                    "input_hash": run_record.get("input_hash") if run_record else None,
+                    "snapshot_status": run_record.get("snapshot_status") if run_record else "Not saved",
+                }
+                if run_record:
+                    st.success(f"Analysis completed and saved as {run_record['run_id']}.")
+                    if run_record["snapshot_status"] != "Complete":
+                        st.info(run_record["snapshot_status"] + ". Run metadata and input hash were retained.")
+                else:
+                    st.success("Module-specific calculation completed in this session.")
+            except (TypeError, ValueError, KeyError, ZeroDivisionError) as exc:
+                st.session_state.pop(domain_result_key, None)
+                st.warning(f"The current table is not ready for this method: {exc}")
+            except Exception as exc:
+                st.session_state.pop(domain_result_key, None)
+                st.error(f"Module analysis stopped safely: {type(exc).__name__}: {exc}")
+
+        saved_domain_result = st.session_state.get(domain_result_key)
+        if isinstance(saved_domain_result, dict):
+            if saved_domain_result.get("input_signature") != input_signature:
+                st.info("Inputs have changed since the last module-specific review. Run the review again before using its previous results.")
+            else:
+                analysis = saved_domain_result.get("analysis", {})
+                analyzed_df = analysis.get("result", pd.DataFrame())
+                analysis_metrics = analysis.get("metrics", {})
+                if analysis_metrics:
+                    metric_items = list(analysis_metrics.items())
+                    metric_cols = st.columns(min(4, len(metric_items)))
+                    for metric_index, (metric_name, metric_value) in enumerate(metric_items):
+                        if metric_value is None:
+                            display_value = "N/A"
+                        elif isinstance(metric_value, (float, np.floating)):
+                            display_value = f"{float(metric_value):,.2f}"
+                        elif isinstance(metric_value, (int, np.integer)):
+                            display_value = f"{int(metric_value):,}"
+                        else:
+                            display_value = str(metric_value)
+                        metric_cols[metric_index % len(metric_cols)].metric(str(metric_name), display_value)
+                if isinstance(analyzed_df, pd.DataFrame) and not analyzed_df.empty:
+                    st.dataframe(apply_display_labels(analyzed_df, profile), use_container_width=True, hide_index=True)
+                    x_column = analysis.get("chart_x")
+                    y_column = analysis.get("chart_y")
+                    numeric_columns = [
+                        str(column) for column in analyzed_df.columns
+                        if pd.api.types.is_numeric_dtype(analyzed_df[column])
+                    ]
+                    if not y_column or y_column not in analyzed_df.columns or not pd.api.types.is_numeric_dtype(analyzed_df[y_column]):
+                        y_column = numeric_columns[-1] if numeric_columns else None
+                    chart, actual_chart, chart_notice = build_profiled_module_figure(
+                        analyzed_df, x_column, y_column, profile,
+                        f"{profile['display_name']} · {display_field_label(y_column, profile) if y_column else 'Analysis'}",
+                    )
+                    if chart_notice:
+                        st.info(chart_notice)
+                    if chart is not None:
+                        st.caption(f"Visualization: {actual_chart} · configured for this module profile.")
+                        st.plotly_chart(chart, use_container_width=True, config={"displayModeBar": True, "responsive": True})
+                    if saved_domain_result.get("run_id"):
+                        st.caption(
+                            f"Saved run: {saved_domain_result['run_id']} · Input SHA-256: {saved_domain_result.get('input_hash', 'unavailable')}"
+                        )
+                st.warning(analysis.get("guardrail", blueprint["guardrail"]))
+                st.caption("Outputs are calculated from the selected table and current assumptions. Save and independently verify any operational decision before implementation.")
+
         numbers = [column for column in df.columns if pd.api.types.is_numeric_dtype(df[column])]
         if len(numbers) >= 2:
-            baseline = st.selectbox("Baseline metric", numbers, key="sx_base_" + key)
-            scenario = st.selectbox("Scenario metric", numbers, index=1, key="sx_scenario_" + key)
+            baseline = st.selectbox(
+                profile["baseline_label"] + " KPI",
+                numbers,
+                format_func=lambda value: display_field_label(value, profile),
+                key="sx_base_" + key,
+            )
+            scenario = st.selectbox(
+                profile["scenario_label"] + " KPI",
+                numbers,
+                index=1,
+                format_func=lambda value: display_field_label(value, profile),
+                key="sx_scenario_" + key,
+            )
+            delta_column = profile["scenario_label"] + " − " + profile["baseline_label"]
+            pct_column = profile["scenario_label"] + " vs " + profile["baseline_label"] + " (%)"
             if st.button("▶ Run Analysis", type="primary", use_container_width=True, key="sx_run_" + key):
                 started = time.perf_counter_ns()
                 output = df.copy()
                 base_values = pd.to_numeric(output[baseline], errors="coerce")
                 scenario_values = pd.to_numeric(output[scenario], errors="coerce")
-                output["Delta"] = scenario_values - base_values
-                output["Delta %"] = output["Delta"] / base_values.replace(0, np.nan) * 100.0
+                output[delta_column] = scenario_values - base_values
+                output[pct_column] = output[delta_column] / base_values.replace(0, np.nan) * 100.0
                 st.session_state["sx_result_" + key] = output
                 st.session_state["sx_run_id_" + key] = benchmark_duration(module, started, username, len(output), "generic_analysis")
             output = st.session_state.get("sx_result_" + key, pd.DataFrame())
             if isinstance(output, pd.DataFrame) and not output.empty:
                 st.dataframe(output, use_container_width=True, hide_index=True)
-                st.plotly_chart(px.bar(output, x=output.columns[0], y="Delta %", title="Scenario delta (%)"), use_container_width=True)
+                output_display = apply_display_labels(output, profile)
+                st.plotly_chart(
+                    px.bar(output_display, x=output_display.columns[0], y=pct_column, title=profile["scenario_label"] + " vs " + profile["baseline_label"] + " (%)"),
+                    use_container_width=True,
+                    config={"displayModeBar": True, "responsive": True},
+                )
 
     with tabs[2]:
         output = st.session_state.get("sx_result_" + key, df)
@@ -1991,7 +3460,7 @@ def render_blank_module_studio(module: str, tier: str, username: str) -> None:
         if st.button("📝 Create decision from current study", type="primary", use_container_width=True, key="sx_decision_blank_" + key):
             result = generic_result(df)
             did = create_decision(
-                module + " working decision",
+                str(profile.get("display_name") or module) + " working decision",
                 module,
                 {"quality": result["quality"], "rows": result["rows"]},
                 {"tier": tier},
