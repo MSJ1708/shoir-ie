@@ -738,6 +738,9 @@ MODULE_CATALOG = [
     {"tier": "Research Pack", "category": "Research AI", "name": "Research AI",
      "when": "You need a research-focused assistant for protocols, hypotheses, statistical planning, reproducibility, manuscript structure and peer-review preparation.",
      "example": "Ask Research AI to inspect your study design, identify the appropriate analysis plan, review reproducibility risks, and structure reviewer-facing evidence without inventing results or citations."},
+    {"tier": "Research Pack", "category": "Research & Experimentation", "name": "Evidence Degradation & Decision-Readiness Lab",
+     "when": "You need to test how incomplete, stale, conflicting or uncertain evidence changes an industrial decision under operational stress.",
+     "example": "Vary evidence completeness, freshness, conflicts, uncertainty and demand shocks; compare decision regret and identify the evidence conditions where a policy becomes unreliable."},
     {"tier": "Research Pack", "category": "Research Authoring", "name": "Statistical Hypothesis Testing",
      "when": "You're writing a paper and need a properly-run t-test, ANOVA, or chi-square test with the actual statistics, not a claimed result.",
      "example": "Test whether your new layout's cycle times are significantly faster than the baseline: get the test statistic, p-value, and a plain-language verdict - \"p = 0.031, reject H0 at α = 0.05\" - ready to cite."},
@@ -1875,6 +1878,10 @@ elif "Pro" in tier_val or "Trial" in tier_val:
     allowed_modules = tier2_features
 else:
     allowed_modules = tier1_features
+
+# Cumulative tier lists inherit prior features. Keep one entry per module so
+# navigation and tier search never show repeated options.
+allowed_modules = list(dict.fromkeys(allowed_modules))
 
 # Administration is an explicit privilege, never a normal tier feature.
 # This prevents stale session state or tier membership from exposing the
