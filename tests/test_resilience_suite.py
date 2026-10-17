@@ -24,6 +24,18 @@ from shoir_resilience_suite import (
 )
 
 
+def test_shared_access_and_copilot_gates_match_subscription_tiers():
+    from shoir_tier_capabilities import copilot_gate, module_required_tier, tier_allows
+
+    assert module_required_tier(GLOBAL_SUPPLY) == "Enterprise"
+    assert module_required_tier(AKDT) == "Enterprise Plus"
+    assert tier_allows("Enterprise Plus", "Enterprise")
+    assert not tier_allows("Starter", "Enterprise")
+    assert not tier_allows("Research Pack", "Enterprise Plus")
+    assert copilot_gate("open l-sims and analyze capability", "Starter")["required_tier"] == "Enterprise"
+    assert copilot_gate("open industrial logistics resilience twin", "Enterprise")["required_tier"] == "Enterprise Plus"
+
+
 def test_new_workspaces_have_catalogued_tiers_and_descriptions():
     assert len(RESILIENCE_MODULES) == 6
     assert set(RESILIENCE_MODULES) == set(MODULE_DEFINITIONS)
