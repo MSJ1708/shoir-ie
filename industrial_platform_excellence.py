@@ -251,7 +251,7 @@ def infer_column_types(df: pd.DataFrame) -> pd.DataFrame:
     for col in df.columns:
         s = df[col]
         numeric = pd.to_numeric(s, errors="coerce")
-        parsed = pd.to_datetime(s, errors="coerce")
+        parsed = pd.to_datetime(s, errors="coerce", format="mixed")
         if numeric.notna().mean() >= 0.95:
             kind = "numeric"
         elif parsed.notna().mean() >= 0.95:
