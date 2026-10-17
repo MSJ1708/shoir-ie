@@ -38,7 +38,7 @@ def test_module_groups_cover_core_engineering_families():
 def test_module_index_is_searchable_metadata():
     index = build_module_index(["MILP Solvers", "Excel Data Cleaning & Import", "Experiment Engine"])
     assert list(index["Module"]) == ["MILP Solvers", "Excel Data Cleaning & Import", "Experiment Engine"]
-    assert set(index["Group"]) == {"Industrial Engineering", "Data", "Research"}
+    assert set(index["Group"]) == {"Optimization", "Data", "Research"}
 
 
 def test_provenance_states_are_explicit():
