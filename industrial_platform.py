@@ -669,8 +669,12 @@ def analyze_experiment_scenarios(
 
 def save_experiment(name: str, module: str, scenarios: list, results: dict, username: str, db_path="enterprise_full_workspace.db") -> str:
     """Persist a complete experiment record using the explicit table schema."""
-    eid = "EXP-" + hashlib.sha256((name + module + _now()).encode()).hexdigest()[:12].upper()
+    # Nanosecond entropy prevents rapid repeated saves from colliding when
+    # multiple runs occur within the same second.
     created_at = _now()
+    eid = "EXP-" + hashlib.sha256(
+        f"{name}|{module}|{username}|{time.time_ns()}".encode("utf-8")
+    ).hexdigest()[:12].upper()
     with sqlite3.connect(db_path) as c:
         c.execute(
             """INSERT INTO platform_experiments
@@ -1522,15 +1526,15 @@ def render_module(module: str, tier: str, username: str):
         baseline_options = list(dict.fromkeys(name for name in scenario_names if name))
         baseline_scenario = None
         if baseline_options:
-            default_baseline = (
-                st.session_state.get("experiment_baseline")
-                if st.session_state.get("experiment_baseline") in baseline_options
-                else baseline_options[0]
-            )
+            current_baseline = st.session_state.get("experiment_baseline")
+            if current_baseline not in baseline_options:
+                current_baseline = baseline_options[0]
+                # Reset a stale widget value before the keyed widget is created.
+                st.session_state["experiment_baseline"] = current_baseline
             baseline_scenario = st.selectbox(
                 "Baseline scenario",
                 options=baseline_options,
-                index=baseline_options.index(default_baseline),
+                index=baseline_options.index(current_baseline),
                 key="experiment_baseline",
                 help="All KPI deltas are calculated relative to this scenario.",
             )
