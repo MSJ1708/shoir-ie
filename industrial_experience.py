@@ -1983,7 +1983,18 @@ def render_research_workspace(module: str, tier: str, username: str) -> None:
                     try:
                         stored_inputs = pd.DataFrame(json.loads(stored[0]))
                         stored_results_payload = json.loads(stored[1])
-                        stored_results = pd.DataFrame(stored_results_payload.get("scenario_results", []))
+                        # Earlier Experiment Lab versions saved the result rows
+                        # as a bare JSON list; current saves wrap them in a
+                        # baseline/signature object. Support both schemas.
+                        if isinstance(stored_results_payload, dict):
+                            stored_result_rows = stored_results_payload.get("scenario_results")
+                            if not isinstance(stored_result_rows, list):
+                                stored_result_rows = stored_results_payload.get("results", [])
+                        elif isinstance(stored_results_payload, list):
+                            stored_result_rows = stored_results_payload
+                        else:
+                            stored_result_rows = []
+                        stored_results = pd.DataFrame(stored_result_rows)
                         with st.expander("Saved experiment inputs and results", expanded=False):
                             st.caption(f"Saved at {stored[2]} · {selected_experiment_id}")
                             detail_tabs = st.tabs(["Inputs", "Calculated results", "Trade-off chart"])
