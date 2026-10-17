@@ -565,6 +565,9 @@ def persist_resilience_run(module: str, username: str, inputs: Mapping[str, pd.D
     }
     payload_inputs = json.dumps(clean_inputs, sort_keys=True, default=str, allow_nan=False, separators=(",", ":"))
     payload_results = json.dumps(clean_results, sort_keys=True, default=str, allow_nan=False, separators=(",", ":"))
+    max_payload_bytes = 8 * 1024 * 1024
+    if len(payload_inputs.encode("utf-8")) > max_payload_bytes or len(payload_results.encode("utf-8")) > max_payload_bytes:
+        raise ValueError("Snapshot input or result exceeds the 8 MiB per-section safety limit. Reduce the saved table size and try again.")
     digest = hashlib.sha256(payload_inputs.encode("utf-8")).hexdigest()
     run_id = uuid.uuid4().hex
     stamp = datetime.now(timezone.utc).isoformat()
@@ -688,10 +691,25 @@ def _render_transport(module: str, tier: str, username: str, *, humanitarian: bo
             demands = _get_editor(st, module, "demands", demand_defaults)
         disabled = st.selectbox("Simulated unavailable supplier", ["None"] + suppliers.get("Supplier", pd.Series(dtype=str)).astype(str).tolist(), key=_state_key(module, "disabled_supplier"))
         model = solve_transport_allocation(suppliers, demands, disabled_suppliers=[] if disabled == "None" else [disabled], capacity_scale=max(0.1, 1.0 - disruption / 100.0) * (1.0 + recovery / 100.0 * 0.25))
+        baseline_model = solve_transport_allocation(suppliers, demands)
         st.session_state["akdt_supply_routes_df"] = model["routes"].copy(deep=True)
         st.session_state["akdt_supply_shortages_df"] = model["shortages"].copy(deep=True)
+        comparison = pd.DataFrame([
+            {"Metric": "Service level (%)", "Baseline": float(baseline_model["metrics"].get("service_level_pct", 0.0)), "Current scenario": float(model["metrics"].get("service_level_pct", 0.0))},
+            {"Metric": "Unmet demand (units)", "Baseline": float(baseline_model["metrics"].get("unmet_demand", 0.0)), "Current scenario": float(model["metrics"].get("unmet_demand", 0.0))},
+            {"Metric": "Direct modeled cost", "Baseline": float(baseline_model["metrics"].get("modeled_cost", 0.0)), "Current scenario": float(model["metrics"].get("modeled_cost", 0.0))},
+        ])
+        st.markdown("### Baseline vs disrupted industrial scenario")
+        c1, c2 = st.columns(2)
+        with c1:
+            chart = pd.DataFrame({"Case": ["Baseline", "Disrupted"], "Service (%)": [baseline_model["metrics"].get("service_level_pct", 0.0), model["metrics"].get("service_level_pct", 0.0)]})
+            st.plotly_chart(px.bar(chart, x="Case", y="Service (%)", title="Modeled service retention", template="plotly_white"), use_container_width=True)
+        with c2:
+            chart = pd.DataFrame({"Case": ["Baseline", "Disrupted"], "Unmet units": [baseline_model["metrics"].get("unmet_demand", 0.0), model["metrics"].get("unmet_demand", 0.0)]})
+            st.plotly_chart(px.bar(chart, x="Case", y="Unmet units", title="Visible unmet industrial demand", template="plotly_white"), use_container_width=True)
+        st.dataframe(comparison, use_container_width=True, hide_index=True)
         _render_transport_results(st, px, go, module, model, prefix="AKDT")
-        _render_snapshot_actions(st, module, username, {"assets": assets, "suppliers": suppliers, "demands": demands}, {"asset_results": asset_results, "routes": model["routes"], "shortages": model["shortages"]})
+        _render_snapshot_actions(st, module, username, {"assets": assets, "suppliers": suppliers, "demands": demands}, {"asset_results": asset_results, "routes": model["routes"], "shortages": model["shortages"], "baseline_comparison": comparison})
         with st.expander("Method, limits and integration readiness"):
             st.write("This is a synthetic industrial digital-twin prototype. Risk scores are transparent heuristics, not trained failure-time models. Edge/cloud is a scenario label, not an active decentralized network.")
             st.write("Future data integration should require explicit connector configuration, validation, audit logging and an approval gate before any production system could act.")
@@ -797,7 +815,7 @@ def _render_transport(module: str, tier: str, username: str, *, humanitarian: bo
         st.write("Monte Carlo trials vary demand and available capacity and may disable suppliers. They are synthetic sensitivity tests; they do not represent a calibrated forecast, live availability or a guarantee that all demand can be fulfilled.")
         if humanitarian:
             st.warning("Humanitarian aid quantities and urgency weights must be validated with qualified local coordinators. This screen does not determine real deployment routes or replace safety and access assessments.")
-    _render_snapshot_actions(st, module, username, {"suppliers": suppliers, "demands": demands}, {"routes": model["routes"], "shortages": model["shortages"], "supplier_summary": model["supplier_summary"]})
+    _render_snapshot_actions(st, module, username, {"suppliers": suppliers, "demands": demands}, {"routes": model["routes"], "shortages": model["shortages"], "supplier_summary": model["supplier_summary"], "scenario_comparison": scenario_comparison})
 
 
 def _render_transport_results(st: Any, px: Any, go: Any, module: str, model: Mapping[str, Any], prefix: str) -> None:
@@ -972,10 +990,18 @@ def _render_l_sims(module: str, username: str) -> None:
         local_weight = st.slider("Local-content preference", 0.0, 2.0, 1.0, 0.1, key=_state_key(module, "lsims_local_content_weight"))
     excluded = suppliers.loc[_number(suppliers, "Qualification confidence %") < conf_floor, "Supplier"].astype(str).tolist() if "Qualification confidence %" in suppliers else []
     analysis = analyze_local_capability(suppliers, demands, disabled_suppliers=excluded, capacity_scale=capacity_scale, demand_scale=demand_scale, local_content_weight=local_weight)
+    baseline_analysis = analyze_local_capability(suppliers, demands, local_content_weight=local_weight)
     st.session_state["lsims_local_allocations_df"] = analysis["routes"].copy(deep=True)
     st.session_state["lsims_local_gaps_df"] = analysis["shortages"].copy(deep=True)
     st.session_state["lsims_supplier_capacity_df"] = analysis["supplier_summary"].copy(deep=True)
     m = analysis["metrics"]
+    base_m = baseline_analysis["metrics"]
+    local_comparison = pd.DataFrame([
+        {"Metric": "Demand fulfilled (%)", "Baseline": base_m["demand_fulfilled_pct"], "Current scenario": m["demand_fulfilled_pct"]},
+        {"Metric": "Unmet industrial demand", "Baseline": base_m["monthly_unmet_demand"], "Current scenario": m["monthly_unmet_demand"]},
+        {"Metric": "Local-content proxy (%)", "Baseline": base_m["local_content_proxy_pct"], "Current scenario": m["local_content_proxy_pct"]},
+        {"Metric": "Repair capacity / month", "Baseline": base_m["monthly_repair_capacity"], "Current scenario": m["monthly_repair_capacity"]},
+    ])
     _metric(st, [
         ("Monthly industrial demand fulfilled", f"{m['demand_fulfilled_pct']:.1f}%"),
         ("Unmet industrial demand", f"{m['monthly_unmet_demand']:,.1f} units"),
@@ -983,7 +1009,7 @@ def _render_l_sims(module: str, username: str) -> None:
         ("Repair capacity / month", f"{m['monthly_repair_capacity']:,.0f} units"),
     ])
     st.caption("Research/planning sandbox for aggregated domestic industrial spare-part families and repair capability. It does not recommend operational deployment actions.")
-    tabs = st.tabs(["Capability allocation", "Supplier confidence & capacity", "Data & assumptions"])
+    tabs = st.tabs(["Capability allocation", "Baseline comparison", "Supplier confidence & capacity", "Data & assumptions"])
     with tabs[0]:
         if not analysis["routes"].empty:
             st.plotly_chart(px.bar(analysis["routes"], x="Destination", y="Allocated units", color="Supplier", barmode="group", title="Modeled local allocation by plant / depot", template="plotly_white"), use_container_width=True)
@@ -994,15 +1020,24 @@ def _render_l_sims(module: str, username: str) -> None:
             st.plotly_chart(px.bar(analysis["shortages"], x="Destination", y="Shortage", color="Part family", title="Industrial part-family capability gaps", template="plotly_white"), use_container_width=True)
             st.dataframe(analysis["shortages"], use_container_width=True, hide_index=True)
     with tabs[1]:
+        comparison_cols = st.columns(2)
+        with comparison_cols[0]:
+            chart = pd.DataFrame({"Case": ["Baseline", "Current scenario"], "Demand fulfilled (%)": [base_m["demand_fulfilled_pct"], m["demand_fulfilled_pct"]]})
+            st.plotly_chart(px.bar(chart, x="Case", y="Demand fulfilled (%)", title="Local industrial demand coverage", template="plotly_white"), use_container_width=True)
+        with comparison_cols[1]:
+            chart = pd.DataFrame({"Case": ["Baseline", "Current scenario"], "Unmet demand": [base_m["monthly_unmet_demand"], m["monthly_unmet_demand"]]})
+            st.plotly_chart(px.bar(chart, x="Case", y="Unmet demand", title="Industrial capability gap", template="plotly_white"), use_container_width=True)
+        st.dataframe(local_comparison, use_container_width=True, hide_index=True)
+    with tabs[2]:
         st.plotly_chart(px.bar(suppliers, x="Supplier", y=["Monthly capacity", "Repair capacity/month"], barmode="group", color_discrete_sequence=None, title="Domestic production and repair capacity", template="plotly_white"), use_container_width=True)
         if "Qualification confidence %" in suppliers:
             st.plotly_chart(px.bar(suppliers, x="Supplier", y="Qualification confidence %", title="User-entered qualification confidence", template="plotly_white"), use_container_width=True)
-    with tabs[2]:
+    with tabs[3]:
         st.write("Demand is matched by the editable, generic industrial spare-part family. A supplier from a different family cannot fill that demand in this model. Capacity, cost, confidence and local-content values are user inputs and require evidence.")
         st.dataframe(analysis["supplier_summary"], use_container_width=True, hide_index=True)
         st.download_button("Download local capability allocation CSV", analysis["routes"].to_csv(index=False).encode("utf-8"), file_name="lsims_local_capability.csv", mime="text/csv", key=_state_key(module, "lsims_routes_csv"))
         st.download_button("Download capability gap CSV", analysis["shortages"].to_csv(index=False).encode("utf-8"), file_name="lsims_capability_gaps.csv", mime="text/csv", key=_state_key(module, "lsims_gaps_csv"))
-    _render_snapshot_actions(st, module, username, {"suppliers": suppliers, "demands": demands}, {"routes": analysis["routes"], "shortages": analysis["shortages"], "supplier_summary": analysis["supplier_summary"]})
+    _render_snapshot_actions(st, module, username, {"suppliers": suppliers, "demands": demands}, {"routes": analysis["routes"], "shortages": analysis["shortages"], "supplier_summary": analysis["supplier_summary"], "scenario_comparison": local_comparison})
 
 
 def _render_snapshot_actions(st: Any, module: str, username: str, inputs: Mapping[str, pd.DataFrame], results: Mapping[str, Any]) -> None:
