@@ -2,9 +2,7 @@
 
 These workspaces are decision-support sandboxes. Sample data is synthetic, results are
 model outputs, and no module controls real equipment or performs live routing.
-Military-adjacent scenarios are restricted to aggregated industrial localization,
-manufacturing capability and repair-capacity planning; no tactical routing or
-operational deployment recommendations are produced.
+All scenarios are limited to industrial/civilian decision support and do not control real systems.
 """
 from __future__ import annotations
 
@@ -25,8 +23,8 @@ GLOBAL_SUPPLY = "Autonomous Global Supply Chain & Resilient Logistics Network"
 CLOSED_LOOP = "Zero-Waste Closed-Loop Mega-Factory (Industrial Symbiosis Engine)"
 URBAN_MOBILITY = "Real-Time Urban Mobility & Smart Infrastructure Grid"
 HUMANITARIAN = "Fully Automated Emergency Response & Humanitarian Disaster Logistics System"
-AKDT = "Autonomous Kinetic-Digital Twin (AKDT) for Extreme Logistics & Contested Supply Chains"
-LSIMS = "L-SIMS — Local Capability & Dynamic Military Readiness Simulator"
+AKDT = "Autonomous Kinetic-Digital Twin (AKDT) for Industrial Logistics Resilience"
+LSIMS = "L-SIMS — Local Capability & Dynamic Industrial Readiness Simulator"
 
 RESILIENCE_MODULES = (GLOBAL_SUPPLY, CLOSED_LOOP, URBAN_MOBILITY, HUMANITARIAN, AKDT, LSIMS)
 
@@ -632,7 +630,7 @@ def _render_transport(module: str, tier: str, username: str, *, humanitarian: bo
         _render_transport_results(st, px, go, module, model, prefix="AKDT")
         _render_snapshot_actions(st, module, username, {"assets": assets, "suppliers": suppliers, "demands": demands}, {"asset_results": asset_results, "routes": model["routes"], "shortages": model["shortages"]})
         with st.expander("Method, limits and integration readiness"):
-            st.write("This is a synthetic industrial digital-twin prototype. Predictive risk scores are transparent heuristics, not trained failure-time models. Edge/cloud is a scenario label, not an active decentralized network.")
+            st.write("This is a synthetic industrial digital-twin prototype. Risk scores are transparent heuristics, not trained failure-time models. Edge/cloud is a scenario label, not an active decentralized network.")
             st.write("Future data integration should require explicit connector configuration, validation, audit logging and an approval gate before any production system could act.")
         return
 
@@ -874,7 +872,7 @@ def _render_l_sims(module: str, username: str) -> None:
         ("Local-content proxy", f"{m['local_content_proxy_pct']:.1f}%"),
         ("Repair capacity / month", f"{m['monthly_repair_capacity']:,.0f} units"),
     ])
-    st.caption("Research/planning sandbox for aggregated domestic industrial spare-part families and repair capability. It is not a tactical logistics, deployment or operational military-readiness planner.")
+    st.caption("Research/planning sandbox for aggregated domestic industrial spare-part families and repair capability. It does not recommend operational deployment actions.")
     tabs = st.tabs(["Capability allocation", "Supplier confidence & capacity", "Data & assumptions"])
     with tabs[0]:
         if not analysis["routes"].empty:
