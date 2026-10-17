@@ -160,3 +160,30 @@ def test_module_renderer_has_access_gate_and_explicit_sandbox_disclosures():
     assert "Starter workspace uses editable synthetic data" in source
     assert "persist_resilience_run" in source
     assert "simulate_disruption_scenarios" in source
+
+
+def test_module_tiers_match_catalog_and_enforce_entitlements():
+    from industrial_platform import PLATFORM_CATALOG, tier_allows
+    from shoir_tier_capabilities import module_required_tier
+    from shoir_resilience_suite import MODULE_DEFINITIONS
+
+    catalog = {entry["name"]: entry["tier"] for entry in PLATFORM_CATALOG}
+    for module, definition in MODULE_DEFINITIONS.items():
+        assert catalog[module] == definition["tier"]
+        assert module_required_tier(module) == definition["tier"]
+    for module in (GLOBAL_SUPPLY, CLOSED_LOOP, URBAN_MOBILITY, HUMANITARIAN, LSIMS):
+        assert tier_allows("Enterprise", MODULE_DEFINITIONS[module]["tier"])
+    assert not tier_allows("Enterprise", MODULE_DEFINITIONS[AKDT]["tier"])
+    assert tier_allows("Enterprise Plus", MODULE_DEFINITIONS[AKDT]["tier"])
+    # Research Pack is an add-on and must not imply Enterprise Plus access.
+    assert not tier_allows("Research Pack", MODULE_DEFINITIONS[AKDT]["tier"])
+
+
+def test_closed_loop_never_claims_more_reuse_than_captured_or_demanded():
+    data = _default_data(CLOSED_LOOP)["streams"]
+    result = analyze_closed_loop(data, material_capture_pct=37, water_capture_pct=42, heat_capture_pct=31)
+    frame = result["results"]
+    assert (frame["Reused material kg"] <= frame["Captured waste kg"] + 1e-9).all()
+    assert (frame["Reused material kg"] <= frame["Reuse demand kg"] + 1e-9).all()
+    assert (frame["Reused water m3"] <= frame["Recoverable water m3"] * 0.42 + 1e-9).all()
+    assert (frame["Reused water m3"] <= frame["Water reuse demand m3"] + 1e-9).all()
