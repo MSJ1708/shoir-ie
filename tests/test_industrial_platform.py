@@ -12,7 +12,6 @@ from industrial_platform import (
 )
 from shoir_tier_capabilities import unique_modules
 
-)
 
 def test_catalog_and_tiers():
     names={x["name"] for x in PLATFORM_CATALOG}
