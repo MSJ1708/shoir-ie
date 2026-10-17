@@ -110,25 +110,49 @@ def solve_transport_allocation(
     demand_required = ("Demand", "Priority", "Due Days")
     s = _clean_table(suppliers, supplier_required)
     d = _clean_table(demands, demand_required)
-    if s.empty or d.empty:
-        return {
-            "status": "No data", "routes": pd.DataFrame(), "shortages": pd.DataFrame(),
-            "supplier_summary": pd.DataFrame(), "metrics": {"service_level_pct": 0.0, "unmet_demand": 0.0},
-            "message": "Add at least one supplier and one demand destination.",
-        }
-
-    s_names = s["Supplier"].astype(str).tolist() if "Supplier" in s.columns else [f"Supplier {i+1}" for i in range(len(s))]
     d_names = d["Destination"].astype(str).tolist() if "Destination" in d.columns else [f"Destination {i+1}" for i in range(len(d))]
-    disabled = {str(x) for x in disabled_suppliers}
-    effective_capacity = _number(s, "Capacity").to_numpy() * max(0.0, float(capacity_scale))
-    effective_capacity = np.asarray([0.0 if name in disabled else cap for name, cap in zip(s_names, effective_capacity)])
     raw_demand = _number(d, "Demand").to_numpy() * max(0.0, float(demand_scale))
     if integer_units:
-        # The default represents countable units; round fractional demand upward
-        # so the solver never silently under-plans a partial unit.
         raw_demand = np.ceil(np.maximum(0.0, raw_demand) - 1e-9)
     priorities = np.clip(_number(d, "Priority", 1.0).to_numpy(), 1.0, 5.0)
     due = _number(d, "Due Days").to_numpy()
+    if d.empty:
+        return {
+            "status": "No demand data", "routes": pd.DataFrame(),
+            "shortages": pd.DataFrame(columns=["Destination", "Demand", "Fulfilled", "Shortage", "Service %", "Priority", "Due days"]),
+            "supplier_summary": pd.DataFrame(),
+            "metrics": {"total_demand": 0.0, "delivered": 0.0, "unmet_demand": 0.0, "service_level_pct": 100.0, "modeled_cost": 0.0, "carbon_proxy_kg": 0.0, "weighted_objective": 0.0},
+            "message": "Add at least one demand destination to run an allocation.",
+        }
+    if s.empty:
+        total_demand = float(raw_demand.sum())
+        shortage_df = pd.DataFrame({
+            "Destination": d_names, "Demand": raw_demand, "Fulfilled": np.zeros(len(d)),
+            "Shortage": raw_demand.copy(),
+            "Service %": np.where(raw_demand > 0, 0.0, 100.0), "Priority": priorities, "Due days": due,
+        })
+        return {
+            "status": "No suppliers available", "routes": pd.DataFrame(),
+            "shortages": shortage_df, "supplier_summary": pd.DataFrame(
+                columns=["Supplier", "Effective capacity", "Allocated", "Idle capacity", "Utilization %", "Status"]
+            ),
+            "metrics": {
+                "total_demand": total_demand, "delivered": 0.0, "unmet_demand": total_demand,
+                "service_level_pct": 100.0 if total_demand <= 0 else 0.0,
+                "modeled_cost": 0.0, "carbon_proxy_kg": 0.0, "weighted_objective": 0.0,
+                "capacity_total": 0.0, "local_content_proxy_pct": 0.0,
+            },
+            "message": "No suppliers are available. All demand is shown as unmet rather than silently removed.",
+        }
+
+    s_names = s["Supplier"].astype(str).tolist() if "Supplier" in s.columns else [f"Supplier {i+1}" for i in range(len(s))]
+    disabled = {str(x) for x in disabled_suppliers}
+    effective_capacity = _number(s, "Capacity").to_numpy() * max(0.0, float(capacity_scale))
+    effective_capacity = np.asarray([0.0 if name in disabled else cap for name, cap in zip(s_names, effective_capacity)])
+    if integer_units:
+        # Demand has already been rounded above so fractional units are never
+        # silently under-planned.
+        raw_demand = np.ceil(np.maximum(0.0, raw_demand) - 1e-9)
     routes_adjust = route_adjustments or {}
     ns, nd = len(s), len(d)
     shipment_count = ns * nd
