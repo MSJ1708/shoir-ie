@@ -218,3 +218,134 @@ def test_experiment_lab_routes_to_full_research_workspace_with_scenario_lab():
         "Cost versus service trade-off",
     ):
         assert required_piece in scenario_lab
+
+
+def test_every_named_fallback_module_has_an_analyzable_starter_dataset():
+    from industrial_experience import (
+        FALLBACK_MODULE_BLUEPRINTS,
+        _starter_data,
+        analyze_fallback_module,
+    )
+    failures = {}
+    for module in sorted(FALLBACK_MODULE_BLUEPRINTS):
+        starter = _starter_data(module)
+        try:
+            analysis = analyze_fallback_module(module, starter)
+            if not isinstance(analysis.get("result"), pd.DataFrame):
+                failures[module] = "analysis did not return a result DataFrame"
+            elif analysis["result"].empty:
+                failures[module] = "analysis returned an empty result"
+            elif not isinstance(analysis.get("metrics"), dict):
+                failures[module] = "analysis did not return a KPI dictionary"
+        except Exception as exc:
+            failures[module] = f"{type(exc).__name__}: {exc}"
+    assert not failures, failures
+
+
+def test_module_run_history_persists_snapshots_and_is_owner_scoped(tmp_path):
+    from industrial_experience import (
+        load_module_analysis_run,
+        list_module_analysis_runs,
+        save_module_analysis_run,
+    )
+    from shoir_module_customization import default_module_profile
+
+    db = str(tmp_path / "module-runs.db")
+    profile = default_module_profile("Quality Control, Six Sigma & Reliability")
+    profile.update({"display_name": "Plant Quality Review", "project_name": "Line 2 capability"})
+    inputs = pd.DataFrame({"Part": ["A", "B", "C"], "Measurement": [10.0, 10.2, 9.9]})
+    results = inputs.assign(Deviation=[0.0, 0.2, -0.1])
+    saved = save_module_analysis_run(
+        "Quality Control, Six Sigma & Reliability", "quality-user", profile, inputs,
+        {
+            "result": results,
+            "metrics": {"Rows reviewed": 3, "Mean deviation": 0.0333333333},
+            "method": "Regression test",
+            "guardrail": "Illustrative test result only.",
+        },
+        duration_ms=12.5, db_path=db,
+    )
+    history = list_module_analysis_runs(
+        "Quality Control, Six Sigma & Reliability", "quality-user", db_path=db
+    )
+    loaded = load_module_analysis_run(saved["run_id"], "quality-user", db_path=db)
+
+    assert saved["run_id"].startswith("MRUN-")
+    assert saved["snapshot_status"] == "Complete"
+    assert len(history) == 1
+    assert loaded is not None
+    assert loaded["input_df"]["Part"].tolist() == ["A", "B", "C"]
+    assert loaded["result_df"]["Deviation"].tolist() == [0.0, 0.2, -0.1]
+    assert loaded["profile"]["display_name"] == "Plant Quality Review"
+    assert loaded["metrics"]["Rows reviewed"] == 3
+    assert load_module_analysis_run(saved["run_id"], "different-user", db_path=db) is None
+    assert list_module_analysis_runs(
+        "Quality Control, Six Sigma & Reliability", "different-user", db_path=db
+    ).empty
+
+
+def test_module_customization_targets_and_display_names_are_independent():
+    from shoir_module_customization import (
+        apply_display_labels,
+        default_module_profile,
+        evaluate_kpi_target,
+        get_module_profile,
+        save_module_profile,
+    )
+
+    state = {}
+    profile = default_module_profile("Advanced Planning & Scheduling")
+    profile.update({
+        "display_name": "Riyadh Plant Finite Schedule",
+        "project_name": "Expansion Program",
+        "primary_kpi": "Late Minutes",
+        "target_enabled": True,
+        "target_value": 30,
+        "target_direction": "At most",
+        "target_tolerance": 5,
+        "target_statistic": "Latest",
+        "target_unit": "min",
+        "field_labels": {"Late Minutes": "Order lateness"},
+        "field_units": {"Late Minutes": "min"},
+        "preferred_chart": "SPC",
+    })
+    saved = save_module_profile(
+        state, "Advanced Planning & Scheduling", "planner-1", profile,
+        valid_columns=["Order", "Late Minutes"],
+    )
+    frame = pd.DataFrame({"Order": ["WO-1", "WO-2"], "Late Minutes": [20, 38]})
+    displayed = apply_display_labels(frame, saved)
+    check = evaluate_kpi_target(frame["Late Minutes"], saved)
+
+    assert saved["display_name"] == "Riyadh Plant Finite Schedule"
+    assert displayed.columns.tolist() == ["Order", "Order lateness (min)"]
+    assert check is not None and check["passed"] is False
+    assert get_module_profile(state, "Advanced Planning & Scheduling", "planner-1")["display_name"] == "Riyadh Plant Finite Schedule"
+    assert get_module_profile(state, "Advanced Planning & Scheduling", "planner-2")["display_name"] == "Advanced Planning & Scheduling"
+
+
+def test_profiled_chart_builder_honors_compatible_preferred_charts():
+    import pandas as pd
+    from industrial_experience import build_profiled_module_figure
+    from shoir_module_customization import default_module_profile
+
+    frame = pd.DataFrame({
+        "Period": ["P1", "P2", "P3", "P4"],
+        "Output": [100.0, 105.0, 98.0, 112.0],
+        "Defects": [4.0, 3.0, 5.0, 2.0],
+    })
+    profile = default_module_profile("Production Planning & Control (PPC)")
+    profile["preferred_chart"] = "Line"
+    fig, actual, notice = build_profiled_module_figure(
+        frame, "Period", "Output", profile, "Production trend"
+    )
+    assert fig is not None
+    assert actual == "Line"
+    assert notice is None
+
+    profile["preferred_chart"] = "Correlation Heatmap"
+    fig, actual, notice = build_profiled_module_figure(
+        frame, "Period", "Output", profile, "Correlation diagnostics"
+    )
+    assert fig is not None
+    assert actual == "Correlation Heatmap"
