@@ -2094,6 +2094,13 @@ def render_blank_module_studio(module: str, tier: str, username: str) -> None:
         key="sx_blank_editor_" + key,
     )
     st.session_state[data_key] = df
+    profile = get_module_profile(st.session_state, module, username, valid_columns=list(df.columns))
+    display_df = apply_display_labels(df, profile)
+    st.caption(
+        f"Working profile: {profile['display_name']}"
+        + (f" · {profile['project_name']}" if profile.get("project_name") else "")
+        + (f" · {profile['site_name']}" if profile.get("site_name") else "")
+    )
 
     tabs = st.tabs(["📊 Overview", "🧮 Analysis", "✅ Verification", "🧠 Decision", "📤 Export"])
     with tabs[0]:
@@ -2105,29 +2112,52 @@ def render_blank_module_studio(module: str, tier: str, username: str) -> None:
         c4.metric("Numeric fields", "{:,}".format(result["numeric_fields"]))
         numbers = [column for column in df.columns if pd.api.types.is_numeric_dtype(df[column])]
         if numbers:
-            metric = st.selectbox("Metric", numbers, key="sx_metric_" + key)
-            plot = df[[df.columns[0], metric]].dropna()
+            metric = st.selectbox("Metric", numbers, format_func=lambda value: display_field_label(value, profile), key="sx_metric_" + key)
+            metric_index = list(df.columns).index(metric)
+            plot = display_df.iloc[:, [0, metric_index]].dropna().copy()
             if not plot.empty:
-                st.plotly_chart(px.bar(plot, x=df.columns[0], y=metric, title=module + " · " + metric), use_container_width=True)
+                st.plotly_chart(
+                    px.bar(plot, x=plot.columns[0], y=plot.columns[1], title=profile["display_name"] + " · " + plot.columns[1]),
+                    use_container_width=True,
+                    config={"displayModeBar": True, "responsive": True},
+                )
 
     with tabs[1]:
         numbers = [column for column in df.columns if pd.api.types.is_numeric_dtype(df[column])]
         if len(numbers) >= 2:
-            baseline = st.selectbox("Baseline metric", numbers, key="sx_base_" + key)
-            scenario = st.selectbox("Scenario metric", numbers, index=1, key="sx_scenario_" + key)
+            baseline = st.selectbox(
+                profile["baseline_label"] + " KPI",
+                numbers,
+                format_func=lambda value: display_field_label(value, profile),
+                key="sx_base_" + key,
+            )
+            scenario = st.selectbox(
+                profile["scenario_label"] + " KPI",
+                numbers,
+                index=1,
+                format_func=lambda value: display_field_label(value, profile),
+                key="sx_scenario_" + key,
+            )
+            delta_column = profile["scenario_label"] + " − " + profile["baseline_label"]
+            pct_column = profile["scenario_label"] + " vs " + profile["baseline_label"] + " (%)"
             if st.button("▶ Run Analysis", type="primary", use_container_width=True, key="sx_run_" + key):
                 started = time.perf_counter_ns()
                 output = df.copy()
                 base_values = pd.to_numeric(output[baseline], errors="coerce")
                 scenario_values = pd.to_numeric(output[scenario], errors="coerce")
-                output["Delta"] = scenario_values - base_values
-                output["Delta %"] = output["Delta"] / base_values.replace(0, np.nan) * 100.0
+                output[delta_column] = scenario_values - base_values
+                output[pct_column] = output[delta_column] / base_values.replace(0, np.nan) * 100.0
                 st.session_state["sx_result_" + key] = output
                 st.session_state["sx_run_id_" + key] = benchmark_duration(module, started, username, len(output), "generic_analysis")
             output = st.session_state.get("sx_result_" + key, pd.DataFrame())
             if isinstance(output, pd.DataFrame) and not output.empty:
                 st.dataframe(output, use_container_width=True, hide_index=True)
-                st.plotly_chart(px.bar(output, x=output.columns[0], y="Delta %", title="Scenario delta (%)"), use_container_width=True)
+                output_display = apply_display_labels(output, profile)
+                st.plotly_chart(
+                    px.bar(output_display, x=output_display.columns[0], y=pct_column, title=profile["scenario_label"] + " vs " + profile["baseline_label"] + " (%)"),
+                    use_container_width=True,
+                    config={"displayModeBar": True, "responsive": True},
+                )
 
     with tabs[2]:
         output = st.session_state.get("sx_result_" + key, df)
@@ -2148,7 +2178,7 @@ def render_blank_module_studio(module: str, tier: str, username: str) -> None:
         if st.button("📝 Create decision from current study", type="primary", use_container_width=True, key="sx_decision_blank_" + key):
             result = generic_result(df)
             did = create_decision(
-                module + " working decision",
+                str(profile.get("display_name") or module) + " working decision",
                 module,
                 {"quality": result["quality"], "rows": result["rows"]},
                 {"tier": tier},
