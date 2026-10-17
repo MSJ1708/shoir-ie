@@ -943,11 +943,13 @@ def render_resilience_module(module: str, tier: str, username: str) -> None:
     try:
         from industrial_platform import tier_allows
         required = MODULE_DEFINITIONS[module]["tier"]
-        if not tier_allows(tier, required):
-            st.warning(f"🔒 {module} requires {required}. Current tier: {tier}.")
-            return
-    except Exception:
-        pass
+    except Exception as exc:
+        st.error("Subscription access could not be verified, so this workspace remains locked.")
+        st.caption(f"Access check diagnostic: {type(exc).__name__}")
+        return
+    if not tier_allows(tier, required):
+        st.warning(f"🔒 {module} requires {required}. Current tier: {tier}.")
+        return
 
     info = MODULE_DEFINITIONS[module]
     st.title(info["category"] + " | " + module)
