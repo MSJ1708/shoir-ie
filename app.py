@@ -90,6 +90,44 @@ def _shoir_module_stop():
         )
     except Exception:
         pass
+
+    # Several legacy module routes intentionally stop the script after their
+    # native UI. Ensure these routes still receive the shared results, charts,
+    # validation, and export surface that ordinary module routes render in the
+    # common tail below. Shell/settings surfaces are explicitly excluded.
+    active_module = str(globals().get("mod") or st.session_state.get("selected_module") or "").strip()
+    allowed = globals().get("allowed_modules", [])
+    try:
+        can_render_results = (
+            bool(active_module)
+            and bool(st.session_state.get("authenticated"))
+            and bool(st.session_state.get("current_user"))
+            and st.session_state.get("selected_nav", "Dashboard") == "Dashboard"
+            and not globals().get("_shell_surface")
+            and active_module in set(map(str, allowed))
+        )
+    except Exception:
+        can_render_results = False
+
+    if can_render_results:
+        try:
+            render_universal_module_parity(active_module, phase="results")
+        except Exception as exc:
+            st.warning("Universal Module Studio could not render the results surface; the native module remains available.")
+            with st.expander("Module parity diagnostic"):
+                st.code(f"{type(exc).__name__}: {exc}")
+        try:
+            save_user_workspace(st.session_state["current_user"], st.session_state)
+        except Exception:
+            pass
+    else:
+        # Shell/settings pages can stop before the module workspace exists, but
+        # their ordinary account/workspace data still follows the same saver.
+        if st.session_state.get("authenticated") and st.session_state.get("current_user"):
+            try:
+                save_user_workspace(st.session_state["current_user"], st.session_state)
+            except Exception:
+                pass
     st.stop()
 from shoir_venture_studio import render_venture_studio
 from shoir_160 import init_160_platform, render_160_command_center
