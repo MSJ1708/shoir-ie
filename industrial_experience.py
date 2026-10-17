@@ -6,6 +6,7 @@ surfaces for engineering modules without replacing their specialist logic.
 from __future__ import annotations
 
 import hashlib
+import html
 import io
 import math
 import json
@@ -21,6 +22,12 @@ import pandas as pd
 import plotly.express as px
 
 from shoir_experiment_engine import render_experiment_engine
+from shoir_module_customization import (
+    apply_display_labels,
+    default_module_profile,
+    display_field_label,
+    get_module_profile,
+)
 
 try:
     from durable_account_store import (
@@ -1758,25 +1765,170 @@ def _module_meta(module: str) -> dict:
 
 
 def _starter_data(module: str) -> pd.DataFrame:
+    """Return editable, domain-shaped demo inputs for generic module fallbacks.
+
+    These are clearly illustrative starter values. They help a user discover the
+    expected schema but must never be presented as observations from a real plant.
+    """
     lower = str(module).lower()
-    if any(word in lower for word in ("quality", "reliability", "maintenance")):
-        return pd.DataFrame({"Workcenter": ["WC-01", "WC-02", "WC-03"], "Baseline": [94, 91, 88], "Scenario": [96, 93, 92], "Unit": ["%"] * 3})
-    if any(word in lower for word in ("sustain", "carbon", "energy")):
-        return pd.DataFrame({"Area": ["Line A", "Line B", "Warehouse"], "Baseline": [120, 95, 80], "Scenario": [105, 84, 66], "Unit": ["tCO2e"] * 3})
-    if any(word in lower for word in ("planning", "schedule", "production")):
-        return pd.DataFrame({"Workcenter": ["M-01", "M-02", "M-03"], "Baseline": [82, 90, 76], "Scenario": [88, 92, 85], "Unit": ["% utilization"] * 3})
-    return pd.DataFrame({"Area": ["Demand", "Capacity", "Service", "Inventory", "Risk"], "Baseline": [100, 100, 95, 100, 10], "Scenario": [110, 108, 97, 92, 7], "Unit": ["index", "index", "%", "index", "index"]})
+
+    if any(word in lower for word in ("six sigma", "gage", "quality", "reliability", "spc", "fmea", "capability")):
+        return pd.DataFrame({
+            "Part": ["P-100", "P-100", "P-200", "P-200"],
+            "Workcenter": ["WC-01", "WC-01", "WC-02", "WC-02"],
+            "Sample": [1, 2, 1, 2],
+            "Measured_Value": [10.02, 9.98, 10.14, 9.93],
+            "Lower_Spec": [9.5, 9.5, 9.5, 9.5],
+            "Upper_Spec": [10.5, 10.5, 10.5, 10.5],
+            "Defect_Count": [0, 0, 1, 0],
+            "Inspected_Count": [100, 100, 100, 100],
+        })
+    if any(word in lower for word in ("maintenance", "downtime", "asset health", "predictive")):
+        return pd.DataFrame({
+            "Asset": ["CNC-01", "Press-02", "Packing-01", "CNC-02"],
+            "Runtime_Hours": [1200, 3200, 2100, 1800],
+            "Temperature_C": [65.0, 82.0, 71.0, 68.0],
+            "Vibration_mm_s": [1.1, 3.8, 2.2, 1.6],
+            "Downtime_Hours": [4.0, 18.0, 7.0, 5.0],
+            "Failure_Count": [0, 2, 1, 0],
+        })
+    if any(word in lower for word in ("inventory", "meio", "replenishment", "stock", "warehouse heatmap", "slotting")):
+        return pd.DataFrame({
+            "SKU": ["SKU-100", "SKU-200", "SKU-300", "SKU-400"],
+            "On_Hand_Units": [820, 340, 1250, 90],
+            "Daily_Demand_Units": [72, 38, 95, 24],
+            "Lead_Time_Days": [6, 9, 4, 12],
+            "Safety_Stock_Units": [180, 150, 220, 160],
+            "Unit_Cost_SAR": [18.5, 42.0, 12.0, 86.0],
+        })
+    if any(word in lower for word in ("fleet", "routing", "logistics", "transport", "agv", "geospatial", "network design")):
+        return pd.DataFrame({
+            "Task": ["T-001", "T-002", "T-003", "T-004"],
+            "Origin": ["Plant", "Plant", "DC-01", "Plant"],
+            "Destination": ["DC-01", "DC-02", "Customer-A", "Customer-B"],
+            "Demand_Units": [120, 85, 60, 100],
+            "Vehicle_Capacity": [180, 180, 90, 180],
+            "Distance_km": [22.5, 34.0, 15.2, 28.7],
+            "Cost_SAR_per_km": [2.4, 2.4, 2.8, 2.4],
+            "CO2_kg": [8.1, 12.3, 6.2, 10.2],
+        })
+    if any(word in lower for word in ("facility", "layout", "factory designer", "from-to", "slp", "material handling")):
+        return pd.DataFrame({
+            "Department": ["Receiving", "Machining", "Assembly", "Quality", "Shipping"],
+            "X_m": [2, 12, 20, 29, 38],
+            "Y_m": [4, 8, 8, 5, 4],
+            "Area_m2": [120, 260, 310, 140, 180],
+            "FromTo_Flows_per_Day": [0, 240, 310, 190, 275],
+            "Travel_Distance_m": [18, 12, 9, 14, 10],
+        })
+    if any(word in lower for word in ("schedule", "planning", "production planning", "dispatch", "gantt", "mrp")):
+        return pd.DataFrame({
+            "Work_Order": ["WO-001", "WO-002", "WO-003", "WO-004"],
+            "Product": ["P-100", "P-200", "P-100", "P-300"],
+            "Machine": ["M-01", "M-01", "M-02", "M-03"],
+            "Quantity": [100, 160, 140, 90],
+            "Processing_Min": [32, 28, 25, 40],
+            "Setup_Min": [8, 12, 6, 10],
+            "Due_Offset_Hours": [8, 12, 16, 20],
+            "Priority": [1, 2, 1, 3],
+        })
+    if any(word in lower for word in ("production", "manufacturing", "lean", "shop floor", "mes", "oee")):
+        return pd.DataFrame({
+            "Line": ["Line-01", "Line-02", "Line-03", "Line-04"],
+            "Planned_Units": [1000, 900, 1100, 850],
+            "Good_Units": [948, 840, 1045, 790],
+            "Downtime_Min": [38, 52, 25, 63],
+            "Cycle_Time_Sec": [42.0, 45.5, 39.8, 48.0],
+            "Scrap_Units": [22, 35, 18, 27],
+        })
+    if any(word in lower for word in ("forecast", "demand", "time series")):
+        return pd.DataFrame({
+            "Period": pd.date_range("2026-01-01", periods=8, freq="MS"),
+            "Demand_Units": [520, 545, 560, 590, 575, 625, 650, 672],
+            "Capacity_Units": [600, 600, 620, 620, 620, 650, 650, 650],
+            "Lead_Time_Days": [6.3, 6.0, 6.4, 5.8, 6.1, 5.7, 5.5, 5.4],
+            "Inventory_Units": [830, 790, 760, 745, 710, 680, 650, 620],
+        })
+    if any(word in lower for word in ("sustain", "carbon", "energy", "lca", "environment", "green ie")):
+        return pd.DataFrame({
+            "Activity": ["Electricity", "Diesel", "Freight", "Natural Gas"],
+            "Scope": ["Scope 2", "Scope 1", "Scope 3", "Scope 1"],
+            "Quantity": [12000, 2400, 15000, 3200],
+            "Emission_Factor": [0.42, 2.68, 0.10, 2.02],
+            "Baseline_tCO2e": [5.04, 6.43, 1.50, 6.46],
+            "Scenario_tCO2e": [4.25, 5.10, 1.20, 5.80],
+        })
+    if any(word in lower for word in ("economics", "finance", "capital", "investment", "npv", "benchmark")):
+        return pd.DataFrame({
+            "Alternative": ["Current state", "Option A", "Option B", "Option C"],
+            "CapEx_SAR": [0, 180000, 240000, 125000],
+            "Annual_Benefit_SAR": [0, 95000, 112000, 72000],
+            "Annual_Operating_Cost_SAR": [0, 12000, 18000, 9000],
+            "Project_Life_Years": [5, 5, 7, 5],
+            "Risk_Score": [10, 14, 9, 12],
+        })
+    if any(word in lower for word in ("workforce", "human factors", "ergonomic", "labor", "time study")):
+        return pd.DataFrame({
+            "Task": ["Load", "Inspect", "Assemble", "Pack"],
+            "Operator": ["OP-01", "OP-02", "OP-03", "OP-01"],
+            "Cycle_Time_Sec": [42, 58, 75, 36],
+            "Ergonomic_Risk_Score": [3, 6, 4, 2],
+            "Shift_Hours": [8, 8, 8, 8],
+            "Headcount": [2, 1, 3, 2],
+        })
+    if any(word in lower for word in ("research", "hypothesis", "regression", "literature", "paper", "peer review", "formal proof")):
+        return pd.DataFrame({
+            "Scenario": ["Baseline", "Treatment A", "Treatment B", "Stress Case"],
+            "Sample_Size": [100, 100, 100, 100],
+            "Effect_Estimate": [0.0, 0.18, 0.24, 0.07],
+            "Standard_Error": [0.08, 0.09, 0.10, 0.12],
+            "Confidence_Level": [0.95, 0.95, 0.95, 0.95],
+            "Reproducible": [True, True, True, True],
+        })
+    if any(word in lower for word in ("digital twin", "iot", "telemetry", "connectivity", "sensor", "simulation")):
+        return pd.DataFrame({
+            "Asset": ["CNC-01", "CNC-02", "Press-01", "Conveyor-01"],
+            "Period": [1, 2, 3, 4],
+            "Temperature_C": [65.0, 68.2, 82.0, 71.5],
+            "Vibration_mm_s": [1.1, 1.6, 3.8, 2.2],
+            "Availability_pct": [98.5, 97.0, 91.2, 95.4],
+            "Energy_kWh": [120, 128, 165, 142],
+        })
+    if any(word in lower for word in ("decision", "control tower", "governance", "security", "audit", "ledger", "registry", "collaboration", "workspace", "integration", "platform", "data")):
+        return pd.DataFrame({
+            "Entity_ID": ["FAC-001", "MCH-001", "WO-001", "SKU-001"],
+            "Entity_Type": ["Facility", "Machine", "Work Order", "SKU"],
+            "Status": ["Active", "Review", "Released", "Active"],
+            "Owner_Team": ["Operations", "Maintenance", "Production", "Planning"],
+            "Readiness_Score": [92, 76, 88, 95],
+            "Open_Issues": [0, 3, 1, 0],
+        })
+    return pd.DataFrame({
+        "Workstream": ["Demand", "Capacity", "Service", "Inventory"],
+        "Baseline": [100, 100, 95, 100],
+        "Scenario": [110, 108, 97, 92],
+        "Unit": ["index", "index", "%", "index"],
+    })
 
 
 def _evidence_bundle(module: str, df: pd.DataFrame, actor: str, research_protocol: Optional[Mapping[str, Any]] = None) -> bytes:
     result = generic_result(df)
     verification = verification_snapshot(df)
+    try:
+        import streamlit as st
+        profile = get_module_profile(st.session_state, module, actor)
+    except Exception:
+        profile = default_module_profile(module)
     manifest = {
         "module": module,
+        "display_name": profile.get("display_name", module),
+        "project_name": profile.get("project_name", ""),
+        "site_name": profile.get("site_name", ""),
         "actor": actor,
         "generated_at": _now(),
         "result": result,
         "verification": verification,
+        "module_profile": profile,
     }
     if research_protocol:
         manifest["research_protocol_hash"] = research_protocol.get("protocol_hash")
@@ -1784,7 +1936,9 @@ def _evidence_bundle(module: str, df: pd.DataFrame, actor: str, research_protoco
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
         archive.writestr("inputs.csv", df.to_csv(index=False).encode("utf-8"))
-        archive.writestr("manifest.json", json.dumps(manifest, indent=2, default=str).encode("utf-8"))
+        archive.writestr("display_inputs.csv", apply_display_labels(df, profile).to_csv(index=False).encode("utf-8"))
+        archive.writestr("module_profile.json", json.dumps(profile, indent=2, ensure_ascii=False, default=str).encode("utf-8"))
+        archive.writestr("manifest.json", json.dumps(manifest, indent=2, ensure_ascii=False, default=str).encode("utf-8"))
         archive.writestr("feature_manifest.csv", feature_catalog().to_csv(index=False).encode("utf-8"))
         if research_protocol:
             archive.writestr("research_protocol.json", json.dumps(dict(research_protocol), indent=2, ensure_ascii=False, default=str).encode("utf-8"))
@@ -1801,6 +1955,7 @@ def render_experience_shell(module: str, tier: str, username: str) -> None:
         return
 
     meta = _module_meta(module)
+    profile = get_module_profile(st.session_state, module, username)
     key = _safe_key(module)
     category = str(meta.get("category", "Industrial Engineering"))
     capability_tier = str(meta.get("tier", tier))
@@ -1839,8 +1994,9 @@ def render_experience_shell(module: str, tier: str, username: str) -> None:
         f"""
         <div class="mx-hero">
           <div class="mx-kicker">{html.escape(category)} · {html.escape(capability_tier)}</div>
-          <div class="mx-title">{html.escape(str(module))}</div>
+          <div class="mx-title">{html.escape(str(profile.get("display_name") or module))}</div>
           <div class="mx-sub">{html.escape(when)}</div>
+          <div class="mx-sub">{html.escape(" · ".join(str(x) for x in (profile.get("project_name"), profile.get("site_name"), profile.get("owner_team")) if x))}</div>
           <span class="mx-pill">Data-first</span><span class="mx-pill">Evidence-linked</span><span class="mx-pill">Human approval</span>
         </div>
         """,
@@ -1868,7 +2024,8 @@ def render_experience_shell(module: str, tier: str, username: str) -> None:
     action_cols = st.columns(4)
     with action_cols[0]:
         if st.button("💾 Save study", use_container_width=True, key="mx_save_" + key):
-            pid = save_project(module + " Study", module, username, {"module": module, "tier": tier})
+            project_title = str(profile.get("project_name") or (profile.get("display_name", module) + " Study"))
+            pid = save_project(project_title, module, username, {"module": module, "display_name": profile.get("display_name", module), "tier": tier, "profile": profile})
             st.session_state["sx_project_id"] = pid
             st.success("Study saved: " + pid)
     with action_cols[1]:
@@ -1881,7 +2038,7 @@ def render_experience_shell(module: str, tier: str, username: str) -> None:
     with action_cols[2]:
         if st.button("📝 Decision card", use_container_width=True, key="mx_decision_" + key):
             did = create_decision(
-                module + " decision", module,
+                str(profile.get("display_name") or module) + " decision", module,
                 {"rows": result["rows"], "quality": result["quality"]},
                 {"Tier": tier},
                 {"Uncertainty": "Module-specific; inspect source evidence"},
