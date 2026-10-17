@@ -1770,7 +1770,7 @@ def render_research_workspace(module: str, tier: str, username: str) -> None:
             init_platform_db()
         except Exception as exc:
             st.error(f"Scenario Lab services could not initialize safely: {type(exc).__name__}: {exc}")
-            st.stop()
+            return
 
         scenario_defaults = pd.DataFrame({
             "Scenario": ["Baseline", "High Demand", "Supplier Shock", "Capacity Expansion"],
