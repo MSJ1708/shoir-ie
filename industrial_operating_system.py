@@ -11,7 +11,7 @@ import json
 import math
 import sqlite3
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Mapping, Optional, Sequence
 
 import numpy as np
@@ -130,7 +130,7 @@ def safe_formula(formula: str, variables: Mapping[str,float]) -> float:
     return out
 
 def now() -> str:
-    return datetime.utcnow().isoformat(timespec="microseconds")
+    return datetime.now(timezone.utc).isoformat(timespec="microseconds")
 
 def ensure_os_db(db_path: str="enterprise_full_workspace.db") -> None:
     with sqlite3.connect(db_path, timeout=30) as c:
