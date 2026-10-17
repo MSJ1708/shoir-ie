@@ -190,6 +190,9 @@ def test_customization_layer_is_connected_to_module_prepare_and_live_charts():
     assert "apply_display_labels(raw_df, profile)" in live_visuals
     assert 'profile.get("preferred_chart", "Auto")' in live_visuals
     assert "target_summary" in live_visuals
+    assert "FALLBACK_MODULE_BLUEPRINTS" in parity
+    assert "analyze_fallback_module(module, result_df)" in parity
+    assert 'st.session_state["shoir_native_fallback_module_active"] = module' in (ROOT / "industrial_experience.py").read_text(encoding="utf-8")
 
 
 
