@@ -97,6 +97,7 @@ def solve_transport_allocation(
     lead_weight: float = 0.35,
     risk_weight: float = 0.25,
     carbon_weight: float = 0.0,
+    local_content_weight: float = 0.0,
     route_adjustments: Mapping[tuple[str, str], float] | None = None,
     integer_units: bool = True,
 ) -> dict[str, Any]:
@@ -132,19 +133,27 @@ def solve_transport_allocation(
     ns, nd = len(s), len(d)
     shipment_count = ns * nd
     c_ship = []
+    maximum_unit_cost = max(1.0, float(_number(s, "Unit Cost").max()) if ns else 1.0)
     for i in range(ns):
         for j in range(nd):
             unit_cost = max(0.0, float(s.iloc[i]["Unit Cost"]))
             lead = max(0.0, float(s.iloc[i]["Lead Days"]))
             risk = min(100.0, max(0.0, float(s.iloc[i]["Risk %"])))
             carbon = max(0.0, float(s.iloc[i]["Carbon kg/unit"]))
+            local_share = min(100.0, max(0.0, float(s.iloc[i]["Local Share %"])))
+            # Penalize non-local share in the same approximate scale as unit cost.
+            # This is an optional preference, not a claim of verified local content.
+            localization_penalty = (
+                maximum_unit_cost * max(0.0, float(local_content_weight))
+                * (1.0 - local_share / 100.0)
+            )
             adjusted = max(0.0, float(routes_adjust.get((s_names[i], d_names[j]), 0.0)))
             c_ship.append(
                 max(0.0, float(cost_weight)) * unit_cost
                 + max(0.0, float(lead_weight)) * lead
                 + max(0.0, float(risk_weight)) * risk
                 + max(0.0, float(carbon_weight)) * carbon
-                + adjusted
+                + localization_penalty + adjusted
             )
     shortage_penalty = max(1000.0, (max(c_ship, default=1.0) + 1.0) * 100.0)
     objective = np.asarray(c_ship + [shortage_penalty * (1.0 + p / 5.0) for p in priorities], dtype=float)
@@ -238,6 +247,7 @@ def solve_transport_allocation(
 def simulate_disruption_scenarios(
     suppliers: pd.DataFrame, demands: pd.DataFrame, *, iterations: int = 50, seed: int = 17,
     outage_probability: float = 0.12, demand_cv: float = 0.12, integer_units: bool = True,
+    local_content_weight: float = 0.0,
 ) -> pd.DataFrame:
     """Small, reproducible Monte Carlo stress-test over synthetic supply shocks."""
     rng = np.random.default_rng(int(seed))
@@ -250,7 +260,7 @@ def simulate_disruption_scenarios(
         disabled = [name for name in names if rng.random() < outage_probability]
         demand_factor = max(0.0, float(rng.normal(1.0, demand_cv)))
         cap_factor = float(np.clip(rng.normal(0.94, 0.10), 0.20, 1.15))
-        result = solve_transport_allocation(suppliers, demands, disabled_suppliers=disabled, capacity_scale=cap_factor, demand_scale=demand_factor, integer_units=integer_units)
+        result = solve_transport_allocation(suppliers, demands, disabled_suppliers=disabled, capacity_scale=cap_factor, demand_scale=demand_factor, integer_units=integer_units, local_content_weight=local_content_weight)
         m = result["metrics"]
         rows.append({
             "Iteration": iteration, "Service %": float(m.get("service_level_pct", 0.0)),
