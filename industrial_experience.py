@@ -5,6 +5,7 @@ surfaces for engineering modules without replacing their specialist logic.
 """
 from __future__ import annotations
 
+import gzip
 import hashlib
 import html
 import io
@@ -149,6 +150,8 @@ def ensure_experience_db(path: str = "enterprise_full_workspace.db") -> None:
             "CREATE TABLE IF NOT EXISTS experience_jobs(job_id TEXT PRIMARY KEY,module TEXT,job_type TEXT,status TEXT,progress REAL,message TEXT,payload_json TEXT,started_at TEXT,finished_at TEXT)",
             "CREATE TABLE IF NOT EXISTS experience_copilot_actions(id INTEGER PRIMARY KEY AUTOINCREMENT,run_id TEXT,module TEXT,action TEXT,status TEXT,requires_approval INTEGER,evidence_json TEXT,actor TEXT,created_at TEXT)",
             "CREATE TABLE IF NOT EXISTS experience_observability(id INTEGER PRIMARY KEY AUTOINCREMENT,run_id TEXT,module TEXT,event_type TEXT,duration_ms REAL,details_json TEXT,created_at TEXT)",
+            "CREATE TABLE IF NOT EXISTS experience_module_runs(run_id TEXT PRIMARY KEY,module TEXT NOT NULL,owner TEXT NOT NULL,display_name TEXT NOT NULL,project_name TEXT,site_name TEXT,input_hash TEXT NOT NULL,input_rows INTEGER NOT NULL,input_columns_json TEXT NOT NULL,result_columns_json TEXT NOT NULL,input_snapshot_gzip BLOB,result_snapshot_gzip BLOB,profile_json TEXT NOT NULL,metrics_json TEXT NOT NULL,method TEXT,guardrail TEXT,duration_ms REAL NOT NULL,status TEXT NOT NULL,snapshot_status TEXT NOT NULL,created_at TEXT NOT NULL)",
+            "CREATE INDEX IF NOT EXISTS idx_exp_module_runs_owner ON experience_module_runs(owner,module,created_at DESC)",
             "CREATE TABLE IF NOT EXISTS experience_memory(memory_id TEXT PRIMARY KEY,problem TEXT,data_ref TEXT,model_ref TEXT,scenario_ref TEXT,decision_ref TEXT,actual_result TEXT,lesson TEXT,owner TEXT,created_at TEXT,updated_at TEXT)",
             "CREATE TABLE IF NOT EXISTS experience_research_studies(study_id TEXT PRIMARY KEY,research_id TEXT UNIQUE,title TEXT,objective TEXT,research_question TEXT,hypothesis TEXT,null_hypothesis TEXT,methodology TEXT,primary_domain TEXT,transfer_domain TEXT,primary_endpoint TEXT,secondary_metrics_json TEXT,independent_variables_json TEXT,controls_json TEXT,baseline_definition TEXT,treatment_definition TEXT,sample_size INTEGER,replications INTEGER,random_seed INTEGER,alpha REAL,confidence_level REAL,planned_tests_json TEXT,inclusion_criteria TEXT,exclusion_criteria TEXT,data_source TEXT,protocol_notes TEXT,protocol_hash TEXT,protocol_locked INTEGER DEFAULT 0,owner TEXT,created_at TEXT,updated_at TEXT)",
             "CREATE TABLE IF NOT EXISTS experience_research_runs(run_id TEXT PRIMARY KEY,study_id TEXT NOT NULL,research_id TEXT NOT NULL,owner TEXT NOT NULL,experiment_code TEXT NOT NULL,config_json TEXT NOT NULL,summary_json TEXT NOT NULL,results_csv TEXT NOT NULL,created_at TEXT NOT NULL)",
@@ -709,6 +712,327 @@ def verification_snapshot(df: pd.DataFrame) -> dict:
     }
     passed = sum(1 for value in checks.values() if value)
     return {"checks": checks, "passed": passed, "total": len(checks), "score": round(100.0 * passed / max(1, len(checks)), 1)}
+
+
+
+MODULE_RUN_SNAPSHOT_LIMIT_BYTES = 8 * 1024 * 1024
+
+
+def _module_run_json_safe(value: Any) -> Any:
+    """Convert NumPy/Pandas values to strict JSON-safe primitives."""
+    if value is None or value is pd.NA:
+        return None
+    if isinstance(value, (pd.Timestamp, datetime)):
+        return value.isoformat()
+    if isinstance(value, np.generic):
+        return _module_run_json_safe(value.item())
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    if isinstance(value, Mapping):
+        return {str(key): _module_run_json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_module_run_json_safe(item) for item in value]
+    if isinstance(value, (str, int, float, bool)):
+        return value
+    try:
+        if pd.isna(value):
+            return None
+    except (TypeError, ValueError):
+        pass
+    return str(value)
+
+
+def build_profiled_module_figure(
+    frame: pd.DataFrame,
+    chart_x: str | None,
+    chart_y: str | None,
+    profile: Mapping[str, Any] | None,
+    title: str,
+):
+    """Honor a module's preferred chart when the current data supports it.
+
+    Returns (figure, chart_name, notice). An incompatible preference receives
+    a clear fallback notice instead of silently ignoring the user's setting.
+    """
+    if not isinstance(frame, pd.DataFrame) or frame.empty:
+        return None, "Unavailable", "No result rows are available to chart."
+    profile = dict(profile or {})
+    display_frame = apply_display_labels(frame, profile)
+    x_display = display_field_label(chart_x, profile) if chart_x is not None and str(chart_x) in frame.columns else chart_x
+    y_display = display_field_label(chart_y, profile) if chart_y is not None and str(chart_y) in frame.columns else chart_y
+    if x_display not in display_frame.columns:
+        x_display = None
+    if y_display not in display_frame.columns:
+        y_display = None
+
+    requested = str(profile.get("preferred_chart", "Auto") or "Auto")
+    try:
+        from shoir_live_visuals import _make_figure, _suggest_chart
+        actual = _suggest_chart(display_frame, x_display, y_display) if requested == "Auto" else requested
+        figure = _make_figure(display_frame, actual, x_display, y_display, None, title)
+        if figure is not None:
+            return figure, actual, None
+        fallback_chart = _suggest_chart(display_frame, x_display, y_display)
+        if fallback_chart == actual:
+            fallback_chart = "Bar"
+        fallback = _make_figure(display_frame, fallback_chart, x_display, y_display, None, title)
+        if fallback is not None:
+            return fallback, fallback_chart, (
+                f"Your preferred chart ({actual}) needs fields that are not available in this result. "
+                f"Showing {fallback_chart} instead."
+            )
+    except Exception:
+        pass
+
+    try:
+        numeric = [str(column) for column in display_frame.columns if pd.api.types.is_numeric_dtype(display_frame[column])]
+        if not numeric:
+            return None, requested, f"{requested} is not compatible with this table; add a numeric measure or choose another chart."
+        y_column = y_display if y_display in numeric else numeric[-1]
+        from plotly import express as px
+        fallback = px.bar(display_frame, x=x_display, y=y_column, title=title) if x_display else px.bar(display_frame, y=y_column, title=title)
+        return fallback, "Bar", (
+            f"Your preferred chart ({requested}) could not be generated from the current fields. "
+            "Showing a compatible Bar chart instead."
+        )
+    except Exception as exc:
+        return None, requested, f"A chart could not be generated safely: {type(exc).__name__}: {exc}"
+
+
+def save_module_analysis_run(
+    module: str,
+    owner: str,
+    profile: Mapping[str, Any] | None,
+    input_frame: pd.DataFrame,
+    analysis: Mapping[str, Any],
+    duration_ms: float = 0.0,
+    status: str = "Completed",
+    db_path: str = "enterprise_full_workspace.db",
+) -> dict[str, Any]:
+    """Persist a user-scoped input/result snapshot, bounded to protect the app."""
+    if not isinstance(input_frame, pd.DataFrame):
+        raise TypeError("Module run inputs must be a pandas DataFrame.")
+    ensure_experience_db(db_path)
+    analysis = dict(analysis or {})
+    result_frame = analysis.get("result")
+    if not isinstance(result_frame, pd.DataFrame):
+        result_frame = pd.DataFrame()
+
+    input_raw = input_frame.to_json(orient="split", date_format="iso", default_handler=str).encode("utf-8")
+    result_raw = result_frame.to_json(orient="split", date_format="iso", default_handler=str).encode("utf-8")
+    input_hash = hashlib.sha256(input_raw).hexdigest()
+    compressed_input = gzip.compress(input_raw, compresslevel=6, mtime=0)
+    compressed_result = gzip.compress(result_raw, compresslevel=6, mtime=0)
+    input_blob = compressed_input if len(compressed_input) <= MODULE_RUN_SNAPSHOT_LIMIT_BYTES else None
+    result_blob = compressed_result if len(compressed_result) <= MODULE_RUN_SNAPSHOT_LIMIT_BYTES else None
+
+    if input_blob is not None and result_blob is not None:
+        snapshot_status = "Complete"
+    elif input_blob is None and result_blob is None:
+        snapshot_status = "Input and result snapshots omitted (size limit)"
+    elif input_blob is None:
+        snapshot_status = "Input snapshot omitted (size limit)"
+    else:
+        snapshot_status = "Result snapshot omitted (size limit)"
+
+    cleaned_profile = _module_run_json_safe(dict(profile or default_module_profile(module)))
+    metrics = _module_run_json_safe(dict(analysis.get("metrics") or {}))
+    run_id = "MRUN-" + uuid.uuid4().hex[:16].upper()
+    created_at = _now()
+    elapsed = max(0.0, float(duration_ms or 0.0))
+    values = (
+        run_id, str(module), str(owner),
+        str(cleaned_profile.get("display_name") or module),
+        str(cleaned_profile.get("project_name") or ""),
+        str(cleaned_profile.get("site_name") or ""),
+        input_hash, int(len(input_frame)),
+        json.dumps([str(column) for column in input_frame.columns], ensure_ascii=False),
+        json.dumps([str(column) for column in result_frame.columns], ensure_ascii=False),
+        input_blob, result_blob,
+        json.dumps(cleaned_profile, ensure_ascii=False, default=str),
+        json.dumps(metrics, ensure_ascii=False, default=str),
+        str(analysis.get("method") or "Module analysis"),
+        str(analysis.get("guardrail") or "Verify the result against independent evidence before implementation."),
+        elapsed, str(status or "Completed")[:40], snapshot_status, created_at,
+    )
+    with _db(db_path) as conn:
+        conn.execute(
+            """INSERT INTO experience_module_runs(
+                run_id,module,owner,display_name,project_name,site_name,input_hash,input_rows,
+                input_columns_json,result_columns_json,input_snapshot_gzip,result_snapshot_gzip,
+                profile_json,metrics_json,method,guardrail,duration_ms,status,snapshot_status,created_at
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            values,
+        )
+        conn.commit()
+    return {
+        "run_id": run_id,
+        "input_hash": input_hash,
+        "snapshot_status": snapshot_status,
+        "duration_ms": elapsed,
+        "created_at": created_at,
+    }
+
+
+def list_module_analysis_runs(
+    module: str,
+    owner: str,
+    limit: int = 20,
+    db_path: str = "enterprise_full_workspace.db",
+) -> pd.DataFrame:
+    """List only the current owner's runs for the exact module identifier."""
+    ensure_experience_db(db_path)
+    safe_limit = max(1, min(50, int(limit)))
+    with _db(db_path) as conn:
+        rows = conn.execute(
+            """SELECT run_id,display_name,project_name,site_name,input_rows,input_hash,
+                      method,status,snapshot_status,duration_ms,created_at
+               FROM experience_module_runs
+               WHERE module=? AND owner=?
+               ORDER BY created_at DESC, rowid DESC LIMIT ?""",
+            (str(module), str(owner), safe_limit),
+        ).fetchall()
+    return pd.DataFrame(rows, columns=[
+        "Run ID", "Workspace name", "Project", "Site", "Input rows", "Input SHA-256",
+        "Method", "Status", "Snapshot status", "Duration (ms)", "Created at",
+    ])
+
+
+def load_module_analysis_run(
+    run_id: str,
+    owner: str,
+    db_path: str = "enterprise_full_workspace.db",
+) -> dict[str, Any] | None:
+    """Load a saved run only for its owner, including whichever bounded snapshots exist."""
+    ensure_experience_db(db_path)
+    with _db(db_path) as conn:
+        row = conn.execute(
+            """SELECT run_id,module,owner,display_name,project_name,site_name,input_hash,
+                      input_rows,input_columns_json,result_columns_json,input_snapshot_gzip,
+                      result_snapshot_gzip,profile_json,metrics_json,method,guardrail,
+                      duration_ms,status,snapshot_status,created_at
+               FROM experience_module_runs WHERE run_id=? AND owner=?""",
+            (str(run_id), str(owner)),
+        ).fetchone()
+    if not row:
+        return None
+    (
+        saved_id,module,saved_owner,display_name,project_name,site_name,input_hash,
+        input_rows,input_columns_json,result_columns_json,input_blob,result_blob,
+        raw_profile,raw_metrics,method,guardrail,duration_ms,status,snapshot_status,created_at,
+    ) = row
+
+    def decode_json(raw: Any, fallback: Any) -> Any:
+        try:
+            return json.loads(raw or "")
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return fallback
+
+    def decode_frame(blob: Any, raw_columns: Any) -> pd.DataFrame:
+        columns = decode_json(raw_columns, [])
+        if not blob:
+            return pd.DataFrame(columns=columns if isinstance(columns, list) else [])
+        try:
+            decoded = gzip.decompress(blob).decode("utf-8")
+            return pd.read_json(io.StringIO(decoded), orient="split")
+        except Exception:
+            return pd.DataFrame(columns=columns if isinstance(columns, list) else [])
+
+    return {
+        "run_id": saved_id, "module": module, "owner": saved_owner,
+        "display_name": display_name, "project_name": project_name, "site_name": site_name,
+        "input_hash": input_hash, "input_rows": int(input_rows or 0),
+        "input_df": decode_frame(input_blob, input_columns_json),
+        "result_df": decode_frame(result_blob, result_columns_json),
+        "profile": decode_json(raw_profile, default_module_profile(module)),
+        "metrics": decode_json(raw_metrics, {}),
+        "method": method, "guardrail": guardrail,
+        "duration_ms": float(duration_ms or 0.0), "status": status,
+        "snapshot_status": snapshot_status, "created_at": created_at,
+    }
+
+
+def render_module_run_history(module: str, owner: str, key_suffix: str | None = None) -> None:
+    """Render private run history and downloadable snapshots without changing the module shell."""
+    import streamlit as st
+
+    ensure_experience_db()
+    token = str(key_suffix or hashlib.sha1(str(module).encode("utf-8")).hexdigest()[:10])
+    with st.expander("🗂️ Saved module runs & result history", expanded=False):
+        st.caption(
+            "History is scoped to your account and this module. A saved run documents the selected "
+            "inputs/results; it is not proof of a verified plant outcome."
+        )
+        history = list_module_analysis_runs(module, owner, limit=20)
+        if history.empty:
+            st.info("No saved runs are available for this module yet.")
+            return
+        st.dataframe(history.drop(columns=["Input SHA-256"]), use_container_width=True, hide_index=True)
+        run_ids = history["Run ID"].astype(str).tolist()
+        selector_key = f"module_run_history_selector_{token}"
+        if selector_key in st.session_state and str(st.session_state[selector_key]) not in run_ids:
+            st.session_state.pop(selector_key, None)
+        labels = {
+            str(row["Run ID"]): (
+                f"{row['Created at']} · {row['Status']} · {row['Workspace name']} · {row['Run ID']}"
+            )
+            for _, row in history.iterrows()
+        }
+        selected_id = st.selectbox(
+            "Inspect a saved run",
+            options=run_ids,
+            format_func=lambda value: labels.get(str(value), str(value)),
+            key=selector_key,
+        )
+        record = load_module_analysis_run(selected_id, owner)
+        if not record:
+            st.warning("This saved run is no longer available to the current account.")
+            return
+        context = [record["display_name"], record["project_name"], record["site_name"]]
+        st.caption(" · ".join(str(value) for value in context if value))
+        a,b,c = st.columns(3)
+        a.metric("Saved run", record["run_id"])
+        b.metric("Input rows", f"{record['input_rows']:,}")
+        c.metric("Calculation time", f"{record['duration_ms']:,.1f} ms")
+        st.caption(f"Input SHA-256: {record['input_hash']} · {record['snapshot_status']}")
+        st.caption(f"Method: {record['method']}")
+        if record["guardrail"]:
+            st.warning(record["guardrail"])
+        if record["snapshot_status"] != "Complete":
+            st.info("At least one data snapshot exceeded the 8 MiB compressed-payload limit. Metadata and input hash were preserved.")
+
+        st.markdown("**Saved inputs**")
+        if record["input_df"].empty and record["input_rows"]:
+            st.info("The input snapshot was omitted or could not be decoded; the schema and hash remain available.")
+        elif not record["input_df"].empty:
+            st.dataframe(apply_display_labels(record["input_df"], record["profile"]).head(300), use_container_width=True, hide_index=True)
+        st.markdown("**Saved calculated results**")
+        if record["result_df"].empty:
+            st.info("This record has no tabular result snapshot.")
+        else:
+            st.dataframe(apply_display_labels(record["result_df"], record["profile"]).head(500), use_container_width=True, hide_index=True)
+        if record["metrics"]:
+            with st.expander("Saved KPI summary", expanded=False):
+                st.json(record["metrics"])
+        dl1, dl2 = st.columns(2)
+        with dl1:
+            if not record["input_df"].empty:
+                st.download_button(
+                    "📥 Download saved inputs",
+                    record["input_df"].to_csv(index=False).encode("utf-8"),
+                    file_name=f"shoir_ie_{token}_{record['run_id'].lower()}_inputs.csv",
+                    mime="text/csv", use_container_width=True,
+                    key=f"module_run_inputs_download_{token}_{record['run_id']}",
+                )
+        with dl2:
+            if not record["result_df"].empty:
+                st.download_button(
+                    "📥 Download saved results",
+                    record["result_df"].to_csv(index=False).encode("utf-8"),
+                    file_name=f"shoir_ie_{token}_{record['run_id'].lower()}_results.csv",
+                    mime="text/csv", use_container_width=True,
+                    key=f"module_run_results_download_{token}_{record['run_id']}",
+                )
 
 
 def _research_list(value: Any) -> list[str]:
@@ -2954,6 +3278,19 @@ def render_blank_module_studio(module: str, tier: str, username: str) -> None:
         c2.metric("Columns", "{:,}".format(result["columns"]))
         c3.metric("Data quality", "{:.1f}%".format(result["quality"]))
         c4.metric("Numeric fields", "{:,}".format(result["numeric_fields"]))
+        primary_kpi = profile.get("primary_kpi")
+        if profile.get("target_enabled") and primary_kpi in df.columns and pd.api.types.is_numeric_dtype(df[primary_kpi]):
+            target_check = evaluate_kpi_target(df[primary_kpi], profile)
+            if target_check:
+                precision = int(profile.get("decimal_places", 2))
+                target_unit = str(target_check.get("unit") or "")
+                actual_text = f"{target_check['actual']:,.{precision}f}" + (f" {target_unit}" if target_unit else "")
+                goal_text = f"{target_check['target']:,.{precision}f}" + (f" {target_unit}" if target_unit else "")
+                target_cols = st.columns(3)
+                target_cols[0].metric(f"{display_field_label(primary_kpi, profile)} · {target_check['statistic']}", actual_text)
+                target_cols[1].metric("Configured target", goal_text, delta=target_check["direction"])
+                target_cols[2].metric("Target rule", "MEETS TARGET" if target_check["passed"] else "REVIEW")
+                st.caption("Configured target comparison only; this is not an independently verified operational outcome.")
         with st.expander("ℹ️ Workflow, required inputs and interpretation limits", expanded=False):
             st.markdown(f"**Purpose:** {blueprint['purpose']}")
             st.markdown(f"**Recommended method:** {blueprint['method']}")
@@ -2986,13 +3323,34 @@ def render_blank_module_studio(module: str, tier: str, username: str) -> None:
             use_container_width=True,
             key="sx_domain_run_" + key,
         ):
+            run_started_ns = time.perf_counter_ns()
             try:
                 analysis = analyze_fallback_module(module, df)
+                elapsed_ms = max(0.0, (time.perf_counter_ns() - run_started_ns) / 1_000_000.0)
+                run_record = None
+                try:
+                    run_record = save_module_analysis_run(
+                        module, username, profile, df, analysis,
+                        duration_ms=elapsed_ms, status="Completed",
+                    )
+                except Exception as persist_exc:
+                    st.warning(
+                        "Analysis completed, but the run history could not be updated: "
+                        f"{type(persist_exc).__name__}: {persist_exc}"
+                    )
                 st.session_state[domain_result_key] = {
                     "input_signature": input_signature,
                     "analysis": analysis,
+                    "run_id": run_record.get("run_id") if run_record else None,
+                    "input_hash": run_record.get("input_hash") if run_record else None,
+                    "snapshot_status": run_record.get("snapshot_status") if run_record else "Not saved",
                 }
-                st.success("Module-specific calculation completed using the current table.")
+                if run_record:
+                    st.success(f"Analysis completed and saved as {run_record['run_id']}.")
+                    if run_record["snapshot_status"] != "Complete":
+                        st.info(run_record["snapshot_status"] + ". Run metadata and input hash were retained.")
+                else:
+                    st.success("Module-specific calculation completed in this session.")
             except (TypeError, ValueError, KeyError, ZeroDivisionError) as exc:
                 st.session_state.pop(domain_result_key, None)
                 st.warning(f"The current table is not ready for this method: {exc}")
@@ -3025,27 +3383,25 @@ def render_blank_module_studio(module: str, tier: str, username: str) -> None:
                     st.dataframe(apply_display_labels(analyzed_df, profile), use_container_width=True, hide_index=True)
                     x_column = analysis.get("chart_x")
                     y_column = analysis.get("chart_y")
-                    display_result = apply_display_labels(analyzed_df, profile)
-                    x_display = display_field_label(x_column, profile) if x_column and x_column in df.columns else x_column
-                    y_display = display_field_label(y_column, profile) if y_column and y_column in df.columns else y_column
-                    if not y_display or y_display not in display_result.columns:
-                        candidates = [str(c) for c in display_result.columns if pd.api.types.is_numeric_dtype(display_result[c])]
-                        y_display = candidates[-1] if candidates else None
-                    if x_display and x_display not in display_result.columns:
-                        x_display = None
-                    if y_display and pd.api.types.is_numeric_dtype(display_result[y_display]):
-                        chart_choice = profile.get("preferred_chart", "Auto")
-                        if chart_choice not in {"Line", "Bar", "Area", "Scatter"}:
-                            chart_choice = analysis.get("chart_kind", "bar").title()
-                        if chart_choice == "Line" and x_display:
-                            chart = px.line(display_result, x=x_display, y=y_display, markers=True, title=f"{profile['display_name']} · {y_display}")
-                        elif chart_choice == "Area" and x_display:
-                            chart = px.area(display_result, x=x_display, y=y_display, title=f"{profile['display_name']} · {y_display}")
-                        elif chart_choice == "Scatter" and x_display:
-                            chart = px.scatter(display_result, x=x_display, y=y_display, title=f"{profile['display_name']} · {y_display}")
-                        else:
-                            chart = px.bar(display_result, x=x_display, y=y_display, title=f"{profile['display_name']} · {y_display}") if x_display else px.bar(display_result, y=y_display, title=f"{profile['display_name']} · {y_display}")
+                    numeric_columns = [
+                        str(column) for column in analyzed_df.columns
+                        if pd.api.types.is_numeric_dtype(analyzed_df[column])
+                    ]
+                    if not y_column or y_column not in analyzed_df.columns or not pd.api.types.is_numeric_dtype(analyzed_df[y_column]):
+                        y_column = numeric_columns[-1] if numeric_columns else None
+                    chart, actual_chart, chart_notice = build_profiled_module_figure(
+                        analyzed_df, x_column, y_column, profile,
+                        f"{profile['display_name']} · {display_field_label(y_column, profile) if y_column else 'Analysis'}",
+                    )
+                    if chart_notice:
+                        st.info(chart_notice)
+                    if chart is not None:
+                        st.caption(f"Visualization: {actual_chart} · configured for this module profile.")
                         st.plotly_chart(chart, use_container_width=True, config={"displayModeBar": True, "responsive": True})
+                    if saved_domain_result.get("run_id"):
+                        st.caption(
+                            f"Saved run: {saved_domain_result['run_id']} · Input SHA-256: {saved_domain_result.get('input_hash', 'unavailable')}"
+                        )
                 st.warning(analysis.get("guardrail", blueprint["guardrail"]))
                 st.caption("Outputs are calculated from the selected table and current assumptions. Save and independently verify any operational decision before implementation.")
 
@@ -3084,6 +3440,8 @@ def render_blank_module_studio(module: str, tier: str, username: str) -> None:
                     use_container_width=True,
                     config={"displayModeBar": True, "responsive": True},
                 )
+
+        render_module_run_history(module, username, key_suffix=key)
 
     with tabs[2]:
         output = st.session_state.get("sx_result_" + key, df)
