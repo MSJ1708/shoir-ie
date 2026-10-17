@@ -211,3 +211,68 @@ def test_generic_module_fallbacks_start_with_domain_relevant_schemas():
         starter = _starter_data(module)
         assert required_columns <= set(starter.columns), module
         assert len(starter) >= 3, module
+
+
+
+def test_every_shared_fallback_module_has_a_working_domain_analysis():
+    from industrial_experience import (
+        FALLBACK_MODULE_BLUEPRINTS,
+        _starter_data,
+        analyze_fallback_module,
+        fallback_module_blueprint,
+    )
+
+    assert len(FALLBACK_MODULE_BLUEPRINTS) == 32
+    for module in FALLBACK_MODULE_BLUEPRINTS:
+        blueprint = fallback_module_blueprint(module)
+        assert blueprint["family"] != "generic", module
+        assert blueprint["purpose"]
+        assert blueprint["method"]
+        assert blueprint["inputs"]
+        assert blueprint["guardrail"]
+
+        starter = _starter_data(module)
+        analysis = analyze_fallback_module(module, starter)
+        assert isinstance(analysis["result"], pd.DataFrame), module
+        assert not analysis["result"].empty, module
+        assert isinstance(analysis["metrics"], dict), module
+        assert analysis["guardrail"], module
+
+
+def test_fallback_completeness_scores_treat_blank_strings_as_missing():
+    from industrial_experience import analyze_fallback_module, _starter_data
+
+    security = _starter_data("Decentralized Cryptographic Reproducibility Vault")
+    result = analyze_fallback_module("Decentralized Cryptographic Reproducibility Vault", security)
+    assert result["result"]["Provenance_Metadata_Completeness_pct"].lt(100).all()
+
+    literature = _starter_data("Literature & Citation Matrix")
+    literature_result = analyze_fallback_module("Literature & Citation Matrix", literature)
+    assert literature_result["result"]["Metadata_Completeness_pct"].lt(100).all()
+
+
+def test_quality_maintenance_and_sustainability_fallback_outputs_are_explicit():
+    from industrial_experience import analyze_fallback_module, _starter_data
+
+    quality = analyze_fallback_module(
+        "Quality Control, Six Sigma & Reliability",
+        _starter_data("Quality Control, Six Sigma & Reliability"),
+    )
+    assert "Within_Spec" in quality["result"]
+    assert "Within specification (%)" in quality["metrics"]
+
+    maintenance = analyze_fallback_module(
+        "Predictive Maintenance Hub",
+        _starter_data("Predictive Maintenance Hub"),
+    )
+    assert "Relative_Triage_Index_0_100" in maintenance["result"]
+    assert "Mean relative triage index" in maintenance["metrics"]
+    assert "Relative" in maintenance["guardrail"]
+
+    sustainability = analyze_fallback_module(
+        "Green IE & Sustainability",
+        _starter_data("Green IE & Sustainability"),
+    )
+    assert "Calculated_tCO2e" in sustainability["result"]
+    assert "Calculated total tCO2e" in sustainability["metrics"]
+    assert "emission factors" in sustainability["guardrail"].lower() or "emission factor" in sustainability["guardrail"].lower()
