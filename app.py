@@ -33,7 +33,32 @@ from workspace_persistence import ensure_workspace_state_db, load_user_workspace
 from shoir_visual_system import apply_shoir_design_system, render_workspace_status
 from shoir_live_visuals import discover_visual_tables
 from shoir_module_parity import render_universal_module_parity
-from shoir_tier_capabilities import MODULE_EXPLORER_TIERS, unique_modules
+# Startup compatibility guard: if Streamlit Cloud is pinned to a stale commit where the
+# tier-helper module or one of its public names is absent, the app still boots. The
+# canonical tier policy remains in industrial_platform.py and the shared helper when present.
+try:
+    from shoir_tier_capabilities import MODULE_EXPLORER_TIERS, unique_modules
+except ImportError:
+    MODULE_EXPLORER_TIERS = (
+        "All capabilities",
+        "Starter",
+        "Mid-Tier Pro",
+        "Professional",
+        "Enterprise",
+        "Enterprise Plus",
+        "Research Pack",
+    )
+
+    def unique_modules(modules):
+        """Fallback de-duplicator used only if the tier helper cannot be imported."""
+        seen = set()
+        result = []
+        for module in modules:
+            label = str(module or "").strip()
+            if label and label not in seen:
+                seen.add(label)
+                result.append(label)
+        return result
 from shoir_copilot_orchestrator import build_workflow_plan, recommend_module, run_orchestration, stage_copilot_decision
 from shoir_digital_thread import render_global_project_digital_thread
 from shoir_enterprise_services import render_enterprise_bridge
