@@ -2638,6 +2638,9 @@ def render_experience_shell(module: str, tier: str, username: str) -> None:
 def render_blank_module_studio(module: str, tier: str, username: str) -> None:
     import streamlit as st
 
+    # The shared result layer uses this marker to avoid showing a duplicate
+    # module playbook when this native fallback canvas already has one.
+    st.session_state["shoir_native_fallback_module_active"] = module
     ensure_experience_db()
     key = _safe_key(module)
     data_key = "sx_blank_data_" + key
