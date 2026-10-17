@@ -427,6 +427,18 @@ def _build_export_xlsx(module: str, df: pd.DataFrame, validation: dict[str, Any]
         ("Results Summary", results_df),
         ("Module Personalization", pd.DataFrame(profile_rows)),
     ]
+    playbook_record = st.session_state.get(f"module_playbook_result_{module_token(module)}")
+    if (
+        isinstance(playbook_record, dict)
+        and playbook_record.get("data_signature") == lightweight_frame_signature(df)
+        and isinstance(playbook_record.get("analysis", {}).get("result"), pd.DataFrame)
+    ):
+        tables.append(("Module-Specific Analysis", apply_display_labels(playbook_record["analysis"]["result"], profile)))
+        metrics = playbook_record["analysis"].get("metrics", {})
+        tables.append((
+            "Module Analysis Metrics",
+            pd.DataFrame([{"Metric": name, "Value": value} for name, value in metrics.items()]),
+        ))
     figures = [("Live Engineering Chart", figure)] if figure is not None else []
     return build_excel_report("Shoir-IE | " + profile["display_name"] + " | Universal Parity", tables, figures)
 
@@ -449,6 +461,27 @@ def _build_export_zip(
             for k, v in results.items()
         }
         zf.writestr(f"{safe}_results.json", json.dumps(serializable_results, indent=2, default=_json_default).encode("utf-8"))
+        playbook_record = st.session_state.get(f"module_playbook_result_{module_token(module)}")
+        if (
+            isinstance(playbook_record, dict)
+            and playbook_record.get("data_signature") == lightweight_frame_signature(df)
+            and isinstance(playbook_record.get("analysis", {}).get("result"), pd.DataFrame)
+        ):
+            analysis = playbook_record["analysis"]
+            zf.writestr(
+                f"{safe}_module_specific_analysis.csv",
+                apply_display_labels(analysis["result"], get_module_profile(st.session_state, module, str(st.session_state.get("current_user", "unknown")))).to_csv(index=False).encode("utf-8"),
+            )
+            zf.writestr(
+                f"{safe}_module_analysis_metrics.json",
+                json.dumps({
+                    "method": analysis.get("method"),
+                    "metrics": analysis.get("metrics", {}),
+                    "guardrail": analysis.get("guardrail"),
+                    "source_key": playbook_record.get("source_key"),
+                    "source_signature": playbook_record.get("data_signature"),
+                }, indent=2, ensure_ascii=False, default=_json_default).encode("utf-8"),
+            )
         zf.writestr(f"{safe}_universal_parity.xlsx", xlsx)
 
         if figure_json:
@@ -460,7 +493,7 @@ def _build_export_zip(
                 pass
 
         username = str(st.session_state.get("current_user", "unknown"))
-        profile = get_module_profile(st.session_state, module, username, valid_columns=list(df.columns))
+        profile = get_module_profile(st.session_state, module, username)
         zf.writestr(
             f"{safe}_module_profile.json",
             json.dumps(profile, indent=2, ensure_ascii=False, default=_json_default).encode("utf-8"),
@@ -749,6 +782,8 @@ def _render_results(module: str, keys: dict[str, str]) -> None:
                     playbook_analysis = analyze_fallback_module(module, result_df)
                     st.session_state[result_key] = {
                         "signature": result_signature,
+                        "data_signature": lightweight_frame_signature(result_df),
+                        "source_key": result_state_key,
                         "analysis": playbook_analysis,
                     }
                     cached_playbook = st.session_state[result_key]
