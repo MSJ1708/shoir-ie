@@ -74,7 +74,7 @@ def test_all_subscription_modules_are_catalogued_with_the_correct_tier():
     catalogue = _catalogue_entries(assignments)
 
     # Keep the tier progression and its Research Pack add-on boundary explicit.
-    assert [len(tier_lists[label]) for label in TIER_LABELS] == [12, 29, 35, 64, 68, 85]
+    assert [len(tier_lists[label]) for label in TIER_LABELS] == [12, 29, 35, 69, 74, 90]
 
     access_names = set().union(*(set(names) for names in tier_lists.values()))
     catalogue_names = set(catalogue)

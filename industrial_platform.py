@@ -78,6 +78,13 @@ PLATFORM_CATALOG = [
     {"tier":"Enterprise Plus","category":"Maintenance","name":"Predictive Maintenance Digital Twin","when":"Use telemetry trends or labeled failures to estimate maintenance risk and remaining-useful-life proxies.","example":"Score assets from vibration, temperature and runtime data and schedule inspection candidates."},
     {"tier":"Mid-Tier Pro","category":"Global Operations","name":"Localization & Multi-Currency","when":"Normalize financial values across currencies and maintain configurable regional trade-compliance rules.","example":"Convert facility costs to a reporting currency and flag routes requiring a compliance rule review."},
     {"tier":"Enterprise Plus","category":"Security","name":"Enterprise Security & Governance","when":"Manage policy, audit, API access, retention, workspace isolation and identity configuration.","example":"Review security posture, role assignments and auditable configuration changes."},
+
+    {"tier":"Enterprise","category":"Supply Chain Resilience","name":"Autonomous Global Supply Chain & Resilient Logistics Network","when":"Stress-test multi-supplier logistics networks against capacity loss, supplier risk, lead-time variation, carbon trade-offs and demand shocks.","example":"Edit suppliers and demand nodes, simulate an interruption, compare modeled allocations, visible shortage and Monte Carlo service distributions."},
+    {"tier":"Enterprise","category":"Circular Manufacturing","name":"Zero-Waste Closed-Loop Mega-Factory (Industrial Symbiosis Engine)","when":"Quantify material, water and heat recovery across an industrial site using editable process streams and reuse demand.","example":"Compare circularity and residual waste under different capture efficiencies, reuse demand and user-entered utility values."},
+    {"tier":"Enterprise","category":"Urban Systems","name":"Real-Time Urban Mobility & Smart Infrastructure Grid","when":"Explore aggregated urban demand, road/transit capacity, signal efficiency, delay and emissions proxies.","example":"Edit synthetic junction data, test peak demand and review modeled road and transit capacity trade-offs."},
+    {"tier":"Enterprise","category":"Humanitarian Logistics","name":"Fully Automated Emergency Response & Humanitarian Disaster Logistics System","when":"Model relief-stock allocation against aggregated humanitarian demand, urgency, depot capacity and disruption uncertainty.","example":"Test demand spikes and depot outages to reveal modeled aid coverage and shortages; local coordination remains authoritative."},
+    {"tier":"Enterprise Plus","category":"Industrial Digital Twin","name":"Autonomous Kinetic-Digital Twin (AKDT) for Industrial Logistics Resilience","when":"Stress-test an industrial digital-twin concept using synthetic asset telemetry, alternate capacity and edge-buffering assumptions.","example":"Simulate asset health and supplier disruption in an industrial sandbox. No live routing or controller access is performed."},
+    {"tier":"Enterprise","category":"Local Manufacturing Capability","name":"L-SIMS — Local Capability & Dynamic Industrial Readiness Simulator","when":"Map aggregated domestic manufacturing and repair capacity for generic industrial spare-part families and localization research.","example":"Compare local capacity, lead time, qualification confidence and monthly industrial demand to find capability gaps."},
 ]
 
 TIER_FEATURES = {
@@ -95,6 +102,11 @@ TIER_FEATURES = {
         "Carbon Accounting","MEIO Matrix","Fleet Routing","Production Planning & Control (PPC)",
     ],
     "Enterprise": [
+        "Autonomous Global Supply Chain & Resilient Logistics Network",
+        "Zero-Waste Closed-Loop Mega-Factory (Industrial Symbiosis Engine)",
+        "Real-Time Urban Mobility & Smart Infrastructure Grid",
+        "Fully Automated Emergency Response & Humanitarian Disaster Logistics System",
+        "L-SIMS — Local Capability & Dynamic Industrial Readiness Simulator",
         "Industrial Operating System",
         "Manufacturing Execution System","Industrial Simulation Lab","3D Factory Designer",
         "Industrial Connectivity Hub","Multi-Objective Optimization","Robust & Resilient Optimization",
@@ -105,6 +117,12 @@ TIER_FEATURES = {
         "AI Copilot","Monte Carlo Sim","Sensitivity Analysis","Digital Twin & Discrete-Event Simulation",
     ],
     "Enterprise Plus": [
+        "Autonomous Kinetic-Digital Twin (AKDT) for Industrial Logistics Resilience",
+        "Autonomous Global Supply Chain & Resilient Logistics Network",
+        "Zero-Waste Closed-Loop Mega-Factory (Industrial Symbiosis Engine)",
+        "Real-Time Urban Mobility & Smart Infrastructure Grid",
+        "Fully Automated Emergency Response & Humanitarian Disaster Logistics System",
+        "L-SIMS — Local Capability & Dynamic Industrial Readiness Simulator",
         "Advanced Engineering Copilot","Live Industrial Digital Twin","Enterprise Security & Governance",
         "Manufacturing Execution System","Industrial Simulation Lab","3D Factory Designer",
         "Industrial Connectivity Hub","Multi-Objective Optimization","Robust & Resilient Optimization",
@@ -1040,6 +1058,32 @@ def render_module(module: str, tier: str, username: str):
     if module == "Experiment Lab":
         from industrial_experience import render_research_workspace
         render_research_workspace(module, tier, username)
+        return
+
+    # Specialist resilience workspaces: route before generic import/activation.
+    if module == "Autonomous Global Supply Chain & Resilient Logistics Network":
+        from shoir_resilience_suite import render_resilience_module
+        render_resilience_module(module, tier, username)
+        return
+    if module == "Zero-Waste Closed-Loop Mega-Factory (Industrial Symbiosis Engine)":
+        from shoir_resilience_suite import render_resilience_module
+        render_resilience_module(module, tier, username)
+        return
+    if module == "Real-Time Urban Mobility & Smart Infrastructure Grid":
+        from shoir_resilience_suite import render_resilience_module
+        render_resilience_module(module, tier, username)
+        return
+    if module == "Fully Automated Emergency Response & Humanitarian Disaster Logistics System":
+        from shoir_resilience_suite import render_resilience_module
+        render_resilience_module(module, tier, username)
+        return
+    if module == "Autonomous Kinetic-Digital Twin (AKDT) for Industrial Logistics Resilience":
+        from shoir_resilience_suite import render_resilience_module
+        render_resilience_module(module, tier, username)
+        return
+    if module == "L-SIMS — Local Capability & Dynamic Industrial Readiness Simulator":
+        from shoir_resilience_suite import render_resilience_module
+        render_resilience_module(module, tier, username)
         return
 
     # The investor Control Center has its own scenario controls and should
