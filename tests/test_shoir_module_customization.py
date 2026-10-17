@@ -190,3 +190,24 @@ def test_customization_layer_is_connected_to_module_prepare_and_live_charts():
     assert "apply_display_labels(raw_df, profile)" in live_visuals
     assert 'profile.get("preferred_chart", "Auto")' in live_visuals
     assert "target_summary" in live_visuals
+
+
+
+def test_generic_module_fallbacks_start_with_domain_relevant_schemas():
+    from industrial_experience import _starter_data
+
+    cases = [
+        ("Quality Control, Six Sigma & Reliability", {"Part", "Measured_Value", "Lower_Spec", "Upper_Spec"}),
+        ("Predictive Maintenance Hub", {"Asset", "Temperature_C", "Vibration_mm_s", "Downtime_Hours"}),
+        ("Inventory Playback", {"SKU", "On_Hand_Units", "Daily_Demand_Units", "Lead_Time_Days"}),
+        ("Fleet Routing", {"Origin", "Destination", "Distance_km", "Vehicle_Capacity"}),
+        ("Advanced Planning & Scheduling", {"Work_Order", "Processing_Min", "Setup_Min", "Due_Offset_Hours"}),
+        ("Industrial Sustainability & LCA", {"Activity", "Scope", "Emission_Factor", "Baseline_tCO2e"}),
+        ("Localization & Multi-Currency", {"Currency", "Region_From", "Region_To"}),
+        ("Experiment Engine", {"Scenario", "Demand_Units", "Cost_SAR", "Service_pct"}),
+        ("Research AI", {"Effect_Estimate", "Standard_Error", "Confidence_Level"}),
+    ]
+    for module, required_columns in cases:
+        starter = _starter_data(module)
+        assert required_columns <= set(starter.columns), module
+        assert len(starter) >= 3, module
