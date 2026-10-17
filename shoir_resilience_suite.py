@@ -624,6 +624,7 @@ def _render_transport(module: str, tier: str, username: str, *, humanitarian: bo
             recovery = st.slider("Alternative capacity contribution (%)", 0, 100, 65, 5, key=_state_key(module, "recovery"))
         health = score_asset_health(assets, telemetry_dropout_pct=telemetry_dropout, disruption_pct=disruption, mode="Edge" if edge_mode else "Cloud")
         asset_results = health["results"]
+        st.session_state["akdt_asset_health_df"] = asset_results.copy(deep=True)
         _metric(st, [
             ("Asset health index", f"{health['metrics']['asset_health_index_pct']:.1f}%"),
             ("High-risk flags", str(health["metrics"]["high_risk_assets"])),
@@ -642,6 +643,8 @@ def _render_transport(module: str, tier: str, username: str, *, humanitarian: bo
             demands = _get_editor(st, module, "demands", demand_defaults)
         disabled = st.selectbox("Simulated unavailable supplier", ["None"] + suppliers.get("Supplier", pd.Series(dtype=str)).astype(str).tolist(), key=_state_key(module, "disabled_supplier"))
         model = solve_transport_allocation(suppliers, demands, disabled_suppliers=[] if disabled == "None" else [disabled], capacity_scale=max(0.1, 1.0 - disruption / 100.0) * (1.0 + recovery / 100.0 * 0.25))
+        st.session_state["akdt_supply_routes_df"] = model["routes"].copy(deep=True)
+        st.session_state["akdt_supply_shortages_df"] = model["shortages"].copy(deep=True)
         _render_transport_results(st, px, go, module, model, prefix="AKDT")
         _render_snapshot_actions(st, module, username, {"assets": assets, "suppliers": suppliers, "demands": demands}, {"asset_results": asset_results, "routes": model["routes"], "shortages": model["shortages"]})
         with st.expander("Method, limits and integration readiness"):
@@ -682,6 +685,14 @@ def _render_transport(module: str, tier: str, username: str, *, humanitarian: bo
         capacity_scale=1.0 - capacity_loss / 100.0, demand_scale=max(0.0, 1.0 + demand_shock / 100.0),
         cost_weight=cost_weight, lead_weight=lead_weight, risk_weight=risk_weight, carbon_weight=carbon_weight,
     )
+    if humanitarian:
+        st.session_state["humanitarian_allocations_df"] = model["routes"].copy(deep=True)
+        st.session_state["humanitarian_gaps_df"] = model["shortages"].copy(deep=True)
+        st.session_state["humanitarian_depot_utilization_df"] = model["supplier_summary"].copy(deep=True)
+    else:
+        st.session_state["resilience_global_supply_routes_df"] = model["routes"].copy(deep=True)
+        st.session_state["resilience_global_supply_shortages_df"] = model["shortages"].copy(deep=True)
+        st.session_state["resilience_global_supply_capacity_df"] = model["supplier_summary"].copy(deep=True)
     _render_transport_results(st, px, go, module, model, prefix="Relief" if humanitarian else "Network")
     run_tab, method_tab = st.tabs(["Scenario robustness", "Method & assumptions"])
     with run_tab:
@@ -782,6 +793,7 @@ def _render_closed_loop(module: str, username: str) -> None:
     with c6:
         disposal_cost = st.number_input("Waste disposal cost (SAR/kg)", min_value=0.0, max_value=100000.0, value=0.75, step=0.05, key=_state_key(module, "disposal_cost"))
     analysis = analyze_closed_loop(streams, material_capture_pct=material, heat_capture_pct=heat, water_capture_pct=water, electricity_value_per_kwh=energy_price, water_value_per_m3=water_price, disposal_cost_per_kg=disposal_cost)
+    st.session_state["industrial_symbiosis_result_df"] = analysis["results"].copy(deep=True)
     m = analysis["metrics"]
     _metric(st, [
         ("Modeled material circularity", f"{m['material_circularity_pct']:.1f}%"),
@@ -833,6 +845,7 @@ def _render_urban_mobility(module: str, username: str) -> None:
         demand_shock = st.slider("Demand peak / dip (%)", -30, 100, 0, 5, key=_state_key(module, "mobility_shock"))
     analysis = analyze_urban_mobility(junctions, car_mode_share_pct=car_share, signal_efficiency_gain_pct=signal_gain, transit_capacity_gain_pct=transit_gain, demand_shock_pct=demand_shock)
     m, result = analysis["metrics"], analysis["results"]
+    st.session_state["urban_mobility_result_df"] = result.copy(deep=True)
     _metric(st, [
         ("Demand served", f"{m['served_demand_pct']:.1f}%"),
         ("Average modeled delay", f"{m['average_delay_min']:.1f} min"),
@@ -880,6 +893,9 @@ def _render_l_sims(module: str, username: str) -> None:
         conf_floor = st.slider("Qualification-confidence filter (%)", 0, 100, 70, 5, key=_state_key(module, "confidence_floor"))
     excluded = suppliers.loc[_number(suppliers, "Qualification confidence %") < conf_floor, "Supplier"].astype(str).tolist() if "Qualification confidence %" in suppliers else []
     analysis = analyze_local_capability(suppliers, demands, disabled_suppliers=excluded, capacity_scale=capacity_scale, demand_scale=demand_scale)
+    st.session_state["lsims_local_allocations_df"] = analysis["routes"].copy(deep=True)
+    st.session_state["lsims_local_gaps_df"] = analysis["shortages"].copy(deep=True)
+    st.session_state["lsims_supplier_capacity_df"] = analysis["supplier_summary"].copy(deep=True)
     m = analysis["metrics"]
     _metric(st, [
         ("Monthly industrial demand fulfilled", f"{m['demand_fulfilled_pct']:.1f}%"),
