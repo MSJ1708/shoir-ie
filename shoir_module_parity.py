@@ -33,7 +33,6 @@ from shoir_performance import (
     sample_preview,
 )
 from shoir_module_customization import (
-    apply_display_labels,
     display_field_label,
     evaluate_kpi_target,
     get_module_profile,
