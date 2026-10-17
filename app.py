@@ -31,7 +31,7 @@ from research_experiment_engine import apply_evidence_conflict
 from industrial_excellence_hub import render_platform_excellence_hub
 from workspace_persistence import ensure_workspace_state_db, load_user_workspace, save_user_workspace
 from shoir_visual_system import apply_shoir_design_system, render_workspace_status
-from shoir_live_visuals import render_live_visualization_studio, discover_visual_tables
+from shoir_live_visuals import discover_visual_tables
 from shoir_module_parity import render_universal_module_parity
 from shoir_tier_capabilities import MODULE_EXPLORER_TIERS, unique_modules
 from shoir_copilot_orchestrator import build_workflow_plan, recommend_module, run_orchestration, stage_copilot_decision
@@ -9562,16 +9562,6 @@ else:
             st.error(f"{mod} encountered a recoverable rendering issue. The rest of Shoir-IE remains available.")
             with st.expander("Technical diagnostic"):
                 st.code(f"{type(exc).__name__}: {exc}")
-        else:
-            # Give platform modules a consistent chart surface based on real
-            # result tables. If no data exists yet, the studio explains this
-            # and shows a workflow diagram explicitly labelled as non-measurement.
-            try:
-                render_live_visualization_studio(str(mod), expanded=True)
-            except Exception as visual_exc:
-                st.warning("The live chart studio could not render; the module's native results remain available.")
-                with st.expander("Chart studio diagnostic"):
-                    st.code(f"{type(visual_exc).__name__}: {visual_exc}")
 
     # =========================================================
 # CARBON ACCOUNTING & NET-ZERO STUDIO (Astonishing & Stunning)
