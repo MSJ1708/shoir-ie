@@ -109,3 +109,26 @@ def test_platform_modules_have_a_shared_live_visualization_surface():
     assert "render_industrial_module(" in platform_dispatcher
     assert "render_live_visualization_studio(str(mod), expanded=True)" in platform_dispatcher
     assert "Chart studio diagnostic" in platform_dispatcher
+
+
+
+def test_experiment_lab_renderer_is_reachable_and_charted():
+    platform_source = (APP_PATH.parent / "industrial_platform.py").read_text(encoding="utf-8")
+    dispatcher_start = platform_source.index("def render_module(")
+    experiment_branch = platform_source.index('elif module=="Experiment Lab":', dispatcher_start)
+
+    # Regression guard for the original defect: no earlier Experiment Lab
+    # special case may return before the dedicated renderer branch is reached.
+    bypass = platform_source.find(
+        'if module == "Experiment Lab":',
+        dispatcher_start,
+        experiment_branch,
+    )
+    assert bypass == -1
+    renderer = platform_source[experiment_branch:platform_source.index(
+        'elif module=="Industrial Control Center":', experiment_branch
+    )]
+    assert "analyze_experiment_scenarios(" in renderer
+    assert "st.plotly_chart(" in renderer
+    assert "Analyze & Save Experiment" in renderer
+    assert "Saved experiment history" in renderer
