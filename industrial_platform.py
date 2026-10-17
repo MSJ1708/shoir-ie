@@ -779,7 +779,7 @@ MODULE_TABLE_KEYS = {
     "Multi-Objective Optimization":["multiobj_df","multiobj_result","pareto","optimization_pareto_df","optimization_result_df"],
     "Robust & Resilient Optimization":["robust_df","robust_result_df"],
     "Engineering Model Registry":["model_registry_df"],
-    "Experiment Lab":["experiment_df","experiment_doe_design","experiment_factorial_effects","experiment_factorial_summary","experiment_mc_results","experiment_mc_result_summary","experiment_bootstrap_results","experiment_bootstrap_summary","experiment_replication_summary","experiment_sensitivity_results"],
+    "Experiment Lab":["research_scenario_lab_matrix","experiment_df","experiment_doe_design","experiment_factorial_effects","experiment_factorial_summary","experiment_mc_results","experiment_mc_result_summary","experiment_bootstrap_results","experiment_bootstrap_summary","experiment_replication_summary","experiment_sensitivity_results"],
     "Industrial Data Platform":[],
     "Capital Investment & Engineering Economics":["capex_df"],
     "Workforce Engineering":["work_elements","skills_df"],
