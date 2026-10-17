@@ -1,6 +1,6 @@
 import pandas as pd
 
-from shoir_live_visuals import _auto_chart_choice, _make_figure
+from shoir_live_visuals import _auto_chart_choice, _make_figure, _module_widget_token
 
 
 def test_extended_engineering_visualizations_render():
@@ -148,3 +148,18 @@ def test_visualization_contract_report_requires_no_cross_module_data():
     assert list(report.columns) == [
         "Module", "Table", "State Key", "Rows", "Columns", "Graphs", "Status", "Primary Chart"
     ]
+
+
+
+def test_module_widget_tokens_are_stable_and_isolated():
+    modules = [
+        "Experiment Lab",
+        "Facility Layout & Warehousing",
+        "Predictive Maintenance Hub",
+        "Quality Control, Six Sigma & Reliability",
+        "Research AI",
+    ]
+    first = [_module_widget_token(module) for module in modules]
+    assert first == [_module_widget_token(module) for module in modules]
+    assert len(set(first)) == len(modules)
+    assert all(len(token) == 12 for token in first)
