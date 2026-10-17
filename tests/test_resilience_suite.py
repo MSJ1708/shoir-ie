@@ -16,6 +16,7 @@ from shoir_resilience_suite import (
     analyze_local_capability,
     analyze_urban_mobility,
     list_resilience_runs,
+    load_resilience_run,
     persist_resilience_run,
     score_asset_health,
     simulate_disruption_scenarios,
@@ -113,3 +114,6 @@ def test_run_snapshots_are_owner_and_module_scoped(tmp_path):
     assert len(list_resilience_runs(GLOBAL_SUPPLY, "Alice", db_path=path)) == 1
     assert list_resilience_runs(GLOBAL_SUPPLY, "Bob", db_path=path).empty
     assert list_resilience_runs(HUMANITARIAN, "Alice", db_path=path).empty
+    assert load_resilience_run(saved["run_id"], GLOBAL_SUPPLY, "Alice", db_path=path)["inputs"]["inputs"][0]["value"] == 1.0
+    assert load_resilience_run(saved["run_id"], GLOBAL_SUPPLY, "Bob", db_path=path) is None
+    assert load_resilience_run(saved["run_id"], HUMANITARIAN, "Alice", db_path=path) is None
