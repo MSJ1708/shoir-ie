@@ -209,13 +209,28 @@ def _import_dataset(upload: Any) -> tuple[dict[str,pd.DataFrame], str]:
     name = str(upload.name)
     try:
         from shoir_excel_studio import process_uploaded_workbook
+    except ModuleNotFoundError as exc:
+        # Raw-parser compatibility fallback is permitted only if this optional
+        # module itself is absent; do not hide its broken dependencies.
+        if exc.name != "shoir_excel_studio":
+            raise
+        process_uploaded_workbook = None
+
+    if process_uploaded_workbook is not None:
         result = process_uploaded_workbook(raw, name)
         sheets = result.get("cleaned_sheets") or result.get("raw_sheets") or {}
-        if sheets:
-            digest = str(result.get("signature") or "")
-            return {str(k): v.copy(deep=True) for k,v in sheets.items() if isinstance(v,pd.DataFrame) and not v.empty}, digest
-    except Exception:
-        pass
+        frames = {
+            str(k): v.copy(deep=True)
+            for k, v in sheets.items()
+            if isinstance(v, pd.DataFrame) and not v.empty
+        }
+        if not frames:
+            raise ValueError(
+                f"The workbook processor returned no non-empty worksheets for {name!r}. "
+                "Check the file's sheets and headers, then try importing it again."
+            )
+        return frames, str(result.get("signature") or "")
+
     lower=name.lower()
     if lower.endswith(".csv"):
         return {"Data":pd.read_csv(io.BytesIO(raw))},""
