@@ -696,7 +696,7 @@ def render_enterprise_bridge(module: str, tier: str, username: str) -> None:
                 if selected_workspace:
                     try:
                         from shoir_workspace_rbac import list_workspace_members
-                        members = list_workspace_members(selected_workspace, username)
+                        members = list_workspace_members(selected_workspace, username, allow_draft=False)
                     except PermissionError as exc:
                         st.info(f"Workspace membership list is restricted: {exc}")
                     except Exception as exc:
