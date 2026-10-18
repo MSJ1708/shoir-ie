@@ -127,6 +127,7 @@ Deno.serve(async(req)=>{
   if(action==="workspace_save"){await getSession(String(body.token),String(body.username));const {error}=await supabase.from("shoir_workspace_states").upsert({username_lc:String(body.username).trim().toLowerCase(),state_json:String(body.state_json||"{}"),updated_at:new Date().toISOString()},{onConflict:"username_lc"});if(error)throw error;return response({ok:true});}
   if(action==="renew_request"){
    const row=await getSession(String(body.token),String(body.username),"either");
+   if(row.username_lc==="sho"&&row.role==="Enterprise Admin")return response({error:"Administrator subscription is not eligible for customer renewal."},403);
    const transactionId=String(body.transaction_id||"").trim();
    if(!transactionId)return response({error:"A transaction/payment reference is required for renewal review."},400);
    const proofPath=await storePaymentProof(body);
