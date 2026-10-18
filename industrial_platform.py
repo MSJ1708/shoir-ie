@@ -746,8 +746,30 @@ def export_pptx(title: str, tables: Sequence[Tuple[str,pd.DataFrame]], figures: 
             for j,val in enumerate(row): table.cell(i,j).text=str(val)
     b=io.BytesIO(); prs.save(b); return b.getvalue()
 
-def render_export_bar(module: str, tables: Sequence[Tuple[str,pd.DataFrame]], figures: Sequence[Tuple[str,Any]]=(), tier: str="Starter", username: str="unknown"):
+def _normalize_render_export_args(figures, tier, username):
+    """Accept the legacy (module, tables, tier, username) calling convention safely.
+
+    The export function originally placed figures before tier. A large set of
+    existing module renderers still pass tier as the third positional argument.
+    Without normalization, the tier string is treated as a figure list, while
+    export entitlement checks silently fall back to Starter.
+    """
+    if isinstance(figures, str):
+        legacy_tier = figures
+        # When a fourth positional argument was supplied, Python places that
+        # username in tier. A keyword username remains in username.
+        if tier is not None:
+            username = tier
+        figures = ()
+        tier = legacy_tier
+    elif tier is None:
+        tier = "Starter"
+    return figures, str(tier or "Starter"), str(username or "unknown")
+
+
+def render_export_bar(module: str, tables: Sequence[Tuple[str,pd.DataFrame]], figures: Sequence[Tuple[str,Any]]=(), tier: Optional[str]=None, username: str="unknown"):
     import streamlit as st
+    figures, tier, username = _normalize_render_export_args(figures, tier, username)
     from shoir_upgrade import build_excel_report
     if not tables: return
     st.markdown("---")
