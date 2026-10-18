@@ -60,6 +60,7 @@ def main() -> int:
                     page = browser.new_page(viewport=viewport)
                     page_errors: list[str] = []
                     console_errors: list[str] = []
+                    failed_http_responses: list[dict] = []
                     page.on("pageerror", lambda error: page_errors.append(str(error)))
                     page.on(
                         "console",
@@ -67,6 +68,16 @@ def main() -> int:
                         if message.type == "error" and len(console_errors) < 20
                         else None,
                     )
+
+                    def record_failed_response(response):
+                        if response.status >= 400 and len(failed_http_responses) < 50:
+                            failed_http_responses.append({
+                                "status": response.status,
+                                "url": response.url,
+                                "resource_type": response.request.resource_type,
+                            })
+
+                    page.on("response", record_failed_response)
                     item = {
                         "viewport": label,
                         "width": viewport["width"],
@@ -225,6 +236,7 @@ def main() -> int:
                             )
                         except Exception:
                             pass
+                    item["failed_http_responses"] = failed_http_responses
                     item["result"] = "PASS" if not item["failure_reasons"] else "FAIL"
                     overall_ok = overall_ok and item["result"] == "PASS"
                     report["viewports"].append(item)
