@@ -603,6 +603,8 @@ def render_industrial_operating_system(tier="Enterprise",username="unknown"):
                             st.session_state["os_capacity_impl_cost"] = float(loaded["inputs"]["implementation_cost"])
                             st.session_state["os_capacity_data_source"] = str(loaded["data_source"])
                             st.session_state["os_capacity_study_name"] = str(loaded["study_name"])
+                            st.session_state["os_capacity_decision"] = str(loaded["decision"])
+                            st.session_state["os_capacity_rationale"] = str(loaded["rationale"])
                             st.session_state["os_capacity_loaded_study"] = loaded
                             st.session_state.pop("os_capacity_station_editor", None)
                             st.success(f"Loaded {loaded['study_id']}. Inputs and calculation version were restored.")
@@ -700,23 +702,32 @@ def render_industrial_operating_system(tier="Enterprise",username="unknown"):
         demand_col, yield_col = st.columns(2)
         with demand_col:
             demand_units = st.number_input(
-                "Demand (good units/shift)", min_value=0.0, value=340.0, step=10.0,
+                "Demand (good units/shift)", min_value=0.0, step=10.0,
                 key="os_capacity_demand",
                 help="Set the required good output per shift. Zero is permitted for capacity-only studies.",
             )
         with yield_col:
             yield_pct = st.number_input(
-                "Overall first-pass yield (%)", min_value=0.0, max_value=100.0, value=96.0, step=0.5,
+                "Overall first-pass yield (%)", min_value=0.0, max_value=100.0, step=0.5,
                 key="os_capacity_yield",
                 help="Applied once to the line's lowest calculated station capacity.",
             )
         st.markdown("#### 2 · Source, assumptions, and decision")
+        st.session_state.setdefault("os_capacity_data_source", "Synthetic demonstration data — replace with measured plant data")
+        st.session_state.setdefault("os_capacity_study_name", "Production Capacity Recovery")
+        st.session_state.setdefault("os_capacity_demand", 340.0)
+        st.session_state.setdefault("os_capacity_yield", 96.0)
+        st.session_state.setdefault("os_capacity_shifts_year", 0.0)
+        st.session_state.setdefault("os_capacity_unit_value", 0.0)
+        st.session_state.setdefault("os_capacity_impl_cost", 0.0)
+        st.session_state.setdefault("os_capacity_decision", "Investigate bottleneck")
+        st.session_state.setdefault("os_capacity_rationale", "")
         st.text_input(
             "Data source / reference",
             key="os_capacity_data_source",
             help="Use a workbook/source reference or keep the synthetic-data notice until real inputs are supplied.",
         )
-        st.text_input("Study name", value="Production Capacity Recovery", key="os_capacity_study_name")
+        st.text_input("Study name", key="os_capacity_study_name")
         decision = st.selectbox(
             "Current decision status",
             ["Investigate bottleneck", "Run controlled pilot", "Adopt after operational validation", "Reject scenario", "Other"],
@@ -783,11 +794,11 @@ def render_industrial_operating_system(tier="Enterprise",username="unknown"):
             st.caption("Financial values remain estimates until operational outcomes and the agreed cost/value basis are measured. Blank or zero assumptions are not silently replaced with industry averages.")
             e1, e2, e3 = st.columns(3)
             with e1:
-                shifts_per_year = st.number_input("Operating shifts/year", min_value=0.0, value=0.0, step=25.0, key="os_capacity_shifts_year")
+                shifts_per_year = st.number_input("Operating shifts/year", min_value=0.0, step=25.0, key="os_capacity_shifts_year")
             with e2:
-                unit_value = st.number_input("Contribution / avoided cost per additional good unit (SAR)", min_value=0.0, value=0.0, step=1.0, key="os_capacity_unit_value")
+                unit_value = st.number_input("Contribution / avoided cost per additional good unit (SAR)", min_value=0.0, step=1.0, key="os_capacity_unit_value")
             with e3:
-                implementation_cost = st.number_input("Implementation cost (SAR)", min_value=0.0, value=0.0, step=1000.0, key="os_capacity_impl_cost")
+                implementation_cost = st.number_input("Implementation cost (SAR)", min_value=0.0, step=1000.0, key="os_capacity_impl_cost")
             if shifts_per_year > 0 and unit_value > 0:
                 sensitivity = calculate_capacity_value_sensitivity(
                     result["delta"]["additional_good_units_per_shift"], shifts_per_year, unit_value, implementation_cost
