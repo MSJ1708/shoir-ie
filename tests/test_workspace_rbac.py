@@ -1,3 +1,4 @@
+import sqlite3
 import pandas as pd
 import pytest
 import streamlit as st
@@ -158,3 +159,27 @@ def test_workspace_membership_requires_authenticated_matching_identity_and_role(
     state = _session(monkeypatch, "alice", role="User")
     with pytest.raises(PermissionError, match="does not match"):
         list_workspace_members("Plant-D", "bob", db)
+
+def test_corrupt_legacy_membership_fails_closed(tmp_path, monkeypatch):
+    _session(monkeypatch, "alice")
+    db = str(tmp_path / "corrupt-members.db")
+    # The historical table's primary key is case-sensitive, so old unsafe UI
+    # writes could have created duplicate logical identities such as Alice/alice.
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            """CREATE TABLE workspace_members(
+                workspace TEXT NOT NULL, username TEXT NOT NULL, role TEXT NOT NULL,
+                updated_at TEXT NOT NULL, PRIMARY KEY(workspace, username)
+            )"""
+        )
+        conn.executemany(
+            "INSERT INTO workspace_members(workspace,username,role,updated_at) VALUES(?,?,?,?)",
+            [
+                ("Plant-E", "alice", "Owner", "now"),
+                ("Plant-E", "Alice", "Viewer", "now"),
+            ],
+        )
+        conn.commit()
+    with pytest.raises(PermissionError, match="duplicate usernames"):
+        list_workspace_members("Plant-E", "alice", db)
+
