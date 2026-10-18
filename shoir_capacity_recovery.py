@@ -34,6 +34,10 @@ def validate_production_events(events: pd.DataFrame) -> tuple[pd.DataFrame, dict
     warnings: list[str] = []
     if events.columns.duplicated().any():
         errors.append("Duplicate column names are not allowed.")
+        return events.copy(deep=True), {
+            "valid": False, "errors": errors, "warnings": warnings,
+            "rows": int(len(events)), "required_columns": list(REQUIRED_COLUMNS),
+        }
     missing = [column for column in REQUIRED_COLUMNS if column not in events.columns]
     if missing:
         errors.extend(f"Missing required column: {column}" for column in missing)
