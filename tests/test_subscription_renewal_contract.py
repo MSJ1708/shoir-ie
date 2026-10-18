@@ -16,6 +16,10 @@ PAYMENT_PROOF_MIGRATION = (
     ROOT / "supabase" / "migrations" /
     "20261018204217_private_subscription_payment_proofs.sql"
 ).read_text(encoding="utf-8")
+PAYMENT_PROOF_RLS_MIGRATION = (
+    ROOT / "supabase" / "migrations" /
+    "20261018204857_restrict_payment_proof_storage_to_server.sql"
+).read_text(encoding="utf-8")
 
 
 def test_expired_login_enters_renewal_only_flow():
@@ -80,6 +84,9 @@ def test_payment_proofs_are_private_and_server_reviewed():
     assert 'Payment proof content does not match its declared file type.' in EDGE_SOURCE
     assert 'public = false' in PAYMENT_PROOF_MIGRATION
     assert 'file_size_limit = 524288' in PAYMENT_PROOF_MIGRATION
+    assert 'AS RESTRICTIVE' in PAYMENT_PROOF_RLS_MIGRATION
+    assert "bucket_id <> 'subscription-payment-proofs'" in PAYMENT_PROOF_RLS_MIGRATION
+    assert 'WITH CHECK (bucket_id <> ' + "'subscription-payment-proofs'" + ')' in PAYMENT_PROOF_RLS_MIGRATION
     assert "USING (false) WITH CHECK (false)" in PLATFORM_RLS_MIGRATION
     for table in (
         "shoir_platform_artifacts",
