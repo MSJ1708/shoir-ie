@@ -1888,7 +1888,7 @@ def security_access_check(username: str, action: str, workspace: str = "default"
     admin_actions = {
         "approve", "manage_users", "manage_roles", "change_permissions",
         "security_policy", "admin", "delete_user", "delete_workspace",
-        "manage_workspace_members",
+        "manage_workspace_members", "view_audit_log",
     }
 
     normalized_role = re.sub(r"\s+", " ", role.casefold()).strip()
