@@ -77,6 +77,7 @@ def test_payment_proofs_are_private_and_server_reviewed():
     assert 'createSignedUrl(objectPath,300)' in EDGE_SOURCE
     assert 'await adminSession(String(body.username),String(body.token))' in EDGE_SOURCE
     assert 'MAX_PAYMENT_PROOF_BYTES = 512 * 1024' in EDGE_SOURCE
+    assert 'Payment proof content does not match its declared file type.' in EDGE_SOURCE
     assert 'public = false' in PAYMENT_PROOF_MIGRATION
     assert 'file_size_limit = 524288' in PAYMENT_PROOF_MIGRATION
     assert "USING (false) WITH CHECK (false)" in PLATFORM_RLS_MIGRATION
