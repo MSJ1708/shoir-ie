@@ -438,12 +438,28 @@ def _file_to_frames(upload: Any) -> dict[str, pd.DataFrame]:
     name = str(upload.name)
     try:
         from shoir_excel_studio import process_uploaded_workbook
+    except ModuleNotFoundError as exc:
+        # Fall back only when the optional processor module itself is absent.
+        # A broken processor or missing transitive dependency must be visible.
+        if exc.name != "shoir_excel_studio":
+            raise
+        process_uploaded_workbook = None
+
+    if process_uploaded_workbook is not None:
         result = process_uploaded_workbook(raw, name)
         sheets = result.get("cleaned_sheets") or result.get("raw_sheets") or {}
-        if sheets:
-            return {str(k): v.copy(deep=True) for k,v in sheets.items() if isinstance(v, pd.DataFrame) and not v.empty}
-    except Exception:
-        pass
+        frames = {
+            str(k): v.copy(deep=True)
+            for k, v in sheets.items()
+            if isinstance(v, pd.DataFrame) and not v.empty
+        }
+        if not frames:
+            raise ValueError(
+                f"The workbook processor returned no non-empty worksheets for {name!r}. "
+                "Check the file's sheets and headers, then try importing it again."
+            )
+        return frames
+
     lower = name.lower()
     if lower.endswith(".csv"):
         return {"Data": pd.read_csv(io.BytesIO(raw))}
