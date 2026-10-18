@@ -1922,27 +1922,96 @@ def enforce_action_gate(
 
 
 def security_maturity_status(username: str, workspace: str = "default") -> pd.DataFrame:
-    """Report implementation maturity without overstating provider-dependent controls."""
-    policy = security_policy(username, workspace)
+    """Summarize configured controls without presenting configuration as verification."""
+    policy_available = True
     try:
-        import streamlit as st
-        role_present = bool(st.session_state.get("current_role") or st.session_state.get("role"))
-        mfa_verified = bool(st.session_state.get("mfa_verified") or st.session_state.get("auth_mfa_verified"))
+        policy = security_policy(username, workspace)
     except Exception:
+        policy = {}
+        policy_available = False
+
+    try:
+        state = st.session_state
+        session_user = str(state.get("current_user") or "").strip()
+        authenticated = bool(state.get("authenticated")) and bool(session_user)
+        role_present = bool(
+            state.get("user_role") or state.get("current_role") or state.get("role")
+        )
+        mfa_verified = bool(
+            state.get("mfa_verified")
+            or state.get("auth_mfa_verified")
+            or state.get("mfa_challenge_verified")
+        )
+    except Exception:
+        authenticated = False
         role_present = False
         mfa_verified = False
-    cloud = _remote()
+
+    try:
+        from durable_account_store import durable_backend_configured
+        cloud_configured = bool(durable_backend_configured() or postgres_backend_configured())
+    except Exception:
+        try:
+            cloud_configured = bool(postgres_backend_configured())
+        except Exception:
+            cloud_configured = False
+
+    if not policy_available:
+        oidc_state = "Policy unavailable"
+        mfa_state = "Policy unavailable"
+    else:
+        oidc_state = "Configured" if bool(policy.get("oidc_enabled")) else "Not configured"
+        if not bool(policy.get("require_mfa")):
+            mfa_state = "Not configured"
+        elif authenticated and mfa_verified:
+            mfa_state = "Session verified"
+        else:
+            mfa_state = "Required / unverified"
+
     rows = [
-        {"Control":"RBAC","State":"Verified" if role_present else "Configured","Evidence":"Active workspace role." if role_present else "Role model is present; runtime role not observed."},
-        {"Control":"Workspace isolation","State":"Verified","Evidence":"Enterprise records are keyed by user + workspace."},
-        {"Control":"Audit / artifacts","State":"Verified","Evidence":"Durable artifact and audit stores are available."},
-        {"Control":"Cloud persistence","State":"Connected" if cloud else "Configured","Evidence":"Managed persistence configuration."},
-        {"Control":"SSO / OIDC","State":"Connected" if bool(policy.get("oidc_enabled")) else "Configured","Evidence":"Provider policy flag; runtime provider enforcement is external."},
-        {"Control":"MFA","State":"Connected" if bool(policy.get("require_mfa")) and mfa_verified else ("Configured" if bool(policy.get("require_mfa")) else "Not configured"),"Evidence":"Session verification is checked; secrets are never displayed."},
-        {"Control":"Secure uploads","State":"Verified","Evidence":"Extension, size, archive traversal and signature checks."},
-        {"Control":"Secrets","State":"Configured","Evidence":"Connector credentials use references rather than stored secret values."},
+        {
+            "Control": "RBAC",
+            "State": "Session role present" if authenticated and role_present else "Not verified",
+            "Evidence": "Account role exists in the current authenticated session; complete per-route enforcement remains separately unverified.",
+        },
+        {
+            "Control": "Workspace isolation",
+            "State": "Partial",
+            "Evidence": "Records use a user + workspace key. Exhaustive cross-user/cross-workspace negative authorization tests and shared-workspace membership enforcement are not established by this status check.",
+        },
+        {
+            "Control": "Audit / artifacts",
+            "State": "Available",
+            "Evidence": "Artifact and audit store functions are present; durable-backend recovery, write authorization and retention behavior are not independently verified here.",
+        },
+        {
+            "Control": "Cloud persistence",
+            "State": "Configured" if cloud_configured else "Local only",
+            "Evidence": "Backend configuration is detected; a successful live write/read and restart-recovery check is not performed by this status check.",
+        },
+        {
+            "Control": "SSO / OIDC",
+            "State": oidc_state,
+            "Evidence": "The workspace policy flag is configuration only; identity-provider handshake and enforcement are external and have not been verified here.",
+        },
+        {
+            "Control": "MFA",
+            "State": mfa_state,
+            "Evidence": "The current session flag is observed; this status does not independently validate a second-factor provider or replay resistance.",
+        },
+        {
+            "Control": "Secure uploads",
+            "State": "Checks present",
+            "Evidence": "Extension, size, archive/path and signature checks exist; this is not a complete upload-security audit or certification.",
+        },
+        {
+            "Control": "Secrets",
+            "State": "Configured",
+            "Evidence": "Some connector flows use credential references; comprehensive storage, access, rotation and redaction verification remains open.",
+        },
     ]
     return pd.DataFrame(rows)
+
 def security_policy(username: str, workspace: str = "default") -> dict[str, Any]:
     ensure_enterprise_schema()
     wid = workspace_key(username, workspace)
