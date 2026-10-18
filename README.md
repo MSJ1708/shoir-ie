@@ -61,6 +61,13 @@ Learning / Improvement
 
 The differentiator is **integration and traceability**, not simply the number of modules.
 
+## A complete flagship workflow: bottleneck → recovery → verification
+
+Shoir-IE's Industrial Operating System includes a **Production Bottleneck & Capacity Recovery Study** rather than asking users to stitch together disconnected calculators. Engineers can map existing CSV/Excel columns, validate station capacities and assumptions, compare an explicitly edited recovery scenario, inspect the limiting station, export the result set, and save a versioned, hash-identified study. When operations later supply actual good output and a measurement/source reference, the study compares the observed output with its scenario estimate under an explicit tolerance.
+
+The calculation is a transparent deterministic capacity screen—not a calibrated factory simulation or guaranteed throughput forecast. Its financial sensitivity uses user-supplied shifts, unit contribution/avoided cost and implementation cost, and is labelled as an estimate until outcomes are measured. A hash makes a study payload identifiable; it does not independently authenticate the plant data.
+
+
 ---
 
 ## 🚀 Capability map
