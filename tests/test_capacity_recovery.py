@@ -97,6 +97,8 @@ def test_yield_rejects_out_of_range_or_nonfinite_values(yield_pct):
 )
 def test_station_inputs_reject_invalid_values(column, value):
     stations = reference_stations()
+    # Keep the fixture assignable on modern pandas even for fractional / NaN cases.
+    stations[column] = stations[column].astype(float)
     stations.loc[0, column] = value
     with pytest.raises(ValueError):
         analyze_capacity_recovery(stations, 70)
