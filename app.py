@@ -1330,8 +1330,9 @@ if st.session_state.get("renewal_mode") and not st.session_state.get("current_us
         _renew_qr_image = Image.open("stc_pay_qr.png")
         st.image(_renew_qr_image, caption="STC Pay payment QR code", width=230)
     except Exception:
-        st.info("The payment QR image is unavailable in this deployment. Use an approved payment method and include your transaction reference or receipt.")
+        st.info("The payment QR image is unavailable in this deployment. Contact the administrator for current STC Pay payment instructions before submitting a renewal.")
     st.caption("Keep your transaction reference and receipt private. Upload only the proof needed to review this subscription request.")
+    st.caption("Payment method: STC Pay QR. Scan the code below and enter the payment transaction reference.")
     with st.form("expired_subscription_renewal_form", clear_on_submit=False):
         _renew_tier = st.selectbox(
             "Subscription plan",
@@ -1342,7 +1343,7 @@ if st.session_state.get("renewal_mode") and not st.session_state.get("current_us
                 else 0
             ),
         )
-        _renew_method = st.selectbox("Payment method", ["STC Pay (QR)", "Bank transfer", "Other approved method"])
+        _renew_method = "STC Pay (QR)"
         _renew_reference = st.text_input("Transaction / payment reference", key="expired_renewal_reference")
         _renew_receipt = st.file_uploader("Payment receipt (PNG, JPG, JPEG or PDF)", type=["png", "jpg", "jpeg", "pdf"], key="expired_renewal_receipt")
         _renew_submit = st.form_submit_button("Submit renewal request", type="primary")
@@ -2370,6 +2371,12 @@ if str(st.session_state.get("current_user", "")).strip().lower() != "sho":
         else:
             st.info("Subscription expiry is not available in this session. Sign in again to refresh account status.")
 
+        st.caption("Payment method: STC Pay QR. Scan the code below, then enter the payment transaction reference.")
+        try:
+            _active_renew_qr = Image.open("stc_pay_qr.png")
+            st.image(_active_renew_qr, caption="STC Pay payment QR code", width=180)
+        except Exception:
+            st.info("The payment QR image is unavailable in this deployment. Contact the administrator for current STC Pay payment instructions before submitting a renewal.")
         with st.form("active_subscription_renewal_form", clear_on_submit=False):
             _active_renew_tier = st.selectbox(
                 "Renewal plan",
@@ -2380,7 +2387,7 @@ if str(st.session_state.get("current_user", "")).strip().lower() != "sho":
                     else 0
                 ),
             )
-            _active_renew_method = st.selectbox("Payment method", ["STC Pay (QR)", "Bank transfer", "Other approved method"])
+            _active_renew_method = "STC Pay (QR)"
             _active_renew_reference = st.text_input("Transaction / payment reference", key="active_renewal_reference")
             _active_renew_receipt = st.file_uploader(
                 "Payment receipt (PNG, JPG, JPEG or PDF)",
