@@ -62,6 +62,7 @@ def test_visible_subscription_countdown_and_renewal_controls_exist():
     assert 'edge_admin_payment_proof_url' in APP_SOURCE
     assert 'admin_payment_proof_url_session' in EDGE_SOURCE
     assert 'transactionId=String(body.transaction_id||"").trim()' in EDGE_SOURCE
+    assert 'Administrator subscription is not eligible for customer renewal.' in EDGE_SOURCE
     assert 'createBucket(PAYMENT_PROOF_BUCKET' in EDGE_SOURCE
     assert 'public: false' in EDGE_SOURCE
     assert 'Enterprise Plus Tier ($399)' in APP_SOURCE
