@@ -686,8 +686,25 @@ def render_enterprise_bridge(module: str, tier: str, username: str) -> None:
                         st.caption("Variance is calculated from recorded implementation outcomes; it is not a forecast.")
 
             elif module in {"Enterprise Security & Governance","Enterprise Integration & Collaboration","Persistence"}:
-                roles = st.session_state.get("workspace_users", st.session_state.get("workspace_members_df", []))
-                st.dataframe(_safe_frame(roles), use_container_width=True, hide_index=True)
+                selected_workspace = str(
+                    st.session_state.get("workspace_name")
+                    or st.session_state.get("shoir_workspace_name")
+                    or st.session_state.get("workspace")
+                    or st.session_state.get("active_workspace_name")
+                    or ""
+                ).strip()
+                if selected_workspace:
+                    try:
+                        from shoir_workspace_rbac import list_workspace_members
+                        members = list_workspace_members(selected_workspace, username)
+                    except PermissionError as exc:
+                        st.info(f"Workspace membership list is restricted: {exc}")
+                    except Exception as exc:
+                        st.warning(f"Workspace membership list could not be verified: {type(exc).__name__}: {exc}")
+                    else:
+                        st.dataframe(members, use_container_width=True, hide_index=True)
+                else:
+                    st.info("Choose a workspace in Team Workspaces & RBAC to view its membership list.")
                 st.markdown("**Security configuration status**")
                 st.write({
                     "RBAC": "Workspace membership is checked in Team Workspaces; global route coverage is not yet fully verified",
