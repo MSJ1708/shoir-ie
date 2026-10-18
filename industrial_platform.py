@@ -85,6 +85,9 @@ PLATFORM_CATALOG = [
     {"tier":"Enterprise","category":"Humanitarian Logistics","name":"Fully Automated Emergency Response & Humanitarian Disaster Logistics System","when":"Model relief-stock allocation against aggregated humanitarian demand, urgency, depot capacity and disruption uncertainty.","example":"Test demand spikes and depot outages to reveal modeled aid coverage and shortages; local coordination remains authoritative."},
     {"tier":"Enterprise Plus","category":"Industrial Digital Twin","name":"Autonomous Kinetic-Digital Twin (AKDT) for Industrial Logistics Resilience","when":"Stress-test an industrial digital-twin concept using synthetic asset telemetry, alternate capacity and edge-buffering assumptions.","example":"Simulate asset health and supplier disruption in an industrial sandbox. No live routing or controller access is performed."},
     {"tier":"Enterprise","category":"Local Manufacturing Capability","name":"L-SIMS — Local Capability & Dynamic Industrial Readiness Simulator","when":"Map aggregated domestic manufacturing and repair capacity for generic industrial spare-part families and localization research.","example":"Compare local capacity, lead time, qualification confidence and monthly industrial demand to find capability gaps."},
+    {"tier":"Mid-Tier Pro","category":"Production","name":"Production Bottleneck & Capacity Recovery Study",
+     "when":"Find candidate production constraints from validated line data and quantify a transparent downtime-recovery what-if without replacing your MES or ERP.",
+     "example":"Import production-event CSV rows, validate planned time, downtime, ideal cycle, total output and good output, compare line OEE, then export calculated baseline metrics and clearly labeled simulated recovery estimates with input/result hashes."},
 ]
 
 TIER_FEATURES = {
@@ -1084,6 +1087,11 @@ def render_module(module: str, tier: str, username: str):
     if module == "L-SIMS — Local Capability & Dynamic Industrial Readiness Simulator":
         from shoir_resilience_suite import render_resilience_module
         render_resilience_module(module, tier, username)
+        return
+
+    if module == "Production Bottleneck & Capacity Recovery Study":
+        from shoir_capacity_recovery import render_capacity_recovery
+        render_capacity_recovery(tier, username)
         return
 
     # The investor Control Center has its own scenario controls and should
