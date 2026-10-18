@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import html
+import json
 import math
 import re
 import sqlite3
@@ -312,7 +313,7 @@ def save_financial_bridge_record(
     if evidence_state != "Reference estimate" and not source_value:
         raise ValueError("A source reference is required for measured or reviewed financial records.")
     if evidence_state.startswith("Independent review") and not reviewer_value:
-        raise ValueError("An independent-review reference is required; it is recorded as user-attested, not authenticated.")
+        raise ValueError("A reviewer reference is required for an independent-review record; it is recorded as user-attested, not authenticated.")
     if len(source_value) > 500 or len(reviewer_value) > 500:
         raise ValueError("Source and reviewer references must be 500 characters or fewer.")
     if not currency_value or len(currency_value) > 8:
