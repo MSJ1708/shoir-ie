@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -94,6 +95,7 @@ def main() -> int:
                         # frame rather than only the outer hosting document.
                         frame_records = []
                         rendered_bodies = []
+                        app_frame = None
                         for frame in page.frames:
                             try:
                                 frame_body = frame.locator("body").inner_text(timeout=5_000)
@@ -107,6 +109,11 @@ def main() -> int:
                                 continue
                             if frame_body:
                                 rendered_bodies.append(frame_body)
+                            if (
+                                "welcome to shoir-ie workspace" in frame_body.casefold()
+                                or "shoir-ie industrial engineering command center" in frame_body.casefold()
+                            ):
+                                app_frame = frame
                             frame_records.append({
                                 "url": frame.url,
                                 "body_length": len(frame_body),
@@ -123,6 +130,53 @@ def main() -> int:
                         item["fatal_error_marker_found"] = any(
                             marker in folded_body for marker in FATAL_TEXT_MARKERS
                         )
+
+                        # Exercise public tabs only; do not sign in, submit forms,
+                        # register accounts or write production data.
+                        tab_checks = []
+                        if app_frame is not None:
+                            scenarios = [
+                                (
+                                    "subscription-registration-tab",
+                                    re.compile(r"Get Ticket\s*&\s*Register", re.I),
+                                    re.compile(r"Get Subscription Ticket\s*&\s*Register", re.I),
+                                ),
+                                (
+                                    "public-module-explorer-tab",
+                                    re.compile(r"Explore the Modules", re.I),
+                                    re.compile(r"Turn hard industrial decisions into clear next moves", re.I),
+                                ),
+                            ]
+                            for check_name, tab_name, content_marker in scenarios:
+                                check = {"name": check_name, "result": "FAIL", "failure_reason": ""}
+                                try:
+                                    app_frame.get_by_role("tab", name=tab_name).click(timeout=8_000)
+                                    app_frame.get_by_text(content_marker).wait_for(timeout=10_000)
+                                    check["result"] = "PASS"
+                                except Exception as tab_error:
+                                    check["failure_reason"] = (
+                                        f"{type(tab_error).__name__}: {str(tab_error)[:300]}"
+                                    )
+                                    item["failure_reasons"].append(
+                                        f"Public tab {check_name} did not render its expected content."
+                                    )
+                                tab_checks.append(check)
+                            try:
+                                app_frame.get_by_role(
+                                    "tab", name=re.compile(r"Sign In", re.I)
+                                ).click(timeout=5_000)
+                            except Exception:
+                                pass
+                        else:
+                            item["failure_reasons"].append(
+                                "Could not locate the Streamlit frame containing the public app."
+                            )
+                            tab_checks.append({
+                                "name": "public-tabs",
+                                "result": "FAIL",
+                                "failure_reason": "Shoir-IE application frame not located.",
+                            })
+                        item["public_tab_checks"] = tab_checks
                         dimensions = page.evaluate(
                             """() => ({
                                 innerWidth: window.innerWidth,
