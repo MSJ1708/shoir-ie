@@ -423,14 +423,26 @@ def edge_admin_list_requests(username: str, token: str) -> list[dict[str, Any]]:
 
 
 def edge_renew_request(username: str, token: str, request: Mapping[str, Any]) -> dict[str, Any]:
-    return _edge_call("renew_request", {
+    """Submit a subscription renewal request.
+
+    Active users may submit with their current session token. Expired users do
+    not receive a workspace session, so the Edge Function can instead verify
+    the supplied existing-account password for this narrowly scoped request.
+    The password is transported only over HTTPS and is never written locally
+    or included in the request record by this helper.
+    """
+    payload = {
         "username": username,
         "token": token,
         "tier": request.get("tier"),
         "payment_method": request.get("payment_method") or "",
         "transaction_id": request.get("transaction_id"),
         "screenshot_path": request.get("screenshot_path"),
-    })
+    }
+    password = request.get("password")
+    if password:
+        payload["password"] = str(password)
+    return _edge_call("renew_request", payload)
 
 
 def _iso(value: Any) -> Optional[str]:
