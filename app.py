@@ -1300,7 +1300,13 @@ if st.session_state.get("renewal_mode") and not st.session_state.get("current_us
     if _renew_expiry:
         st.caption(f"Previous subscription expiry: {_renew_expiry}")
     st.markdown("### Submit a renewal request")
-    st.write("Complete payment using the displayed payment instructions in the registration tab, then provide a transaction reference or upload your receipt. Access resumes only after administrator approval.")
+    st.write("Pay for the selected plan using the instructions below, then provide a transaction reference or upload your receipt. Access resumes only after administrator approval.")
+    try:
+        _renew_qr_image = Image.open("stc_pay_qr.png")
+        st.image(_renew_qr_image, caption="STC Pay payment QR code", width=230)
+    except Exception:
+        st.info("The payment QR image is unavailable in this deployment. Use an approved payment method and include your transaction reference or receipt.")
+    st.caption("Keep your transaction reference and receipt private. Upload only the proof needed to review this subscription request.")
     with st.form("expired_subscription_renewal_form", clear_on_submit=False):
         _renew_tier = st.selectbox(
             "Subscription plan",
