@@ -2292,19 +2292,34 @@ if st.session_state.get("selected_nav") == "✨ Excellence Hub":
 # Subscription countdown and renewal entry point for paid members.
 # The administrator account is intentionally excluded from subscription controls.
 if str(st.session_state.get("current_user", "")).strip().lower() != "sho":
-    _sidebar_expiry_raw = st.session_state.get("subscription_expires_at")
-    if _sidebar_expiry_raw:
+    def _render_subscription_countdown() -> None:
+        _sidebar_expiry_raw = st.session_state.get("subscription_expires_at")
+        if not _sidebar_expiry_raw:
+            return
         try:
             _sidebar_expiry = datetime.datetime.fromisoformat(str(_sidebar_expiry_raw).replace("Z", "+00:00"))
             if _sidebar_expiry.tzinfo is None:
                 _sidebar_expiry = _sidebar_expiry.replace(tzinfo=datetime.timezone.utc)
             _sidebar_remaining = max(0.0, (_sidebar_expiry - datetime.datetime.now(datetime.timezone.utc)).total_seconds())
-            st.sidebar.caption(
+            st.caption(
                 f"⏳ Subscription: {int(_sidebar_remaining // 86400)}d "
                 f"{int((_sidebar_remaining % 86400) // 3600)}h remaining"
             )
         except (TypeError, ValueError, OverflowError):
-            pass
+            st.caption("⏳ Subscription countdown is temporarily unavailable.")
+
+    # A fragment refreshes the countdown even when the user does not interact.
+    # Keep a fallback for older Streamlit deployments that do not expose st.fragment.
+    if hasattr(st, "fragment"):
+        @st.fragment(run_every="60s")
+        def _render_subscription_countdown_fragment() -> None:
+            _render_subscription_countdown()
+        with st.sidebar:
+            _render_subscription_countdown_fragment()
+    else:
+        with st.sidebar:
+            _render_subscription_countdown()
+
     with st.sidebar.expander("Subscription & Renewal", expanded=False):
         _sub_tier = str(st.session_state.get("user_tier", "Starter Tier"))
         _sub_expiry_raw = st.session_state.get("subscription_expires_at")
