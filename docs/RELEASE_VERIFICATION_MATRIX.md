@@ -44,7 +44,7 @@ The following status is tied to merge commit `c93a33cfe6272c1d60f4d6f94753bdad14
 | AUTH-07 | Active subscriber submits renewal | Pending request appears in administrator request queue | Browser check with test account |
 | AUTH-08 | Administrator approves renewal | Existing account is updated; expiry is extended from the later of now/current expiry; data remains associated with same user | Database before/after + browser |
 | AUTH-09 | Administrator declines renewal | Access is not extended and request status is Declined | Database + browser |
-| AUTH-10 | Subscription reaches expiry while session is open | Workspace operations stop server-side; user can re-enter renewal-only flow | Edge regression + browser |
+| AUTH-10 | Subscription reaches expiry while session is open | Workspace operations stop server-side; the UI explains that the user must sign in again with the same account and then opens the renewal-only flow | Edge regression + authenticated browser |
 | AUTH-11 | Renewal token expires | Renewal submission fails safely; user can return to sign-in | Automated + browser |
 | AUTH-12 | Admin account login | Role remains Enterprise Admin; tier is Enterprise Plus; long-dated expiry remains intact | Database + authorized browser |
 | AUTH-13 | New login after approved renewal | Full workspace returns with prior profile and saved workspace | Browser reload/re-login evidence |
