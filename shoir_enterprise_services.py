@@ -690,13 +690,13 @@ def render_enterprise_bridge(module: str, tier: str, username: str) -> None:
                 st.dataframe(_safe_frame(roles), use_container_width=True, hide_index=True)
                 st.markdown("**Security configuration status**")
                 st.write({
-                    "RBAC": bool(roles is not None),
-                    "Workspace isolation": True,
-                    "Audit trail": True,
-                    "SSO/OIDC": "Configured" if st.secrets.get("oidc", {}) else "Configuration surface",
-                    "MFA": "Configured" if st.secrets.get("mfa", {}) else "Configuration surface",
-                    "Secrets management": "Streamlit secrets / environment variables",
-                    "Security scanning": "CI hook available",
+                    "RBAC": "Workspace membership is checked in Team Workspaces; global route coverage is not yet fully verified",
+                    "Workspace isolation": "Partial — module-specific access checks exist; full route and export isolation still requires verification",
+                    "Audit trail": "Event logging is available; durable cloud write, retention and tamper-resistance are not verified here",
+                    "SSO/OIDC": "Configuration surface — provider connection and sign-in flow not independently verified",
+                    "MFA": "Configuration surface — provider-backed challenge and enforcement not independently verified",
+                    "Secrets management": "Use Streamlit secrets / environment variables; active deployment configuration not independently verified",
+                    "Security scanning": "CI security/quality workflow exists; passing it is not a certification",
                 })
                 audit_note = st.text_input("Audit event note", key=f"enterprise_audit_note_{hash(module)&0xffff:04x}")
                 if st.button("🔐 Record audit event", use_container_width=True, key=f"enterprise_audit_save_{hash(module)&0xffff:04x}"):
