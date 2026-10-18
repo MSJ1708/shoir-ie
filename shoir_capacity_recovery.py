@@ -283,10 +283,15 @@ def render_capacity_recovery(tier: str = "Starter", username: str = "unknown") -
     )
     if uploaded is not None:
         try:
-            imported = pd.read_csv(uploaded)
-            st.session_state["capacity_recovery_events"] = imported
-            st.session_state["capacity_recovery_source_name"] = uploaded.name
-            st.session_state["capacity_recovery_source_type"] = "imported CSV"
+            upload_bytes = uploaded.getvalue()
+            upload_sha = hashlib.sha256(upload_bytes).hexdigest()
+            if st.session_state.get("capacity_recovery_uploaded_sha") != upload_sha:
+                imported = pd.read_csv(io.BytesIO(upload_bytes))
+                st.session_state["capacity_recovery_events"] = imported
+                st.session_state["capacity_recovery_source_name"] = uploaded.name
+                st.session_state["capacity_recovery_source_type"] = "imported CSV"
+                st.session_state["capacity_recovery_uploaded_sha"] = upload_sha
+                st.session_state.pop("capacity_recovery_result", None)
         except Exception as exc:
             st.error(f"CSV import failed. The existing study data was not replaced. Details: {type(exc).__name__}: {exc}")
     if "capacity_recovery_events" not in st.session_state:
