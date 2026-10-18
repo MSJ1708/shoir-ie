@@ -514,6 +514,8 @@ def _import_column_map(
 def _import_blank(value: Any) -> bool:
     if value is None:
         return True
+    if isinstance(value, str) and not value.strip():
+        return True
     try:
         missing = pd.isna(value)
         return bool(missing) if not hasattr(missing, "__len__") else False
