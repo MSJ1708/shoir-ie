@@ -429,7 +429,17 @@ def edge_renew_request(username: str, token: str, request: Mapping[str, Any]) ->
         "tier": request.get("tier"),
         "payment_method": request.get("payment_method") or "",
         "transaction_id": request.get("transaction_id"),
-        "screenshot_path": request.get("screenshot_path"),
+        "proof_base64": request.get("proof_base64"),
+        "proof_content_type": request.get("proof_content_type"),
+    })
+
+
+def edge_admin_payment_proof_url(username: str, token: str, screenshot_path: str) -> dict[str, Any]:
+    """Return a short-lived signed URL for a private payment proof (admin session required)."""
+    return _edge_call("admin_payment_proof_url_session", {
+        "username": username,
+        "token": token,
+        "screenshot_path": screenshot_path,
     })
 
 
