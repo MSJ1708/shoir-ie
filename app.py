@@ -13,6 +13,7 @@ import numpy as np
 import plotly.graph_objects as go
 import plotly.express as px
 import hashlib
+import base64
 import re
 import html
 import time
@@ -62,7 +63,7 @@ except ImportError:
 from shoir_copilot_orchestrator import build_workflow_plan, recommend_module, run_orchestration, stage_copilot_decision
 from shoir_digital_thread import render_global_project_digital_thread
 from shoir_enterprise_services import render_enterprise_bridge
-from durable_account_store import (durable_backend_configured, sync_durable_accounts, sync_remote_requests_to_local, edge_login, edge_admin_list_requests, edge_renew_request, upsert_remote_account, insert_remote_request, remote_account, account_is_expired, renewed_expiry)
+from durable_account_store import (durable_backend_configured, sync_durable_accounts, sync_remote_requests_to_local, edge_login, edge_admin_list_requests, edge_renew_request, edge_admin_payment_proof_url, upsert_remote_account, insert_remote_request, remote_account, account_is_expired, renewed_expiry)
 from shoir_enterprise_layer import (
     ensure_enterprise_schema, save_twin_snapshot, load_twin_state, save_twin_scenario,
     list_twin_scenarios, twin_what_if, twin_replay, build_control_tower_health,
@@ -79,6 +80,30 @@ from shoir_adoption_engine import render_adoption_center
 from shoir_universal_engine import render_universal_engine_surface, postflight_contract
 from shoir_commercial import render_module_enrichment
 from shoir_value_evidence import render_value_pulse, ensure_value_evidence_db, result_button_should_track, begin_result_timer, render_value_receipt
+
+
+def _encode_renewal_proof(uploaded_file):
+    """Return a size-limited base64 receipt and allowlisted MIME type for private storage."""
+    if uploaded_file is None:
+        return None, None
+    filename = str(getattr(uploaded_file, "name", "") or "").lower()
+    suffix = os.path.splitext(filename)[1]
+    mime_by_suffix = {
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".pdf": "application/pdf",
+    }
+    content_type = mime_by_suffix.get(suffix)
+    if not content_type:
+        raise ValueError("Payment receipts must be PNG, JPG, JPEG or PDF files.")
+    content = uploaded_file.getvalue()
+    if not content:
+        raise ValueError("The selected payment receipt is empty.")
+    if len(content) > 512 * 1024:
+        raise ValueError("Payment receipts must be 512 KiB or smaller so they can be stored and reviewed reliably.")
+    return base64.b64encode(content).decode("ascii"), content_type
+
 
 # Central result-action timer: every result-generating button starts a run clock.
 # The wrapper marker lives on the Streamlit function itself, not session state,
@@ -1325,32 +1350,32 @@ if st.session_state.get("renewal_mode") and not st.session_state.get("current_us
         if not str(_renew_reference or "").strip():
             st.warning("Enter the payment transaction/reference. The uploaded receipt is supplementary; the reference is retained with the renewal request for durable review.")
         else:
-            _receipt_path = None
-            if _renew_receipt is not None:
-                os.makedirs("payment_proofs", exist_ok=True)
-                _receipt_ext = os.path.splitext(str(_renew_receipt.name or "receipt.png"))[1].lower()
-                if _receipt_ext not in {".png", ".jpg", ".jpeg", ".pdf"}:
-                    _receipt_ext = ".png"
-                _receipt_name = hashlib.sha256(str(st.session_state.get("renewal_username","")).encode("utf-8")).hexdigest()[:12]
-                _receipt_path = os.path.join("payment_proofs", f"renewal_{_receipt_name}_{time.time_ns()}{_receipt_ext}")
-                with open(_receipt_path, "wb") as _receipt_file:
-                    _receipt_file.write(_renew_receipt.getbuffer())
             try:
-                _renew_result = edge_renew_request(
-                    st.session_state.get("renewal_username", ""),
-                    st.session_state.get("renewal_session_token", ""),
-                    {
-                        "tier": _renew_tier,
-                        "payment_method": _renew_method,
-                        "transaction_id": str(_renew_reference or "").strip() or None,
-                        "screenshot_path": _receipt_path,
-                    },
-                )
-                st.session_state["renewal_request_submitted"] = _renew_result.get("request_id", True)
-                st.success("Renewal request submitted. Your saved workspace remains protected; the administrator must approve the request before normal access returns.")
-            except Exception as _renew_exc:
-                st.error("We could not submit the renewal request. Your account and saved work have not been deleted.")
-                st.caption(f"Renewal request diagnostic: {type(_renew_exc).__name__}: {_renew_exc}")
+                _renew_proof_base64, _renew_proof_type = _encode_renewal_proof(_renew_receipt)
+            except ValueError as _proof_exc:
+                st.warning(str(_proof_exc))
+                _renew_proof_base64, _renew_proof_type = None, None
+                _renew_proof_invalid = True
+            else:
+                _renew_proof_invalid = False
+            if not _renew_proof_invalid:
+                try:
+                    _renew_result = edge_renew_request(
+                        st.session_state.get("renewal_username", ""),
+                        st.session_state.get("renewal_session_token", ""),
+                        {
+                            "tier": _renew_tier,
+                            "payment_method": _renew_method,
+                            "transaction_id": str(_renew_reference or "").strip(),
+                            "proof_base64": _renew_proof_base64,
+                            "proof_content_type": _renew_proof_type,
+                        },
+                    )
+                    st.session_state["renewal_request_submitted"] = _renew_result.get("request_id", True)
+                    st.success("Renewal request submitted. Your payment reference and any receipt are saved for administrator review. Your existing workspace remains preserved until approval.")
+                except Exception as _renew_exc:
+                    st.error("We could not submit the renewal request. Your account and saved work have not been deleted.")
+                    st.caption(f"Renewal request diagnostic: {type(_renew_exc).__name__}: {_renew_exc}")
     if st.session_state.get("renewal_request_submitted"):
         st.success(f"Renewal request reference: {st.session_state['renewal_request_submitted']}")
         st.caption("You can close this page safely. Sign in again after the administrator confirms approval.")
@@ -2362,31 +2387,31 @@ if str(st.session_state.get("current_user", "")).strip().lower() != "sho":
             if not str(_active_renew_reference or "").strip():
                 st.warning("Enter the payment transaction/reference. The uploaded receipt is supplementary; the reference is retained with the renewal request for durable review.")
             else:
-                _active_receipt_path = None
-                if _active_renew_receipt is not None:
-                    os.makedirs("payment_proofs", exist_ok=True)
-                    _active_receipt_ext = os.path.splitext(str(_active_renew_receipt.name or "receipt.png"))[1].lower()
-                    if _active_receipt_ext not in {".png", ".jpg", ".jpeg", ".pdf"}:
-                        _active_receipt_ext = ".png"
-                    _active_receipt_owner = hashlib.sha256(str(st.session_state.get("current_user", "")).encode("utf-8")).hexdigest()[:12]
-                    _active_receipt_path = os.path.join("payment_proofs", f"renewal_{_active_receipt_owner}_{time.time_ns()}{_active_receipt_ext}")
-                    with open(_active_receipt_path, "wb") as _active_receipt_file:
-                        _active_receipt_file.write(_active_renew_receipt.getbuffer())
                 try:
-                    _active_renew_result = edge_renew_request(
-                        st.session_state.get("current_user", ""),
-                        st.session_state.get("remote_session_token", ""),
-                        {
-                            "tier": _active_renew_tier,
-                            "payment_method": _active_renew_method,
-                            "transaction_id": str(_active_renew_reference or "").strip() or None,
-                            "screenshot_path": _active_receipt_path,
-                        },
-                    )
-                    st.success(f"Renewal request submitted for administrator review (reference {_active_renew_result.get('request_id', 'created')}). Your current access remains governed by its expiry.")
-                except Exception as _active_renew_exc:
-                    st.error("Renewal request could not be submitted. Your current account and data remain unchanged.")
-                    st.caption(f"Renewal diagnostic: {type(_active_renew_exc).__name__}: {_active_renew_exc}")
+                    _active_proof_base64, _active_proof_type = _encode_renewal_proof(_active_renew_receipt)
+                except ValueError as _proof_exc:
+                    st.warning(str(_proof_exc))
+                    _active_proof_base64, _active_proof_type = None, None
+                    _active_proof_invalid = True
+                else:
+                    _active_proof_invalid = False
+                if not _active_proof_invalid:
+                    try:
+                        _active_renew_result = edge_renew_request(
+                            st.session_state.get("current_user", ""),
+                            st.session_state.get("remote_session_token", ""),
+                            {
+                                "tier": _active_renew_tier,
+                                "payment_method": _active_renew_method,
+                                "transaction_id": str(_active_renew_reference or "").strip(),
+                                "proof_base64": _active_proof_base64,
+                                "proof_content_type": _active_proof_type,
+                            },
+                        )
+                        st.success(f"Renewal request submitted for administrator review (reference {_active_renew_result.get('request_id', 'created')}). Any uploaded receipt is saved in private storage. Your current access remains governed by its expiry.")
+                    except Exception as _active_renew_exc:
+                        st.error("Renewal request could not be submitted. Your current account and data remain unchanged.")
+                        st.caption(f"Renewal diagnostic: {type(_active_renew_exc).__name__}: {_active_renew_exc}")
 
 st.sidebar.markdown("---")
 if st.sidebar.button("Lock / Logout Workspace"):
@@ -11746,10 +11771,51 @@ if mod == "Admin Panel":
                         else:
                             st.warning("No transaction reference was recorded. Verify durable payment evidence before approval.")
                         
-                        if row['screenshot_path'] and os.path.exists(row['screenshot_path']):
-                            st.image(row['screenshot_path'], caption="Uploaded Payment Proof", width=250)
-                        elif row['screenshot_path'] and str(row['screenshot_path']).startswith(("https://", "http://")):
-                            st.image(row['screenshot_path'], caption="Uploaded Payment Proof", width=250)
+                        _proof_location = str(row.get("screenshot_path") or "").strip()
+                        if _proof_location.startswith("storage://subscription-payment-proofs/"):
+                            try:
+                                _signed_proof = edge_admin_payment_proof_url(
+                                    st.session_state.get("current_user", ""),
+                                    st.session_state.get("remote_session_token", ""),
+                                    _proof_location,
+                                )
+                                _proof_url = str(_signed_proof.get("signed_url") or "")
+                                if not _proof_url:
+                                    st.warning("Private payment receipt could not be previewed. Use the durable transaction reference above.")
+                                elif _proof_location.lower().endswith(".pdf"):
+                                    st.link_button("Open private payment receipt (expires in 5 minutes)", _proof_url)
+                                else:
+                                    st.image(_proof_url, caption="Private payment proof", width=250)
+                            except Exception as _proof_exc:
+                                st.warning("Private payment receipt could not be loaded for review.")
+                                st.caption(f"Receipt access diagnostic: {type(_proof_exc).__name__}: {_proof_exc}")
+                        elif _proof_location and os.path.isfile(_proof_location):
+                            if os.path.splitext(_proof_location)[1].lower() == ".pdf":
+                                try:
+                                    with open(_proof_location, "rb") as _local_proof_file:
+                                        _local_proof_bytes = _local_proof_file.read()
+                                    st.download_button(
+                                        "Download payment receipt",
+                                        data=_local_proof_bytes,
+                                        file_name=os.path.basename(_proof_location),
+                                        mime="application/pdf",
+                                        key=f"payment_proof_download_{row['id']}_{idx}",
+                                    )
+                                except OSError:
+                                    st.warning("Local payment receipt could not be read.")
+                            else:
+                                try:
+                                    st.image(_proof_location, caption="Uploaded Payment Proof", width=250)
+                                except Exception:
+                                    st.warning("The local payment receipt is not a readable image.")
+                        elif _proof_location.startswith(("https://", "http://")):
+                            if _proof_location.lower().split("?", 1)[0].endswith(".pdf"):
+                                st.link_button("Open payment receipt", _proof_location)
+                            else:
+                                try:
+                                    st.image(_proof_location, caption="Uploaded Payment Proof", width=250)
+                                except Exception:
+                                    st.warning("The linked payment receipt could not be previewed.")
                         elif _request_reference:
                             st.info("Receipt file is not available in this runtime; use the transaction reference above for manual verification.")
                         else:
