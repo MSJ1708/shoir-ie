@@ -45,6 +45,9 @@ def test_reference_metrics_match_independent_calculation():
 def test_validator_does_not_mutate_input_and_flags_bad_values():
     events = sample_events()
     original = events.copy(deep=True)
+    # Keep the test column permissive so pandas does not reject the bad value
+    # before the production validator receives it.
+    events["TotalCount"] = events["TotalCount"].astype("object")
     events.loc[0, "TotalCount"] = "not-a-count"
 
     validation_input = events.copy(deep=True)
@@ -69,9 +72,21 @@ def test_validator_does_not_mutate_input_and_flags_bad_values():
 )
 def test_invalid_engineering_inputs_are_rejected(column, value, expected):
     events = sample_events()
+    # Test the engine’s validation, not pandas’ typed-assignment guard.
+    events[column] = events[column].astype("object")
     events.loc[0, column] = value
     with pytest.raises(ValueError, match=expected):
         calculate_line_metrics(events)
+
+
+def test_duplicate_columns_are_reported_without_crashing():
+    events = sample_events()
+    duplicated = pd.concat([events, events[["TotalCount"]]], axis=1)
+
+    _, report = validate_production_events(duplicated)
+
+    assert not report["valid"]
+    assert "Duplicate column names are not allowed." in report["errors"]
 
 
 def test_missing_columns_and_empty_data_are_reported():
