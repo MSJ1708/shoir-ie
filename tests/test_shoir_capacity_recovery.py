@@ -47,12 +47,13 @@ def test_validator_does_not_mutate_input_and_flags_bad_values():
     original = events.copy(deep=True)
     events.loc[0, "TotalCount"] = "not-a-count"
 
+    validation_input = events.copy(deep=True)
     normalized, report = validate_production_events(events)
 
     assert not report["valid"]
     assert any("TotalCount" in error for error in report["errors"])
     assert normalized.loc[0, "TotalCount"] != 0
-    pd.testing.assert_frame_equal(events, events)
+    pd.testing.assert_frame_equal(events, validation_input)
     assert original.loc[0, "TotalCount"] == 400
 
 
