@@ -87,10 +87,21 @@ def _read_members(conn: sqlite3.Connection, workspace: str) -> list[dict[str, An
            ORDER BY username COLLATE NOCASE""",
         (workspace,),
     ).fetchall()
-    return [
+    normalized = [
         {"workspace": str(row[0]), "username": str(row[1]), "role": str(row[2]), "updated_at": str(row[3])}
         for row in rows
     ]
+    folded = [row["username"].strip().casefold() for row in normalized]
+    if len(folded) != len(set(folded)):
+        raise PermissionError(
+            "This workspace contains case-insensitive duplicate usernames; membership access is blocked pending administrative cleanup."
+        )
+    allowed_roles = {role.casefold() for role in WORKSPACE_ROLES}
+    if any(row["role"].strip().casefold() not in allowed_roles for row in normalized):
+        raise PermissionError(
+            "This workspace contains an unsupported saved role; membership access is blocked pending administrative cleanup."
+        )
+    return normalized
 
 
 def list_workspace_members(
