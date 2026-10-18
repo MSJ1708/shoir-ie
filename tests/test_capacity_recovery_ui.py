@@ -7,9 +7,10 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def test_capacity_recovery_is_inside_the_existing_enterprise_os():
     source = (ROOT / "industrial_operating_system.py").read_text(encoding="utf-8")
+    renderer = (ROOT / "shoir_capacity_recovery_ui.py").read_text(encoding="utf-8")
     assert '"🧰 Bottleneck Recovery"' in source
-    start = source.index("with tabs[10]:")
-    workflow = source[start:]
+    assert "with tabs[10]:" in source
+    assert "render_capacity_recovery_workspace(tier, username)" in source
     for contract in (
         "analyze_capacity_recovery(stations, demand_units, yield_pct)",
         "map_imported_station_data(imported_frame, mapping)",
@@ -19,13 +20,11 @@ def test_capacity_recovery_is_inside_the_existing_enterprise_os():
         "render_exports(",
         "os_capacity_loaded_study",
     ):
-        assert contract in workflow
+        assert contract in renderer
 
 
 def test_capacity_recovery_import_guardrails_are_visible_in_the_ui():
-    source = (ROOT / "industrial_operating_system.py").read_text(encoding="utf-8")
-    start = source.index("with tabs[10]:")
-    workflow = source[start:]
+    workflow = (ROOT / "shoir_capacity_recovery_ui.py").read_text(encoding="utf-8")
     assert 'type=["csv", "xlsx"]' in workflow
     assert "10 * 1024 * 1024" in workflow
     assert "len(imported_frame) > 1000" in workflow
