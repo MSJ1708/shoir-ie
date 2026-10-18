@@ -52,6 +52,9 @@ def test_visible_subscription_countdown_and_renewal_controls_exist():
     assert 'Time remaining' in APP_SOURCE
     assert 'Subscription: ' in APP_SOURCE
     assert '@st.fragment(run_every="60s")' in APP_SOURCE
+    assert '_sidebar_remaining <= 0' in APP_SOURCE
+    assert 'save_user_workspace(_expired_user, st.session_state)' in APP_SOURCE
+    assert 'st.session_state["subscription_expired_notice"] = True' in APP_SOURCE
     assert 'active_subscription_renewal_form' in APP_SOURCE
     assert 'Payment method: STC Pay QR' in APP_SOURCE
     assert '_active_renew_qr = Image.open("stc_pay_qr.png")' in APP_SOURCE
