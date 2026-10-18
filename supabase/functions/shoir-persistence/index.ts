@@ -56,6 +56,14 @@ async function storePaymentProof(body: Record<string, unknown>): Promise<string 
   const extension = extensionByType[contentType];
   if (!extension) throw new Error("Payment proof must be PNG, JPG, JPEG or PDF.");
   const bytes = decodePaymentProof(encoded);
+  const validSignature =
+    contentType === "application/pdf"
+      ? new TextDecoder().decode(bytes.slice(0, 5)) === "%PDF-"
+      : contentType === "image/png"
+        ? bytes.length >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47 &&
+          bytes[4] === 0x0d && bytes[5] === 0x0a && bytes[6] === 0x1a && bytes[7] === 0x0a
+        : bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+  if (!validSignature) throw new Error("Payment proof content does not match its declared file type.");
   await ensurePaymentProofBucket();
   const objectPath = `renewals/${crypto.randomUUID()}.${extension}`;
   const { error } = await supabase.storage.from(PAYMENT_PROOF_BUCKET).upload(objectPath, bytes, {
