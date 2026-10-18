@@ -7,7 +7,9 @@ comparison with source-referenced operational outcomes.
 """
 from __future__ import annotations
 
+import csv
 import hashlib
+import io
 import json
 import math
 import sqlite3
@@ -22,6 +24,8 @@ DB_PATH = "enterprise_full_workspace.db"
 CALCULATION_VERSION = "capacity-recovery/1.0.0"
 MAX_STATIONS = 200
 MAX_IMPORT_ROWS = 1000
+MAX_IMPORT_COLUMNS = 100
+MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 
 STATION_COLUMNS = (
     "Station",
@@ -224,6 +228,53 @@ def _normalize_station_table(stations: pd.DataFrame) -> pd.DataFrame:
         if (frame[column] <= 0).any():
             raise ValueError(f"{column} must be greater than zero.")
     return frame.reset_index(drop=True)
+
+
+def read_station_upload(payload: bytes, filename: str) -> pd.DataFrame:
+    """Read a bounded CSV or XLSX upload without trusting its filename or headers."""
+    if not isinstance(payload, (bytes, bytearray)):
+        raise ValueError("Uploaded file contents must be bytes.")
+    if not payload:
+        raise ValueError("The uploaded file is empty.")
+    if len(payload) > MAX_UPLOAD_BYTES:
+        raise ValueError(f"Uploads are limited to {MAX_UPLOAD_BYTES // (1024 * 1024)} MiB.")
+    name = str(filename or "").strip().casefold()
+    try:
+        if name.endswith(".csv"):
+            text = bytes(payload).decode("utf-8-sig")
+            try:
+                header = next(csv.reader(io.StringIO(text, newline="")))
+            except StopIteration as exc:
+                raise ValueError("The CSV file is empty.") from exc
+            normalized_header = [str(item).strip() for item in header]
+            if any(not item for item in normalized_header):
+                raise ValueError("Every imported column needs a non-empty header.")
+            if len(normalized_header) > MAX_IMPORT_COLUMNS:
+                raise ValueError(f"Imports are limited to {MAX_IMPORT_COLUMNS} columns.")
+            if pd.Index(normalized_header).duplicated().any():
+                raise ValueError("The CSV contains duplicate column names after trimming whitespace.")
+            frame = pd.read_csv(io.BytesIO(bytes(payload)), nrows=MAX_IMPORT_ROWS + 1)
+        elif name.endswith(".xlsx"):
+            frame = pd.read_excel(io.BytesIO(bytes(payload)), sheet_name=0, nrows=MAX_IMPORT_ROWS + 1, engine="openpyxl")
+        else:
+            raise ValueError("Only CSV and XLSX files are supported.")
+    except ValueError:
+        raise
+    except Exception as exc:
+        raise ValueError(f"The file could not be parsed as a valid {'.csv' if name.endswith('.csv') else '.xlsx'} workbook.") from exc
+
+    if frame.empty:
+        raise ValueError("The file contains no data rows.")
+    if len(frame) > MAX_IMPORT_ROWS:
+        raise ValueError(f"Imports are limited to {MAX_IMPORT_ROWS} station rows.")
+    if len(frame.columns) > MAX_IMPORT_COLUMNS:
+        raise ValueError(f"Imports are limited to {MAX_IMPORT_COLUMNS} columns.")
+    frame.columns = [str(column).strip() for column in frame.columns]
+    if any(not column for column in frame.columns):
+        raise ValueError("Every imported column needs a non-empty header.")
+    if pd.Index(frame.columns).duplicated().any():
+        raise ValueError("The imported table contains duplicate column names after normalization.")
+    return frame
 
 
 def map_imported_station_data(frame: pd.DataFrame, column_mapping: Mapping[str, str]) -> pd.DataFrame:
