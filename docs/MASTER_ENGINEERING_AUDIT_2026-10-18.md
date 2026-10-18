@@ -123,6 +123,6 @@ A module status describes the evidence actually obtained, not whether a renderer
 - [x] Keep capacity-recovery edits separate from overlapping open PR #123.
 - [x] Complete audit-branch CI and inspect the principal workflows; all five completed successfully at commit 408ebd3e6e60edfd1c78094c53ad084ad5b2bedb.
 - [x] Record completed workflow outcomes and links in this report.
-- [ ] Open a non-merged PR to \`main\`.
+- [x] Open a non-merged PR to main (PR #126).
 - [ ] Perform an authorized hosted browser/deployment verification.
 - [ ] Complete remaining module and security matrices before declaring the full definition of done satisfied.
