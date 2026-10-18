@@ -5,6 +5,68 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 const ITERATIONS = 200_000;
+const PAYMENT_PROOF_BUCKET = "subscription-payment-proofs";
+const MAX_PAYMENT_PROOF_BYTES = 512 * 1024;
+
+async function ensurePaymentProofBucket() {
+  const { data, error } = await supabase.storage.getBucket(PAYMENT_PROOF_BUCKET);
+  if (!error && data) {
+    if ((data as { public?: boolean }).public === true) {
+      throw new Error("Payment proof storage bucket must remain private.");
+    }
+    return;
+  }
+  const { error: createError } = await supabase.storage.createBucket(PAYMENT_PROOF_BUCKET, {
+    public: false,
+    fileSizeLimit: "512KB",
+    allowedMimeTypes: ["image/png", "image/jpeg", "application/pdf"],
+  });
+  if (createError) {
+    const { data: retry, error: retryError } = await supabase.storage.getBucket(PAYMENT_PROOF_BUCKET);
+    if (retryError || !retry || (retry as { public?: boolean }).public === true) throw createError;
+  }
+}
+
+function decodePaymentProof(base64Value: string) {
+  const compact = base64Value.replace(/^data:[^;]+;base64,/i, "").replace(/\s+/g, "");
+  if (!compact || compact.length > Math.ceil(MAX_PAYMENT_PROOF_BYTES * 4 / 3) + 8) {
+    throw new Error("Payment proof is empty or exceeds the 512 KiB limit.");
+  }
+  let binary: string;
+  try {
+    binary = atob(compact);
+  } catch {
+    throw new Error("Payment proof is not valid base64 data.");
+  }
+  if (binary.length > MAX_PAYMENT_PROOF_BYTES) throw new Error("Payment proof exceeds the 512 KiB limit.");
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+async function storePaymentProof(body: Record<string, unknown>): Promise<string | null> {
+  const encoded = String(body.proof_base64 || "");
+  if (!encoded) return null;
+  const contentType = String(body.proof_content_type || "").toLowerCase();
+  const extensionByType: Record<string, string> = {
+    "image/png": "png",
+    "image/jpeg": "jpg",
+    "application/pdf": "pdf",
+  };
+  const extension = extensionByType[contentType];
+  if (!extension) throw new Error("Payment proof must be PNG, JPG, JPEG or PDF.");
+  const bytes = decodePaymentProof(encoded);
+  await ensurePaymentProofBucket();
+  const objectPath = `renewals/${crypto.randomUUID()}.${extension}`;
+  const { error } = await supabase.storage.from(PAYMENT_PROOF_BUCKET).upload(objectPath, bytes, {
+    contentType,
+    cacheControl: "300",
+    upsert: false,
+  });
+  if (error) throw error;
+  return `storage://${PAYMENT_PROOF_BUCKET}/${objectPath}`;
+}
+
 
 function response(data: unknown, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -55,7 +117,33 @@ Deno.serve(async(req)=>{
 
   if(action==="workspace_load"){await getSession(String(body.token),String(body.username));const {data,error}=await supabase.from("shoir_workspace_states").select("state_json,updated_at").eq("username_lc",String(body.username).trim().toLowerCase()).maybeSingle();if(error)throw error;return response({ok:true,state_json:data?.state_json||null,updated_at:data?.updated_at||null});}
   if(action==="workspace_save"){await getSession(String(body.token),String(body.username));const {error}=await supabase.from("shoir_workspace_states").upsert({username_lc:String(body.username).trim().toLowerCase(),state_json:String(body.state_json||"{}"),updated_at:new Date().toISOString()},{onConflict:"username_lc"});if(error)throw error;return response({ok:true});}
-  if(action==="renew_request"){const row=await getSession(String(body.token),String(body.username),"either");const pending=await supabase.from("shoir_subscription_requests").insert({username:row.username,username_lc:row.username_lc,email:row.email,tier:body.tier||row.tier,request_type:"Renewal",payment_method:body.payment_method||"",transaction_id:body.transaction_id||null,screenshot_path:body.screenshot_path||null,status:"Pending"}).select("id").single();if(pending.error)throw pending.error;return response({ok:true,request_id:pending.data.id});}
+  if(action==="renew_request"){
+   const row=await getSession(String(body.token),String(body.username),"either");
+   const transactionId=String(body.transaction_id||"").trim();
+   if(!transactionId)return response({error:"A transaction/payment reference is required for renewal review."},400);
+   const proofPath=await storePaymentProof(body);
+   const pending=await supabase.from("shoir_subscription_requests").insert({
+    username:row.username,username_lc:row.username_lc,email:row.email,tier:body.tier||row.tier,
+    request_type:"Renewal",payment_method:body.payment_method||"",transaction_id:transactionId,
+    screenshot_path:proofPath,status:"Pending"
+   }).select("id").single();
+   if(pending.error){
+    if(proofPath){const objectPath=proofPath.replace(`storage://${PAYMENT_PROOF_BUCKET}/`,"");await supabase.storage.from(PAYMENT_PROOF_BUCKET).remove([objectPath]);}
+    throw pending.error;
+   }
+   return response({ok:true,request_id:pending.data.id,proof_uploaded:!!proofPath});
+  }
+  if(action==="admin_payment_proof_url_session"){
+   await adminSession(String(body.username),String(body.token));
+   const storedPath=String(body.screenshot_path||"");
+   const prefix=`storage://${PAYMENT_PROOF_BUCKET}/`;
+   if(!storedPath.startsWith(prefix))return response({error:"Invalid private payment proof reference."},400);
+   const objectPath=storedPath.slice(prefix.length);
+   if(!objectPath.startsWith("renewals/")||objectPath.includes(".."))return response({error:"Invalid private payment proof path."},400);
+   const {data,error}=await supabase.storage.from(PAYMENT_PROOF_BUCKET).createSignedUrl(objectPath,300);
+   if(error)throw error;
+   return response({ok:true,signed_url:data.signedUrl,expires_in:300});
+  }
   if(action==="admin_list_requests_session"){await adminSession(String(body.username),String(body.token));const {data,error}=await supabase.from("shoir_subscription_requests").select("*").eq("status","Pending").order("requested_at",{ascending:true});if(error)throw error;return response({ok:true,requests:data||[]});}
 
   if(action==="admin_approve_session"||action==="admin_approve_latest_session"||action==="admin_approve_target_session"){
