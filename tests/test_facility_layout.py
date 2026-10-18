@@ -99,3 +99,130 @@ def test_slp_heatmap_conversion_is_pandas_compatible_and_preserves_unconnected_c
     assert pd.isna(heatmap.loc["D2", "D2"])
     assert pd.isna(heatmap.loc["D3", "D3"])
     assert all(pd.api.types.is_numeric_dtype(dtype) for dtype in heatmap.dtypes)
+
+
+def _facility_import_frames(*, departments=None, flows=None):
+    return {
+        "Departments": pd.DataFrame(departments if departments is not None else [
+            {"ID": "D1", "Name": "Receiving", "X": 10, "Y": 20, "Area": 100},
+            {"ID": "D2", "Name": "Assembly", "X": 50, "Y": 60, "Area": 200},
+        ]),
+        "From_To_Flows": pd.DataFrame(flows if flows is not None else [
+            {"Flow_ID": "F001", "From_ID": "D1", "To_ID": "D2",
+             "Loads_Day": 25, "Distance_M": 12.5, "Relationship": "A"},
+        ]),
+    }
+
+
+def _use_temporary_facility_database(tmp_path, monkeypatch):
+    import shoir_facility_layout as facility
+
+    monkeypatch.setattr(facility, "DB_PATH", str(tmp_path / "facility-import.db"))
+    return facility
+
+
+def test_facility_import_round_trip_validates_headers_and_preserves_flow_direction(
+    tmp_path, monkeypatch
+):
+    facility = _use_temporary_facility_database(tmp_path, monkeypatch)
+    frames = _facility_import_frames(flows=[
+        {"Flow_ID": "F001", "From_ID": "D1", "To_ID": "D2",
+         "Loads_Day": 25, "Distance_M": 12.5, "Relationship": "A"},
+        {"Flow_ID": "F002", "From_ID": "D2", "To_ID": "D1",
+         "Loads_Day": 7, "Distance_M": 15, "Relationship": "O"},
+    ])
+
+    assert facility._import_data(frames, "tester", "workspace-a") == (2, 2)
+    flows = facility._load_flows("tester", "workspace-a")
+    by_direction = {
+        (row.from_id, row.to_id): row.loads_day
+        for row in flows.itertuples(index=False)
+    }
+    assert by_direction == {("D1", "D2"): 25.0, ("D2", "D1"): 7.0}
+
+
+def test_facility_import_rejects_negative_flow_without_partial_writes(
+    tmp_path, monkeypatch
+):
+    facility = _use_temporary_facility_database(tmp_path, monkeypatch)
+    frames = _facility_import_frames(flows=[
+        {"Flow_ID": "F001", "From_ID": "D1", "To_ID": "D2",
+         "Loads_Day": -1, "Distance_M": 12.5, "Relationship": "A"},
+    ])
+
+    import pytest
+    with pytest.raises(ValueError, match="loads_day must be at least 0"):
+        facility._import_data(frames, "tester", "workspace-a")
+
+    assert facility._load_departments("tester", "workspace-a").empty
+    assert facility._load_flows("tester", "workspace-a").empty
+
+
+def test_facility_import_rejects_dangling_endpoint_without_partial_writes(
+    tmp_path, monkeypatch
+):
+    facility = _use_temporary_facility_database(tmp_path, monkeypatch)
+    frames = _facility_import_frames(flows=[
+        {"Flow_ID": "F001", "From_ID": "D1", "To_ID": "MISSING",
+         "Loads_Day": 25, "Distance_M": 12.5, "Relationship": "A"},
+    ])
+
+    import pytest
+    with pytest.raises(ValueError, match="unknown To department"):
+        facility._import_data(frames, "tester", "workspace-a")
+
+    assert facility._load_departments("tester", "workspace-a").empty
+    assert facility._load_flows("tester", "workspace-a").empty
+
+
+def test_facility_import_rejects_duplicate_department_ids_and_invalid_slp_codes(
+    tmp_path, monkeypatch
+):
+    import pytest
+    facility = _use_temporary_facility_database(tmp_path, monkeypatch)
+    duplicate_departments = _facility_import_frames(departments=[
+        {"ID": "D1", "Name": "Receiving", "X": 10, "Y": 20, "Area": 100},
+        {"ID": "D1", "Name": "Assembly", "X": 50, "Y": 60, "Area": 200},
+    ])
+    with pytest.raises(ValueError, match="Duplicate department ID"):
+        facility._import_data(duplicate_departments, "tester", "workspace-a")
+
+    invalid_relationship = _facility_import_frames(flows=[
+        {"Flow_ID": "F001", "From_ID": "D1", "To_ID": "D2",
+         "Loads_Day": 25, "Distance_M": 12.5, "Relationship": "Q"},
+    ])
+    with pytest.raises(ValueError, match="unsupported SLP relationship"):
+        facility._import_data(invalid_relationship, "tester", "workspace-a")
+
+    assert facility._load_departments("tester", "workspace-a").empty
+    assert facility._load_flows("tester", "workspace-a").empty
+
+
+def test_facility_import_rejects_duplicate_directed_edges_but_allows_reverse_flow(
+    tmp_path, monkeypatch
+):
+    import pytest
+    facility = _use_temporary_facility_database(tmp_path, monkeypatch)
+    frames = _facility_import_frames(flows=[
+        {"Flow_ID": "F001", "From_ID": "D1", "To_ID": "D2",
+         "Loads_Day": 25, "Distance_M": 12.5, "Relationship": "A"},
+        {"Flow_ID": "F002", "From_ID": "D1", "To_ID": "D2",
+         "Loads_Day": 7, "Distance_M": 15, "Relationship": "O"},
+    ])
+
+    with pytest.raises(ValueError, match="Duplicate directed flow"):
+        facility._import_data(frames, "tester", "workspace-a")
+
+    assert facility._load_departments("tester", "workspace-a").empty
+    assert facility._load_flows("tester", "workspace-a").empty
+
+
+def test_facility_import_is_idempotent_for_the_same_existing_flow_id(
+    tmp_path, monkeypatch
+):
+    facility = _use_temporary_facility_database(tmp_path, monkeypatch)
+    frames = _facility_import_frames()
+    assert facility._import_data(frames, "tester", "workspace-a") == (2, 1)
+    assert facility._import_data(frames, "tester", "workspace-a") == (2, 1)
+    assert len(facility._load_departments("tester", "workspace-a")) == 2
+    assert len(facility._load_flows("tester", "workspace-a")) == 1
