@@ -39,6 +39,8 @@ def test_visible_subscription_countdown_and_renewal_controls_exist():
     assert 'Subscription: ' in APP_SOURCE
     assert '@st.fragment(run_every="60s")' in APP_SOURCE
     assert 'active_subscription_renewal_form' in APP_SOURCE
+    assert 'Enter the payment transaction/reference' in APP_SOURCE
+    assert 'Transaction / Payment Reference' in APP_SOURCE
     assert 'Enterprise Plus Tier ($399)' in APP_SOURCE
     assert 'Research Pack ($30 add-on)' in APP_SOURCE
 
