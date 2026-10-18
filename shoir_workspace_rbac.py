@@ -110,7 +110,11 @@ def _read_members(conn: sqlite3.Connection, workspace: str) -> list[dict[str, An
 
 
 def list_workspace_members(
-    workspace: str, username: str, db_path: str = DEFAULT_DB_PATH
+    workspace: str,
+    username: str,
+    db_path: str = DEFAULT_DB_PATH,
+    *,
+    allow_draft: bool = True,
 ) -> pd.DataFrame:
     """List members only to current workspace members.
 
@@ -123,6 +127,8 @@ def list_workspace_members(
     with sqlite3.connect(db_path, timeout=15) as conn:
         rows = _read_members(conn, requested_workspace)
     if not rows:
+        if not allow_draft:
+            raise LookupError("Workspace does not exist yet; create it from Team Workspaces & RBAC first.")
         return pd.DataFrame(
             [{"Username": actor, "Role": "Owner", "Updated At": ""}],
             columns=_COLUMNS,
