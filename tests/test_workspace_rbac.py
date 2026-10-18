@@ -183,3 +183,24 @@ def test_corrupt_legacy_membership_fails_closed(tmp_path, monkeypatch):
     with pytest.raises(PermissionError, match="duplicate usernames"):
         list_workspace_members("Plant-E", "alice", db)
 
+def test_case_colliding_legacy_workspace_names_fail_closed(tmp_path, monkeypatch):
+    _session(monkeypatch, "alice")
+    db = str(tmp_path / "workspace-name-collision.db")
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            """CREATE TABLE workspace_members(
+                workspace TEXT NOT NULL, username TEXT NOT NULL, role TEXT NOT NULL,
+                updated_at TEXT NOT NULL, PRIMARY KEY(workspace, username)
+            )"""
+        )
+        conn.executemany(
+            "INSERT INTO workspace_members(workspace,username,role,updated_at) VALUES(?,?,?,?)",
+            [
+                ("Plant-F", "alice", "Owner", "now"),
+                ("plant-f", "bob", "Viewer", "now"),
+            ],
+        )
+        conn.commit()
+    with pytest.raises(PermissionError, match="differing only by case"):
+        list_workspace_members("Plant-F", "alice", db)
+
