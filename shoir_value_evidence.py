@@ -592,7 +592,7 @@ def render_value_evidence_engine(owner: str, current_module: str = "Venture Stud
         """<div class="hero-card">
         <div class="kicker">EVIDENCE-FIRST VALUE MODEL</div>
         <div class="hero-title">Engineering improvement → measurable business value</div>
-        <div class="hero-copy">Use the task baseline to quantify time released, then attach customer evidence to financial impact. Nothing is presented as a verified result until the source is recorded.</div>
+        <div class="hero-copy">Use comparable baseline and post-deployment task times to estimate capacity released. Source references and evidence classifications are preserved, but entering a source does not authenticate it or independently verify an outcome.</div>
         </div>""",
         unsafe_allow_html=True,
     )
@@ -609,7 +609,13 @@ def render_value_evidence_engine(owner: str, current_module: str = "Venture Stud
     c1.metric("Hours saved / study", f"{tv['hours_saved']:,.2f} h")
     c2.metric("Annual capacity released", f"{tv['annual_capacity_hours']:,.1f} h")
     c3.metric("Annual time value", f"SAR {tv['annual_time_value']:,.0f}")
-    c4.metric("Evidence status", "Saved baseline — source not authenticated" if saved else "Reference estimate")
+    c4.metric(
+        "Evidence status",
+        "Customer measured — source not authenticated"
+        if saved and saved.get("evidence_state") == "Customer measured"
+        else "Saved baseline — source not authenticated" if saved
+        else "Reference estimate",
+    )
 
     st.markdown("#### 2 · Financial value")
     st.code("Calculated Period Net Benefit = Baseline Cost − Post-Deployment Cost − Implementation Cost", language="text")
@@ -699,22 +705,28 @@ def render_value_evidence_engine(owner: str, current_module: str = "Venture Stud
             if not source.strip() and confidence != "Reference estimate":
                 st.error("Customer-measured values require a source reference.")
             else:
-                with sqlite3.connect(DB_PATH, timeout=30) as conn:
-                    conn.execute(
-                        """INSERT INTO shoir_value_task_baselines
-                           (owner,module,task,baseline_minutes,shoir_minutes,studies_per_year,hourly_rate,currency,source,updated_at)
-                           VALUES(?,?,?,?,?,?,?,?,?,?)
-                           ON CONFLICT(owner,module) DO UPDATE SET
-                           task=excluded.task,baseline_minutes=excluded.baseline_minutes,shoir_minutes=excluded.shoir_minutes,
-                           studies_per_year=excluded.studies_per_year,hourly_rate=excluded.hourly_rate,
-                           currency=excluded.currency,source=excluded.source,updated_at=excluded.updated_at""",
-                        (owner,module,profile["task"],baseline,shoir,freq,hourly,"SAR",source.strip()[:300] or "Reference planning benchmark",_now()),
+                try:
+                    stored_baseline = save_task_baseline(
+                        owner, module, profile["task"], baseline, shoir, freq, hourly,
+                        currency="SAR",
+                        source=source.strip(),
+                        evidence_state=confidence,
                     )
-                    conn.commit()
-                snapshot_values = dict(tv)
-                snapshot_values["currency"] = "SAR"
-                snapshot_id = record_time_snapshot(owner, module, profile["task"], snapshot_values, source.strip() or "Reference planning benchmark")
-                st.success(f"Value snapshot {snapshot_id} saved with its evidence state.")
-                st.rerun()
+                    snapshot_values = dict(tv)
+                    snapshot_values["currency"] = "SAR"
+                    snapshot_values["evidence_state"] = confidence
+                    snapshot_id = record_time_snapshot(
+                        owner, module, profile["task"], snapshot_values,
+                        source.strip() or "Reference planning benchmark",
+                        db_path=DB_PATH,
+                    )
+                    st.success(
+                        f"Value snapshot {snapshot_id} saved · "
+                        f"baseline classification: {stored_baseline['evidence_state']}. "
+                        "The source itself is not authenticated by Shoir-IE."
+                    )
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"Value evidence could not be saved safely: {type(exc).__name__}: {exc}")
 
     st.caption("Reference task times are planning assumptions. Financial values are calculated from entered cost inputs, and source references are recorded but not authenticated. ROI and payback are scenario calculations, not verified or realized benefits.")
