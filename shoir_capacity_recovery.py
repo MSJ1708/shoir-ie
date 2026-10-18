@@ -15,6 +15,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Mapping
 
+import numpy as np
 import pandas as pd
 
 DB_PATH = "enterprise_full_workspace.db"
@@ -105,8 +106,24 @@ def _finite_number(
     return number
 
 
+def _json_safe(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(item) for item in value]
+    if isinstance(value, np.generic):
+        return _json_safe(value.item())
+    if isinstance(value, pd.Timestamp):
+        return value.isoformat()
+    if value is pd.NA or value is pd.NaT:
+        return None
+    if isinstance(value, float) and not math.isfinite(value):
+        raise ValueError("Non-finite values cannot be included in a reproducible study payload.")
+    return value
+
+
 def _canonical_json(value: Any) -> str:
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
+    return json.dumps(_json_safe(value), sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
 
 
 def _sha256(value: Any) -> str:
@@ -178,13 +195,13 @@ def _normalize_station_table(stations: pd.DataFrame) -> pd.DataFrame:
         raise ValueError("Station names must be unique (case-insensitive): " + ", ".join(repeated))
 
     numeric_rules = {
-        "Cycle Time (sec/unit)": (0.0, None, False),
-        "Available Time (min/shift)": (0.0, None, False),
+        "Cycle Time (sec/unit)": (0.0, 1e9, False),
+        "Available Time (min/shift)": (0.0, 1e6, False),
         "Availability (%)": (0.0, 100.0, False),
-        "Parallel Resources": (1.0, None, True),
-        "Scenario Cycle Time (sec/unit)": (0.0, None, False),
+        "Parallel Resources": (1.0, 10000.0, True),
+        "Scenario Cycle Time (sec/unit)": (0.0, 1e9, False),
         "Scenario Availability (%)": (0.0, 100.0, False),
-        "Scenario Parallel Resources": (1.0, None, True),
+        "Scenario Parallel Resources": (1.0, 10000.0, True),
     }
     for column, (minimum, maximum, integer_only) in numeric_rules.items():
         series = pd.to_numeric(frame[column], errors="coerce")
@@ -246,7 +263,7 @@ def analyze_capacity_recovery(
 ) -> dict[str, Any]:
     """Calculate deterministic line-capacity bounds and a transparent what-if scenario."""
     frame = _normalize_station_table(stations)
-    demand = _finite_number(demand_units_per_shift, "Demand (good units/shift)")
+    demand = _finite_number(demand_units_per_shift, "Demand (good units/shift)", maximum=1e12)
     yield_pct = _finite_number(
         overall_first_pass_yield_pct, "Overall first-pass yield (%)", maximum=100.0
     )
@@ -326,13 +343,15 @@ def calculate_capacity_value_sensitivity(
     implementation_cost: float,
 ) -> dict[str, Any]:
     """Calculate a user-assumption sensitivity, explicitly classified as an estimate."""
-    delta = _finite_number(additional_good_units_per_shift, "Additional good units/shift", minimum=None)
-    shifts = _finite_number(operating_shifts_per_year, "Operating shifts/year")
-    unit_value = _finite_number(contribution_or_avoided_cost_per_unit, "Contribution or avoided cost per unit")
-    implementation = _finite_number(implementation_cost, "Implementation cost")
+    delta = _finite_number(additional_good_units_per_shift, "Additional good units/shift", minimum=-1e12, maximum=1e12)
+    shifts = _finite_number(operating_shifts_per_year, "Operating shifts/year", maximum=1e6)
+    unit_value = _finite_number(contribution_or_avoided_cost_per_unit, "Contribution or avoided cost per unit", maximum=1e12)
+    implementation = _finite_number(implementation_cost, "Implementation cost", maximum=1e15)
     annual_units = delta * shifts
     annual_gross = annual_units * unit_value
     annual_net = annual_gross - implementation
+    if not all(math.isfinite(value) for value in (annual_units, annual_gross, annual_net)):
+        raise ValueError("Financial sensitivity exceeded the finite numeric range.")
     roi = (annual_net / implementation * 100.0) if implementation > 0 else None
     payback = (implementation / (annual_gross / 12.0)) if implementation > 0 and annual_gross > 0 else None
     return {
