@@ -385,6 +385,9 @@ def render_capacity_recovery(tier: str = "Starter", username: str = "unknown") -
             st.write(f"• {error}")
         return
 
+    for warning in validation["warnings"]:
+        st.warning(warning)
+
     metrics = result["line_metrics"]
     scenario = result["recovery_scenario"]
     if metrics.empty:
@@ -397,6 +400,10 @@ def render_capacity_recovery(tier: str = "Starter", username: str = "unknown") -
     m3.metric("Observed downtime (min)", f"{metrics['DowntimeMin'].sum():,.1f}")
 
     st.subheader("Baseline: calculated line performance")
+    st.caption(
+        "Constraint signal is a screening hint based on lowest OEE only. Confirm a true flow bottleneck "
+        "using comparable products, routing, throughput, queues/WIP, and process constraints."
+    )
     st.dataframe(metrics, use_container_width=True, hide_index=True)
     st.plotly_chart(
         px.bar(metrics, x="Line", y="OEEPct", title="Calculated OEE by line",
@@ -428,8 +435,6 @@ def render_capacity_recovery(tier: str = "Starter", username: str = "unknown") -
         st.write("Assumptions and limits:")
         for assumption in evidence["assumptions"]:
             st.write(f"• {assumption}")
-        for warning in evidence["validation"]["warnings"]:
-            st.warning(warning)
 
     buffer = io.BytesIO()
     try:
