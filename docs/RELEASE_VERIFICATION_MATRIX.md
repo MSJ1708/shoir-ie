@@ -13,7 +13,7 @@ This matrix is the release gate for the subscription renewal, account, module, i
 
 ## Current verification record — 2026-10-18
 
-The following status is tied to merge commit `c93a33cfe6272c1d60f4d6f94753bdad147948e5` and live backend observations captured during this run.
+This record combines automated and public-browser evidence from the merged subscription/documentation work plus follow-up private-payment-proof hardening. The live backend facts below were queried directly on 2026-10-18; current source/CI evidence should always be matched to the commit SHA shown by the linked workflow run.
 
 | Area | Current status | Evidence / boundary |
 |---|---|---|
@@ -21,13 +21,13 @@ The following status is tied to merge commit `c93a33cfe6272c1d60f4d6f94753bdad14
 | Engine regression | **PASS — automated** | Main engine-regression workflow completed successfully. |
 | Security and quality checks | **PASS — automated** | Main security-quality workflow completed successfully. This is not a penetration test or independent certification. |
 | Public hosted entry screen | **PASS — browser smoke** | Headless Chromium checked the live public shell at desktop and mobile widths, including registration and public Explore Modules tab, with no fatal marker or horizontal overflow. No sign-in or production writes were attempted. |
-| Subscription backend deployment | **PASS — configuration checked; runtime behavior open** | Supabase `shoir-persistence` is deployed at version 5; `shoir_sessions.scope` exists, is NOT NULL and defaults to `workspace`. Automated repository tests assert source contracts; they do not directly exercise the deployed login/renewal/workspace endpoints. |
+| Subscription backend deployment | **PASS — deployed configuration checked; endpoint walkthrough pending** | Supabase `shoir-persistence` is deployed at version 7. `shoir_sessions.scope` exists, is NOT NULL and defaults to `workspace`; the private payment-proof bucket and restrictive storage policy are configured. The Edge Function also rejects renewal requests for the protected `sho` administrator. Repository tests assert source contracts, but an authenticated walkthrough is still required to verify deployed login, renewal, upload, signed-link and workspace endpoints end to end. |
 | Admin tier | **PASS — record checked** | Existing admin record is active, retains role `Enterprise Admin` and long-dated expiry `2099-01-01 UTC`, and now has tier `Enterprise Plus Tier ($399)`. No password or account recreation was performed. |
-| Renewal payment review | **PASS — source/CI checked; browser pending** | Renewal requires a transaction/payment reference; the Admin Panel displays the reference. Receipt preview is supplementary and may be unavailable if its local file is gone. |
+| Renewal payment review | **Implemented / backend configured; end-to-end pending** | Transaction reference is validated server-side. The private `subscription-payment-proofs` bucket is provisioned with a 512 KiB limit and PNG/JPG/PDF allowlist; `storage.objects` also has a restrictive policy denying direct `anon`/`authenticated` access to that bucket, even if another permissive storage policy is added. Edge v6 uploads there and returns five-minute URLs only to an admin session. Verify upload/review with an authorized test account before calling the flow end-to-end passed. |
 | Core account/workspace RLS | **PASS — policy inspected** | `shoir_accounts`, `shoir_pending_credentials`, `shoir_sessions`, `shoir_subscription_requests` and `shoir_workspace_states` have server-only policies with `USING false` and `WITH CHECK false` for `anon`/`authenticated`. The service-role Edge Function is the designed persistence boundary. |
 | Authenticated sign-in, expiry, renewal and restoration | **BLOCKED — not browser verified** | This run had no authorized test credential or already-authenticated browser session available to exercise the private account journey. The public smoke deliberately does not sign in. Do not claim these cases passed from static checks alone. |
 | Module-by-module rendering, imports/downloads, persistence after restart, roles/tiers and tenant isolation | **OPEN — not fully browser verified** | The matrix below is the acceptance checklist. A public shell smoke is not evidence for these private workflows. |
-| Platform-table security advisor | **REVIEW REQUIRED** | Supabase reports five other public platform tables with RLS enabled but no explicit policies (`shoir_platform_artifacts`, `shoir_platform_events`, `shoir_platform_jobs`, `shoir_platform_meta`, `shoir_platform_records`). No-policy RLS is normally default-deny for public roles, but verify intended grants and service-role access before exposing these tables directly. Do not add permissive client policies without a tenant-aware access design. |
+| Platform-table security advisor | **PASS — deny-by-default policies applied** | All five public platform tables now have explicit `FOR ALL TO anon, authenticated USING (false) WITH CHECK (false)` policies. Security advisor returns no lints; direct table-grant query returns no privileges for `anon`/`authenticated`. Trusted service-role Edge operations are unchanged. |
 
 **Release decision:** automated and public-shell checks passed, but **the full definition of done remains OPEN** until authorized authenticated browser tests and the remaining module/import/export/persistence/security matrix rows are recorded with evidence.
 
@@ -44,7 +44,7 @@ The following status is tied to merge commit `c93a33cfe6272c1d60f4d6f94753bdad14
 | AUTH-07 | Active subscriber submits renewal | Pending request appears in administrator request queue | Browser check with test account |
 | AUTH-08 | Administrator approves renewal | Existing account is updated; expiry is extended from the later of now/current expiry; data remains associated with same user | Database before/after + browser |
 | AUTH-09 | Administrator declines renewal | Access is not extended and request status is Declined | Database + browser |
-| AUTH-10 | Subscription reaches expiry while session is open | Workspace operations stop server-side; user can re-enter renewal-only flow | Edge regression + browser |
+| AUTH-10 | Subscription reaches expiry while session is open | Workspace operations stop server-side; the UI explains that the user must sign in again with the same account and then opens the renewal-only flow | Edge regression + authenticated browser |
 | AUTH-11 | Renewal token expires | Renewal submission fails safely; user can return to sign-in | Automated + browser |
 | AUTH-12 | Admin account login | Role remains Enterprise Admin; tier is Enterprise Plus; long-dated expiry remains intact | Database + authorized browser |
 | AUTH-13 | New login after approved renewal | Full workspace returns with prior profile and saved workspace | Browser reload/re-login evidence |
