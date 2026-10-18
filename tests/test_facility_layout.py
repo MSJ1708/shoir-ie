@@ -226,3 +226,80 @@ def test_facility_import_is_idempotent_for_the_same_existing_flow_id(
     assert facility._import_data(frames, "tester", "workspace-a") == (2, 1)
     assert len(facility._load_departments("tester", "workspace-a")) == 2
     assert len(facility._load_flows("tester", "workspace-a")) == 1
+
+
+def test_facility_import_rejects_missing_layout_geometry_instead_of_inventing_defaults(
+    tmp_path, monkeypatch
+):
+    import pytest
+    facility = _use_temporary_facility_database(tmp_path, monkeypatch)
+    frames = _facility_import_frames(
+        departments=[
+            {"ID": "D1", "Name": "Receiving", "Y": 20, "Area": 100},
+            {"ID": "D2", "Name": "Assembly", "Y": 60, "Area": 200},
+        ],
+        flows=[],
+    )
+
+    with pytest.raises(ValueError, match="missing required column.*x"):
+        facility._import_data(frames, "tester", "workspace-a")
+
+    assert facility._load_departments("tester", "workspace-a").empty
+    assert facility._load_flows("tester", "workspace-a").empty
+
+
+def test_facility_import_rejects_missing_flow_measurement_columns_atomically(
+    tmp_path, monkeypatch
+):
+    import pytest
+    facility = _use_temporary_facility_database(tmp_path, monkeypatch)
+    frames = _facility_import_frames(flows=[
+        {"Flow_ID": "F001", "From_ID": "D1", "To_ID": "D2", "Relationship": "A"},
+    ])
+
+    with pytest.raises(ValueError, match="missing required column.*distance_m|missing required column.*loads_day"):
+        facility._import_data(frames, "tester", "workspace-a")
+
+    assert facility._load_departments("tester", "workspace-a").empty
+    assert facility._load_flows("tester", "workspace-a").empty
+
+
+def test_facility_import_rejects_missing_flow_measurement_cells_atomically(
+    tmp_path, monkeypatch
+):
+    import pytest
+    facility = _use_temporary_facility_database(tmp_path, monkeypatch)
+    frames = _facility_import_frames(flows=[
+        {"Flow_ID": "F001", "From_ID": "D1", "To_ID": "D2",
+         "Loads_Day": None, "Distance_M": 12.5, "Relationship": "A"},
+    ])
+
+    with pytest.raises(ValueError, match="loads_day is required"):
+        facility._import_data(frames, "tester", "workspace-a")
+
+    assert facility._load_departments("tester", "workspace-a").empty
+    assert facility._load_flows("tester", "workspace-a").empty
+
+
+def test_blank_slp_relationship_remains_missing_not_a_fabricated_score(
+    tmp_path, monkeypatch
+):
+    facility = _use_temporary_facility_database(tmp_path, monkeypatch)
+    frames = _facility_import_frames(flows=[
+        {"Flow_ID": "F001", "From_ID": "D1", "To_ID": "D2",
+         "Loads_Day": 25, "Distance_M": 12.5, "Relationship": ""},
+    ])
+    assert facility._import_data(frames, "tester", "workspace-a") == (2, 1)
+
+    departments = facility._load_departments("tester", "workspace-a")
+    flows = facility._load_flows("tester", "workspace-a")
+    assert str(flows.iloc[0]["relationship"]) == ""
+
+    slp = facility._slp_frame(departments, flows)
+    row = slp[(slp["From"] == "D1") & (slp["To"] == "D2")].iloc[0]
+    assert row["REL"] == ""
+    assert pd.isna(row["Score"])
+
+    matrix = facility._matrix(departments, slp)
+    assert matrix.loc["D1", "D2"] == ""
+    assert pd.isna(facility._slp_heatmap_values(matrix).loc["D1", "D2"])
