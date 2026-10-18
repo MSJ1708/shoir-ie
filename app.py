@@ -1290,6 +1290,77 @@ if st.session_state.get("authenticated") and st.session_state.get("current_user"
     except Exception:
         pass
 
+# Expired subscriptions receive a narrowly scoped renewal-only surface.
+# Do not render module navigation or workspace data in this state.
+if st.session_state.get("renewal_mode") and not st.session_state.get("current_user"):
+    st.title("🔁 Renew your Shoir-IE subscription")
+    st.warning("Your 30-day subscription period has ended. Workspace access is paused until your renewal is reviewed and approved.")
+    st.info("Your existing account, profile, research records and saved workspace are preserved. Do not create a new account; renewing restores access to your existing account.")
+    _renew_expiry = st.session_state.get("renewal_expires_at")
+    if _renew_expiry:
+        st.caption(f"Previous subscription expiry: {_renew_expiry}")
+    st.markdown("### Submit a renewal request")
+    st.write("Pay for the selected plan using the instructions below, then provide a transaction reference or upload your receipt. Access resumes only after administrator approval.")
+    try:
+        _renew_qr_image = Image.open("stc_pay_qr.png")
+        st.image(_renew_qr_image, caption="STC Pay payment QR code", width=230)
+    except Exception:
+        st.info("The payment QR image is unavailable in this deployment. Use an approved payment method and include your transaction reference or receipt.")
+    st.caption("Keep your transaction reference and receipt private. Upload only the proof needed to review this subscription request.")
+    with st.form("expired_subscription_renewal_form", clear_on_submit=False):
+        _renew_tier = st.selectbox(
+            "Subscription plan",
+            ["Starter Tier ($29)", "Mid-Tier Pro ($79)", "Professional Tier ($129)", "Enterprise Tier ($199)", "Enterprise Plus Tier ($399)", "Research Pack ($30 add-on)"],
+            index=(
+                ["Starter Tier ($29)", "Mid-Tier Pro ($79)", "Professional Tier ($129)", "Enterprise Tier ($199)", "Enterprise Plus Tier ($399)", "Research Pack ($30 add-on)"].index(st.session_state.get("renewal_tier"))
+                if st.session_state.get("renewal_tier") in ["Starter Tier ($29)", "Mid-Tier Pro ($79)", "Professional Tier ($129)", "Enterprise Tier ($199)", "Enterprise Plus Tier ($399)", "Research Pack ($30 add-on)"]
+                else 0
+            ),
+        )
+        _renew_method = st.selectbox("Payment method", ["STC Pay (QR)", "Bank transfer", "Other approved method"])
+        _renew_reference = st.text_input("Transaction / payment reference", key="expired_renewal_reference")
+        _renew_receipt = st.file_uploader("Payment receipt (PNG, JPG, JPEG or PDF)", type=["png", "jpg", "jpeg", "pdf"], key="expired_renewal_receipt")
+        _renew_submit = st.form_submit_button("Submit renewal request", type="primary")
+    if _renew_submit:
+        if not str(_renew_reference or "").strip() and _renew_receipt is None:
+            st.warning("Provide a transaction reference or upload your payment receipt before submitting.")
+        else:
+            _receipt_path = None
+            if _renew_receipt is not None:
+                os.makedirs("payment_proofs", exist_ok=True)
+                _receipt_ext = os.path.splitext(str(_renew_receipt.name or "receipt.png"))[1].lower()
+                if _receipt_ext not in {".png", ".jpg", ".jpeg", ".pdf"}:
+                    _receipt_ext = ".png"
+                _receipt_name = hashlib.sha256(str(st.session_state.get("renewal_username","")).encode("utf-8")).hexdigest()[:12]
+                _receipt_path = os.path.join("payment_proofs", f"renewal_{_receipt_name}_{time.time_ns()}{_receipt_ext}")
+                with open(_receipt_path, "wb") as _receipt_file:
+                    _receipt_file.write(_renew_receipt.getbuffer())
+            try:
+                _renew_result = edge_renew_request(
+                    st.session_state.get("renewal_username", ""),
+                    st.session_state.get("renewal_session_token", ""),
+                    {
+                        "tier": _renew_tier,
+                        "payment_method": _renew_method,
+                        "transaction_id": str(_renew_reference or "").strip() or None,
+                        "screenshot_path": _receipt_path,
+                    },
+                )
+                st.session_state["renewal_request_submitted"] = _renew_result.get("request_id", True)
+                st.success("Renewal request submitted. Your saved workspace remains protected; the administrator must approve the request before normal access returns.")
+            except Exception as _renew_exc:
+                st.error("We could not submit the renewal request. Your account and saved work have not been deleted.")
+                st.caption(f"Renewal request diagnostic: {type(_renew_exc).__name__}: {_renew_exc}")
+    if st.session_state.get("renewal_request_submitted"):
+        st.success(f"Renewal request reference: {st.session_state['renewal_request_submitted']}")
+        st.caption("You can close this page safely. Sign in again after the administrator confirms approval.")
+    if st.button("Back to sign in", key="expired_renewal_back"):
+        st.session_state.pop("renewal_mode", None)
+        st.session_state.pop("renewal_session_token", None)
+        st.session_state.pop("renewal_request_submitted", None)
+        st.rerun()
+    st.stop()
+
 if not st.session_state.get("current_user"):
     st.title("🔐 Welcome to Shoir-IE Workspace")
     st.markdown("Please sign in with your approved account or register and submit your payment ticket below.")
@@ -1326,9 +1397,23 @@ if not st.session_state.get("current_user"):
 
             # Expiry is enforced by the durable authentication service.
             if auth.get("error") == "SUBSCRIPTION_EXPIRED":
-                st.error("⏰ Your Shoir-IE subscription expired after 30 days.")
-                st.info("Your account, profile, research data and workspace are preserved. Submit a renewal request to regain access after administrator approval.")
+                # Authentication succeeded, but normal workspace access is expired.
+                # The server issues a short-lived renewal-only token; it cannot load/save workspaces.
+                renewal_token = str(auth.get("token") or "")
+                if renewal_token:
+                    st.session_state["renewal_mode"] = True
+                    st.session_state["renewal_session_token"] = renewal_token
+                    st.session_state["renewal_username"] = username
+                    st.session_state["renewal_tier"] = tier
+                    st.session_state["renewal_email"] = email
+                    st.session_state["renewal_expires_at"] = expiry
+                    st.rerun()
+                else:
+                    st.error("Your subscription has expired, but a renewal-only session could not be created. Please contact support.")
             elif token:
+                st.session_state.pop("renewal_mode", None)
+                st.session_state.pop("renewal_session_token", None)
+                st.session_state.pop("renewal_request_submitted", None)
                 st.session_state["remote_session_token"] = token
                 st.session_state["current_user"] = username
                 st.session_state["user_role"] = role
@@ -1810,20 +1895,23 @@ if not st.session_state.get("current_user"):
                 )
 
         st.markdown("### A simple way to choose")
-        _plan_cols = st.columns(4)
         _plan_copy = [
             ("Starter", "$29", "Core engineering decisions", "Optimization, inventory, facilities and essential IE workflows."),
             ("Mid-Tier Pro", "$79", "Operational improvement", "Adds routing, planning, quality, finance, sustainability and network operations."),
+            ("Professional", "$129", "Advanced engineering studies", "For teams combining quality, forecasting, engineering economics and structured specialist workflows."),
             ("Enterprise", "$199", "Connected decision-making", "Adds simulation, automation, monitoring, control-tower capabilities and team-scale workflows."),
-            ("Research Pack", "+$30", "Research-grade evidence", "Adds statistical analysis, reproducibility, paper-to-simulation and research stress-testing."),
+            ("Enterprise Plus", "$399", "Flagship industrial intelligence", "For connected decision workflows, advanced operational intelligence and enterprise-scale use."),
+            ("Research Pack", "+$30", "Research-grade evidence", "An add-on for statistical analysis, reproducibility, paper-to-simulation and research stress-testing."),
         ]
-        for _col, (_name, _price, _headline, _body) in zip(_plan_cols, _plan_copy):
-            with _col:
-                st.markdown(
-                    f'<div class="value-strip"><div class="kicker">{_name}</div>'
-                    f'<b>{_price}</b><span><b>{_headline}</b><br>{_body}</span></div>',
-                    unsafe_allow_html=True
-                )
+        for _plan_start in range(0, len(_plan_copy), 3):
+            _plan_cols = st.columns(3)
+            for _col, (_name, _price, _headline, _body) in zip(_plan_cols, _plan_copy[_plan_start:_plan_start + 3]):
+                with _col:
+                    st.markdown(
+                        f'<div class="value-strip"><div class="kicker">{_name}</div>'
+                        f'<b>{_price}</b><span><b>{_headline}</b><br>{_body}</span></div>',
+                        unsafe_allow_html=True
+                    )
 
         st.success(
             "If you can describe the industrial problem, there is a strong chance the catalog has a workflow "
@@ -2200,6 +2288,105 @@ if st.session_state.get("selected_nav") == "✨ Excellence Hub":
         st.session_state.get("user_tier", "Starter Tier"),
     )
     _shoir_module_stop()
+
+# Subscription countdown and renewal entry point for paid members.
+# The administrator account is intentionally excluded from subscription controls.
+if str(st.session_state.get("current_user", "")).strip().lower() != "sho":
+    def _render_subscription_countdown() -> None:
+        _sidebar_expiry_raw = st.session_state.get("subscription_expires_at")
+        if not _sidebar_expiry_raw:
+            return
+        try:
+            _sidebar_expiry = datetime.datetime.fromisoformat(str(_sidebar_expiry_raw).replace("Z", "+00:00"))
+            if _sidebar_expiry.tzinfo is None:
+                _sidebar_expiry = _sidebar_expiry.replace(tzinfo=datetime.timezone.utc)
+            _sidebar_remaining = max(0.0, (_sidebar_expiry - datetime.datetime.now(datetime.timezone.utc)).total_seconds())
+            st.caption(
+                f"⏳ Subscription: {int(_sidebar_remaining // 86400)}d "
+                f"{int((_sidebar_remaining % 86400) // 3600)}h remaining"
+            )
+        except (TypeError, ValueError, OverflowError):
+            st.caption("⏳ Subscription countdown is temporarily unavailable.")
+
+    # A fragment refreshes the countdown even when the user does not interact.
+    # Keep a fallback for older Streamlit deployments that do not expose st.fragment.
+    if hasattr(st, "fragment"):
+        @st.fragment(run_every="60s")
+        def _render_subscription_countdown_fragment() -> None:
+            _render_subscription_countdown()
+        with st.sidebar:
+            _render_subscription_countdown_fragment()
+    else:
+        with st.sidebar:
+            _render_subscription_countdown()
+
+    with st.sidebar.expander("Subscription & Renewal", expanded=False):
+        _sub_tier = str(st.session_state.get("user_tier", "Starter Tier"))
+        _sub_expiry_raw = st.session_state.get("subscription_expires_at")
+        st.caption(f"Current plan: {_sub_tier}")
+        if _sub_expiry_raw:
+            try:
+                _sub_expiry = datetime.datetime.fromisoformat(str(_sub_expiry_raw).replace("Z", "+00:00"))
+                if _sub_expiry.tzinfo is None:
+                    _sub_expiry = _sub_expiry.replace(tzinfo=datetime.timezone.utc)
+                _sub_remaining = max(0.0, (_sub_expiry - datetime.datetime.now(datetime.timezone.utc)).total_seconds())
+                _sub_days = _sub_remaining / 86400
+                st.metric("Time remaining", f"{int(_sub_remaining // 86400)}d {int((_sub_remaining % 86400) // 3600)}h")
+                st.caption(f"Subscription expiry (UTC): {_sub_expiry.astimezone(datetime.timezone.utc).strftime('%Y-%m-%d %H:%M')}")
+                if _sub_days <= 3:
+                    st.warning("Your subscription is nearing expiry. Submit a renewal request before access is interrupted.")
+            except (TypeError, ValueError, OverflowError):
+                st.info("Subscription expiry is being refreshed from the account service.")
+        else:
+            st.info("Subscription expiry is not available in this session. Sign in again to refresh account status.")
+
+        with st.form("active_subscription_renewal_form", clear_on_submit=False):
+            _active_renew_tier = st.selectbox(
+                "Renewal plan",
+                ["Starter Tier ($29)", "Mid-Tier Pro ($79)", "Professional Tier ($129)", "Enterprise Tier ($199)", "Enterprise Plus Tier ($399)", "Research Pack ($30 add-on)"],
+                index=(
+                    ["Starter Tier ($29)", "Mid-Tier Pro ($79)", "Professional Tier ($129)", "Enterprise Tier ($199)", "Enterprise Plus Tier ($399)", "Research Pack ($30 add-on)"].index(_sub_tier)
+                    if _sub_tier in ["Starter Tier ($29)", "Mid-Tier Pro ($79)", "Professional Tier ($129)", "Enterprise Tier ($199)", "Enterprise Plus Tier ($399)", "Research Pack ($30 add-on)"]
+                    else 0
+                ),
+            )
+            _active_renew_method = st.selectbox("Payment method", ["STC Pay (QR)", "Bank transfer", "Other approved method"])
+            _active_renew_reference = st.text_input("Transaction / payment reference", key="active_renewal_reference")
+            _active_renew_receipt = st.file_uploader(
+                "Payment receipt (PNG, JPG, JPEG or PDF)",
+                type=["png", "jpg", "jpeg", "pdf"],
+                key="active_renewal_receipt",
+            )
+            _active_renew_submit = st.form_submit_button("Request renewal review", type="primary")
+        if _active_renew_submit:
+            if not str(_active_renew_reference or "").strip() and _active_renew_receipt is None:
+                st.warning("Provide a transaction reference or upload a payment receipt before submitting.")
+            else:
+                _active_receipt_path = None
+                if _active_renew_receipt is not None:
+                    os.makedirs("payment_proofs", exist_ok=True)
+                    _active_receipt_ext = os.path.splitext(str(_active_renew_receipt.name or "receipt.png"))[1].lower()
+                    if _active_receipt_ext not in {".png", ".jpg", ".jpeg", ".pdf"}:
+                        _active_receipt_ext = ".png"
+                    _active_receipt_owner = hashlib.sha256(str(st.session_state.get("current_user", "")).encode("utf-8")).hexdigest()[:12]
+                    _active_receipt_path = os.path.join("payment_proofs", f"renewal_{_active_receipt_owner}_{time.time_ns()}{_active_receipt_ext}")
+                    with open(_active_receipt_path, "wb") as _active_receipt_file:
+                        _active_receipt_file.write(_active_renew_receipt.getbuffer())
+                try:
+                    _active_renew_result = edge_renew_request(
+                        st.session_state.get("current_user", ""),
+                        st.session_state.get("remote_session_token", ""),
+                        {
+                            "tier": _active_renew_tier,
+                            "payment_method": _active_renew_method,
+                            "transaction_id": str(_active_renew_reference or "").strip() or None,
+                            "screenshot_path": _active_receipt_path,
+                        },
+                    )
+                    st.success(f"Renewal request submitted for administrator review (reference {_active_renew_result.get('request_id', 'created')}). Your current access remains governed by its expiry.")
+                except Exception as _active_renew_exc:
+                    st.error("Renewal request could not be submitted. Your current account and data remain unchanged.")
+                    st.caption(f"Renewal diagnostic: {type(_active_renew_exc).__name__}: {_active_renew_exc}")
 
 st.sidebar.markdown("---")
 if st.sidebar.button("Lock / Logout Workspace"):
