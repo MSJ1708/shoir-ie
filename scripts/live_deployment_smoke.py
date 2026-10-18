@@ -147,29 +147,68 @@ def main() -> int:
                         tab_checks = []
                         if app_frame is not None:
                             scenarios = [
-                                (
-                                    "subscription-registration-tab",
-                                    re.compile(r"Get Ticket\s*&\s*Register", re.I),
-                                    re.compile(r"Get Subscription Ticket\s*&\s*Register", re.I),
-                                ),
-                                (
-                                    "public-module-explorer-tab",
-                                    re.compile(r"Explore the Modules", re.I),
-                                    re.compile(r"Turn hard industrial decisions into clear next moves", re.I),
-                                ),
+                                {
+                                    "name": "subscription-registration-tab",
+                                    "tab": re.compile(r"Get Ticket\s*&\s*Register", re.I),
+                                    "marker": re.compile(r"Get Subscription Ticket\s*&\s*Register", re.I),
+                                    "fields": [
+                                        "Choose Subscription Tier",
+                                        "Name / Username",
+                                        "Email Address",
+                                        "Password",
+                                        "Activation / Ticket Code",
+                                    ],
+                                    "extra_markers": [re.compile(r"Legal & Privacy", re.I)],
+                                },
+                                {
+                                    "name": "public-module-explorer-tab",
+                                    "tab": re.compile(r"Explore the Modules", re.I),
+                                    "marker": re.compile(r"Turn hard industrial decisions into clear next moves", re.I),
+                                    "fields": [],
+                                    "extra_markers": [
+                                        re.compile(r"Venture Studio", re.I),
+                                        re.compile(r"Why industrial teams are moving this way", re.I),
+                                    ],
+                                },
                             ]
-                            for check_name, tab_name, content_marker in scenarios:
-                                check = {"name": check_name, "result": "FAIL", "failure_reason": ""}
+                            for scenario in scenarios:
+                                check_name = scenario["name"]
+                                check = {
+                                    "name": check_name,
+                                    "result": "FAIL",
+                                    "failure_reason": "",
+                                    "expected_fields": scenario["fields"],
+                                    "missing_fields": [],
+                                    "missing_extra_markers": [],
+                                }
                                 try:
-                                    app_frame.get_by_role("tab", name=tab_name).click(timeout=8_000)
-                                    app_frame.get_by_text(content_marker).wait_for(timeout=10_000)
+                                    app_frame.get_by_role("tab", name=scenario["tab"]).click(timeout=8_000)
+                                    app_frame.get_by_text(scenario["marker"]).wait_for(timeout=10_000)
+                                    for field_label in scenario["fields"]:
+                                        locator = app_frame.get_by_label(field_label)
+                                        if locator.count() == 0:
+                                            check["missing_fields"].append(field_label)
+                                    for extra_marker in scenario["extra_markers"]:
+                                        if app_frame.get_by_text(extra_marker).count() == 0:
+                                            check["missing_extra_markers"].append(extra_marker.pattern)
+                                    if check["missing_fields"] or check["missing_extra_markers"]:
+                                        raise AssertionError(
+                                            "Missing fields/markers: "
+                                            + ", ".join(check["missing_fields"] + check["missing_extra_markers"])
+                                        )
+                                    tab_text = app_frame.locator("body").inner_text(timeout=5_000)
+                                    check["rendered_text_length"] = len(tab_text)
+                                    check["rendered_text_preview"] = " ".join(tab_text.split())[:450]
+                                    screenshot_path = OUTPUT / f"{label}-{check_name}.png"
+                                    page.screenshot(path=str(screenshot_path), full_page=True, timeout=30_000)
+                                    check["screenshot"] = str(screenshot_path)
                                     check["result"] = "PASS"
                                 except Exception as tab_error:
                                     check["failure_reason"] = (
                                         f"{type(tab_error).__name__}: {str(tab_error)[:300]}"
                                     )
                                     item["failure_reasons"].append(
-                                        f"Public tab {check_name} did not render its expected content."
+                                        f"Public tab {check_name} did not render its expected content or fields."
                                     )
                                 tab_checks.append(check)
                             try:
