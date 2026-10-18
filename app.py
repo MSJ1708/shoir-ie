@@ -1881,21 +1881,23 @@ if not st.session_state.get("current_user"):
                 )
 
         st.markdown("### A simple way to choose")
-        _plan_cols = st.columns(5)
         _plan_copy = [
             ("Starter", "$29", "Core engineering decisions", "Optimization, inventory, facilities and essential IE workflows."),
             ("Mid-Tier Pro", "$79", "Operational improvement", "Adds routing, planning, quality, finance, sustainability and network operations."),
             ("Professional", "$129", "Advanced engineering studies", "For teams combining quality, forecasting, engineering economics and structured specialist workflows."),
             ("Enterprise", "$199", "Connected decision-making", "Adds simulation, automation, monitoring, control-tower capabilities and team-scale workflows."),
             ("Enterprise Plus", "$399", "Flagship industrial intelligence", "For connected decision workflows, advanced operational intelligence and enterprise-scale use."),
+            ("Research Pack", "+$30", "Research-grade evidence", "An add-on for statistical analysis, reproducibility, paper-to-simulation and research stress-testing."),
         ]
-        for _col, (_name, _price, _headline, _body) in zip(_plan_cols, _plan_copy):
-            with _col:
-                st.markdown(
-                    f'<div class="value-strip"><div class="kicker">{_name}</div>'
-                    f'<b>{_price}</b><span><b>{_headline}</b><br>{_body}</span></div>',
-                    unsafe_allow_html=True
-                )
+        for _plan_start in range(0, len(_plan_copy), 3):
+            _plan_cols = st.columns(3)
+            for _col, (_name, _price, _headline, _body) in zip(_plan_cols, _plan_copy[_plan_start:_plan_start + 3]):
+                with _col:
+                    st.markdown(
+                        f'<div class="value-strip"><div class="kicker">{_name}</div>'
+                        f'<b>{_price}</b><span><b>{_headline}</b><br>{_body}</span></div>',
+                        unsafe_allow_html=True
+                    )
 
         st.success(
             "If you can describe the industrial problem, there is a strong chance the catalog has a workflow "
