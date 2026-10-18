@@ -28,6 +28,7 @@ __all__ = [
     "available_modules",
     "copilot_gate",
     "copilot_capabilities",
+    "effective_account_tier",
 ]
 
 
@@ -112,6 +113,23 @@ COPILOT_TOOL_REQUIREMENTS = {
     "l-sims": "Enterprise",
     "industrial logistics resilience twin": "Enterprise Plus",
 }
+
+
+def effective_account_tier(username: str, role: str, tier: str) -> str:
+    """Return the entitlement tier for an account without altering its identity.
+
+    The canonical Shoir-IE administrator keeps the existing admin role and
+    credentials but always receives Enterprise Plus feature entitlement.
+    Other accounts keep the tier assigned by the subscription service.
+    """
+    is_canonical_admin = (
+        str(username or "").strip().casefold() == "sho"
+        and str(role or "").strip().casefold()
+        in {"enterprise admin", "administrator", "admin"}
+    )
+    if is_canonical_admin:
+        return "Enterprise Plus Tier ($399)"
+    return str(tier or "Starter Tier ($29)")
 
 
 def normalize_tier(value: str) -> str:
