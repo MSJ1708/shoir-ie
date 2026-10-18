@@ -53,6 +53,8 @@ def test_visible_subscription_countdown_and_renewal_controls_exist():
     assert 'Subscription: ' in APP_SOURCE
     assert '@st.fragment(run_every="60s")' in APP_SOURCE
     assert 'active_subscription_renewal_form' in APP_SOURCE
+    assert 'Payment method: STC Pay QR' in APP_SOURCE
+    assert '_active_renew_qr = Image.open("stc_pay_qr.png")' in APP_SOURCE
     assert 'Enter the payment transaction/reference' in APP_SOURCE
     assert 'Transaction / Payment Reference' in APP_SOURCE
     assert '_encode_renewal_proof' in APP_SOURCE
