@@ -247,3 +247,171 @@ def analyze_capacity_recovery(
     )
     return {"validation": validation, "line_metrics": metrics,
             "recovery_scenario": scenario, "evidence": evidence}
+
+
+def render_capacity_recovery(tier: str = "Starter", username: str = "unknown") -> None:
+    """Render the validated study workflow inside the existing Streamlit platform."""
+    import io
+    import plotly.express as px
+    import streamlit as st
+
+    st.subheader("Production Bottleneck & Capacity Recovery Study")
+    st.caption(
+        "Validate production-event data, calculate line-level OEE, compare a bounded "
+        "downtime-recovery scenario, and export a traceable study. Scenarios are estimates, "
+        "not promises of factory performance."
+    )
+
+    demo = pd.DataFrame({
+        "Line": ["Line A", "Line B", "Line C"],
+        "PlannedMin": [480, 480, 480],
+        "DowntimeMin": [42, 78, 55],
+        "IdealCycleSec": [48, 60, 54],
+        "TotalCount": [520, 390, 455],
+        "GoodCount": [505, 378, 439],
+    })
+    st.info(
+        "The starter table below is synthetic demonstration data, not real factory data. "
+        "Upload a CSV or edit the table to analyze your own records."
+    )
+
+    uploaded = st.file_uploader(
+        "Optional: import production-event CSV",
+        type=["csv"],
+        key="capacity_recovery_csv_upload",
+        help="Required columns: Line, PlannedMin, DowntimeMin, IdealCycleSec, TotalCount, GoodCount.",
+    )
+    if uploaded is not None:
+        try:
+            imported = pd.read_csv(uploaded)
+            st.session_state["capacity_recovery_events"] = imported
+            st.session_state["capacity_recovery_source_name"] = uploaded.name
+            st.session_state["capacity_recovery_source_type"] = "imported CSV"
+        except Exception as exc:
+            st.error(f"CSV import failed. The existing study data was not replaced. Details: {type(exc).__name__}: {exc}")
+    if "capacity_recovery_events" not in st.session_state:
+        st.session_state["capacity_recovery_events"] = demo.copy(deep=True)
+        st.session_state["capacity_recovery_source_name"] = "synthetic-demo.csv"
+        st.session_state["capacity_recovery_source_type"] = "synthetic demonstration data"
+
+    edited = st.data_editor(
+        st.session_state["capacity_recovery_events"],
+        num_rows="dynamic",
+        use_container_width=True,
+        hide_index=True,
+        key="capacity_recovery_events_editor",
+    )
+    st.session_state["capacity_recovery_events"] = edited.copy(deep=True)
+
+    reduction_pct = st.slider(
+        "Scenario: downtime reduction (%)",
+        min_value=0,
+        max_value=100,
+        value=25,
+        step=5,
+        help="A what-if assumption only. It does not assert that this reduction is achievable.",
+        key="capacity_recovery_reduction_pct",
+    )
+    if st.button("Validate and analyze capacity", type="primary", use_container_width=True,
+                 key="capacity_recovery_analyze"):
+        result = analyze_capacity_recovery(
+            edited,
+            downtime_reduction_fraction=reduction_pct / 100.0,
+            source_name=st.session_state.get("capacity_recovery_source_name", "user-provided production data"),
+            source_type=st.session_state.get("capacity_recovery_source_type", "user-entered data"),
+        )
+        st.session_state["capacity_recovery_result"] = result
+
+    result = st.session_state.get("capacity_recovery_result")
+    if not result:
+        validation_frame, validation = validate_production_events(edited)
+        st.subheader("Input validation")
+        if validation["valid"]:
+            st.success(f"Input structure is valid ({validation['rows']} row(s)). Run the analysis to calculate results.")
+        else:
+            st.error("The study cannot be calculated until the input errors below are corrected.")
+            for error in validation["errors"]:
+                st.write(f"• {error}")
+        for warning in validation["warnings"]:
+            st.warning(warning)
+        return
+
+    validation = result["validation"]
+    if not validation["valid"]:
+        st.error("Analysis blocked: invalid input data.")
+        for error in validation["errors"]:
+            st.write(f"• {error}")
+        return
+
+    metrics = result["line_metrics"]
+    scenario = result["recovery_scenario"]
+    if metrics.empty:
+        st.warning("No line metrics are available for the current dataset.")
+        return
+
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Lines analyzed", f"{len(metrics):,}")
+    m2.metric("Good units observed", f"{metrics['GoodCount'].sum():,.0f}")
+    m3.metric("Observed downtime (min)", f"{metrics['DowntimeMin'].sum():,.1f}")
+
+    st.subheader("Baseline: calculated line performance")
+    st.dataframe(metrics, use_container_width=True, hide_index=True)
+    st.plotly_chart(
+        px.bar(metrics, x="Line", y="OEEPct", title="Calculated OEE by line",
+               labels={"OEEPct": "OEE (%)", "Line": "Production line"}),
+        use_container_width=True,
+    )
+    if (metrics["OEEPct"] > 100).any():
+        st.warning("At least one OEE result exceeds 100%. Check ideal-cycle units and source data; the engine has not silently capped the result.")
+    if metrics["OEEPct"].isna().any():
+        st.warning("At least one OEE result is unavailable because quality cannot be calculated from zero total output.")
+
+    st.subheader(f"What-if: recover {reduction_pct}% of observed downtime")
+    st.caption("Simulated estimates assume observed row-level performance and quality remain unchanged during recovered time.")
+    st.dataframe(scenario, use_container_width=True, hide_index=True)
+    st.plotly_chart(
+        px.bar(scenario, x="Line", y="EstimatedAdditionalGoodUnits",
+               title="Estimated additional good units under the scenario",
+               labels={"EstimatedAdditionalGoodUnits": "Estimated units", "Line": "Production line"}),
+        use_container_width=True,
+    )
+
+    evidence = result["evidence"]
+    with st.expander("Trust & evidence manifest", expanded=False):
+        st.write("Result type: Calculated. Downtime recovery scenario: Simulated.")
+        st.write("Input SHA-256:", evidence["input_sha256"])
+        st.write("Result SHA-256:", evidence["result_sha256"])
+        st.write("Formula version:", evidence["formula_version"])
+        st.write("Source:", evidence["source_name"], "—", evidence["source_type"])
+        st.write("Assumptions and limits:")
+        for assumption in evidence["assumptions"]:
+            st.write(f"• {assumption}")
+        for warning in evidence["validation"]["warnings"]:
+            st.warning(warning)
+
+    buffer = io.BytesIO()
+    try:
+        with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
+            metrics.to_excel(writer, sheet_name="Baseline Metrics", index=False)
+            scenario.to_excel(writer, sheet_name="Recovery Scenario", index=False)
+            pd.DataFrame([{
+                "Formula version": evidence["formula_version"],
+                "Source name": evidence["source_name"],
+                "Source type": evidence["source_type"],
+                "Input SHA-256": evidence["input_sha256"],
+                "Result SHA-256": evidence["result_sha256"],
+                "Result classification": evidence["result_classification"],
+                "Scenario classification": evidence["scenario_classification"],
+                "Created at": evidence["created_at"],
+            }]).to_excel(writer, sheet_name="Evidence", index=False)
+            pd.DataFrame({"Assumption": evidence["assumptions"]}).to_excel(writer, sheet_name="Assumptions", index=False)
+        st.download_button(
+            "Download capacity study (Excel)",
+            data=buffer.getvalue(),
+            file_name="shoir_ie_capacity_recovery_study.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True,
+            key="capacity_recovery_download",
+        )
+    except Exception as exc:
+        st.error(f"Excel export could not be generated. Results remain visible. Details: {type(exc).__name__}: {exc}")
