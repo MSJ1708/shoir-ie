@@ -927,9 +927,9 @@ def save_workbook(workbook:Mapping[str,pd.DataFrame],formulas:Mapping[str,Mappin
         latest=conn.execute(
             """SELECT sha256,formulas_json,semantic_map_json,COALESCE(variables_json,'{}'),version_no
                FROM industrial_workbook_versions
-               WHERE workbook_id=? AND workspace=?
+               WHERE workbook_id=? AND workspace=? AND owner=?
                ORDER BY version_no DESC LIMIT 1""",
-            (wid,workspace),
+            (wid,workspace,owner),
         ).fetchone()
         unchanged=bool(
             latest
