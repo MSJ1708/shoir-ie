@@ -91,6 +91,11 @@ def _read_members(conn: sqlite3.Connection, workspace: str) -> list[dict[str, An
         {"workspace": str(row[0]), "username": str(row[1]), "role": str(row[2]), "updated_at": str(row[3])}
         for row in rows
     ]
+    workspace_names = {row["workspace"] for row in normalized}
+    if len(workspace_names) > 1:
+        raise PermissionError(
+            "Workspace names differing only by case collide in legacy membership data; access is blocked pending administrative cleanup."
+        )
     folded = [row["username"].strip().casefold() for row in normalized]
     if len(folded) != len(set(folded)):
         raise PermissionError(
