@@ -42,6 +42,12 @@ def test_access_gate_rejects_requested_identity_mismatch(monkeypatch):
 
 
 def test_access_gate_requires_authenticated_session_and_real_role(monkeypatch):
+    # A stale secondary role must not override an explicitly empty canonical role.
+    _session(monkeypatch, role="", current_role="Owner")
+    decision = ent.security_access_check("alice", "approve")
+    assert not decision["allowed"]
+    assert any("account role" in reason for reason in decision["reasons"])
+
     _session(monkeypatch, role="User", authenticated=False)
     decision = ent.security_access_check("alice", "read")
     assert not decision["allowed"]
@@ -133,7 +139,7 @@ def test_security_maturity_does_not_claim_provider_connection_or_full_verificati
     assert statuses["Cloud persistence"] == "Local only"
     assert statuses["SSO / OIDC"] == "Configured"
     assert statuses["SSO / OIDC"] != "Connected"
-    assert statuses["MFA"] == "Session verified"
+    assert statuses["MFA"] == "Session flag set"
     assert statuses["MFA"] != "Connected"
     assert statuses["Secure uploads"] == "Checks present"
     assert statuses["Secrets"] == "Configured"
