@@ -13,7 +13,7 @@ This matrix is the release gate for the subscription renewal, account, module, i
 
 ## Current verification record — 2026-10-18
 
-The following status is tied to merge commit `c93a33cfe6272c1d60f4d6f94753bdad147948e5` and live backend observations captured during this run.
+This record combines automated and public-browser evidence from the merged subscription/documentation work plus follow-up private-payment-proof hardening. The live backend facts below were queried directly on 2026-10-18; current source/CI evidence should always be matched to the commit SHA shown by the linked workflow run.
 
 | Area | Current status | Evidence / boundary |
 |---|---|---|
@@ -21,7 +21,7 @@ The following status is tied to merge commit `c93a33cfe6272c1d60f4d6f94753bdad14
 | Engine regression | **PASS — automated** | Main engine-regression workflow completed successfully. |
 | Security and quality checks | **PASS — automated** | Main security-quality workflow completed successfully. This is not a penetration test or independent certification. |
 | Public hosted entry screen | **PASS — browser smoke** | Headless Chromium checked the live public shell at desktop and mobile widths, including registration and public Explore Modules tab, with no fatal marker or horizontal overflow. No sign-in or production writes were attempted. |
-| Subscription backend deployment | **PASS — deployed configuration checked; endpoint walkthrough pending** | Supabase `shoir-persistence` is deployed at version 6. `shoir_sessions.scope` exists, is NOT NULL and defaults to `workspace`; the private payment-proof bucket is configured. Repository tests assert source contracts, but an authenticated walkthrough is still required to verify the deployed login, renewal, upload, signed-link and workspace endpoints end to end. |
+| Subscription backend deployment | **PASS — deployed configuration checked; endpoint walkthrough pending** | Supabase `shoir-persistence` is deployed at version 7. `shoir_sessions.scope` exists, is NOT NULL and defaults to `workspace`; the private payment-proof bucket and restrictive storage policy are configured. The Edge Function also rejects renewal requests for the protected `sho` administrator. Repository tests assert source contracts, but an authenticated walkthrough is still required to verify deployed login, renewal, upload, signed-link and workspace endpoints end to end. |
 | Admin tier | **PASS — record checked** | Existing admin record is active, retains role `Enterprise Admin` and long-dated expiry `2099-01-01 UTC`, and now has tier `Enterprise Plus Tier ($399)`. No password or account recreation was performed. |
 | Renewal payment review | **Implemented / backend configured; end-to-end pending** | Transaction reference is validated server-side. The private `subscription-payment-proofs` bucket is provisioned with a 512 KiB limit and PNG/JPG/PDF allowlist; `storage.objects` also has a restrictive policy denying direct `anon`/`authenticated` access to that bucket, even if another permissive storage policy is added. Edge v6 uploads there and returns five-minute URLs only to an admin session. Verify upload/review with an authorized test account before calling the flow end-to-end passed. |
 | Core account/workspace RLS | **PASS — policy inspected** | `shoir_accounts`, `shoir_pending_credentials`, `shoir_sessions`, `shoir_subscription_requests` and `shoir_workspace_states` have server-only policies with `USING false` and `WITH CHECK false` for `anon`/`authenticated`. The service-role Edge Function is the designed persistence boundary. |
