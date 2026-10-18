@@ -1348,6 +1348,11 @@ if st.session_state.get("renewal_mode") and not st.session_state.get("current_us
     if st.session_state.get("renewal_request_submitted"):
         st.success(f"Renewal request reference: {st.session_state['renewal_request_submitted']}")
         st.caption("You can close this page safely. Sign in again after the administrator confirms approval.")
+    if st.button("Back to sign in", key="expired_renewal_back"):
+        st.session_state.pop("renewal_mode", None)
+        st.session_state.pop("renewal_session_token", None)
+        st.session_state.pop("renewal_request_submitted", None)
+        st.rerun()
     st.stop()
 
 if not st.session_state.get("current_user"):
@@ -1400,6 +1405,9 @@ if not st.session_state.get("current_user"):
                 else:
                     st.error("Your subscription has expired, but a renewal-only session could not be created. Please contact support.")
             elif token:
+                st.session_state.pop("renewal_mode", None)
+                st.session_state.pop("renewal_session_token", None)
+                st.session_state.pop("renewal_request_submitted", None)
                 st.session_state["remote_session_token"] = token
                 st.session_state["current_user"] = username
                 st.session_state["user_role"] = role
@@ -2278,6 +2286,19 @@ if st.session_state.get("selected_nav") == "✨ Excellence Hub":
 # Subscription countdown and renewal entry point for paid members.
 # The administrator account is intentionally excluded from subscription controls.
 if str(st.session_state.get("current_user", "")).strip().lower() != "sho":
+    _sidebar_expiry_raw = st.session_state.get("subscription_expires_at")
+    if _sidebar_expiry_raw:
+        try:
+            _sidebar_expiry = datetime.datetime.fromisoformat(str(_sidebar_expiry_raw).replace("Z", "+00:00"))
+            if _sidebar_expiry.tzinfo is None:
+                _sidebar_expiry = _sidebar_expiry.replace(tzinfo=datetime.timezone.utc)
+            _sidebar_remaining = max(0.0, (_sidebar_expiry - datetime.datetime.now(datetime.timezone.utc)).total_seconds())
+            st.sidebar.caption(
+                f"⏳ Subscription: {int(_sidebar_remaining // 86400)}d "
+                f"{int((_sidebar_remaining % 86400) // 3600)}h remaining"
+            )
+        except (TypeError, ValueError, OverflowError):
+            pass
     with st.sidebar.expander("Subscription & Renewal", expanded=False):
         _sub_tier = str(st.session_state.get("user_tier", "Starter Tier"))
         _sub_expiry_raw = st.session_state.get("subscription_expires_at")
