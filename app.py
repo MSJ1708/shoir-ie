@@ -2332,6 +2332,26 @@ if str(st.session_state.get("current_user", "")).strip().lower() != "sho":
             if _sidebar_expiry.tzinfo is None:
                 _sidebar_expiry = _sidebar_expiry.replace(tzinfo=datetime.timezone.utc)
             _sidebar_remaining = max(0.0, (_sidebar_expiry - datetime.datetime.now(datetime.timezone.utc)).total_seconds())
+            if (
+                _sidebar_remaining <= 0
+                and st.session_state.get("authenticated")
+                and st.session_state.get("current_user")
+            ):
+                # A fragment refresh is independent of the main script. Force a
+                # full rerun at expiry so cached workspace content is not left
+                # visible merely because the user has not clicked anything.
+                _expired_user = str(st.session_state.get("current_user", ""))
+                try:
+                    save_user_workspace(_expired_user, st.session_state)
+                except Exception:
+                    pass
+                for _expiry_key in list(st.session_state.keys()):
+                    try:
+                        del st.session_state[_expiry_key]
+                    except Exception:
+                        pass
+                st.session_state["subscription_expired_notice"] = True
+                st.rerun()
             st.caption(
                 f"⏳ Subscription: {int(_sidebar_remaining // 86400)}d "
                 f"{int((_sidebar_remaining % 86400) // 3600)}h remaining"
