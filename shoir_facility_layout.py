@@ -365,7 +365,8 @@ def _slp_frame(depts: pd.DataFrame, flows: pd.DataFrame) -> pd.DataFrame:
                     "Status": "Unconnected",
                 })
                 continue
-            rel = str(row.relationship).upper()
+            raw_rel = getattr(row, "relationship", "")
+            rel = "" if _import_blank(raw_rel) else str(raw_rel).strip().upper()
             records.append({
                 "From": frm, "To": to,
                 "From Department": names[frm],
@@ -373,7 +374,7 @@ def _slp_frame(depts: pd.DataFrame, flows: pd.DataFrame) -> pd.DataFrame:
                 "Daily Loads": float(row.loads_day),
                 "Distance (m)": float(row.distance_m),
                 "REL": rel,
-                "Score": rel_scores.get(rel, 1),
+                "Score": rel_scores.get(rel),
                 "Reason": str(row.reason or ""),
                 "Status": "Connected",
             })
@@ -594,6 +595,14 @@ def _import_data(
     seen_department_ids: set[str] = set()
     seen_department_names: set[str] = set()
     if department_frame is not None:
+        required_department_fields = {"id", "name", "x", "y", "area_sqm"}
+        missing_fields = sorted(required_department_fields - set(department_columns))
+        if missing_fields:
+            raise ValueError(
+                "Departments sheet is missing required column(s): "
+                + ", ".join(missing_fields)
+                + ". Include ID, Name, X, Y, and Area; unknown geometry must not be fabricated."
+            )
         for row_number, row in enumerate(department_frame.to_dict("records"), 2):
             if all(_import_blank(value) for value in row.values()):
                 continue
@@ -616,24 +625,21 @@ def _import_data(
                     "id": department_id,
                     "name": name,
                     "x": _import_number(
-                        row.get(department_columns.get("x")),
+                        row.get(department_columns["x"]),
                         f"Departments row {row_number} X",
-                        default=50.0,
                         minimum=0.0,
                         maximum=100.0,
                     ),
                     "y": _import_number(
-                        row.get(department_columns.get("y")),
+                        row.get(department_columns["y"]),
                         f"Departments row {row_number} Y",
-                        default=50.0,
                         minimum=0.0,
                         maximum=100.0,
                     ),
                     "area_sqm": _import_number(
-                        row.get(department_columns.get("area_sqm")),
+                        row.get(department_columns["area_sqm"]),
                         f"Departments row {row_number} area_sqm",
-                        default=400.0,
-                        minimum=0.0,
+                        minimum=0.01,
                     ),
                 }
             )
@@ -641,6 +647,14 @@ def _import_data(
     raw_flow_rows: list[dict[str, Any]] = []
     seen_flow_ids: set[str] = set()
     if flow_frame is not None:
+        required_flow_fields = {"from_id", "to_id", "loads_day", "distance_m"}
+        missing_fields = sorted(required_flow_fields - set(flow_columns))
+        if missing_fields:
+            raise ValueError(
+                "From/To flow sheet is missing required column(s): "
+                + ", ".join(missing_fields)
+                + ". Include From_ID, To_ID, Loads_Day, and Distance_M; measurements must not be inferred."
+            )
         for row_number, row in enumerate(flow_frame.to_dict("records"), 2):
             if all(_import_blank(value) for value in row.values()):
                 continue
@@ -664,15 +678,15 @@ def _import_data(
                 if folded_id in seen_flow_ids:
                     raise ValueError(f"Duplicate flow ID {flow_id!r} in import.")
                 seen_flow_ids.add(folded_id)
-            relationship = _import_text(
-                row.get(flow_columns.get("relationship")),
-                f"Flows row {row_number} relationship",
-                default="O",
-            ).upper()
-            if relationship not in {"A", "E", "I", "O", "U", "X"}:
+            raw_relationship = row.get(flow_columns.get("relationship"))
+            relationship = (
+                "" if _import_blank(raw_relationship)
+                else _import_text(raw_relationship, f"Flows row {row_number} relationship").upper()
+            )
+            if relationship and relationship not in {"A", "E", "I", "O", "U", "X"}:
                 raise ValueError(
                     f"Flows row {row_number} has unsupported SLP relationship "
-                    f"{relationship!r}; use A, E, I, O, U, or X."
+                    f"{relationship!r}; use A, E, I, O, U, or X, or leave it blank to mark it missing."
                 )
             raw_flow_rows.append(
                 {
@@ -680,15 +694,13 @@ def _import_data(
                     "from_id": from_id,
                     "to_id": to_id,
                     "loads_day": _import_number(
-                        row.get(flow_columns.get("loads_day")),
+                        row.get(flow_columns["loads_day"]),
                         f"Flows row {row_number} loads_day",
-                        default=0.0,
                         minimum=0.0,
                     ),
                     "distance_m": _import_number(
-                        row.get(flow_columns.get("distance_m")),
+                        row.get(flow_columns["distance_m"]),
                         f"Flows row {row_number} distance_m",
-                        default=0.0,
                         minimum=0.0,
                     ),
                     "relationship": relationship,
