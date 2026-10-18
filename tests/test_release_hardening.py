@@ -256,3 +256,36 @@ def test_enterprise_pdf_and_powerpoint_exports_are_valid_artifacts():
     assert pptx_payload[:2] == b"PK"
     presentation = Presentation(BytesIO(pptx_payload))
     assert len(presentation.slides) >= 2
+
+
+def test_pdf_export_escapes_markup_characters_in_titles_and_section_names():
+    tables = [
+        (
+            "KPIs & <Signals>",
+            pd.DataFrame({"Metric": ["OEE < target", "Quality & Scrap"], "Value": [82.5, 1.2]}),
+        )
+    ]
+    payload = export_pdf("R&D <Line 2> & OEE", tables)
+    assert payload.startswith(b"%PDF-")
+    assert len(payload) > 500
+
+
+def test_powerpoint_keeps_explicit_placeholder_when_chart_rendering_fails():
+    class UnrenderableFigure:
+        def to_image(self, **_kwargs):
+            raise RuntimeError("chart renderer unavailable")
+
+    payload = export_pptx(
+        "Rescue & Recovery",
+        [],
+        [("OEE <before/after>", UnrenderableFigure())],
+    )
+    presentation = Presentation(BytesIO(payload))
+    assert len(presentation.slides) == 2
+    slide_text = "\n".join(
+        shape.text
+        for shape in presentation.slides[1].shapes
+        if getattr(shape, "has_text_frame", False)
+    )
+    assert "OEE <before/after>" in slide_text
+    assert "chart image could not be rendered" in slide_text.lower()

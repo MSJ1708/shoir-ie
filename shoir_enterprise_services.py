@@ -686,17 +686,34 @@ def render_enterprise_bridge(module: str, tier: str, username: str) -> None:
                         st.caption("Variance is calculated from recorded implementation outcomes; it is not a forecast.")
 
             elif module in {"Enterprise Security & Governance","Enterprise Integration & Collaboration","Persistence"}:
-                roles = st.session_state.get("workspace_users", st.session_state.get("workspace_members_df", []))
-                st.dataframe(_safe_frame(roles), use_container_width=True, hide_index=True)
+                selected_workspace = str(
+                    st.session_state.get("workspace_name")
+                    or st.session_state.get("shoir_workspace_name")
+                    or st.session_state.get("workspace")
+                    or st.session_state.get("active_workspace_name")
+                    or ""
+                ).strip()
+                if selected_workspace:
+                    try:
+                        from shoir_workspace_rbac import list_workspace_members
+                        members = list_workspace_members(selected_workspace, username, allow_draft=False)
+                    except PermissionError as exc:
+                        st.info(f"Workspace membership list is restricted: {exc}")
+                    except Exception as exc:
+                        st.warning(f"Workspace membership list could not be verified: {type(exc).__name__}: {exc}")
+                    else:
+                        st.dataframe(members, use_container_width=True, hide_index=True)
+                else:
+                    st.info("Choose a workspace in Team Workspaces & RBAC to view its membership list.")
                 st.markdown("**Security configuration status**")
                 st.write({
-                    "RBAC": bool(roles is not None),
-                    "Workspace isolation": True,
-                    "Audit trail": True,
-                    "SSO/OIDC": "Configured" if st.secrets.get("oidc", {}) else "Configuration surface",
-                    "MFA": "Configured" if st.secrets.get("mfa", {}) else "Configuration surface",
-                    "Secrets management": "Streamlit secrets / environment variables",
-                    "Security scanning": "CI hook available",
+                    "RBAC": "Workspace membership is checked in Team Workspaces; global route coverage is not yet fully verified",
+                    "Workspace isolation": "Partial — module-specific access checks exist; full route and export isolation still requires verification",
+                    "Audit trail": "Event logging is available; durable cloud write, retention and tamper-resistance are not verified here",
+                    "SSO/OIDC": "Configuration surface — provider connection and sign-in flow not independently verified",
+                    "MFA": "Configuration surface — provider-backed challenge and enforcement not independently verified",
+                    "Secrets management": "Use Streamlit secrets / environment variables; active deployment configuration not independently verified",
+                    "Security scanning": "CI security/quality workflow exists; passing it is not a certification",
                 })
                 audit_note = st.text_input("Audit event note", key=f"enterprise_audit_note_{hash(module)&0xffff:04x}")
                 if st.button("🔐 Record audit event", use_container_width=True, key=f"enterprise_audit_save_{hash(module)&0xffff:04x}"):

@@ -365,7 +365,8 @@ def _slp_frame(depts: pd.DataFrame, flows: pd.DataFrame) -> pd.DataFrame:
                     "Status": "Unconnected",
                 })
                 continue
-            rel = str(row.relationship).upper()
+            raw_rel = getattr(row, "relationship", "")
+            rel = "" if _import_blank(raw_rel) else str(raw_rel).strip().upper()
             records.append({
                 "From": frm, "To": to,
                 "From Department": names[frm],
@@ -373,7 +374,7 @@ def _slp_frame(depts: pd.DataFrame, flows: pd.DataFrame) -> pd.DataFrame:
                 "Daily Loads": float(row.loads_day),
                 "Distance (m)": float(row.distance_m),
                 "REL": rel,
-                "Score": rel_scores.get(rel, 1),
+                "Score": rel_scores.get(rel),
                 "Reason": str(row.reason or ""),
                 "Status": "Connected",
             })
@@ -438,12 +439,28 @@ def _file_to_frames(upload: Any) -> dict[str, pd.DataFrame]:
     name = str(upload.name)
     try:
         from shoir_excel_studio import process_uploaded_workbook
+    except ModuleNotFoundError as exc:
+        # Fall back only when the optional processor module itself is absent.
+        # A broken processor or missing transitive dependency must be visible.
+        if exc.name != "shoir_excel_studio":
+            raise
+        process_uploaded_workbook = None
+
+    if process_uploaded_workbook is not None:
         result = process_uploaded_workbook(raw, name)
         sheets = result.get("cleaned_sheets") or result.get("raw_sheets") or {}
-        if sheets:
-            return {str(k): v.copy(deep=True) for k,v in sheets.items() if isinstance(v, pd.DataFrame) and not v.empty}
-    except Exception:
-        pass
+        frames = {
+            str(k): v.copy(deep=True)
+            for k, v in sheets.items()
+            if isinstance(v, pd.DataFrame) and not v.empty
+        }
+        if not frames:
+            raise ValueError(
+                f"The workbook processor returned no non-empty worksheets for {name!r}. "
+                "Check the file's sheets and headers, then try importing it again."
+            )
+        return frames
+
     lower = name.lower()
     if lower.endswith(".csv"):
         return {"Data": pd.read_csv(io.BytesIO(raw))}
@@ -452,68 +469,387 @@ def _file_to_frames(upload: Any) -> dict[str, pd.DataFrame]:
     return {str(s): pd.read_excel(io.BytesIO(raw), sheet_name=s) for s in pd.ExcelFile(io.BytesIO(raw)).sheet_names}
 
 
-def _import_data(frames: dict[str,pd.DataFrame], owner: str, workspace: str) -> tuple[int,int]:
-    dept_df = next((v for k,v in frames.items() if {"id","name"} <= {str(c).lower() for c in v.columns}), pd.DataFrame())
-    flow_df = next((v for k,v in frames.items() if {"from_id","to_id"} <= {str(c).lower() for c in v.columns}), pd.DataFrame())
-    if dept_df.empty and frames:
-        candidate = next(iter(frames.values()))
-        columns = {str(c).strip().lower(): c for c in candidate.columns}
-        rename = {}
-        for canonical, aliases in {
-            "id":["id","dept id","department id"],
-            "name":["name","department","department name"],
-            "x":["x","x coord","x coordinate"],
-            "y":["y","y coord","y coordinate"],
-            "area_sqm":["area_sqm","area","area m2","area (m²)"],
-        }.items():
-            found = next((columns[a] for a in aliases if a in columns), None)
-            if found is not None: rename[found] = canonical
-        temp = candidate.rename(columns=rename)
-        if {"id","name"} <= set(temp.columns):
-            dept_df = temp
-    dep_count = flow_count = 0
-    if not dept_df.empty:
-        rows=[]
-        for r in dept_df.to_dict("records"):
-            rows.append({
-                "id": str(r.get("id") or r.get("dept_id") or "").strip(),
-                "name": str(r.get("name") or "Department").strip(),
-                "x": float(pd.to_numeric(r.get("x",50), errors="coerce") if pd.notna(r.get("x",50)) else 50),
-                "y": float(pd.to_numeric(r.get("y",50), errors="coerce") if pd.notna(r.get("y",50)) else 50),
-                "area_sqm": float(pd.to_numeric(r.get("area_sqm",400), errors="coerce") if pd.notna(r.get("area_sqm",400)) else 400),
-            })
-        rows=[r for r in rows if r["id"]]
-        _save_departments(owner,workspace,rows); dep_count=len(rows)
-    if not flow_df.empty:
-        columns={str(c).strip().lower(): c for c in flow_df.columns}
-        records=[]
-        for i,r in enumerate(flow_df.to_dict("records"),1):
-            get=lambda *names, default="": next((r.get(columns[n]) for n in names if n in columns),default)
-            records.append({
-                "flow_id": str(get("flow_id","flow id",default=f"FIMP{i:03d}")).strip(),
-                "from_id": str(get("from_id","from","source",default="")).strip(),
-                "to_id": str(get("to_id","to","destination",default="")).strip(),
-                "loads_day": float(pd.to_numeric(get("loads_day","loads/day","daily loads",default=0),errors="coerce") or 0),
-                "distance_m": float(pd.to_numeric(get("distance_m","distance","distance m",default=0),errors="coerce") or 0),
-                "relationship": str(get("relationship","rel",default="O") or "O").upper()[:1],
-                "reason": str(get("reason","primary reason",default="Imported flow")),
-                "transport": str(get("transport","handling",default="Forklift")),
-            })
-        records=[r for r in records if r["from_id"] and r["to_id"]]
-        with _db() as conn:
-            for r in records:
-                conn.execute(
-                    """
-                    INSERT OR REPLACE INTO facility_flows
-                    (owner,workspace,flow_id,from_id,to_id,loads_day,distance_m,relationship,reason,transport,updated_at)
-                    VALUES(?,?,?,?,?,?,?,?,?,?,?)
-                    """,
-                    (owner,workspace,r["flow_id"],r["from_id"],r["to_id"],r["loads_day"],r["distance_m"],r["relationship"],r["reason"],r["transport"],_now()),
-                )
-            conn.commit()
-        flow_count=len(records)
-    return dep_count, flow_count
+_DEPARTMENT_IMPORT_ALIASES = {
+    "id": ("id", "dept id", "department id", "dept_id", "department_id"),
+    "name": ("name", "department", "department name", "dept name"),
+    "x": ("x", "x coord", "x coordinate"),
+    "y": ("y", "y coord", "y coordinate"),
+    "area_sqm": ("area_sqm", "area", "area m2", "area sqm", "area (m²)", "footprint"),
+}
+_FLOW_IMPORT_ALIASES = {
+    "flow_id": ("flow_id", "flow id", "connection id"),
+    "from_id": ("from_id", "from id", "from", "source", "source department"),
+    "to_id": ("to_id", "to id", "to", "destination", "destination department"),
+    "loads_day": ("loads_day", "loads/day", "daily loads", "loads per day"),
+    "distance_m": ("distance_m", "distance", "distance m", "distance meters"),
+    "relationship": ("relationship", "rel", "slp"),
+    "reason": ("reason", "primary reason", "process step"),
+    "transport": ("transport", "handling", "handling mode"),
+}
 
+
+def _import_column_map(
+    frame: pd.DataFrame, aliases: dict[str, tuple[str, ...]], label: str
+) -> dict[str, Any]:
+    """Map supported header aliases and reject ambiguous duplicate fields."""
+    alias_to_field = {
+        _key(alias): field
+        for field, names in aliases.items()
+        for alias in names
+    }
+    found: dict[str, Any] = {}
+    for column in frame.columns:
+        field = alias_to_field.get(_key(str(column).strip()))
+        if field is None:
+            continue
+        if field in found:
+            raise ValueError(
+                f"{label} contains more than one column for {field!r}; "
+                "rename or remove the duplicate column before importing."
+            )
+        found[field] = column
+    return found
+
+
+def _import_blank(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str) and not value.strip():
+        return True
+    try:
+        missing = pd.isna(value)
+        return bool(missing) if not hasattr(missing, "__len__") else False
+    except (TypeError, ValueError):
+        return False
+
+
+def _import_text(value: Any, field: str, default: str | None = None) -> str:
+    if _import_blank(value):
+        if default is not None:
+            return default
+        raise ValueError(f"{field} is required.")
+    text = str(value).strip()
+    if not text:
+        if default is not None:
+            return default
+        raise ValueError(f"{field} is required.")
+    return text
+
+
+def _import_number(
+    value: Any,
+    field: str,
+    *,
+    default: float | None = None,
+    minimum: float | None = None,
+    maximum: float | None = None,
+) -> float:
+    if _import_blank(value):
+        if default is None:
+            raise ValueError(f"{field} is required.")
+        return float(default)
+    raw = str(value).strip().replace(",", "")
+    try:
+        number = float(raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field} must be a valid number; received {value!r}.") from exc
+    if not math.isfinite(number):
+        raise ValueError(f"{field} must be finite; received {value!r}.")
+    if minimum is not None and number < minimum:
+        raise ValueError(f"{field} must be at least {minimum:g}; received {number:g}.")
+    if maximum is not None and number > maximum:
+        raise ValueError(f"{field} must be at most {maximum:g}; received {number:g}.")
+    return number
+
+
+def _import_data(
+    frames: dict[str, pd.DataFrame], owner: str, workspace: str
+) -> tuple[int, int]:
+    """Validate the complete facility import before atomically writing any rows.
+
+    Import is additive/upsert-based for backwards compatibility. Invalid rows,
+    duplicate identifiers/edges, or dangling endpoints abort the entire import
+    rather than leaving departments saved without their corresponding flows.
+    """
+    if not frames:
+        return 0, 0
+
+    department_frame: pd.DataFrame | None = None
+    department_columns: dict[str, Any] = {}
+    flow_frame: pd.DataFrame | None = None
+    flow_columns: dict[str, Any] = {}
+
+    for sheet_name, frame in frames.items():
+        if not isinstance(frame, pd.DataFrame):
+            raise ValueError(f"Import sheet {sheet_name!r} is not a tabular dataset.")
+        columns = _import_column_map(
+            frame, _DEPARTMENT_IMPORT_ALIASES, f"Sheet {sheet_name!r}"
+        )
+        if {"id", "name"} <= set(columns) and department_frame is None:
+            department_frame, department_columns = frame, columns
+        columns = _import_column_map(
+            frame, _FLOW_IMPORT_ALIASES, f"Sheet {sheet_name!r}"
+        )
+        if {"from_id", "to_id"} <= set(columns) and flow_frame is None:
+            flow_frame, flow_columns = frame, columns
+
+    department_rows: list[dict[str, Any]] = []
+    seen_department_ids: set[str] = set()
+    seen_department_names: set[str] = set()
+    if department_frame is not None:
+        required_department_fields = {"id", "name", "x", "y", "area_sqm"}
+        missing_fields = sorted(required_department_fields - set(department_columns))
+        if missing_fields:
+            raise ValueError(
+                "Departments sheet is missing required column(s): "
+                + ", ".join(missing_fields)
+                + ". Include ID, Name, X, Y, and Area; unknown geometry must not be fabricated."
+            )
+        for row_number, row in enumerate(department_frame.to_dict("records"), 2):
+            if all(_import_blank(value) for value in row.values()):
+                continue
+            department_id = _import_text(
+                row.get(department_columns["id"]), f"Departments row {row_number} ID"
+            )
+            name = _import_text(
+                row.get(department_columns["name"]),
+                f"Departments row {row_number} name",
+            )
+            id_key, name_key = department_id.casefold(), name.casefold()
+            if id_key in seen_department_ids:
+                raise ValueError(f"Duplicate department ID {department_id!r} in import.")
+            if name_key in seen_department_names:
+                raise ValueError(f"Duplicate department name {name!r} in import.")
+            seen_department_ids.add(id_key)
+            seen_department_names.add(name_key)
+            department_rows.append(
+                {
+                    "id": department_id,
+                    "name": name,
+                    "x": _import_number(
+                        row.get(department_columns["x"]),
+                        f"Departments row {row_number} X",
+                        minimum=0.0,
+                        maximum=100.0,
+                    ),
+                    "y": _import_number(
+                        row.get(department_columns["y"]),
+                        f"Departments row {row_number} Y",
+                        minimum=0.0,
+                        maximum=100.0,
+                    ),
+                    "area_sqm": _import_number(
+                        row.get(department_columns["area_sqm"]),
+                        f"Departments row {row_number} area_sqm",
+                        minimum=0.01,
+                    ),
+                }
+            )
+
+    raw_flow_rows: list[dict[str, Any]] = []
+    seen_flow_ids: set[str] = set()
+    if flow_frame is not None:
+        required_flow_fields = {"from_id", "to_id", "loads_day", "distance_m"}
+        missing_fields = sorted(required_flow_fields - set(flow_columns))
+        if missing_fields:
+            raise ValueError(
+                "From/To flow sheet is missing required column(s): "
+                + ", ".join(missing_fields)
+                + ". Include From_ID, To_ID, Loads_Day, and Distance_M; measurements must not be inferred."
+            )
+        for row_number, row in enumerate(flow_frame.to_dict("records"), 2):
+            if all(_import_blank(value) for value in row.values()):
+                continue
+            flow_id = _import_text(
+                row.get(flow_columns.get("flow_id")),
+                f"Flows row {row_number} flow ID",
+                default="",
+            )
+            from_id = _import_text(
+                row.get(flow_columns["from_id"]), f"Flows row {row_number} From ID"
+            )
+            to_id = _import_text(
+                row.get(flow_columns["to_id"]), f"Flows row {row_number} To ID"
+            )
+            if from_id == to_id:
+                raise ValueError(
+                    f"Flows row {row_number} must connect two different departments."
+                )
+            if flow_id:
+                folded_id = flow_id.casefold()
+                if folded_id in seen_flow_ids:
+                    raise ValueError(f"Duplicate flow ID {flow_id!r} in import.")
+                seen_flow_ids.add(folded_id)
+            raw_relationship = row.get(flow_columns.get("relationship"))
+            relationship = (
+                "" if _import_blank(raw_relationship)
+                else _import_text(raw_relationship, f"Flows row {row_number} relationship").upper()
+            )
+            if relationship and relationship not in {"A", "E", "I", "O", "U", "X"}:
+                raise ValueError(
+                    f"Flows row {row_number} has unsupported SLP relationship "
+                    f"{relationship!r}; use A, E, I, O, U, or X, or leave it blank to mark it missing."
+                )
+            raw_flow_rows.append(
+                {
+                    "flow_id": flow_id,
+                    "from_id": from_id,
+                    "to_id": to_id,
+                    "loads_day": _import_number(
+                        row.get(flow_columns["loads_day"]),
+                        f"Flows row {row_number} loads_day",
+                        minimum=0.0,
+                    ),
+                    "distance_m": _import_number(
+                        row.get(flow_columns["distance_m"]),
+                        f"Flows row {row_number} distance_m",
+                        minimum=0.0,
+                    ),
+                    "relationship": relationship,
+                    "reason": _import_text(
+                        row.get(flow_columns.get("reason")),
+                        f"Flows row {row_number} reason",
+                        default="Imported flow",
+                    ),
+                    "transport": _import_text(
+                        row.get(flow_columns.get("transport")),
+                        f"Flows row {row_number} transport",
+                        default="Forklift",
+                    ),
+                }
+            )
+
+    if not department_rows and not raw_flow_rows:
+        return 0, 0
+
+    # Read the workspace's existing identifiers before validation. No writes
+    # occur until every department and every flow has passed all checks.
+    ensure_facility_schema()
+    with _db() as conn:
+        existing_departments = conn.execute(
+            "SELECT dept_id, name, active FROM facility_departments "
+            "WHERE owner=? AND workspace=?",
+            (owner, workspace),
+        ).fetchall()
+        existing_flows = conn.execute(
+            "SELECT flow_id, from_id, to_id FROM facility_flows "
+            "WHERE owner=? AND workspace=?",
+            (owner, workspace),
+        ).fetchall()
+
+    incoming_department_ids = {row["id"].casefold(): row["id"] for row in department_rows}
+    existing_id_lookup = {str(row[0]).casefold(): str(row[0]) for row in existing_departments}
+    for department_id in incoming_department_ids.values():
+        existing_id = existing_id_lookup.get(department_id.casefold())
+        if existing_id is not None and existing_id != department_id:
+            raise ValueError(
+                f"Department ID {department_id!r} differs only by letter case "
+                f"from existing ID {existing_id!r}."
+            )
+
+    incoming_exact_ids = {row["id"] for row in department_rows}
+    existing_names = {
+        str(name).strip().casefold()
+        for department_id, name, active in existing_departments
+        if bool(active) and str(department_id) not in incoming_exact_ids
+    }
+    for row in department_rows:
+        if row["name"].casefold() in existing_names:
+            raise ValueError(
+                f"Department name {row['name']!r} already exists in this workspace; "
+                "edit the existing department or choose a unique name."
+            )
+        existing_names.add(row["name"].casefold())
+
+    valid_department_ids = {
+        str(department_id)
+        for department_id, _name, active in existing_departments
+        if bool(active)
+    } | incoming_exact_ids
+
+    existing_flow_by_id = {str(flow_id).casefold(): str(flow_id) for flow_id, _, _ in existing_flows}
+    reserved_flow_ids = set(existing_flow_by_id) | seen_flow_ids
+    flow_rows: list[dict[str, Any]] = []
+    next_generated_id = 1
+    for row in raw_flow_rows:
+        flow_id = row["flow_id"]
+        if flow_id:
+            prior_id = existing_flow_by_id.get(flow_id.casefold())
+            if prior_id is not None and prior_id != flow_id:
+                raise ValueError(
+                    f"Flow ID {flow_id!r} differs only by letter case from existing "
+                    f"flow ID {prior_id!r}."
+                )
+        else:
+            while True:
+                candidate = f"FIMP{next_generated_id:03d}"
+                next_generated_id += 1
+                if candidate.casefold() not in reserved_flow_ids:
+                    flow_id = candidate
+                    reserved_flow_ids.add(flow_id.casefold())
+                    break
+        row["flow_id"] = flow_id
+        if row["from_id"] not in valid_department_ids:
+            raise ValueError(
+                f"Flow {flow_id!r} references unknown From department {row['from_id']!r}."
+            )
+        if row["to_id"] not in valid_department_ids:
+            raise ValueError(
+                f"Flow {flow_id!r} references unknown To department {row['to_id']!r}."
+            )
+        flow_rows.append(row)
+
+    # Flow IDs may update an existing edge, but two IDs cannot represent the
+    # same directed edge. The reverse direction remains a distinct valid edge.
+    existing_edges = {
+        (str(from_id), str(to_id)): str(flow_id)
+        for flow_id, from_id, to_id in existing_flows
+    }
+    seen_edges: set[tuple[str, str]] = set()
+    for row in flow_rows:
+        edge = (row["from_id"], row["to_id"])
+        if edge in seen_edges:
+            raise ValueError(
+                f"Duplicate directed flow {edge[0]!r} → {edge[1]!r} in import."
+            )
+        seen_edges.add(edge)
+        existing_id = existing_edges.get(edge)
+        if existing_id is not None and existing_id != row["flow_id"]:
+            raise ValueError(
+                f"Directed flow {edge[0]!r} → {edge[1]!r} already exists as "
+                f"{existing_id!r}; update that flow ID rather than duplicating the edge."
+            )
+
+    with _db() as conn:
+        for row in department_rows:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO facility_departments
+                (owner,workspace,dept_id,name,x,y,area_sqm,active,updated_at)
+                VALUES(?,?,?,?,?,?,?,?,?)
+                """,
+                (
+                    owner, workspace, row["id"], row["name"], row["x"],
+                    row["y"], row["area_sqm"], 1, _now(),
+                ),
+            )
+        for row in flow_rows:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO facility_flows
+                (owner,workspace,flow_id,from_id,to_id,loads_day,distance_m,
+                 relationship,reason,transport,updated_at)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?)
+                """,
+                (
+                    owner, workspace, row["flow_id"], row["from_id"], row["to_id"],
+                    row["loads_day"], row["distance_m"], row["relationship"],
+                    row["reason"], row["transport"], _now(),
+                ),
+            )
+        conn.commit()
+
+    return len(department_rows), len(flow_rows)
 
 def _export_workbook(depts: pd.DataFrame, flows: pd.DataFrame, slp: pd.DataFrame) -> bytes:
     out = io.BytesIO()

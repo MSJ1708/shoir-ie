@@ -207,6 +207,8 @@ def test_security_gate_requires_explicit_approval(tmp_path, monkeypatch):
     monkeypatch.setattr(ent, "_remote", lambda: False)
     st.session_state.clear()
     st.session_state["current_user"] = "alice"
+    st.session_state["authenticated"] = True
+    st.session_state["user_role"] = "Owner"
     st.session_state["current_role"] = "Owner"
     st.session_state["current_action_approved"] = False
     try:

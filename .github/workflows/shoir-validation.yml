@@ -32,3 +32,37 @@ jobs:
               ast.parse(Path(name).read_text(encoding="utf-8"), filename=name)
           print("Required application modules parsed successfully.")
           PY
+
+  live-deployment-smoke:
+    # This audit branch gets a real browser probe of the currently hosted
+    # unauthenticated shell. Do not make ordinary feature PRs depend on a
+    # third-party demo host or on undisclosed account credentials.
+    if: >-
+      (github.event_name == 'pull_request' && startsWith(github.head_ref, 'audit/')) ||
+      (github.event_name == 'push' && startsWith(github.ref_name, 'audit/'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      SHoir_LIVE_URL: https://shoir-ie-app.streamlit.app/
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Install headless browser
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install playwright
+          python -m playwright install --with-deps chromium
+      - name: Test hosted entry-screen rendering at desktop and mobile widths
+        env:
+          SHOIR_LIVE_URL: https://shoir-ie-app.streamlit.app/
+        run: python scripts/live_deployment_smoke.py
+      - name: Save live browser screenshots and result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: shoir-ie-live-deployment-smoke
+          path: artifacts/live-deployment-smoke/
+          if-no-files-found: warn
+

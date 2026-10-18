@@ -1818,51 +1818,100 @@ def upsert_security_policy(
 
 
 def security_access_check(username: str, action: str, workspace: str = "default", require_approval: bool = False) -> dict[str, Any]:
-    """Return an explicit, non-mutating authorization decision for an operator action."""
-    policy = security_policy(username, workspace)
+    """Return a fail-closed authorization decision for the authenticated account.
+
+    Subscription tier and account role are different concepts. The application
+    stores the signed-in account role in user_role; a missing role must never
+    be promoted to Owner as a convenience fallback.
+    """
+    requested_user = str(username or "").strip()
+    requested_action = re.sub(r"[^a-z0-9]+", "_", str(action or "").strip().casefold()).strip("_")
+    workspace_id = workspace_key(requested_user, workspace)
+
+    reasons: list[str] = []
+    role = ""
+    mfa_verified = False
+    approved = False
+    authenticated = False
+    session_user = ""
+
     try:
-        import streamlit as st
-        role = str(st.session_state.get("current_role") or st.session_state.get("role") or "")
+        state = st.session_state
+        session_user = str(state.get("current_user") or "").strip()
+        authenticated = bool(state.get("authenticated"))
+        # user_role is the account role written by the authoritative login flow.
+        # Do not let a secondary/stale role field override it.
+        # The login flow writes the canonical account role to user_role.
+        # Legacy/secondary role fields are not authoritative and cannot be
+        # used to grant privileges when the canonical value is missing.
+        role = str(state.get("user_role") or "").strip()
         mfa_verified = bool(
-            st.session_state.get("mfa_verified")
-            or st.session_state.get("auth_mfa_verified")
-            or st.session_state.get("mfa_challenge_verified")
+            state.get("mfa_verified")
+            or state.get("auth_mfa_verified")
+            or state.get("mfa_challenge_verified")
         )
+        approved = bool(state.get("decision_approved") or state.get("current_action_approved"))
     except Exception:
-        role = ""
-        mfa_verified = False
-    reasons = []
-    allowed = True
-    try:
-        current_user = str(st.session_state.get("current_user") or "")
-    except Exception:
-        current_user = ""
-    if not role and current_user and current_user == str(username):
-        role = "Owner"
+        reasons.append("The authenticated session state is unavailable.")
+
+    if not authenticated:
+        reasons.append("An authenticated session is required.")
+    if not session_user:
+        reasons.append("No signed-in account identity is available.")
+    elif session_user.casefold() != requested_user.casefold():
+        reasons.append("The requested account does not match the signed-in account.")
     if not role:
-        allowed = False
-        reasons.append("No active workspace role is available.")
-    if bool(policy.get("require_mfa")) and not mfa_verified:
-        allowed = False
+        reasons.append("No active account role is available.")
+
+    # Fail closed if the workspace policy cannot be loaded. Otherwise a
+    # database outage could accidentally disable a configured MFA requirement.
+    policy: dict[str, Any] = {}
+    try:
+        policy = security_policy(requested_user, workspace)
+    except Exception:
+        reasons.append("The workspace security policy could not be loaded.")
+
+    mfa_required = bool(policy.get("require_mfa"))
+    if mfa_required and not mfa_verified:
         reasons.append("Workspace policy requires MFA verification.")
-    if require_approval and action in {"execute", "write", "approve", "connector_sync"}:
-        try:
-            approved = bool(st.session_state.get("decision_approved") or st.session_state.get("current_action_approved"))
-        except Exception:
-            approved = False
-        if not approved:
-            allowed = False
-            reasons.append("Explicit human approval is required before this action.")
+
+    admin_roles = {
+        "admin", "administrator", "enterprise admin", "system admin",
+        "super admin", "owner", "workspace owner",
+    }
+    read_only_roles = {
+        "viewer", "read only", "read-only", "readonly", "observer",
+        "auditor", "guest", "guest visitor",
+    }
+    read_actions = {"read", "view", "list", "query", "export", "report_export"}
+    write_actions = {"write", "edit", "save", "import", "execute", "run", "connector_sync"}
+    admin_actions = {
+        "approve", "manage_users", "manage_roles", "change_permissions",
+        "security_policy", "admin", "delete_user", "delete_workspace",
+        "manage_workspace_members", "view_audit_log",
+    }
+
+    normalized_role = re.sub(r"\s+", " ", role.casefold()).strip()
+    is_admin = normalized_role in admin_roles
+    if requested_action not in read_actions | write_actions | admin_actions:
+        reasons.append("The requested action is not defined by the authorization policy.")
+    elif requested_action in admin_actions and not is_admin:
+        reasons.append("This action requires a workspace administrator or owner.")
+    elif requested_action in write_actions and normalized_role in read_only_roles:
+        reasons.append("This role is read-only and cannot modify or execute workspace actions.")
+
+    if require_approval and requested_action in {"execute", "write", "approve", "connector_sync"} and not approved:
+        reasons.append("Explicit human approval is required before this action.")
+
     return {
-        "allowed": allowed,
-        "action": str(action),
+        "allowed": not reasons,
+        "action": requested_action,
         "role": role,
-        "workspace_id": workspace_key(username, workspace),
-        "mfa_required": bool(policy.get("require_mfa")),
+        "workspace_id": workspace_id,
+        "mfa_required": mfa_required,
         "mfa_verified": mfa_verified,
         "reasons": reasons,
     }
-
 
 def enforce_action_gate(
     username: str,
@@ -1876,27 +1925,94 @@ def enforce_action_gate(
 
 
 def security_maturity_status(username: str, workspace: str = "default") -> pd.DataFrame:
-    """Report implementation maturity without overstating provider-dependent controls."""
-    policy = security_policy(username, workspace)
+    """Summarize configured controls without presenting configuration as verification."""
+    policy_available = True
     try:
-        import streamlit as st
-        role_present = bool(st.session_state.get("current_role") or st.session_state.get("role"))
-        mfa_verified = bool(st.session_state.get("mfa_verified") or st.session_state.get("auth_mfa_verified"))
+        policy = security_policy(username, workspace)
     except Exception:
+        policy = {}
+        policy_available = False
+
+    try:
+        state = st.session_state
+        session_user = str(state.get("current_user") or "").strip()
+        authenticated = bool(state.get("authenticated")) and bool(session_user)
+        role_present = bool(state.get("user_role"))
+        mfa_verified = bool(
+            state.get("mfa_verified")
+            or state.get("auth_mfa_verified")
+            or state.get("mfa_challenge_verified")
+        )
+    except Exception:
+        authenticated = False
         role_present = False
         mfa_verified = False
-    cloud = _remote()
+
+    try:
+        from durable_account_store import durable_backend_configured
+        cloud_configured = bool(durable_backend_configured() or postgres_backend_configured())
+    except Exception:
+        try:
+            cloud_configured = bool(postgres_backend_configured())
+        except Exception:
+            cloud_configured = False
+
+    if not policy_available:
+        oidc_state = "Policy unavailable"
+        mfa_state = "Policy unavailable"
+    else:
+        oidc_state = "Configured" if bool(policy.get("oidc_enabled")) else "Not configured"
+        if not bool(policy.get("require_mfa")):
+            mfa_state = "Not configured"
+        elif authenticated and mfa_verified:
+            mfa_state = "Session flag set"
+        else:
+            mfa_state = "Required / unverified"
+
     rows = [
-        {"Control":"RBAC","State":"Verified" if role_present else "Configured","Evidence":"Active workspace role." if role_present else "Role model is present; runtime role not observed."},
-        {"Control":"Workspace isolation","State":"Verified","Evidence":"Enterprise records are keyed by user + workspace."},
-        {"Control":"Audit / artifacts","State":"Verified","Evidence":"Durable artifact and audit stores are available."},
-        {"Control":"Cloud persistence","State":"Connected" if cloud else "Configured","Evidence":"Managed persistence configuration."},
-        {"Control":"SSO / OIDC","State":"Connected" if bool(policy.get("oidc_enabled")) else "Configured","Evidence":"Provider policy flag; runtime provider enforcement is external."},
-        {"Control":"MFA","State":"Connected" if bool(policy.get("require_mfa")) and mfa_verified else ("Configured" if bool(policy.get("require_mfa")) else "Not configured"),"Evidence":"Session verification is checked; secrets are never displayed."},
-        {"Control":"Secure uploads","State":"Verified","Evidence":"Extension, size, archive traversal and signature checks."},
-        {"Control":"Secrets","State":"Configured","Evidence":"Connector credentials use references rather than stored secret values."},
+        {
+            "Control": "RBAC",
+            "State": "Session role present" if authenticated and role_present else "Not verified",
+            "Evidence": "Account role exists in the current authenticated session; complete per-route enforcement remains separately unverified.",
+        },
+        {
+            "Control": "Workspace isolation",
+            "State": "Partial",
+            "Evidence": "Records use a user + workspace key. Exhaustive cross-user/cross-workspace negative authorization tests and shared-workspace membership enforcement are not established by this status check.",
+        },
+        {
+            "Control": "Audit / artifacts",
+            "State": "Available",
+            "Evidence": "Artifact and audit store functions are present; durable-backend recovery, write authorization and retention behavior are not independently verified here.",
+        },
+        {
+            "Control": "Cloud persistence",
+            "State": "Configured" if cloud_configured else "Local only",
+            "Evidence": "Backend configuration is detected; a successful live write/read and restart-recovery check is not performed by this status check.",
+        },
+        {
+            "Control": "SSO / OIDC",
+            "State": oidc_state,
+            "Evidence": "The workspace policy flag is configuration only; identity-provider handshake and enforcement are external and have not been verified here.",
+        },
+        {
+            "Control": "MFA",
+            "State": mfa_state,
+            "Evidence": "The current session flag is observed; this status does not independently validate a second-factor provider or replay resistance.",
+        },
+        {
+            "Control": "Secure uploads",
+            "State": "Checks present",
+            "Evidence": "Extension, size, archive/path and signature checks exist; this is not a complete upload-security audit or certification.",
+        },
+        {
+            "Control": "Secrets",
+            "State": "Configured",
+            "Evidence": "Some connector flows use credential references; comprehensive storage, access, rotation and redaction verification remains open.",
+        },
     ]
     return pd.DataFrame(rows)
+
 def security_policy(username: str, workspace: str = "default") -> dict[str, Any]:
     ensure_enterprise_schema()
     wid = workspace_key(username, workspace)

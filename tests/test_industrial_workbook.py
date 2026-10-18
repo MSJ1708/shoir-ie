@@ -340,3 +340,98 @@ def test_workbook_version_history_and_comments_round_trip(tmp_path, monkeypatch)
     comments = list_workbook_comments(wid, path=str(db))
     assert cid > 0
     assert comments.iloc[0]["Comment"] == "Reviewed by engineering."
+
+def test_workbook_persistence_isolated_by_owner_and_blocks_id_reassignment(tmp_path, monkeypatch):
+    import streamlit as st
+    from shoir_industrial_workbook import (
+        list_query_pipelines,
+        list_saved_workbooks,
+        list_templates,
+        list_workbook_comments,
+        list_workbook_versions,
+        load_template,
+        load_workbook,
+        load_workbook_version,
+        save_query_pipeline,
+        save_template,
+        save_workbook_comment,
+    )
+
+    state = {"current_user": "alice", "shoir_workspace_name": "shared-label"}
+    monkeypatch.setattr(st, "session_state", state)
+    db = str(tmp_path / "owner-isolation.db")
+    original = {"Sheet1": pd.DataFrame({"Value": [11, 22]})}
+    workbook_id = save_workbook(original, {}, {}, "Alice workbook", path=db)
+    version_id = int(list_workbook_versions(workbook_id, path=db).iloc[0]["ID"])
+    save_workbook_comment(workbook_id, "Sheet1", "A1", "Alice-only comment", path=db)
+    template_id = save_template("Alice template", "Test", "private test", original, path=db)
+    save_query_pipeline("Alice pipeline", "Sheet1", [{"type": "filter"}], path=db)
+
+    # A second account using the same workspace display label must not see or
+    # mutate Alice's saved workbook, versions, comments, templates, or pipelines.
+    state["current_user"] = "bob"
+    assert list_saved_workbooks(path=db).empty
+    assert list_workbook_versions(path=db).empty
+    assert list_workbook_comments(workbook_id, path=db).empty
+    assert list_query_pipelines(path=db).empty
+    assert template_id not in set(list_templates(path=db)["ID"].astype(str))
+    with pytest.raises(KeyError, match="current workspace"):
+        load_workbook(workbook_id, path=db)
+    with pytest.raises(KeyError, match="current workspace"):
+        load_workbook_version(version_id, path=db)
+    with pytest.raises(KeyError, match="current workspace"):
+        load_workbook_version(workbook_id, 1, path=db)
+    with pytest.raises(KeyError, match="Template not found"):
+        load_template(template_id, path=db)
+    with pytest.raises(PermissionError, match="different owner or workspace"):
+        save_workbook({"Sheet1": pd.DataFrame({"Value": [999]})}, {}, {}, "Hijack", workbook_id, path=db)
+    with pytest.raises(KeyError, match="current owner and workspace"):
+        save_workbook_comment(workbook_id, "Sheet1", "A1", "Unauthorized", path=db)
+
+    # Denied attempts do not damage the original owner's persisted state.
+    state["current_user"] = "alice"
+    loaded, _, _ = load_workbook(workbook_id, path=db)
+    assert loaded["Sheet1"]["Value"].tolist() == [11, 22]
+    assert len(list_workbook_comments(workbook_id, path=db)) == 1
+
+
+def test_workbook_version_ids_are_scoped_to_the_active_workspace(tmp_path, monkeypatch):
+    import streamlit as st
+    from shoir_industrial_workbook import (
+        list_saved_workbooks,
+        list_workbook_versions,
+        load_workbook,
+        load_workbook_version,
+    )
+
+    state = {"current_user": "alice", "shoir_workspace_name": "plant-a"}
+    monkeypatch.setattr(st, "session_state", state)
+    db = str(tmp_path / "workspace-isolation.db")
+    workbook_id = save_workbook(
+        {"Sheet1": pd.DataFrame({"Value": [42]})}, {}, {}, "Plant A", path=db
+    )
+    version_id = int(list_workbook_versions(workbook_id, path=db).iloc[0]["ID"])
+
+    # A version ID is not a bearer token: switching the active workspace makes
+    # the same ID unreadable and prevents a stale ID from reassigning the record.
+    state["shoir_workspace_name"] = "plant-b"
+    assert list_saved_workbooks(path=db).empty
+    assert list_workbook_versions(path=db).empty
+    with pytest.raises(KeyError, match="current workspace"):
+        load_workbook_version(version_id, path=db)
+    with pytest.raises(KeyError, match="current workspace"):
+        load_workbook(workbook_id, path=db)
+    with pytest.raises(PermissionError, match="different owner or workspace"):
+        save_workbook(
+            {"Sheet1": pd.DataFrame({"Value": [1000]})},
+            {},
+            {},
+            "Plant B overwrite attempt",
+            workbook_id,
+            path=db,
+        )
+
+    state["shoir_workspace_name"] = "plant-a"
+    loaded, _, _ = load_workbook(workbook_id, path=db)
+    assert loaded["Sheet1"]["Value"].tolist() == [42]
+
