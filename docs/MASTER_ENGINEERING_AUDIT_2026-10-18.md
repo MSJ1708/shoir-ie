@@ -4,7 +4,7 @@
 
 **Status: partial implementation; full production-readiness gate remains open.**
 
-This document records an evidence-based repository baseline and the first focused fix from the audit. It deliberately does not equate a green CI run or a module renderer existing with end-to-end production readiness. The audit branch currently fixes Facility Layout import integrity and adds targeted regression tests. Broader live connector, browser-rendering, production-persistence and authorization checks remain unverified unless expressly marked below.
+This document records an evidence-based repository baseline and the first focused fix from the audit. It deliberately does not equate a green CI run or a module renderer existing with end-to-end production readiness. The audit branch fixes Facility Layout import integrity and adds targeted regression tests. At audit commit 408ebd3e6e60edfd1c78094c53ad084ad5b2bedb, all five principal CI workflows completed successfully, including the 379-test suite. Broader live connector, browser-rendering, production-persistence and authorization checks remain unverified unless expressly marked below.
 
 ## 1. Repository baseline
 
@@ -22,7 +22,7 @@ This document records an evidence-based repository baseline and the first focuse
 | Baseline engine-regression workflow | [Run 39135650936 — success](https://github.com/MSJ1708/shoir-ie/actions/runs/39135650936) |
 | Baseline validation workflow | [Run 39135650977 — success](https://github.com/MSJ1708/shoir-ie/actions/runs/39135650977) |
 
-The three results above belong to the unmodified baseline commit. They are not evidence that the current audit branch has passed; branch checks must be inspected separately.
+The three results above belong to the unmodified baseline commit. The audited head 408ebd3e6e60edfd1c78094c53ad084ad5b2bedb also passed the principal workflows listed in Section 6. This is CI evidence only and does not establish live browser or production-infrastructure readiness.
 
 ### Relevant open pull requests inspected
 
@@ -67,7 +67,7 @@ Regression cases added:
 5. Duplicate directed edges reject the import.
 6. Re-importing the same flow IDs is idempotent and does not create duplicate rows.
 
-These tests are committed but must be considered **pending until the audit branch CI result completes successfully**.
+These tests completed successfully as part of the 379-test suite in [Shoir-IE tests run 39137304047](https://github.com/MSJ1708/shoir-ie/actions/runs/39137304047), validation run 39137304053, and platform tests run 39137304099. The repository workflow also reports success for [Engine Regression run 39137304029](https://github.com/MSJ1708/shoir-ie/actions/runs/39137304029) and [Security and Quality run 39137304055](https://github.com/MSJ1708/shoir-ie/actions/runs/39137304055), all against commit 408ebd3e6e60edfd1c78094c53ad084ad5b2bedb.
 
 ## 4. Eight-module verification matrix
 
@@ -88,7 +88,7 @@ A module status describes the evidence actually obtained, not whether a renderer
 
 | Area | Evidence available | Result | Evidence still required |
 |---|---|---|---|
-| Python syntax / import compilation | Baseline validation workflow includes compile/parse checks; baseline run succeeded. The current branch has its own run. | Baseline: **Pass**. Audit branch: **pending CI**. | Completed branch workflow result for the final commit. |
+| Python syntax / import compilation | The audited head's validation run completed compile and required-module parse steps successfully. | **Pass at commit 408ebd3e6e60edfd1c78094c53ad084ad5b2bedb.** | Re-run automatically after further changes. |
 | Primary navigation and module catalog | Existing catalog/category, tier-integrity, application-shell and smoke tests are present. | **Partially covered by existing automated tests**. | Authenticated browser navigation across every category, tab, modal, search route and narrow/desktop layout. |
 | Optional workbook/data startup | Modular application has existing no-upload paths and smoke tests, but live startup under every missing dependency/configuration is not run in this task. | **Not fully verified**. | Hosted startup with no upload, invalid upload, missing database and returning/new sessions. |
 | Persistence and recovery | Local SQLite workspace tests cover round trips and selected isolation semantics. | **Unit-level evidence only**. | Hosted durable database outage/recovery, restart persistence, concurrent writes and account switch. |
@@ -104,7 +104,7 @@ A module status describes the evidence actually obtained, not whether a renderer
 
 ## 6. CI, scope and limitations
 
-- Never interpret “pending” or “blocked” as “passed.” The baseline main-branch runs were successful, but the audit branch must pass its own checks before this code change is considered validated.
+- Never interpret “pending” or “blocked” as “passed.” The baseline main-branch runs and five principal audit-branch workflows have completed successfully at commit 408ebd3e6e60edfd1c78094c53ad084ad5b2bedb. Hosted browser and production-infrastructure verification are still open.
 - The repository cannot be cloned into the task container because outbound GitHub DNS/network access is unavailable. Changes were made through the authenticated GitHub integration and must be validated by GitHub Actions.
 - No production database records, credentials or deployment settings were modified.
 - No destructive penetration test was run.
@@ -121,8 +121,8 @@ A module status describes the evidence actually obtained, not whether a renderer
 - [x] Fix the identified Facility Layout import integrity issue.
 - [x] Add regression tests for the fix.
 - [x] Keep capacity-recovery edits separate from overlapping open PR #123.
-- [ ] Complete audit-branch CI and investigate any failing check.
-- [ ] Update this report with final audit-branch run URLs and actual outcomes.
+- [x] Complete audit-branch CI and inspect the principal workflows; all five completed successfully at commit 408ebd3e6e60edfd1c78094c53ad084ad5b2bedb.
+- [x] Record completed workflow outcomes and links in this report.
 - [ ] Open a non-merged PR to \`main\`.
 - [ ] Perform an authorized hosted browser/deployment verification.
 - [ ] Complete remaining module and security matrices before declaring the full definition of done satisfied.
