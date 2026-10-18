@@ -117,19 +117,19 @@ A module status describes the evidence actually obtained, not whether a renderer
 | PDF / PowerPoint / Excel report integrity | Selected artifact builders are tested in \`test_release_hardening.py\`. | **Partially covered**. | Cross-format data parity, visual inspection, Arabic/RTL, long report boundaries and missing-chart paths. |
 | Connector availability | Endpoint validation tests exist, but credentials and plant endpoints were not supplied. | **Blocked for live verification**. | Authorized configuration plus successful connector-specific tests. |
 | Security control enforcement | Baseline security workflow passed; checks include a heuristic credential-pattern scan. | **Limited automated verification**. | Control-by-control negative tests, deployment configuration review, TLS/backup evidence, identity provider evidence and full access-boundary audit. |
-| Hosted Streamlit browser | GitHub-hosted Chromium confirmed Shoir-IE content inside the rendered Streamlit frame; the public sign-in, registration, and module-explorer tabs passed at 1440×1000 and 390×844. No fatal startup markers, uncaught JavaScript errors, or horizontal overflow were detected. | **Public shell and public tabs pass; authenticated modules not run.** | Login and module flow with an approved test account; test downloads and module interaction; investigate observed platform/telemetry 404/403 responses. |
+| Hosted Streamlit browser | GitHub-hosted Chromium confirmed Shoir-IE content inside the rendered Streamlit frame; sign-in, registration and module-explorer tabs passed at 1440×1000 and 390×844. No fatal startup markers, uncaught JavaScript errors, or horizontal overflow were detected. | **Public shell and public tabs pass; authenticated modules not run.** | Network diagnostics also recorded a 404 for `https://cdn.heapanalytics.com/js/heap-.js`, a 404 for `/api/v2/user/details`, and a mobile-only 403 for `/api/v1/app/event/open`; these did not block the exercised UI but need attribution if telemetry or user context are expected to work. |
 | Production deployment | Repository CI is observable; no deployment changes or production database mutations were performed. | **Not verified in this task**. | Post-PR hosted smoke test and deployment-specific configuration evidence. |
 
 ## 6. CI, scope and limitations
 
-- Never interpret “pending” or “blocked” as “passed.” All five principal workflows passed on the behavior-changing code/test head `3b0238e7e4c373bd625e2d287694eea0a647510f` with 388 tests. The report-only commit that follows does not alter application behavior.
+- Never interpret “pending” or “blocked” as “passed.” All five principal workflows passed on code-bearing head `b99987e596a8916c9d29e8c3af01084a7e71450a` with 400 tests; the hosted public-entry browser smoke and both public tab interactions also passed. The following report-only commit must still maintain fresh CI.
 - The repository cannot be cloned into the task container because outbound GitHub DNS/network access is unavailable. Changes were made through the authenticated GitHub integration and must be validated by GitHub Actions.
 - No production database records, credentials or deployment settings were modified.
 - No destructive penetration test was run.
 - No live SAP, Oracle, MES, ERP, SQL, REST, MQTT or OPC-UA system was claimed as connected.
 - No investor-facing savings, downtime, yield or ROI claims were independently measured or re-certified.
 - The audit does not claim full Excel compatibility, SSO/MFA, encryption, backups, certification or general production readiness solely because related functions or settings exist.
-- The main branch's existing tests and current-green baseline workflows are useful evidence, but they do not replace complete browser testing and enforcement-point security tests.
+- The main branch's existing tests and current-green baseline workflows are useful evidence, but they do not replace authenticated browser testing, exhaustive enforcement-point authorization tests, or full module export/download interaction checks.
 
 ## 7. Pull request acceptance checklist
 
