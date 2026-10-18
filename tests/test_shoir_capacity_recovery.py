@@ -126,6 +126,7 @@ def test_zero_output_is_not_fabricated_into_a_zero_quality_claim():
     metrics = calculate_line_metrics(events).set_index("Line")
     assert math.isnan(metrics.loc["A", "QualityPct"])
     assert metrics.loc["A", "OEEStatus"] == "Not available"
+    assert metrics.loc["A", "ConstraintSignal"] == "Not assessed — OEE unavailable"
 
 
 def test_evidence_manifest_has_stable_input_hash_and_versioned_formulas():
