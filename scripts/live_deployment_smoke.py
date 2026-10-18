@@ -199,9 +199,40 @@ def main() -> int:
                                     tab_text = app_frame.locator("body").inner_text(timeout=5_000)
                                     check["rendered_text_length"] = len(tab_text)
                                     check["rendered_text_preview"] = " ".join(tab_text.split())[:450]
+                                    frame_dimensions = app_frame.evaluate(
+                                        """() => ({
+                                            innerWidth: window.innerWidth,
+                                            documentScrollWidth: document.documentElement.scrollWidth,
+                                            bodyScrollWidth: document.body ? document.body.scrollWidth : 0,
+                                            innerHeight: window.innerHeight,
+                                            documentScrollHeight: document.documentElement.scrollHeight
+                                        })"""
+                                    )
+                                    check["app_frame_dimensions"] = frame_dimensions
+                                    check["horizontal_overflow"] = (
+                                        frame_dimensions["documentScrollWidth"] > frame_dimensions["innerWidth"] + 8
+                                        or frame_dimensions["bodyScrollWidth"] > frame_dimensions["innerWidth"] + 8
+                                    )
+                                    if check["horizontal_overflow"]:
+                                        raise AssertionError(
+                                            f"App frame horizontal overflow at {label}: {frame_dimensions}"
+                                        )
                                     screenshot_path = OUTPUT / f"{label}-{check_name}.png"
                                     page.screenshot(path=str(screenshot_path), full_page=True, timeout=30_000)
                                     check["screenshot"] = str(screenshot_path)
+                                    if check_name == "public-module-explorer-tab":
+                                        deep_marker = app_frame.get_by_text(
+                                            re.compile(r"Venture Studio", re.I)
+                                        ).first
+                                        deep_marker.scroll_into_view_if_needed(timeout=8_000)
+                                        if not deep_marker.is_visible():
+                                            raise AssertionError("Venture Studio section is not visible when scrolled into view.")
+                                        deep_screenshot = OUTPUT / f"{label}-public-module-explorer-venture-studio.png"
+                                        page.screenshot(path=str(deep_screenshot), full_page=False, timeout=30_000)
+                                        check["deep_section_marker"] = "Venture Studio"
+                                        check["deep_section_screenshot"] = str(deep_screenshot)
+                                        # Restore the top of the app frame for the next screenshot/check.
+                                        app_frame.evaluate("window.scrollTo(0, 0)")
                                     check["result"] = "PASS"
                                 except Exception as tab_error:
                                     check["failure_reason"] = (
@@ -234,11 +265,27 @@ def main() -> int:
                                 bodyScrollWidth: document.body ? document.body.scrollWidth : 0
                             })"""
                         )
-                        item["dimensions"] = dimensions
-                        item["horizontal_overflow"] = (
+                        item["host_dimensions"] = dimensions
+                        item["app_frame_dimensions"] = (
+                            app_frame.evaluate(
+                                """() => ({
+                                    innerWidth: window.innerWidth,
+                                    documentScrollWidth: document.documentElement.scrollWidth,
+                                    bodyScrollWidth: document.body ? document.body.scrollWidth : 0
+                                })"""
+                            )
+                            if app_frame is not None
+                            else None
+                        )
+                        host_overflow = (
                             dimensions["documentScrollWidth"] > dimensions["innerWidth"] + 8
                             or dimensions["bodyScrollWidth"] > dimensions["innerWidth"] + 8
                         )
+                        frame_overflows = any(
+                            bool(check.get("horizontal_overflow"))
+                            for check in item.get("public_tab_checks", [])
+                        )
+                        item["horizontal_overflow"] = host_overflow or frame_overflows
                         page.screenshot(
                             path=item["screenshot"], full_page=True, timeout=30_000
                         )
