@@ -328,6 +328,23 @@ def render_capacity_recovery(tier: str = "Starter", username: str = "unknown") -
         st.session_state["capacity_recovery_result"] = result
 
     result = st.session_state.get("capacity_recovery_result")
+    if result and result.get("evidence"):
+        current_frame, current_validation = validate_production_events(edited)
+        inputs_match = False
+        if current_validation["valid"]:
+            current_evidence = build_evidence_manifest(
+                current_frame,
+                result["line_metrics"],
+                result["recovery_scenario"],
+                source_name=st.session_state.get("capacity_recovery_source_name", "user-provided production data"),
+                source_type=st.session_state.get("capacity_recovery_source_type", "user-entered data"),
+            )
+            inputs_match = current_evidence["input_sha256"] == result["evidence"]["input_sha256"]
+        if not inputs_match:
+            st.session_state.pop("capacity_recovery_result", None)
+            st.info("The input table has changed since the last analysis. Re-run the study to refresh results and evidence.")
+            result = None
+
     if not result:
         validation_frame, validation = validate_production_events(edited)
         st.subheader("Input validation")
