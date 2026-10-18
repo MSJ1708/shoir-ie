@@ -111,9 +111,13 @@ def test_administrator_actions_require_an_administrator_role(monkeypatch):
     decision = ent.security_access_check("alice", "approve")
     assert not decision["allowed"]
     assert any("administrator or owner" in reason for reason in decision["reasons"])
+    audit_decision = ent.security_access_check("alice", "view_audit_log")
+    assert not audit_decision["allowed"]
+    assert any("administrator or owner" in reason for reason in audit_decision["reasons"])
 
     _session(monkeypatch, role="Enterprise Admin")
     assert ent.security_access_check("alice", "approve")["allowed"]
+    assert ent.security_access_check("alice", "view_audit_log")["allowed"]
 
 
 def test_mfa_and_human_approval_fail_closed(monkeypatch):
