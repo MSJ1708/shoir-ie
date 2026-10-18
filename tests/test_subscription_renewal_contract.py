@@ -41,6 +41,13 @@ def test_visible_subscription_countdown_and_renewal_controls_exist():
     assert 'active_subscription_renewal_form' in APP_SOURCE
     assert 'Enter the payment transaction/reference' in APP_SOURCE
     assert 'Transaction / Payment Reference' in APP_SOURCE
+    assert '_encode_renewal_proof' in APP_SOURCE
+    assert '512 * 1024' in APP_SOURCE
+    assert 'edge_admin_payment_proof_url' in APP_SOURCE
+    assert 'admin_payment_proof_url_session' in EDGE_SOURCE
+    assert 'transactionId=String(body.transaction_id||"").trim()' in EDGE_SOURCE
+    assert 'createBucket(PAYMENT_PROOF_BUCKET' in EDGE_SOURCE
+    assert 'public: false' in EDGE_SOURCE
     assert 'Enterprise Plus Tier ($399)' in APP_SOURCE
     assert 'Research Pack ($30 add-on)' in APP_SOURCE
 
