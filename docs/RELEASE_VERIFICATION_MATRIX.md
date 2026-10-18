@@ -11,6 +11,25 @@ This matrix is the release gate for the subscription renewal, account, module, i
 - **Browser verified** — completed against the hosted application using an authorized account; record date, account class, build, steps and observed outcome.
 - **Blocked** — a dependency prevents a trustworthy test; document the dependency and do not mark the release definition of done complete.
 
+## Current verification record — 2026-10-18
+
+The following status is tied to merge commit `c93a33cfe6272c1d60f4d6f94753bdad147948e5` and live backend observations captured during this run.
+
+| Area | Current status | Evidence / boundary |
+|---|---|---|
+| Compile and regression suite | **PASS — automated** | Main validation workflow, including `compileall`, tests, and required module parsing, completed successfully. |
+| Engine regression | **PASS — automated** | Main engine-regression workflow completed successfully. |
+| Security and quality checks | **PASS — automated** | Main security-quality workflow completed successfully. This is not a penetration test or independent certification. |
+| Public hosted entry screen | **PASS — browser smoke** | Headless Chromium checked the live public shell at desktop and mobile widths, including registration and public Explore Modules tab, with no fatal marker or horizontal overflow. No sign-in or production writes were attempted. |
+| Subscription backend deployment | **PASS — configuration checked** | Supabase `shoir-persistence` is deployed at version 5; `shoir_sessions.scope` exists, is NOT NULL and defaults to `workspace`. |
+| Admin tier | **PASS — record checked** | Existing admin record is active, retains role `Enterprise Admin` and long-dated expiry `2099-01-01 UTC`, and now has tier `Enterprise Plus Tier ($399)`. No password or account recreation was performed. |
+| Core account/workspace RLS | **PASS — policy inspected** | `shoir_accounts`, `shoir_pending_credentials`, `shoir_sessions`, `shoir_subscription_requests` and `shoir_workspace_states` have server-only policies with `USING false` and `WITH CHECK false` for `anon`/`authenticated`. The service-role Edge Function is the designed persistence boundary. |
+| Authenticated sign-in, expiry, renewal and restoration | **BLOCKED — not browser verified** | This run had no authorized test credential or already-authenticated browser session available to exercise the private account journey. The public smoke deliberately does not sign in. Do not claim these cases passed from static checks alone. |
+| Module-by-module rendering, imports/downloads, persistence after restart, roles/tiers and tenant isolation | **OPEN — not fully browser verified** | The matrix below is the acceptance checklist. A public shell smoke is not evidence for these private workflows. |
+| Platform-table security advisor | **REVIEW REQUIRED** | Supabase reports five other public platform tables with RLS enabled but no explicit policies (`shoir_platform_artifacts`, `shoir_platform_events`, `shoir_platform_jobs`, `shoir_platform_meta`, `shoir_platform_records`). No-policy RLS is normally default-deny for public roles, but verify intended grants and service-role access before exposing these tables directly. Do not add permissive client policies without a tenant-aware access design. |
+
+**Release decision:** automated and public-shell checks passed, but **the full definition of done remains OPEN** until authorized authenticated browser tests and the remaining module/import/export/persistence/security matrix rows are recorded with evidence.
+
 ## Account, subscription and session matrix
 
 | ID | Scenario | Expected result | Minimum evidence |
