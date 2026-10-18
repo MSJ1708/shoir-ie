@@ -25,9 +25,13 @@ def test_capacity_recovery_is_inside_the_existing_enterprise_os():
 
 def test_capacity_recovery_import_guardrails_are_visible_in_the_ui():
     workflow = (ROOT / "shoir_capacity_recovery_ui.py").read_text(encoding="utf-8")
+    service = (ROOT / "shoir_capacity_recovery.py").read_text(encoding="utf-8")
     assert 'type=["csv", "xlsx"]' in workflow
-    assert "10 * 1024 * 1024" in workflow
-    assert "len(imported_frame) > 1000" in workflow
+    assert "read_station_upload(upload.getvalue(), upload.name)" in workflow
+    assert "10 MiB" in workflow
+    assert "MAX_UPLOAD_BYTES = 10 * 1024 * 1024" in service
+    assert "MAX_IMPORT_ROWS = 1000" in service
+    assert "MAX_IMPORT_COLUMNS = 100" in service
     assert "Apply validated column mapping" in workflow
     assert "optional" in workflow.lower()
     assert "synthetic demonstration data" in workflow.lower()
