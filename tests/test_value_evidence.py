@@ -9,6 +9,7 @@ from shoir_value_evidence import (
     ensure_value_evidence_db,
     record_time_snapshot,
     save_financial_bridge_record,
+    save_task_baseline,
 )
 
 
@@ -34,6 +35,48 @@ def test_time_value_uses_explicit_before_after_inputs():
 def test_time_value_rejects_invalid_inputs_instead_of_silently_zeroing(args):
     with pytest.raises(ValueError):
         calculate_time_value(*args)
+
+
+def test_task_baseline_persists_measurement_state_and_source_without_claiming_authentication(tmp_path):
+    db = str(tmp_path / "task-time.db")
+    stored = save_task_baseline(
+        "alice", "Capacity Study", "Capacity analysis", 180, 30, 10, 250,
+        source="Controlled time study TS-19",
+        evidence_state="Customer measured",
+        db_path=db,
+    )
+    assert stored["evidence_state"] == "Customer measured"
+    assert stored["source"] == "Controlled time study TS-19"
+    assert stored["baseline_minutes"] == pytest.approx(180)
+    assert stored["shoir_minutes"] == pytest.approx(30)
+
+    values = calculate_time_value(180, 30, 10, 250)
+    values["currency"] = "SAR"
+    values["evidence_state"] = "Customer measured"
+    snapshot_id = record_time_snapshot(
+        "alice", "Capacity Study", "Capacity analysis", values,
+        "Controlled time study TS-19", db_path=db,
+    )
+    with sqlite3.connect(db) as conn:
+        baseline = conn.execute(
+            "SELECT evidence_state,source FROM shoir_value_task_baselines WHERE owner=? AND module=?",
+            ("alice", "Capacity Study"),
+        ).fetchone()
+        snapshot = conn.execute(
+            "SELECT evidence_state,source FROM shoir_value_snapshots WHERE snapshot_id=?",
+            (snapshot_id,),
+        ).fetchone()
+    assert baseline == ("Customer measured", "Controlled time study TS-19")
+    assert snapshot == ("Customer measured", "Controlled time study TS-19")
+
+
+def test_customer_measured_task_baseline_requires_a_source(tmp_path):
+    with pytest.raises(ValueError, match="require a source reference"):
+        save_task_baseline(
+            "alice", "Capacity Study", "Capacity analysis", 180, 30, 10, 250,
+            source="", evidence_state="Customer measured",
+            db_path=str(tmp_path / "source-required.db"),
+        )
 
 
 def test_financial_bridge_matches_documented_formula_and_labels_estimate():
