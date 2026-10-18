@@ -1,0 +1,81 @@
+import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import { createClient } from "jsr:@supabase/supabase-js@2";
+
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
+const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
+const ITERATIONS = 200_000;
+
+function response(data: unknown, status = 200) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: {
+      "Content-Type": "application/json",
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+    },
+  });
+}
+function hexToBytes(hex: string) { const out = new Uint8Array(hex.length / 2); for (let i=0;i<out.length;i++) out[i]=parseInt(hex.slice(i*2,i*2+2),16); return out; }
+function bytesToHex(bytes: ArrayBuffer | Uint8Array) { const u=bytes instanceof Uint8Array?bytes:new Uint8Array(bytes); return Array.from(u).map(b=>b.toString(16).padStart(2,"0")).join(""); }
+async function pbkdf2(password:string,saltHex:string){ const key=await crypto.subtle.importKey("raw",new TextEncoder().encode(password),"PBKDF2",false,["deriveBits"]); const bits=await crypto.subtle.deriveBits({name:"PBKDF2",hash:"SHA-256",salt:hexToBytes(saltHex),iterations:ITERATIONS},key,256); return bytesToHex(bits); }
+async function hashPassword(password:string){ const salt=new Uint8Array(16); crypto.getRandomValues(salt); const s=bytesToHex(salt); return s+"$"+await pbkdf2(password,s); }
+async function verifyPassword(stored:string,password:string){ if(!stored||!password||!stored.includes("$"))return false; const [salt,expected]=stored.split("$",2); const actual=await pbkdf2(password,salt); if(actual.length!==expected.length)return false; let diff=0; for(let i=0;i<actual.length;i++)diff|=actual.charCodeAt(i)^expected.charCodeAt(i); return diff===0; }
+function isExpired(v:string|null){return !!v&&new Date(v).getTime()<=Date.now();}
+function expiry30(base?:string|null){const now=Date.now();const current=base?new Date(base).getTime():0;return new Date(Math.max(now,current||0)+30*24*60*60*1000).toISOString();}
+async function getAccount(username:string){const {data,error}=await supabase.from("shoir_accounts").select("*").eq("username_lc",username.trim().toLowerCase()).maybeSingle();if(error)throw error;return data;}
+async function createSession(usernameLc:string,scope:"workspace"|"renewal"="workspace",ttlMs=30*24*60*60*1000){const b=new Uint8Array(32);crypto.getRandomValues(b);const token=bytesToHex(b);const h=bytesToHex(await crypto.subtle.digest("SHA-256",new TextEncoder().encode(token)));const {error}=await supabase.from("shoir_sessions").insert({token_hash:h,username_lc:usernameLc,scope,expires_at:new Date(Date.now()+ttlMs).toISOString()});if(error)throw error;return token;}
+async function getSession(token:string,username?:string,requiredScope:"workspace"|"renewal"|"either"="workspace"){const h=bytesToHex(await crypto.subtle.digest("SHA-256",new TextEncoder().encode(token)));const {data,error}=await supabase.from("shoir_sessions").select("username_lc,expires_at,scope").eq("token_hash",h).maybeSingle();if(error||!data||isExpired(data.expires_at))throw new Error("Unauthorized session.");if(username&&data.username_lc!==username.trim().toLowerCase())throw new Error("Unauthorized session.");const scope=data.scope||"workspace";if(requiredScope!=="either"&&scope!==requiredScope)throw new Error("Session scope does not permit this action.");const row=await getAccount(data.username_lc);if(!row||row.active===false)throw new Error("Account is inactive.");if(requiredScope==="workspace"&&row.username_lc!=="sho"&&isExpired(row.subscription_expires_at))throw new Error("SUBSCRIPTION_EXPIRED");return row;}
+async function adminSession(username:string,token:string){const row=await getSession(token,username);if(row.role!=="Enterprise Admin")throw new Error("Admin authorization failed.");return row;}
+
+Deno.serve(async(req)=>{
+ if(req.method==="OPTIONS")return response({ok:true});
+ try{
+  const body=await req.json(); const action=String(body.action||"");
+
+  if(action==="account_exists"){const row=await getAccount(String(body.username||""));return response({exists:!!row,username:row?.username||null});}
+
+  if(action==="register_request"){
+   const username=String(body.username||"").trim(), password=String(body.password||""), email=String(body.email||"").trim(), tier=String(body.tier||"Starter Tier ($29)");
+   if(!username||!password||!email)return response({error:"Missing registration fields."},400);
+   if(await getAccount(username))return response({error:"An account already exists for this username."},409);
+   const passwordHash=await hashPassword(password);
+   const cred=await supabase.from("shoir_pending_credentials").upsert({username_lc:username.toLowerCase(),username,password_hash:passwordHash,email,updated_at:new Date().toISOString()},{onConflict:"username_lc"});
+   if(cred.error)throw cred.error;
+   const pending=await supabase.from("shoir_subscription_requests").insert({username,username_lc:username.toLowerCase(),email,tier,request_type:"New",payment_method:body.payment_method||"",transaction_id:body.transaction_id||null,screenshot_path:body.screenshot_path||null,status:"Pending"}).select("id").single();
+   if(pending.error)throw pending.error; return response({ok:true,request_id:pending.data.id});
+  }
+
+  if(action==="login"){
+   const username=String(body.username||"").trim(),password=String(body.password||""),row=await getAccount(username);
+   if(!row||!await verifyPassword(row.password_hash,password))return response({error:"Invalid username or password."},401);
+   if(row.username_lc!=="sho"&&isExpired(row.subscription_expires_at)){const token=await createSession(row.username_lc,"renewal",60*60*1000);return response({error:"SUBSCRIPTION_EXPIRED",token,username:row.username,tier:row.tier,email:row.email,expires_at:row.subscription_expires_at,renewal_only:true},403);}
+   const token=await createSession(row.username_lc); return response({ok:true,token,username:row.username,role:row.role,tier:row.tier,email:row.email,expires_at:row.subscription_expires_at});
+  }
+
+  if(action==="workspace_load"){await getSession(String(body.token),String(body.username));const {data,error}=await supabase.from("shoir_workspace_states").select("state_json,updated_at").eq("username_lc",String(body.username).trim().toLowerCase()).maybeSingle();if(error)throw error;return response({ok:true,state_json:data?.state_json||null,updated_at:data?.updated_at||null});}
+  if(action==="workspace_save"){await getSession(String(body.token),String(body.username));const {error}=await supabase.from("shoir_workspace_states").upsert({username_lc:String(body.username).trim().toLowerCase(),state_json:String(body.state_json||"{}"),updated_at:new Date().toISOString()},{onConflict:"username_lc"});if(error)throw error;return response({ok:true});}
+  if(action==="renew_request"){const row=await getSession(String(body.token),String(body.username),"either");const pending=await supabase.from("shoir_subscription_requests").insert({username:row.username,username_lc:row.username_lc,email:row.email,tier:body.tier||row.tier,request_type:"Renewal",payment_method:body.payment_method||"",transaction_id:body.transaction_id||null,screenshot_path:body.screenshot_path||null,status:"Pending"}).select("id").single();if(pending.error)throw pending.error;return response({ok:true,request_id:pending.data.id});}
+  if(action==="admin_list_requests_session"){await adminSession(String(body.username),String(body.token));const {data,error}=await supabase.from("shoir_subscription_requests").select("*").eq("status","Pending").order("requested_at",{ascending:true});if(error)throw error;return response({ok:true,requests:data||[]});}
+
+  if(action==="admin_approve_session"||action==="admin_approve_latest_session"||action==="admin_approve_target_session"){
+   await adminSession(String(body.username),String(body.token));
+   let query=supabase.from("shoir_subscription_requests").select("*").eq("status","Pending");
+   if(action==="admin_approve_session") query=query.eq("id",Number(body.request_id));
+   else if(action==="admin_approve_target_session") query=query.eq("username_lc",String(body.target_username||"").trim().toLowerCase()).eq("request_type",String(body.request_type||"New"));
+   query=query.order("requested_at",{ascending:false}).limit(1);
+   const {data,error}=await query; if(error)throw error; const request=data?.[0]; if(!request)return response({error:"Request not found."},404);
+   const existing=await getAccount(request.username); const {data:pendingCred}=await supabase.from("shoir_pending_credentials").select("*").eq("username_lc",request.username_lc).maybeSingle();
+   const now=new Date().toISOString(); const expiry=request.request_type==="Renewal"&&existing?expiry30(existing.subscription_expires_at):expiry30(); const passwordHash=existing?.password_hash||pendingCred?.password_hash;
+   if(!passwordHash)return response({error:"Pending registration credentials are missing."},500);
+   const payload={username:request.username,username_lc:request.username_lc,password_hash:passwordHash,role:existing?.role||"User",tier:request.tier||existing?.tier||"Starter Tier ($29)",email:request.email||existing?.email||"",created_at:existing?.created_at||now,subscription_expires_at:expiry,linkedin:existing?.linkedin||null,github:existing?.github||null,about_me:existing?.about_me||null,affiliate_code:existing?.affiliate_code||null,active:true,updated_at:now};
+   const {error:accountErr}=await supabase.from("shoir_accounts").upsert(payload,{onConflict:"username"});if(accountErr)throw accountErr;
+   await supabase.from("shoir_subscription_requests").update({status:"Approved",approved_at:now,updated_at:now}).eq("id",request.id);
+   return response({ok:true,username:request.username,expires_at:expiry,tier:payload.tier,email:payload.email,request_id:request.id});
+  }
+
+  if(action==="admin_decline_session"){await adminSession(String(body.username),String(body.token));const id=Number(body.request_id);const {error}=await supabase.from("shoir_subscription_requests").update({status:"Declined",updated_at:new Date().toISOString()}).eq("id",id);if(error)throw error;return response({ok:true});}
+
+  return response({error:"Unknown action."},400);
+ }catch(err){return response({error:String(err?.message||err)},500);}
+});
