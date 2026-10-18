@@ -1841,7 +1841,12 @@ def security_access_check(username: str, action: str, workspace: str = "default"
         authenticated = bool(state.get("authenticated"))
         # user_role is the account role written by the authoritative login flow.
         # Do not let a secondary/stale role field override it.
-        role = str(state.get("user_role") or state.get("current_role") or state.get("role") or "").strip()
+        role_value = (
+            state.get("user_role")
+            if "user_role" in state
+            else (state.get("current_role") or state.get("role") or "")
+        )
+        role = str(role_value or "").strip()
         mfa_verified = bool(
             state.get("mfa_verified")
             or state.get("auth_mfa_verified")
@@ -1964,7 +1969,7 @@ def security_maturity_status(username: str, workspace: str = "default") -> pd.Da
         if not bool(policy.get("require_mfa")):
             mfa_state = "Not configured"
         elif authenticated and mfa_verified:
-            mfa_state = "Session verified"
+            mfa_state = "Session flag set"
         else:
             mfa_state = "Required / unverified"
 
