@@ -112,7 +112,7 @@ def main() -> int:
                                 "body_length": len(frame_body),
                                 "body_preview": " ".join(frame_body.split())[:300],
                             })
-                        body = "\\n".join(rendered_bodies)
+                        body = "\n".join(rendered_bodies)
                         folded_body = body.casefold()
                         item["frames"] = frame_records
                         item["rendered_text_length"] = len(body)
