@@ -146,9 +146,12 @@ def calculate_line_metrics(events: pd.DataFrame) -> pd.DataFrame:
         grouped["ConstraintSignal"] = "Not assessed — OEE unavailable"
     else:
         grouped["ConstraintSignal"] = grouped["OEEPct"].map(
-            lambda value: "Candidate — lowest OEE; review flow data"
-            if _finite_number(value) and math.isclose(float(value), lowest_oee, rel_tol=1e-9, abs_tol=1e-9)
-            else "No lowest-OEE signal"
+            lambda value: "Not assessed — OEE unavailable" if not _finite_number(value)
+            else (
+                "Candidate — lowest OEE; review flow data"
+                if math.isclose(float(value), lowest_oee, rel_tol=1e-9, abs_tol=1e-9)
+                else "No lowest-OEE signal"
+            )
         )
     grouped.index.name = "Line"
     return grouped.reset_index().drop(columns=["IdealSeconds"])
