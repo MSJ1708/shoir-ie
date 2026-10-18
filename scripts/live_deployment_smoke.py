@@ -168,6 +168,9 @@ def main() -> int:
                                     "extra_markers": [
                                         re.compile(r"Venture Studio", re.I),
                                         re.compile(r"Why industrial teams are moving this way", re.I),
+                                        re.compile(r"ShadowShift", re.I),
+                                        re.compile(r"Enterprise Plus", re.I),
+                                        re.compile(r"Research Pack", re.I),
                                     ],
                                 },
                             ]
@@ -191,6 +194,13 @@ def main() -> int:
                                     for extra_marker in scenario["extra_markers"]:
                                         if app_frame.get_by_text(extra_marker).count() == 0:
                                             check["missing_extra_markers"].append(extra_marker.pattern)
+                                    if check_name == "public-module-explorer-tab":
+                                        plus_card_count = app_frame.locator("div.value-strip").filter(
+                                            has_text=re.compile(r"Enterprise Plus", re.I)
+                                        ).count()
+                                        check["enterprise_plus_plan_card_count"] = plus_card_count
+                                        if plus_card_count < 1:
+                                            check["missing_extra_markers"].append("Enterprise Plus plan comparison card")
                                     if check["missing_fields"] or check["missing_extra_markers"]:
                                         raise AssertionError(
                                             "Missing fields/markers: "
