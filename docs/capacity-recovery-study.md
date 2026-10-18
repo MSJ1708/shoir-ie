@@ -35,6 +35,8 @@ For each line, values are aggregated from its validated rows:
 
 Performance is not silently capped at 100%. A result above 100% is a diagnostic that may indicate cycle-time unit errors, product-mix issues, or inaccurate source data. When total output is zero, quality and OEE are shown as unavailable rather than fabricated as zero.
 
+The table includes a **candidate constraint signal** for the line with the lowest available OEE. This is a screening hint, not proof of a flow bottleneck. Confirming a true bottleneck requires comparable product/routing context and flow evidence such as throughput, queues/WIP, precedence, and resource constraints. Validation warnings are surfaced in the results view instead of being hidden only in the evidence expander.
+
 ## Downtime-recovery scenario
 
 The user selects a downtime-reduction fraction from 0% to 100%. The calculation estimates additional good units using recovered downtime and the observed row-level performance and quality rates. The output is labeled **Simulated** and includes the assumption used.
