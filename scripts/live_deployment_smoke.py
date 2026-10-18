@@ -89,8 +89,34 @@ def main() -> int:
                         # Streamlit renders its app after the initial HTML response.
                         page.wait_for_timeout(8_000)
                         item["page_title"] = page.title()
-                        body = page.locator("body").inner_text(timeout=15_000)
+                        # Streamlit-hosted applications may render their
+                        # app surface in a child frame. Inspect every accessible
+                        # frame rather than only the outer hosting document.
+                        frame_records = []
+                        rendered_bodies = []
+                        for frame in page.frames:
+                            try:
+                                frame_body = frame.locator("body").inner_text(timeout=5_000)
+                            except Exception as frame_error:
+                                frame_records.append({
+                                    "url": frame.url,
+                                    "body_length": 0,
+                                    "body_preview": "",
+                                    "read_error": type(frame_error).__name__,
+                                })
+                                continue
+                            if frame_body:
+                                rendered_bodies.append(frame_body)
+                            frame_records.append({
+                                "url": frame.url,
+                                "body_length": len(frame_body),
+                                "body_preview": " ".join(frame_body.split())[:300],
+                            })
+                        body = "\\n".join(rendered_bodies)
                         folded_body = body.casefold()
+                        item["frames"] = frame_records
+                        item["rendered_text_length"] = len(body)
+                        item["rendered_text_preview"] = " ".join(body.split())[:500]
                         item["app_marker_found"] = any(
                             marker.casefold() in folded_body for marker in APP_MARKERS
                         )
