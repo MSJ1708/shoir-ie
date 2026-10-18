@@ -885,12 +885,22 @@ def save_workbook(workbook:Mapping[str,pd.DataFrame],formulas:Mapping[str,Mappin
     semantic_json=json.dumps(dict(semantic_map or {}),default=str,sort_keys=True)
     variables_json=json.dumps(dict(variables),default=str,sort_keys=True)
     with sqlite3.connect(path,timeout=30) as conn:
+        # Workbook IDs are global primary keys; do not let a stale/session-supplied
+        # ID transfer an existing workbook across owners or workspaces.
+        existing_identity=conn.execute(
+            "SELECT owner,workspace FROM industrial_workbooks WHERE workbook_id=?",
+            (wid,),
+        ).fetchone()
+        if existing_identity and (
+            str(existing_identity[0]) != owner or str(existing_identity[1]) != workspace
+        ):
+            raise PermissionError("Workbook ID belongs to a different owner or workspace.")
         existing=conn.execute(
             "SELECT sha256,formulas_json,semantic_map_json,COALESCE(variables_json,'{}') "
-            "FROM industrial_workbooks WHERE workbook_id=? AND workspace=?",
-            (wid,workspace),
+            "FROM industrial_workbooks WHERE workbook_id=? AND workspace=? AND owner=?",
+            (wid,workspace,owner),
         ).fetchone()
-        conn.execute(
+        write_cursor=conn.execute(
             """INSERT INTO industrial_workbooks(
                 workbook_id,workspace,owner,name,payload_b64,formulas_json,semantic_map_json,
                 variables_json,sha256,created_at,updated_at
@@ -899,12 +909,16 @@ def save_workbook(workbook:Mapping[str,pd.DataFrame],formulas:Mapping[str,Mappin
                 workspace=excluded.workspace,owner=excluded.owner,name=excluded.name,
                 payload_b64=excluded.payload_b64,formulas_json=excluded.formulas_json,
                 semantic_map_json=excluded.semantic_map_json,variables_json=excluded.variables_json,
-                sha256=excluded.sha256,updated_at=excluded.updated_at""",
+                sha256=excluded.sha256,updated_at=excluded.updated_at
+            WHERE industrial_workbooks.workspace=excluded.workspace
+              AND industrial_workbooks.owner=excluded.owner""",
             (
                 wid,workspace,owner,str(name)[:160],base64.b64encode(payload).decode("ascii"),
                 formula_json,semantic_json,variables_json,digest,now,now,
             ),
         )
+        if write_cursor.rowcount == 0:
+            raise PermissionError("Workbook ID belongs to a different owner or workspace.")
         conn.execute(
             "INSERT INTO industrial_workbook_audit(workbook_id,workspace,owner,action,details,created_at) VALUES(?,?,?,?,?,?)",
             (wid,workspace,owner,"save",
@@ -952,17 +966,17 @@ def list_workbook_versions(workbook_id:str|None=None,path:str=DB_PATH)->pd.DataF
                 """SELECT version_id AS ID,version_no AS Version,COALESCE(label,'Autosave') AS Label,
                           created_at AS Created,sha256 AS SHA256,owner AS Owner
                    FROM industrial_workbook_versions
-                   WHERE workbook_id=? AND workspace=?
+                   WHERE workbook_id=? AND workspace=? AND owner=?
                    ORDER BY version_no DESC""",
-                conn,params=(workbook_id,_workspace())
+                conn,params=(workbook_id,_workspace(),_actor())
             )
         return pd.read_sql(
             """SELECT version_id AS ID,workbook_id AS Workbook,version_no AS Version,
                       COALESCE(label,'Autosave') AS Label,created_at AS Created,sha256 AS SHA256,owner AS Owner
                FROM industrial_workbook_versions
-               WHERE workspace=?
+               WHERE workspace=? AND owner=?
                ORDER BY created_at DESC,version_no DESC""",
-            conn,params=(_workspace(),)
+            conn,params=(_workspace(),_actor())
         )
 
 def load_workbook_version(
@@ -982,8 +996,8 @@ def load_workbook_version(
             row=conn.execute(
                 """SELECT payload_b64,formulas_json,semantic_map_json,COALESCE(variables_json,'{}')
                    FROM industrial_workbook_versions
-                   WHERE version_id=?""",
-                (int(workbook_id_or_version_id),)
+                   WHERE version_id=? AND workspace=? AND owner=?""",
+                (int(workbook_id_or_version_id),_workspace(),_actor())
             ).fetchone()
             if not row:
                 raise KeyError("Workbook version not found in the current workspace.")
@@ -996,8 +1010,8 @@ def load_workbook_version(
         row=conn.execute(
             """SELECT payload_b64,formulas_json,semantic_map_json
                FROM industrial_workbook_versions
-               WHERE workbook_id=? AND workspace=? AND version_no=?""",
-            (workbook_id_or_version_id,_workspace(),int(version_no))
+               WHERE workbook_id=? AND workspace=? AND owner=? AND version_no=?""",
+            (workbook_id_or_version_id,_workspace(),_actor(),int(version_no))
         ).fetchone()
     if not row:
         raise KeyError("Workbook version not found in the current workspace.")
@@ -1008,8 +1022,8 @@ def load_workbook_version_variables(workbook_id:str,version_no:int,path:str=DB_P
     with sqlite3.connect(path,timeout=30) as conn:
         row=conn.execute(
             """SELECT COALESCE(variables_json,'{}') FROM industrial_workbook_versions
-               WHERE workbook_id=? AND workspace=? AND version_no=?""",
-            (workbook_id,_workspace(),int(version_no))
+               WHERE workbook_id=? AND workspace=? AND owner=? AND version_no=?""",
+            (workbook_id,_workspace(),_actor(),int(version_no))
         ).fetchone()
     if not row: raise KeyError("Workbook version not found in the current workspace.")
     return json.loads(row[0] or "{}")
@@ -1018,6 +1032,12 @@ def save_workbook_comment(workbook_id:str,sheet_name:str,cell_ref:str,comment:st
     if not str(comment).strip(): raise ValueError("Comment text is required.")
     ensure_workbook_db(path)
     with sqlite3.connect(path,timeout=30) as conn:
+        workbook_exists=conn.execute(
+            "SELECT 1 FROM industrial_workbooks WHERE workbook_id=? AND workspace=? AND owner=?",
+            (workbook_id,_workspace(),_actor()),
+        ).fetchone()
+        if not workbook_exists:
+            raise KeyError("Workbook not found for the current owner and workspace.")
         cur=conn.execute(
             "INSERT INTO industrial_workbook_comments(workbook_id,workspace,owner,sheet_name,cell_ref,comment,created_at) VALUES(?,?,?,?,?,?,?)",
             (workbook_id,_workspace(),_actor(),str(sheet_name)[:160],str(cell_ref).upper()[:20],str(comment).strip()[:2000],_now())
@@ -1030,16 +1050,16 @@ def list_workbook_comments(workbook_id:str,path:str=DB_PATH)->pd.DataFrame:
     with sqlite3.connect(path,timeout=30) as conn:
         return pd.read_sql(
             "SELECT comment_id AS ID,sheet_name AS Sheet,cell_ref AS Cell,comment AS Comment,owner AS Author,created_at AS Created "
-            "FROM industrial_workbook_comments WHERE workbook_id=? AND workspace=? ORDER BY comment_id DESC",
-            conn,params=(workbook_id,_workspace())
+            "FROM industrial_workbook_comments WHERE workbook_id=? AND workspace=? AND owner=? ORDER BY comment_id DESC",
+            conn,params=(workbook_id,_workspace(),_actor())
         )
 
 def load_workbook(workbook_id:str,path:str=DB_PATH)->tuple[dict[str,pd.DataFrame],dict[str,dict[str,str]],dict[str,Any]]:
     ensure_workbook_db(path)
     with sqlite3.connect(path,timeout=30) as conn:
         row=conn.execute(
-            "SELECT payload_b64,formulas_json,semantic_map_json FROM industrial_workbooks WHERE workbook_id=? AND workspace=?",
-            (workbook_id,_workspace())).fetchone()
+            "SELECT payload_b64,formulas_json,semantic_map_json FROM industrial_workbooks WHERE workbook_id=? AND workspace=? AND owner=?",
+            (workbook_id,_workspace(),_actor())).fetchone()
     if not row: raise KeyError("Workbook not found in the current workspace.")
     return _deserialize_workbook(base64.b64decode(row[0])),json.loads(row[1] or "{}"),json.loads(row[2] or "{}")
 
@@ -1048,16 +1068,16 @@ def list_saved_workbooks(path:str=DB_PATH)->pd.DataFrame:
     with sqlite3.connect(path,timeout=30) as conn:
         return pd.read_sql(
             "SELECT workbook_id AS ID,name AS Name,owner AS Owner,updated_at AS Updated,sha256 AS SHA256 "
-            "FROM industrial_workbooks WHERE workspace=? ORDER BY updated_at DESC",
-            conn,params=(_workspace(),)
+            "FROM industrial_workbooks WHERE workspace=? AND owner=? ORDER BY updated_at DESC",
+            conn,params=(_workspace(),_actor())
         )
 
 def load_workbook_variables(workbook_id:str,path:str=DB_PATH)->dict[str,Any]:
     ensure_workbook_db(path)
     with sqlite3.connect(path,timeout=30) as conn:
         row=conn.execute(
-            "SELECT COALESCE(variables_json,'{}') FROM industrial_workbooks WHERE workbook_id=? AND workspace=?",
-            (workbook_id,_workspace())).fetchone()
+            "SELECT COALESCE(variables_json,'{}') FROM industrial_workbooks WHERE workbook_id=? AND workspace=? AND owner=?",
+            (workbook_id,_workspace(),_actor())).fetchone()
     if not row: raise KeyError("Workbook not found in the current workspace.")
     return json.loads(row[0] or "{}")
 
@@ -1074,8 +1094,8 @@ def list_templates(path:str=DB_PATH)->pd.DataFrame:
     built=[{"ID":"builtin:"+_slug(n),"Name":n,"Category":d["category"],"Description":d["description"],"Source":"Shoir-IE built-in"} for n,d in _starter_templates().items()]
     with sqlite3.connect(path,timeout=30) as conn:
         try:
-            custom=pd.read_sql("SELECT template_id AS ID,name AS Name,category AS Category,description AS Description,'Workspace library' AS Source FROM industrial_workbook_templates WHERE workspace=? ORDER BY updated_at DESC",
-                               conn,params=(_workspace(),))
+            custom=pd.read_sql("SELECT template_id AS ID,name AS Name,category AS Category,description AS Description,'Workspace library' AS Source FROM industrial_workbook_templates WHERE workspace=? AND owner=? ORDER BY updated_at DESC",
+                               conn,params=(_workspace(),_actor()))
         except Exception: custom=pd.DataFrame()
     frames=[pd.DataFrame(built)]; 
     if not custom.empty: frames.append(custom)
@@ -1089,7 +1109,7 @@ def load_template(template_id:str,path:str=DB_PATH)->tuple[str,dict[str,pd.DataF
         raise KeyError("Built-in template not found.")
     ensure_workbook_db(path)
     with sqlite3.connect(path,timeout=30) as conn:
-        row=conn.execute("SELECT name,payload_b64 FROM industrial_workbook_templates WHERE template_id=? AND workspace=?",(template_id,_workspace())).fetchone()
+        row=conn.execute("SELECT name,payload_b64 FROM industrial_workbook_templates WHERE template_id=? AND workspace=? AND owner=?",(template_id,_workspace(),_actor())).fetchone()
     if not row: raise KeyError("Template not found.")
     return str(row[0]),_deserialize_workbook(base64.b64decode(row[1]))
 
@@ -1103,8 +1123,8 @@ def save_query_pipeline(name:str,source_sheet:str,steps:Sequence[Mapping[str,Any
 def list_query_pipelines(path:str=DB_PATH)->pd.DataFrame:
     ensure_workbook_db(path)
     with sqlite3.connect(path,timeout=30) as conn:
-        return pd.read_sql("SELECT pipeline_id AS ID,name AS Name,source_sheet AS Source,updated_at AS Updated FROM industrial_workbook_queries WHERE workspace=? ORDER BY updated_at DESC",
-                           conn,params=(_workspace(),))
+        return pd.read_sql("SELECT pipeline_id AS ID,name AS Name,source_sheet AS Source,updated_at AS Updated FROM industrial_workbook_queries WHERE workspace=? AND owner=? ORDER BY updated_at DESC",
+                           conn,params=(_workspace(),_actor()))
 
 def stream_profile_csv(raw: bytes, chunksize: int = 50_000) -> dict[str, Any]:
     """Profile a CSV in chunks without materializing the whole table."""
