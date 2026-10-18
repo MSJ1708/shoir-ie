@@ -140,6 +140,16 @@ def calculate_line_metrics(events: pd.DataFrame) -> pd.DataFrame:
         lambda value: "Not available" if not _finite_number(value)
         else ("Diagnostic: above 100%" if value > 100.0 else "Calculated")
     )
+    finite_oee = grouped.loc[grouped["OEEPct"].map(_finite_number), "OEEPct"]
+    lowest_oee = float(finite_oee.min()) if not finite_oee.empty else None
+    if lowest_oee is None:
+        grouped["ConstraintSignal"] = "Not assessed — OEE unavailable"
+    else:
+        grouped["ConstraintSignal"] = grouped["OEEPct"].map(
+            lambda value: "Candidate — lowest OEE; review flow data"
+            if _finite_number(value) and math.isclose(float(value), lowest_oee, rel_tol=1e-9, abs_tol=1e-9)
+            else "No lowest-OEE signal"
+        )
     grouped.index.name = "Line"
     return grouped.reset_index().drop(columns=["IdealSeconds"])
 
