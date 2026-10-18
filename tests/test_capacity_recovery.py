@@ -1,4 +1,5 @@
 """Regression coverage for validated production bottleneck and capacity recovery."""
+import io
 import math
 
 import pandas as pd
@@ -13,6 +14,7 @@ from shoir_capacity_recovery import (
     load_capacity_study,
     map_imported_station_data,
     record_capacity_outcome,
+    read_station_upload,
     save_capacity_study,
     starter_station_table,
 )
@@ -126,6 +128,45 @@ def test_deterministic_hash_is_stable_and_changes_when_inputs_change():
     assert len(first["input_sha256"]) == 64
     assert first["input_sha256"] == second["input_sha256"]
     assert first["input_sha256"] != third["input_sha256"]
+
+
+def test_bounded_csv_import_returns_normalized_headers():
+    csv = (
+        "Station,Cycle Time (sec/unit),Available Time (min/shift),Availability (%),Parallel Resources\\n"
+        "Line A,42,400,95,1\\n"
+    ).encode("utf-8")
+    frame = read_station_upload(csv, "stations.CSV")
+    assert frame.shape == (1, 5)
+    assert frame.iloc[0]["Station"] == "Line A"
+
+
+def test_bounded_xlsx_import_uses_first_worksheet():
+    output = io.BytesIO()
+    pd.DataFrame({"Station": ["Line A"], "Cycle Time": [42]}).to_excel(output, index=False)
+    frame = read_station_upload(output.getvalue(), "stations.xlsx")
+    assert frame.shape == (1, 2)
+    assert frame.iloc[0]["Station"] == "Line A"
+
+
+def test_upload_contract_rejects_oversized_unsupported_empty_and_duplicate_header_files():
+    with pytest.raises(ValueError, match="limited to 10 MiB"):
+        read_station_upload(b"x" * (10 * 1024 * 1024 + 1), "large.csv")
+    with pytest.raises(ValueError, match="Only CSV and XLSX"):
+        read_station_upload(b"some data", "stations.xlsm")
+    with pytest.raises(ValueError, match="empty"):
+        read_station_upload(b"", "empty.csv")
+    duplicate = b"Station, Station ,Cycle\\nA,B,10\\n"
+    with pytest.raises(ValueError, match="duplicate column names"):
+        read_station_upload(duplicate, "duplicate.csv")
+
+
+def test_upload_contract_rejects_excessive_rows_and_columns():
+    too_many_rows = ("Station\\n" + "".join(f"Line {i}\\n" for i in range(1001))).encode("utf-8")
+    with pytest.raises(ValueError, match="1,000 station rows"):
+        read_station_upload(too_many_rows, "rows.csv")
+    columns = ",".join(f"C{i}" for i in range(101)) + "\\n" + ",".join("1" for _ in range(101)) + "\\n"
+    with pytest.raises(ValueError, match="100 columns"):
+        read_station_upload(columns.encode("utf-8"), "columns.csv")
 
 
 def test_import_mapping_initializes_scenario_as_baseline_and_checks_mapping():
