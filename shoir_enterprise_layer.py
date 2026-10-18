@@ -1841,12 +1841,10 @@ def security_access_check(username: str, action: str, workspace: str = "default"
         authenticated = bool(state.get("authenticated"))
         # user_role is the account role written by the authoritative login flow.
         # Do not let a secondary/stale role field override it.
-        role_value = (
-            state.get("user_role")
-            if "user_role" in state
-            else (state.get("current_role") or state.get("role") or "")
-        )
-        role = str(role_value or "").strip()
+        # The login flow writes the canonical account role to user_role.
+        # Legacy/secondary role fields are not authoritative and cannot be
+        # used to grant privileges when the canonical value is missing.
+        role = str(state.get("user_role") or "").strip()
         mfa_verified = bool(
             state.get("mfa_verified")
             or state.get("auth_mfa_verified")
@@ -1939,9 +1937,7 @@ def security_maturity_status(username: str, workspace: str = "default") -> pd.Da
         state = st.session_state
         session_user = str(state.get("current_user") or "").strip()
         authenticated = bool(state.get("authenticated")) and bool(session_user)
-        role_present = bool(
-            state.get("user_role") or state.get("current_role") or state.get("role")
-        )
+        role_present = bool(state.get("user_role"))
         mfa_verified = bool(
             state.get("mfa_verified")
             or state.get("auth_mfa_verified")
