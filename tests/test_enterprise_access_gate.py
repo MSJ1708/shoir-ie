@@ -59,6 +59,44 @@ def test_access_gate_requires_authenticated_session_and_real_role(monkeypatch):
     assert any("account role" in reason for reason in decision["reasons"])
 
 
+def test_missing_canonical_role_cannot_fall_back_to_legacy_owner_or_admin(monkeypatch):
+    state = {
+        "current_user": "alice",
+        "authenticated": True,
+        "current_role": "Owner",
+        "role": "admin",
+    }
+    monkeypatch.setattr(st, "session_state", state)
+    monkeypatch.setattr(
+        ent,
+        "security_policy",
+        lambda _username, _workspace: {"require_mfa": False},
+    )
+    decision = ent.security_access_check("alice", "approve")
+    assert not decision["allowed"]
+    assert decision["role"] == ""
+    assert any("account role" in reason for reason in decision["reasons"])
+
+
+def test_security_maturity_does_not_use_legacy_role_without_canonical_role(monkeypatch):
+    import durable_account_store as durable
+
+    monkeypatch.setattr(
+        st,
+        "session_state",
+        {"current_user": "alice", "authenticated": True, "current_role": "Owner", "role": "Admin"},
+    )
+    monkeypatch.setattr(
+        ent,
+        "security_policy",
+        lambda _username, _workspace: {"require_mfa": False, "oidc_enabled": False},
+    )
+    monkeypatch.setattr(ent, "postgres_backend_configured", lambda: False)
+    monkeypatch.setattr(durable, "durable_backend_configured", lambda: False)
+    statuses = ent.security_maturity_status("alice").set_index("Control")["State"].to_dict()
+    assert statuses["RBAC"] == "Not verified"
+
+
 def test_read_only_role_cannot_write_or_execute(monkeypatch):
     _session(monkeypatch, role="Viewer")
     assert ent.security_access_check("alice", "read")["allowed"]
