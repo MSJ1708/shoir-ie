@@ -8,7 +8,7 @@ This study is a first connected production workflow in Shoir-IE. It validates pr
 
 The module is listed under **Production** in Explore Modules and is available from the **Mid-Tier Pro** tier onward.
 
-CSV import is optional. The module starts with clearly labeled synthetic demonstration data, and the user can edit the table directly. Imported CSVs must contain these columns:
+CSV import is optional. The module starts with clearly labeled synthetic demonstration data, and the user can edit the table directly. CSV uploads are limited to 10 MiB, 100,000 rows, and 100 columns; oversized files are rejected without replacing the current study. Imported CSVs must contain these columns:
 
 | Column | Meaning | Unit / rule |
 |---|---|---|
@@ -39,13 +39,13 @@ The table includes a **candidate constraint signal** for the line with the lowes
 
 ## Downtime-recovery scenario
 
-The user selects a downtime-reduction fraction from 0% to 100%. The calculation estimates additional good units using recovered downtime and the observed row-level performance and quality rates. The output is labeled **Simulated** and includes the assumption used.
+The user selects a downtime-reduction fraction from 0% to 100%. The calculation estimates additional good units using recovered downtime and the observed row-level performance and quality rates. The output is labeled **Simulated** and the exact fraction is recorded in the evidence manifest and result hash. If the user changes the fraction after running a study, the displayed results are invalidated and the study must be run again.
 
 This is a what-if calculation, not a forecast, guarantee, or proof that the assumed downtime reduction is feasible. Actual outcomes depend on causes of downtime, staffing, material availability, product mix, setup constraints, demand, and other factors not represented by the calculation.
 
 ## Evidence and export
 
-The Excel export contains baseline metrics, the simulated recovery scenario, a compact evidence manifest, and the assumptions. The manifest records the formula version, source name/type, input SHA-256, result SHA-256, row/line counts, and result classifications.
+The Excel export contains baseline metrics, the simulated recovery scenario, a compact evidence manifest (including the exact scenario fraction), and the assumptions. The manifest records the formula version, source name/type, input SHA-256, result SHA-256, row/line counts, and result classifications. Untrusted imported strings are written as text rather than executable spreadsheet formulas or automatic hyperlinks.
 
 Hashes support integrity checks and reproducibility comparisons. They do **not** establish that the source data is accurate, that a result has been independently verified, or that a simulated benefit was realized. No customer data is persisted by this calculation service.
 

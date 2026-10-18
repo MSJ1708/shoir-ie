@@ -17,6 +17,9 @@ import pandas as pd
 FORMULA_VERSION = "capacity-recovery/1.0.0"
 REQUIRED_COLUMNS = ("Line", "PlannedMin", "DowntimeMin", "IdealCycleSec", "TotalCount", "GoodCount")
 NUMERIC_COLUMNS = REQUIRED_COLUMNS[1:]
+MAX_CSV_UPLOAD_BYTES = 10 * 1024 * 1024
+MAX_CSV_ROWS = 100_000
+MAX_CSV_COLUMNS = 100
 
 
 def _finite_number(value: Any) -> bool:
@@ -215,25 +218,38 @@ def build_evidence_manifest(
     *,
     source_name: str = "user-provided production data",
     source_type: str = "unspecified",
+    downtime_reduction_fraction: float | None = None,
 ) -> dict[str, Any]:
-    """Link input/output hashes and assumptions; hashes do not verify source truth."""
+    """Link inputs, scenario parameters and outputs; hashes do not verify source truth."""
     frame, report = validate_production_events(events)
     if not report["valid"]:
         raise ValueError("Cannot create evidence for invalid data: " + " ".join(report["errors"]))
+    scenario_fraction: float | None = None
+    if downtime_reduction_fraction is not None:
+        if not _finite_number(downtime_reduction_fraction):
+            raise ValueError("Downtime reduction fraction must be a finite number from 0 to 1.")
+        scenario_fraction = float(downtime_reduction_fraction)
+        if not 0.0 <= scenario_fraction <= 1.0:
+            raise ValueError("Downtime reduction fraction must be between 0 and 1.")
+    elif recovery_scenario is not None:
+        raise ValueError("A downtime reduction fraction is required to record a recovery scenario.")
     input_payload = json.dumps(_canonical_records(frame), sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     metrics_payload = line_metrics.to_json(orient="records", double_precision=15, force_ascii=False)
     scenario_payload = recovery_scenario.to_json(orient="records", double_precision=15, force_ascii=False) if recovery_scenario is not None else "null"
+    scenario_parameters = ({"downtime_reduction_fraction": scenario_fraction} if recovery_scenario is not None else None)
+    scenario_parameters_payload = json.dumps(scenario_parameters, sort_keys=True, separators=(",", ":"))
     return {
         "manifest_version": "1.0",
         "formula_version": FORMULA_VERSION,
         "source_name": str(source_name)[:240],
         "source_type": str(source_type)[:80],
         "input_sha256": hashlib.sha256(input_payload.encode("utf-8")).hexdigest(),
-        "result_sha256": hashlib.sha256((metrics_payload + "|" + scenario_payload).encode("utf-8")).hexdigest(),
+        "result_sha256": hashlib.sha256((metrics_payload + "|" + scenario_payload + "|" + scenario_parameters_payload).encode("utf-8")).hexdigest(),
         "row_count": int(len(frame)),
         "line_count": int(frame["Line"].nunique()),
         "result_classification": "Calculated",
         "scenario_classification": "Simulated" if recovery_scenario is not None else None,
+        "scenario_parameters": scenario_parameters,
         "validation": {"valid": report["valid"], "warnings": report["warnings"]},
         "assumptions": [
             "Each row represents a consistent line and reporting interval.",
@@ -261,9 +277,42 @@ def analyze_capacity_recovery(
     scenario = estimate_downtime_recovery(normalized, downtime_reduction_fraction)
     evidence = build_evidence_manifest(
         normalized, metrics, scenario, source_name=source_name, source_type=source_type,
+        downtime_reduction_fraction=downtime_reduction_fraction,
     )
     return {"validation": validation, "line_metrics": metrics,
             "recovery_scenario": scenario, "evidence": evidence}
+
+
+def build_capacity_recovery_excel(
+    line_metrics: pd.DataFrame,
+    recovery_scenario: pd.DataFrame,
+    evidence: dict[str, Any],
+) -> bytes:
+    """Build an Excel report while keeping untrusted imported strings as text."""
+    import io
+
+    buffer = io.BytesIO()
+    # Prevent CSV-supplied labels from being interpreted as formulas or URLs by Excel.
+    with pd.ExcelWriter(
+        buffer,
+        engine="xlsxwriter",
+        engine_kwargs={"options": {"strings_to_formulas": False, "strings_to_urls": False}},
+    ) as writer:
+        line_metrics.to_excel(writer, sheet_name="Baseline Metrics", index=False)
+        recovery_scenario.to_excel(writer, sheet_name="Recovery Scenario", index=False)
+        pd.DataFrame([{
+            "Formula version": evidence["formula_version"],
+            "Source name": evidence["source_name"],
+            "Source type": evidence["source_type"],
+            "Input SHA-256": evidence["input_sha256"],
+            "Result SHA-256": evidence["result_sha256"],
+            "Result classification": evidence["result_classification"],
+            "Scenario classification": evidence["scenario_classification"],
+            "Downtime reduction fraction": (evidence.get("scenario_parameters") or {}).get("downtime_reduction_fraction"),
+            "Created at": evidence["created_at"],
+        }]).to_excel(writer, sheet_name="Evidence", index=False)
+        pd.DataFrame({"Assumption": evidence["assumptions"]}).to_excel(writer, sheet_name="Assumptions", index=False)
+    return buffer.getvalue()
 
 
 def render_capacity_recovery(tier: str = "Starter", username: str = "unknown") -> None:
@@ -301,9 +350,13 @@ def render_capacity_recovery(tier: str = "Starter", username: str = "unknown") -
     if uploaded is not None:
         try:
             upload_bytes = uploaded.getvalue()
+            if len(upload_bytes) > MAX_CSV_UPLOAD_BYTES:
+                raise ValueError("CSV files must be 10 MiB or smaller.")
             upload_sha = hashlib.sha256(upload_bytes).hexdigest()
             if st.session_state.get("capacity_recovery_uploaded_sha") != upload_sha:
                 imported = pd.read_csv(io.BytesIO(upload_bytes))
+                if len(imported) > MAX_CSV_ROWS or len(imported.columns) > MAX_CSV_COLUMNS:
+                    raise ValueError(f"CSV exceeds the supported limit of {MAX_CSV_ROWS:,} rows and {MAX_CSV_COLUMNS} columns.")
                 st.session_state["capacity_recovery_events"] = imported
                 st.session_state["capacity_recovery_source_name"] = uploaded.name
                 st.session_state["capacity_recovery_source_type"] = "imported CSV"
@@ -359,8 +412,12 @@ def render_capacity_recovery(tier: str = "Starter", username: str = "unknown") -
                 result["recovery_scenario"],
                 source_name=st.session_state.get("capacity_recovery_source_name", "user-provided production data"),
                 source_type=st.session_state.get("capacity_recovery_source_type", "user-entered data"),
+                downtime_reduction_fraction=reduction_pct / 100.0,
             )
-            inputs_match = current_evidence["input_sha256"] == result["evidence"]["input_sha256"]
+            inputs_match = (
+                current_evidence["input_sha256"] == result["evidence"]["input_sha256"]
+                and current_evidence.get("scenario_parameters") == result["evidence"].get("scenario_parameters")
+            )
         if not inputs_match:
             st.session_state.pop("capacity_recovery_result", None)
             st.session_state["capacity_recovery_line_metrics"] = pd.DataFrame()
@@ -439,25 +496,11 @@ def render_capacity_recovery(tier: str = "Starter", username: str = "unknown") -
         for assumption in evidence["assumptions"]:
             st.write(f"• {assumption}")
 
-    buffer = io.BytesIO()
     try:
-        with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
-            metrics.to_excel(writer, sheet_name="Baseline Metrics", index=False)
-            scenario.to_excel(writer, sheet_name="Recovery Scenario", index=False)
-            pd.DataFrame([{
-                "Formula version": evidence["formula_version"],
-                "Source name": evidence["source_name"],
-                "Source type": evidence["source_type"],
-                "Input SHA-256": evidence["input_sha256"],
-                "Result SHA-256": evidence["result_sha256"],
-                "Result classification": evidence["result_classification"],
-                "Scenario classification": evidence["scenario_classification"],
-                "Created at": evidence["created_at"],
-            }]).to_excel(writer, sheet_name="Evidence", index=False)
-            pd.DataFrame({"Assumption": evidence["assumptions"]}).to_excel(writer, sheet_name="Assumptions", index=False)
+        export_bytes = build_capacity_recovery_excel(metrics, scenario, evidence)
         st.download_button(
             "Download capacity study (Excel)",
-            data=buffer.getvalue(),
+            data=export_bytes,
             file_name="shoir_ie_capacity_recovery_study.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True,

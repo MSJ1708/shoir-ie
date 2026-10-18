@@ -1,3 +1,4 @@
+import io
 import math
 
 import pandas as pd
@@ -6,6 +7,7 @@ import pytest
 from shoir_capacity_recovery import (
     FORMULA_VERSION,
     analyze_capacity_recovery,
+    build_capacity_recovery_excel,
     build_evidence_manifest,
     calculate_line_metrics,
     estimate_downtime_recovery,
@@ -147,7 +149,35 @@ def test_evidence_manifest_has_stable_input_hash_and_versioned_formulas():
     assert evidence["result_sha256"] == second["evidence"]["result_sha256"]
     assert evidence["result_classification"] == "Calculated"
     assert evidence["scenario_classification"] == "Simulated"
+    assert evidence["scenario_parameters"] == {"downtime_reduction_fraction": 0.25}
     assert "not independent verification" in evidence["assumptions"][-1]
+
+
+def test_scenario_parameter_is_required_for_scenario_evidence():
+    events = sample_events()
+    metrics = calculate_line_metrics(events)
+    scenario = estimate_downtime_recovery(events, 0.25)
+
+    with pytest.raises(ValueError, match="fraction is required"):
+        build_evidence_manifest(events, metrics, scenario)
+
+
+def test_excel_export_keeps_untrusted_line_labels_as_text():
+    from openpyxl import load_workbook
+
+    events = sample_events()
+    malicious_label = '=HYPERLINK("https://example.invalid","open")'
+    events.loc[0, "Line"] = malicious_label
+    result = analyze_capacity_recovery(events, downtime_reduction_fraction=0.25)
+
+    workbook_bytes = build_capacity_recovery_excel(
+        result["line_metrics"], result["recovery_scenario"], result["evidence"]
+    )
+    workbook = load_workbook(io.BytesIO(workbook_bytes), data_only=False)
+    cell = workbook["Baseline Metrics"]["A2"]
+
+    assert cell.value == malicious_label
+    assert cell.data_type != "f"
 
 
 def test_invalid_data_cannot_produce_evidence_or_scenario_results():
