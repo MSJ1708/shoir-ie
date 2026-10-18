@@ -1818,51 +1818,97 @@ def upsert_security_policy(
 
 
 def security_access_check(username: str, action: str, workspace: str = "default", require_approval: bool = False) -> dict[str, Any]:
-    """Return an explicit, non-mutating authorization decision for an operator action."""
-    policy = security_policy(username, workspace)
+    """Return a fail-closed authorization decision for the authenticated account.
+
+    Subscription tier and account role are different concepts. The application
+    stores the signed-in account role in user_role; a missing role must never
+    be promoted to Owner as a convenience fallback.
+    """
+    requested_user = str(username or "").strip()
+    requested_action = re.sub(r"[^a-z0-9]+", "_", str(action or "").strip().casefold()).strip("_")
+    workspace_id = workspace_key(requested_user, workspace)
+
+    reasons: list[str] = []
+    role = ""
+    mfa_verified = False
+    approved = False
+    authenticated = False
+    session_user = ""
+
     try:
-        import streamlit as st
-        role = str(st.session_state.get("current_role") or st.session_state.get("role") or "")
+        state = st.session_state
+        session_user = str(state.get("current_user") or "").strip()
+        authenticated = bool(state.get("authenticated"))
+        # user_role is the account role written by the authoritative login flow.
+        # Do not let a secondary/stale role field override it.
+        role = str(state.get("user_role") or state.get("current_role") or state.get("role") or "").strip()
         mfa_verified = bool(
-            st.session_state.get("mfa_verified")
-            or st.session_state.get("auth_mfa_verified")
-            or st.session_state.get("mfa_challenge_verified")
+            state.get("mfa_verified")
+            or state.get("auth_mfa_verified")
+            or state.get("mfa_challenge_verified")
         )
+        approved = bool(state.get("decision_approved") or state.get("current_action_approved"))
     except Exception:
-        role = ""
-        mfa_verified = False
-    reasons = []
-    allowed = True
-    try:
-        current_user = str(st.session_state.get("current_user") or "")
-    except Exception:
-        current_user = ""
-    if not role and current_user and current_user == str(username):
-        role = "Owner"
+        reasons.append("The authenticated session state is unavailable.")
+
+    if not authenticated:
+        reasons.append("An authenticated session is required.")
+    if not session_user:
+        reasons.append("No signed-in account identity is available.")
+    elif session_user.casefold() != requested_user.casefold():
+        reasons.append("The requested account does not match the signed-in account.")
     if not role:
-        allowed = False
-        reasons.append("No active workspace role is available.")
-    if bool(policy.get("require_mfa")) and not mfa_verified:
-        allowed = False
+        reasons.append("No active account role is available.")
+
+    # Fail closed if the workspace policy cannot be loaded. Otherwise a
+    # database outage could accidentally disable a configured MFA requirement.
+    policy: dict[str, Any] = {}
+    try:
+        policy = security_policy(requested_user, workspace)
+    except Exception:
+        reasons.append("The workspace security policy could not be loaded.")
+
+    mfa_required = bool(policy.get("require_mfa"))
+    if mfa_required and not mfa_verified:
         reasons.append("Workspace policy requires MFA verification.")
-    if require_approval and action in {"execute", "write", "approve", "connector_sync"}:
-        try:
-            approved = bool(st.session_state.get("decision_approved") or st.session_state.get("current_action_approved"))
-        except Exception:
-            approved = False
-        if not approved:
-            allowed = False
-            reasons.append("Explicit human approval is required before this action.")
+
+    admin_roles = {
+        "admin", "administrator", "enterprise admin", "system admin",
+        "super admin", "owner", "workspace owner",
+    }
+    read_only_roles = {
+        "viewer", "read only", "read-only", "readonly", "observer",
+        "auditor", "guest", "guest visitor",
+    }
+    read_actions = {"read", "view", "list", "query", "export", "report_export"}
+    write_actions = {"write", "edit", "save", "import", "execute", "run", "connector_sync"}
+    admin_actions = {
+        "approve", "manage_users", "manage_roles", "change_permissions",
+        "security_policy", "admin", "delete_user", "delete_workspace",
+        "manage_workspace_members",
+    }
+
+    normalized_role = re.sub(r"\s+", " ", role.casefold()).strip()
+    is_admin = normalized_role in admin_roles
+    if requested_action not in read_actions | write_actions | admin_actions:
+        reasons.append("The requested action is not defined by the authorization policy.")
+    elif requested_action in admin_actions and not is_admin:
+        reasons.append("This action requires a workspace administrator or owner.")
+    elif requested_action in write_actions and normalized_role in read_only_roles:
+        reasons.append("This role is read-only and cannot modify or execute workspace actions.")
+
+    if require_approval and requested_action in {"execute", "write", "approve", "connector_sync"} and not approved:
+        reasons.append("Explicit human approval is required before this action.")
+
     return {
-        "allowed": allowed,
-        "action": str(action),
+        "allowed": not reasons,
+        "action": requested_action,
         "role": role,
-        "workspace_id": workspace_key(username, workspace),
-        "mfa_required": bool(policy.get("require_mfa")),
+        "workspace_id": workspace_id,
+        "mfa_required": mfa_required,
         "mfa_verified": mfa_verified,
         "reasons": reasons,
     }
-
 
 def enforce_action_gate(
     username: str,
