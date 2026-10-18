@@ -80,6 +80,8 @@ CREATE TABLE IF NOT EXISTS shoir_value_task_baselines (
     currency TEXT NOT NULL DEFAULT 'SAR',
     source TEXT NOT NULL DEFAULT 'Reference planning benchmark',
     updated_at TEXT NOT NULL,
+    evidence_state TEXT NOT NULL DEFAULT 'Reference estimate',
+    reviewer_reference TEXT NOT NULL DEFAULT '',
     PRIMARY KEY(owner, module)
 );
 CREATE TABLE IF NOT EXISTS shoir_value_snapshots (
@@ -94,7 +96,9 @@ CREATE TABLE IF NOT EXISTS shoir_value_snapshots (
     annual_time_value REAL NOT NULL,
     currency TEXT NOT NULL,
     source TEXT NOT NULL,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    evidence_state TEXT NOT NULL DEFAULT 'Reference estimate',
+    reviewer_reference TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS shoir_value_financial_bridges (
     bridge_id TEXT PRIMARY KEY,
@@ -138,14 +142,26 @@ def ensure_value_evidence_db(db_path: str | None = None) -> None:
         with sqlite3.connect(path, timeout=30) as conn:
             conn.executescript(_SCHEMA)
             columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(shoir_value_financial_bridges)")}
-            migrations = {
-                "evidence_state": "ALTER TABLE shoir_value_financial_bridges ADD COLUMN evidence_state TEXT NOT NULL DEFAULT 'Reference estimate'",
-                "reviewer_reference": "ALTER TABLE shoir_value_financial_bridges ADD COLUMN reviewer_reference TEXT NOT NULL DEFAULT ''",
-                "bridge_sha256": "ALTER TABLE shoir_value_financial_bridges ADD COLUMN bridge_sha256 TEXT NOT NULL DEFAULT ''",
+            table_migrations = {
+                "shoir_value_task_baselines": {
+                    "evidence_state": "ALTER TABLE shoir_value_task_baselines ADD COLUMN evidence_state TEXT NOT NULL DEFAULT 'Reference estimate'",
+                    "reviewer_reference": "ALTER TABLE shoir_value_task_baselines ADD COLUMN reviewer_reference TEXT NOT NULL DEFAULT ''",
+                },
+                "shoir_value_snapshots": {
+                    "evidence_state": "ALTER TABLE shoir_value_snapshots ADD COLUMN evidence_state TEXT NOT NULL DEFAULT 'Reference estimate'",
+                    "reviewer_reference": "ALTER TABLE shoir_value_snapshots ADD COLUMN reviewer_reference TEXT NOT NULL DEFAULT ''",
+                },
+                "shoir_value_financial_bridges": {
+                    "evidence_state": "ALTER TABLE shoir_value_financial_bridges ADD COLUMN evidence_state TEXT NOT NULL DEFAULT 'Reference estimate'",
+                    "reviewer_reference": "ALTER TABLE shoir_value_financial_bridges ADD COLUMN reviewer_reference TEXT NOT NULL DEFAULT ''",
+                    "bridge_sha256": "ALTER TABLE shoir_value_financial_bridges ADD COLUMN bridge_sha256 TEXT NOT NULL DEFAULT ''",
+                },
             }
-            for column, statement in migrations.items():
-                if column not in columns:
-                    conn.execute(statement)
+            for table_name, migrations in table_migrations.items():
+                columns = {str(row[1]) for row in conn.execute(f"PRAGMA table_info({table_name})")}
+                for column, statement in migrations.items():
+                    if column not in columns:
+                        conn.execute(statement)
             conn.commit()
     except Exception as exc:
         # A locally unavailable optional evidence store must not prevent the
@@ -197,11 +213,11 @@ def _saved_baseline(owner: str, module: str) -> dict[str, Any] | None:
     try:
         with sqlite3.connect(DB_PATH, timeout=30) as conn:
             row = conn.execute(
-                "SELECT task,baseline_minutes,shoir_minutes,studies_per_year,hourly_rate,currency,source FROM shoir_value_task_baselines WHERE owner=? AND module=?",
+                "SELECT task,baseline_minutes,shoir_minutes,studies_per_year,hourly_rate,currency,source,evidence_state,reviewer_reference FROM shoir_value_task_baselines WHERE owner=? AND module=?",
                 (str(owner), str(module)),
             ).fetchone()
         if row:
-            return {"task": row[0], "baseline_minutes": row[1], "shoir_minutes": row[2], "studies_per_year": row[3], "hourly_rate": row[4], "currency": row[5], "source": row[6]}
+            return {"task": row[0], "baseline_minutes": row[1], "shoir_minutes": row[2], "studies_per_year": row[3], "hourly_rate": row[4], "currency": row[5], "source": row[6], "evidence_state": row[7], "reviewer_reference": row[8]}
     except Exception:
         pass
     return None
@@ -371,6 +387,73 @@ def save_financial_bridge_record(
     }
 
 
+def save_task_baseline(
+    owner: str,
+    module: str,
+    task: str,
+    baseline_minutes: float,
+    shoir_minutes: float,
+    studies_per_year: float,
+    hourly_rate: float,
+    *,
+    currency: str = "SAR",
+    source: str = "",
+    evidence_state: str = "Reference estimate",
+    reviewer_reference: str = "",
+    db_path: str | None = None,
+) -> dict[str, Any]:
+    """Store explicitly supplied comparable task times and their evidence label."""
+    owner_value, module_value = str(owner or "").strip(), str(module or "").strip()
+    task_value, source_value = str(task or "").strip(), str(source or "").strip()
+    reviewer_value = str(reviewer_reference or "").strip()
+    accepted_states = {"Reference estimate", "Customer measured"}
+    if not owner_value or not module_value or not task_value:
+        raise ValueError("Owner, module, and task are required to save a time baseline.")
+    if evidence_state not in accepted_states:
+        raise ValueError("Unsupported task-time evidence state.")
+    if evidence_state == "Customer measured" and not source_value:
+        raise ValueError("Customer-measured task times require a source reference.")
+    if any(len(value) > max_length for value, max_length in (
+        (owner_value, 200), (module_value, 200), (task_value, 200),
+        (source_value, 500), (reviewer_value, 500),
+    )):
+        raise ValueError("A task-time evidence field exceeds its length limit.")
+    values = calculate_time_value(baseline_minutes, shoir_minutes, studies_per_year, hourly_rate)
+    baseline = values["baseline_hours"] * 60.0
+    shoir = values["shoir_hours"] * 60.0
+    frequency = _require_finite(studies_per_year, "Studies per year")
+    rate = _require_finite(hourly_rate, "Hourly rate")
+    path = str(db_path or DB_PATH)
+    ensure_value_evidence_db(path)
+    timestamp = _now()
+    with sqlite3.connect(path, timeout=30) as conn:
+        conn.execute(
+            """INSERT INTO shoir_value_task_baselines
+               (owner,module,task,baseline_minutes,shoir_minutes,studies_per_year,hourly_rate,
+                currency,source,updated_at,evidence_state,reviewer_reference)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
+               ON CONFLICT(owner,module) DO UPDATE SET
+               task=excluded.task,baseline_minutes=excluded.baseline_minutes,shoir_minutes=excluded.shoir_minutes,
+               studies_per_year=excluded.studies_per_year,hourly_rate=excluded.hourly_rate,
+               currency=excluded.currency,source=excluded.source,updated_at=excluded.updated_at,
+               evidence_state=excluded.evidence_state,reviewer_reference=excluded.reviewer_reference""",
+            (
+                owner_value, module_value, task_value, baseline, shoir, frequency, rate,
+                currency, source_value or "Reference planning benchmark", timestamp,
+                evidence_state, reviewer_value,
+            ),
+        )
+        conn.commit()
+    return {
+        "owner": owner_value, "module": module_value, "task": task_value,
+        "baseline_minutes": baseline, "shoir_minutes": shoir,
+        "studies_per_year": frequency, "hourly_rate": rate, "currency": currency,
+        "source": source_value or "Reference planning benchmark",
+        "evidence_state": evidence_state, "reviewer_reference": reviewer_value,
+        "updated_at": timestamp,
+    }
+
+
 def record_time_snapshot(
     owner: str,
     module: str,
@@ -382,13 +465,20 @@ def record_time_snapshot(
     path = str(db_path or DB_PATH)
     ensure_value_evidence_db(path)
     snapshot_id = "VE-" + datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S") + "-" + hashlib.sha256(f"{owner}|{module}|{task}|{_now()}".encode("utf-8")).hexdigest()[:10].upper()
+    evidence_state = str(values.get("evidence_state", "Reference estimate") or "Reference estimate")
+    reviewer_reference = str(values.get("reviewer_reference", "") or "")
+    if evidence_state not in {"Reference estimate", "Customer measured"}:
+        raise ValueError("Unsupported time-snapshot evidence state.")
+    if evidence_state == "Customer measured" and not str(source or "").strip():
+        raise ValueError("Customer-measured time snapshots require a source reference.")
     with sqlite3.connect(path, timeout=30) as conn:
         conn.execute(
             """INSERT INTO shoir_value_snapshots
                (snapshot_id,owner,module,task,baseline_minutes,shoir_minutes,hours_saved,
-                annual_capacity_hours,annual_time_value,currency,source,created_at)
-               VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (snapshot_id, str(owner), str(module), str(task), values["baseline_hours"] * 60.0, values["shoir_hours"] * 60.0, values["hours_saved"], values["annual_capacity_hours"], values["annual_time_value"], str(values.get("currency", "SAR") or "SAR"), str(source), _now()),
+                annual_capacity_hours,annual_time_value,currency,source,created_at,
+                evidence_state,reviewer_reference)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (snapshot_id, str(owner), str(module), str(task), values["baseline_hours"] * 60.0, values["shoir_hours"] * 60.0, values["hours_saved"], values["annual_capacity_hours"], values["annual_time_value"], str(values.get("currency", "SAR") or "SAR"), str(source), _now(), evidence_state, reviewer_reference),
         )
         conn.commit()
     return snapshot_id
