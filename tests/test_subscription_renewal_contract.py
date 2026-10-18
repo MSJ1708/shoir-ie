@@ -29,6 +29,8 @@ def test_expired_login_enters_renewal_only_flow():
     assert 'edge_renew_request(' in APP_SOURCE
     assert 'Submit renewal request' in APP_SOURCE
     assert 'Back to sign in' in APP_SOURCE
+    assert 'subscription_expired_notice' in APP_SOURCE
+    assert 'Sign in using the same account to open its renewal page' in APP_SOURCE
 
 
 def test_renewal_sessions_are_short_lived_and_scoped():
