@@ -115,9 +115,11 @@ Paid subscriptions use a **30-day period from activation or approved renewal**. 
 The renewal workflow is designed to:
 1. authenticate the existing account;
 2. offer a short-lived, renewal-only session if the subscription has expired;
-3. accept a renewal request with a payment reference or receipt;
+3. require a transaction/payment reference for a durable renewal-review trail (an uploaded receipt is supplementary);
 4. retain the original account and saved workspace while the request is reviewed; and
 5. restore normal access after an administrator approves the request and the subscription expiry is extended.
+
+The transaction reference is stored with the managed renewal request so an administrator can review it even if a locally uploaded receipt preview is no longer available after an app-runtime restart.
 
 The administrator account is configured for Enterprise Plus entitlements. Its existing identity, role, credentials and long-dated expiry are separate from paid-customer renewal handling.
 
