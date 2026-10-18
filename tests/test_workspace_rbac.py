@@ -31,6 +31,8 @@ def test_workspace_membership_is_server_authorized_and_private(tmp_path, monkeyp
     # grants the signed-in creator ownership regardless of browser-supplied role.
     draft = list_workspace_members("Plant-A", "alice", db)
     assert draft.to_dict("records")[0]["Username"] == "alice"
+    with pytest.raises(LookupError, match="does not exist yet"):
+        list_workspace_members("Plant-A", "alice", db, allow_draft=False)
     save_workspace_members(
         "Plant-A",
         "alice",
