@@ -34,12 +34,14 @@ def test_reference_metrics_match_independent_calculation():
     assert result.loc["A", "OEEPct"] == pytest.approx(79.1666666667)
     assert result.loc["A", "TheoreticalCapacityUnits"] == pytest.approx(480.0)
     assert result.loc["A", "CapacityAtTargetOEE_85Pct"] == pytest.approx(408.0)
+    assert result.loc["A", "ConstraintSignal"] == "No lowest-OEE signal"
 
     # Line B is calculated independently from its own planned/runtime/count values.
     assert result.loc["B", "AvailabilityPct"] == pytest.approx(75.0)
     assert result.loc["B", "PerformancePct"] == pytest.approx(150 / 360 * 2 * 100)
     assert result.loc["B", "QualityPct"] == pytest.approx(145 / 150 * 100)
     assert result.loc["B", "OEEPct"] == pytest.approx(60.4166666667)
+    assert result.loc["B", "ConstraintSignal"] == "Candidate — lowest OEE; review flow data"
 
 
 def test_validator_does_not_mutate_input_and_flags_bad_values():
@@ -124,6 +126,7 @@ def test_zero_output_is_not_fabricated_into_a_zero_quality_claim():
     metrics = calculate_line_metrics(events).set_index("Line")
     assert math.isnan(metrics.loc["A", "QualityPct"])
     assert metrics.loc["A", "OEEStatus"] == "Not available"
+    assert metrics.loc["A", "ConstraintSignal"] == "Not assessed — OEE unavailable"
 
 
 def test_evidence_manifest_has_stable_input_hash_and_versioned_formulas():
