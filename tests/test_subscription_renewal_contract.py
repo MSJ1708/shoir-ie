@@ -8,6 +8,14 @@ ADMIN_TIER_MIGRATION = (
     ROOT / "supabase" / "migrations" /
     "20261018194225_renewal_scoped_sessions_and_admin_plus_tier.sql"
 ).read_text(encoding="utf-8")
+PLATFORM_RLS_MIGRATION = (
+    ROOT / "supabase" / "migrations" /
+    "20261018204013_explicit_server_only_platform_policies.sql"
+).read_text(encoding="utf-8")
+PAYMENT_PROOF_MIGRATION = (
+    ROOT / "supabase" / "migrations" /
+    "20261018204217_private_subscription_payment_proofs.sql"
+).read_text(encoding="utf-8")
 
 
 def test_expired_login_enters_renewal_only_flow():
@@ -59,3 +67,31 @@ def test_admin_tier_change_does_not_rewrite_identity_or_expiry():
     assert "SET role =" not in ADMIN_TIER_MIGRATION
     assert "password_hash =" not in ADMIN_TIER_MIGRATION
     assert "subscription_expires_at =" not in ADMIN_TIER_MIGRATION
+
+
+
+def test_payment_proofs_are_private_and_server_reviewed():
+    assert 'const PAYMENT_PROOF_BUCKET = "subscription-payment-proofs"' in EDGE_SOURCE
+    assert 'createBucket(PAYMENT_PROOF_BUCKET' in EDGE_SOURCE
+    assert 'public: false' in EDGE_SOURCE
+    assert 'createSignedUrl(objectPath,300)' in EDGE_SOURCE
+    assert 'await adminSession(String(body.username),String(body.token))' in EDGE_SOURCE
+    assert 'MAX_PAYMENT_PROOF_BYTES = 512 * 1024' in EDGE_SOURCE
+    assert 'public = false' in PAYMENT_PROOF_MIGRATION
+    assert 'file_size_limit = 524288' in PAYMENT_PROOF_MIGRATION
+    assert "USING (false) WITH CHECK (false)" in PLATFORM_RLS_MIGRATION
+    for table in (
+        "shoir_platform_artifacts",
+        "shoir_platform_events",
+        "shoir_platform_jobs",
+        "shoir_platform_meta",
+        "shoir_platform_records",
+    ):
+        assert f"ON public.{table}" in PLATFORM_RLS_MIGRATION
+
+
+def test_admin_receipt_ui_handles_pdf_and_private_storage():
+    assert 'edge_admin_payment_proof_url(' in APP_SOURCE
+    assert 'st.link_button("Open private payment receipt (expires in 5 minutes)"' in APP_SOURCE
+    assert 'Download payment receipt' in APP_SOURCE
+    assert '_encode_renewal_proof' in APP_SOURCE
