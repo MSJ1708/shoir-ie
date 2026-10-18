@@ -112,3 +112,41 @@ def test_enforce_action_gate_raises_for_identity_mismatch(monkeypatch):
         assert "does not match" in str(exc)
     else:
         raise AssertionError("Expected an authorization failure for another account")
+
+
+def test_security_maturity_does_not_claim_provider_connection_or_full_verification(monkeypatch):
+    import durable_account_store as durable
+
+    state = _session(monkeypatch, role="User", mfa_verified=True)
+    monkeypatch.setattr(
+        ent,
+        "security_policy",
+        lambda _username, _workspace: {"require_mfa": True, "oidc_enabled": True},
+    )
+    monkeypatch.setattr(ent, "postgres_backend_configured", lambda: False)
+    monkeypatch.setattr(durable, "durable_backend_configured", lambda: False)
+
+    statuses = ent.security_maturity_status("alice").set_index("Control")["State"].to_dict()
+    assert statuses["RBAC"] == "Session role present"
+    assert statuses["Workspace isolation"] == "Partial"
+    assert statuses["Audit / artifacts"] == "Available"
+    assert statuses["Cloud persistence"] == "Local only"
+    assert statuses["SSO / OIDC"] == "Configured"
+    assert statuses["SSO / OIDC"] != "Connected"
+    assert statuses["MFA"] == "Session verified"
+    assert statuses["MFA"] != "Connected"
+    assert statuses["Secure uploads"] == "Checks present"
+    assert statuses["Secrets"] == "Configured"
+    assert state["authenticated"] is True
+
+
+def test_security_maturity_handles_unavailable_policy_without_crashing(monkeypatch):
+    _session(monkeypatch, role="User")
+
+    def unavailable_policy(_username, _workspace):
+        raise RuntimeError("policy store unavailable")
+
+    monkeypatch.setattr(ent, "security_policy", unavailable_policy)
+    status = ent.security_maturity_status("alice").set_index("Control")["State"]
+    assert status["SSO / OIDC"] == "Policy unavailable"
+    assert status["MFA"] == "Policy unavailable"
