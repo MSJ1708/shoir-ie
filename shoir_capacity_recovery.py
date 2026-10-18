@@ -292,6 +292,8 @@ def render_capacity_recovery(tier: str = "Starter", username: str = "unknown") -
                 st.session_state["capacity_recovery_source_type"] = "imported CSV"
                 st.session_state["capacity_recovery_uploaded_sha"] = upload_sha
                 st.session_state.pop("capacity_recovery_result", None)
+                st.session_state["capacity_recovery_line_metrics"] = pd.DataFrame()
+                st.session_state["capacity_recovery_scenario"] = pd.DataFrame()
         except Exception as exc:
             st.error(f"CSV import failed. The existing study data was not replaced. Details: {type(exc).__name__}: {exc}")
     if "capacity_recovery_events" not in st.session_state:
@@ -326,6 +328,8 @@ def render_capacity_recovery(tier: str = "Starter", username: str = "unknown") -
             source_type=st.session_state.get("capacity_recovery_source_type", "user-entered data"),
         )
         st.session_state["capacity_recovery_result"] = result
+        st.session_state["capacity_recovery_line_metrics"] = result["line_metrics"]
+        st.session_state["capacity_recovery_scenario"] = result["recovery_scenario"]
 
     result = st.session_state.get("capacity_recovery_result")
     if result and result.get("evidence"):
@@ -342,6 +346,8 @@ def render_capacity_recovery(tier: str = "Starter", username: str = "unknown") -
             inputs_match = current_evidence["input_sha256"] == result["evidence"]["input_sha256"]
         if not inputs_match:
             st.session_state.pop("capacity_recovery_result", None)
+            st.session_state["capacity_recovery_line_metrics"] = pd.DataFrame()
+            st.session_state["capacity_recovery_scenario"] = pd.DataFrame()
             st.info("The input table has changed since the last analysis. Re-run the study to refresh results and evidence.")
             result = None
 
