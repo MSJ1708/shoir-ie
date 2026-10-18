@@ -110,7 +110,10 @@ CREATE TABLE IF NOT EXISTS shoir_value_financial_bridges (
     payback_months REAL,
     currency TEXT NOT NULL,
     source TEXT NOT NULL,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    evidence_state TEXT NOT NULL DEFAULT 'Reference estimate',
+    reviewer_reference TEXT NOT NULL DEFAULT '',
+    bridge_sha256 TEXT NOT NULL DEFAULT ''
 );
 """
 
@@ -127,15 +130,31 @@ def _safe_float(value: Any, default: float = 0.0) -> float:
     except Exception:
         return default
 
-def ensure_value_evidence_db() -> None:
+def ensure_value_evidence_db(db_path: str | None = None) -> None:
+    """Create the value-evidence schema and safely upgrade older local databases."""
+    path = str(db_path or DB_PATH)
     try:
-        with sqlite3.connect(DB_PATH, timeout=30) as conn:
-            for statement in _SCHEMA.split(";"):
-                if statement.strip():
+        with sqlite3.connect(path, timeout=30) as conn:
+            conn.executescript(_SCHEMA)
+            columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(shoir_value_financial_bridges)")}
+            migrations = {
+                "evidence_state": "ALTER TABLE shoir_value_financial_bridges ADD COLUMN evidence_state TEXT NOT NULL DEFAULT 'Reference estimate'",
+                "reviewer_reference": "ALTER TABLE shoir_value_financial_bridges ADD COLUMN reviewer_reference TEXT NOT NULL DEFAULT ''",
+                "bridge_sha256": "ALTER TABLE shoir_value_financial_bridges ADD COLUMN bridge_sha256 TEXT NOT NULL DEFAULT ''",
+            }
+            for column, statement in migrations.items():
+                if column not in columns:
                     conn.execute(statement)
             conn.commit()
-    except Exception:
-        pass
+    except Exception as exc:
+        # A locally unavailable optional evidence store must not prevent the
+        # application from starting. The warning leaves a diagnostic trail.
+        import logging
+        logging.getLogger(__name__).warning(
+            "Value-evidence database initialization failed for %s: %s",
+            path, type(exc).__name__,
+        )
+
 
 def task_profile(module: str) -> dict[str, Any]:
     name = str(module or "Default").strip()
@@ -186,27 +205,170 @@ def _saved_baseline(owner: str, module: str) -> dict[str, Any] | None:
         pass
     return None
 
-def calculate_time_value(baseline_minutes: float, shoir_minutes: float, studies_per_year: float = 1.0, hourly_rate: float = 0.0) -> dict[str, float]:
-    baseline_h = _safe_float(baseline_minutes) / 60.0
-    shoir_h = _safe_float(shoir_minutes) / 60.0
-    frequency = max(0.0, _safe_float(studies_per_year, 1.0))
+def _require_finite(value: Any, field: str, *, minimum: float = 0.0) -> float:
+    """Reject invalid evidence inputs instead of silently converting them to zero."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(f"{field} must be numeric.") from exc
+    if not math.isfinite(number):
+        raise ValueError(f"{field} must be finite; NaN and infinity are not accepted.")
+    if number < minimum:
+        raise ValueError(f"{field} must be at least {minimum:g}.")
+    return number
+
+
+def calculate_time_value(
+    baseline_minutes: float,
+    shoir_minutes: float,
+    studies_per_year: float = 1.0,
+    hourly_rate: float = 0.0,
+) -> dict[str, float]:
+    baseline_h = _require_finite(baseline_minutes, "Baseline minutes") / 60.0
+    shoir_h = _require_finite(shoir_minutes, "Shoir-IE minutes") / 60.0
+    frequency = _require_finite(studies_per_year, "Studies per year")
+    rate = _require_finite(hourly_rate, "Hourly rate")
     saved_h = baseline_h - shoir_h
     annual_h = saved_h * frequency
-    annual_value = annual_h * max(0.0, _safe_float(hourly_rate))
-    return {"baseline_hours": baseline_h, "shoir_hours": shoir_h, "hours_saved": saved_h, "annual_capacity_hours": annual_h, "annual_time_value": annual_value}
+    annual_value = annual_h * rate
+    values = {
+        "baseline_hours": baseline_h,
+        "shoir_hours": shoir_h,
+        "hours_saved": saved_h,
+        "annual_capacity_hours": annual_h,
+        "annual_time_value": annual_value,
+    }
+    if not all(math.isfinite(value) for value in values.values()):
+        raise ValueError("Time-value calculation exceeded the finite numeric range.")
+    return values
 
-def calculate_financial_bridge(baseline_cost: float, post_cost: float, implementation_cost: float, frequency_per_year: float = 1.0) -> dict[str, float | None]:
-    baseline = max(0.0, _safe_float(baseline_cost))
-    post = max(0.0, _safe_float(post_cost))
-    implementation = max(0.0, _safe_float(implementation_cost))
-    frequency = max(0.0, _safe_float(frequency_per_year, 1.0))
-    verified_period = baseline - post - implementation
+
+def calculate_financial_bridge(
+    baseline_cost: float,
+    post_cost: float,
+    implementation_cost: float,
+    frequency_per_year: float = 1.0,
+) -> dict[str, Any]:
+    baseline = _require_finite(baseline_cost, "Baseline cost")
+    post = _require_finite(post_cost, "Post-deployment cost")
+    implementation = _require_finite(implementation_cost, "Implementation cost")
+    frequency = _require_finite(frequency_per_year, "Periods per year")
+    calculated_period_net = baseline - post - implementation
     operational_delta = baseline - post
     annualized_operational = operational_delta * frequency
     annual_net = annualized_operational - implementation
     roi = (annual_net / implementation * 100.0) if implementation > 0 else None
-    payback = (implementation / (annualized_operational / 12.0)) if annualized_operational > 0 and implementation > 0 else None
-    return {"verified_period_benefit": verified_period, "annualized_operational_benefit": annualized_operational, "annual_net_benefit": annual_net, "roi_percent": roi, "payback_months": payback}
+    payback = (
+        implementation / (annualized_operational / 12.0)
+        if annualized_operational > 0 and implementation > 0
+        else None
+    )
+    numeric_values = [calculated_period_net, operational_delta, annualized_operational, annual_net]
+    numeric_values.extend(value for value in (roi, payback) if value is not None)
+    if not all(math.isfinite(value) for value in numeric_values):
+        raise ValueError("Financial value calculation exceeded the finite numeric range.")
+    return {
+        # Keep the legacy key for compatibility; it is a calculation, not a verified outcome.
+        "verified_period_benefit": calculated_period_net,
+        "calculated_period_net_benefit": calculated_period_net,
+        "annualized_operational_benefit": annualized_operational,
+        "annual_net_benefit": annual_net,
+        "roi_percent": roi,
+        "payback_months": payback,
+        "classification": "Calculated scenario estimate; not a verified or realized benefit",
+        "calculation_version": "value-bridge/1.0.0",
+    }
+
+
+def save_financial_bridge_record(
+    owner: str,
+    module: str,
+    baseline_cost: float,
+    post_cost: float,
+    implementation_cost: float,
+    frequency_per_year: float = 1.0,
+    *,
+    source: str = "",
+    evidence_state: str = "Reference estimate",
+    reviewer_reference: str = "",
+    currency: str = "SAR",
+    db_path: str | None = None,
+) -> dict[str, Any]:
+    """Persist a financial estimate with explicit evidence-state and review metadata."""
+    owner_value, module_value = str(owner or "").strip(), str(module or "").strip()
+    source_value, reviewer_value = str(source or "").strip(), str(reviewer_reference or "").strip()
+    currency_value = str(currency or "").strip().upper()
+    accepted_states = {
+        "Reference estimate",
+        "Customer measured",
+        "Independent review record (user-attested; not authenticated)",
+    }
+    if not owner_value or not module_value:
+        raise ValueError("A non-empty owner and module are required.")
+    if len(owner_value) > 200 or len(module_value) > 200:
+        raise ValueError("Owner or module name is too long.")
+    if evidence_state not in accepted_states:
+        raise ValueError("Unsupported financial evidence state.")
+    if evidence_state != "Reference estimate" and not source_value:
+        raise ValueError("A source reference is required for measured or reviewed financial records.")
+    if evidence_state.startswith("Independent review") and not reviewer_value:
+        raise ValueError("An independent-review reference is required; it is recorded as user-attested, not authenticated.")
+    if len(source_value) > 500 or len(reviewer_value) > 500:
+        raise ValueError("Source and reviewer references must be 500 characters or fewer.")
+    if not currency_value or len(currency_value) > 8:
+        raise ValueError("Currency must be a short non-empty code.")
+
+    path = str(db_path or DB_PATH)
+    result = calculate_financial_bridge(baseline_cost, post_cost, implementation_cost, frequency_per_year)
+    created = _now()
+    bridge_id = "VB-" + datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S") + "-" + hashlib.sha256(
+        f"{owner_value}|{module_value}|{baseline_cost}|{post_cost}|{implementation_cost}|{created}".encode("utf-8")
+    ).hexdigest()[:10].upper()
+    payload = {
+        "bridge_id": bridge_id,
+        "owner": owner_value,
+        "module": module_value,
+        "baseline_cost": float(baseline_cost),
+        "post_cost": float(post_cost),
+        "implementation_cost": float(implementation_cost),
+        "frequency_per_year": float(frequency_per_year),
+        "currency": currency_value,
+        "source": source_value or "Reference planning estimate",
+        "evidence_state": evidence_state,
+        "reviewer_reference": reviewer_value,
+        "calculation": result,
+        "created_at": created,
+    }
+    bridge_hash = hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False).encode("utf-8")
+    ).hexdigest()
+    ensure_value_evidence_db(path)
+    with sqlite3.connect(path, timeout=30) as conn:
+        conn.execute(
+            """INSERT INTO shoir_value_financial_bridges
+               (bridge_id,owner,module,baseline_cost,post_cost,implementation_cost,
+                verified_economic_benefit,frequency_per_year,annualized_operational_benefit,
+                annual_net_benefit,roi_percent,payback_months,currency,source,created_at,
+                evidence_state,reviewer_reference,bridge_sha256)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                bridge_id, owner_value, module_value, float(baseline_cost), float(post_cost),
+                float(implementation_cost), float(result["calculated_period_net_benefit"]),
+                float(frequency_per_year), float(result["annualized_operational_benefit"]),
+                float(result["annual_net_benefit"]),
+                float(result["roi_percent"]) if result["roi_percent"] is not None else 0.0,
+                float(result["payback_months"]) if result["payback_months"] is not None else None,
+                currency_value, payload["source"], created, evidence_state, reviewer_value, bridge_hash,
+            ),
+        )
+        conn.commit()
+    return {
+        **payload,
+        "calculation": result,
+        "bridge_sha256": bridge_hash,
+        "source_authentication": "Not independently authenticated by Shoir-IE",
+    }
+
 
 def record_time_snapshot(owner: str, module: str, task: str, values: dict[str, Any], source: str) -> str:
     snapshot_id = "VE-" + datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S") + "-" + hashlib.sha256(f"{owner}|{module}|{task}|{_now()}".encode("utf-8")).hexdigest()[:10].upper()
@@ -260,10 +422,12 @@ def begin_result_timer(module: str, label: str) -> None:
     }
 
 def render_value_receipt(module: str, username: str) -> None:
-    """Show comparable task-value receipts; exclude modules whose outputs are not timed tasks."""
-    # ShadowShift measures real-world interruption/recovery. Streamlit render
-    # latency is not a comparable baseline and must never be presented as saved
-    # operational time or money.
+    """Report measured application latency without mislabelling it as engineering time saved.
+
+    Application execution time is not comparable to the end-to-end engineering task
+    baseline. Only the Value Evidence Engine's explicit before/after task inputs may
+    be used to calculate task-time differences.
+    """
     if "shadowshift" in str(module or "").casefold():
         return
     run = st.session_state.get("shoir_value_active_run")
@@ -272,115 +436,39 @@ def render_value_receipt(module: str, username: str) -> None:
 
     started = _safe_float(run.get("started_at"), 0.0)
     if started <= 0:
+        st.session_state.pop("shoir_value_active_run", None)
         return
     elapsed = max(0.0, time.perf_counter() - started)
-
-    profile = task_profile(module)
-    saved = _saved_baseline(str(username or "unknown"), module) or {}
-    traditional_minutes = _safe_float(saved.get("baseline_minutes", profile["baseline_minutes"]))
-    traditional_hours = traditional_minutes / 60.0
-    time_saved = traditional_hours - (elapsed / 3600.0)
-    signed_time_delta = time_saved
-    saved_positive = max(0.0, signed_time_delta)
-    saved_pct = abs(signed_time_delta) / traditional_hours * 100.0 if traditional_hours > 0 else 0.0
-
-    studies = max(1.0, _safe_float(saved.get("studies_per_year", 1.0), 1.0))
-    hourly = _safe_float(saved.get("hourly_rate", 250.0), 250.0)
-    if hourly <= 0:
-        hourly = 250.0
-    currency = str(saved.get("currency", "SAR") or "SAR").upper()
-    annual_hours = signed_time_delta * studies
-    labor_value = signed_time_delta * hourly
-    annual_labor_value = annual_hours * hourly
+    label = str(run.get("label", "Result generation"))[:120]
 
     st.markdown(
-        f"""<div class="hero-card" style="margin:16px 0 14px 0;border-color:#99f6e4;background:linear-gradient(135deg,#f0fdfa,#ffffff 62%,#eff6ff);">
-        <div class="kicker">RESULT VALUE RECEIPT · {html.escape(str(module))}</div>
-        <div class="hero-title">⏱️ This result just saved measurable engineering time</div>
-        <div class="hero-copy">Compared with the traditional time required for the same task. Shoir-IE time is measured from the result-generating action to completion; the traditional time is a configurable task-specific reference baseline.</div>
+        f"""<div class="hero-card" style="margin:16px 0 14px 0;">
+        <div class="kicker">EXECUTION RECEIPT · {html.escape(str(module))}</div>
+        <div class="hero-title">Observed application execution duration</div>
+        <div class="hero-copy">This is software execution time for the current action. It is not the total time an engineer spends completing the task and is not evidence of hours saved, annual capacity released, or financial benefit.</div>
         </div>""",
         unsafe_allow_html=True,
     )
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Traditional time", f"{traditional_hours:,.2f} h")
-    c2.metric("Shoir-IE actual time", f"{elapsed / 3600.0:,.2f} h")
-    c3.metric(
-        "Time saved",
-        f"{signed_time_delta:,.2f} h",
-        delta=(f"{saved_pct:,.0f}% less time" if signed_time_delta >= 0 else f"{saved_pct:,.0f}% more time"),
-        delta_color=("normal" if signed_time_delta >= 0 else "inverse"),
-    )
-    c4.metric(f"Est. labor-value difference · {currency}", f"{currency} {labor_value:,.0f}")
-
-    a1, a2, a3 = st.columns(3)
-    a1.metric("Annual capacity released", f"{annual_hours:,.1f} h")
-    a2.metric("Annual labor-value difference", f"{currency} {annual_labor_value:,.0f}")
-    a3.metric("Result action", str(run.get("label", "Result generation"))[:55])
-
-    with st.expander("Calibrate the traditional-time and money baseline", expanded=False):
-        st.caption("The traditional time is a planning reference unless you replace it with your real measured customer baseline. The hourly value is an editable planning assumption, not a claimed industry average.")
-        key = "shoir_result_calibrate_" + _slug(module)
-        with st.form(key):
-            b1, b2, b3 = st.columns(3)
-            baseline_input = b1.number_input("Traditional task time (minutes)", min_value=0.0, value=float(traditional_minutes), step=5.0, key=key+"_baseline")
-            freq_input = b2.number_input("Tasks / studies per year", min_value=1.0, value=float(studies), step=1.0, key=key+"_frequency")
-            hourly_input = b3.number_input(f"Loaded engineering value / hour ({currency})", min_value=0.0, value=float(hourly), step=10.0, key=key+"_hourly")
-            source_input = st.text_input("Traditional-time source / reference", value=str(saved.get("source", "Reference planning benchmark")), key=key+"_source")
-            save_input = st.form_submit_button("Save value baseline", type="primary", use_container_width=True)
-        if save_input:
-            with sqlite3.connect(DB_PATH, timeout=30) as conn:
-                conn.execute(
-                    """INSERT INTO shoir_value_task_baselines
-                       (owner,module,task,baseline_minutes,shoir_minutes,studies_per_year,hourly_rate,currency,source,updated_at)
-                       VALUES(?,?,?,?,?,?,?,?,?,?)
-                       ON CONFLICT(owner,module) DO UPDATE SET
-                       task=excluded.task,baseline_minutes=excluded.baseline_minutes,
-                       shoir_minutes=excluded.shoir_minutes,studies_per_year=excluded.studies_per_year,
-                       hourly_rate=excluded.hourly_rate,currency=excluded.currency,
-                       source=excluded.source,updated_at=excluded.updated_at""",
-                    (str(username or "unknown"), str(module), profile["task"], baseline_input,
-                     max(0.01, elapsed/60.0), freq_input, hourly_input, currency,
-                     source_input.strip()[:300] or "Reference planning benchmark", _now()),
-                )
-                conn.commit()
-            st.success("Value baseline saved for this module.")
-            st.rerun()
-
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Observed application duration", f"{elapsed:,.2f} seconds")
+    c2.metric("Claimed engineering time saved", "Not calculated")
+    c3.metric("Claimed financial benefit", "Not calculated")
     st.caption(
-        f"Measured at {elapsed:,.2f}s after '{str(run.get('label','result'))[:80]}'. "
-        f"Traditional reference: {traditional_minutes:,.0f} min. "
-        f"Time difference: {signed_time_delta:,.2f} h. "
-        f"Money shown is an estimated labor-value difference using {currency} {hourly:,.0f}/h."
+        f"Action: {label}. Record comparable end-to-end baseline and post-deployment task times "
+        "in Value Evidence Engine before calculating task-time differences. The app does not "
+        "create an operational savings snapshot from render latency."
     )
-    try:
-        record_time_snapshot(
-            str(username or "unknown"),
-            str(module),
-            str(profile["task"]),
-            {
-                "baseline_hours": traditional_hours,
-                "shoir_hours": elapsed / 3600.0,
-                "hours_saved": signed_time_delta,
-                "annual_capacity_hours": annual_hours,
-                "annual_time_value": annual_labor_value,
-                "currency": currency,
-            },
-            str(saved.get("source") or "Measured result runtime vs reference planning baseline"),
-        )
-    except Exception:
-        pass
-
     st.session_state["shoir_value_last_receipt"] = {
         "module": str(module),
-        "label": str(run.get("label", "Result generation")),
+        "label": label,
         "elapsed_seconds": elapsed,
-        "traditional_minutes": traditional_minutes,
-        "time_saved_hours": saved_positive,
-        "labor_value": labor_value,
-        "currency": currency,
+        "classification": "Measured application execution duration only",
+        "time_saved_hours": None,
+        "labor_value": None,
         "created_at": _now(),
     }
     st.session_state.pop("shoir_value_active_run", None)
+
 
 def render_value_pulse(module: str, username: str) -> None:
     """Compatibility entry point: render the post-result receipt when a result run is active."""
@@ -418,10 +506,10 @@ def render_value_evidence_engine(owner: str, current_module: str = "Venture Stud
     c1.metric("Hours saved / study", f"{tv['hours_saved']:,.2f} h")
     c2.metric("Annual capacity released", f"{tv['annual_capacity_hours']:,.1f} h")
     c3.metric("Annual time value", f"SAR {tv['annual_time_value']:,.0f}")
-    c4.metric("Evidence status", "Customer-calibrated" if saved else "Reference estimate")
+    c4.metric("Evidence status", "Saved baseline — source not authenticated" if saved else "Reference estimate")
 
     st.markdown("#### 2 · Financial value")
-    st.code("Verified Economic Benefit = Baseline Cost − Post-Deployment Cost − Implementation Cost", language="text")
+    st.code("Calculated Period Net Benefit = Baseline Cost − Post-Deployment Cost − Implementation Cost", language="text")
     f1, f2, f3, f4 = st.columns(4)
     baseline_cost = f1.number_input("Baseline cost / period (SAR)", min_value=0.0, value=0.0, step=100.0, key="ve_fin_baseline")
     post_cost = f2.number_input("Post-deployment cost / period (SAR)", min_value=0.0, value=0.0, step=100.0, key="ve_fin_post")
@@ -429,7 +517,7 @@ def render_value_evidence_engine(owner: str, current_module: str = "Venture Stud
     financial_freq = f4.number_input("Periods per year", min_value=1.0, value=float(freq), step=1.0, key="ve_fin_freq")
     fb = calculate_financial_bridge(baseline_cost, post_cost, implementation, financial_freq)
     m1, m2, m3, m4, m5 = st.columns(5)
-    m1.metric("Verified benefit / period", f"SAR {fb['verified_period_benefit']:,.0f}")
+    m1.metric("Calculated net benefit / period", f"SAR {fb['calculated_period_net_benefit']:,.0f}")
     m2.metric("Annualized operating benefit", f"SAR {fb['annualized_operational_benefit']:,.0f}")
     m3.metric("Annual net benefit", f"SAR {fb['annual_net_benefit']:,.0f}")
     m4.metric("ROI", f"{fb['roi_percent']:,.1f}%" if fb["roi_percent"] is not None else "N/A")
@@ -437,48 +525,49 @@ def render_value_evidence_engine(owner: str, current_module: str = "Venture Stud
 
     if baseline_cost or post_cost or implementation:
         bridge = pd.DataFrame({
-            "Component": ["Baseline cost", "Post-deployment cost", "Implementation cost", "Verified economic benefit"],
+            "Component": ["Baseline cost", "Post-deployment cost", "Implementation cost", "Calculated period net benefit"],
             "SAR": [baseline_cost, -post_cost, -implementation, fb["verified_period_benefit"]],
         })
         fig = px.bar(bridge, x="SAR", y="Component", orientation="h", text="SAR", title="Financial value bridge")
         fig.update_layout(height=320, margin=dict(l=16,r=16,t=56,b=20))
         st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
-    with st.expander("Save verified financial bridge", expanded=False):
+    with st.expander("Save financial evidence record", expanded=False):
         bridge_source = st.text_input("Financial evidence source / reference", key="ve_fin_source")
         bridge_state = st.selectbox(
-            "Financial evidence state",
-            ["Reference estimate", "Customer measured", "Audited"],
+            "Financial evidence classification",
+            [
+                "Reference estimate",
+                "Customer measured",
+                "Independent review record (user-attested; not authenticated)",
+            ],
             key="ve_fin_state",
         )
-        if st.button("💾 Save financial value bridge", type="primary", use_container_width=True, key="ve_fin_save"):
-            if bridge_state != "Reference estimate" and not bridge_source.strip():
-                st.error("Customer measured or audited financial values require a source reference.")
-            else:
-                bridge_id = "VB-" + datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S") + "-" + hashlib.sha256(
-                    f"{owner}|{module}|{baseline_cost}|{post_cost}|{implementation}|{_now()}".encode("utf-8")
-                ).hexdigest()[:10].upper()
-                with sqlite3.connect(DB_PATH, timeout=30) as conn:
-                    conn.execute(
-                        """INSERT INTO shoir_value_financial_bridges
-                           VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                        (
-                            bridge_id, owner, module,
-                            float(baseline_cost), float(post_cost), float(implementation),
-                            float(fb["verified_period_benefit"]),
-                            float(financial_freq),
-                            float(fb["annualized_operational_benefit"]),
-                            float(fb["annual_net_benefit"]),
-                            float(fb["roi_percent"] or 0.0),
-                            float(fb["payback_months"]) if fb["payback_months"] is not None else None,
-                            "SAR",
-                            bridge_source.strip()[:300] or "Reference planning estimate",
-                            _now(),
-                        ),
-                    )
-                    conn.commit()
-                st.success(f"Financial bridge {bridge_id} saved.")
+        reviewer_reference = ""
+        if bridge_state.startswith("Independent review"):
+            reviewer_reference = st.text_input(
+                "Independent reviewer / review artifact reference",
+                key="ve_fin_reviewer_reference",
+                help="This field records a user-attested review reference. Shoir-IE does not authenticate the reviewer or certify the independent review.",
+            )
+        st.caption("Saving preserves the assumptions and source reference; it does not independently verify the stated costs or any realized benefit.")
+        if st.button("💾 Save financial evidence record", type="primary", use_container_width=True, key="ve_fin_save"):
+            try:
+                saved_bridge = save_financial_bridge_record(
+                    owner, module, baseline_cost, post_cost, implementation, financial_freq,
+                    source=bridge_source,
+                    evidence_state=bridge_state,
+                    reviewer_reference=reviewer_reference,
+                    currency="SAR",
+                )
+                st.success(
+                    f"Saved {saved_bridge['bridge_id']} · {saved_bridge['calculation']['classification']} · "
+                    f"SHA-256 {saved_bridge['bridge_sha256'][:16]}…"
+                )
+                st.caption("The source is recorded but not independently authenticated by Shoir-IE.")
                 st.rerun()
+            except Exception as exc:
+                st.error(f"Financial evidence record could not be saved safely: {type(exc).__name__}: {exc}")
 
     st.markdown("#### 3 · Industrial value scorecard")
     metric_df = pd.DataFrame(_METRICS, columns=["Metric", "Category", "Direction", "Unit"])
@@ -502,10 +591,10 @@ def render_value_evidence_engine(owner: str, current_module: str = "Venture Stud
 
     with st.expander("Save this value snapshot"):
         source = st.text_input("Evidence source / reference", key="ve_snapshot_source")
-        confidence = st.selectbox("Evidence state", ["Reference estimate", "Customer measured", "Audited"], key="ve_snapshot_conf")
+        confidence = st.selectbox("Evidence state", ["Reference estimate", "Customer measured"], key="ve_snapshot_conf")
         if st.button("💾 Save time-value snapshot", type="primary", use_container_width=True, key="ve_snapshot_save"):
             if not source.strip() and confidence != "Reference estimate":
-                st.error("Customer measured or audited values require a source reference.")
+                st.error("Customer-measured values require a source reference.")
             else:
                 with sqlite3.connect(DB_PATH, timeout=30) as conn:
                     conn.execute(
@@ -525,4 +614,4 @@ def render_value_evidence_engine(owner: str, current_module: str = "Venture Stud
                 st.success(f"Value snapshot {snapshot_id} saved with its evidence state.")
                 st.rerun()
 
-    st.caption("Reference task times are planning assumptions until replaced with customer baseline data. Financial values remain customer-specific; ROI and payback are not reported as verified until the underlying costs and source evidence are supplied.")
+    st.caption("Reference task times are planning assumptions. Financial values are calculated from entered cost inputs, and source references are recorded but not authenticated. ROI and payback are scenario calculations, not verified or realized benefits.")
