@@ -36,6 +36,7 @@ from shoir_engine_studio import (
     render_optimization_studio, render_decision_center_studio,
 )
 from shoir_investor_demo import render_investor_control_center
+from shoir_workspace_rbac import list_workspace_members, save_workspace_members, WORKSPACE_ROLES
 
 PLATFORM_CATALOG = [
     {"tier":"Starter","category":"AI & Automation","name":"Excel Data Cleaning & Import",
@@ -1917,14 +1918,36 @@ def render_module(module: str, tier: str, username: str):
         render_export_bar(module,[("Scenario Inputs",base),("Persisted Scenarios",saved)],tier,username)
     elif module=="Team Workspaces & RBAC":
         st.subheader("👥 Team Workspace & Role-Based Access")
+        st.caption("Membership changes are checked server-side. Only current workspace Owners/Admins can edit members; membership and role values are validated before persistence.")
         ws=st.text_input("Workspace name","Plant-01 Engineering",key="workspace_name")
-        members=st.data_editor(st.session_state.setdefault("workspace_members_df",pd.DataFrame({"Username":[username],"Role":["Owner"]})),num_rows="dynamic",use_container_width=True,key="workspace_members_editor")
+        try:
+            saved=list_workspace_members(ws,username)
+        except Exception as exc:
+            st.error(f"Workspace access was denied or could not be loaded: {type(exc).__name__}: {exc}")
+            st.info("Check the workspace name or ask its Owner to add your account before continuing.")
+            return
+        members_key="workspace_members_df_"+hashlib.sha256(ws.strip().casefold().encode("utf-8")).hexdigest()[:12]
+        if members_key not in st.session_state:
+            st.session_state[members_key]=saved.copy(deep=True)
+        members=st.data_editor(
+            st.session_state[members_key],
+            num_rows="dynamic",
+            use_container_width=True,
+            key="workspace_members_editor_"+hashlib.sha256(ws.strip().casefold().encode("utf-8")).hexdigest()[:12],
+            column_config={
+                "Username":st.column_config.TextColumn("Username",required=True),
+                "Role":st.column_config.SelectboxColumn("Role",options=list(WORKSPACE_ROLES),required=True),
+                "Updated At":st.column_config.TextColumn("Updated At",disabled=True),
+            },
+        )
         if st.button("💾 Save Workspace Members",type="primary",use_container_width=True,key="workspace_save"):
-            with sqlite3.connect("enterprise_full_workspace.db") as c:
-                for r in members.to_dict("records"): c.execute("INSERT OR REPLACE INTO workspace_members VALUES(?,?,?,?)",(ws,r["Username"],r["Role"],_now()))
-                c.commit()
-            st.success("Workspace membership saved with explicit roles.")
-        with sqlite3.connect("enterprise_full_workspace.db") as c: saved=pd.read_sql("SELECT * FROM workspace_members WHERE workspace=?",(c),params=(ws,))
+            try:
+                saved=save_workspace_members(ws,username,members.to_dict("records"))
+                st.session_state[members_key]=saved.copy(deep=True)
+                st.success("Workspace membership saved after server-side identity and role validation.")
+            except Exception as exc:
+                st.error(f"Workspace membership was not changed: {type(exc).__name__}: {exc}")
+        st.markdown("### Members available to this workspace")
         st.dataframe(saved,use_container_width=True,hide_index=True)
         render_export_bar(module,[("Workspace Members",saved)],tier,username)
     elif module=="Executive Report Center":
@@ -1955,10 +1978,11 @@ def render_module(module: str, tier: str, username: str):
     elif module=="Enterprise Security & Governance":
         tabs=st.tabs(["Posture","Roles","Audit"])
         with tabs[0]:
-            st.json({"MFA":"Configurable","SSO/OIDC":"Configuration surface","SAML":"Configuration surface","SCIM":"Configuration surface","Workspace isolation":"Enabled by application role model","Audit logging":"Enabled","Data retention":"Configurable","Secrets":"Use Streamlit secrets/environment variables"})
+            st.json({"MFA":"Configuration surface — provider enforcement not verified","SSO/OIDC":"Configuration surface — connection not verified","SAML":"Configuration surface — provider flow not verified","SCIM":"Configuration surface — provisioning not verified","Workspace isolation":"Partial — Team Workspaces membership is checked server-side; remaining routes require review","Audit logging":"Available in the application database; deployment durability not verified","Data retention":"Configurable — deletion/retention execution requires verification","Secrets":"Use Streamlit secrets/environment variables; deployment configuration requires review"})
         with tabs[1]:
-            role=st.data_editor(st.session_state.setdefault("security_roles",pd.DataFrame({"Role":["Owner","Planner","Engineer","Viewer"],"Read":["Yes","Yes","Yes","Yes"],"Write":["Yes","Yes","Yes","No"],"Execute":["Yes","Yes","Yes","No"],"Admin":["Yes","No","No","No"]})),num_rows="dynamic",use_container_width=True,key="security_roles_editor")
-            st.dataframe(role,use_container_width=True)
+            role=st.session_state.setdefault("security_roles",pd.DataFrame({"Role":["Owner","Planner","Engineer","Viewer"],"Read":["Yes","Yes","Yes","Yes"],"Write":["Yes","Yes","Yes","No"],"Execute":["Yes","Yes","Yes","No"],"Admin":["Yes","No","No","No"]}))
+            st.caption("Role matrix preview only. Editing this display does not change authorization policy. Enforced access checks are server-side and separately tested.")
+            st.dataframe(role,use_container_width=True,hide_index=True)
         with tabs[2]:
             with sqlite3.connect("enterprise_full_workspace.db") as c: audit=pd.read_sql("SELECT * FROM security_events ORDER BY id DESC LIMIT 200",c)
             st.dataframe(audit,use_container_width=True,hide_index=True)
