@@ -371,11 +371,23 @@ def save_financial_bridge_record(
     }
 
 
-def record_time_snapshot(owner: str, module: str, task: str, values: dict[str, Any], source: str) -> str:
+def record_time_snapshot(
+    owner: str,
+    module: str,
+    task: str,
+    values: dict[str, Any],
+    source: str,
+    db_path: str | None = None,
+) -> str:
+    path = str(db_path or DB_PATH)
+    ensure_value_evidence_db(path)
     snapshot_id = "VE-" + datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S") + "-" + hashlib.sha256(f"{owner}|{module}|{task}|{_now()}".encode("utf-8")).hexdigest()[:10].upper()
-    with sqlite3.connect(DB_PATH, timeout=30) as conn:
+    with sqlite3.connect(path, timeout=30) as conn:
         conn.execute(
-            "INSERT INTO shoir_value_snapshots VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+            """INSERT INTO shoir_value_snapshots
+               (snapshot_id,owner,module,task,baseline_minutes,shoir_minutes,hours_saved,
+                annual_capacity_hours,annual_time_value,currency,source,created_at)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
             (snapshot_id, str(owner), str(module), str(task), values["baseline_hours"] * 60.0, values["shoir_hours"] * 60.0, values["hours_saved"], values["annual_capacity_hours"], values["annual_time_value"], str(values.get("currency", "SAR") or "SAR"), str(source), _now()),
         )
         conn.commit()
