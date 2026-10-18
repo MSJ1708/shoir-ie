@@ -21,8 +21,9 @@ The following status is tied to merge commit `c93a33cfe6272c1d60f4d6f94753bdad14
 | Engine regression | **PASS — automated** | Main engine-regression workflow completed successfully. |
 | Security and quality checks | **PASS — automated** | Main security-quality workflow completed successfully. This is not a penetration test or independent certification. |
 | Public hosted entry screen | **PASS — browser smoke** | Headless Chromium checked the live public shell at desktop and mobile widths, including registration and public Explore Modules tab, with no fatal marker or horizontal overflow. No sign-in or production writes were attempted. |
-| Subscription backend deployment | **PASS — configuration checked** | Supabase `shoir-persistence` is deployed at version 5; `shoir_sessions.scope` exists, is NOT NULL and defaults to `workspace`. |
+| Subscription backend deployment | **PASS — configuration checked; runtime behavior open** | Supabase `shoir-persistence` is deployed at version 5; `shoir_sessions.scope` exists, is NOT NULL and defaults to `workspace`. Automated repository tests assert source contracts; they do not directly exercise the deployed login/renewal/workspace endpoints. |
 | Admin tier | **PASS — record checked** | Existing admin record is active, retains role `Enterprise Admin` and long-dated expiry `2099-01-01 UTC`, and now has tier `Enterprise Plus Tier ($399)`. No password or account recreation was performed. |
+| Renewal payment review | **PASS — source/CI checked; browser pending** | Renewal requires a transaction/payment reference; the Admin Panel displays the reference. Receipt preview is supplementary and may be unavailable if its local file is gone. |
 | Core account/workspace RLS | **PASS — policy inspected** | `shoir_accounts`, `shoir_pending_credentials`, `shoir_sessions`, `shoir_subscription_requests` and `shoir_workspace_states` have server-only policies with `USING false` and `WITH CHECK false` for `anon`/`authenticated`. The service-role Edge Function is the designed persistence boundary. |
 | Authenticated sign-in, expiry, renewal and restoration | **BLOCKED — not browser verified** | This run had no authorized test credential or already-authenticated browser session available to exercise the private account journey. The public smoke deliberately does not sign in. Do not claim these cases passed from static checks alone. |
 | Module-by-module rendering, imports/downloads, persistence after restart, roles/tiers and tenant isolation | **OPEN — not fully browser verified** | The matrix below is the acceptance checklist. A public shell smoke is not evidence for these private workflows. |
@@ -37,9 +38,9 @@ The following status is tied to merge commit `c93a33cfe6272c1d60f4d6f94753bdad14
 | AUTH-01 | Valid non-admin login before expiry | Authenticate and open the entitled workspace | Browser recording/checklist + session result |
 | AUTH-02 | Invalid password | No session; useful generic error; rate limit remains effective | Automated + browser |
 | AUTH-03 | Expired subscription with correct credentials | No workspace access; renewal-only screen opens | Automated + browser |
-| AUTH-04 | Renewal-only token attempts workspace load/save | Server denies both operations | Edge regression test |
-| AUTH-05 | Renewal-only token submits own renewal request | Request becomes Pending; cannot read another workspace or administer accounts | Edge regression test + browser |
-| AUTH-06 | Renewal request without reference or receipt | Client refuses submission and explains what is missing | Automated + browser |
+| AUTH-04 | Renewal-only token attempts workspace load/save | Server denies both operations | Deployed Edge API integration test + authenticated browser |
+| AUTH-05 | Renewal-only token submits own renewal request | Request becomes Pending; cannot read another workspace or administer accounts | Deployed Edge API integration test + authenticated browser |
+| AUTH-06 | Renewal request without transaction reference | Client refuses submission and explains that a reference is required; receipt upload alone is not treated as durable payment evidence | Automated + browser |
 | AUTH-07 | Active subscriber submits renewal | Pending request appears in administrator request queue | Browser check with test account |
 | AUTH-08 | Administrator approves renewal | Existing account is updated; expiry is extended from the later of now/current expiry; data remains associated with same user | Database before/after + browser |
 | AUTH-09 | Administrator declines renewal | Access is not extended and request status is Declined | Database + browser |
