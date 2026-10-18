@@ -1984,9 +1984,23 @@ def render_module(module: str, tier: str, username: str):
             st.caption("Role matrix preview only. Editing this display does not change authorization policy. Enforced access checks are server-side and separately tested.")
             st.dataframe(role,use_container_width=True,hide_index=True)
         with tabs[2]:
-            with sqlite3.connect("enterprise_full_workspace.db") as c: audit=pd.read_sql("SELECT * FROM security_events ORDER BY id DESC LIMIT 200",c)
-            st.dataframe(audit,use_container_width=True,hide_index=True)
-            render_export_bar(module,[("Roles",role),("Security Events",audit)],tier,username)
+            audit_workspace=str(
+                st.session_state.get("shoir_workspace_name")
+                or st.session_state.get("workspace")
+                or st.session_state.get("active_workspace_name")
+                or "default"
+            )
+            try:
+                from shoir_enterprise_layer import enforce_action_gate
+                enforce_action_gate(username,"view_audit_log",audit_workspace)
+            except Exception as exc:
+                st.error(f"Security audit access denied: {type(exc).__name__}: {exc}")
+                st.info("The security event log is restricted to authenticated administrators. This denial is independent of subscription tier.")
+            else:
+                with sqlite3.connect("enterprise_full_workspace.db") as c:
+                    audit=pd.read_sql("SELECT * FROM security_events ORDER BY id DESC LIMIT 200",c)
+                st.dataframe(audit,use_container_width=True,hide_index=True)
+                render_export_bar(module,[("Roles",role),("Security Events",audit)],tier,username)
     else:
         render_experience_shell(module, tier, username)
         render_blank_module_studio(module, tier, username)
