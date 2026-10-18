@@ -5,8 +5,6 @@ owner-scoped persistence in shoir_capacity_recovery.py.
 """
 from __future__ import annotations
 
-import io
-
 import pandas as pd
 import plotly.express as px
 
@@ -22,10 +20,10 @@ def render_capacity_recovery_workspace(tier="Enterprise", username="unknown"):
         load_capacity_study,
         map_imported_station_data,
         record_capacity_outcome,
+        read_station_upload,
         save_capacity_study,
         starter_station_table,
     )
-    import io
 
     st.subheader("Production Bottleneck & Capacity Recovery Study")
     st.caption(
@@ -95,34 +93,16 @@ def render_capacity_recovery_workspace(tier="Enterprise", username="unknown"):
         )
         imported_frame = None
         if upload is not None:
-            payload = upload.getvalue()
-            if len(payload) > 10 * 1024 * 1024:
-                st.error("This upload exceeds the 10 MiB limit. Reduce the file size and try again.")
-            else:
-                try:
-                    if upload.name.casefold().endswith(".csv"):
-                        imported_frame = pd.read_csv(io.BytesIO(payload), nrows=1001)
-                    else:
-                        imported_frame = pd.read_excel(io.BytesIO(payload), sheet_name=0, nrows=1001)
-                    if imported_frame.empty:
-                        st.error("The first worksheet contains no data rows.")
-                        imported_frame = None
-                    elif len(imported_frame) > 1000:
-                        st.error("The imported table exceeds the 1,000-row limit.")
-                        imported_frame = None
-                    else:
-                        imported_frame.columns = [str(column).strip() for column in imported_frame.columns]
-                        if any(not column for column in imported_frame.columns):
-                            st.error("Every imported column needs a non-empty header.")
-                            imported_frame = None
-                        elif pd.Index(imported_frame.columns).duplicated().any():
-                            st.error("Column names are duplicated after normalization. Rename them before mapping.")
-                            imported_frame = None
-                        else:
-                            st.dataframe(imported_frame.head(20), use_container_width=True, hide_index=True)
-                except Exception as exc:
-                    imported_frame = None
-                    st.error(f"Import failed safely: {type(exc).__name__}: {exc}")
+            try:
+                imported_frame = read_station_upload(upload.getvalue(), upload.name)
+                st.dataframe(imported_frame.head(20), use_container_width=True, hide_index=True)
+                st.caption(
+                    f"Validated {len(imported_frame):,} rows × {len(imported_frame.columns):,} columns. "
+                    "Mapping and engineering-value validation are applied before data enters the study."
+                )
+            except Exception as exc:
+                imported_frame = None
+                st.error(f"Import failed safely: {type(exc).__name__}: {exc}")
 
         if imported_frame is not None:
             source_options = ["— choose a column —"] + list(imported_frame.columns)
