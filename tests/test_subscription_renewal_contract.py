@@ -108,6 +108,8 @@ def test_payment_proofs_are_private_and_server_reviewed():
 
 def test_admin_receipt_ui_handles_pdf_and_private_storage():
     assert 'edge_admin_payment_proof_url(' in APP_SOURCE
+    assert 'except ImportError:' in APP_SOURCE
+    assert 'Private receipt preview is not available in this deployment version.' in APP_SOURCE
     assert 'st.link_button("Open private payment receipt (expires in 5 minutes)"' in APP_SOURCE
     assert 'Download payment receipt' in APP_SOURCE
     assert '_encode_renewal_proof' in APP_SOURCE
