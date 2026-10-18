@@ -1388,6 +1388,11 @@ if st.session_state.get("renewal_mode") and not st.session_state.get("current_us
 
 if not st.session_state.get("current_user"):
     st.title("🔐 Welcome to Shoir-IE Workspace")
+    if st.session_state.pop("subscription_expired_notice", False):
+        st.warning(
+            "Your 30-day subscription has expired. Sign in using the same account to open its renewal page. "
+            "Your existing account, profile and saved workspace are preserved."
+        )
     st.markdown("Please sign in with your approved account or register and submit your payment ticket below.")
     auth_tab1, auth_tab2, auth_tab3 = st.tabs(["🔑 Sign In", "📝 Get Ticket & Register", "🧭 Explore the Modules"])
 
