@@ -1322,8 +1322,8 @@ if st.session_state.get("renewal_mode") and not st.session_state.get("current_us
         _renew_receipt = st.file_uploader("Payment receipt (PNG, JPG, JPEG or PDF)", type=["png", "jpg", "jpeg", "pdf"], key="expired_renewal_receipt")
         _renew_submit = st.form_submit_button("Submit renewal request", type="primary")
     if _renew_submit:
-        if not str(_renew_reference or "").strip() and _renew_receipt is None:
-            st.warning("Provide a transaction reference or upload your payment receipt before submitting.")
+        if not str(_renew_reference or "").strip():
+            st.warning("Enter the payment transaction/reference. The uploaded receipt is supplementary; the reference is retained with the renewal request for durable review.")
         else:
             _receipt_path = None
             if _renew_receipt is not None:
@@ -2359,8 +2359,8 @@ if str(st.session_state.get("current_user", "")).strip().lower() != "sho":
             )
             _active_renew_submit = st.form_submit_button("Request renewal review", type="primary")
         if _active_renew_submit:
-            if not str(_active_renew_reference or "").strip() and _active_renew_receipt is None:
-                st.warning("Provide a transaction reference or upload a payment receipt before submitting.")
+            if not str(_active_renew_reference or "").strip():
+                st.warning("Enter the payment transaction/reference. The uploaded receipt is supplementary; the reference is retained with the renewal request for durable review.")
             else:
                 _active_receipt_path = None
                 if _active_renew_receipt is not None:
@@ -11739,9 +11739,19 @@ if mod == "Admin Panel":
                         st.write(f"**Tier Requested:** {row['tier']}")
                         st.write(f"**Payment Method:** {row['payment_method']}")
                         st.write(f"**Submitted At:** {row['timestamp']}")
+                        _request_reference = str(row.get("transaction_id") or "").strip()
+                        st.write("**Transaction / Payment Reference:**")
+                        if _request_reference:
+                            st.code(_request_reference)
+                        else:
+                            st.warning("No transaction reference was recorded. Verify durable payment evidence before approval.")
                         
                         if row['screenshot_path'] and os.path.exists(row['screenshot_path']):
                             st.image(row['screenshot_path'], caption="Uploaded Payment Proof", width=250)
+                        elif row['screenshot_path'] and str(row['screenshot_path']).startswith(("https://", "http://")):
+                            st.image(row['screenshot_path'], caption="Uploaded Payment Proof", width=250)
+                        elif _request_reference:
+                            st.info("Receipt file is not available in this runtime; use the transaction reference above for manual verification.")
                         else:
                             st.warning("Payment screenshot file not found on disk.")
                     
