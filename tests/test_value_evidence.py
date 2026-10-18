@@ -126,7 +126,7 @@ def test_existing_legacy_financial_table_is_migrated_without_breaking_snapshots(
         "annual_time_value": 1000.0,
         "currency": "SAR",
     }
-    snapshot_id = record_time_snapshot("alice", "Migrated study", "Test task", values, "measured time-study reference")
+    snapshot_id = record_time_snapshot("alice", "Migrated study", "Test task", values, "measured time-study reference", db_path=db)
     assert record["bridge_sha256"]
     assert snapshot_id.startswith("VE-")
     with sqlite3.connect(db) as conn:
