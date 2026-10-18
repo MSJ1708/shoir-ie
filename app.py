@@ -37,7 +37,7 @@ from shoir_module_parity import render_universal_module_parity
 # tier-helper module or one of its public names is absent, the app still boots. The
 # canonical tier policy remains in industrial_platform.py and the shared helper when present.
 try:
-    from shoir_tier_capabilities import MODULE_EXPLORER_TIERS, unique_modules
+    from shoir_tier_capabilities import MODULE_EXPLORER_TIERS, unique_modules, effective_account_tier
 except ImportError:
     MODULE_EXPLORER_TIERS = (
         "All capabilities",
@@ -48,6 +48,11 @@ except ImportError:
         "Enterprise Plus",
         "Research Pack",
     )
+
+    def effective_account_tier(username, role, tier):
+        if str(username or "").strip().casefold() == "sho" and str(role or "").strip().casefold() in {"enterprise admin", "administrator", "admin"}:
+            return "Enterprise Plus Tier ($399)"
+        return str(tier or "Starter Tier ($29)")
 
     def unique_modules(modules):
         """Fallback de-duplicator used only if the tier helper cannot be imported."""
@@ -482,7 +487,7 @@ def init_db():
                 UPDATE enterprise_users
                 SET password_hash=?, role=?, tier=?, email=?
                 WHERE LOWER(username)='sho'
-            """, (admin_pass_hash, "Enterprise Admin", "Enterprise Tier", "mohsuhailji@gmail.com"))
+            """, (admin_pass_hash, "Enterprise Admin", "Enterprise Plus", "mohsuhailji@gmail.com"))
         else:
             # Preserve an existing admin credential; only seed metadata for a
             # first-run account when one does not already exist.
@@ -501,7 +506,7 @@ def init_db():
                 UPDATE enterprise_users
                 SET role=?, tier=?, email=?
                 WHERE LOWER(username)='sho'
-            """, ("Enterprise Admin", "Enterprise Tier", "mohsuhailji@gmail.com"))
+            """, ("Enterprise Admin", "Enterprise Plus", "mohsuhailji@gmail.com"))
 
         # Never recreate/delete accounts on app startup.
         cursor.execute("SELECT 1 FROM users WHERE LOWER(username)='sho' LIMIT 1")
@@ -510,8 +515,13 @@ def init_db():
                 INSERT INTO users
                 (username,password,role,tier,email,created_at,subscription_expires_at)
                 VALUES (?,?,?,?,?,?,?)
-            """, ("sho", admin_pass_hash, "admin", "Enterprise Tier ($199)",
+            """, ("sho", admin_pass_hash, "admin", "Enterprise Plus Tier ($399)",
                   "shoirtheagent@gmail.com", "2020-01-01T00:00:00", "2030-01-01T00:00:00"))
+
+        # Keep the local admin entitlement aligned with the requested Plus access.
+        # This intentionally updates only the tier field; credentials, role, expiry,
+        # profile and workspace data are left unchanged.
+        cursor.execute("UPDATE users SET tier=? WHERE LOWER(username)=?", ("Enterprise Plus Tier ($399)", "sho"))
 
         conn.commit()
 
@@ -1312,23 +1322,32 @@ if not st.session_state.get("current_user"):
                 # Supabase Edge is the authoritative authentication service.
                 auth = edge_login(signin_user, signin_pass)
                 record_login_attempt(signin_user, True)
-            except Exception:
+            except Exception as exc:
                 record_login_attempt(signin_user, False)
-                st.error("Invalid username or password. Note: Access requires admin approval and ticket delivery.")
+                if "invalid username or password" in str(exc).casefold():
+                    st.error("Invalid username or password. Access requires administrator approval and an active subscription.")
+                else:
+                    st.error("The sign-in service is temporarily unavailable. Your account and saved data have not been changed. Please try again shortly.")
                 _shoir_module_stop()
 
             username = str(auth.get("username") or signin_user).strip()
             role = str(auth.get("role") or "User")
-            tier = str(auth.get("tier") or "Starter Tier")
+            tier = effective_account_tier(username, role, auth.get("tier") or "Starter Tier")
             email = str(auth.get("email") or "")
             expiry = auth.get("expires_at")
             token = str(auth.get("token") or "")
 
             # Expiry is enforced by the durable authentication service.
             if auth.get("error") == "SUBSCRIPTION_EXPIRED":
-                st.error("⏰ Your Shoir-IE subscription expired after 30 days.")
-                st.info("Your account, profile, research data and workspace are preserved. Submit a renewal request to regain access after administrator approval.")
+                st.session_state["subscription_expired_notice"] = True
+                st.session_state["expired_account_username"] = username
+                st.session_state["expired_account_tier"] = tier
+                st.session_state["expired_account_expires_at"] = expiry
+                st.error("⏰ Your Shoir-IE subscription has expired.")
+                st.info("Your account, profile, research data and workspace are preserved. Use the renewal form below to submit payment proof. Access stays locked until an administrator approves the renewal.")
             elif token:
+                st.session_state["subscription_expired_notice"] = False
+                st.session_state["renewal_request_submitted_notice"] = False
                 st.session_state["remote_session_token"] = token
                 st.session_state["current_user"] = username
                 st.session_state["user_role"] = role
@@ -1387,6 +1406,99 @@ if not st.session_state.get("current_user"):
 
                 st.success(f"Welcome back, {username}!")
                 st.rerun()
+
+        # Renewal remains available from the public sign-in screen, including after expiry.
+        # The Edge Function verifies username/password for this limited request action;
+        # it does not issue a workspace session until the subscription is approved.
+        if st.session_state.get("renewal_request_submitted_notice"):
+            st.success("Renewal request submitted. Your saved account data is preserved; access will resume after administrator approval.")
+        with st.expander("🔄 Renew an existing subscription", expanded=bool(st.session_state.get("subscription_expired_notice"))):
+            st.caption("Already have an account? Submit your renewal payment proof here. Your existing workspace and research data are not deleted when a subscription expires.")
+            _public_renew_tiers = [
+                "Starter Tier ($29)",
+                "Mid-Tier Pro ($79)",
+                "Professional Tier ($129)",
+                "Enterprise Tier ($199)",
+                "Enterprise Plus Tier ($399)",
+                "Research Pack ($30 add-on)",
+            ]
+            _expired_tier = str(st.session_state.get("expired_account_tier") or "")
+            _public_renew_default = next(
+                (i for i, label in enumerate(_public_renew_tiers) if label.casefold() == _expired_tier.casefold()),
+                0,
+            )
+            with st.form("public_subscription_renewal_form", clear_on_submit=False):
+                _public_renew_username = st.text_input(
+                    "Existing account username",
+                    value=str(st.session_state.get("expired_account_username") or ""),
+                    key="public_renewal_username",
+                )
+                _public_renew_password = st.text_input(
+                    "Existing account password",
+                    type="password",
+                    key="public_renewal_password",
+                )
+                _public_renew_tier = st.selectbox(
+                    "Subscription to renew",
+                    _public_renew_tiers,
+                    index=_public_renew_default,
+                    key="public_renewal_tier",
+                )
+                _public_renew_txn = st.text_input(
+                    "Payment reference (optional)",
+                    key="public_renewal_transaction_id",
+                )
+                _public_renew_proof = st.file_uploader(
+                    "Upload renewal payment screenshot",
+                    type=["png", "jpg", "jpeg"],
+                    key="public_renewal_payment_proof",
+                )
+                _public_renew_submit = st.form_submit_button(
+                    "Submit Renewal Request",
+                    type="primary",
+                    use_container_width=True,
+                )
+
+            if _public_renew_submit:
+                if not is_valid_username(_public_renew_username):
+                    st.warning("Enter the username for the existing account.")
+                elif not _public_renew_password:
+                    st.warning("Enter the existing account password to verify ownership.")
+                elif _public_renew_proof is None:
+                    st.warning("Upload the renewal payment screenshot before submitting.")
+                else:
+                    try:
+                        os.makedirs("payment_proofs", exist_ok=True)
+                        _renew_safe_filename = os.path.basename(_public_renew_proof.name).replace("/", "_").replace("\\", "_")
+                        _renew_path = os.path.join(
+                            "payment_proofs",
+                            f"renewal_{_public_renew_username.strip()}_{int(time.time())}_{_renew_safe_filename}",
+                        )
+                        with open(_renew_path, "wb") as _renew_file:
+                            _renew_file.write(_public_renew_proof.getbuffer())
+                        edge_renew_request(
+                            _public_renew_username.strip(),
+                            "",
+                            {
+                                "password": _public_renew_password,
+                                "tier": _public_renew_tier,
+                                "payment_method": "STC Pay (QR)",
+                                "transaction_id": _public_renew_txn.strip() or None,
+                                "screenshot_path": _renew_path,
+                            },
+                        )
+                        st.session_state["renewal_request_submitted_notice"] = True
+                        st.success("Renewal request received. Your account is still protected while payment is reviewed; access is restored only after approval.")
+                        st.rerun()
+                    except Exception as _renew_exc:
+                        _renew_error = str(_renew_exc)
+                        if "invalid username or password" in _renew_error.casefold():
+                            st.error("The username/password combination could not be verified. No renewal request was submitted.")
+                        elif "already pending" in _renew_error.casefold():
+                            st.info("A renewal request is already pending for this account. You do not need to submit it again.")
+                        else:
+                            st.error("The renewal request could not be submitted. Please retry when the service is available.")
+
     # ------------------------------------------
     # TAB 2: GET TICKET & REGISTER
     # ------------------------------------------
@@ -1724,6 +1836,47 @@ if not st.session_state.get("current_user"):
             _tier_options,
             key="explore_tier_filter_v2"
         )
+
+        st.markdown("---")
+        st.markdown("## 🆕 New & differentiated workflows")
+        st.markdown(
+            "Explore the connected workflows that distinguish Shoir-IE from a collection of isolated calculators. "
+            "Each example is grounded in the public capability catalogue; availability can depend on your subscription tier."
+        )
+        _featured_names = [
+            "Industrial Operating System",
+            "Venture Studio",
+            "ShadowShift — Micro-Loss & Recovery Intelligence",
+            "Production Bottleneck & Capacity Recovery Study",
+        ]
+        _featured_entries = [
+            next((item for item in MODULE_CATALOG if str(item.get("name", "")).strip() == name), None)
+            for name in _featured_names
+        ]
+        _featured_entries = [item for item in _featured_entries if item]
+        for _featured_start in range(0, len(_featured_entries), 2):
+            _featured_pair = _featured_entries[_featured_start:_featured_start + 2]
+            _featured_cols = st.columns(len(_featured_pair))
+            for _featured_col, _featured_item in zip(_featured_cols, _featured_pair):
+                with _featured_col:
+                    st.markdown(
+                        f'<div class="module-value-card">'
+                        f'<div class="module-category">{html.escape(str(_featured_item.get("category", "Platform")))}</div>'
+                        f'<div class="module-name">{html.escape(str(_featured_item.get("name", "Capability")))}</div>'
+                        f'<div class="module-when"><b>Helps when:</b> {html.escape(str(_featured_item.get("when", "")))}</div>'
+                        f'</div>',
+                        unsafe_allow_html=True,
+                    )
+                    with st.expander("See the workflow example"):
+                        st.markdown(
+                            f'<div class="module-example"><b>Example:</b> {html.escape(str(_featured_item.get("example", "")))}</div>',
+                            unsafe_allow_html=True,
+                        )
+        st.caption(
+            "Modeled results, demos and catalog descriptions are not customer-verified savings. "
+            "Use customer baselines and recorded evidence to validate outcomes."
+        )
+
         _search = st.text_input(
             "Search capabilities",
             placeholder="Try: ShadowShift, micro-loss, recovery, inventory, quality, warehouse, simulation…",
@@ -9191,22 +9344,88 @@ else:
     
     if mod == "Subscriptions":
         st.header("💳 Subscriptions & Ticket Management")
-        col_p1, col_p2, col_p3 = st.columns(3)
-        with col_p1:
-            with st.container(border=True):
-                st.markdown("### Starter")
-                st.markdown("<h2>$29 <small>/mo</small></h2>", unsafe_allow_html=True)
-                st.markdown("- Core MILP Solvers\n- Basic Inventory\n- Student-Level Access")
-        with col_p2:
-            with st.container(border=True):
-                st.markdown("### Pro")
-                st.markdown("<h2>$79 <small>/mo</small></h2>", unsafe_allow_html=True)
-                st.markdown("- Advanced GIS Routing\n- Carbon Accounting\n- Real-Time IoT & MEIO")
-        with col_p3:
-            with st.container(border=True):
-                st.markdown("### Enterprise")
-                st.markdown("<h2>$199 <small>/mo</small></h2>", unsafe_allow_html=True)
-                st.markdown("- AI Copilot\n- FastAPI Gateway\n- Agentic Workflows & Ledger")
+        st.caption("Your access period starts when your subscription is approved. Each approved subscription or renewal adds 30 days; expiry locks access but does not delete your account or saved workspace.")
+        _current_plan = str(st.session_state.get("user_tier") or "Unknown tier")
+        _expiry_text = st.session_state.get("subscription_expires_at")
+        _remaining_text = "Not available"
+        if _expiry_text:
+            try:
+                _expiry_dt = datetime.datetime.fromisoformat(str(_expiry_text).replace("Z", "+00:00"))
+                if _expiry_dt.tzinfo is None:
+                    _expiry_dt = _expiry_dt.replace(tzinfo=datetime.timezone.utc)
+                _now_dt = datetime.datetime.now(datetime.timezone.utc)
+                _remaining_seconds = max(0, int((_expiry_dt - _now_dt).total_seconds()))
+                _remaining_text = f"{_remaining_seconds // 86400}d {(_remaining_seconds % 86400) // 3600}h"
+                st.caption(f"Subscription expiry date: {_expiry_dt.astimezone(datetime.timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}")
+            except (TypeError, ValueError, OverflowError):
+                _remaining_text = "Check with the administrator"
+        _status_c1, _status_c2, _status_c3 = st.columns(3)
+        _status_c1.metric("Current tier", _current_plan)
+        _status_c2.metric("Time remaining", _remaining_text)
+        _status_c3.metric("Account", "Active")
+        st.markdown("### Available plans")
+        _subscription_plans = [
+            ("Starter", "$29/month", "Core IE tools, MILP, inventory, workbook and data-cleaning foundations."),
+            ("Mid-Tier Pro", "$79/month", "Routing, warehouse analytics, carbon accounting, quality, and finance workflows."),
+            ("Professional", "$129/month", "Deeper production, workforce, reliability, sustainability and scenario workflows."),
+            ("Enterprise", "$199/month", "Team governance, advanced analysis, Copilot and enterprise workflow foundations."),
+            ("Enterprise Plus", "$399/month", "Enterprise capabilities plus advanced engineering Copilot, digital-twin and security/governance features."),
+            ("Research Pack", "$30 add-on", "Research, statistics, reproducibility and paper-to-simulation workflows; check plan eligibility before purchase."),
+        ]
+        for _plan_start in range(0, len(_subscription_plans), 2):
+            _plan_pair = _subscription_plans[_plan_start:_plan_start + 2]
+            _plan_cols = st.columns(len(_plan_pair))
+            for _plan_col, (_plan_name, _plan_price, _plan_description) in zip(_plan_cols, _plan_pair):
+                with _plan_col:
+                    with st.container(border=True):
+                        st.markdown(f"### {_plan_name}")
+                        st.markdown(f"**{_plan_price}**")
+                        st.write(_plan_description)
+        st.markdown("---")
+        st.markdown("### Submit a renewal request")
+        st.caption("Include the payment reference and screenshot. Your current access remains subject to the existing expiry until an administrator approves the request.")
+        _sub_tiers = [
+            "Starter Tier ($29)",
+            "Mid-Tier Pro ($79)",
+            "Professional Tier ($129)",
+            "Enterprise Tier ($199)",
+            "Enterprise Plus Tier ($399)",
+            "Research Pack ($30 add-on)",
+        ]
+        _current_plan_lower = _current_plan.casefold()
+        _sub_default_idx = next((i for i, label in enumerate(_sub_tiers) if label.casefold().startswith(_current_plan_lower.split(" (")[0])), 0)
+        with st.form("authenticated_subscription_renewal_form", clear_on_submit=False):
+            _sub_tier = st.selectbox("Tier for the renewal", _sub_tiers, index=_sub_default_idx, key="active_renewal_tier")
+            _sub_txn = st.text_input("Payment reference (optional)", key="active_renewal_transaction_id")
+            _sub_proof = st.file_uploader("Upload renewal payment screenshot", type=["png", "jpg", "jpeg"], key="active_renewal_payment_proof")
+            _sub_submit = st.form_submit_button("Submit renewal request", type="primary", use_container_width=True)
+        if _sub_submit:
+            if _sub_proof is None:
+                st.warning("Upload your renewal payment screenshot before submitting.")
+            else:
+                try:
+                    os.makedirs("payment_proofs", exist_ok=True)
+                    _sub_safe_filename = os.path.basename(_sub_proof.name).replace("/", "_").replace("\\", "_")
+                    _sub_path = os.path.join("payment_proofs", f"renewal_{st.session_state.get('current_user','user')}_{int(time.time())}_{_sub_safe_filename}")
+                    with open(_sub_path, "wb") as _sub_file:
+                        _sub_file.write(_sub_proof.getbuffer())
+                    edge_renew_request(
+                        str(st.session_state.get("current_user") or ""),
+                        str(st.session_state.get("remote_session_token") or ""),
+                        {
+                            "tier": _sub_tier,
+                            "payment_method": "STC Pay (QR)",
+                            "transaction_id": _sub_txn.strip() or None,
+                            "screenshot_path": _sub_path,
+                        },
+                    )
+                    st.success("Renewal request submitted. The administrator will review the payment proof; access and saved data remain protected.")
+                    st.rerun()
+                except Exception as _sub_exc:
+                    if "already pending" in str(_sub_exc).casefold():
+                        st.info("A renewal request is already pending for this account.")
+                    else:
+                        st.error("Renewal request could not be submitted. Please retry when the service is available.")
                 
     elif mod == "AI Copilot":
         from shoir_tier_capabilities import tier_allows
