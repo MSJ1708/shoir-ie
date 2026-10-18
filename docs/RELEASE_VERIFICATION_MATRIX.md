@@ -13,7 +13,7 @@ This matrix is the release gate for the subscription renewal, account, module, i
 
 ## Current verification record — 2026-10-18
 
-This record combines automated and public-browser evidence from the merged subscription/documentation work plus follow-up private-payment-proof hardening. The live backend facts below were queried directly on 2026-10-18; current source/CI evidence should always be matched to the commit SHA shown by the linked workflow run.
+This record combines the automated and public-browser evidence from merged subscription, private-payment-proof and expiry changes. The final public smoke passed on merge commit `3215db267e532533f7a7fc48fee8c5dcd8bbdf42`; live backend facts below were queried directly on 2026-10-18.
 
 | Area | Current status | Evidence / boundary |
 |---|---|---|
