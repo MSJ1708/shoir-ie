@@ -63,7 +63,20 @@ except ImportError:
 from shoir_copilot_orchestrator import build_workflow_plan, recommend_module, run_orchestration, stage_copilot_decision
 from shoir_digital_thread import render_global_project_digital_thread
 from shoir_enterprise_services import render_enterprise_bridge
-from durable_account_store import (durable_backend_configured, sync_durable_accounts, sync_remote_requests_to_local, edge_login, edge_admin_list_requests, edge_renew_request, edge_admin_payment_proof_url, upsert_remote_account, insert_remote_request, remote_account, account_is_expired, renewed_expiry)
+from durable_account_store import (durable_backend_configured, sync_durable_accounts, sync_remote_requests_to_local, edge_login, edge_admin_list_requests, edge_renew_request, upsert_remote_account, insert_remote_request, remote_account, account_is_expired, renewed_expiry)
+
+# Compatibility guard: a hosted deployment can briefly have a newer app.py than
+# its supporting module during a rolling rebuild. Keep a receipt-preview import
+# mismatch from taking down the entire login page; the admin UI reports an
+# actionable message when signed-link support is unavailable.
+try:
+    from durable_account_store import edge_admin_payment_proof_url
+except ImportError:
+    def edge_admin_payment_proof_url(username: str, token: str, screenshot_path: str) -> dict:
+        raise RuntimeError(
+            "Private receipt preview is not available in this deployment version. "
+            "Refresh/redeploy the app before reviewing stored payment proofs."
+        )
 from shoir_enterprise_layer import (
     ensure_enterprise_schema, save_twin_snapshot, load_twin_state, save_twin_scenario,
     list_twin_scenarios, twin_what_if, twin_replay, build_control_tower_health,
@@ -2332,6 +2345,26 @@ if str(st.session_state.get("current_user", "")).strip().lower() != "sho":
             if _sidebar_expiry.tzinfo is None:
                 _sidebar_expiry = _sidebar_expiry.replace(tzinfo=datetime.timezone.utc)
             _sidebar_remaining = max(0.0, (_sidebar_expiry - datetime.datetime.now(datetime.timezone.utc)).total_seconds())
+            if (
+                _sidebar_remaining <= 0
+                and st.session_state.get("authenticated")
+                and st.session_state.get("current_user")
+            ):
+                # A fragment refresh is independent of the main script. Force a
+                # full rerun at expiry so cached workspace content is not left
+                # visible merely because the user has not clicked anything.
+                _expired_user = str(st.session_state.get("current_user", ""))
+                try:
+                    save_user_workspace(_expired_user, st.session_state)
+                except Exception:
+                    pass
+                for _expiry_key in list(st.session_state.keys()):
+                    try:
+                        del st.session_state[_expiry_key]
+                    except Exception:
+                        pass
+                st.session_state["subscription_expired_notice"] = True
+                st.rerun()
             st.caption(
                 f"⏳ Subscription: {int(_sidebar_remaining // 86400)}d "
                 f"{int((_sidebar_remaining % 86400) // 3600)}h remaining"

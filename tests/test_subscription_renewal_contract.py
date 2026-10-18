@@ -52,6 +52,9 @@ def test_visible_subscription_countdown_and_renewal_controls_exist():
     assert 'Time remaining' in APP_SOURCE
     assert 'Subscription: ' in APP_SOURCE
     assert '@st.fragment(run_every="60s")' in APP_SOURCE
+    assert '_sidebar_remaining <= 0' in APP_SOURCE
+    assert 'save_user_workspace(_expired_user, st.session_state)' in APP_SOURCE
+    assert 'st.session_state["subscription_expired_notice"] = True' in APP_SOURCE
     assert 'active_subscription_renewal_form' in APP_SOURCE
     assert 'Payment method: STC Pay QR' in APP_SOURCE
     assert '_active_renew_qr = Image.open("stc_pay_qr.png")' in APP_SOURCE
@@ -105,6 +108,8 @@ def test_payment_proofs_are_private_and_server_reviewed():
 
 def test_admin_receipt_ui_handles_pdf_and_private_storage():
     assert 'edge_admin_payment_proof_url(' in APP_SOURCE
+    assert 'except ImportError:' in APP_SOURCE
+    assert 'Private receipt preview is not available in this deployment version.' in APP_SOURCE
     assert 'st.link_button("Open private payment receipt (expires in 5 minutes)"' in APP_SOURCE
     assert 'Download payment receipt' in APP_SOURCE
     assert '_encode_renewal_proof' in APP_SOURCE
