@@ -167,7 +167,7 @@ def test_versioned_migration_history_replays_from_clean_local_postgres():
             rows = _fetchone(
                 target,
                 """
-                SELECT array_agg(table_name ORDER BY table_name)
+                SELECT array_agg(table_name::text ORDER BY table_name)
                 FROM information_schema.tables
                 WHERE table_schema='public' AND table_type='BASE TABLE';
                 """,
@@ -186,7 +186,7 @@ def test_versioned_migration_history_replays_from_clean_local_postgres():
                 columns = _fetchone(
                     target,
                     """
-                    SELECT array_agg(column_name ORDER BY column_name)
+                    SELECT array_agg(column_name::text ORDER BY column_name)
                     FROM information_schema.columns
                     WHERE table_schema='public' AND table_name=%s;
                     """,
