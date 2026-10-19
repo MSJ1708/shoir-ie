@@ -2084,6 +2084,38 @@ if _current_username.casefold() == "sho" and not _current_role:
     except Exception:
         is_admin = False
 
+# Show paid customers a concise countdown based on the server-issued expiry.
+# The canonical admin account is deliberately excluded from customer renewal timing.
+if (
+    st.session_state.get("authenticated")
+    and _current_username
+    and _current_username.casefold() != "sho"
+    and _current_username.casefold() != "guest visitor"
+    and not is_admin
+):
+    _expiry_value = st.session_state.get("subscription_expires_at")
+    if _expiry_value:
+        try:
+            _expiry_dt = datetime.datetime.fromisoformat(str(_expiry_value).replace("Z", "+00:00"))
+            if _expiry_dt.tzinfo is None:
+                _expiry_dt = _expiry_dt.replace(tzinfo=datetime.timezone.utc)
+            _expiry_dt = _expiry_dt.astimezone(datetime.timezone.utc)
+            _remaining_seconds = max(
+                0,
+                int((_expiry_dt - datetime.datetime.now(datetime.timezone.utc)).total_seconds()),
+            )
+            _remaining_days = math.ceil(_remaining_seconds / 86400) if _remaining_seconds else 0
+            st.sidebar.markdown("---")
+            st.sidebar.caption("SUBSCRIPTION COUNTDOWN")
+            st.sidebar.markdown(f"**{_remaining_days} day(s) remaining**")
+            st.sidebar.caption(f"Expires {_expiry_dt.strftime('%d %b %Y, %H:%M UTC')}")
+            st.sidebar.caption("Calculated from the subscription expiry timestamp; refreshes with app activity.")
+            if _remaining_days <= 5:
+                st.sidebar.warning("Renewal is approaching. Prepare your payment reference before access expires.")
+        except (TypeError, ValueError, OverflowError):
+            # Authentication continues normally if an older account has no parseable timestamp.
+            pass
+
 
 tier1_features = ["MILP Solvers", "Inventory Playback", "Core IE Tools", "Subscriptions", "Persistence", "Facility Layout & Warehousing", "Enterprise Integration & Collaboration", "Engineering Validation Center", "Excel Data Cleaning & Import", "Industrial Workbook", "AI Copilot", "Venture Studio"]
 tier2_features = tier1_features + ["Carbon Accounting", "IoT Digital Twin", "MEIO Matrix", "Slotting & Gantt", "Fleet Routing", "Warehouse Heatmap", "Supplier Risk Matrix", "Scenarios", "AGV Fleet Dispatcher", "Geospatial Network Designer", "Production Planning & Control (PPC)", "Production Bottleneck & Capacity Recovery Study", "Lean Manufacturing & Shop Floor Operations", "Quality Control, Six Sigma & Reliability", "Engineering Economics & Finance", "Industrial Data Model & Digital Thread", "Scenario Versioning & Comparison", "Localization & Multi-Currency"]
