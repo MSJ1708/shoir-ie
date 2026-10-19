@@ -486,7 +486,9 @@ Deno.serve(async (req) => {
             `storage://${PAYMENT_PROOF_BUCKET}/`,
             "",
           );
-          await supabase.storage.from(PAYMENT_PROOF_BUCKET).remove([objectPath]);
+          await supabase.storage.from(PAYMENT_PROOF_BUCKET).remove([
+            objectPath,
+          ]);
         }
         if (error.code === "P0002") {
           return response({
@@ -510,7 +512,9 @@ Deno.serve(async (req) => {
             `storage://${PAYMENT_PROOF_BUCKET}/`,
             "",
           );
-          await supabase.storage.from(PAYMENT_PROOF_BUCKET).remove([objectPath]);
+          await supabase.storage.from(PAYMENT_PROOF_BUCKET).remove([
+            objectPath,
+          ]);
         }
         throw new Error(
           "Registration request could not be confirmed by the persistence service.",
