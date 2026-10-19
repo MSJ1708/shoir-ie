@@ -101,3 +101,21 @@ Before any production rollout, the authorized owner must make an isolated stagin
 **The current candidate is not workforce-ready for the defined scope.** Compilation, regression, engine checks, dependency scanning and local desktop/mobile runtime smoke passed in the listed CI runs. However, the production persistence Edge Function is behind the current source contract, its required atomic-decision migration is absent from production migration history, no staging branch is available for replay, the hosted smoke was skipped on the latest recorded post-merge validation, and authenticated workforce/module acceptance remains unverified.
 
 No protected administrator or customer record was modified during this assessment. No production migration, Edge Function deployment, paid staging resource or production rollout was initiated.
+
+
+## Supplemental connected-environment inspection — 2026-10-19
+
+This supplement records an additional read-only inspection performed after the earlier report text was written. It does not replace the original evidence rows or change the NO-GO decision.
+
+- Production `shoir-persistence`: active version 8; the connected Supabase metadata reports fingerprint `410e22f7af0be8f3ec74bae5a15aec70f8b6a807a540e98a2c5143f4e6b8790d`.
+- Staging `shoir-persistence` source was compared with `supabase/functions/shoir-persistence/index.ts` from `main`; the retrieved file contents were identical.
+- Catalog inspection found `shoir_create_registration_request` and `shoir_finalize_subscription_request` in staging and not in production. The production ledger does not contain `20261019140600_atomic_subscription_request_decisions`.
+- Production records login throttling as `20261019124815 server_side_login_rate_limits`; repository source uses `20261019123300_server_side_login_rate_limits.sql`. This is a migration-history discrepancy requiring SQL equivalence review and supported reconciliation or a forward-only corrective migration.
+- The two atomic RPCs inspected in staging report EXECUTE privilege for `service_role` and not for `anon` or `authenticated`.
+- RLS is enabled on the inspected core account/workspace tables. This is not equivalent to a full cross-tenant test across every resource and service action.
+- The direct staging HTTP endpoint could not be reached from the inspection runtime because hostname resolution/network access was unavailable. HTTP acceptance is **BLOCKED / NOT RUN**, not PASS.
+- No production migration or Edge Function deployment was performed during this inspection.
+
+### Immediate next gate
+
+Provision dedicated disposable staging identities through the supported lifecycle and run the existing `Authenticated release gate` workflow against the intended staging app and matching staging Edge Function. Do not configure it with production/customer identities. Review the redacted artifact, repair failures, and rerun before any production rollout.
