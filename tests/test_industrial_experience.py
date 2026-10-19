@@ -3,6 +3,7 @@ import tempfile
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 import industrial_experience as ie
 from industrial_experience import (
@@ -324,3 +325,38 @@ def test_all_named_fallback_modules_run_on_their_starter_data():
         except Exception as exc:
             failures.append(f"{module}: {type(exc).__name__}: {exc}")
     assert not failures, "\\n".join(failures)
+
+
+
+def test_research_protocol_id_cannot_be_overwritten_by_another_owner(monkeypatch):
+    with tempfile.TemporaryDirectory() as td:
+        db = str(Path(td) / "research-owner-boundary.db")
+        monkeypatch.setattr(ie, "_db", lambda path=db: sqlite3.connect(db, timeout=30))
+        ensure_experience_db(db)
+        original = {
+            "title": "Alice's protected study",
+            "objective": "Original owner protocol",
+            "research_question": "Does ownership remain enforced?",
+            "hypothesis": "A different owner cannot overwrite the record.",
+            "null_hypothesis": "A different owner can overwrite the record.",
+            "methodology": "Controlled simulation benchmark",
+            "primary_domain": "Manufacturing",
+            "transfer_domain": "Maintenance",
+            "primary_endpoint": "Normalized decision regret",
+            "sample_size": 20,
+            "replications": 2,
+        }
+        research_id, _ = create_research_protocol("PRJ-OWNER-GUARD", original, "alice")
+
+        attempted = dict(original)
+        attempted["title"] = "Bob's overwrite attempt"
+        attempted["objective"] = "Attempt to replace Alice's record."
+        with pytest.raises(PermissionError):
+            create_research_protocol("PRJ-OWNER-GUARD", attempted, "bob")
+
+        with sqlite3.connect(db) as conn:
+            row = conn.execute(
+                "SELECT research_id,owner,title,objective FROM experience_research_studies WHERE study_id=?",
+                ("PRJ-OWNER-GUARD",),
+            ).fetchone()
+        assert row == (research_id, "alice", "Alice's protected study", "Original owner protocol")
