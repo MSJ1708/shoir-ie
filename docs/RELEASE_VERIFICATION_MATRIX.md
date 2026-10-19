@@ -124,7 +124,7 @@ Test every current catalog item and legacy route that remains reachable, not onl
 
 ## Authentication abuse protection
 
-Server-side login rate limiting is being added in the same reviewed release series. It requires migration `20261019123300_server_side_login_rate_limits.sql` to be applied before deploying the Edge Function revision that calls it. The throttle table and RPC deny `anon`/`authenticated` access and grant the RPC only to `service_role`. Verify this order and the live behavior before marking AUTH-02 complete.
+Read-only production inspection on 2026-10-19 confirmed that active Edge Function v8 calls `shoir_check_login_throttle`; the function denies EXECUTE to `anon` and `authenticated` and grants it to `service_role`. The `shoir_login_throttle` table has RLS enabled and denies SELECT/INSERT/UPDATE/DELETE to both client roles. This verifies deployed permissions, **not** the complete behavioral abuse suite: synthetic account/IP throttling, concurrency, fail-closed behavior, expiry and cleanup still require controlled tests. One migration-history discrepancy remains: production records version `20261019124815` (`server_side_login_rate_limits`), while the repository filename is `20261019123300_server_side_login_rate_limits.sql`. Reconcile this timestamp/source difference before the next migration release.
 
 ## Role, tier and tenant isolation matrix
 
@@ -142,3 +142,17 @@ Server-side login rate limiting is being added in the same reviewed release seri
 For each run, retain commit SHA, CI workflow URL, environment/build, timestamp, account class (never password), scenario, expected outcome, actual outcome, artifact or screenshot reference, and linked issue for each failure. Redact emails, receipts, tokens, personal data and production datasets.
 
 **Definition of done:** every required automated job passes; the hosted browser walkthroughs pass using authorized test accounts; all relevant module, export, persistence, role, tier and security cases have evidence; high-severity findings are resolved; and remaining limitations are explicitly accepted. Do not use “fully verified” when a browser pass or a required matrix row is still blocked.
+
+## Latest deployment evidence — 2026-10-19 14:55 UTC
+
+| Check | Result | Evidence / remaining action |
+|---|---|---|
+| Public hosted entry screen, desktop 1440×1000 | **FAIL** | Actions run [39273186987](https://github.com/MSJ1708/shoir-ie/actions/runs/39273186987), artifact ID 12196580808. HTTP 200, but the Streamlit frame displays the redacted ImportError screen; the application sign-in surface is absent. |
+| Public hosted entry screen, mobile 390×844 | **FAIL** | Same run/artifact; redacted ImportError screen; no app sign-in surface. |
+| Local Streamlit startup and public shell, desktop/mobile | **PASS** | Same run's local runtime smoke artifact 12196146718; top-level import execution and Playwright smoke passed, with no horizontal overflow or fatal app marker. This does not prove the hosted deployment is healthy. |
+| Production Edge Function / migration alignment | **BLOCKED** | The production function is active version 8 (source hash 410e22f7af0be8f3ec74bae5a15aec70f8b6a807a540e98a2c5143f4e6b8790d). Read-only source inspection found the login-throttle RPC call, but not the candidate's registration, account-existence preflight or atomic subscription-decision actions. Production migration history ends at 20261019124815_server_side_login_rate_limits; candidate migration 20261019140600_atomic_subscription_request_decisions.sql is absent. |
+| Master administrator invariant | **PASS — READ ONLY** | Production query returned active Enterprise Admin, Enterprise Plus Tier ($399), expiry 2099-01-01 00:00:00+00. No fields changed. |
+| 96-module browser matrix | **UNVERIFIED** | docs/MODULE_TIER_INVENTORY.csv contains 96 unique modules; all 96 authenticated_browser_status values remain UNVERIFIED. |
+| Candidate registration/atomic decision checks | **AUTOMATED PASS / STAGING NOT RUN** | Candidate PR CI passes at the time of this update, including Deno format/type checks and PostgreSQL transaction-contract integration. The migration remains unapplied to production and must first be checked against an isolated staging schema. |
+
+The Streamlit traceback is private to Streamlit Cloud and is not exposed by its redacted public error page. Close the hosted-startup gate only after the owner inspects **Manage app → runtime logs**, records the actual deployed revision/runtime/dependency versions, fixes the exact exception, and repeats the public desktop/mobile smoke. No authenticated release test is claimed: protected test credentials and dedicated disposable accounts were not supplied to CI.
