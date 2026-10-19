@@ -429,7 +429,10 @@ def edge_register_request(request: Mapping[str, Any]) -> dict[str, Any]:
             raise ValueError("Payment proofs must be 512 KiB or smaller.")
         proof_base64 = base64.b64encode(proof_bytes).decode("ascii")
     else:
-        raise ValueError("A payment proof is required for registration.")
+        # No upload is valid for registration; when either proof field is
+        # supplied, both must be valid (the branch above enforces that).
+        proof_base64 = None
+        proof_content_type = None
 
     return _edge_call("register_request", {
         "username": request["username"],
