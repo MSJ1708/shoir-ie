@@ -50,19 +50,28 @@ def test_master_admin_enterprise_plus_entitlement_contract():
     assert _source_contract_contains(edge_source, 'if(row.username_lc!=="sho"||row.role!=="Enterprise Admin")')
 
 
-def test_renewal_approval_preserves_existing_account_identity_and_renews_expiry():
-    """Protect the old account/workspace instead of creating a replacement account."""
+def test_renewal_approval_is_atomic_and_preserves_existing_account_identity():
+    """The decision transaction preserves existing account identity and rejects processed requests."""
     from pathlib import Path
 
     root = Path(__file__).resolve().parents[1]
     edge_source = (root / "supabase/functions/shoir-persistence/index.ts").read_text(encoding="utf-8")
+    migration = (
+        root / "supabase/migrations/20261019140600_atomic_subscription_request_decisions.sql"
+    ).read_text(encoding="utf-8")
 
-    assert _source_contract_contains(edge_source, 'request.request_type==="Renewal"&&existing?expiry30(existing.subscription_expires_at):expiry30()')
-    assert _source_contract_contains(edge_source, 'const passwordHash=existing?.password_hash||pendingCred?.password_hash;')
-    assert _source_contract_contains(edge_source, 'created_at:existing?.created_at||now')
-    assert _source_contract_contains(edge_source, 'username_lc:request.username_lc')
-    assert _source_contract_contains(edge_source, 'if(action==="renew_request")')
-
+    assert _source_contract_contains(
+        edge_source,
+        'supabase.rpc("shoir_finalize_subscription_request",{p_request_id:request.id,p_decision:"Approved"})',
+    )
+    assert "FOR UPDATE" in migration
+    assert "request_row.status IS DISTINCT FROM 'Pending'" in migration
+    assert "ON CONFLICT (username_lc) DO UPDATE SET" in migration
+    assert "password_hash = current_account.password_hash" in migration
+    assert "role = current_account.role" in migration
+    assert "created_at = current_account.created_at" in migration
+    assert "subscription_expires_at = EXCLUDED.subscription_expires_at" in migration
+    assert "GRANT EXECUTE ON FUNCTION public.shoir_finalize_subscription_request(bigint, text)" in migration
 
 
 def test_remote_research_upsert_rejects_cross_owner_conflict(monkeypatch):
@@ -171,3 +180,51 @@ def test_login_throttle_contract_is_server_only_and_atomic():
     assert 'REVOKE ALL ON TABLE public.shoir_login_throttle FROM anon, authenticated' in migration
     assert 'REVOKE EXECUTE ON FUNCTION public.shoir_check_login_throttle' in migration
     assert 'TO service_role' in migration
+
+
+
+def test_edge_register_request_sends_proof_bytes_not_local_path(tmp_path, monkeypatch):
+    import base64
+
+    receipt = b"fake-test-receipt-bytes"
+    proof_path = tmp_path / "receipt.png"
+    proof_path.write_bytes(receipt)
+    calls = []
+
+    def fake_edge_call(action, payload):
+        calls.append((action, payload))
+        return {"ok": True, "request_id": 123, "status": "Pending"}
+
+    monkeypatch.setattr(das, "_edge_call", fake_edge_call)
+    result = das.edge_register_request({
+        "username": "shoir-e2e-registration",
+        "password": "a-long-test-password",
+        "email": "e2e@example.invalid",
+        "tier": "Starter Tier ($29)",
+        "payment_method": "STC Pay (QR)",
+        "transaction_id": "SYNTHETIC-REFERENCE",
+        "screenshot_path": str(proof_path),
+    })
+
+    assert result["ok"] is True
+    assert calls[0][0] == "register_request"
+    assert calls[0][1]["proof_base64"] == base64.b64encode(receipt).decode("ascii")
+    assert calls[0][1]["proof_content_type"] == "image/png"
+    assert "screenshot_path" not in calls[0][1]
+
+
+def test_edge_register_request_rejects_oversized_payment_proof(tmp_path, monkeypatch):
+    proof_path = tmp_path / "receipt.png"
+    proof_path.write_bytes(b"x" * (512 * 1024 + 1))
+    monkeypatch.setattr(das, "_edge_call", lambda action, payload: (_ for _ in ()).throw(AssertionError("must not call Edge")))
+
+    import pytest
+    with pytest.raises(ValueError, match="512 KiB"):
+        das.edge_register_request({
+            "username": "shoir-e2e-registration",
+            "password": "a-long-test-password",
+            "email": "e2e@example.invalid",
+            "tier": "Starter Tier ($29)",
+            "payment_method": "STC Pay (QR)",
+            "screenshot_path": str(proof_path),
+        })

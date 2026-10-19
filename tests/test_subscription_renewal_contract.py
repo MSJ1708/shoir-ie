@@ -1,6 +1,9 @@
 import re
 from pathlib import Path
 
+import pytest
+import durable_account_store as das
+
 def _source_contract_contains(source: str, fragment: str) -> bool:
     normalized_source = re.sub(r"\s+", "", source)
     normalized_fragment = re.sub(r"\s+", "", fragment)
@@ -122,3 +125,154 @@ def test_admin_receipt_ui_handles_pdf_and_private_storage():
     assert 'st.link_button("Open private payment receipt (expires in 5 minutes)"' in APP_SOURCE
     assert 'Download payment receipt' in APP_SOURCE
     assert '_encode_renewal_proof' in APP_SOURCE
+
+
+def test_admin_decline_uses_atomic_pending_request_decision():
+    decline_branch = EDGE_SOURCE.split(
+        'if (action === "admin_decline_session") {', 1
+    )[1].split(
+        'return response({ error: "Unknown action." }, 400);', 1
+    )[0]
+    migration = (
+        ROOT / "supabase" / "migrations" /
+        "20261019140600_atomic_subscription_request_decisions.sql"
+    ).read_text(encoding="utf-8")
+
+    assert "Number.isSafeInteger(id)" in decline_branch
+    assert "id <= 0" in decline_branch
+    assert _source_contract_contains(
+        decline_branch,
+        'supabase.rpc("shoir_finalize_subscription_request",{p_request_id:id,p_decision:"Declined"})',
+    )
+    assert "Pending request not found or already processed." in decline_branch
+    assert "FOR UPDATE" in migration
+    assert "request_row.status IS DISTINCT FROM 'Pending'" in migration
+    assert "REVOKE ALL ON FUNCTION public.shoir_finalize_subscription_request(bigint, text)" in migration
+    assert "GRANT EXECUTE ON FUNCTION public.shoir_finalize_subscription_request(bigint, text)" in migration
+
+
+def test_subscription_decision_migration_is_transactional_and_pending_only():
+    migration = (
+        ROOT / "supabase" / "migrations" /
+        "20261019140600_atomic_subscription_request_decisions.sql"
+    ).read_text(encoding="utf-8")
+
+    assert "SECURITY INVOKER" in migration
+    assert "SELECT *" in migration and "FOR UPDATE" in migration
+    assert "status = 'Declined'" in migration
+    assert "status = 'Approved'" in migration
+    assert "status = 'Pending'" in migration
+    assert "ON CONFLICT (username_lc) DO UPDATE SET" in migration
+    assert "password_hash = current_account.password_hash" in migration
+    assert "role = current_account.role" in migration
+    assert "created_at = current_account.created_at" in migration
+    assert "INTERVAL '30 days'" in migration
+
+
+
+
+
+def test_registration_submit_validates_proof_before_any_persistence():
+    registration_block = APP_SOURCE.split(
+        'if st.button("Send Verification Request", type="primary", key="btn_send_request"):', 1
+    )[1].split(
+        "# TAB 3: EXPLORE THE MODULES", 1
+    )[0]
+
+    assert "elif reg_name and reg_pass and reg_email:" in registration_block
+    assert "if uploaded_screenshot is not None:" in registration_block
+    assert "Please upload your payment screenshot." not in registration_block
+    assert registration_block.index("_encode_renewal_proof(uploaded_screenshot)") < registration_block.index("INSERT INTO pending_payments")
+    assert registration_block.index("insert_remote_request({") < registration_block.index("INSERT INTO pending_payments")
+    assert '"proof_base64": _registration_proof_base64' in registration_block
+    assert '"proof_content_type": _registration_proof_content_type' in registration_block
+    assert "Password must be between 8 and 128 characters." in registration_block
+
+    edge_registration = EDGE_SOURCE.split(
+        'if (action === "register_request") {', 1
+    )[1].split(
+        'if (action === "logout") {', 1
+    )[0]
+    migration = (
+        ROOT / "supabase" / "migrations" /
+        "20261019140600_atomic_subscription_request_decisions.sql"
+    ).read_text(encoding="utf-8")
+    assert "A payment screenshot is required for registration." not in edge_registration
+    assert "proof_uploaded: !!proofPath" in edge_registration
+    assert "NULLIF(btrim(p_transaction_id), '') IS NULL" in migration
+    assert "A payment reference or private payment proof is required." in migration
+    assert "Invalid private payment proof reference." in migration
+    assert "Invalid payment reference." in migration
+
+
+def test_registration_accepts_no_optional_proof_and_rejects_partial_proof(monkeypatch):
+    calls = []
+
+    def fake_edge_call(action, payload):
+        calls.append((action, payload))
+        return {"ok": True, "status": "Pending", "request_id": 17}
+
+    monkeypatch.setattr(das, "_edge_call", fake_edge_call)
+    result = das.edge_register_request({
+        "username": "shoir-e2e-optional-proof",
+        "password": "Strong-Test-Password-123",
+        "email": "test@example.invalid",
+        "tier": "Starter Tier ($29)",
+        "payment_method": "STC Pay (QR)",
+        "transaction_id": "SYNTHETIC-TEST-REFERENCE",
+        "screenshot_path": None,
+        "proof_base64": None,
+        "proof_content_type": None,
+    })
+
+    assert result["ok"] is True
+    assert len(calls) == 1
+    assert calls[0][0] == "register_request"
+    assert calls[0][1]["proof_base64"] is None
+    assert calls[0][1]["proof_content_type"] is None
+
+    with pytest.raises(ValueError, match="Payment proof data or content type is invalid"):
+        das.edge_register_request({
+            "username": "shoir-e2e-optional-proof",
+            "password": "Strong-Test-Password-123",
+            "email": "test@example.invalid",
+            "tier": "Starter Tier ($29)",
+            "payment_method": "STC Pay (QR)",
+            "proof_base64": None,
+            "proof_content_type": "image/png",
+        })
+
+
+def test_registration_requires_payment_reference_or_proof():
+    edge_block = EDGE_SOURCE.split(
+        'if (action === "register_request") {', 1
+    )[1].split(
+        'if (action === "logout") {', 1
+    )[0]
+    migration = (
+        ROOT / "supabase" / "migrations" /
+        "20261019140600_atomic_subscription_request_decisions.sql"
+    ).read_text(encoding="utf-8")
+
+    assert "if (!transactionId && !proofPath)" in edge_block
+    assert "Provide a payment reference or upload payment proof" in edge_block
+    assert "NULLIF(btrim(p_transaction_id), '') IS NULL" in migration
+    assert "A payment reference or private payment proof is required." in migration
+
+
+def test_registration_preflight_does_not_disclose_durable_account_existence():
+    edge_block = EDGE_SOURCE.split(
+        'if (action === "account_exists") {', 1
+    )[1].split(
+        'if (action === "register_request") {', 1
+    )[0]
+    registration_block = APP_SOURCE.split(
+        'if st.button("Send Verification Request", type="primary", key="btn_send_request"):', 1
+    )[1].split(
+        "# TAB 3: EXPLORE THE MODULES", 1
+    )[0]
+
+    assert "return response({ exists: false });" in edge_block
+    assert "getAccount(" not in edge_block
+    assert "shoir_subscription_requests" not in edge_block
+    assert "(not _durable_accounts_ready and local_account_exists(reg_name))" in registration_block

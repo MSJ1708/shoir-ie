@@ -63,9 +63,14 @@ function decodePaymentProof(base64Value: string) {
 async function storePaymentProof(
   body: Record<string, unknown>,
 ): Promise<string | null> {
-  const encoded = String(body.proof_base64 || "");
-  if (!encoded) return null;
-  const contentType = String(body.proof_content_type || "").toLowerCase();
+  const encoded = String(body.proof_base64 || "").trim();
+  const rawContentType = String(body.proof_content_type || "").trim()
+    .toLowerCase();
+  if (!encoded && !rawContentType) return null;
+  if (!encoded || !rawContentType) {
+    throw new Error("Payment proof data or content type is invalid.");
+  }
+  const contentType = rawContentType;
   const extensionByType: Record<string, string> = {
     "image/png": "png",
     "image/jpeg": "jpg",
@@ -396,6 +401,140 @@ Deno.serve(async (req) => {
       });
     }
 
+    if (action === "account_exists") {
+      // Do not expose account or registration status through a public username
+      // probe. The serialized registration transaction enforces duplicates and
+      // returns the same generic conflict response to every caller.
+      return response({ exists: false });
+    }
+
+    if (action === "register_request") {
+      const username = String(body.username || "").trim();
+      const usernameLc = username.toLowerCase();
+      const password = String(body.password || "");
+      const email = String(body.email || "").trim();
+      const tier = String(body.tier || "Starter Tier ($29)").trim();
+      const paymentMethod = String(body.payment_method || "").trim();
+      const transactionId = String(body.transaction_id || "").trim();
+      const allowedTiers = new Set([
+        "Starter Tier ($29)",
+        "Mid-Tier Pro ($79)",
+        "Professional Tier ($129)",
+        "Enterprise Tier ($199)",
+        "Enterprise Plus Tier ($399)",
+        "Research Pack ($30 add-on)",
+      ]);
+
+      if (!/^[A-Za-z0-9._-]{3,32}$/.test(username)) {
+        return response({
+          error:
+            "Username must be 3-32 letters, numbers, periods, underscores or hyphens.",
+        }, 400);
+      }
+      if (password.length < 8 || password.length > 128) {
+        return response({
+          error: "Password must be between 8 and 128 characters.",
+        }, 400);
+      }
+      if (
+        email.length > 254 ||
+        !/^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/.test(email)
+      ) {
+        return response({ error: "Enter a valid email address." }, 400);
+      }
+      if (!allowedTiers.has(tier)) {
+        return response({ error: "Select a valid subscription tier." }, 400);
+      }
+      if (paymentMethod !== "STC Pay (QR)") {
+        return response(
+          { error: "Unsupported registration payment method." },
+          400,
+        );
+      }
+      if (transactionId.length > 128) {
+        return response({
+          error: "Payment reference must be 128 characters or fewer.",
+        }, 400);
+      }
+
+      let proofPath: string | null = null;
+      try {
+        proofPath = await storePaymentProof(body);
+      } catch (err) {
+        return response({
+          error: err instanceof Error
+            ? err.message
+            : "Payment proof could not be validated.",
+        }, 400);
+      }
+      if (!transactionId && !proofPath) {
+        return response({
+          error:
+            "Provide a payment reference or upload payment proof before submitting registration.",
+        }, 400);
+      }
+
+      const { data, error } = await supabase.rpc(
+        "shoir_create_registration_request",
+        {
+          p_username: username,
+          p_username_lc: usernameLc,
+          p_password_hash: await hashPassword(password),
+          p_email: email,
+          p_tier: tier,
+          p_payment_method: paymentMethod,
+          p_transaction_id: transactionId || null,
+          p_screenshot_path: proofPath,
+        },
+      );
+      if (error) {
+        if (proofPath) {
+          const objectPath = proofPath.replace(
+            `storage://${PAYMENT_PROOF_BUCKET}/`,
+            "",
+          );
+          await supabase.storage.from(PAYMENT_PROOF_BUCKET).remove([
+            objectPath,
+          ]);
+        }
+        if (error.code === "P0002") {
+          return response({
+            error:
+              "Registration request could not be submitted. Sign in if you have an account or contact support.",
+          }, 409);
+        }
+        if (error.code === "22023") {
+          return response({ error: error.message }, 400);
+        }
+        throw error;
+      }
+      const result = data as {
+        ok?: boolean;
+        request_id?: number;
+        status?: string;
+      } | null;
+      if (!result?.ok || !result.request_id) {
+        if (proofPath) {
+          const objectPath = proofPath.replace(
+            `storage://${PAYMENT_PROOF_BUCKET}/`,
+            "",
+          );
+          await supabase.storage.from(PAYMENT_PROOF_BUCKET).remove([
+            objectPath,
+          ]);
+        }
+        throw new Error(
+          "Registration request could not be confirmed by the persistence service.",
+        );
+      }
+      return response({
+        ok: true,
+        request_id: result.request_id,
+        status: result.status || "Pending",
+        proof_uploaded: !!proofPath,
+      });
+    }
+
     if (action === "logout") {
       const token = String(body.token || "").trim();
       const usernameLc = String(body.username || "").trim().toLowerCase();
@@ -543,63 +682,42 @@ Deno.serve(async (req) => {
       if (error) throw error;
       const request = data?.[0];
       if (!request) return response({ error: "Request not found." }, 404);
-      const existing = await getAccount(request.username);
-      const { data: pendingCred } = await supabase.from(
-        "shoir_pending_credentials",
-      ).select("*").eq("username_lc", request.username_lc).maybeSingle();
-      const now = new Date().toISOString();
-      const expiry = request.request_type === "Renewal" && existing
-        ? expiry30(existing.subscription_expires_at)
-        : expiry30();
-      const passwordHash = existing?.password_hash ||
-        pendingCred?.password_hash;
-      if (!passwordHash) {
-        return response({
-          error: "Pending registration credentials are missing.",
-        }, 500);
+      const { data: decision, error: decisionError } = await supabase.rpc(
+        "shoir_finalize_subscription_request",
+        { p_request_id: request.id, p_decision: "Approved" },
+      );
+      if (decisionError) {
+        if (decisionError.code === "P0002") {
+          return response(
+            { error: "Pending request not found or already processed." },
+            409,
+          );
+        }
+        throw decisionError;
       }
-      const payload = {
-        username: request.username,
-        username_lc: request.username_lc,
-        password_hash: passwordHash,
-        role: existing?.role || "User",
-        tier: request.tier || existing?.tier || "Starter Tier ($29)",
-        email: request.email || existing?.email || "",
-        created_at: existing?.created_at || now,
-        subscription_expires_at: expiry,
-        linkedin: existing?.linkedin || null,
-        github: existing?.github || null,
-        about_me: existing?.about_me || null,
-        affiliate_code: existing?.affiliate_code || null,
-        active: true,
-        updated_at: now,
-      };
-      const { error: accountErr } = await supabase.from("shoir_accounts")
-        .upsert(payload, { onConflict: "username" });
-      if (accountErr) throw accountErr;
-      await supabase.from("shoir_subscription_requests").update({
-        status: "Approved",
-        approved_at: now,
-        updated_at: now,
-      }).eq("id", request.id);
-      return response({
-        ok: true,
-        username: request.username,
-        expires_at: expiry,
-        tier: payload.tier,
-        email: payload.email,
-        request_id: request.id,
-      });
+      return response(decision || { ok: true, request_id: request.id });
     }
 
     if (action === "admin_decline_session") {
       await adminSession(String(body.username), String(body.token));
       const id = Number(body.request_id);
-      const { error } = await supabase.from("shoir_subscription_requests")
-        .update({ status: "Declined", updated_at: new Date().toISOString() })
-        .eq("id", id);
-      if (error) throw error;
-      return response({ ok: true });
+      if (!Number.isSafeInteger(id) || id <= 0) {
+        return response({ error: "Invalid request identifier." }, 400);
+      }
+      const { data: decision, error: decisionError } = await supabase.rpc(
+        "shoir_finalize_subscription_request",
+        { p_request_id: id, p_decision: "Declined" },
+      );
+      if (decisionError) {
+        if (decisionError.code === "P0002") {
+          return response(
+            { error: "Pending request not found or already processed." },
+            404,
+          );
+        }
+        throw decisionError;
+      }
+      return response(decision || { ok: true, request_id: id });
     }
 
     return response({ error: "Unknown action." }, 400);
