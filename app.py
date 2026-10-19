@@ -4365,7 +4365,7 @@ elif selected_module == "Evidence Degradation & Decision-Readiness Lab":
     )
 
     active_study_id = st.session_state.get("sx_research_study_id")
-    active_protocol = load_research_protocol(active_study_id) if active_study_id else None
+    active_protocol = load_research_protocol(active_study_id, owner=st.session_state.current_user) if active_study_id else None
     if active_protocol is None:
         studies = list_research_studies(st.session_state.current_user)
         if not studies.empty:
@@ -4374,7 +4374,7 @@ elif selected_module == "Evidence Degradation & Decision-Readiness Lab":
             )]
             if not preferred.empty:
                 active_study_id = str(preferred.iloc[0]["Study ID"])
-                active_protocol = load_research_protocol(active_study_id)
+                active_protocol = load_research_protocol(active_study_id, owner=st.session_state.current_user)
                 st.session_state["sx_research_study_id"] = active_study_id
 
     if active_protocol:
