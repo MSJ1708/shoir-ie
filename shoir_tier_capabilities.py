@@ -26,6 +26,7 @@ __all__ = [
     "tier_allows",
     "module_required_tier",
     "available_modules",
+    "audit_module_entitlement_coverage",
     "copilot_gate",
     "copilot_capabilities",
 ]
@@ -66,6 +67,89 @@ MODULE_REQUIREMENTS = {
     "Fully Automated Emergency Response & Humanitarian Disaster Logistics System": "Enterprise",
     "L-SIMS — Local Capability & Dynamic Industrial Readiness Simulator": "Enterprise",
     "Autonomous Kinetic-Digital Twin (AKDT) for Industrial Logistics Resilience": "Enterprise Plus",
+    # Mirror the minimum tiers in industrial_platform.PLATFORM_CATALOG. The
+    # regression tests compare both sources to prevent silent policy drift.
+    "Industrial Operating System": "Enterprise",
+    "Global Project & Digital Thread": "Enterprise",
+    "Engineering Validation Center": "Starter",
+    "Industrial Data Model & Digital Thread": "Mid-Tier Pro",
+    "Advanced Planning & Scheduling": "Professional",
+    "Quality Engineering & Reliability": "Professional",
+    "Capital Investment & Engineering Economics": "Professional",
+    "Workforce Engineering": "Professional",
+    "Industrial Sustainability & LCA": "Professional",
+    "Benchmarking & Engineering Standards": "Professional",
+    "Manufacturing Execution System": "Enterprise",
+    "Industrial Simulation Lab": "Enterprise",
+    "3D Factory Designer": "Enterprise",
+    "Industrial Connectivity Hub": "Enterprise",
+    "Multi-Objective Optimization": "Enterprise",
+    "Robust & Resilient Optimization": "Enterprise",
+    "Engineering Model Registry": "Enterprise",
+    "Experiment Lab": "Enterprise",
+    "Experiment Engine": "Enterprise",
+    "Industrial Control Center": "Enterprise",
+    "Engineering Decision Center": "Enterprise",
+    "Industrial Data Platform": "Enterprise",
+    "Advanced ML Demand Forecasting": "Enterprise",
+    "Scenario Versioning & Comparison": "Mid-Tier Pro",
+    "Team Workspaces & RBAC": "Enterprise",
+    "Executive Report Center": "Enterprise",
+    "Localization & Multi-Currency": "Mid-Tier Pro",
+    "Production Bottleneck & Capacity Recovery Study": "Mid-Tier Pro",
+    # Remaining names declared in industrial_platform.TIER_FEATURES.
+    "Carbon Accounting": "Mid-Tier Pro",
+    "MEIO Matrix": "Mid-Tier Pro",
+    "Fleet Routing": "Mid-Tier Pro",
+    "Production Planning & Control (PPC)": "Mid-Tier Pro",
+    "Monte Carlo Sim": "Enterprise",
+    "Sensitivity Analysis": "Enterprise",
+    "Digital Twin & Discrete-Event Simulation": "Enterprise",
+    # Explicit minimum tier from app.py's subscription feature registry: Starter.
+    "MILP Solvers": "Starter",
+    "Inventory Playback": "Starter",
+    "Core IE Tools": "Starter",
+    "Subscriptions": "Starter",
+    "Persistence": "Starter",
+    "Facility Layout & Warehousing": "Starter",
+    "Enterprise Integration & Collaboration": "Starter",
+    "Venture Studio": "Starter",
+    # Explicit minimum tier from app.py's subscription feature registry: Mid-Tier Pro.
+    "IoT Digital Twin": "Mid-Tier Pro",
+    "Slotting & Gantt": "Mid-Tier Pro",
+    "Warehouse Heatmap": "Mid-Tier Pro",
+    "Supplier Risk Matrix": "Mid-Tier Pro",
+    "Scenarios": "Mid-Tier Pro",
+    "AGV Fleet Dispatcher": "Mid-Tier Pro",
+    "Geospatial Network Designer": "Mid-Tier Pro",
+    "Lean Manufacturing & Shop Floor Operations": "Mid-Tier Pro",
+    "Quality Control, Six Sigma & Reliability": "Mid-Tier Pro",
+    "Engineering Economics & Finance": "Mid-Tier Pro",
+    # Explicit minimum tier from app.py's subscription feature registry: Enterprise.
+    "FastAPI Gateway": "Enterprise",
+    "Webhook Alerts": "Enterprise",
+    "Agentic Workflows": "Enterprise",
+    "Control Tower": "Enterprise",
+    "Cryptographic Ledger": "Enterprise",
+    "Predictive Maintenance Hub": "Enterprise",
+    "Human Factors & Ergonomics (NIOSH)": "Enterprise",
+    "Green IE & Sustainability": "Enterprise",
+    # Explicit minimum tier from app.py's subscription feature registry: Research Pack.
+    "Evidence Degradation & Decision-Readiness Lab": "Research Pack",
+    "LaTeX Document Formatter": "Research Pack",
+    "Live Reproducible Paper Canvas": "Research Pack",
+    "Adversarial Chaos & Shock Injector": "Research Pack",
+    "Adversarially Stressed Synthetic Industrial Twins": "Research Pack",
+    "Automated Theory-to-Code Formalizer": "Research Pack",
+    "Real-Time Quantum-Classical Hybrid Optimization Router": "Research Pack",
+    "Automated Code-to-Formal-Proof Verifier": "Research Pack",
+    "Decentralized Cryptographic Reproducibility Vault": "Research Pack",
+    "Autonomous Parametric Surrogate Swarm": "Research Pack",
+    "🔌 Edge-Connected IoT Digital Twin Bridge": "Research Pack",
+    "🔌 Universal Cross-Domain Mathematical Isomorphism Engine (UCMIE)": "Research Pack",
+    "🔄 Autonomous Epistemic Cross-Disciplinary Falsification Matrix (AE-FRESM)": "Research Pack",
+    "Autonomous Cognitive Operations & Zero-Knowledge Mesh (ACO-ZKMS)": "Research Pack",
+    "⚡ ACO-ZKMS Master Engine": "Research Pack",
 }
 
 COPILOT_TOOL_REQUIREMENTS = {
@@ -151,6 +235,46 @@ def tier_allows(current: str, required: str) -> bool:
 
 def module_required_tier(module: str) -> Optional[str]:
     return MODULE_REQUIREMENTS.get(str(module).strip())
+
+
+def audit_module_entitlement_coverage(modules: Iterable[str]) -> dict[str, object]:
+    """Audit explicit tier-policy coverage for an observed module catalogue.
+
+    A missing policy is reported as unresolved rather than being inferred to mean
+    that the module is free or secure. This is an audit helper only: it does not
+    authorize access or change the existing module-availability behavior.
+    """
+    catalog = unique_modules(modules)
+    unmapped: list[str] = []
+    invalid: list[dict[str, str]] = []
+
+    for module in catalog:
+        required = module_required_tier(module)
+        if required is None:
+            unmapped.append(module)
+        elif required not in TIER_ORDER:
+            invalid.append({"module": module, "required_tier": required})
+
+    total = len(catalog)
+    explicit = total - len(unmapped) - len(invalid)
+    if total == 0:
+        status = "EMPTY"
+    elif not unmapped and not invalid:
+        status = "COMPLETE"
+    else:
+        status = "INCOMPLETE"
+
+    return {
+        "status": status,
+        "total_modules": total,
+        "explicit_policy_count": explicit,
+        "unmapped_count": len(unmapped),
+        "unmapped_modules": unmapped,
+        "invalid_policy_count": len(invalid),
+        "invalid_policy_modules": invalid,
+        "coverage_percent": round((100.0 * explicit / total), 2) if total else 0.0,
+        "policy_source": "MODULE_REQUIREMENTS",
+    }
 
 
 def available_modules(tier: str, modules: Iterable[str]) -> list[str]:
