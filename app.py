@@ -1586,7 +1586,7 @@ if not st.session_state.get("current_user"):
                     if reg_name and not is_valid_username(reg_name):
                         st.warning("Username can only contain letters, numbers, periods, underscores, and hyphens (3-32 characters).")
                     elif reg_name and (
-                        local_account_exists(reg_name)
+                        (not _durable_accounts_ready and local_account_exists(reg_name))
                         or (
                             _durable_accounts_ready
                             and remote_account(reg_name) is not None
