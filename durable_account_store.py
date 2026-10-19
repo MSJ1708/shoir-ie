@@ -16,6 +16,7 @@ import datetime as dt
 import os
 import sqlite3
 from typing import Any, Mapping, Optional
+from urllib.parse import urlsplit
 
 try:
     import streamlit as st
@@ -29,12 +30,138 @@ except Exception:  # pragma: no cover
     psycopg2 = None
     RealDictCursor = None
 
-# Supabase publishable keys are explicitly designed for application-side use.
-# The Edge Function performs the privileged database work with Supabase's
-# server-side service-role credentials, so the Streamlit app never needs the
-# database password or a service-role key.
-SUPABASE_EDGE_URL = "https://gcsamrdaeraxieaagsta.supabase.co/functions/v1/shoir-persistence"
-SUPABASE_PUBLISHABLE_KEY = "sb_publishable_ccMYEvPjf1AXbx_VhewNUQ_jWPnSwEc"
+# The production defaults preserve the existing public deployment. A staging
+# deployment must set [shoir].environment = "staging" and supply the staging
+# Edge URL + publishable key. In staging mode, there is deliberately no
+# fallback to production if configuration is missing or incorrect.
+PRODUCTION_SUPABASE_EDGE_URL = "https://gcsamrdaeraxieaagsta.supabase.co/functions/v1/shoir-persistence"
+PRODUCTION_SUPABASE_PROJECT_HOST = "gcsamrdaeraxieaagsta.supabase.co"
+PRODUCTION_SUPABASE_PUBLISHABLE_KEY = "sb_publishable_ccMYEvPjf1AXbx_VhewNUQ_jWPnSwEc"
+STAGING_SUPABASE_EDGE_URL = "https://hfhrosthswcybccepmak.supabase.co/functions/v1/shoir-persistence"
+STAGING_SUPABASE_PROJECT_HOST = "hfhrosthswcybccepmak.supabase.co"
+SUPABASE_EDGE_PATH = "/functions/v1/shoir-persistence"
+
+
+def _streamlit_secret(section: str, key: str) -> str:
+    if st is None:
+        return ""
+    try:
+        value = st.secrets[section][key]
+        return str(value).strip() if value is not None else ""
+    except Exception:
+        return ""
+
+
+def _validate_supabase_edge_url(value: str, expected_host: str) -> str:
+    try:
+        parsed = urlsplit(value.strip())
+        port = parsed.port
+    except ValueError as exc:
+        raise RuntimeError("The configured Supabase Edge URL is invalid.") from exc
+    if (
+        parsed.scheme.casefold() != "https"
+        or not parsed.hostname
+        or parsed.hostname.casefold().rstrip(".") != expected_host
+        or parsed.path.rstrip("/") != SUPABASE_EDGE_PATH
+        or parsed.username
+        or parsed.password
+        or parsed.query
+        or parsed.fragment
+        or port not in (None, 443)
+    ):
+        raise RuntimeError(
+            "The configured Supabase Edge URL does not match the declared deployment environment."
+        )
+    return value.strip().rstrip("/")
+
+
+def _validate_supabase_publishable_key(value: str) -> str:
+    key = value.strip()
+    if key.startswith("sb_publishable_") and len(key) > len("sb_publishable_"):
+        return key
+    if key.startswith("sb_secret_"):
+        raise RuntimeError("A Supabase secret/service-role key is forbidden in the Streamlit app.")
+    parts = key.split(".")
+    if len(parts) == 3:
+        try:
+            import base64
+            import json
+
+            payload = parts[1] + "=" * (-len(parts[1]) % 4)
+            claims = json.loads(base64.urlsafe_b64decode(payload.encode("ascii")))
+        except Exception:
+            claims = {}
+        if isinstance(claims, dict) and claims.get("role") == "anon":
+            return key
+    raise RuntimeError(
+        "The Streamlit app requires a Supabase publishable key (or legacy anon key), never a service-role key."
+    )
+
+
+def _resolve_supabase_edge_config(
+    environment: str,
+    configured_url: str = "",
+    configured_key: str = "",
+) -> tuple[str, str]:
+    mode = str(environment or "").strip().casefold()
+    url = str(configured_url or "").strip()
+    key = str(configured_key or "").strip()
+    if mode not in {"production", "staging"}:
+        raise RuntimeError("SHOIR_ENVIRONMENT must be either 'production' or 'staging'.")
+
+    if mode == "staging":
+        if not url or not key:
+            raise RuntimeError(
+                "Staging mode requires supabase.edge_url and supabase.publishable_key; production fallback is disabled."
+            )
+        return (
+            _validate_supabase_edge_url(url, STAGING_SUPABASE_PROJECT_HOST),
+            _validate_supabase_publishable_key(key),
+        )
+
+    # Production keeps its historical fallback for backward compatibility. If
+    # an explicit override is supplied, require a complete production-matched pair.
+    if bool(url) != bool(key):
+        raise RuntimeError("Production Supabase overrides must include both Edge URL and publishable key.")
+    if url and key:
+        return (
+            _validate_supabase_edge_url(url, PRODUCTION_SUPABASE_PROJECT_HOST),
+            _validate_supabase_publishable_key(key),
+        )
+    return PRODUCTION_SUPABASE_EDGE_URL, PRODUCTION_SUPABASE_PUBLISHABLE_KEY
+
+
+APP_ENVIRONMENT = (
+    os.getenv("SHOIR_ENVIRONMENT", "").strip()
+    or _streamlit_secret("shoir", "environment")
+    or "production"
+).casefold()
+SUPABASE_EDGE_URL, SUPABASE_PUBLISHABLE_KEY = _resolve_supabase_edge_config(
+    APP_ENVIRONMENT,
+    os.getenv("SHOIR_SUPABASE_EDGE_URL", "").strip()
+    or _streamlit_secret("supabase", "edge_url"),
+    os.getenv("SHOIR_SUPABASE_PUBLISHABLE_KEY", "").strip()
+    or _streamlit_secret("supabase", "publishable_key"),
+)
+
+
+def _configured_direct_database_url() -> str:
+    for name in ("SHOIR_DATABASE_URL", "SUPABASE_DB_URL", "DATABASE_URL"):
+        value = os.getenv(name, "").strip()
+        if value:
+            return value
+    for section in ("database", "postgresql", "supabase"):
+        value = _streamlit_secret(section, "url")
+        if value:
+            return value
+    return ""
+
+
+if APP_ENVIRONMENT == "staging" and _configured_direct_database_url():
+    raise RuntimeError(
+        "Direct PostgreSQL URLs are forbidden in Shoir-IE staging mode. "
+        "Remove database.url/postgresql.url/supabase.url and database DSN environment variables; use the pinned staging Edge Function."
+    )
 
 
 def _edge_headers() -> dict[str, str]:
