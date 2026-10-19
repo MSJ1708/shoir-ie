@@ -1713,17 +1713,28 @@ def research_runs_frame(study_id: Optional[str], owner: Optional[str] = None) ->
         except Exception:
             pass
 
-    # Primary source: persisted research runs with full evidence data.
+    # Primary source: persisted research runs scoped to the requested owner.
     with _db() as conn:
-        rows = conn.execute(
-            """
-            SELECT run_id,experiment_code,config_json,summary_json,created_at
-            FROM experience_research_runs
-            WHERE study_id=?
-            ORDER BY created_at DESC
-            """,
-            (str(study_id),),
-        ).fetchall()
+        if owner:
+            rows = conn.execute(
+                """
+                SELECT run_id,experiment_code,config_json,summary_json,created_at
+                FROM experience_research_runs
+                WHERE study_id=? AND owner=?
+                ORDER BY created_at DESC
+                """,
+                (str(study_id), str(owner)),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """
+                SELECT run_id,experiment_code,config_json,summary_json,created_at
+                FROM experience_research_runs
+                WHERE study_id=?
+                ORDER BY created_at DESC
+                """,
+                (str(study_id),),
+            ).fetchall()
     for run_id, code, raw_cfg, raw_summary, created_at in rows:
         try: cfg = json.loads(raw_cfg or "{}")
         except Exception: cfg = {}
@@ -1741,16 +1752,29 @@ def research_runs_frame(study_id: Optional[str], owner: Optional[str] = None) ->
             created_at, created_at,
         ])
 
-    # Compatibility source: governed experience jobs created by the generic shell.
+    # Compatibility source: jobs attributed to the requested owner. Legacy
+    # ownerless rows are deliberately not assigned to a user.
     with _db() as conn:
-        jobs = conn.execute(
-            """
-            SELECT job_id,module,job_type,status,progress,message,payload_json,
-                   started_at,finished_at
-            FROM experience_jobs
-            ORDER BY COALESCE(started_at,finished_at) DESC
-            """
-        ).fetchall()
+        if owner:
+            jobs = conn.execute(
+                """
+                SELECT job_id,module,job_type,status,progress,message,payload_json,
+                       started_at,finished_at
+                FROM experience_jobs
+                WHERE owner=?
+                ORDER BY COALESCE(started_at,finished_at) DESC
+                """,
+                (str(owner),),
+            ).fetchall()
+        else:
+            jobs = conn.execute(
+                """
+                SELECT job_id,module,job_type,status,progress,message,payload_json,
+                       started_at,finished_at
+                FROM experience_jobs
+                ORDER BY COALESCE(started_at,finished_at) DESC
+                """
+            ).fetchall()
     existing_ids = {str(r[0]) for r in records}
     for job_id, module, job_type, status, progress, message, raw, started, finished in jobs:
         try: payload = json.loads(raw or "{}")
