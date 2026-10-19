@@ -124,17 +124,45 @@ def test_admin_receipt_ui_handles_pdf_and_private_storage():
     assert '_encode_renewal_proof' in APP_SOURCE
 
 
-def test_admin_decline_only_changes_pending_requests():
+def test_admin_decline_uses_atomic_pending_request_decision():
     decline_branch = EDGE_SOURCE.split(
         'if (action === "admin_decline_session") {', 1
     )[1].split(
         'return response({ error: "Unknown action." }, 400);', 1
     )[0]
+    migration = (
+        ROOT / "supabase" / "migrations" /
+        "20261019140600_atomic_subscription_request_decisions.sql"
+    ).read_text(encoding="utf-8")
 
     assert "Number.isSafeInteger(id)" in decline_branch
     assert "id <= 0" in decline_branch
-    assert '.eq("status", "Pending")' in decline_branch
-    assert '.select("id")' in decline_branch
-    assert ".maybeSingle()" in decline_branch
-    assert "if (!data)" in decline_branch
-    assert "Pending request not found." in decline_branch
+    assert _source_contract_contains(
+        decline_branch,
+        'supabase.rpc("shoir_finalize_subscription_request",{p_request_id:id,p_decision:"Declined"})',
+    )
+    assert "Pending request not found or already processed." in decline_branch
+    assert "FOR UPDATE" in migration
+    assert "request_row.status IS DISTINCT FROM 'Pending'" in migration
+    assert "REVOKE ALL ON FUNCTION public.shoir_finalize_subscription_request(bigint, text)" in migration
+    assert "GRANT EXECUTE ON FUNCTION public.shoir_finalize_subscription_request(bigint, text)" in migration
+
+
+def test_subscription_decision_migration_is_transactional_and_pending_only():
+    migration = (
+        ROOT / "supabase" / "migrations" /
+        "20261019140600_atomic_subscription_request_decisions.sql"
+    ).read_text(encoding="utf-8")
+
+    assert "SECURITY INVOKER" in migration
+    assert "SELECT *" in migration and "FOR UPDATE" in migration
+    assert "status = 'Declined'" in migration
+    assert "status = 'Approved'" in migration
+    assert "status = 'Pending'" in migration
+    assert "ON CONFLICT (username_lc) DO UPDATE SET" in migration
+    assert "password_hash = current_account.password_hash" in migration
+    assert "role = current_account.role" in migration
+    assert "created_at = current_account.created_at" in migration
+    assert "INTERVAL '30 days'" in migration
+
+
