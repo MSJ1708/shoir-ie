@@ -1107,18 +1107,55 @@ def _research_hash(protocol: Mapping[str, Any]) -> str:
 
 
 def create_research_protocol(study_id: str, protocol: Mapping[str, Any], owner: str) -> tuple[str, str]:
+    """Create/update a protocol without allowing a different owner to claim its ID.
+
+    The local owner check and upsert run in one SQLite write transaction. When
+    the managed backend is configured, its upsert has the same owner-conflict
+    rule and must succeed before the local write continues.
+    """
     ensure_experience_db()
+    study_id = str(study_id or "").strip()
+    owner = str(owner or "").strip()
+    if not study_id:
+        raise ValueError("A research study ID is required.")
+    if not owner:
+        raise ValueError("A research study owner is required.")
+
     payload = dict(protocol)
-    with _db() as conn:
-        existing = conn.execute(
-            "SELECT research_id,created_at FROM experience_research_studies WHERE study_id=?",
-            (study_id,),
-        ).fetchone()
-    research_id = str(existing[0]) if existing else "RSH-" + uuid.uuid4().hex[:12].upper()
     stamp = _now()
-    created_at = str(existing[1]) if existing and existing[1] else stamp
     protocol_hash = _research_hash(payload)
     with _db() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        existing = conn.execute(
+            "SELECT research_id,created_at,owner FROM experience_research_studies WHERE study_id=?",
+            (study_id,),
+        ).fetchone()
+        if existing and str(existing[2] or "").strip() != owner:
+            raise PermissionError("Research study not found or not owned by this user.")
+
+        research_id = str(existing[0]) if existing else "RSH-" + uuid.uuid4().hex[:12].upper()
+        created_at = str(existing[1]) if existing and existing[1] else stamp
+
+        remote_record = {
+            "study_id": study_id,
+            "research_id": research_id,
+            "owner": owner,
+            "title": payload.get("title"),
+            "protocol": payload,
+            "created_at": created_at,
+            "updated_at": stamp,
+        }
+        try:
+            if durable_backend_configured():
+                upsert_remote_research_study(remote_record)
+        except PermissionError:
+            # An owner conflict is a security result, not a transient fallback.
+            raise
+        except Exception:
+            # Non-authoritative transport failures retain the existing local
+            # fallback behavior; an explicit ownership conflict never does.
+            pass
+
         conn.execute(
             """
             INSERT OR REPLACE INTO experience_research_studies(
@@ -1166,20 +1203,6 @@ def create_research_protocol(study_id: str, protocol: Mapping[str, Any], owner: 
             ),
         )
         conn.commit()
-    try:
-        if durable_backend_configured():
-            upsert_remote_research_study({
-                "study_id": study_id,
-                "research_id": research_id,
-                "owner": owner,
-                "title": payload.get("title"),
-                "protocol": payload,
-                "created_at": created_at,
-                "updated_at": stamp,
-            })
-    except Exception:
-        # Local persistence remains the fallback if managed storage is temporarily unavailable.
-        pass
     return research_id, protocol_hash
 
 
@@ -1247,10 +1270,10 @@ def _hydrate_remote_research_to_local(remote: Mapping[str, Any]) -> Optional[dic
 
 
 def load_research_protocol(study_id: str, owner: Optional[str] = None) -> Optional[dict[str, Any]]:
+    """Load a protocol; user-facing callers must supply owner for isolation."""
     ensure_experience_db()
     with _db() as conn:
-        row = conn.execute(
-            """
+        query = """
             SELECT study_id,research_id,title,objective,research_question,hypothesis,
                    null_hypothesis,methodology,primary_domain,transfer_domain,
                    primary_endpoint,secondary_metrics_json,independent_variables_json,
@@ -1260,9 +1283,12 @@ def load_research_protocol(study_id: str, owner: Optional[str] = None) -> Option
                    protocol_hash,protocol_locked,owner,created_at,updated_at
             FROM experience_research_studies
             WHERE study_id=?
-            """,
-            (study_id,),
-        ).fetchone()
+        """
+        params: tuple[Any, ...] = (str(study_id),)
+        if owner is not None:
+            query += " AND owner=?"
+            params += (str(owner),)
+        row = conn.execute(query, params).fetchone()
     if not row:
         try:
             remote = remote_research_study(study_id, owner=owner)
@@ -1500,8 +1526,22 @@ def register_research_run(
     config: Mapping[str, Any],
     results: pd.DataFrame,
 ) -> str:
-    """Persist a completed controlled experiment and its evidence data."""
+    """Persist a run only for the owner of the parent research protocol."""
     ensure_experience_db()
+    study_id = str(study_id or "").strip()
+    research_id = str(research_id or "").strip()
+    owner = str(owner or "").strip()
+    if not study_id or not research_id or not owner:
+        raise ValueError("Research study ID, research ID and owner are required.")
+
+    # Remote-only records can be restored into the local cache through the same
+    # owner-scoped loader before validating the new run.
+    parent = load_research_protocol(study_id, owner=owner)
+    if not parent:
+        raise PermissionError("Research study not found or not owned by this user.")
+    if str(parent.get("research_id") or "") != research_id:
+        raise ValueError("Research ID does not match the selected study's protocol.")
+
     run_id = "RRUN-" + uuid.uuid4().hex[:12].upper()
     cfg = dict(config)
     cfg["study_id"] = study_id
@@ -1530,6 +1570,16 @@ def register_research_run(
     created_at = _now()
     raw_results = results.to_csv(index=False) if isinstance(results, pd.DataFrame) else ""
     with _db() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        # Recheck parent ownership and protocol identity at the write boundary.
+        parent_row = conn.execute(
+            "SELECT research_id,owner FROM experience_research_studies WHERE study_id=?",
+            (study_id,),
+        ).fetchone()
+        if not parent_row or str(parent_row[1] or "") != owner:
+            raise PermissionError("Research study not found or not owned by this user.")
+        if str(parent_row[0] or "") != research_id:
+            raise ValueError("Research ID does not match the selected study's protocol.")
         conn.execute(
             """
             INSERT INTO experience_research_runs(
@@ -1538,7 +1588,7 @@ def register_research_run(
             ) VALUES(?,?,?,?,?,?,?,?,?)
             """,
             (
-                run_id, str(study_id), str(research_id), str(owner), code,
+                run_id, study_id, research_id, owner, code,
                 json.dumps(cfg, ensure_ascii=False, default=str),
                 json.dumps(summary, ensure_ascii=False, default=str),
                 raw_results,
@@ -1842,9 +1892,12 @@ def research_decisions_frame(owner: str) -> pd.DataFrame:
 
 
 def research_evidence_bundle(study_id: str, owner: str) -> bytes:
-    protocol = load_research_protocol(study_id)
+    """Export only the requesting owner's protocol, runs, studies and decisions."""
+    protocol = load_research_protocol(study_id, owner=owner)
+    if not protocol:
+        raise PermissionError("Research study not found or not owned by this user.")
     studies = list_research_studies(owner)
-    runs = research_runs_frame(study_id)
+    runs = research_runs_frame(study_id, owner=owner)
     decisions = research_decisions_frame(owner)
     manifest = {
         "bundle_type": "Shoir-IE research workspace evidence",

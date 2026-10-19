@@ -1,8 +1,12 @@
+import io
+import json
 import sqlite3
 import tempfile
+import zipfile
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 import industrial_experience as ie
 from industrial_experience import (
@@ -20,6 +24,7 @@ from industrial_experience import (
     register_research_run,
     import_research_run_csv,
     research_runs_frame,
+    research_evidence_bundle,
     save_project,
     analyze_fallback_module,
     fallback_module_blueprint,
@@ -227,7 +232,7 @@ def test_research_run_history_persists_completed_run(monkeypatch):
             "sample_size": 20,
             "replications": 2,
         }
-        create_research_protocol("PRJ-RUN-HISTORY", protocol, "alice")
+        actual_research_id, _ = create_research_protocol("PRJ-RUN-HISTORY", protocol, "alice")
         results = pd.DataFrame({
             "scenario": [1,2,3,4],
             "decision_regret": [0.10,0.20,0.15,0.25],
@@ -242,7 +247,7 @@ def test_research_run_history_persists_completed_run(monkeypatch):
             "shock_severity": 0.0,
         }
         run_id = register_research_run(
-            "PRJ-RUN-HISTORY", "RSH-TEST123", "alice", cfg, results
+            "PRJ-RUN-HISTORY", actual_research_id, "alice", cfg, results
         )
         frame = research_runs_frame("PRJ-RUN-HISTORY", owner="alice")
         assert len(frame) == 1
@@ -268,7 +273,7 @@ def test_previous_lab_csv_can_be_imported_into_research_registry(monkeypatch):
             "primary_domain": "Manufacturing",
             "transfer_domain": "Maintenance",
         }
-        create_research_protocol("PRJ-IMPORT", protocol, "alice")
+        actual_research_id, _ = create_research_protocol("PRJ-IMPORT", protocol, "alice")
         csv = (
             "scenario,decision_regret,readiness_score,evidence_completeness,evidence_freshness_hours,"
             "evidence_conflict_pct,evidence_uncertainty_pct,shock_severity,split\n"
@@ -279,7 +284,7 @@ def test_previous_lab_csv_can_be_imported_into_research_registry(monkeypatch):
             def getvalue(self):
                 return csv.encode("utf-8")
         run_id, summary = import_research_run_csv(
-            "PRJ-IMPORT", "RSH-TEST", "alice", Upload()
+            "PRJ-IMPORT", actual_research_id, "alice", Upload()
         )
         assert run_id.startswith("RRUN-")
         assert summary["experiment_code"] == "001I"
@@ -324,3 +329,104 @@ def test_all_named_fallback_modules_run_on_their_starter_data():
         except Exception as exc:
             failures.append(f"{module}: {type(exc).__name__}: {exc}")
     assert not failures, "\\n".join(failures)
+
+
+
+def test_research_protocol_id_cannot_be_overwritten_by_another_owner(monkeypatch):
+    with tempfile.TemporaryDirectory() as td:
+        db = str(Path(td) / "research-owner-boundary.db")
+        monkeypatch.setattr(ie, "_db", lambda path=db: sqlite3.connect(db, timeout=30))
+        ensure_experience_db(db)
+        original = {
+            "title": "Alice's protected study",
+            "objective": "Original owner protocol",
+            "research_question": "Does ownership remain enforced?",
+            "hypothesis": "A different owner cannot overwrite the record.",
+            "null_hypothesis": "A different owner can overwrite the record.",
+            "methodology": "Controlled simulation benchmark",
+            "primary_domain": "Manufacturing",
+            "transfer_domain": "Maintenance",
+            "primary_endpoint": "Normalized decision regret",
+            "sample_size": 20,
+            "replications": 2,
+        }
+        research_id, _ = create_research_protocol("PRJ-OWNER-GUARD", original, "alice")
+
+        attempted = dict(original)
+        attempted["title"] = "Bob's overwrite attempt"
+        attempted["objective"] = "Attempt to replace Alice's record."
+        with pytest.raises(PermissionError):
+            create_research_protocol("PRJ-OWNER-GUARD", attempted, "bob")
+
+        with sqlite3.connect(db) as conn:
+            row = conn.execute(
+                "SELECT research_id,owner,title,objective FROM experience_research_studies WHERE study_id=?",
+                ("PRJ-OWNER-GUARD",),
+            ).fetchone()
+        assert row == (research_id, "alice", "Alice's protected study", "Original owner protocol")
+
+
+def test_load_research_protocol_and_evidence_bundle_enforce_owner(monkeypatch):
+    with tempfile.TemporaryDirectory() as td:
+        db = str(Path(td) / "research-read-owner.db")
+        monkeypatch.setattr(ie, "_db", lambda path=db: sqlite3.connect(db, timeout=30))
+        ensure_experience_db(db)
+        create_research_protocol(
+            "PRJ-ALICE-PRIVATE",
+            {"title": "Private Alice study", "objective": "Alice's objective"},
+            "alice",
+        )
+        create_research_protocol(
+            "PRJ-BOB-PRIVATE",
+            {"title": "Private Bob study", "objective": "Bob's objective"},
+            "bob",
+        )
+
+        assert ie.load_research_protocol("PRJ-ALICE-PRIVATE", owner="alice") is not None
+        assert ie.load_research_protocol("PRJ-BOB-PRIVATE", owner="alice") is None
+        with pytest.raises(PermissionError):
+            research_evidence_bundle("PRJ-BOB-PRIVATE", owner="alice")
+
+        bundle = research_evidence_bundle("PRJ-ALICE-PRIVATE", owner="alice")
+        with zipfile.ZipFile(io.BytesIO(bundle)) as archive:
+            exported = json.loads(archive.read("research_protocol.json").decode("utf-8"))
+            manifest = json.loads(archive.read("manifest.json").decode("utf-8"))
+        assert exported["title"] == "Private Alice study"
+        assert manifest["owner"] == "alice"
+        assert manifest["study_id"] == "PRJ-ALICE-PRIVATE"
+
+
+
+def test_research_run_registration_rejects_another_owner_and_mismatched_protocol(monkeypatch):
+    with tempfile.TemporaryDirectory() as td:
+        db = str(Path(td) / "research-run-owner-boundary.db")
+        monkeypatch.setattr(ie, "_db", lambda path=db: sqlite3.connect(db, timeout=30))
+        ensure_experience_db(db)
+        alice_research_id, _ = create_research_protocol(
+            "PRJ-ALICE-RUNS",
+            {"title": "Alice protected study", "objective": "Only Alice may add runs"},
+            "alice",
+        )
+        results = pd.DataFrame({
+            "scenario": [1, 2],
+            "decision_regret": [0.1, 0.2],
+            "readiness_score": [0.8, 0.7],
+            "split": ["development", "holdout"],
+        })
+        with pytest.raises(PermissionError):
+            register_research_run(
+                "PRJ-ALICE-RUNS", alice_research_id, "bob", {}, results
+            )
+        with pytest.raises(ValueError, match="does not match"):
+            register_research_run(
+                "PRJ-ALICE-RUNS", "RSH-UNRELATED", "alice", {}, results
+            )
+
+        frame = research_runs_frame("PRJ-ALICE-RUNS", owner="alice")
+        assert frame.empty
+        with sqlite3.connect(db) as conn:
+            count = conn.execute(
+                "SELECT COUNT(*) FROM experience_research_runs WHERE study_id=?",
+                ("PRJ-ALICE-RUNS",),
+            ).fetchone()[0]
+        assert count == 0
