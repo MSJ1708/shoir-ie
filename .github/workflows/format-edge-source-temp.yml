@@ -1,0 +1,29 @@
+name: Temporary Edge source formatter export
+
+on:
+  push:
+    branches:
+      - fix/edge-login-throttle-deployment-2026-10-19
+    paths:
+      - ".github/workflows/format-edge-source-temp.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: Format and emit source for reviewed update
+        shell: bash
+        run: |
+          set -euo pipefail
+          deno fmt supabase/functions/shoir-persistence/index.ts
+          echo '---SHOIR_FORMATTED_TS_BEGIN---'
+          cat supabase/functions/shoir-persistence/index.ts
+          echo '---SHOIR_FORMATTED_TS_END---'
