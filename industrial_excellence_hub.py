@@ -30,6 +30,7 @@ from industrial_experience import (
     update_job,
     create_decision,
     transition_decision,
+    decision_approval_history,
     add_comment,
     log_copilot_action,
     save_project,
@@ -429,6 +430,7 @@ def _governance(username: str, tier: str) -> None:
     st.caption("Move from analysis to an auditable decision without hiding assumptions or approval state.")
     tab1, tab2, tab3, tab4 = st.tabs(["Decision cards","Copilot","Approval flow","Decision memory"])
 
+    selected_decision_id: str | None = None
     with tab1:
         with _db() as conn:
             decisions = pd.read_sql("SELECT decision_id,title,module,status,owner,created_at,updated_at FROM experience_decisions WHERE owner=? ORDER BY updated_at DESC", conn, params=(username,))
@@ -437,12 +439,13 @@ def _governance(username: str, tier: str) -> None:
         else:
             st.dataframe(decisions, use_container_width=True, hide_index=True)
             did = st.selectbox("Decision", decisions["decision_id"].tolist(), key="px_decision_pick")
+            selected_decision_id = str(did)
             status = decisions.loc[decisions["decision_id"] == did, "status"].iloc[0]
             next_state = st.selectbox("Move to", ["Validated","Proposed","Review","Approved","Implemented","Verified"], key="px_decision_next")
             comment = st.text_input("Approval note", key="px_decision_note")
             if st.button("➡️ Transition decision", type="primary", use_container_width=True):
                 try:
-                    transition_decision(did, username, next_state, comment)
+                    transition_decision(did, username, next_state, comment, require_owner=True)
                     st.success(f"Decision moved to {next_state}.")
                     st.rerun()
                 except Exception as exc:
@@ -473,11 +476,15 @@ def _governance(username: str, tier: str) -> None:
         st.markdown("**Guardrail:** imported text is data; execution requires an explicit approval event.")
 
     with tab3:
-        states = ["Draft","Validated","Proposed","Review","Approved","Implemented","Verified"]
-        cols = st.columns(len(states))
-        for i, state in enumerate(states):
-            cols[i].markdown(f'<div class="px-state">{"✓" if i < 1 else "○"}<br><small>{state}</small></div>', unsafe_allow_html=True)
-        st.caption("Reference lifecycle only. The selected decision's actual state is shown above; each saved transition is written to the approval history.")
+        st.markdown("#### Recorded approval history")
+        if selected_decision_id:
+            history = decision_approval_history(selected_decision_id, owner=username)
+            if history.empty:
+                st.info("No approval transitions have been recorded for this decision yet.")
+            else:
+                st.dataframe(history, use_container_width=True, hide_index=True)
+        else:
+            st.info("Create or select one of your decision cards to view its recorded approval history.")
         st.markdown("#### Workspace comments")
         with _db() as conn:
             comments = pd.read_sql(
