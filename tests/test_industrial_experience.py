@@ -360,3 +360,15 @@ def test_research_protocol_id_cannot_be_overwritten_by_another_owner(monkeypatch
                 ("PRJ-OWNER-GUARD",),
             ).fetchone()
         assert row == (research_id, "alice", "Alice's protected study", "Original owner protocol")
+
+
+def test_load_research_protocol_enforces_owner_when_supplied(monkeypatch):
+    with tempfile.TemporaryDirectory() as td:
+        db = str(Path(td) / "research-read-owner.db")
+        monkeypatch.setattr(ie, "_db", lambda path=db: sqlite3.connect(db, timeout=30))
+        ensure_experience_db(db)
+        protocol = {"title": "Private Alice study", "objective": "Alice's objective"}
+        create_research_protocol("PRJ-READ-OWNER", protocol, "alice")
+
+        assert ie.load_research_protocol("PRJ-READ-OWNER", owner="alice") is not None
+        assert ie.load_research_protocol("PRJ-READ-OWNER", owner="bob") is None
