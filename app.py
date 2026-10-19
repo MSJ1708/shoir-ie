@@ -63,7 +63,59 @@ except ImportError:
 from shoir_copilot_orchestrator import build_workflow_plan, recommend_module, run_orchestration, stage_copilot_decision
 from shoir_digital_thread import render_global_project_digital_thread
 from shoir_enterprise_services import render_enterprise_bridge
-from durable_account_store import (durable_backend_configured, sync_durable_accounts, sync_remote_requests_to_local, edge_login, edge_logout, edge_admin_list_requests, edge_renew_request, upsert_remote_account, insert_remote_request, remote_account, account_is_expired, renewed_expiry)
+# Load the persistence module first, then validate its complete public contract.
+# A stale Streamlit checkout or partially updated deployment can otherwise raise an
+# opaque ImportError here and prevent even the public sign-in page from rendering.
+_DURABLE_STORE_REQUIRED_EXPORTS = (
+    "durable_backend_configured",
+    "sync_durable_accounts",
+    "sync_remote_requests_to_local",
+    "edge_login",
+    "edge_logout",
+    "edge_admin_list_requests",
+    "edge_renew_request",
+    "upsert_remote_account",
+    "insert_remote_request",
+    "remote_account",
+    "account_is_expired",
+    "renewed_expiry",
+)
+_DURABLE_STORE_IMPORT_ERROR_TYPE = None
+try:
+    import durable_account_store as _durable_account_store
+except Exception as _durable_store_exc:
+    _durable_account_store = None
+    _DURABLE_STORE_IMPORT_ERROR_TYPE = type(_durable_store_exc).__name__
+
+_DURABLE_STORE_MISSING_EXPORTS = [
+    _name for _name in _DURABLE_STORE_REQUIRED_EXPORTS
+    if _durable_account_store is not None
+    and not callable(getattr(_durable_account_store, _name, None))
+]
+if _durable_account_store is None or _DURABLE_STORE_MISSING_EXPORTS:
+    st.error("Shoir-IE could not initialize its required account and persistence layer.")
+    if _durable_account_store is None:
+        st.caption(
+            "The durable_account_store module failed to import "
+            f"({_DURABLE_STORE_IMPORT_ERROR_TYPE or 'unknown import error'})."
+        )
+    else:
+        st.caption(
+            "The durable_account_store module is missing required functions: "
+            + ", ".join(_DURABLE_STORE_MISSING_EXPORTS)
+        )
+    st.info(
+        "This is a deployment compatibility error, not a password or account error. "
+        "Open Streamlit Cloud → Manage app → Logs, confirm the deployed commit, "
+        "and redeploy the complete repository revision. Account access is disabled "
+        "until the required persistence functions are available."
+    )
+    st.stop()
+
+for _durable_store_export in _DURABLE_STORE_REQUIRED_EXPORTS:
+    globals()[_durable_store_export] = getattr(
+        _durable_account_store, _durable_store_export
+    )
 
 # Compatibility guard: a hosted deployment can briefly have a newer app.py than
 # its supporting module during a rolling rebuild. Keep a receipt-preview import
