@@ -1,12 +1,12 @@
 # Authenticated release gate
 
-This workflow is an **on-demand production integration check**. It is deliberately not triggered by ordinary pushes or pull requests because it contacts the configured Edge Function, creates temporary server sessions and performs a small save/restore probe against a dedicated test account.
+This workflow is an **on-demand non-production staging integration check**. It is deliberately not triggered by ordinary pushes or pull requests because it contacts the configured Edge Function, creates temporary server sessions and performs a small save/restore probe against a dedicated test account. It is fail-closed: the Edge API target must be the approved staging Supabase project (hfhrosthswcybccepmak), and the browser target must match the explicitly configured staging Streamlit hostname. The known production Supabase project and public production Streamlit host are rejected.
 
 ## Safety requirements
 
 Every account used by this workflow must be a disposable test identity whose username starts with `shoir-e2e-`. The runner refuses other usernames. Never use the master administrator, a paying customer, or an account with real workspace data.
 
-Provision these distinct accounts in the selected test environment before running the workflow:
+Provision these distinct accounts in the approved staging environment through the supported account registration/approval lifecycle before running the workflow. Do not insert account rows directly with SQL or reuse production identities:
 
 | Test identity | Required state | Purpose |
 |---|---|---|
@@ -23,22 +23,30 @@ The Active test workspace should be a small JSON object and contain no real cust
 Add these as **GitHub Actions secrets** under repository Settings → Secrets and variables → Actions → Secrets:
 
 - `SHOIR_E2E_EDGE_URL` — the configured `shoir-persistence` Edge Function endpoint for the target environment.
-- `SHOIR_E2E_PUBLISHABLE_KEY` — the publishable key for that same environment. Do **not** provide a service-role key.
+- `SHOIR_E2E_PUBLISHABLE_KEY` — the publishable key for the approved staging environment. Do **not** provide a service-role key.
+- `SHOIR_E2E_APP_URL` — the full HTTPS URL of the dedicated staging Streamlit app (not `https://shoir-ie-app.streamlit.app/`).
 - `SHOIR_E2E_ACTIVE_USERNAME`, `SHOIR_E2E_ACTIVE_PASSWORD`
 - `SHOIR_E2E_SECOND_USERNAME`, `SHOIR_E2E_SECOND_PASSWORD`
 - `SHOIR_E2E_STARTER_USERNAME`, `SHOIR_E2E_STARTER_PASSWORD`
-- `SHOIR_E2E_EXPIRED_USERNAME`, `SHOIR_E2E_EXPIRED_PASSWORD`\n- `SHOIR_E2E_MODULE_USERNAME`, `SHOIR_E2E_MODULE_PASSWORD` — a distinct Enterprise Plus test account used only for route/default-state module traversal.\n- `SHOIR_E2E_RESEARCH_MODULE_USERNAME`, `SHOIR_E2E_RESEARCH_MODULE_PASSWORD` — a distinct Research Pack add-on test account for the modules unavailable to the base-tier matrix.
+- `SHOIR_E2E_EXPIRED_USERNAME`, `SHOIR_E2E_EXPIRED_PASSWORD`
+- `SHOIR_E2E_MODULE_USERNAME`, `SHOIR_E2E_MODULE_PASSWORD` — a distinct Enterprise Plus test account used only for route/default-state module traversal.
+- `SHOIR_E2E_RESEARCH_MODULE_USERNAME`, `SHOIR_E2E_RESEARCH_MODULE_PASSWORD` — a distinct Research Pack add-on test account for the modules unavailable to the base-tier matrix.
 
-Optional inactive-account verification uses `SHOIR_E2E_INACTIVE_USERNAME` and `SHOIR_E2E_INACTIVE_PASSWORD` together. Set the Actions **variable** `SHOIR_E2E_ACTIVE_EXPECTED_TIER` if the Active test account should be a tier other than `Enterprise Plus Tier ($399)`. The browser test defaults to `https://shoir-ie-app.streamlit.app/`; override that with secret `SHOIR_E2E_APP_URL` only when testing an approved staging deployment.
+Add this as a GitHub Actions **variable** under Settings → Secrets and variables → Actions → Variables:
+
+- `SHOIR_E2E_EXPECTED_STAGING_APP_HOST` — the exact hostname of the staging Streamlit app, for example `your-staging-app.streamlit.app` (hostname only; no scheme or path).
+
+Optional inactive-account verification uses `SHOIR_E2E_INACTIVE_USERNAME` and `SHOIR_E2E_INACTIVE_PASSWORD` together. Set the Actions **variable** `SHOIR_E2E_ACTIVE_EXPECTED_TIER` if the Active test account should be a tier other than `Enterprise Plus Tier ($399)`. There is intentionally no default application URL: missing or mismatched staging configuration stops the tests before browser navigation.
 
 Do not put passwords or tokens in workflow inputs, source files, issues, pull requests, or chat messages. Reports deliberately omit usernames, passwords, tokens, workspace payloads, and response bodies.
 
 ## Running and evidence
 
-1. Confirm the configured Edge Function and Streamlit deployment contain the revisions being tested.
-2. Open GitHub Actions → **Authenticated release gate** → **Run workflow** on `main`.
-3. Review the run summary and download `shoir-ie-authenticated-release-evidence`.
-4. Record the run URL, commit SHA, timestamp, target environment, and each case's result in `docs/RELEASE_VERIFICATION_MATRIX.md`. Treat any failed cleanup or workspace restore as a release blocker.
+1. Confirm a dedicated staging Streamlit deployment exists and that its own app secrets point to staging Supabase project `hfhrosthswcybccepmak` (not production). Confirm the Edge Function endpoint and publishable key refer to that same project. Changing the approved staging project requires an explicit reviewed code change.
+2. Confirm the configured Edge Function and Streamlit deployment contain the revisions being tested.
+3. Open GitHub Actions → **Authenticated release gate** → **Run workflow** on `main`.
+4. Review the run summary and download `shoir-ie-authenticated-release-evidence`.
+5. Record the run URL, commit SHA, timestamp, target environment, and each case's result in `docs/RELEASE_VERIFICATION_MATRIX.md`. Treat any failed cleanup or workspace restore as a release blocker.
 
 The gate checks active/invalid-password/expired authentication, dedicated-account tier metadata, server-side non-admin denial, owner-bound workspace access, workspace save/re-login/restore, renewal-only restrictions and reference validation, server logout revocation, and an authenticated browser route to the Excel module. It also runs `scripts/authenticated_module_matrix.py` against the 96-name `docs/MODULE_TIER_INVENTORY.csv`: Enterprise Plus routes are exercised using a dedicated Enterprise Plus test account, and Research Pack-only entries are exercised using a distinct Research Pack test account. The script records per-module route/default-state rendering outcomes and fails closed on missing inventory entries, blank content, fatal renderer markers, or horizontal overflow. The Edge login path consumes server-side buckets: 8 attempts per username per 10 minutes and, when the trusted Cloudflare client-IP header is present, 30 attempts per IP per 10 minutes. A successful login clears that user's bucket; the IP bucket expires naturally after the window. The throttle table and RPC are restricted to service_role, and login fails closed with 503 if the throttle RPC is unavailable. Apply migration `20261019123300_server_side_login_rate_limits.sql` before deploying the Edge Function revision that calls it. For an intentional live limiter test, set the Actions variable `SHOIR_E2E_VERIFY_LOGIN_THROTTLE=true`; it generates nine invalid attempts against a random synthetic username (never a real account). This consumes nine attempts from the ephemeral runner's IP bucket, so do not run the optional probe repeatedly inside one 10-minute window.
 
