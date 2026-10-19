@@ -234,11 +234,10 @@ def upsert_remote_research_study(study: Mapping[str, Any]) -> None:
                 VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
                 ON CONFLICT (study_id) DO UPDATE SET
                     research_id=EXCLUDED.research_id,
-                    owner=EXCLUDED.owner,
-                    owner_lc=EXCLUDED.owner_lc,
                     title=EXCLUDED.title,
                     protocol_json=EXCLUDED.protocol_json,
                     updated_at=EXCLUDED.updated_at
+                WHERE shoir_research_studies.owner_lc = EXCLUDED.owner_lc
                 """,
                 (
                     str(study["study_id"]),
@@ -251,6 +250,8 @@ def upsert_remote_research_study(study: Mapping[str, Any]) -> None:
                     updated,
                 ),
             )
+            if cur.rowcount == 0:
+                raise PermissionError("Research study not found or not owned by this user.")
         conn.commit()
 
 
