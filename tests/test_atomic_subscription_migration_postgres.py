@@ -310,7 +310,7 @@ def test_atomic_subscription_migration_and_state_transitions():
 
     # Race two registrations for the same normalized username using independent
     # PostgreSQL sessions. Exactly one may create the Pending request.
-    concurrent_registration_user = "shoir-e2e-postgres-concurrent-registration"
+    concurrent_registration_user = "shoir-e2e-conreg"
     registration_barrier = Barrier(2)
 
     def register_concurrently():
@@ -342,7 +342,7 @@ def test_atomic_subscription_migration_and_state_transitions():
 
     # Race two decisions for the same Pending request. The row lock and status
     # guard must allow one durable transition and reject the stale contender.
-    decision_request = _registration("shoir-e2e-postgres-concurrent-decision")
+    decision_request = _registration("shoir-e2e-condec")
     decision_request_id = int(decision_request["request_id"])
     decision_barrier = Barrier(2)
 
@@ -369,7 +369,7 @@ def test_atomic_subscription_migration_and_state_transitions():
     ) == "Approved"
     assert _sql(
         "SELECT count(*) FROM public.shoir_accounts WHERE username_lc=%s",
-        ("shoir-e2e-postgres-concurrent-decision",),
+        ("shoir-e2e-condec",),
     ) == 1
 
     # Force a failure after the approval function has inserted/updated the
