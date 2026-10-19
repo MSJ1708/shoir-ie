@@ -6,9 +6,9 @@
 
 This report reflects the current repository head and a read-only check of the connected Supabase production project. It supersedes earlier point-in-time statements in this file that describe PR #145 as unmerged or treat an older browser-smoke failure as the latest deployment result.
 
-- **Repository `main`:** [`e4dea7729568447f6fcb9c1de45e19c02a31dd46`](https://github.com/MSJ1708/shoir-ie/commit/e4dea7729568447f6fcb9c1de45e19c02a31dd46)
+- **Repository `main`:** [`e9524db88cf7d20de965e38cf2705e80e1af1906`](https://github.com/MSJ1708/shoir-ie/commit/e9524db88cf7d20de965e38cf2705e80e1af1906)
 - **Latest merged smoke-harness change:** [PR #152](https://github.com/MSJ1708/shoir-ie/pull/152)
-- **Hosted-smoke trigger repair:** [PR #153](https://github.com/MSJ1708/shoir-ie/pull/153) is open and must not be treated as merged or deployed.
+- **Hosted-smoke trigger repair:** [PR #153](https://github.com/MSJ1708/shoir-ie/pull/153) is merged to `main` in commit [`e9524db88cf7d20de965e38cf2705e80e1af1906`](https://github.com/MSJ1708/shoir-ie/commit/e9524db88cf7d20de965e38cf2705e80e1af1906). Its PR-head CI passed; the post-merge `main` hosted-smoke result has not yet been independently confirmed.
 - **Production application revision:** UNVERIFIED. The public endpoint alone does not identify the Streamlit Cloud Git SHA.
 - **Production database migration state:** the atomic subscription-decision migration is NOT applied.
 - **Protected master administrator:** verified through a read-only production query; invariant unchanged.
@@ -25,7 +25,9 @@ The principal blockers are a deployed Edge Function/source mismatch, no availabl
 | Security and quality | **PASS for automated checks** | [Run 39291301605](https://github.com/MSJ1708/shoir-ie/actions/runs/39291301605): compilation, regression tests, dependency audit and secret-pattern guard completed successfully. This is not an independent penetration test or certification. |
 | Engine regression | **PASS for the run** | [Run 39291301735](https://github.com/MSJ1708/shoir-ie/actions/runs/39291301735). This does not replace independent calculation reference cases or module-specific end-to-end acceptance. |
 | Earlier anonymous hosted smoke | **PASS on an earlier candidate only** | [Run 39287236351](https://github.com/MSJ1708/shoir-ie/actions/runs/39287236351) passed desktop/mobile registration and public module-explorer checks on an earlier commit. It is not evidence that the final `main` revision is deployed or served. |
-| Hosted smoke after merge | **NOT VERIFIED for the final revision** | The post-merge validation above skipped its hosted-smoke job. PR #153 proposes running this anonymous, read-only smoke on `main` pushes and enabling manual dispatch. A shell smoke will still not establish the deployed Git SHA by itself. |
+| PR #153 checks before merge | **PASS on the PR head, not the merge SHA** | [Validation 39293083599](https://github.com/MSJ1708/shoir-ie/actions/runs/39293083599), [engine 39293083584](https://github.com/MSJ1708/shoir-ie/actions/runs/39293083584), [tests 39293083403](https://github.com/MSJ1708/shoir-ie/actions/runs/39293083403), [security/quality 39293083466](https://github.com/MSJ1708/shoir-ie/actions/runs/39293083466) and [platform 39293083526](https://github.com/MSJ1708/shoir-ie/actions/runs/39293083526) succeeded on head `2c38aefe847fd320038ba88952315a2fa8a10271`. The hosted-smoke job was expectedly skipped on the `fix/` PR branch; the change adds a `main`-push trigger. |
+| Post-merge `main` workflow results | **NOT VERIFIED for merge SHA** | The merged revision is `e9524db88cf7d20de965e38cf2705e80e1af1906`. The available workflow-run query did not provide a confirmed completed hosted-smoke result for this exact merge SHA. Do not infer a pass from the pre-merge PR-head runs. |
+| Hosted smoke after merge | **NOT VERIFIED for the final revision** | The post-merge validation associated with the prior main SHA skipped its hosted-smoke job because the prior workflow condition excluded `main`. PR #153 now enables the anonymous, read-only smoke on `main` pushes and manual dispatch; a completed pass on the merged SHA still needs to be confirmed. A shell smoke will not establish the deployed Git SHA by itself. |
 
 ### Production Supabase — read-only inspection
 
