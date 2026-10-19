@@ -4,15 +4,15 @@
 
 **NO-GO for workforce production use at this verification point.** This is an evidence-based release decision, not a claim that the entire product is broken. The current public Streamlit deployment failed a fresh entry-screen browser check with Streamlit's redacted `ImportError` page. The deployed Streamlit revision and exact exception are not available from the public page and must be established from Streamlit Cloud runtime logs.
 
-Do not invite workers to depend on the live app until the startup error is diagnosed and the authenticated release gates below pass. Do not deploy the unmerged changes in PR [#145](https://github.com/MSJ1708/shoir-ie/pull/145) until its migration has been validated in an isolated database and the release sequence is approved.
+Do not invite workers to depend on the live app until the startup error is diagnosed and the authenticated release gates below pass. Do not deploy the unmerged changes in PR [#145](https://github.com/MSJ1708/shoir-ie/pull/145) until its migration has been reviewed and replayed against an isolated staging schema matching production, and the release sequence is approved.
 
 ## Revisions and environment
 
 - Repository: [MSJ1708/shoir-ie](https://github.com/MSJ1708/shoir-ie)
 - Baseline `main` revision examined: `6bc1f0bf5aca1ff7c09a87565c736f88cc291210`
 - Candidate branch: `fix/pending-renewal-decline-guard-2026-10-19`
-- Latest implementation-code revision with a full passing CI set: `b7c9da43d0c3c51aa5fb94b71c6fe3f0844afadc`. Subsequent commits on the same PR update the readiness report and matrix; they do not change application code.
-- Candidate PR: [#145 — Guard subscription decline transitions](https://github.com/MSJ1708/shoir-ie/pull/145). Open, **not merged**, **not deployed**.
+- Latest implementation and PostgreSQL integration-test revision with a full passing CI set: `c375ec70240849fa607d3426cad18c8682004e0b`. Subsequent commits on the same PR update release documentation only.
+- Candidate PR: [#145 — Repair durable registration and make subscription decisions atomic](https://github.com/MSJ1708/shoir-ie/pull/145). Open, **not merged**, **not deployed**.
 - Public application: https://shoir-ie-app.streamlit.app/
 - Supabase project: `shoir-ie-production`, ref `gcsamrdaeraxieaagsta`
 - Deployed persistence Edge Function when inspected: `shoir-persistence`, active version 8.
@@ -22,12 +22,12 @@ Do not invite workers to depend on the live app until the startup error is diagn
 
 | Area | Result | Scope and evidence |
 |---|---|---|
-| Python/Streamlit tests on candidate | **PASS** | [Candidate test run](https://github.com/MSJ1708/shoir-ie/actions/runs/39269059922): 482 passed, 2 warnings. This is CI against the candidate source, not a live worker session. |
+| Python/Streamlit tests on candidate | **PASS** | [Candidate test run](https://github.com/MSJ1708/shoir-ie/actions/runs/39270884924): 482 passed, 1 skipped (the isolated-PostgreSQL-only test is skipped in the general suite), 2 warnings. This is CI against the candidate source, not a live worker session. |
 | Engine regression | **PASS** | [Candidate engine run](https://github.com/MSJ1708/shoir-ie/actions/runs/39269060088). |
 | Platform tests | **PASS** | [Candidate platform run](https://github.com/MSJ1708/shoir-ie/actions/runs/39269059883). |
 | Security and quality gates | **PASS** | [Candidate security/quality run](https://github.com/MSJ1708/shoir-ie/actions/runs/39269059989). Automated scanning is not independent penetration testing. |
 | Edge Function formatting/type-check | **PASS** | [Candidate Edge Function run](https://github.com/MSJ1708/shoir-ie/actions/runs/39269059985). |
-| Consolidated source validation | **PASS** | [Candidate validation run](https://github.com/MSJ1708/shoir-ie/actions/runs/39269059886). Its live-smoke job was skipped on this fix branch. |
+| Consolidated source validation | **PASS** | [Candidate validation run](https://github.com/MSJ1708/shoir-ie/actions/runs/39270884903). Its live-smoke job was skipped on this fix branch. |\n| Subscription transaction SQL integration | **PASS — isolated PostgreSQL 17 CI** | [PostgreSQL integration run](https://github.com/MSJ1708/shoir-ie/actions/runs/39270884993): one test passed. It executed the candidate migration against a disposable synthetic schema and exercised function grants, registration, duplicate rejection, approval, decline, repeat-decision rejection and renewal identity/profile preservation. This is not a full staging migration replay against the actual production schema. |
 | Production Supabase health | **PASS — read-only inspection** | Connected project reported active/healthy; deployed `shoir-persistence` version 8. |
 | Login-throttle migration and grants | **PASS — read-only inspection** | Current production migration history includes the server-side throttle migration. `anon`/ordinary `authenticated` roles cannot execute the throttle RPC; `service_role` can. |
 | Public access to protected account/workspace tables | **PASS — read-only inspection** | Direct table privilege checks for `anon` and `authenticated` returned denied for the reviewed protected tables; RLS and server-only policies were inspected. This is not a complete tenant-isolation assessment of all objects. |
