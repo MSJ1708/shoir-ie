@@ -180,3 +180,51 @@ def test_login_throttle_contract_is_server_only_and_atomic():
     assert 'REVOKE ALL ON TABLE public.shoir_login_throttle FROM anon, authenticated' in migration
     assert 'REVOKE EXECUTE ON FUNCTION public.shoir_check_login_throttle' in migration
     assert 'TO service_role' in migration
+
+
+
+def test_edge_register_request_sends_proof_bytes_not_local_path(tmp_path, monkeypatch):
+    import base64
+
+    receipt = b"fake-test-receipt-bytes"
+    proof_path = tmp_path / "receipt.png"
+    proof_path.write_bytes(receipt)
+    calls = []
+
+    def fake_edge_call(action, payload):
+        calls.append((action, payload))
+        return {"ok": True, "request_id": 123, "status": "Pending"}
+
+    monkeypatch.setattr(das, "_edge_call", fake_edge_call)
+    result = das.edge_register_request({
+        "username": "shoir-e2e-registration",
+        "password": "a-long-test-password",
+        "email": "e2e@example.invalid",
+        "tier": "Starter Tier ($29)",
+        "payment_method": "STC Pay (QR)",
+        "transaction_id": "SYNTHETIC-REFERENCE",
+        "screenshot_path": str(proof_path),
+    })
+
+    assert result["ok"] is True
+    assert calls[0][0] == "register_request"
+    assert calls[0][1]["proof_base64"] == base64.b64encode(receipt).decode("ascii")
+    assert calls[0][1]["proof_content_type"] == "image/png"
+    assert "screenshot_path" not in calls[0][1]
+
+
+def test_edge_register_request_rejects_oversized_payment_proof(tmp_path, monkeypatch):
+    proof_path = tmp_path / "receipt.png"
+    proof_path.write_bytes(b"x" * (512 * 1024 + 1))
+    monkeypatch.setattr(das, "_edge_call", lambda action, payload: (_ for _ in ()).throw(AssertionError("must not call Edge")))
+
+    import pytest
+    with pytest.raises(ValueError, match="512 KiB"):
+        das.edge_register_request({
+            "username": "shoir-e2e-registration",
+            "password": "a-long-test-password",
+            "email": "e2e@example.invalid",
+            "tier": "Starter Tier ($29)",
+            "payment_method": "STC Pay (QR)",
+            "screenshot_path": str(proof_path),
+        })
