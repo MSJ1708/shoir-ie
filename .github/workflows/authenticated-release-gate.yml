@@ -13,7 +13,7 @@ concurrency:
 jobs:
   authenticated-release-gate:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 60
     env:
       SHOIR_E2E_EDGE_URL: ${{ secrets.SHOIR_E2E_EDGE_URL }}
       SHOIR_E2E_PUBLISHABLE_KEY: ${{ secrets.SHOIR_E2E_PUBLISHABLE_KEY }}
@@ -21,6 +21,10 @@ jobs:
       SHOIR_E2E_ACTIVE_USERNAME: ${{ secrets.SHOIR_E2E_ACTIVE_USERNAME }}
       SHOIR_E2E_ACTIVE_PASSWORD: ${{ secrets.SHOIR_E2E_ACTIVE_PASSWORD }}
       SHOIR_E2E_ACTIVE_EXPECTED_TIER: ${{ vars.SHOIR_E2E_ACTIVE_EXPECTED_TIER }}
+      SHOIR_E2E_MODULE_USERNAME: ${{ secrets.SHOIR_E2E_MODULE_USERNAME }}
+      SHOIR_E2E_MODULE_PASSWORD: ${{ secrets.SHOIR_E2E_MODULE_PASSWORD }}
+      SHOIR_E2E_RESEARCH_MODULE_USERNAME: ${{ secrets.SHOIR_E2E_RESEARCH_MODULE_USERNAME }}
+      SHOIR_E2E_RESEARCH_MODULE_PASSWORD: ${{ secrets.SHOIR_E2E_RESEARCH_MODULE_PASSWORD }}
       SHOIR_E2E_SECOND_USERNAME: ${{ secrets.SHOIR_E2E_SECOND_USERNAME }}
       SHOIR_E2E_SECOND_PASSWORD: ${{ secrets.SHOIR_E2E_SECOND_PASSWORD }}
       SHOIR_E2E_STARTER_USERNAME: ${{ secrets.SHOIR_E2E_STARTER_USERNAME }}
@@ -45,20 +49,22 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          required=(SHOIR_E2E_EDGE_URL SHOIR_E2E_PUBLISHABLE_KEY SHOIR_E2E_ACTIVE_USERNAME SHOIR_E2E_ACTIVE_PASSWORD SHOIR_E2E_SECOND_USERNAME SHOIR_E2E_SECOND_PASSWORD SHOIR_E2E_STARTER_USERNAME SHOIR_E2E_STARTER_PASSWORD SHOIR_E2E_EXPIRED_USERNAME SHOIR_E2E_EXPIRED_PASSWORD)
+          required=(SHOIR_E2E_EDGE_URL SHOIR_E2E_PUBLISHABLE_KEY SHOIR_E2E_ACTIVE_USERNAME SHOIR_E2E_ACTIVE_PASSWORD SHOIR_E2E_SECOND_USERNAME SHOIR_E2E_SECOND_PASSWORD SHOIR_E2E_STARTER_USERNAME SHOIR_E2E_STARTER_PASSWORD SHOIR_E2E_EXPIRED_USERNAME SHOIR_E2E_EXPIRED_PASSWORD SHOIR_E2E_MODULE_USERNAME SHOIR_E2E_MODULE_PASSWORD SHOIR_E2E_RESEARCH_MODULE_USERNAME SHOIR_E2E_RESEARCH_MODULE_PASSWORD)
           for name in "${required[@]}"; do
             if [[ -z "${!name:-}" ]]; then
               echo "::error::Missing required Actions secret/variable: $name"
               exit 2
             fi
           done
-          for name in SHOIR_E2E_ACTIVE_USERNAME SHOIR_E2E_SECOND_USERNAME SHOIR_E2E_STARTER_USERNAME SHOIR_E2E_EXPIRED_USERNAME; do
+          for name in SHOIR_E2E_ACTIVE_USERNAME SHOIR_E2E_SECOND_USERNAME SHOIR_E2E_STARTER_USERNAME SHOIR_E2E_EXPIRED_USERNAME SHOIR_E2E_MODULE_USERNAME SHOIR_E2E_RESEARCH_MODULE_USERNAME; do
             value="${!name}"
             if [[ "${value,,}" != shoir-e2e-* ]]; then
               echo "::error::$name must use a dedicated shoir-e2e-* test account; production/customer/admin identities are refused."
               exit 2
             fi
           done
+      - name: Verify authenticated 96-module rendering matrix
+        run: python scripts/authenticated_module_matrix.py
       - name: Verify authenticated Edge API lifecycle and workspace isolation
         run: python scripts/authenticated_release_gate.py
       - name: Verify authenticated browser shell, Excel module and logout
