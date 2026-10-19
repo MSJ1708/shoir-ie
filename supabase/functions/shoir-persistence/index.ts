@@ -233,5 +233,5 @@ if(action==="login"){
 
 
   return response({error:"Unknown action."},400);
- }catch(err){return response({error:String(err?.message||err)},500);}
+ }catch(err: unknown){return response({error:err instanceof Error?err.message:String(err)},500);}
 });
