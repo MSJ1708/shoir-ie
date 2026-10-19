@@ -102,7 +102,10 @@ def login_test_account(page, account_class: str, username: str, password: str) -
         raise RuntimeError(f"{account_class}: public app navigation did not return HTTP 200.")
     frame = find_app_frame(page)
     if frame is None:
-        raise RuntimeError(f"{account_class}: sign-in application frame was not found.")
+        raise RuntimeError(f"{account_class}: sign-in application frame was not found; test credentials were not submitted.")
+    initial_body = frame.locator("body").inner_text(timeout=8_000)
+    if "STAGING TEST ENVIRONMENT" not in initial_body:
+        raise RuntimeError(f"{account_class}: staging marker is missing; refusing to submit credentials to a possibly production-backed app.")
     frame.get_by_role("tab", name=re.compile("Sign In", re.I)).click(timeout=10_000)
     frame.get_by_label("Username").fill(username)
     frame.get_by_label("Password").fill(password)
