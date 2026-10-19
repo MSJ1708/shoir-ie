@@ -97,6 +97,14 @@ MODULE_REQUIREMENTS = {
     "Executive Report Center": "Enterprise",
     "Localization & Multi-Currency": "Mid-Tier Pro",
     "Production Bottleneck & Capacity Recovery Study": "Mid-Tier Pro",
+    # Remaining names declared in industrial_platform.TIER_FEATURES.
+    "Carbon Accounting": "Mid-Tier Pro",
+    "MEIO Matrix": "Professional",
+    "Fleet Routing": "Professional",
+    "Production Planning & Control (PPC)": "Professional",
+    "Monte Carlo Sim": "Enterprise",
+    "Sensitivity Analysis": "Enterprise",
+    "Digital Twin & Discrete-Event Simulation": "Enterprise",
 }
 
 COPILOT_TOOL_REQUIREMENTS = {
