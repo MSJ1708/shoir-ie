@@ -1249,8 +1249,7 @@ def _hydrate_remote_research_to_local(remote: Mapping[str, Any]) -> Optional[dic
 def load_research_protocol(study_id: str, owner: Optional[str] = None) -> Optional[dict[str, Any]]:
     ensure_experience_db()
     with _db() as conn:
-        row = conn.execute(
-            """
+        query = """
             SELECT study_id,research_id,title,objective,research_question,hypothesis,
                    null_hypothesis,methodology,primary_domain,transfer_domain,
                    primary_endpoint,secondary_metrics_json,independent_variables_json,
@@ -1260,9 +1259,12 @@ def load_research_protocol(study_id: str, owner: Optional[str] = None) -> Option
                    protocol_hash,protocol_locked,owner,created_at,updated_at
             FROM experience_research_studies
             WHERE study_id=?
-            """,
-            (study_id,),
-        ).fetchone()
+        """
+        params: tuple[Any, ...] = (str(study_id),)
+        if owner is not None:
+            query += " AND owner=?"
+            params += (str(owner),)
+        row = conn.execute(query, params).fetchone()
     if not row:
         try:
             remote = remote_research_study(study_id, owner=owner)
@@ -1842,9 +1844,12 @@ def research_decisions_frame(owner: str) -> pd.DataFrame:
 
 
 def research_evidence_bundle(study_id: str, owner: str) -> bytes:
-    protocol = load_research_protocol(study_id)
+    """Export only the requesting owner's protocol, runs, studies and decisions."""
+    protocol = load_research_protocol(study_id, owner=owner)
+    if not protocol:
+        raise PermissionError("Research study not found or not owned by this user.")
     studies = list_research_studies(owner)
-    runs = research_runs_frame(study_id)
+    runs = research_runs_frame(study_id, owner=owner)
     decisions = research_decisions_frame(owner)
     manifest = {
         "bundle_type": "Shoir-IE research workspace evidence",
