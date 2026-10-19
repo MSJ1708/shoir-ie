@@ -1,4 +1,11 @@
+import re
 from datetime import datetime, timedelta, timezone
+
+def _source_contract_contains(source: str, fragment: str) -> bool:
+    normalized_source = re.sub(r"\\s+", "", source)
+    normalized_fragment = re.sub(r"\\s+", "", fragment)
+    return normalized_fragment in normalized_source
+
 
 from durable_account_store import account_is_expired, renewed_expiry
 import durable_account_store as das
@@ -35,10 +42,10 @@ def test_master_admin_enterprise_plus_entitlement_contract():
     assert '("sho", admin_pass_hash, "Enterprise Admin", "Enterprise Plus Tier ($399)",' in app_source
     assert '(admin_pass_hash, "Enterprise Admin", "Enterprise Plus Tier ($399)", "mohsuhailji@gmail.com")' in app_source
     assert '("Enterprise Admin", "Enterprise Plus Tier ($399)", "mohsuhailji@gmail.com")' in app_source
-    assert 'const isMasterAdmin = row.username_lc==="sho"&&row.role==="Enterprise Admin";' in edge_source
-    assert 'const effectiveTier=isMasterAdmin?adminTier:row.tier;' in edge_source
-    assert 'if(requiredScope==="workspace"&&!(row.username_lc==="sho"&&row.role==="Enterprise Admin")' in edge_source
-    assert 'if(row.username_lc!=="sho"||row.role!=="Enterprise Admin")throw new Error("Admin authorization failed.");' in edge_source
+    assert _source_contract_contains(edge_source, 'const isMasterAdmin = row.username_lc==="sho"&&row.role==="Enterprise Admin";')
+    assert _source_contract_contains(edge_source, 'const effectiveTier=isMasterAdmin?adminTier:row.tier;')
+    assert _source_contract_contains(edge_source, 'if(requiredScope==="workspace"&&!(row.username_lc==="sho"&&row.role==="Enterprise Admin")')
+    assert _source_contract_contains(edge_source, 'if(row.username_lc!=="sho"||row.role!=="Enterprise Admin")throw new Error("Admin authorization failed.");')
 
 
 def test_renewal_approval_preserves_existing_account_identity_and_renews_expiry():
@@ -48,11 +55,11 @@ def test_renewal_approval_preserves_existing_account_identity_and_renews_expiry(
     root = Path(__file__).resolve().parents[1]
     edge_source = (root / "supabase/functions/shoir-persistence/index.ts").read_text(encoding="utf-8")
 
-    assert 'request.request_type==="Renewal"&&existing?expiry30(existing.subscription_expires_at):expiry30()' in edge_source
-    assert 'const passwordHash=existing?.password_hash||pendingCred?.password_hash;' in edge_source
-    assert 'created_at:existing?.created_at||now' in edge_source
-    assert 'username_lc:request.username_lc' in edge_source
-    assert 'if(action==="renew_request")' in edge_source
+    assert _source_contract_contains(edge_source, 'request.request_type==="Renewal"&&existing?expiry30(existing.subscription_expires_at):expiry30()')
+    assert _source_contract_contains(edge_source, 'const passwordHash=existing?.password_hash||pendingCred?.password_hash;')
+    assert _source_contract_contains(edge_source, 'created_at:existing?.created_at||now')
+    assert _source_contract_contains(edge_source, 'username_lc:request.username_lc')
+    assert _source_contract_contains(edge_source, 'if(action==="renew_request")')
 
 
 
@@ -136,9 +143,9 @@ def test_edge_login_contract_denies_inactive_accounts_and_supports_session_revoc
     edge_source = (root / "supabase/functions/shoir-persistence/index.ts").read_text(encoding="utf-8")
     app_source = (root / "app.py").read_text(encoding="utf-8")
 
-    assert 'if(!row||row.active===false||!await verifyPassword(row.password_hash,password))' in edge_source
-    assert 'if(action==="logout")' in edge_source
-    assert '.eq("token_hash",tokenHash).eq("username_lc",usernameLc).select("token_hash")' in edge_source
+    assert _source_contract_contains(edge_source, 'if(!row||row.active===false||!await verifyPassword(row.password_hash,password))')
+    assert _source_contract_contains(edge_source, 'if(action==="logout")')
+    assert _source_contract_contains(edge_source, '.eq("token_hash",tokenHash).eq("username_lc",usernameLc).select("token_hash")')
     assert 'edge_logout(_logout_user, _logout_token)' in app_source
     assert 'if _shell_surface == "logout":' in app_source
     assert 'edge_logout(_renew_username, _renew_token)' in app_source
@@ -152,10 +159,10 @@ def test_login_throttle_contract_is_server_only_and_atomic():
     edge_source = (root / "supabase/functions/shoir-persistence/index.ts").read_text(encoding="utf-8")
     migration = (root / "supabase/migrations/20261019123300_server_side_login_rate_limits.sql").read_text(encoding="utf-8")
 
-    assert 'loginThrottleBuckets(usernameLc,req)' in edge_source
-    assert 'checkLoginThrottle(bucket.key_hash,bucket.max_attempts,"attempt")' in edge_source
-    assert 'response({error:"Too many sign-in attempts. Please wait and try again."},429)' in edge_source
-    assert 'response({error:"Authentication protection is temporarily unavailable. Please retry shortly."},503)' in edge_source
+    assert _source_contract_contains(edge_source, 'loginThrottleBuckets(usernameLc,req)')
+    assert _source_contract_contains(edge_source, 'checkLoginThrottle(bucket.key_hash,bucket.max_attempts,"attempt")')
+    assert _source_contract_contains(edge_source, 'response({error:"Too many sign-in attempts. Please wait and try again."},429)')
+    assert _source_contract_contains(edge_source, 'response({error:"Authentication protection is temporarily unavailable. Please retry shortly."},503)')
     assert 'SECURITY INVOKER' in migration
     assert 'pg_advisory_xact_lock' in migration
     assert 'ALTER TABLE public.shoir_login_throttle ENABLE ROW LEVEL SECURITY' in migration
