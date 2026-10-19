@@ -180,18 +180,23 @@ def _expected_accounts() -> list[dict[str, str]]:
 def _assert_none_exist(service_key: str, accounts: list[dict[str, str]]) -> None:
     names = [account["username"] for account in accounts]
     expr = "in.(" + ",".join(names) + ")"
-    query = urlencode({"select": "username_lc", "username_lc": expr})
-    status, data = rest_call(service_key, "GET", f"shoir_accounts?{query}")
-    if status != 200 or not isinstance(data, list):
-        raise RuntimeError("Could not verify whether the planned staging test identities already exist.")
-    found = {
-        str(row.get("username_lc") or "").casefold()
-        for row in data
-        if isinstance(row, dict)
-    }
-    if found:
+    conflicts: set[str] = set()
+    # Check all durable lifecycle tables, not only approved accounts. This
+    # catches a stale pending request/credential left by an interrupted attempt
+    # and prevents accidental reuse or duplicate submissions.
+    for table in ("shoir_accounts", "shoir_pending_credentials", "shoir_subscription_requests"):
+        query = urlencode({"select": "username_lc", "username_lc": expr})
+        status, data = rest_call(service_key, "GET", f"{table}?{query}")
+        if status != 200 or not isinstance(data, list):
+            raise RuntimeError("Could not verify whether the planned staging test identities already exist.")
+        conflicts.update(
+            str(row.get("username_lc") or "").casefold()
+            for row in data
+            if isinstance(row, dict)
+        )
+    if conflicts:
         raise RuntimeError(
-            "At least one planned E2E identity already exists. No registration was attempted; use the documented recovery/reconciliation path."
+            "At least one planned E2E identity or pending request already exists. No registration was attempted; inspect the staging lifecycle state and do not retry blindly."
         )
 
 
