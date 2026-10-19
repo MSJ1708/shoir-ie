@@ -400,10 +400,18 @@ def transition_decision(
             raise PermissionError("Decision not found or not owned by this user.")
         if current in states and states.index(to_status) < states.index(current) and to_status not in {"Draft", "Review"}:
             raise ValueError("Decision cannot move backward to that state.")
-        conn.execute(
-            "UPDATE experience_decisions SET status=?,updated_at=? WHERE decision_id=?",
-            (to_status, _now(), decision_id),
-        )
+        if require_owner:
+            cursor = conn.execute(
+                "UPDATE experience_decisions SET status=?,updated_at=? WHERE decision_id=? AND owner=?",
+                (to_status, _now(), decision_id, str(actor)),
+            )
+            if cursor.rowcount == 0:
+                raise PermissionError("Decision not found or not owned by this user.")
+        else:
+            conn.execute(
+                "UPDATE experience_decisions SET status=?,updated_at=? WHERE decision_id=?",
+                (to_status, _now(), decision_id),
+            )
         conn.execute(
             "INSERT INTO experience_decision_approvals(decision_id,from_status,to_status,actor,comment,created_at) VALUES(?,?,?,?,?,?)",
             (decision_id, current, to_status, actor, str(comment)[:500], _now()),
