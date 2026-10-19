@@ -206,27 +206,71 @@ def save_project(name: str, module: str, owner: str, payload: Mapping[str, Any])
     return pid
 
 
-def autosave_project(project_id: str, payload: Mapping[str, Any]) -> int:
+def autosave_project(project_id: str, payload: Mapping[str, Any], owner: str) -> int:
+    """Append a project snapshot only when the authenticated owner owns the project."""
     ensure_experience_db()
+    project_id = str(project_id or "").strip()
+    owner = str(owner or "").strip()
+    if not project_id or not owner:
+        raise ValueError("A project ID and owner are required.")
     raw = json.dumps(dict(payload), sort_keys=True, default=str)
     with _db() as conn:
+        # Keep ownership validation, snapshot append and current payload update
+        # in one transaction to prevent an ID-only cross-workspace overwrite.
+        conn.execute("BEGIN IMMEDIATE")
         row = conn.execute(
+            "SELECT owner FROM experience_projects WHERE project_id=?",
+            (project_id,),
+        ).fetchone()
+        if not row:
+            # Managed research protocols may be restored without a legacy
+            # experience_projects row. Re-create that compatibility parent only
+            # when the protocol table confirms that this owner owns the study ID.
+            study = conn.execute(
+                "SELECT title,owner,created_at FROM experience_research_studies WHERE study_id=?",
+                (project_id,),
+            ).fetchone()
+            if not study:
+                raise ValueError("Project not found.")
+            if str(study[1] or "") != owner:
+                raise PermissionError("Project not found or not owned by this user.")
+            protocol_value = payload.get("research_protocol", {})
+            protocol_value = protocol_value if isinstance(protocol_value, Mapping) else {}
+            project_name = str(protocol_value.get("title") or study[0] or "Recovered research study").strip()[:160]
+            project_module = str(protocol_value.get("module") or "Experiment Lab").strip()[:120]
+            created = str(study[2] or _now())
+            stamp = _now()
+            conn.execute(
+                "INSERT INTO experience_projects VALUES(?,?,?,?,?,?,?,?)",
+                (project_id, project_name, project_module, owner, "Draft", raw, created, stamp),
+            )
+            conn.execute(
+                "INSERT INTO experience_project_snapshots(project_id,snapshot_no,payload_json,created_at) VALUES(?,?,?,?)",
+                (project_id, 1, raw, stamp),
+            )
+            conn.commit()
+            return 1
+        if str(row[0] or "") != owner:
+            raise PermissionError("Project not found or not owned by this user.")
+
+        latest = conn.execute(
             "SELECT COALESCE(MAX(snapshot_no),0) FROM experience_project_snapshots WHERE project_id=?",
             (project_id,),
         ).fetchone()
-        number = int(row[0]) + 1
+        number = int(latest[0]) + 1
         stamp = _now()
         conn.execute(
             "INSERT INTO experience_project_snapshots(project_id,snapshot_no,payload_json,created_at) VALUES(?,?,?,?)",
             (project_id, number, raw, stamp),
         )
-        conn.execute(
-            "UPDATE experience_projects SET payload_json=?,updated_at=? WHERE project_id=?",
-            (raw, stamp, project_id),
+        cursor = conn.execute(
+            "UPDATE experience_projects SET payload_json=?,updated_at=? WHERE project_id=? AND owner=?",
+            (raw, stamp, project_id, owner),
         )
+        if cursor.rowcount != 1:
+            raise PermissionError("Project not found or not owned by this user.")
         conn.commit()
     return number
-
 
 def register_lineage(source_type: str, source_id: str, target_type: str, target_id: str, relation: str, actor: str) -> None:
     ensure_experience_db()
@@ -281,10 +325,24 @@ def save_decision_spec(
     evidence: Any,
     verification: Any,
 ) -> None:
-    """Persist the richer decision card specification beside the governed status record."""
+    """Persist decision specifications only for the owning workspace user."""
     ensure_experience_db()
+    decision_id = str(decision_id or "").strip()
+    owner = str(owner or "").strip()
+    if not decision_id or not owner:
+        raise ValueError("A decision ID and owner are required.")
     now = _now()
     with _db() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        parent = conn.execute(
+            "SELECT owner FROM experience_decisions WHERE decision_id=?",
+            (decision_id,),
+        ).fetchone()
+        if not parent:
+            raise ValueError("Decision not found.")
+        if str(parent[0] or "") != owner:
+            raise PermissionError("Decision not found or not owned by this user.")
+
         conn.execute(
             """
             INSERT INTO experience_decision_specs(
@@ -301,9 +359,10 @@ def save_decision_spec(
                 evidence_json=excluded.evidence_json,
                 verification_json=excluded.verification_json,
                 updated_at=excluded.updated_at
+            WHERE experience_decision_specs.owner=excluded.owner
             """,
             (
-                str(decision_id),
+                decision_id,
                 json.dumps(dict(baseline or {}), default=str),
                 json.dumps(alternatives if isinstance(alternatives, list) else list(alternatives or []), default=str),
                 json.dumps(dict(constraints or {}), default=str),
@@ -311,13 +370,20 @@ def save_decision_spec(
                 json.dumps(dict(uncertainty or {}), default=str),
                 json.dumps(evidence if isinstance(evidence, list) else list(evidence or []), default=str),
                 json.dumps(verification if isinstance(verification, list) else list(verification or []), default=str),
-                str(owner),
+                owner,
                 now,
                 now,
             ),
         )
+        # If a legacy/corrupt specification row has a different owner, the
+        # conditional ON CONFLICT deliberately updated nothing.
+        current = conn.execute(
+            "SELECT owner FROM experience_decision_specs WHERE decision_id=?",
+            (decision_id,),
+        ).fetchone()
+        if not current or str(current[0] or "") != owner:
+            raise PermissionError("Decision specification not found or not owned by this user.")
         conn.commit()
-
 
 def load_decision_spec(decision_id: str, owner: str | None = None) -> dict[str, Any] | None:
     ensure_experience_db()
@@ -382,9 +448,9 @@ def transition_decision(
     actor: str,
     to_status: str,
     comment: str = "",
-    require_owner: bool = False,
+    require_owner: bool = True,
 ) -> None:
-    """Transition a decision; user-facing surfaces can enforce decision ownership."""
+    """Transition a decision, enforcing parent ownership unless explicitly bypassed by trusted code."""
     states = ["Draft", "Validated", "Proposed", "Review", "Approved", "Implemented", "Verified"]
     if to_status not in states:
         raise ValueError("Invalid approval state.")
@@ -417,7 +483,6 @@ def transition_decision(
             (decision_id, current, to_status, actor, str(comment)[:500], _now()),
         )
         conn.commit()
-
 
 def calculate_decision_variance(predicted: Mapping[str, Any], actual: Mapping[str, Any]) -> pd.DataFrame:
     """Compare predicted and observed KPI values using the shared decision schema."""
@@ -2099,7 +2164,7 @@ def render_research_workspace(module: str, tier: str, username: str) -> None:
                 }
                 if active_protocol:
                     pid=active_protocol["study_id"]
-                    autosave_project(pid,{"research_protocol":payload,"protocol_type":"local_research_protocol"})
+                    autosave_project(pid,{"research_protocol":payload,"protocol_type":"local_research_protocol"}, owner=username)
                 else:
                     pid=save_project(title,module,username,{"research_protocol":payload,"protocol_type":"local_research_protocol"})
                 rid,phash=create_research_protocol(pid,payload,username)
