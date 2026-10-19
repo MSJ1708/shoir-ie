@@ -45,4 +45,8 @@ The gate checks active/invalid-password/expired authentication, dedicated-accoun
 ## Explicit limits
 
 This gate does not approve or decline renewal requests, change any subscription, run a penetration test, restore a database backup, or verify every one of the 96 modules' calculations and file-export round-trips. Those require separate test-environment workflows and evidence. A successful run improves release confidence, but must not be described as an independent security certification.
-\n\n## Module-rendering matrix\n\nThe module-rendering matrix validates authenticated route selection and safe default/empty-state rendering for every source inventory entry. It does not prove calculation correctness, valid-input results, import/export round trips, direct service authorization, tenant isolation, or production readiness; those remain separate acceptance cases. The account usernames must be unique `shoir-e2e-*` identities and must never be the master administrator or a customer. Module-matrix workspaces are disposable and must contain no industrial/customer data.\n
+
+
+## Module-rendering matrix
+
+The module-rendering matrix validates authenticated route selection and safe default/empty-state rendering for every source inventory entry. It is not calculation correctness proof, valid-input result proof, import/export round-trip proof, direct service authorization proof, tenant-isolation proof, or production readiness evidence; those remain separate acceptance cases. The account usernames must be unique `shoir-e2e-*` identities and must never be the master administrator or a customer. Module-matrix workspaces are disposable and must contain no industrial/customer data.
