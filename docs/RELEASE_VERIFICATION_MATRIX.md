@@ -11,6 +11,25 @@ This matrix is the release gate for the subscription renewal, account, module, i
 - **Browser verified** — completed against the hosted application using an authorized account; record date, account class, build, steps and observed outcome.
 - **Blocked** — a dependency prevents a trustworthy test; document the dependency and do not mark the release definition of done complete.
 
+## Latest release decision — 2026-10-19 (supersedes older smoke result below)
+
+**Current decision: NO-GO for workforce production use.** The fresh public-browser rerun failed against the hosted Streamlit URL: the page showed Streamlit's redacted `ImportError` screen and the application frame was not found. See [failed live smoke run/artifact](https://github.com/MSJ1708/shoir-ie/actions/runs/39238591641). The exact runtime exception and deployed Streamlit SHA are not available from the public response; inspect Streamlit Cloud private runtime logs and record the actual deployed revision before further release claims. Do not rely on the earlier smoke-pass row later in this document; it is superseded by this failure.
+
+The PR #145 candidate is [`b7c9da43d0c3c51aa5fb94b71c6fe3f0844afadc`](https://github.com/MSJ1708/shoir-ie/commit/b7c9da43d0c3c51aa5fb94b71c6fe3f0844afadc), still open and not deployed. Candidate CI passed: [482 tests passed, 2 warnings](https://github.com/MSJ1708/shoir-ie/actions/runs/39269059922), [engine regression](https://github.com/MSJ1708/shoir-ie/actions/runs/39269060088), [platform tests](https://github.com/MSJ1708/shoir-ie/actions/runs/39269059883), [security/quality](https://github.com/MSJ1708/shoir-ie/actions/runs/39269059989), [Deno format/type-check](https://github.com/MSJ1708/shoir-ie/actions/runs/39269059985), and [consolidated validation](https://github.com/MSJ1708/shoir-ie/actions/runs/39269059886). The candidate contains fixes for durable registration/duplicate handling and atomic pending-only approval/decline decisions. These are candidate source and CI results, not live production verification.
+
+| Current gate | Status | Evidence / closure requirement |
+|---|---|---|
+| Current public Streamlit entry screen | **FAIL — release blocker** | Fresh smoke shows redacted ImportError page, no app frame. Diagnose the exact Streamlit runtime exception, establish deployed SHA, fix and rerun public desktop/mobile smoke. |
+| Production database and security boundary | **PASS — read-only checks only** | Supabase active/healthy; deployed Edge version 8; throttle grants, protected table privileges/RLS, private proof bucket and admin invariant checked. Does not equal full tenant-isolation certification. |
+| Protected master admin invariant | **PASS — no writes** | Existing account is active, role `Enterprise Admin`, tier `Enterprise Plus Tier ($399)`, expiry `2099-01-01 UTC`; no admin account used for tests. |
+| PR #145 application/Edge candidate checks | **PASS — candidate only** | Candidate automated checks above passed at revision `b7c9da43...`; PR remains unmerged and not deployed. |
+| PR #145 database migration | **BLOCKED — not executed** | Test the new atomic decision/registration RPC migration on isolated staging, verify constraints and service-role-only grants, then approve sequencing before production use. |
+| Authenticated release workflow | **UNVERIFIED** | No completed authenticated release-gate evidence was found. Run with protected secrets and disposable `shoir-e2e-*` accounts; do not use admin or customer identities. |
+| 96-module browser matrix | **UNVERIFIED** | Inventory has 96 distinct module names, but all authenticated browser statuses are `UNVERIFIED`. Each module needs suitable inputs/outputs, rendering, entitlement, error/empty state and export verification as applicable. |
+| Worker go-live | **NO-GO** | Do not onboard workers until the public app starts correctly and critical authenticated, migration, module and import/export acceptance evidence is recorded. |
+
+Full dated analysis and closure sequence: [Release Readiness Report](RELEASE_READINESS_REPORT_2026-10-19.md).
+
 ## Latest repair and deployment update — 2026-10-19
 
 This section supersedes the earlier commit/version references below for the Edge dispatcher repair only. The latest verified repository commit is `9572feef9b970f1c2fc0029d963af327aed83b6b` (PR #144 merged). Production Supabase project `shoir-ie-production` reports `shoir-persistence` active at version 8 after deploying the source from that commit.
