@@ -2,7 +2,7 @@ import sqlite3
 
 import pytest
 
-from industrial_experience import create_job, ensure_experience_db, research_runs_frame, update_job
+from industrial_experience import (create_decision, create_job, decision_approval_history, ensure_experience_db, research_runs_frame, transition_decision, update_job)
 from industrial_excellence_hub import _self_diagnostic_report
 
 
@@ -84,3 +84,35 @@ def test_research_run_compatibility_view_does_not_mix_users_jobs(tmp_path, monke
 
     assert alice_job in set(alice_view["Run ID"])
     assert bob_job not in set(alice_view["Run ID"])
+
+
+
+def test_hub_decision_transition_and_history_are_owner_scoped(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    ensure_experience_db()
+    alice_decision = create_decision(
+        "Alice decision", "Quality", {"Cpk": 1.2}, {}, {}, "alice"
+    )
+    create_decision("Bob decision", "Maintenance", {}, {}, {}, "bob")
+
+    transition_decision(
+        alice_decision, "alice", "Review", "Ready for review", require_owner=True
+    )
+    with pytest.raises(PermissionError):
+        transition_decision(
+            alice_decision, "bob", "Approved", "unauthorized", require_owner=True
+        )
+
+    alice_history = decision_approval_history(alice_decision, owner="alice")
+    bob_view = decision_approval_history(alice_decision, owner="bob")
+    assert len(alice_history) == 1
+    assert alice_history.iloc[0]["To"] == "Review"
+    assert bob_view.empty
+
+    import sqlite3
+    with sqlite3.connect(tmp_path / "enterprise_full_workspace.db") as conn:
+        state = conn.execute(
+            "SELECT status FROM experience_decisions WHERE decision_id=?",
+            (alice_decision,),
+        ).fetchone()[0]
+    assert state == "Review"
