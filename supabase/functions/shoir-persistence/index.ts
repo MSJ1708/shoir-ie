@@ -467,6 +467,12 @@ Deno.serve(async (req) => {
             : "Payment proof could not be validated.",
         }, 400);
       }
+      if (!transactionId && !proofPath) {
+        return response({
+          error: "Provide a payment reference or upload payment proof before submitting registration.",
+        }, 400);
+      }
+
       const { data, error } = await supabase.rpc(
         "shoir_create_registration_request",
         {
