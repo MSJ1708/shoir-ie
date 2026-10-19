@@ -11,6 +11,25 @@ This matrix is the release gate for the subscription renewal, account, module, i
 - **Browser verified** — completed against the hosted application using an authorized account; record date, account class, build, steps and observed outcome.
 - **Blocked** — a dependency prevents a trustworthy test; document the dependency and do not mark the release definition of done complete.
 
+## Latest repair and deployment update — 2026-10-19
+
+This section supersedes the earlier commit/version references below for the Edge dispatcher repair only. The latest verified repository commit is `9572feef9b970f1c2fc0029d963af327aed83b6b` (PR #144 merged). Production Supabase project `shoir-ie-production` reports `shoir-persistence` active at version 8 after deploying the source from that commit.
+
+| Check | Status | Evidence / boundary |
+|---|---|---|
+| Edge dispatcher syntax repair | **PASS — source re-read after deployment** | The malformed `retu  if(action===\"login\")` boundary is absent from deployed version 8; request parsing and action dispatch are within one try/catch. |
+| Deno formatting and type check | **PASS — post-merge CI** | [Edge Function verification run](https://github.com/MSJ1708/shoir-ie/actions/runs/39261811432) passed after adding `deno fmt --check` and `deno check`. |
+| Python suite | **PASS — repair candidate CI** | [Full test run](https://github.com/MSJ1708/shoir-ie/actions/runs/39261564956) passed after source-contract tests were made whitespace/trailing-comma tolerant. |
+| Engine regression | **PASS — post-merge CI** | [Engine regression run](https://github.com/MSJ1708/shoir-ie/actions/runs/39261811469). |
+| Security and quality | **PASS — post-merge CI** | [Security/quality run](https://github.com/MSJ1708/shoir-ie/actions/runs/39261811435). This is not an independent penetration test. |
+| Consolidated validation | **PASS — post-merge CI** | [Validation run](https://github.com/MSJ1708/shoir-ie/actions/runs/39261811353). The authenticated live workflow is separate and has not been demonstrated by this run. |
+| Login throttling migration | **PASS — production migration history inspected** | `server_side_login_rate_limits` is recorded in the production migration history. |
+| Throttle permissions | **PASS — live privilege query** | `anon` and `authenticated` lack SELECT on `shoir_login_throttle` and EXECUTE on the throttle RPC; `service_role` retains EXECUTE. No synthetic throttle rows were created during this inspection. |
+| Master administrator invariant | **PASS — live record read after deployment** | Existing record remains active, role `Enterprise Admin`, tier `Enterprise Plus Tier ($399)`, expiry `2099-01-01 UTC`. No password, identity, role or workspace mutation was performed. |
+| Authenticated sign-in/renewal/workspace isolation | **OPEN — not end-to-end verified** | Requires the manually dispatched authenticated workflow with dedicated `shoir-e2e-*` accounts and protected GitHub Actions secrets. |
+| Full 96-module browser matrix and real file round trips | **OPEN — not established by this repair** | Must be completed against the deployed app, with module-specific outputs, entitlement denials and reopened output artifacts recorded. |
+| Streamlit deployed revision | **UNVERIFIED** | The Edge Function deployment does not prove which Git revision Streamlit Cloud is serving. Confirm the live application build and run authenticated browser verification. |
+
 ## Current verification record — 2026-10-19
 
 This record reflects the 2026-10-19 release-readiness consolidation. Current `main` is `2ec8002e19550031b177eb03ed680458b432edbb`, after PRs [#135](https://github.com/MSJ1708/shoir-ie/pull/135) through [#140](https://github.com/MSJ1708/shoir-ie/pull/140) were merged. The merged implementation changes passed their applicable CI workflows on the reviewed implementation revisions; PR #135's last follow-up was documentation-only. Consolidated-main validation, engine regression and security/quality all passed. This audit branch's five CI workflows also passed, including a fresh anonymous desktop/mobile browser smoke at the live URL. None of these results proves authenticated sign-in, renewal, private workspace isolation or module-by-module end-to-end correctness.
