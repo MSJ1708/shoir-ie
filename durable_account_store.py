@@ -11,6 +11,7 @@ Never put the database URL/password in Git.
 
 from __future__ import annotations
 
+import base64
 import datetime as dt
 import os
 import sqlite3
@@ -393,6 +394,27 @@ def edge_logout(username: str, token: str) -> dict[str, Any]:
 
 
 def edge_register_request(request: Mapping[str, Any]) -> dict[str, Any]:
+    proof_path = str(request.get("screenshot_path") or "").strip()
+    proof_base64: str | None = None
+    proof_content_type: str | None = None
+    if proof_path:
+        extension = os.path.splitext(proof_path)[1].lower()
+        proof_content_type = {
+            ".png": "image/png",
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".pdf": "application/pdf",
+        }.get(extension)
+        if not proof_content_type:
+            raise ValueError("Payment proofs must be PNG, JPG, JPEG or PDF files.")
+        with open(proof_path, "rb") as proof_file:
+            proof_bytes = proof_file.read(512 * 1024 + 1)
+        if not proof_bytes:
+            raise ValueError("The payment proof file is empty.")
+        if len(proof_bytes) > 512 * 1024:
+            raise ValueError("Payment proofs must be 512 KiB or smaller.")
+        proof_base64 = base64.b64encode(proof_bytes).decode("ascii")
+
     return _edge_call("register_request", {
         "username": request["username"],
         "password": request.get("password") or "",
@@ -400,9 +422,9 @@ def edge_register_request(request: Mapping[str, Any]) -> dict[str, Any]:
         "tier": request.get("tier") or "Starter Tier ($29)",
         "payment_method": request.get("payment_method") or "",
         "transaction_id": request.get("transaction_id"),
-        "screenshot_path": request.get("screenshot_path"),
+        "proof_base64": proof_base64,
+        "proof_content_type": proof_content_type,
     })
-
 
 def edge_admin_approve(username: str, token: str, request_id: int | None = None, target_username: str | None = None, request_type: str | None = None) -> dict[str, Any]:
     payload: dict[str, Any] = {"username": username, "token": token}
