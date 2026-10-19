@@ -1634,10 +1634,11 @@ if not st.session_state.get("current_user"):
                                     "proof_content_type": _registration_proof_content_type,
                                 })
                             except Exception as exc:
-                                try:
-                                    os.remove(file_path)
-                                except OSError:
-                                    pass
+                                if file_path:
+                                    try:
+                                        os.remove(file_path)
+                                    except OSError:
+                                        pass
                                 st.error(f"Could not create the durable account request: {exc}")
                                 _shoir_module_stop()
 
