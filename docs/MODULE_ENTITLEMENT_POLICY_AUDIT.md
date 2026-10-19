@@ -16,7 +16,7 @@ The helper `audit_module_entitlement_coverage(catalog_names)` provides a machine
 
 ## Current source finding
 
-The source-defined `industrial_platform.PLATFORM_CATALOG` currently contains 42 distinct module entries. Before this follow-up, 28 of those entries had no explicit row in the shared `MODULE_REQUIREMENTS` map; this branch adds those declared minimum tiers. A regression test now checks that every catalog entry has an explicit matching shared policy. This is a source-level catalog count, not proof that all legacy routes and other module surfaces in the application have been reconciled with the separate reported total of 85 modules.
+The source-defined `industrial_platform.PLATFORM_CATALOG` currently contains 42 distinct module entries. Before this follow-up, 28 of those entries had no explicit row in the shared `MODULE_REQUIREMENTS` map; this branch adds their declared minimum tiers. The same source defines 40 distinct names across its five paid/free `TIER_FEATURES` lists; seven additional names were absent from the shared map and are now explicitly mapped as well. Regression tests compare both structures with the shared policy. These are source-level lists, not proof that every legacy route and module surface in the application has been reconciled with the separately reported total of 85 modules.
 
 ## Required follow-through
 
