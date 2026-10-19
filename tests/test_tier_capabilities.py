@@ -292,3 +292,19 @@ def test_checked_in_module_tier_inventory_matches_live_source_declarations():
         module_required_tier(row["module_name"]) == row["minimum_tier"]
         for row in rows
     )
+
+
+
+def test_every_app_module_follows_the_shared_allow_deny_matrix_for_all_tiers():
+    minimum = _app_minimum_tier_by_module()
+    catalog = list(minimum)
+    tiers = ["Starter", "Mid-Tier Pro", "Professional", "Enterprise", "Enterprise Plus", "Research Pack"]
+
+    assert len(catalog) == 96
+    for current_tier in tiers:
+        actual = set(available_modules(current_tier, catalog))
+        expected = {
+            module for module, required_tier in minimum.items()
+            if tier_allows(current_tier, required_tier)
+        }
+        assert actual == expected, f"Tier policy mismatch for {current_tier}"
