@@ -16,11 +16,11 @@ The helper `audit_module_entitlement_coverage(catalog_names)` provides a machine
 
 ## Current source finding
 
-The source-defined `industrial_platform.PLATFORM_CATALOG` currently contains 42 distinct module entries. Before this follow-up, 28 of those entries had no explicit row in the shared `MODULE_REQUIREMENTS` map; this branch adds their declared minimum tiers. The same source defines 40 distinct names across its five paid/free `TIER_FEATURES` lists; seven additional names were absent from the shared map and are now explicitly mapped as well. Regression tests compare both structures with the shared policy. These are source-level lists, not proof that every legacy route and module surface in the application has been reconciled with the separately reported total of 85 modules.
+The current source inventory is **96 unique module names**, derived by merging the 56 unique entries in the app.py `MODULE_CATALOG` literal with the 42 names in `industrial_platform.PLATFORM_CATALOG` and applying the same de-duplication used by the app. The six cumulative app subscription lists also resolve to exactly 96 unique names. This supersedes the earlier reported count of 85 for the current source revision; it does not claim all 96 workflows are fully implemented or end-to-end verified. Before this branch, 41 app-tier names had no explicit row in the shared `MODULE_REQUIREMENTS` map, and three shared minimum tiers conflicted with the runtime app subscription lists. This branch maps the missing names, aligns those minimum tiers, and adds tests that fail on policy drift or catalog/menu count divergence.
 
 ## Required follow-through
 
-1. Continue from `PLATFORM_CATALOG` and inventory every additional module route/catalog outside it. Do not assume the 42-entry catalog is the whole app or silently replace the reported 85-module claim.
+1. Continue from the 96-name catalogue/feature set and inventory every independently routed or dynamically registered workflow outside these two catalog sources. A matching source-level name count is not proof that all 96 module renderers work.
 2. Review every unmapped name. Record an explicit minimum tier, or deliberately declare the capability as intentionally available without a paid-tier gate in the canonical policy model.
 3. Test allow and deny paths for each mapped capability, including server-side direct-action/route checks. Hiding a module card is not sufficient authorization.
 4. Keep Research Pack add-on access separate from Enterprise Plus, and preserve negative tests for both directions.
