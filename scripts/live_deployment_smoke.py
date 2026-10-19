@@ -10,6 +10,7 @@ import json
 import os
 import re
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -100,8 +101,33 @@ def main() -> int:
                             URL, wait_until="domcontentloaded", timeout=90_000
                         )
                         item["http_status"] = response.status if response else None
-                        # Streamlit renders its app after the initial HTML response.
-                        page.wait_for_timeout(8_000)
+                        # Streamlit Cloud serves the app inside a child frame, and mobile
+                        # hydration can lag behind the outer page's DOMContentLoaded event.
+                        # Poll for an actual app/fatal marker instead of relying on a fixed sleep.
+                        app_surface_ready = False
+                        readiness_deadline = time.monotonic() + 45
+                        while time.monotonic() < readiness_deadline:
+                            for candidate_frame in page.frames:
+                                try:
+                                    candidate_body = candidate_frame.locator("body").inner_text(
+                                        timeout=1_000
+                                    ).casefold()
+                                except Exception:
+                                    continue
+                                has_app_marker = any(
+                                    marker.casefold() in candidate_body
+                                    for marker in APP_MARKERS
+                                    if marker.casefold() != "shoir-ie"
+                                )
+                                has_fatal_marker = any(
+                                    marker in candidate_body for marker in FATAL_TEXT_MARKERS
+                                )
+                                if has_app_marker or has_fatal_marker:
+                                    app_surface_ready = True
+                                    break
+                            if app_surface_ready:
+                                break
+                            page.wait_for_timeout(1_000)
                         item["page_title"] = page.title()
                         # Streamlit-hosted applications may render their
                         # app surface in a child frame. Inspect every accessible
@@ -122,9 +148,11 @@ def main() -> int:
                                 continue
                             if frame_body:
                                 rendered_bodies.append(frame_body)
-                            if (
-                                "welcome to shoir-ie workspace" in frame_body.casefold()
-                                or "shoir-ie industrial engineering command center" in frame_body.casefold()
+                            folded_frame_body = frame_body.casefold()
+                            if any(
+                                marker.casefold() in folded_frame_body
+                                for marker in APP_MARKERS
+                                if marker.casefold() != "shoir-ie"
                             ):
                                 app_frame = frame
                             frame_records.append({
@@ -189,13 +217,36 @@ def main() -> int:
                                 try:
                                     app_frame.get_by_role("tab", name=scenario["tab"]).click(timeout=8_000)
                                     app_frame.get_by_text(scenario["marker"]).wait_for(timeout=10_000)
-                                    for field_label in scenario["fields"]:
-                                        locator = app_frame.get_by_label(field_label)
-                                        if locator.count() == 0:
-                                            check["missing_fields"].append(field_label)
-                                    for extra_marker in scenario["extra_markers"]:
-                                        if app_frame.get_by_text(extra_marker).count() == 0:
-                                            check["missing_extra_markers"].append(extra_marker.pattern)
+                                    # Tab clicks trigger a Streamlit websocket rerun. Wait for
+                                    # the expected form controls/content to attach before asserting;
+                                    # immediate locator.count() calls can race that rerun on mobile.
+                                    field_locators = {
+                                        field_label: app_frame.get_by_label(field_label)
+                                        for field_label in scenario["fields"]
+                                    }
+                                    extra_locators = {
+                                        extra_marker.pattern: app_frame.get_by_text(extra_marker)
+                                        for extra_marker in scenario["extra_markers"]
+                                    }
+                                    readiness_deadline = time.monotonic() + 12
+                                    while time.monotonic() < readiness_deadline:
+                                        expected_locators = [
+                                            *field_locators.values(),
+                                            *extra_locators.values(),
+                                        ]
+                                        if all(locator.count() > 0 for locator in expected_locators):
+                                            break
+                                        page.wait_for_timeout(500)
+                                    check["missing_fields"] = [
+                                        field_label
+                                        for field_label, locator in field_locators.items()
+                                        if locator.count() == 0
+                                    ]
+                                    check["missing_extra_markers"] = [
+                                        marker_pattern
+                                        for marker_pattern, locator in extra_locators.items()
+                                        if locator.count() == 0
+                                    ]
                                     if check_name == "public-module-explorer-tab":
                                         plus_card_count = app_frame.locator("div.value-strip").filter(
                                             has_text=re.compile(r"Enterprise Plus", re.I)
