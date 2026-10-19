@@ -1,4 +1,4 @@
-from shoir_tier_capabilities import available_modules, copilot_gate, module_required_tier, normalize_tier, tier_allows
+from shoir_tier_capabilities import (MODULE_REQUIREMENTS, TIER_ORDER, audit_module_entitlement_coverage, available_modules, copilot_gate, module_required_tier, normalize_tier, tier_allows)
 from industrial_platform import tier_allows as platform_tier_allows
 
 
@@ -65,3 +65,48 @@ def test_copilot_blocks_package_gated_actions():
     assert research_gate is not None and research_gate["required_tier"] == "Research Pack"
     assert copilot_gate("run Monte Carlo simulation", "Research Pack") is None
     assert copilot_gate("what is ANOVA?", "Starter Tier") is None
+
+
+
+def test_module_entitlement_audit_reports_unmapped_catalog_items():
+    report = audit_module_entitlement_coverage([
+        "AI Copilot",
+        "Research AI",
+        "Module with no explicit policy",
+        "AI Copilot",
+        "",
+    ])
+
+    assert report["status"] == "INCOMPLETE"
+    assert report["total_modules"] == 3
+    assert report["explicit_policy_count"] == 2
+    assert report["unmapped_count"] == 1
+    assert report["unmapped_modules"] == ["Module with no explicit policy"]
+    assert report["invalid_policy_count"] == 0
+    assert report["coverage_percent"] == 66.67
+    assert report["policy_source"] == "MODULE_REQUIREMENTS"
+
+
+def test_module_entitlement_audit_reports_empty_catalog_without_claiming_coverage():
+    report = audit_module_entitlement_coverage([])
+
+    assert report["status"] == "EMPTY"
+    assert report["total_modules"] == 0
+    assert report["coverage_percent"] == 0.0
+
+
+def test_module_entitlement_audit_exposes_invalid_policy_tier(monkeypatch):
+    monkeypatch.setitem(MODULE_REQUIREMENTS, "Audit-only invalid mapping", "Unrecognized tier")
+
+    report = audit_module_entitlement_coverage(["Audit-only invalid mapping"])
+
+    assert report["status"] == "INCOMPLETE"
+    assert report["explicit_policy_count"] == 0
+    assert report["invalid_policy_count"] == 1
+    assert report["invalid_policy_modules"] == [
+        {"module": "Audit-only invalid mapping", "required_tier": "Unrecognized tier"}
+    ]
+
+
+def test_declared_module_entitlement_tiers_are_known_tiers():
+    assert set(MODULE_REQUIREMENTS.values()).issubset(set(TIER_ORDER))
