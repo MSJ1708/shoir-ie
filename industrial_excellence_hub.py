@@ -520,64 +520,169 @@ def _governance(username: str, tier: str) -> None:
                     st.rerun()
 
 
+def _self_diagnostic_report() -> pd.DataFrame:
+    """Run real structural checks and explicitly mark checks not performed."""
+    records: list[dict[str, str]] = []
+    try:
+        with _db() as conn:
+            integrity = str(conn.execute("PRAGMA integrity_check").fetchone()[0])
+            table_names = {
+                str(row[0])
+                for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            }
+            job_columns = {
+                str(row[1]) for row in conn.execute("PRAGMA table_info(experience_jobs)")
+            }
+        required_tables = {
+            "experience_projects", "experience_decisions", "experience_jobs",
+            "experience_copilot_actions", "experience_lineage",
+            "experience_module_runs",
+        }
+        missing_tables = sorted(required_tables - table_names)
+        records.extend([
+            {
+                "Check": "SQLite integrity",
+                "Status": "PASS" if integrity.lower() == "ok" else "FAIL",
+                "Evidence": integrity,
+            },
+            {
+                "Check": "Required experience tables",
+                "Status": "PASS" if not missing_tables else "FAIL",
+                "Evidence": "All present" if not missing_tables else "Missing: " + ", ".join(missing_tables),
+            },
+            {
+                "Check": "Job owner column",
+                "Status": "PASS" if "owner" in job_columns else "FAIL",
+                "Evidence": "Owner column present" if "owner" in job_columns else "Owner column missing",
+            },
+        ])
+    except Exception as exc:
+        records.extend([
+            {"Check": "SQLite integrity", "Status": "FAIL", "Evidence": f"Check raised {type(exc).__name__}"},
+            {"Check": "Required experience tables", "Status": "FAIL", "Evidence": "Schema inspection failed"},
+            {"Check": "Job owner column", "Status": "FAIL", "Evidence": "Schema inspection failed"},
+        ])
+
+    records.extend([
+        {
+            "Check": "Feature catalog declarations",
+            "Status": "PASS" if len(FEATURES_60) == 60 else "REVIEW",
+            "Evidence": f"{len(FEATURES_60)} declared rows; module behavior was not tested",
+        },
+        {
+            "Check": "Copilot tool registry",
+            "Status": "PASS" if len(COPILOT_TOOLS) >= 8 else "REVIEW",
+            "Evidence": f"{len(COPILOT_TOOLS)} declared tool entries; execution was not tested",
+        },
+        {
+            "Check": "Live connector connectivity",
+            "Status": "NOT TESTED",
+            "Evidence": "Stored profile/demo metadata is not evidence of a live handshake",
+        },
+        {
+            "Check": "Authenticated imports, exports and tenant isolation",
+            "Status": "NOT TESTED",
+            "Evidence": "Requires authorized integration/browser walkthroughs",
+        },
+    ])
+    return pd.DataFrame(records)
+
+
 def _platform_health(username: str) -> None:
     st.markdown("### ⚙️ Platform Health & Delivery")
     with _db() as conn:
-        connectors = pd.read_sql("SELECT name,connector_type,status,freshness_min,error_rate,last_sync FROM excellence_connectors", conn)
-        jobs = pd.read_sql("SELECT job_id,module,job_type,status,progress,message,started_at,finished_at FROM experience_jobs ORDER BY rowid DESC LIMIT 20", conn)
-        obs = pd.read_sql("SELECT run_id,module,event_type,duration_ms,created_at FROM experience_observability ORDER BY id DESC LIMIT 20", conn)
+        connectors = pd.read_sql(
+            """SELECT name,connector_type,status,freshness_min,error_rate,last_sync,owner
+               FROM excellence_connectors WHERE owner=? OR owner='platform'""",
+            conn, params=(username,),
+        )
+        jobs = pd.read_sql(
+            """SELECT job_id,module,job_type,status,progress,message,started_at,finished_at
+               FROM experience_jobs WHERE owner=? ORDER BY rowid DESC LIMIT 20""",
+            conn, params=(username,),
+        )
+        job_count = int(conn.execute(
+            "SELECT COUNT(*) FROM experience_jobs WHERE owner=?", (username,)
+        ).fetchone()[0])
+        run_count = int(conn.execute(
+            "SELECT COUNT(*) FROM experience_module_runs WHERE owner=?", (username,)
+        ).fetchone()[0])
+        integrity = str(conn.execute("PRAGMA integrity_check").fetchone()[0])
+
+    if not connectors.empty:
+        connectors["Evidence"] = connectors["owner"].map(
+            lambda owner: (
+                "Seeded sample metadata — no live connection test"
+                if str(owner) == "platform"
+                else "Saved profile metadata — live connection not verified"
+            )
+        )
 
     c1,c2,c3,c4 = st.columns(4)
-    connector_score = max(0.0, 100.0 - connectors["error_rate"].mean()*10) if not connectors.empty else 0
-    c1.metric("Connector health", f"{connector_score:.0f}%", _metric_status(connector_score))
-    c2.metric("Jobs tracked", len(jobs))
-    c3.metric("Observability events", len(obs))
-    c4.metric("Schema", "WAL + indexed", "ready")
+    c1.metric("Connector profiles", f"{len(connectors):,}", "live connectivity unverified")
+    c2.metric("Your jobs", f"{job_count:,}", "owner-scoped")
+    c3.metric("Your recorded runs", f"{run_count:,}", "owner-scoped")
+    c4.metric("SQLite integrity", "PASS" if integrity.lower() == "ok" else "CHECK", "PRAGMA integrity_check")
 
     a,b = st.columns(2)
     with a:
-        st.markdown("#### Connector freshness")
+        st.markdown("#### Stored connector metadata")
+        st.caption("Freshness and error values below are stored metadata. Seeded demo rows are not live connectivity measurements.")
         if not connectors.empty:
-            fig = px.bar(connectors, x="name", y="freshness_min", text="freshness_min", title="Minutes since last sync")
-            fig.update_layout(height=280, margin=dict(l=8,r=8,t=45,b=8), yaxis_title="Minutes")
+            fig = px.bar(
+                connectors, x="name", y="freshness_min", text="freshness_min",
+                title="Stored freshness metadata (minutes; not live-tested)",
+            )
+            fig.update_layout(height=280, margin=dict(l=8,r=8,t=45,b=8), yaxis_title="Stored minutes")
             st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
             st.dataframe(connectors, use_container_width=True, hide_index=True)
+        else:
+            st.info("No connector profiles are saved for this account.")
+
     with b:
-        st.markdown("#### Recent jobs")
+        st.markdown("#### Your recent jobs")
         if jobs.empty:
-            st.info("No background jobs have been recorded yet.")
+            st.info("No owned job records are available for this account. Existing legacy jobs without owner metadata are retained but not shown in another user's workspace.")
         else:
             st.dataframe(jobs, use_container_width=True, hide_index=True)
             if st.button("🛑 Cancel newest queued job", use_container_width=True):
                 queued = jobs[jobs["status"] == "Queued"]
                 if not queued.empty:
-                    update_job(str(queued.iloc[0]["job_id"]), "Cancelled", float(queued.iloc[0]["progress"]), "Cancelled by operator")
-                    st.success("Queued job cancelled safely.")
-                    st.rerun()
+                    try:
+                        update_job(
+                            str(queued.iloc[0]["job_id"]),
+                            "Cancelled",
+                            float(queued.iloc[0]["progress"]),
+                            "Cancelled by operator",
+                            actor=username,
+                        )
+                        st.success("Your queued job was cancelled.")
+                        st.rerun()
+                    except PermissionError:
+                        st.error("The job could not be updated because it is not owned by this account.")
+                else:
+                    st.info("No queued jobs owned by this account need cancellation.")
 
-    st.markdown("#### Delivery checklist")
+    st.markdown("#### Delivery verification status")
     checks = pd.DataFrame([
-        {"Control":"Runtime validation", "Status":"✓", "Evidence":"Pytest + compileall in CI"},
-        {"Control":"Export resilience", "Status":"✓", "Evidence":"XLSX / evidence bundle paths"},
-        {"Control":"Approval gating", "Status":"✓", "Evidence":"Persistent Copilot action ledger"},
-        {"Control":"Data lineage", "Status":"✓", "Evidence":"Experience lineage store"},
-        {"Control":"Accessibility", "Status":"✓", "Evidence":"Reduced-motion CSS + labeled controls"},
-        {"Control":"RTL readiness", "Status":"✓", "Evidence":"Persisted locale/direction preference"},
+        {"Control":"Python compile and CI regression", "Status":"CI-verified", "Evidence":"Automated repository workflows; not proof every hosted workflow was exercised"},
+        {"Control":"Export resilience", "Status":"UNVERIFIED end-to-end", "Evidence":"Export paths exist; generated files still require round-trip validation"},
+        {"Control":"Approval gating", "Status":"Source present; e2e UNVERIFIED", "Evidence":"Persistent action ledger exists; authorized browser journey remains open"},
+        {"Control":"Data lineage", "Status":"Source present; coverage UNVERIFIED", "Evidence":"Lineage store exists; not every module is proven to emit complete lineage"},
+        {"Control":"Accessibility", "Status":"Partially implemented", "Evidence":"Some labels and reduced-motion CSS exist; formal accessibility audit not run"},
+        {"Control":"Arabic / RTL", "Status":"Preference support present", "Evidence":"Locale/direction persistence exists; complete RTL walkthrough not verified"},
     ])
     st.dataframe(checks, use_container_width=True, hide_index=True)
 
     if st.button("🔍 Run self-diagnostic", type="primary", use_container_width=True):
-        tests = {
-            "Experience database": True,
-            "Feature catalog": len(FEATURES_60) == 60,
-            "Copilot registry": len(COPILOT_TOOLS) >= 8,
-            "Connector metadata": not connectors.empty,
-            "Job registry": True,
-        }
-        result = pd.DataFrame([{"Check": k, "Status": "✓ PASS" if v else "⚠ REVIEW"} for k,v in tests.items()])
+        result = _self_diagnostic_report()
         st.dataframe(result, use_container_width=True, hide_index=True)
-        st.success("Self-diagnostic completed. Review any flagged control before production use.")
-
+        if (result["Status"] == "FAIL").any():
+            st.error("One or more structural checks failed. Review the evidence above.")
+        elif (result["Status"] == "NOT TESTED").any():
+            st.warning("Structural checks completed, but NOT TESTED controls remain unverified.")
+        else:
+            st.info("Structural checks passed. This is not a production-readiness or end-to-end certification.")
 
 def render_platform_excellence_hub(username: str, tier: str) -> None:
     """Render the polished cross-cutting command center."""
