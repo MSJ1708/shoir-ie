@@ -31,6 +31,12 @@ APP_MARKERS = (
     "Industrial Engineering Workbench",
     "Industrial Control Center",
 )
+APP_READY_MARKERS = (
+    "Welcome to Shoir-IE Workspace",
+    "Sign In to Your Workspace",
+    "Get Subscription Ticket & Register",
+    "Industrial Control Center",
+)
 FATAL_TEXT_MARKERS = (
     "application runtime could not be loaded",
     "this app has encountered an error.",
@@ -101,65 +107,72 @@ def main() -> int:
                             URL, wait_until="domcontentloaded", timeout=90_000
                         )
                         item["http_status"] = response.status if response else None
-                        # Streamlit Cloud serves the app inside a child frame, and mobile
-                        # hydration can lag behind the outer page's DOMContentLoaded event.
-                        # Poll for an actual app/fatal marker instead of relying on a fixed sleep.
-                        app_surface_ready = False
-                        readiness_deadline = time.monotonic() + 45
-                        while time.monotonic() < readiness_deadline:
-                            for candidate_frame in page.frames:
-                                try:
-                                    candidate_body = candidate_frame.locator("body").inner_text(
-                                        timeout=1_000
-                                    ).casefold()
-                                except Exception:
-                                    continue
-                                has_app_marker = any(
-                                    marker.casefold() in candidate_body
-                                    for marker in APP_MARKERS
-                                    if marker.casefold() != "shoir-ie"
-                                )
-                                has_fatal_marker = any(
-                                    marker in candidate_body for marker in FATAL_TEXT_MARKERS
-                                )
-                                if has_app_marker or has_fatal_marker:
-                                    app_surface_ready = True
-                                    break
-                            if app_surface_ready:
-                                break
-                            page.wait_for_timeout(1_000)
+                        # Streamlit can briefly render only its static header before the
+                        # application body hydrates. Do not treat generic product/sidebar
+                        # text as readiness: wait for a real sign-in/welcome surface, and
+                        # require the same frame to expose it in consecutive polls.
                         item["page_title"] = page.title()
-                        # Streamlit-hosted applications may render their
-                        # app surface in a child frame. Inspect every accessible
-                        # frame rather than only the outer hosting document.
                         frame_records = []
                         rendered_bodies = []
                         app_frame = None
-                        for frame in page.frames:
-                            try:
-                                frame_body = frame.locator("body").inner_text(timeout=5_000)
-                            except Exception as frame_error:
-                                frame_records.append({
-                                    "url": frame.url,
-                                    "body_length": 0,
-                                    "body_preview": "",
-                                    "read_error": type(frame_error).__name__,
+                        stable_frame_key = None
+                        stable_observations = 0
+                        readiness_deadline = time.monotonic() + 45
+                        while time.monotonic() < readiness_deadline:
+                            current_records = []
+                            current_bodies = []
+                            ready_candidates = []
+                            fatal_marker_seen = False
+                            for candidate_frame in list(page.frames):
+                                try:
+                                    candidate_body = candidate_frame.locator("body").inner_text(
+                                        timeout=1_000
+                                    )
+                                except Exception as frame_error:
+                                    current_records.append({
+                                        "url": candidate_frame.url,
+                                        "body_length": 0,
+                                        "body_preview": "",
+                                        "read_error": type(frame_error).__name__,
+                                    })
+                                    continue
+                                if candidate_body:
+                                    current_bodies.append(candidate_body)
+                                folded_candidate_body = candidate_body.casefold()
+                                if any(
+                                    marker in folded_candidate_body
+                                    for marker in FATAL_TEXT_MARKERS
+                                ):
+                                    fatal_marker_seen = True
+                                if any(
+                                    marker.casefold() in folded_candidate_body
+                                    for marker in APP_READY_MARKERS
+                                ):
+                                    ready_candidates.append(candidate_frame)
+                                current_records.append({
+                                    "url": candidate_frame.url,
+                                    "body_length": len(candidate_body),
+                                    "body_preview": " ".join(candidate_body.split())[:300],
                                 })
-                                continue
-                            if frame_body:
-                                rendered_bodies.append(frame_body)
-                            folded_frame_body = frame_body.casefold()
-                            if any(
-                                marker.casefold() in folded_frame_body
-                                for marker in APP_MARKERS
-                                if marker.casefold() != "shoir-ie"
-                            ):
-                                app_frame = frame
-                            frame_records.append({
-                                "url": frame.url,
-                                "body_length": len(frame_body),
-                                "body_preview": " ".join(frame_body.split())[:300],
-                            })
+                            frame_records = current_records
+                            rendered_bodies = current_bodies
+                            if fatal_marker_seen:
+                                break
+                            candidate = ready_candidates[0] if ready_candidates else None
+                            if candidate is not None:
+                                candidate_key = (candidate.url, candidate.name)
+                                if candidate_key == stable_frame_key:
+                                    stable_observations += 1
+                                else:
+                                    stable_frame_key = candidate_key
+                                    stable_observations = 1
+                                if stable_observations >= 2:
+                                    app_frame = candidate
+                                    break
+                            else:
+                                stable_frame_key = None
+                                stable_observations = 0
+                            page.wait_for_timeout(500)
                         body = "\n".join(rendered_bodies)
                         folded_body = body.casefold()
                         item["frames"] = frame_records
