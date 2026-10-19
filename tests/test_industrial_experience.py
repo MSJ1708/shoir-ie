@@ -232,7 +232,7 @@ def test_research_run_history_persists_completed_run(monkeypatch):
             "sample_size": 20,
             "replications": 2,
         }
-        _, actual_research_id = create_research_protocol("PRJ-RUN-HISTORY", protocol, "alice")
+        actual_research_id, _ = create_research_protocol("PRJ-RUN-HISTORY", protocol, "alice")
         results = pd.DataFrame({
             "scenario": [1,2,3,4],
             "decision_regret": [0.10,0.20,0.15,0.25],
@@ -273,7 +273,7 @@ def test_previous_lab_csv_can_be_imported_into_research_registry(monkeypatch):
             "primary_domain": "Manufacturing",
             "transfer_domain": "Maintenance",
         }
-        _, actual_research_id = create_research_protocol("PRJ-IMPORT", protocol, "alice")
+        actual_research_id, _ = create_research_protocol("PRJ-IMPORT", protocol, "alice")
         csv = (
             "scenario,decision_regret,readiness_score,evidence_completeness,evidence_freshness_hours,"
             "evidence_conflict_pct,evidence_uncertainty_pct,shock_severity,split\n"
@@ -402,7 +402,7 @@ def test_research_run_registration_rejects_another_owner_and_mismatched_protocol
         db = str(Path(td) / "research-run-owner-boundary.db")
         monkeypatch.setattr(ie, "_db", lambda path=db: sqlite3.connect(db, timeout=30))
         ensure_experience_db(db)
-        _, alice_research_id = create_research_protocol(
+        alice_research_id, _ = create_research_protocol(
             "PRJ-ALICE-RUNS",
             {"title": "Alice protected study", "objective": "Only Alice may add runs"},
             "alice",
