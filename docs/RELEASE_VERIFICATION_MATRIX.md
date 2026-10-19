@@ -123,3 +123,7 @@ Server-side login rate limiting is being added in the same reviewed release seri
 For each run, retain commit SHA, CI workflow URL, environment/build, timestamp, account class (never password), scenario, expected outcome, actual outcome, artifact or screenshot reference, and linked issue for each failure. Redact emails, receipts, tokens, personal data and production datasets.
 
 **Definition of done:** every required automated job passes; the hosted browser walkthroughs pass using authorized test accounts; all relevant module, export, persistence, role, tier and security cases have evidence; high-severity findings are resolved; and remaining limitations are explicitly accepted. Do not use “fully verified” when a browser pass or a required matrix row is still blocked.
+
+## Audit-only hosted smoke probe — 2026-10-19
+
+This documentation-only commit triggers the existing Playwright smoke workflow against the currently hosted public Streamlit application. It makes no runtime code, database, subscription, account, or deployment changes. The smoke checks only public entry-screen rendering and is not a substitute for authenticated release verification. Record the actual run and artifact outcome before updating the release decision.
