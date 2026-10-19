@@ -2,7 +2,7 @@
 
 ## Purpose
 
-The shared tier policy in `shoir_tier_capabilities.py` provides `MODULE_REQUIREMENTS` for a subset of module names. A module name absent from that mapping has no explicit policy in this particular map. That absence must not be interpreted automatically as proof that the feature is free, permitted, or protected elsewhere.
+The shared tier policy in `shoir_tier_capabilities.py` defines explicit minimum tiers for the current 96-name app catalog and subscription feature set. A name discovered outside that set and absent from `MODULE_REQUIREMENTS` remains unresolved; its absence must not be interpreted automatically as proof that the feature is free, permitted, or protected elsewhere.
 
 The helper `audit_module_entitlement_coverage(catalog_names)` provides a machine-readable report for an observed module catalogue. It deduplicates labels, counts entries with a recognized explicit tier, lists unmapped module names, and separately reports mappings that name an unknown tier.
 
@@ -21,12 +21,12 @@ The current source inventory is **96 unique module names**, derived by merging t
 ## Required follow-through
 
 1. Continue from the 96-name catalogue/feature set and inventory every independently routed or dynamically registered workflow outside these two catalog sources. A matching source-level name count is not proof that all 96 module renderers work.
-2. Review every unmapped name. Record an explicit minimum tier, or deliberately declare the capability as intentionally available without a paid-tier gate in the canonical policy model.
+2. For any additional or dynamically routed name discovered outside the current 96-name source inventory, record an explicit minimum tier or deliberately declare in the canonical policy model why it is not paid-tier gated.
 3. Test allow and deny paths for each mapped capability, including server-side direct-action/route checks. Hiding a module card is not sufficient authorization.
 4. Keep Research Pack add-on access separate from Enterprise Plus, and preserve negative tests for both directions.
 5. Do not mark the module/tier release matrix complete until the real registry is audited and the relevant tests pass.
 
-This report does not claim that every module has been inventoried or authenticated-browser verified. The existing release-verification matrix remains the source of truth for outstanding end-to-end checks.
+The 96 names are confirmed source catalog and subscription-feature declarations, not proof that every renderer, calculation, import/export, persistence path, or protected action works. Inventory any routes outside those declarations, and use the existing release-verification matrix as the source of truth for outstanding end-to-end checks.
 
 
 ## Machine-readable module inventory
