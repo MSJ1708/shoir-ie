@@ -125,8 +125,40 @@ async function loginThrottleBuckets(usernameLc:string,req:Request){
  return keys;
 }
 
+async function loginThrottleKey(raw:string){
+ const hmacKey=await crypto.subtle.importKey("raw",new TextEncoder().encode(SERVICE_ROLE_KEY),{name:"HMAC",hash:"SHA-256"},false,["sign"]);
+ const signature=await crypto.subtle.sign("HMAC",hmacKey,new TextEncoder().encode(raw));
+ return bytesToHex(signature);
+}
+async function checkLoginThrottle(keyHash:string,maxAttempts:number,mode:"attempt"|"clear"){
+ const {data,error}=await supabase.rpc("shoir_check_login_throttle",{
+  p_key_hash:keyHash,p_mode:mode,p_max_attempts:maxAttempts,
+  p_window_seconds:600,p_block_seconds:600
+ });
+ if(error)throw new Error("Authentication protection is temporarily unavailable.");
+ const result=data as {blocked?:boolean}|null;
+ return Boolean(result?.blocked);
+}
+async function loginThrottleBuckets(usernameLc:string,req:Request){
+ const keys:Array<{key_hash:string,max_attempts:number,reset_on_success:boolean}>=[
+  {key_hash:await loginThrottleKey("user:"+usernameLc),max_attempts:8,reset_on_success:true}
+ ];
+ // Trust only the reverse-proxy-populated Cloudflare IP header; never accept a
+ // client-controlled X-Forwarded-For value as the source of an IP limit.
+ const clientIp=String(req.headers.get("cf-connecting-ip")||"").trim();
+ if(clientIp&&clientIp.length<=128)keys.push({
+  key_hash:await loginThrottleKey("ip:"+clientIp),max_attempts:30,reset_on_success:false
+ });
+ return keys;
+}
+
 Deno.serve(async(req)=>{
- if(req.method==="OPTIONS")retu  if(action==="login"){
+ if(req.method==="OPTIONS")return response({ok:true});
+ try{
+  const body=await req.json();
+  const action=String(body.action||"");
+
+if(action==="login"){
    const username=String(body.username||"").trim(),password=String(body.password||"");
    const usernameLc=username.toLowerCase();
    let throttleBuckets:Array<{key_hash:string,max_attempts:number,reset_on_success:boolean}>;
@@ -168,6 +200,8 @@ Deno.serve(async(req)=>{
    if(!isMasterAdmin&&isExpired(row.subscription_expires_at)){const token=await createSession(row.username_lc,"renewal",60*60*1000);return response({error:"SUBSCRIPTION_EXPIRED",token,username:row.username,tier:effectiveTier,email:row.email,expires_at:row.subscription_expires_at,renewal_only:true},403);}
    const token=await createSession(row.username_lc); return response({ok:true,token,username:row.username,role:row.role,tier:effectiveTier,email:row.email,expires_at:row.subscription_expires_at});
   }
+
+
 
   if(action==="logout"){
    const token=String(body.token||"").trim();
@@ -230,6 +264,8 @@ Deno.serve(async(req)=>{
   }
 
   if(action==="admin_decline_session"){await adminSession(String(body.username),String(body.token));const id=Number(body.request_id);const {error}=await supabase.from("shoir_subscription_requests").update({status:"Declined",updated_at:new Date().toISOString()}).eq("id",id);if(error)throw error;return response({ok:true});}
+
+
 
   return response({error:"Unknown action."},400);
  }catch(err){return response({error:String(err?.message||err)},500);}
