@@ -63,7 +63,9 @@ jobs:
               exit 2
             fi
           done
-      - name: Verify authenticated 96-module rendering matrix\n        run: python scripts/authenticated_module_matrix.py\n      - name: Verify authenticated Edge API lifecycle and workspace isolation
+      - name: Verify authenticated 96-module rendering matrix
+        run: python scripts/authenticated_module_matrix.py
+      - name: Verify authenticated Edge API lifecycle and workspace isolation
         run: python scripts/authenticated_release_gate.py
       - name: Verify authenticated browser shell, Excel module and logout
         run: python scripts/authenticated_browser_matrix.py
