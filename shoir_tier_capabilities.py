@@ -26,6 +26,7 @@ __all__ = [
     "tier_allows",
     "module_required_tier",
     "available_modules",
+    "audit_module_entitlement_coverage",
     "copilot_gate",
     "copilot_capabilities",
 ]
@@ -151,6 +152,46 @@ def tier_allows(current: str, required: str) -> bool:
 
 def module_required_tier(module: str) -> Optional[str]:
     return MODULE_REQUIREMENTS.get(str(module).strip())
+
+
+def audit_module_entitlement_coverage(modules: Iterable[str]) -> dict[str, object]:
+    """Audit explicit tier-policy coverage for an observed module catalogue.
+
+    A missing policy is reported as unresolved rather than being inferred to mean
+    that the module is free or secure. This is an audit helper only: it does not
+    authorize access or change the existing module-availability behavior.
+    """
+    catalog = unique_modules(modules)
+    unmapped: list[str] = []
+    invalid: list[dict[str, str]] = []
+
+    for module in catalog:
+        required = module_required_tier(module)
+        if required is None:
+            unmapped.append(module)
+        elif required not in TIER_ORDER:
+            invalid.append({"module": module, "required_tier": required})
+
+    total = len(catalog)
+    explicit = total - len(unmapped) - len(invalid)
+    if total == 0:
+        status = "EMPTY"
+    elif not unmapped and not invalid:
+        status = "COMPLETE"
+    else:
+        status = "INCOMPLETE"
+
+    return {
+        "status": status,
+        "total_modules": total,
+        "explicit_policy_count": explicit,
+        "unmapped_count": len(unmapped),
+        "unmapped_modules": unmapped,
+        "invalid_policy_count": len(invalid),
+        "invalid_policy_modules": invalid,
+        "coverage_percent": round((100.0 * explicit / total), 2) if total else 0.0,
+        "policy_source": "MODULE_REQUIREMENTS",
+    }
 
 
 def available_modules(tier: str, modules: Iterable[str]) -> list[str]:
