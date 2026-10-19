@@ -396,6 +396,122 @@ Deno.serve(async (req) => {
       });
     }
 
+    if (action === "account_exists") {
+      const username = String(body.username || "").trim();
+      if (!/^[A-Za-z0-9._-]{3,32}$/.test(username)) {
+        return response({ exists: false });
+      }
+      const row = await getAccount(username);
+      const { data: pending, error: pendingError } = await supabase
+        .from("shoir_subscription_requests")
+        .select("id")
+        .eq("username_lc", username.toLowerCase())
+        .eq("request_type", "New")
+        .eq("status", "Pending")
+        .limit(1);
+      if (pendingError) throw pendingError;
+      return response({ exists: Boolean(row || (pending && pending.length)) });
+    }
+
+    if (action === "register_request") {
+      const username = String(body.username || "").trim();
+      const usernameLc = username.toLowerCase();
+      const password = String(body.password || "");
+      const email = String(body.email || "").trim();
+      const tier = String(body.tier || "Starter Tier ($29)").trim();
+      const paymentMethod = String(body.payment_method || "").trim();
+      const transactionId = String(body.transaction_id || "").trim();
+      const allowedTiers = new Set([
+        "Starter Tier ($29)",
+        "Mid-Tier Pro ($79)",
+        "Professional Tier ($129)",
+        "Enterprise Tier ($199)",
+        "Enterprise Plus Tier ($399)",
+        "Research Pack ($30 add-on)",
+      ]);
+
+      if (!/^[A-Za-z0-9._-]{3,32}$/.test(username)) {
+        return response({
+          error: "Username must be 3-32 letters, numbers, periods, underscores or hyphens.",
+        }, 400);
+      }
+      if (password.length < 8 || password.length > 128) {
+        return response({ error: "Password must be between 8 and 128 characters." }, 400);
+      }
+      if (
+        email.length > 254 ||
+        !/^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/.test(email)
+      ) {
+        return response({ error: "Enter a valid email address." }, 400);
+      }
+      if (!allowedTiers.has(tier)) {
+        return response({ error: "Select a valid subscription tier." }, 400);
+      }
+      if (paymentMethod !== "STC Pay (QR)") {
+        return response({ error: "Unsupported registration payment method." }, 400);
+      }
+      if (transactionId.length > 128) {
+        return response({ error: "Payment reference must be 128 characters or fewer." }, 400);
+      }
+
+      let proofPath: string | null = null;
+      try {
+        proofPath = await storePaymentProof(body);
+      } catch (err) {
+        return response({
+          error: err instanceof Error ? err.message : "Payment proof could not be validated.",
+        }, 400);
+      }
+      if (!proofPath) {
+        return response({ error: "A payment screenshot is required for registration." }, 400);
+      }
+
+      const { data, error } = await supabase.rpc(
+        "shoir_create_registration_request",
+        {
+          p_username: username,
+          p_username_lc: usernameLc,
+          p_password_hash: await hashPassword(password),
+          p_email: email,
+          p_tier: tier,
+          p_payment_method: paymentMethod,
+          p_transaction_id: transactionId || null,
+          p_screenshot_path: proofPath,
+        },
+      );
+      if (error) {
+        const objectPath = proofPath.replace(
+          `storage://${PAYMENT_PROOF_BUCKET}/`,
+          "",
+        );
+        await supabase.storage.from(PAYMENT_PROOF_BUCKET).remove([objectPath]);
+        if (error.code === "P0002") {
+          return response({
+            error: "Registration request could not be submitted. Sign in if you have an account or contact support.",
+          }, 409);
+        }
+        if (error.code === "22023") {
+          return response({ error: error.message }, 400);
+        }
+        throw error;
+      }
+      const result = data as { ok?: boolean; request_id?: number; status?: string } | null;
+      if (!result?.ok || !result.request_id) {
+        const objectPath = proofPath.replace(
+          `storage://${PAYMENT_PROOF_BUCKET}/`,
+          "",
+        );
+        await supabase.storage.from(PAYMENT_PROOF_BUCKET).remove([objectPath]);
+        throw new Error("Registration request could not be confirmed by the persistence service.");
+      }
+      return response({
+        ok: true,
+        request_id: result.request_id,
+        status: result.status || "Pending",
+        proof_uploaded: true,
+      });
+    }
+
     if (action === "logout") {
       const token = String(body.token || "").trim();
       const usernameLc = String(body.username || "").trim().toLowerCase();
