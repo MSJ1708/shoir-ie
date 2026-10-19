@@ -203,3 +203,17 @@ Supabase project `shoir-ie-production` is `ACTIVE_HEALTHY` on PostgreSQL 17.6.1.
 - Authenticated account lifecycle, live entitlement-denial tests, real import/export round trips, durable workspace restoration, full migration replay, production function compatibility and disaster recovery: **OPEN / BLOCKED / NOT RUN** as appropriate.
 - The main master administrator invariant: **PASS by read-only query**.
 - The release decision remains **NO-GO** until the migration/function drift, staging, authenticated acceptance, module matrix and deployed-revision evidence are closed.
+
+## Supplemental connected-environment evidence — 2026-10-19
+
+| Gate | Current result | Evidence boundary / next action |
+|---|---|---|
+| Staging Edge Function source parity | **PASS — source comparison only** | Retrieved staging `shoir-persistence` file content matched `supabase/functions/shoir-persistence/index.ts` on `main`. Does not prove runtime behavior. |
+| Atomic subscription RPC presence | **PASS in staging / FAIL in production** | Read-only catalog inspection found `shoir_create_registration_request` and `shoir_finalize_subscription_request` in staging and absent in production. Production migration `20261019140600_atomic_subscription_request_decisions` is not recorded. |
+| Atomic RPC privilege boundary | **PASS — catalog privilege check in staging** | Both inspected RPCs allow EXECUTE to `service_role`, not `anon` or `authenticated`. Keep direct HTTP authorization tests outstanding. |
+| Core-table RLS | **PASS — limited catalog check** | RLS enabled on the inspected five core account/workspace tables. Does not prove end-to-end tenant isolation for all resources/actions. |
+| Login-throttle migration history | **BLOCKED — reconcile** | Production ledger version `20261019124815` differs from repository filename `20261019123300_server_side_login_rate_limits.sql`. Compare exact SQL and reconcile through supported reviewed migration tooling. |
+| Staging Edge Function HTTP acceptance | **BLOCKED / NOT RUN** | Inspection runtime could not resolve/reach the staging endpoint. Run the authenticated workflow from a network-enabled GitHub Actions runner. |
+| Authenticated account lifecycle, module matrix, tenant isolation | **NOT RUN / NOT PROVEN** | Requires distinct disposable `shoir-e2e-*` accounts and protected Actions secrets; inspect and retain the redacted evidence artifact. |
+
+**Release decision remains NO-GO.** No production database migration or Edge Function deployment was performed during this inspection.
