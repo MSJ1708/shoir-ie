@@ -1597,22 +1597,28 @@ if not st.session_state.get("current_user"):
                         st.warning("Please enter a valid email address.")
                     elif reg_pass and (len(reg_pass) < 8 or len(reg_pass) > 128):
                         st.warning("Password must be between 8 and 128 characters.")
-                    elif reg_name and reg_pass and reg_email and uploaded_screenshot is not None:
-                        try:
-                            _registration_proof_base64, _registration_proof_content_type = _encode_renewal_proof(uploaded_screenshot)
-                        except ValueError as exc:
-                            st.warning(str(exc))
-                            st.stop()
+                    elif reg_name and reg_pass and reg_email:
+                        # Receipt upload is optional. If supplied, validate its actual
+                        # bytes before writing either the remote request or local cache.
+                        _registration_proof_base64 = None
+                        _registration_proof_content_type = None
+                        file_path = None
+                        if uploaded_screenshot is not None:
+                            try:
+                                _registration_proof_base64, _registration_proof_content_type = _encode_renewal_proof(uploaded_screenshot)
+                            except ValueError as exc:
+                                st.warning(str(exc))
+                                st.stop()
+
+                            os.makedirs("payment_proofs", exist_ok=True)
+                            _registration_upload_name = os.path.basename(str(uploaded_screenshot.name or "payment-proof.png"))
+                            file_path = os.path.join("payment_proofs", f"{reg_name}_{_registration_upload_name}")
+                            with open(file_path, "wb") as f:
+                                f.write(uploaded_screenshot.getbuffer())
 
                         if reg_pass and (len(reg_pass) < 8 or len(reg_pass) > 128):
                             st.warning("Password must be between 8 and 128 characters.")
                             st.stop()
-
-                        os.makedirs("payment_proofs", exist_ok=True)
-                        _registration_upload_name = os.path.basename(str(uploaded_screenshot.name or "payment-proof.png"))
-                        file_path = os.path.join("payment_proofs", f"{reg_name}_{_registration_upload_name}")
-                        with open(file_path, "wb") as f:
-                            f.write(uploaded_screenshot.getbuffer())
 
                         # The durable service is authoritative. Submit it first so a
                         # failed remote write cannot leave a local-only pending request.
@@ -1660,10 +1666,7 @@ if not st.session_state.get("current_user"):
                         st.session_state.show_qr = False
                         st.rerun()
                     else:
-                        if uploaded_screenshot is None:
-                            st.warning("Please upload your payment screenshot.")
-                        else:
-                            st.warning("Please fill in your name, password, and email address.")
+                        st.warning("Please fill in your name, password, and email address.")
 
     # ------------------------------------------
     # TAB 3: EXPLORE THE MODULES — PUBLIC VALUE SHOWCASE
