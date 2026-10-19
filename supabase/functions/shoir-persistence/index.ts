@@ -543,53 +543,20 @@ Deno.serve(async (req) => {
       if (error) throw error;
       const request = data?.[0];
       if (!request) return response({ error: "Request not found." }, 404);
-      const existing = await getAccount(request.username);
-      const { data: pendingCred } = await supabase.from(
-        "shoir_pending_credentials",
-      ).select("*").eq("username_lc", request.username_lc).maybeSingle();
-      const now = new Date().toISOString();
-      const expiry = request.request_type === "Renewal" && existing
-        ? expiry30(existing.subscription_expires_at)
-        : expiry30();
-      const passwordHash = existing?.password_hash ||
-        pendingCred?.password_hash;
-      if (!passwordHash) {
-        return response({
-          error: "Pending registration credentials are missing.",
-        }, 500);
+      const { data: decision, error: decisionError } = await supabase.rpc(
+        "shoir_finalize_subscription_request",
+        { p_request_id: request.id, p_decision: "Approved" },
+      );
+      if (decisionError) {
+        if (decisionError.code === "P0002") {
+          return response(
+            { error: "Pending request not found or already processed." },
+            409,
+          );
+        }
+        throw decisionError;
       }
-      const payload = {
-        username: request.username,
-        username_lc: request.username_lc,
-        password_hash: passwordHash,
-        role: existing?.role || "User",
-        tier: request.tier || existing?.tier || "Starter Tier ($29)",
-        email: request.email || existing?.email || "",
-        created_at: existing?.created_at || now,
-        subscription_expires_at: expiry,
-        linkedin: existing?.linkedin || null,
-        github: existing?.github || null,
-        about_me: existing?.about_me || null,
-        affiliate_code: existing?.affiliate_code || null,
-        active: true,
-        updated_at: now,
-      };
-      const { error: accountErr } = await supabase.from("shoir_accounts")
-        .upsert(payload, { onConflict: "username" });
-      if (accountErr) throw accountErr;
-      await supabase.from("shoir_subscription_requests").update({
-        status: "Approved",
-        approved_at: now,
-        updated_at: now,
-      }).eq("id", request.id);
-      return response({
-        ok: true,
-        username: request.username,
-        expires_at: expiry,
-        tier: payload.tier,
-        email: payload.email,
-        request_id: request.id,
-      });
+      return response(decision || { ok: true, request_id: request.id });
     }
 
     if (action === "admin_decline_session") {
@@ -598,17 +565,20 @@ Deno.serve(async (req) => {
       if (!Number.isSafeInteger(id) || id <= 0) {
         return response({ error: "Invalid request identifier." }, 400);
       }
-      const { data, error } = await supabase.from("shoir_subscription_requests")
-        .update({ status: "Declined", updated_at: new Date().toISOString() })
-        .eq("id", id)
-        .eq("status", "Pending")
-        .select("id")
-        .maybeSingle();
-      if (error) throw error;
-      if (!data) {
-        return response({ error: "Pending request not found." }, 404);
+      const { data: decision, error: decisionError } = await supabase.rpc(
+        "shoir_finalize_subscription_request",
+        { p_request_id: id, p_decision: "Declined" },
+      );
+      if (decisionError) {
+        if (decisionError.code === "P0002") {
+          return response(
+            { error: "Pending request not found or already processed." },
+            404,
+          );
+        }
+        throw decisionError;
       }
-      return response({ ok: true, request_id: data.id });
+      return response(decision || { ok: true, request_id: id });
     }
 
     return response({ error: "Unknown action." }, 400);
