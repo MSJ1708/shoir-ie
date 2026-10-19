@@ -64,7 +64,8 @@ async function storePaymentProof(
   body: Record<string, unknown>,
 ): Promise<string | null> {
   const encoded = String(body.proof_base64 || "").trim();
-  const rawContentType = String(body.proof_content_type || "").trim().toLowerCase();
+  const rawContentType = String(body.proof_content_type || "").trim()
+    .toLowerCase();
   if (!encoded && !rawContentType) return null;
   if (!encoded || !rawContentType) {
     throw new Error("Payment proof data or content type is invalid.");
