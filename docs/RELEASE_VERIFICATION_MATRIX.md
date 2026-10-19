@@ -1,6 +1,6 @@
 # Subscription, Module and Security Release Verification Matrix
 
-Updated: 2026-10-18
+Updated: 2026-10-19
 
 This matrix is the release gate for the subscription renewal, account, module, import/export, and enterprise-access work. A row is complete only when the stated evidence exists. Source edits and static tests are not evidence of a successful authenticated browser journey.
 
@@ -11,16 +11,16 @@ This matrix is the release gate for the subscription renewal, account, module, i
 - **Browser verified** — completed against the hosted application using an authorized account; record date, account class, build, steps and observed outcome.
 - **Blocked** — a dependency prevents a trustworthy test; document the dependency and do not mark the release definition of done complete.
 
-## Current verification record — 2026-10-18
+## Current verification record — 2026-10-19
 
-This record combines the automated and public-browser evidence from merged subscription, private-payment-proof and expiry changes. The final public smoke passed on merge commit `3215db267e532533f7a7fc48fee8c5dcd8bbdf42`; live backend facts below were queried directly on 2026-10-18.
+This record is being refreshed during the 2026-10-19 release-readiness consolidation. The current `main` commit is `2ec8002e19550031b177eb03ed680458b432edbb`. PRs [#135](https://github.com/MSJ1708/shoir-ie/pull/135), [#136](https://github.com/MSJ1708/shoir-ie/pull/136), [#137](https://github.com/MSJ1708/shoir-ie/pull/137), [#138](https://github.com/MSJ1708/shoir-ie/pull/138), [#139](https://github.com/MSJ1708/shoir-ie/pull/139) and [#140](https://github.com/MSJ1708/shoir-ie/pull/140) are merged. Each PR's final reviewed head passed its applicable five CI workflows before merge; that does not replace validation of the combined `main` commit or authenticated hosted workflows. The prior public shell smoke on `3215db267e532533f7a7fc48fee8c5dcd8bbdf42` remains historical evidence only. This audit PR triggers a fresh, anonymous desktop/mobile browser smoke and does not sign in or mutate production data.
 
 | Area | Current status | Evidence / boundary |
 |---|---|---|
-| Compile and regression suite | **PASS — automated** | Main validation workflow, including `compileall`, tests, and required module parsing, completed successfully. |
-| Engine regression | **PASS — automated** | Main engine-regression workflow completed successfully. |
-| Security and quality checks | **PASS — automated** | Main security-quality workflow completed successfully. This is not a penetration test or independent certification. |
-| Public hosted entry screen | **PASS — post-merge browser smoke** | On merged main SHA `3215db267e532533f7a7fc48fee8c5dcd8bbdf42`, headless Chromium passed at desktop (1440×1000) and mobile (390×844) widths. The Streamlit app frame was found, registration and Explore Modules public tabs rendered, the Enterprise Plus plan card was detected, and no fatal marker, uncaught JavaScript error, or horizontal overflow was reported. No sign-in or production writes were attempted. Evidence: [post-merge browser workflow](https://github.com/MSJ1708/shoir-ie/actions/runs/39165970926). |
+| Compile and regression suite | **PASS on reviewed PR heads; consolidated-main result pending** | All six final reviewed PR heads ran validation/full tests successfully before merge. A new run against current `main` is in progress; record its final result before treating the combined merge as verified. |
+| Engine regression | **PASS on reviewed PR heads; consolidated-main result pending** | Each final reviewed PR head passed engine regression. A new run against current `main` is in progress. |
+| Security and quality checks | **PASS on reviewed PR heads; consolidated-main result pending** | Each final reviewed PR head passed security/quality, including dependency audit and secret-pattern guard. A new run against current `main` is in progress. This is not a penetration test or independent certification. |
+| Public hosted entry screen | **Prior pass; fresh audit smoke pending** | On merged main SHA `3215db267e532533f7a7fc48fee8c5dcd8bbdf42`, headless Chromium previously passed at desktop (1440×1000) and mobile (390×844) widths. A new audit-branch check is being triggered to refresh that evidence against the current public URL. Both checks remain unauthenticated and do not establish private workflow correctness. Prior evidence: [post-merge browser workflow](https://github.com/MSJ1708/shoir-ie/actions/runs/39165970926). |
 | Subscription backend deployment | **PASS — deployed configuration checked; endpoint walkthrough pending** | Supabase `shoir-persistence` is deployed at version 7. `shoir_sessions.scope` exists, is NOT NULL and defaults to `workspace`; the private payment-proof bucket and restrictive storage policy are configured. The Edge Function also rejects renewal requests for the protected `sho` administrator. Repository tests assert source contracts, but an authenticated walkthrough is still required to verify deployed login, renewal, upload, signed-link and workspace endpoints end to end. |
 | Admin tier | **PASS — record checked** | Existing admin record is active, retains role `Enterprise Admin` and long-dated expiry `2099-01-01 UTC`, and now has tier `Enterprise Plus Tier ($399)`. No password or account recreation was performed. |
 | Renewal payment review | **Implemented / backend configured; end-to-end pending** | Transaction reference is validated server-side. The private `subscription-payment-proofs` bucket is provisioned with a 512 KiB limit and PNG/JPG/PDF allowlist; `storage.objects` also has a restrictive policy denying direct `anon`/`authenticated` access to that bucket, even if another permissive storage policy is added. Edge v6 uploads there and returns five-minute URLs only to an admin session. Verify upload/review with an authorized test account before calling the flow end-to-end passed. |
@@ -28,6 +28,8 @@ This record combines the automated and public-browser evidence from merged subsc
 | Authenticated sign-in, expiry, renewal and restoration | **BLOCKED — not browser verified** | This run had no authorized test credential or already-authenticated browser session available to exercise the private account journey. The public smoke deliberately does not sign in. Do not claim these cases passed from static checks alone. |
 | Module-by-module rendering, imports/downloads, persistence after restart, roles/tiers and tenant isolation | **OPEN — not fully browser verified** | The matrix below is the acceptance checklist. A public shell smoke is not evidence for these private workflows. |
 | Platform-table security advisor | **PASS — deny-by-default policies applied** | All five public platform tables now have explicit `FOR ALL TO anon, authenticated USING (false) WITH CHECK (false)` policies. Security advisor returns no lints; direct table-grant query returns no privileges for `anon`/`authenticated`. Trusted service-role Edge operations are unchanged. |
+
+| Merged safeguards — module policy and workspace evidence | **PASS — automated PR coverage** | PRs #135–#140 now merge module entitlement synchronization, owner-scoped Excellence Hub and investor artifact history, research protocol/run ownership, project autosave/decision-spec ownership, and defensive ShadowShift evidence normalization. See the linked PRs above. These are source-level regression results, not end-to-end tenant-isolation certification. |
 
 **Release decision:** automated and public-shell checks passed, but **the full definition of done remains OPEN** until authorized authenticated browser tests and the remaining module/import/export/persistence/security matrix rows are recorded with evidence.
 
