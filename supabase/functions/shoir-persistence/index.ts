@@ -95,8 +95,8 @@ function isExpired(v:string|null){return !!v&&new Date(v).getTime()<=Date.now();
 function expiry30(base?:string|null){const now=Date.now();const current=base?new Date(base).getTime():0;return new Date(Math.max(now,current||0)+30*24*60*60*1000).toISOString();}
 async function getAccount(username:string){const {data,error}=await supabase.from("shoir_accounts").select("*").eq("username_lc",username.trim().toLowerCase()).maybeSingle();if(error)throw error;return data;}
 async function createSession(usernameLc:string,scope:"workspace"|"renewal"="workspace",ttlMs=30*24*60*60*1000){const b=new Uint8Array(32);crypto.getRandomValues(b);const token=bytesToHex(b);const h=bytesToHex(await crypto.subtle.digest("SHA-256",new TextEncoder().encode(token)));const {error}=await supabase.from("shoir_sessions").insert({token_hash:h,username_lc:usernameLc,scope,expires_at:new Date(Date.now()+ttlMs).toISOString()});if(error)throw error;return token;}
-async function getSession(token:string,username?:string,requiredScope:"workspace"|"renewal"|"either"="workspace"){const h=bytesToHex(await crypto.subtle.digest("SHA-256",new TextEncoder().encode(token)));const {data,error}=await supabase.from("shoir_sessions").select("username_lc,expires_at,scope").eq("token_hash",h).maybeSingle();if(error||!data||isExpired(data.expires_at))throw new Error("Unauthorized session.");if(username&&data.username_lc!==username.trim().toLowerCase())throw new Error("Unauthorized session.");const scope=data.scope||"workspace";if(requiredScope!=="either"&&scope!==requiredScope)throw new Error("Session scope does not permit this action.");const row=await getAccount(data.username_lc);if(!row||row.active===false)throw new Error("Account is inactive.");if(requiredScope==="workspace"&&row.username_lc!=="sho"&&isExpired(row.subscription_expires_at))throw new Error("SUBSCRIPTION_EXPIRED");return row;}
-async function adminSession(username:string,token:string){const row=await getSession(token,username);if(row.role!=="Enterprise Admin")throw new Error("Admin authorization failed.");return row;}
+async function getSession(token:string,username?:string,requiredScope:"workspace"|"renewal"|"either"="workspace"){const h=bytesToHex(await crypto.subtle.digest("SHA-256",new TextEncoder().encode(token)));const {data,error}=await supabase.from("shoir_sessions").select("username_lc,expires_at,scope").eq("token_hash",h).maybeSingle();if(error||!data||isExpired(data.expires_at))throw new Error("Unauthorized session.");if(username&&data.username_lc!==username.trim().toLowerCase())throw new Error("Unauthorized session.");const scope=data.scope||"workspace";if(requiredScope!=="either"&&scope!==requiredScope)throw new Error("Session scope does not permit this action.");const row=await getAccount(data.username_lc);if(!row||row.active===false)throw new Error("Account is inactive.");if(requiredScope==="workspace"&&!(row.username_lc==="sho"&&row.role==="Enterprise Admin")&&isExpired(row.subscription_expires_at))throw new Error("SUBSCRIPTION_EXPIRED");return row;}
+async function adminSession(username:string,token:string){const row=await getSession(token,username);if(row.username_lc!=="sho"||row.role!=="Enterprise Admin")throw new Error("Admin authorization failed.");return row;}
 
 Deno.serve(async(req)=>{
  if(req.method==="OPTIONS")return response({ok:true});
@@ -119,8 +119,17 @@ Deno.serve(async(req)=>{
   if(action==="login"){
    const username=String(body.username||"").trim(),password=String(body.password||""),row=await getAccount(username);
    if(!row||!await verifyPassword(row.password_hash,password))return response({error:"Invalid username or password."},401);
-   if(row.username_lc!=="sho"&&isExpired(row.subscription_expires_at)){const token=await createSession(row.username_lc,"renewal",60*60*1000);return response({error:"SUBSCRIPTION_EXPIRED",token,username:row.username,tier:row.tier,email:row.email,expires_at:row.subscription_expires_at,renewal_only:true},403);}
-   const token=await createSession(row.username_lc); return response({ok:true,token,username:row.username,role:row.role,tier:row.tier,email:row.email,expires_at:row.subscription_expires_at});
+   // The canonical master-admin identity receives Enterprise Plus, while its
+   // existing password, role, email, account identity and expiry remain intact.
+   const isMasterAdmin = row.username_lc==="sho"&&row.role==="Enterprise Admin";
+   const adminTier = "Enterprise Plus Tier ($399)";
+   if(isMasterAdmin&&row.tier!==adminTier){
+    const {error:tierError}=await supabase.from("shoir_accounts").update({tier:adminTier,updated_at:new Date().toISOString()}).eq("username_lc","sho");
+    if(tierError)throw tierError;
+   }
+   const effectiveTier=isMasterAdmin?adminTier:row.tier;
+   if(!isMasterAdmin&&isExpired(row.subscription_expires_at)){const token=await createSession(row.username_lc,"renewal",60*60*1000);return response({error:"SUBSCRIPTION_EXPIRED",token,username:row.username,tier:effectiveTier,email:row.email,expires_at:row.subscription_expires_at,renewal_only:true},403);}
+   const token=await createSession(row.username_lc); return response({ok:true,token,username:row.username,role:row.role,tier:effectiveTier,email:row.email,expires_at:row.subscription_expires_at});
   }
 
   if(action==="workspace_load"){await getSession(String(body.token),String(body.username));const {data,error}=await supabase.from("shoir_workspace_states").select("state_json,updated_at").eq("username_lc",String(body.username).trim().toLowerCase()).maybeSingle();if(error)throw error;return response({ok:true,state_json:data?.state_json||null,updated_at:data?.updated_at||null});}

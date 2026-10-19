@@ -514,13 +514,13 @@ def init_db():
                 INSERT OR IGNORE INTO enterprise_users
                 (username, password_hash, role, tier, email, trial_expires, affiliate_code, ticket_expiry)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, ("sho", admin_pass_hash, "Enterprise Admin", "Enterprise Tier",
+            """, ("sho", admin_pass_hash, "Enterprise Admin", "Enterprise Plus Tier ($399)",
                   "mohsuhailji@gmail.com", "2030-01-01T00:00:00", "AFF-SHO-15", "2030-01-01T00:00:00"))
             cursor.execute("""
                 UPDATE enterprise_users
                 SET password_hash=?, role=?, tier=?, email=?
                 WHERE LOWER(username)='sho'
-            """, (admin_pass_hash, "Enterprise Admin", "Enterprise Tier", "mohsuhailji@gmail.com"))
+            """, (admin_pass_hash, "Enterprise Admin", "Enterprise Plus Tier ($399)", "mohsuhailji@gmail.com"))
         else:
             # Preserve an existing admin credential; only seed metadata for a
             # first-run account when one does not already exist.
@@ -533,13 +533,13 @@ def init_db():
                 INSERT OR IGNORE INTO enterprise_users
                 (username, role, tier, email, trial_expires, affiliate_code, ticket_expiry)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, ("sho", "Enterprise Admin", "Enterprise Tier",
+            """, ("sho", "Enterprise Admin", "Enterprise Plus Tier ($399)",
                   "mohsuhailji@gmail.com", "2030-01-01T00:00:00", "AFF-SHO-15", "2030-01-01T00:00:00"))
             cursor.execute("""
                 UPDATE enterprise_users
                 SET role=?, tier=?, email=?
                 WHERE LOWER(username)='sho'
-            """, ("Enterprise Admin", "Enterprise Tier", "mohsuhailji@gmail.com"))
+            """, ("Enterprise Admin", "Enterprise Plus Tier ($399)", "mohsuhailji@gmail.com"))
 
         # Never recreate/delete accounts on app startup.
         cursor.execute("SELECT 1 FROM users WHERE LOWER(username)='sho' LIMIT 1")
@@ -548,7 +548,7 @@ def init_db():
                 INSERT INTO users
                 (username,password,role,tier,email,created_at,subscription_expires_at)
                 VALUES (?,?,?,?,?,?,?)
-            """, ("sho", admin_pass_hash, "admin", "Enterprise Tier ($199)",
+            """, ("sho", admin_pass_hash, "admin", "Enterprise Plus Tier ($399)",
                   "shoirtheagent@gmail.com", "2020-01-01T00:00:00", "2030-01-01T00:00:00"))
 
         conn.commit()
@@ -1809,6 +1809,41 @@ if not st.session_state.get("current_user"):
             st.warning("Venture Studio is not currently present in the capability catalog.")
 
         st.markdown("---")
+        st.markdown("## 🧭 Autonomous Kinetic-Digital Twin (AKDT) for Industrial Logistics Resilience")
+        st.markdown("### Explore how disruption can propagate across a connected industrial logistics network.")
+        st.markdown(
+            "AKDT is an Enterprise Plus scenario workflow for mapping logistics dependencies and comparing resilience options. "
+            "It helps teams frame the question, make assumptions explicit, and understand which routes, resources or hand-offs "
+            "deserve closer investigation before changing a live operation."
+        )
+        _akdt_cols = st.columns(3)
+        _akdt_items = [
+            ("MODEL", "Connect the flow", "Represent suppliers, routes, hand-offs, capacity limits, critical materials and downstream demand."),
+            ("STRESS-TEST", "Explore disruption scenarios", "Vary route availability, lead times, demand, throughput and recovery assumptions with clearly labelled scenarios."),
+            ("COMPARE", "Explain the trade-offs", "Compare baseline and stressed cases, identify potential bottlenecks, and record the next evidence needed."),
+        ]
+        for _col, (_kicker, _headline, _body) in zip(_akdt_cols, _akdt_items):
+            with _col:
+                st.markdown(
+                    f'<div class="value-strip"><div class="kicker">{_kicker}</div>'
+                    f'<b>{_headline}</b><span>{_body}</span></div>',
+                    unsafe_allow_html=True
+                )
+
+        with st.expander("See an illustrative logistics-resilience example"):
+            st.markdown(
+                '<div class="module-example"><b>Example:</b> A manufacturer maps critical suppliers, inbound routes, '
+                'plant-feed points and downstream demand. The team models a port or route disruption, compares alternate '
+                'paths and capacity limits, then documents a recovery option and the evidence gaps that must be resolved '
+                'before operational use.</div>',
+                unsafe_allow_html=True
+            )
+        st.caption(
+            "Plan access: Enterprise Plus. Scenario outputs depend on their inputs and assumptions; they are not a live "
+            "autonomous controller, a guaranteed recovery, or proof of realized savings."
+        )
+
+        st.markdown("---")
         st.markdown("## ⏱️ ShadowShift — Micro-Loss & Recovery Intelligence")
         st.markdown(
             "### Make the small interruptions visible — then test what to change."
@@ -1855,7 +1890,7 @@ if not st.session_state.get("current_user"):
         )
         _search = st.text_input(
             "Search capabilities",
-            placeholder="Try: ShadowShift, micro-loss, recovery, inventory, quality, warehouse, simulation…",
+            placeholder="Try: ShadowShift, Venture Studio, AKDT, logistics resilience, inventory, quality, warehouse, simulation…",
             key="explore_module_search_v2"
         )
         _category_options = ["All categories"] + sorted({str(m.get("category","Other")) for m in MODULE_CATALOG})
