@@ -242,6 +242,23 @@ def test_registration_accepts_no_optional_proof_and_rejects_partial_proof(monkey
         })
 
 
+def test_registration_requires_payment_reference_or_proof():
+    edge_block = EDGE_SOURCE.split(
+        'if (action === "register_request") {', 1
+    )[1].split(
+        'if (action === "logout") {', 1
+    )[0]
+    migration = (
+        ROOT / "supabase" / "migrations" /
+        "20261019140600_atomic_subscription_request_decisions.sql"
+    ).read_text(encoding="utf-8")
+
+    assert "if (!transactionId && !proofPath)" in edge_block
+    assert "Provide a payment reference or upload payment proof" in edge_block
+    assert "NULLIF(btrim(p_transaction_id), '') IS NULL" in migration
+    assert "A payment reference or private payment proof is required." in migration
+
+
 def test_registration_preflight_does_not_disclose_durable_account_existence():
     edge_block = EDGE_SOURCE.split(
         'if (action === "account_exists") {', 1
