@@ -1,11 +1,14 @@
 import json
+import sqlite3
 
 import pandas as pd
+import pytest
 
 from shoir_shadowshift import (
     CAUSES, EVENT_TYPES, add_event, calculate_loss_metrics, clean_event_frame,
     create_study, ensure_shadowshift_schema, list_experiments, list_studies, load_events,
-    rank_next_experiments, record_experiment_result, save_experiment,
+    rank_next_experiments, record_experiment_result, save_analysis_snapshot, save_experiment,
+    load_snapshots, replace_events,
 )
 
 
@@ -99,3 +102,65 @@ def test_study_and_experiment_persistence_is_owner_scoped(tmp_path):
     assert len(data) == 1
     assert data.iloc[0]["Status"] == "Measured"
     assert json.loads(data.iloc[0]["Result"])["test_value"] == 2
+
+
+
+def test_event_replacement_is_atomic_when_import_contains_duplicate_ids(tmp_path):
+    db = str(tmp_path / "shadowshift.sqlite")
+    ensure_shadowshift_schema(db)
+    study_id = create_study("alice", db_path=db)
+    original = _events().iloc[[0]].copy()
+    original["Event ID"] = "stable-event"
+    assert replace_events(study_id, "alice", original, db_path=db) == 1
+    before = load_events(study_id, "alice", db_path=db)
+
+    invalid_replacement = pd.concat([original, original], ignore_index=True)
+    with pytest.raises(sqlite3.IntegrityError):
+        replace_events(study_id, "alice", invalid_replacement, db_path=db)
+
+    after = load_events(study_id, "alice", db_path=db)
+    pd.testing.assert_frame_equal(before, after)
+
+
+def test_snapshots_are_owner_scoped_and_hash_normalized_event_evidence(tmp_path):
+    db = str(tmp_path / "shadowshift.sqlite")
+    ensure_shadowshift_schema(db)
+    study_id = create_study("alice", db_path=db)
+    events = _events()
+    snapshot_id, evidence_hash = save_analysis_snapshot(
+        study_id, "alice", {"observation_window_min": 60},
+        {"observed_burden_min": 40}, events, db_path=db,
+    )
+    assert len(evidence_hash) == 64
+    assert snapshot_id in set(load_snapshots(study_id, "alice", db_path=db)["Snapshot ID"])
+    assert load_snapshots(study_id, "bob", db_path=db).empty
+
+
+def test_cross_owner_event_mutations_are_rejected(tmp_path):
+    db = str(tmp_path / "shadowshift.sqlite")
+    ensure_shadowshift_schema(db)
+    study_id = create_study("alice", db_path=db)
+    with pytest.raises(ValueError, match="current owner"):
+        add_event(study_id, "bob", _events().iloc[0].to_dict(), db_path=db)
+    with __import__("pytest").raises(ValueError, match="current owner"):
+        replace_events(study_id, "bob", _events(), db_path=db)
+
+
+
+def test_non_finite_measurements_are_normalized_before_projection():
+    frame = clean_event_frame(pd.DataFrame([{
+        "Event type": EVENT_TYPES[0],
+        "Station": "A",
+        "Interruption min": float("inf"),
+        "Recovery min": float("-inf"),
+        "People affected": float("inf"),
+        "Evidence strength (1-5)": float("inf"),
+    }]))
+    row = frame.iloc[0]
+    assert row["Interruption min"] == 0
+    assert row["Recovery min"] == 0
+    assert row["People affected"] == 1
+    assert row["Evidence strength (1-5)"] == 3
+    metrics = calculate_loss_metrics(frame, 60, 480, 250, 50, 2)
+    assert metrics["observed_elapsed_burden_minutes"] == 0
+    assert metrics["annual_gross_labor_exposure_sar"] == 0

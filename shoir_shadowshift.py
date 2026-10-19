@@ -237,10 +237,28 @@ def clean_event_frame(frame: pd.DataFrame | None) -> pd.DataFrame:
         if col not in d:
             d[col] = default
     d = d[EVENT_COLUMNS].copy()
-    d["Interruption min"] = pd.to_numeric(d["Interruption min"], errors="coerce").fillna(0).clip(lower=0)
-    d["Recovery min"] = pd.to_numeric(d["Recovery min"], errors="coerce").fillna(0).clip(lower=0)
-    d["People affected"] = pd.to_numeric(d["People affected"], errors="coerce").fillna(1).clip(lower=1, upper=10000).astype(int)
-    d["Evidence strength (1-5)"] = pd.to_numeric(d["Evidence strength (1-5)"], errors="coerce").fillna(3).clip(1, 5).astype(int)
+    # Replace non-finite values before clipping: pandas treats +/-inf as numeric,
+    # which could otherwise leak into projections, exports and persisted observations.
+    d["Interruption min"] = (
+        pd.to_numeric(d["Interruption min"], errors="coerce")
+        .replace([float("inf"), float("-inf")], 0)
+        .fillna(0).clip(lower=0)
+    )
+    d["Recovery min"] = (
+        pd.to_numeric(d["Recovery min"], errors="coerce")
+        .replace([float("inf"), float("-inf")], 0)
+        .fillna(0).clip(lower=0)
+    )
+    d["People affected"] = (
+        pd.to_numeric(d["People affected"], errors="coerce")
+        .replace([float("inf"), float("-inf")], 1)
+        .fillna(1).clip(lower=1, upper=10000).astype(int)
+    )
+    d["Evidence strength (1-5)"] = (
+        pd.to_numeric(d["Evidence strength (1-5)"], errors="coerce")
+        .replace([float("inf"), float("-inf")], 3)
+        .fillna(3).clip(1, 5).astype(int)
+    )
     blank = d["Event ID"].fillna("").astype(str).str.strip().eq("")
     d["Event ID"] = d["Event ID"].fillna("").astype(str)
     d.loc[blank, "Event ID"] = ["SSE-" + uuid.uuid4().hex[:12].upper() for _ in range(int(blank.sum()))]
