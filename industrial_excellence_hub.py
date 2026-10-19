@@ -143,10 +143,10 @@ def _hero(username: str, tier: str) -> None:
           <div class="px-title">The industrial engineering command layer.</div>
           <div class="px-sub">One calm workspace for data → models → experiments → decisions → implementation → verified results.</div>
           <div class="px-pills">
-            <span>✓ {stats["implemented"]}/60 capabilities active</span>
+            <span>✓ {stats["implemented"]}/60 catalog entries marked Implemented</span>
             <span>◈ Evidence-first</span>
             <span>⌁ {tier}</span>
-            <span>● Workspace ready · {username}</span>
+            <span>● Workspace · {username}</span>
           </div>
         </div>
         <style>
@@ -176,39 +176,60 @@ def _overview(username: str) -> None:
     stats = feature_stats()
     with _db() as conn:
         counts = {
-            "projects": conn.execute("SELECT COUNT(*) FROM experience_projects").fetchone()[0],
-            "decisions": conn.execute("SELECT COUNT(*) FROM experience_decisions").fetchone()[0],
-            "jobs": conn.execute("SELECT COUNT(*) FROM experience_jobs").fetchone()[0],
-            "copilot": conn.execute("SELECT COUNT(*) FROM experience_copilot_actions").fetchone()[0],
-            "lineage": conn.execute("SELECT COUNT(*) FROM experience_lineage").fetchone()[0],
+            "projects": conn.execute(
+                "SELECT COUNT(*) FROM experience_projects WHERE owner=?", (username,)
+            ).fetchone()[0],
+            "decisions": conn.execute(
+                "SELECT COUNT(*) FROM experience_decisions WHERE owner=?", (username,)
+            ).fetchone()[0],
+            "jobs": conn.execute(
+                "SELECT COUNT(*) FROM experience_jobs WHERE owner=?", (username,)
+            ).fetchone()[0],
+            "copilot": conn.execute(
+                "SELECT COUNT(*) FROM experience_copilot_actions WHERE actor=?", (username,)
+            ).fetchone()[0],
+            "lineage": conn.execute(
+                "SELECT COUNT(*) FROM experience_lineage WHERE actor=?", (username,)
+            ).fetchone()[0],
         }
+        run_status = pd.read_sql_query(
+            """SELECT status, COUNT(*) AS count
+               FROM experience_module_runs WHERE owner=?
+               GROUP BY status ORDER BY status""",
+            conn,
+            params=(username,),
+        )
     c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("Capabilities", f'{stats["implemented"]}/60', "active")
-    c2.metric("Studies", f'{counts["projects"]:,}', "saved")
-    c3.metric("Decisions", f'{counts["decisions"]:,}', "governed")
-    c4.metric("Runs", f'{counts["jobs"]:,}', "tracked")
-    c5.metric("Lineage links", f'{counts["lineage"]:,}', "traceable")
+    c1.metric("Catalog labels", f'{stats["implemented"]}/60', "source metadata; not runtime tests")
+    c2.metric("Your studies", f'{counts["projects"]:,}', "saved")
+    c3.metric("Your decisions", f'{counts["decisions"]:,}', "governed")
+    c4.metric("Your jobs", f'{counts["jobs"]:,}', "owned records")
+    c5.metric("Your lineage links", f'{counts["lineage"]:,}', "attributed records")
 
+    st.caption("Workspace counts are filtered to this account. Catalog statuses are source-declared labels, not module readiness certification.")
     left, right = st.columns([1.05, 1.95])
     with left:
-        st.markdown("#### Operating loop")
-        loop = pd.DataFrame({
-            "Stage": ["Prepare", "Validate", "Run", "Inspect", "Decide", "Verify"],
-            "Coverage": [96, 98, 94, 91, 89, 86],
-        })
-        fig = px.line(loop, x="Stage", y="Coverage", markers=True, range_y=[70, 100])
-        fig.update_layout(height=260, margin=dict(l=8,r=8,t=15,b=8), yaxis_title="Coverage %", xaxis_title=None)
-        fig.update_traces(line_width=3)
-        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+        st.markdown("#### Your recorded module runs")
+        if run_status.empty:
+            st.info("No module-run records are saved for this account yet. No workflow coverage percentage is inferred.")
+        else:
+            fig = px.bar(
+                run_status, x="status", y="count", text="count",
+                title="Recorded runs by status",
+            )
+            fig.update_layout(height=260, margin=dict(l=8,r=8,t=35,b=8), xaxis_title=None, yaxis_title="Recorded runs")
+            fig.update_traces(textposition="outside")
+            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
     with right:
-        st.markdown("#### Capability health")
+        st.markdown("#### Capability status declarations")
         catalog = feature_catalog().copy()
         catalog["Group"] = catalog["Feature"].str.extract(r"^(.+?)(?: /| &|,|$)")[0]
         groups = catalog.groupby("Status", as_index=False).size().rename(columns={"size":"Count"})
         fig = px.bar(groups, x="Status", y="Count", text="Count")
-        fig.update_layout(height=260, margin=dict(l=8,r=8,t=15,b=8), xaxis_title=None, yaxis_title=None)
+        fig.update_layout(height=260, margin=dict(l=8,r=8,t=15,b=8), xaxis_title=None, yaxis_title="Catalog entries")
         fig.update_traces(textposition="outside")
         st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+        st.caption("Counts show static catalog labels. They do not prove runtime functionality or authenticated verification.")
 
     st.markdown("#### What changed")
     items = [
@@ -237,6 +258,7 @@ def _overview(username: str) -> None:
         _benchmark_lab(username)
     with st.expander("📊 Visualization Readiness Audit", expanded=False):
         _visualization_readiness(username)
+
 
 def _benchmark_lab(username: str) -> None:
     st.markdown("### 🧪 Benchmark Laboratory")
@@ -288,10 +310,16 @@ def _visualization_readiness(username: str) -> None:
 
 def _digital_thread(username: str) -> None:
     st.markdown("### 🔗 Digital Thread")
-    st.caption("A shared industrial graph connecting the objects that modules reason about.")
+    st.caption("Shared seeded examples plus entities and relationships owned by this account. Seeded examples are illustrative, not customer evidence.")
     with _db() as conn:
-        entities = pd.read_sql("SELECT entity_id,entity_type,name,status,owner,updated_at FROM excellence_entities ORDER BY entity_type,name", conn)
-        edges = pd.read_sql("SELECT source_id,target_id,relation,created_at FROM excellence_edges ORDER BY created_at DESC", conn)
+        entities = pd.read_sql(
+            "SELECT entity_id,entity_type,name,status,owner,updated_at FROM excellence_entities WHERE owner=? OR owner='platform' ORDER BY entity_type,name",
+            conn, params=(username,),
+        )
+        edges = pd.read_sql(
+            "SELECT source_id,target_id,relation,created_at FROM excellence_edges WHERE owner=? OR owner='platform' ORDER BY created_at DESC",
+            conn, params=(username,),
+        )
     c1, c2, c3 = st.columns(3)
     c1.metric("Entities", len(entities), "shared IDs")
     c2.metric("Relationships", len(edges), "traceable")
@@ -376,7 +404,7 @@ def _data_lab(username: str) -> None:
         st.success(f"Validation recorded · {run}")
     if b.button("🧪 Queue experiment", use_container_width=True):
         jid = create_job("Platform Excellence", "scenario-sweep", username, {"rows": len(df), "metric": nums[0] if nums else None})
-        update_job(jid, "Running", 25, "Experiment prepared")
+        update_job(jid, "Running", 25, "Experiment prepared", actor=username)
         st.session_state["px_job"] = jid
         st.success(f"Experiment queued · {jid}")
     if c.button("💾 Save study", use_container_width=True):
@@ -403,7 +431,7 @@ def _governance(username: str, tier: str) -> None:
 
     with tab1:
         with _db() as conn:
-            decisions = pd.read_sql("SELECT decision_id,title,module,status,owner,created_at,updated_at FROM experience_decisions ORDER BY updated_at DESC", conn)
+            decisions = pd.read_sql("SELECT decision_id,title,module,status,owner,created_at,updated_at FROM experience_decisions WHERE owner=? ORDER BY updated_at DESC", conn, params=(username,))
         if decisions.empty:
             st.info("No decision cards yet. Create one from the action bar below.")
         else:
@@ -452,12 +480,24 @@ def _governance(username: str, tier: str) -> None:
         st.caption("The lifecycle is persistent; each transition is written to the approval history.")
         st.markdown("#### Workspace comments")
         with _db() as conn:
-            comments = pd.read_sql("SELECT actor,comment,created_at FROM experience_comments ORDER BY id DESC LIMIT 12", conn)
+            comments = pd.read_sql(
+                """SELECT c.actor,c.comment,c.created_at
+                   FROM experience_comments AS c
+                   WHERE c.decision_id IN (
+                       SELECT decision_id FROM experience_decisions WHERE owner=?
+                   )
+                   OR c.project_id IN (
+                       SELECT project_id FROM experience_projects WHERE owner=?
+                   )
+                   OR (c.decision_id IS NULL AND c.project_id IS NULL AND c.actor=?)
+                   ORDER BY c.id DESC LIMIT 12""",
+                conn, params=(username, username, username),
+            )
         st.dataframe(comments, use_container_width=True, hide_index=True)
 
     with tab4:
         with _db() as conn:
-            memory = pd.read_sql("SELECT memory_id,problem,decision,outcome,lesson,owner,created_at FROM excellence_memory ORDER BY created_at DESC", conn)
+            memory = pd.read_sql("SELECT memory_id,problem,decision,outcome,lesson,owner,created_at FROM excellence_memory WHERE owner=? ORDER BY created_at DESC", conn, params=(username,))
         if memory.empty:
             st.info("Decision Memory is ready. Record the first verified lesson after an implementation.")
         else:
