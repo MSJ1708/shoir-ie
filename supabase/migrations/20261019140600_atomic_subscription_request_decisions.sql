@@ -235,6 +235,14 @@ BEGIN
             USING ERRCODE = '22023';
     END IF;
 
+    -- At least one payment evidence item is required. A proof upload may be
+    -- omitted only when a transaction/ticket reference is supplied.
+    IF NULLIF(btrim(p_transaction_id), '') IS NULL
+       AND p_screenshot_path IS NULL THEN
+        RAISE EXCEPTION 'A payment reference or private payment proof is required.'
+            USING ERRCODE = '22023';
+    END IF;
+
     -- Proof upload is optional. If present, only a private server-generated
     -- storage reference is accepted; clients cannot supply arbitrary file paths.
     IF p_screenshot_path IS NOT NULL AND (
