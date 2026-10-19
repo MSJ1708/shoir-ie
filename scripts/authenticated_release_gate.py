@@ -223,10 +223,11 @@ def main() -> int:
                             restore_status, restore_data = safe_call(api, "workspace_restore", "active", "workspace_save",
                                                                       {"username": active_user, "token": reload_token,
                                                                        "state_json": restore_expected})
+                            restore_ok = restore_status == 200 and bool(restore_data.get("ok"))
                             record("workspace_restore", "active",
-                                   restore_status == 200 and bool(restore_data.get("ok")),
-                                   "Original test workspace restored." if restore_status == 200 else "Original workspace restoration failed; manual review is required.")
-                            write_started = False
+                                   restore_ok,
+                                   "Original test workspace restored." if restore_ok else "Original workspace restoration failed; manual retry will run.")
+                            write_started = not restore_ok
 
         # Expiry should produce only a renewal-scoped token, never workspace access.
         expired_status, expired_data = safe_call(api, "expired_login", "expired", "login",
@@ -269,6 +270,26 @@ def main() -> int:
             record("inactive_account_denied", "inactive", None, "Skipped: configure a dedicated inactive test account to verify the server guard.")
 
     finally:
+        # Restore the original dedicated test workspace before revoking the
+        # session needed to perform a retry. Never use a production/customer user.
+        if write_started and workspace_was_loaded:
+            restore_token = reload_token or active_token
+            if restore_token:
+                try:
+                    status, data = api.call("workspace_save", {
+                        "username": active_user,
+                        "token": restore_token,
+                        "state_json": restore_expected,
+                    })
+                    restored_ok = status == 200 and bool(data.get("ok"))
+                    record("workspace_restore_retry", "active", restored_ok,
+                           "Original test workspace restored on retry." if restored_ok else "Workspace restore retry failed; manual review is required.")
+                    write_started = not restored_ok
+                except Exception:
+                    record("workspace_restore_retry", "active", False, "Workspace restore retry failed; manual review is required.")
+            else:
+                record("workspace_restore_retry", "active", False, "No valid test session remained to restore the workspace.")
+
         # Never leave probe sessions active after the test.
         for label, username, token in (
             ("active", active_user, active_token),
@@ -284,16 +305,6 @@ def main() -> int:
                            "Dedicated test session revoked.")
                 except Exception:
                     record("session_revocation", label, False, "Could not confirm cleanup of a dedicated test session.")
-        # If the marker write succeeded and the first restore failed, use the new
-        # session if one exists; never silently leave test data without recording it.
-        if write_started and reload_token and workspace_was_loaded:
-            try:
-                status, data = api.call("workspace_save", {"username": active_user, "token": reload_token,
-                                                          "state_json": restore_expected})
-                record("workspace_restore_retry", "active", status == 200 and bool(data.get("ok")),
-                       "Retry restoration of the original test workspace.")
-            except Exception:
-                record("workspace_restore_retry", "active", False, "Could not restore the original test workspace.")
 
     REPORT_PATH.write_text(json.dumps({
         "run_at_utc": datetime.now(timezone.utc).isoformat(),
