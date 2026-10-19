@@ -1,5 +1,5 @@
 from shoir_tier_capabilities import (MODULE_REQUIREMENTS, TIER_ORDER, audit_module_entitlement_coverage, available_modules, copilot_gate, module_required_tier, normalize_tier, tier_allows)
-from industrial_platform import PLATFORM_CATALOG, tier_allows as platform_tier_allows
+from industrial_platform import PLATFORM_CATALOG, TIER_FEATURES, tier_allows as platform_tier_allows
 
 
 def test_tier_order_and_research_are_distinct():
@@ -125,4 +125,23 @@ def test_every_platform_catalog_entry_has_an_explicit_matching_shared_tier_polic
     assert all(
         module_required_tier(str(item["name"])) == normalize_tier(str(item["tier"]))
         for item in PLATFORM_CATALOG
+    )
+
+
+
+def test_every_tier_feature_has_explicit_matching_shared_tier_policy():
+    tier_order = ["Starter", "Mid-Tier Pro", "Professional", "Enterprise", "Enterprise Plus"]
+    minimum_tiers = {}
+    for tier in tier_order:
+        for module in TIER_FEATURES.get(tier, []):
+            minimum_tiers.setdefault(str(module), tier)
+
+    report = audit_module_entitlement_coverage(minimum_tiers.keys())
+
+    assert report["status"] == "COMPLETE"
+    assert report["total_modules"] == len(minimum_tiers)
+    assert report["unmapped_modules"] == []
+    assert all(
+        module_required_tier(module) == tier
+        for module, tier in minimum_tiers.items()
     )
