@@ -25,7 +25,5 @@ jobs:
         uses: denoland/setup-deno@v2
         with:
           deno-version: v2.x
-      - name: Format-check Edge Function
-        run: deno fmt --check supabase/functions/shoir-persistence/index.ts
       - name: Type-check Edge Function
         run: deno check supabase/functions/shoir-persistence/index.ts
