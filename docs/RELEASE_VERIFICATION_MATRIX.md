@@ -33,6 +33,10 @@ This record reflects the 2026-10-19 release-readiness consolidation. Current `ma
 
 **Release decision:** automated and public-shell checks passed, but **the full definition of done remains OPEN** until authorized authenticated browser tests and the remaining module/import/export/persistence/security matrix rows are recorded with evidence.
 
+## Authenticated end-to-end test runner
+
+The manual, secrets-backed test runner and its account-safety requirements are documented in [AUTHENTICATED_RELEASE_GATE.md](AUTHENTICATED_RELEASE_GATE.md). Do not use the master administrator or customer accounts. Results remain **unverified until a maintainer runs the workflow against the intended deployed build**.
+
 ## Account, subscription and session matrix
 
 | ID | Scenario | Expected result | Minimum evidence |
