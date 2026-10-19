@@ -1595,11 +1595,45 @@ if not st.session_state.get("current_user"):
                         st.warning("This username already has an account. Please sign in instead of creating a duplicate.")
                     elif reg_email and not is_valid_email(reg_email):
                         st.warning("Please enter a valid email address.")
+                    elif reg_pass and (len(reg_pass) < 8 or len(reg_pass) > 128):
+                        st.warning("Password must be between 8 and 128 characters.")
                     elif reg_name and reg_pass and reg_email and uploaded_screenshot is not None:
+                        try:
+                            _registration_proof_base64, _registration_proof_content_type = _encode_renewal_proof(uploaded_screenshot)
+                        except ValueError as exc:
+                            st.warning(str(exc))
+                            st.stop()
+
+                        if reg_pass and (len(reg_pass) < 8 or len(reg_pass) > 128):
+                            st.warning("Password must be between 8 and 128 characters.")
+                            st.stop()
+
                         os.makedirs("payment_proofs", exist_ok=True)
-                        file_path = os.path.join("payment_proofs", f"{reg_name}_{uploaded_screenshot.name}")
+                        _registration_upload_name = os.path.basename(str(uploaded_screenshot.name or "payment-proof.png"))
+                        file_path = os.path.join("payment_proofs", f"{reg_name}_{_registration_upload_name}")
                         with open(file_path, "wb") as f:
                             f.write(uploaded_screenshot.getbuffer())
+
+                        # The durable service is authoritative. Submit it first so a
+                        # failed remote write cannot leave a local-only pending request.
+                        if _durable_accounts_ready:
+                            try:
+                                insert_remote_request({
+                                    "username": reg_name, "password": reg_pass,
+                                    "email": reg_email, "tier": reg_tier,
+                                    "request_type": "New", "payment_method": "STC Pay (QR)",
+                                    "transaction_id": reg_ticket_code if reg_ticket_code else None,
+                                    "screenshot_path": file_path, "status": "Pending",
+                                    "proof_base64": _registration_proof_base64,
+                                    "proof_content_type": _registration_proof_content_type,
+                                })
+                            except Exception as exc:
+                                try:
+                                    os.remove(file_path)
+                                except OSError:
+                                    pass
+                                st.error(f"Could not create the durable account request: {exc}")
+                                _shoir_module_stop()
 
                         conn = sqlite3.connect("enterprise_full_workspace.db")
                         cursor = conn.cursor()
@@ -1621,19 +1655,6 @@ if not st.session_state.get("current_user"):
 
                         conn.commit()
                         conn.close()
-
-                        if _durable_accounts_ready:
-                            try:
-                                insert_remote_request({
-                                    "username": reg_name, "password": reg_pass,
-                                    "email": reg_email, "tier": reg_tier,
-                                    "request_type": "New", "payment_method": "STC Pay (QR)",
-                                    "transaction_id": reg_ticket_code if reg_ticket_code else None,
-                                    "screenshot_path": file_path, "status": "Pending"
-                                })
-                            except Exception as exc:
-                                st.error(f"Could not create the durable account request: {exc}")
-                                _shoir_module_stop()
 
                         st.success("Request sent successfully! Your code will be emailed to you from shoirtheagent@gmail.com")
                         st.session_state.show_qr = False
