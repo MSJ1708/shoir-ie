@@ -168,7 +168,7 @@ def test_login_throttle_contract_is_server_only_and_atomic():
 
     root = Path(__file__).resolve().parents[1]
     edge_source = (root / "supabase/functions/shoir-persistence/index.ts").read_text(encoding="utf-8")
-    migration = (root / "supabase/migrations/20261019123300_server_side_login_rate_limits.sql").read_text(encoding="utf-8")
+    migration = (root / "supabase/migrations/20261019124815_server_side_login_rate_limits.sql").read_text(encoding="utf-8")
 
     assert _source_contract_contains(edge_source, 'loginThrottleBuckets(usernameLc,req)')
     assert _source_contract_contains(edge_source, 'checkLoginThrottle(bucket.key_hash,bucket.max_attempts,"attempt")')
