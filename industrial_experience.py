@@ -1868,9 +1868,12 @@ def research_decisions_frame(owner: str) -> pd.DataFrame:
 
 
 def research_evidence_bundle(study_id: str, owner: str) -> bytes:
-    protocol = load_research_protocol(study_id)
+    """Export only the requesting owner's protocol, runs, studies and decisions."""
+    protocol = load_research_protocol(study_id, owner=owner)
+    if not protocol:
+        raise PermissionError("Research study not found or not owned by this user.")
     studies = list_research_studies(owner)
-    runs = research_runs_frame(study_id)
+    runs = research_runs_frame(study_id, owner=owner)
     decisions = research_decisions_frame(owner)
     manifest = {
         "bundle_type": "Shoir-IE research workspace evidence",
