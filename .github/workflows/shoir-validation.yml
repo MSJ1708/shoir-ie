@@ -33,6 +33,44 @@ jobs:
           print("Required application modules parsed successfully.")
       - name: Execute application top-level import smoke test
         run: python scripts/runtime_import_smoke.py
+      - name: Install Chromium for local runtime smoke
+        run: python -m playwright install --with-deps chromium
+      - name: Start local Streamlit application
+        run: |
+          mkdir -p artifacts/live-deployment-smoke
+          nohup python -m streamlit run app.py \
+            --server.headless=true \
+            --server.address=127.0.0.1 \
+            --server.port=8501 \
+            --browser.gatherUsageStats=false \
+            > artifacts/live-deployment-smoke/streamlit.log 2>&1 &
+          echo $! > /tmp/shoir-streamlit.pid
+          ready=0
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:8501/_stcore/health >/dev/null; then
+              ready=1
+              break
+            fi
+            if ! kill -0 "$(cat /tmp/shoir-streamlit.pid)" 2>/dev/null; then
+              break
+            fi
+            sleep 2
+          done
+          if [ "$ready" -ne 1 ]; then
+            cat artifacts/live-deployment-smoke/streamlit.log
+            exit 1
+          fi
+      - name: Browser-smoke the local app at desktop and mobile widths
+        env:
+          SHOIR_LIVE_URL: http://127.0.0.1:8501/
+        run: python scripts/live_deployment_smoke.py
+      - name: Upload local runtime smoke evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: shoir-ie-local-runtime-smoke
+          path: artifacts/live-deployment-smoke/
+          if-no-files-found: warn
           PY
 
   live-deployment-smoke:
