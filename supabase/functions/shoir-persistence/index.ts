@@ -595,11 +595,20 @@ Deno.serve(async (req) => {
     if (action === "admin_decline_session") {
       await adminSession(String(body.username), String(body.token));
       const id = Number(body.request_id);
-      const { error } = await supabase.from("shoir_subscription_requests")
+      if (!Number.isSafeInteger(id) || id <= 0) {
+        return response({ error: "Invalid request identifier." }, 400);
+      }
+      const { data, error } = await supabase.from("shoir_subscription_requests")
         .update({ status: "Declined", updated_at: new Date().toISOString() })
-        .eq("id", id);
+        .eq("id", id)
+        .eq("status", "Pending")
+        .select("id")
+        .maybeSingle();
       if (error) throw error;
-      return response({ ok: true });
+      if (!data) {
+        return response({ error: "Pending request not found." }, 404);
+      }
+      return response({ ok: true, request_id: data.id });
     }
 
     return response({ error: "Unknown action." }, 400);
