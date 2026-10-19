@@ -199,7 +199,8 @@ def test_registration_submit_validates_proof_before_any_persistence():
     ).read_text(encoding="utf-8")
     assert "A payment screenshot is required for registration." not in edge_registration
     assert "proof_uploaded: !!proofPath" in edge_registration
-    assert "p_screenshot_path IS NULL" not in migration
+    assert "NULLIF(btrim(p_transaction_id), '') IS NULL" in migration
+    assert "A payment reference or private payment proof is required." in migration
     assert "Invalid private payment proof reference." in migration
     assert "Invalid payment reference." in migration
 
@@ -218,7 +219,7 @@ def test_registration_accepts_no_optional_proof_and_rejects_partial_proof(monkey
         "email": "test@example.invalid",
         "tier": "Starter Tier ($29)",
         "payment_method": "STC Pay (QR)",
-        "transaction_id": None,
+        "transaction_id": "SYNTHETIC-TEST-REFERENCE",
         "screenshot_path": None,
         "proof_base64": None,
         "proof_content_type": None,
