@@ -145,6 +145,25 @@ SUPABASE_EDGE_URL, SUPABASE_PUBLISHABLE_KEY = _resolve_supabase_edge_config(
 )
 
 
+def _configured_direct_database_url() -> str:
+    for name in ("SHOIR_DATABASE_URL", "SUPABASE_DB_URL", "DATABASE_URL"):
+        value = os.getenv(name, "").strip()
+        if value:
+            return value
+    for section in ("database", "postgresql", "supabase"):
+        value = _streamlit_secret(section, "url")
+        if value:
+            return value
+    return ""
+
+
+if APP_ENVIRONMENT == "staging" and _configured_direct_database_url():
+    raise RuntimeError(
+        "Direct PostgreSQL URLs are forbidden in Shoir-IE staging mode. "
+        "Remove database.url/postgresql.url/supabase.url and database DSN environment variables; use the pinned staging Edge Function."
+    )
+
+
 def _edge_headers() -> dict[str, str]:
     return {
         "apikey": SUPABASE_PUBLISHABLE_KEY,
