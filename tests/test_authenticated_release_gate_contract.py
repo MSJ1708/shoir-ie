@@ -44,3 +44,20 @@ def test_authenticated_gate_makes_live_login_throttle_probe_opt_in():
     assert "SHOIR_E2E_VERIFY_LOGIN_THROTTLE" in script
     assert 'observed == [401] * 8 + [429]' in script
     assert "SHOIR_E2E_VERIFY_LOGIN_THROTTLE" in workflow
+
+
+def test_authenticated_gate_requires_explicit_staging_targets_and_guard():
+    workflow = (ROOT / ".github/workflows/authenticated-release-gate.yml").read_text(encoding="utf-8")
+    docs = (ROOT / "docs/AUTHENTICATED_RELEASE_GATE.md").read_text(encoding="utf-8")
+    guard = (ROOT / "scripts/staging_e2e_guard.py").read_text(encoding="utf-8")
+    browser = (ROOT / "scripts/authenticated_browser_matrix.py").read_text(encoding="utf-8")
+    module_matrix = (ROOT / "scripts/authenticated_module_matrix.py").read_text(encoding="utf-8")
+
+    assert "SHOIR_E2E_EXPECTED_STAGING_APP_HOST" in workflow
+    assert "python scripts/staging_e2e_guard.py" in workflow
+    assert "hfhrosthswcybccepmak" in guard
+    assert "gcsamrdaeraxieaagsta" in guard
+    assert "shoir-ie-app.streamlit.app" in guard
+    assert "https://shoir-ie-app.streamlit.app/" not in browser
+    assert "https://shoir-ie-app.streamlit.app/" not in module_matrix
+    assert "There is intentionally no default application URL" in docs

@@ -17,6 +17,8 @@ from typing import Any
 
 import requests
 
+from staging_e2e_guard import validate_edge_from_env
+
 REPORT_PATH = Path(os.environ.get("SHOIR_E2E_REPORT", "artifacts/authenticated-release-gate/backend-report.json"))
 PREFIX = "shoir-e2e-"
 TIMEOUT = 20
@@ -80,7 +82,7 @@ def safe_call(api: EdgeAPI, case: str, account_class: str, action: str, payload:
 def main() -> int:
     REPORT_PATH.parent.mkdir(parents=True, exist_ok=True)
     try:
-        edge_url = require_env("SHOIR_E2E_EDGE_URL")
+        edge_url = validate_edge_from_env()
         key = require_env("SHOIR_E2E_PUBLISHABLE_KEY")
         active_user = validate_test_username(require_env("SHOIR_E2E_ACTIVE_USERNAME"), "active account")
         active_password = require_env("SHOIR_E2E_ACTIVE_PASSWORD")
