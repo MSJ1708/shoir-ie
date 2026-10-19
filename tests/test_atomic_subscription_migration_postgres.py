@@ -172,6 +172,24 @@ def test_atomic_subscription_migration_and_state_transitions():
     )
     assert permissions == (False, False, True, False, False, True)
 
+    # The backend must refuse a request with neither a payment reference nor
+    # a private receipt; incomplete evidence cannot create a pending account.
+    with pytest.raises(psycopg2.Error) as no_evidence:
+        _sql(
+            "SELECT public.shoir_create_registration_request(%s,%s,%s,%s,%s,%s,%s,%s)",
+            (
+                "shoir-e2e-postgres-no-evidence",
+                "shoir-e2e-postgres-no-evidence",
+                ("a" * 32) + "$" + ("b" * 64),
+                "no-evidence@example.invalid",
+                "Starter Tier ($29)",
+                "STC Pay (QR)",
+                None,
+                None,
+            ),
+        )
+    assert no_evidence.value.pgcode == "22023"
+
     # Registration writes credentials and a pending request as one function call.
     new = _registration("shoir-e2e-postgres-new")
     new_id = int(new["request_id"])
