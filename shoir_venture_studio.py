@@ -897,6 +897,22 @@ def save_artifact(owner:str,category:str,title:str,content:str,source_url:str,so
     return aid
 
 
+def artifact_version_history(owner: str, artifact_id: str) -> pd.DataFrame:
+    """Return historical versions only when the artifact belongs to the owner.
+
+    Version rows inherit ownership from their parent artifact. Enforce ownership
+    in SQL rather than relying on the UI selector to supply an allowed ID.
+    """
+    return _query(
+        """SELECT v.version,v.source_url,v.source_date,v.confidence,v.checksum,v.saved_at
+           FROM venture_artifact_versions AS v
+           INNER JOIN venture_artifacts AS a ON a.artifact_id=v.artifact_id
+           WHERE v.artifact_id=? AND a.owner=?
+           ORDER BY v.version DESC""",
+        (str(artifact_id), str(owner)),
+    )
+
+
 def _room_export(owner:str)->bytes:
     frames={
         "customers.csv":_query("SELECT * FROM venture_customers WHERE owner=?",(owner,)),
@@ -1014,8 +1030,8 @@ def _render_data_room(owner:str)->None:
     if not artifacts.empty:
         selected_artifact=st.selectbox("Artifact version history",["None"]+list(artifacts["artifact_id"].astype(str)),key="venture_artifact_history")
         if selected_artifact!="None":
-            versions=_query("SELECT version,source_url,source_date,confidence,checksum,saved_at FROM venture_artifact_versions WHERE artifact_id=? ORDER BY version DESC",(selected_artifact,))
-            if versions.empty: st.caption("Version 1 · initial artifact")
+            versions=artifact_version_history(owner, selected_artifact)
+            if versions.empty: st.caption("Version 1 · initial artifact, or no history visible for this account")
             else: st.dataframe(versions,use_container_width=True,hide_index=True)
     st.download_button("📦 Download Investor Data Room package",_room_export(owner),file_name="shoir_ie_investor_data_room.zip",mime="application/zip",type="primary",use_container_width=True,key="venture_room_export")
 
