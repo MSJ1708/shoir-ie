@@ -10,6 +10,7 @@ import json
 import os
 import re
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -28,6 +29,12 @@ APP_MARKERS = (
     "Welcome to Shoir-IE Workspace",
     "Sign In to Your Workspace",
     "Industrial Engineering Workbench",
+    "Industrial Control Center",
+)
+APP_READY_MARKERS = (
+    "Welcome to Shoir-IE Workspace",
+    "Sign In to Your Workspace",
+    "Get Subscription Ticket & Register",
     "Industrial Control Center",
 )
 FATAL_TEXT_MARKERS = (
@@ -100,38 +107,72 @@ def main() -> int:
                             URL, wait_until="domcontentloaded", timeout=90_000
                         )
                         item["http_status"] = response.status if response else None
-                        # Streamlit renders its app after the initial HTML response.
-                        page.wait_for_timeout(8_000)
+                        # Streamlit can briefly render only its static header before the
+                        # application body hydrates. Do not treat generic product/sidebar
+                        # text as readiness: wait for a real sign-in/welcome surface, and
+                        # require the same frame to expose it in consecutive polls.
                         item["page_title"] = page.title()
-                        # Streamlit-hosted applications may render their
-                        # app surface in a child frame. Inspect every accessible
-                        # frame rather than only the outer hosting document.
                         frame_records = []
                         rendered_bodies = []
                         app_frame = None
-                        for frame in page.frames:
-                            try:
-                                frame_body = frame.locator("body").inner_text(timeout=5_000)
-                            except Exception as frame_error:
-                                frame_records.append({
-                                    "url": frame.url,
-                                    "body_length": 0,
-                                    "body_preview": "",
-                                    "read_error": type(frame_error).__name__,
+                        stable_frame_key = None
+                        stable_observations = 0
+                        readiness_deadline = time.monotonic() + 45
+                        while time.monotonic() < readiness_deadline:
+                            current_records = []
+                            current_bodies = []
+                            ready_candidates = []
+                            fatal_marker_seen = False
+                            for candidate_frame in list(page.frames):
+                                try:
+                                    candidate_body = candidate_frame.locator("body").inner_text(
+                                        timeout=1_000
+                                    )
+                                except Exception as frame_error:
+                                    current_records.append({
+                                        "url": candidate_frame.url,
+                                        "body_length": 0,
+                                        "body_preview": "",
+                                        "read_error": type(frame_error).__name__,
+                                    })
+                                    continue
+                                if candidate_body:
+                                    current_bodies.append(candidate_body)
+                                folded_candidate_body = candidate_body.casefold()
+                                if any(
+                                    marker in folded_candidate_body
+                                    for marker in FATAL_TEXT_MARKERS
+                                ):
+                                    fatal_marker_seen = True
+                                if any(
+                                    marker.casefold() in folded_candidate_body
+                                    for marker in APP_READY_MARKERS
+                                ):
+                                    ready_candidates.append(candidate_frame)
+                                current_records.append({
+                                    "url": candidate_frame.url,
+                                    "body_length": len(candidate_body),
+                                    "body_preview": " ".join(candidate_body.split())[:300],
                                 })
-                                continue
-                            if frame_body:
-                                rendered_bodies.append(frame_body)
-                            if (
-                                "welcome to shoir-ie workspace" in frame_body.casefold()
-                                or "shoir-ie industrial engineering command center" in frame_body.casefold()
-                            ):
-                                app_frame = frame
-                            frame_records.append({
-                                "url": frame.url,
-                                "body_length": len(frame_body),
-                                "body_preview": " ".join(frame_body.split())[:300],
-                            })
+                            frame_records = current_records
+                            rendered_bodies = current_bodies
+                            if fatal_marker_seen:
+                                break
+                            candidate = ready_candidates[0] if ready_candidates else None
+                            if candidate is not None:
+                                candidate_key = (candidate.url, candidate.name)
+                                if candidate_key == stable_frame_key:
+                                    stable_observations += 1
+                                else:
+                                    stable_frame_key = candidate_key
+                                    stable_observations = 1
+                                if stable_observations >= 2:
+                                    app_frame = candidate
+                                    break
+                            else:
+                                stable_frame_key = None
+                                stable_observations = 0
+                            page.wait_for_timeout(500)
                         body = "\n".join(rendered_bodies)
                         folded_body = body.casefold()
                         item["frames"] = frame_records
@@ -189,13 +230,36 @@ def main() -> int:
                                 try:
                                     app_frame.get_by_role("tab", name=scenario["tab"]).click(timeout=8_000)
                                     app_frame.get_by_text(scenario["marker"]).wait_for(timeout=10_000)
-                                    for field_label in scenario["fields"]:
-                                        locator = app_frame.get_by_label(field_label)
-                                        if locator.count() == 0:
-                                            check["missing_fields"].append(field_label)
-                                    for extra_marker in scenario["extra_markers"]:
-                                        if app_frame.get_by_text(extra_marker).count() == 0:
-                                            check["missing_extra_markers"].append(extra_marker.pattern)
+                                    # Tab clicks trigger a Streamlit websocket rerun. Wait for
+                                    # the expected form controls/content to attach before asserting;
+                                    # immediate locator.count() calls can race that rerun on mobile.
+                                    field_locators = {
+                                        field_label: app_frame.get_by_label(field_label)
+                                        for field_label in scenario["fields"]
+                                    }
+                                    extra_locators = {
+                                        extra_marker.pattern: app_frame.get_by_text(extra_marker)
+                                        for extra_marker in scenario["extra_markers"]
+                                    }
+                                    readiness_deadline = time.monotonic() + 12
+                                    while time.monotonic() < readiness_deadline:
+                                        expected_locators = [
+                                            *field_locators.values(),
+                                            *extra_locators.values(),
+                                        ]
+                                        if all(locator.count() > 0 for locator in expected_locators):
+                                            break
+                                        page.wait_for_timeout(500)
+                                    check["missing_fields"] = [
+                                        field_label
+                                        for field_label, locator in field_locators.items()
+                                        if locator.count() == 0
+                                    ]
+                                    check["missing_extra_markers"] = [
+                                        marker_pattern
+                                        for marker_pattern, locator in extra_locators.items()
+                                        if locator.count() == 0
+                                    ]
                                     if check_name == "public-module-explorer-tab":
                                         plus_card_count = app_frame.locator("div.value-strip").filter(
                                             has_text=re.compile(r"Enterprise Plus", re.I)

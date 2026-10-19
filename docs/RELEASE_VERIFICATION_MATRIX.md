@@ -151,3 +151,19 @@ The durable-store startup guard is already on `main`; the later public smoke pas
 ## Import-guard redeployment probe — 2026-10-19
 
 This audit-only pull request reruns the public desktop/mobile smoke test after the durable-store startup guard was merged. The previously recorded hosted smoke result after merge is [run 39276620207](https://github.com/MSJ1708/shoir-ie/actions/runs/39276620207), which passed for the unauthenticated entry screen on desktop and mobile. This newer probe must be judged by its own workflow result and the hosted revision actually observed; it does not verify authenticated modules, subscription writes, staging migration compatibility, or tenant isolation. No application logic, credentials, account/subscription records, production data, or deployment configuration is changed by this documentation-only PR.
+
+
+## Audit-only hosted smoke probe — conflict resolution update — 2026-10-19
+
+PR [#152](https://github.com/MSJ1708/shoir-ie/pull/152) hardens the anonymous desktop/mobile Streamlit shell smoke against iframe hydration and tab rerenders. The earlier head `0ee1d7adc851dc13ec0d8e96cefeb54b386478b3` had intermittent mobile assertions ([push run 39281022859](https://github.com/MSJ1708/shoir-ie/actions/runs/39281022859), [PR run 39281027981](https://github.com/MSJ1708/shoir-ie/actions/runs/39281027981)). Those failures prompted the added polling/wait logic.
+
+The updated smoke on head `47b300f96a80e2923c71534f12eed020623f8f23` passed at [run 39287236351](https://github.com/MSJ1708/shoir-ie/actions/runs/39287236351): HTTP 200; registration and public module-explorer tabs passed at desktop (1440×1000) and mobile (390×844); no fatal marker or horizontal overflow was reported. Engine regression passed at [run 39287236342](https://github.com/MSJ1708/shoir-ie/actions/runs/39287236342). Other checks are independent gates; this smoke does not verify authenticated journeys, module-wide acceptance, tenant isolation, production database migration compatibility, or workforce/production readiness.
+
+This conflict resolution retains the current `main` matrix—including the durable-account import-guard and candidate subscription-decision notes—plus this PR's current smoke findings. Workflows must be evaluated again on the conflict-resolution commit; prior results are evidence for their exact earlier SHAs only.
+
+
+## Local runtime smoke readiness fix — 2026-10-19
+
+Push validation on conflict-resolution head `3aa6200d5628d6a808cda232a9c91e249a94a3f4` passed compilation, all 489 regression tests, module/import smoke checks and the hosted anonymous desktop/mobile probe, but its local browser-smoke job failed on the mobile viewport. The artifact showed HTTP 200 and no fatal marker or horizontal overflow, but the final mobile snapshot contained only the partial Streamlit header and no stable application frame; the script could not proceed to the public tab checks. Evidence: [push validation run 39288898854](https://github.com/MSJ1708/shoir-ie/actions/runs/39288898854), [local smoke artifact 12203144215](https://github.com/MSJ1708/shoir-ie/actions/runs/39288898854/artifacts/12203144215).
+
+The smoke harness now waits specifically for a real welcome/sign-in application marker and requires the same frame to expose it in consecutive polls. Generic sidebar/header text is no longer sufficient to declare readiness. The new head's validation run is authoritative: the change does not relax the app-rendering requirement, and the local browser job must pass before merge.
