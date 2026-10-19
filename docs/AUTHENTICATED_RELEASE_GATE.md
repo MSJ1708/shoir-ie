@@ -18,6 +18,23 @@ Provision these distinct accounts in the approved staging environment through th
 
 The Active test workspace should be a small JSON object and contain no real customer or business data. During the round-trip probe, the script records its prior serialized state, writes a unique temporary marker, logs in again to read that marker, and restores the original state before revoking test sessions. A workspace that is not a JSON object or exceeds 1 MB is not overwritten. Review the JSON evidence artifact for any `FAIL` result or restore warning.
 
+## Staging Streamlit configuration — required before any login test
+
+Create a separate Streamlit Cloud app for staging, then set these **app secrets** in that staging app's Manage app → Settings → Secrets panel. Use the staging publishable key from the staging Supabase dashboard, not the production key.
+
+```toml
+[shoir]
+environment = "staging"
+
+[supabase]
+edge_url = "https://hfhrosthswcybccepmak.supabase.co/functions/v1/shoir-persistence"
+publishable_key = "PASTE_THE_STAGING_PUBLISHABLE_KEY_HERE"
+```
+
+The placeholder above is documentation only; replace it in Streamlit's secret editor and never commit the key to Git. The equivalent environment variables are `SHOIR_ENVIRONMENT=staging`, `SHOIR_SUPABASE_EDGE_URL`, and `SHOIR_SUPABASE_PUBLISHABLE_KEY`.
+
+In staging mode the app validates the exact staging Edge host and refuses to start if the staging URL/key are missing or point elsewhere. It also refuses direct database DSNs (`database.url`, `postgresql.url`, `supabase.url`, `SHOIR_DATABASE_URL`, `SUPABASE_DB_URL`, or `DATABASE_URL`) so a leftover production database connection cannot silently bypass the staging Edge Function. The sign-in page must display **STAGING TEST ENVIRONMENT**. The authenticated browser and module-matrix tests check this banner *before entering any username or password*, so they abort without submitting credentials if the staging marker is missing.
+
 ## One-time staging administrator bootstrap
 
 The historical administrator seed migration is intentionally a no-op. If the isolated staging project does not yet have an administrator, use the one-time helper in `scripts/bootstrap_staging_admin.py` from a trusted computer:
