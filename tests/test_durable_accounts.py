@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
 from durable_account_store import account_is_expired, renewed_expiry
+import durable_account_store as das
 
 
 def test_account_is_expired_at_boundary():
@@ -52,3 +53,62 @@ def test_renewal_approval_preserves_existing_account_identity_and_renews_expiry(
     assert 'created_at:existing?.created_at||now' in edge_source
     assert 'username_lc:request.username_lc' in edge_source
     assert 'if(action==="renew_request")' in edge_source
+
+
+
+def test_remote_research_upsert_rejects_cross_owner_conflict(monkeypatch):
+    class FakeCursor:
+        def __init__(self):
+            self.rowcount = 0
+            self.query = ""
+            self.params = None
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def execute(self, query, params=None):
+            self.query = query
+            self.params = params
+            # A zero rowcount simulates PostgreSQL's ON CONFLICT ... WHERE
+            # owner predicate rejecting an existing record owned by someone else.
+            self.rowcount = 0
+
+    class FakeConnection:
+        def __init__(self):
+            self.fake_cursor = FakeCursor()
+            self.committed = False
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def cursor(self, *args, **kwargs):
+            return self.fake_cursor
+
+        def commit(self):
+            self.committed = True
+
+    fake_connection = FakeConnection()
+    monkeypatch.setattr(das, "postgres_backend_configured", lambda: True)
+    monkeypatch.setattr(das, "ensure_remote_research_schema", lambda: None)
+    monkeypatch.setattr(das, "_pg_connect", lambda: fake_connection)
+
+    import pytest
+    with pytest.raises(PermissionError, match="not owned"):
+        das.upsert_remote_research_study({
+            "study_id": "SHARED-STUDY-ID",
+            "research_id": "RSH-BOB",
+            "owner": "bob",
+            "title": "Overwrite attempt",
+            "protocol": {"objective": "should not replace another user's study"},
+        })
+
+    sql = fake_connection.fake_cursor.query
+    assert "ON CONFLICT (study_id) DO UPDATE SET" in sql
+    assert "WHERE shoir_research_studies.owner_lc = EXCLUDED.owner_lc" in sql
+    assert fake_connection.committed is False
