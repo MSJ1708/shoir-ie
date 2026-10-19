@@ -11,12 +11,20 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
+from staging_e2e_guard import validate_app_from_env
+
 REPORT = Path(os.environ.get("SHOIR_E2E_UI_REPORT", "artifacts/authenticated-release-gate/browser-report.json"))
 PREFIX = "shoir-e2e-"
-URL = os.environ.get("SHOIR_E2E_APP_URL", "https://shoir-ie-app.streamlit.app/").strip()
+URL = os.environ.get("SHOIR_E2E_APP_URL", "").strip()
 
 
 def main() -> int:
+    try:
+        target_url = validate_app_from_env()
+    except ValueError as exc:
+        print(f"[FAIL] Staging safety preflight: {exc}", file=sys.stderr)
+        return 2
+
     username = os.environ.get("SHOIR_E2E_ACTIVE_USERNAME", "").strip()
     password = os.environ.get("SHOIR_E2E_ACTIVE_PASSWORD", "")
     if not username.casefold().startswith(PREFIX) or not password:
@@ -37,7 +45,7 @@ def main() -> int:
         page_errors: list[str] = []
         page.on("pageerror", lambda error: page_errors.append(type(error).__name__))
         try:
-            response = page.goto(URL, wait_until="domcontentloaded", timeout=90_000)
+            response = page.goto(target_url, wait_until="domcontentloaded", timeout=90_000)
             page.wait_for_timeout(8000)
             frames = list(page.frames)
             app_frame = None
