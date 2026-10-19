@@ -22,10 +22,12 @@ from typing import Any
 from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import sync_playwright
 
+from staging_e2e_guard import validate_app_from_env
+
 ROOT = Path(__file__).resolve().parents[1]
 INVENTORY = ROOT / "docs" / "MODULE_TIER_INVENTORY.csv"
 REPORT = Path(os.environ.get("SHOIR_E2E_MODULE_REPORT", "artifacts/authenticated-release-gate/module-matrix-report.json"))
-URL = os.environ.get("SHOIR_E2E_APP_URL", "https://shoir-ie-app.streamlit.app/").strip()
+URL = os.environ.get("SHOIR_E2E_APP_URL", "").strip()
 PREFIX = "shoir-e2e-"
 EXPECTED_TIERS = {
     "Starter", "Mid-Tier Pro", "Professional", "Enterprise",
@@ -238,6 +240,13 @@ def run_account(browser, account_class: str, username: str, password: str, rows:
 
 
 def main() -> int:
+    global URL
+    try:
+        URL = validate_app_from_env()
+    except ValueError as exc:
+        print(f"[FAIL] Staging safety preflight: {exc}", file=sys.stderr)
+        return 2
+
     REPORT.parent.mkdir(parents=True, exist_ok=True)
     report: dict[str, Any] = {
         "started_at_utc": datetime.now(timezone.utc).isoformat(),
