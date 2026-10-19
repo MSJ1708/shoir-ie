@@ -196,3 +196,38 @@ def test_value_summary_blocks_unspecified_currency_when_priced():
     assert result["mixed_currency"] == 1.0
     assert result["currency_missing"] == 1.0
     assert result["annualized_benefit"] == 0.0
+
+
+
+def test_artifact_version_history_is_scoped_to_parent_artifact_owner(tmp_path, monkeypatch):
+    db = tmp_path / "venture.db"
+    monkeypatch.setattr(vs, "DB_PATH", str(db))
+    monkeypatch.setattr(vs, "ensure_experience_db", lambda *args, **kwargs: None)
+    vs.ensure_venture_db()
+
+    alice_artifact = vs.save_artifact(
+        "alice", "Product", "Plan", "alice version 1", "https://alice.example/1",
+        "2026-10-10", "Medium"
+    )
+    vs.save_artifact(
+        "alice", "Product", "Plan", "alice version 2", "https://alice.example/2",
+        "2026-10-11", "High"
+    )
+    bob_artifact = vs.save_artifact(
+        "bob", "Product", "Plan", "bob version 1", "https://bob.example/1",
+        "2026-10-10", "Medium"
+    )
+    vs.save_artifact(
+        "bob", "Product", "Plan", "bob version 2", "https://bob.example/2",
+        "2026-10-12", "High"
+    )
+
+    alice_history = vs.artifact_version_history("alice", alice_artifact)
+    bob_history = vs.artifact_version_history("bob", alice_artifact)
+    bob_own_history = vs.artifact_version_history("bob", bob_artifact)
+
+    assert len(alice_history) == 1
+    assert alice_history.iloc[0]["source_url"] == "https://alice.example/1"
+    assert bob_history.empty
+    assert len(bob_own_history) == 1
+    assert bob_own_history.iloc[0]["source_url"] == "https://bob.example/1"
