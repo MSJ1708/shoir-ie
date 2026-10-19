@@ -124,6 +124,22 @@ For each run, retain commit SHA, CI workflow URL, environment/build, timestamp, 
 
 **Definition of done:** every required automated job passes; the hosted browser walkthroughs pass using authorized test accounts; all relevant module, export, persistence, role, tier and security cases have evidence; high-severity findings are resolved; and remaining limitations are explicitly accepted. Do not use “fully verified” when a browser pass or a required matrix row is still blocked.
 
+## Durable account-store import recovery — 2026-10-19 15:17–15:18 UTC
+
+**PUBLIC STARTUP SMOKE: PASS after main merge `cf50437887fce04fc5cf0450d7f3317d0a358d7f`.**
+
+Evidence: [GitHub Actions run 39276620207](https://github.com/MSJ1708/shoir-ie/actions/runs/39276620207), artifact `12198120719` (`shoir-ie-live-deployment-smoke`).
+
+- Desktop 1440×1000: HTTP 200; Shoir-IE welcome/sign-in surface found; no fatal startup marker; no uncaught browser JavaScript errors; no horizontal overflow.
+- Mobile 390×844: same result.
+- Subscription-registration tab: passed on desktop and mobile; expected tier, username, email, password and activation/ticket fields were found.
+- Public module explorer: passed on desktop and mobile; Enterprise Plus plan card was found; Venture Studio section was reached.
+- Main-branch validation run [39276609544](https://github.com/MSJ1708/shoir-ie/actions/runs/39276609544): local tests and public live smoke both succeeded.
+
+This closes the previously failing **public startup/shell smoke**. The previous redacted Streamlit ImportError no longer appeared in the post-merge run. The exact internal exception from the earlier redacted runtime was not available in the public page, so the record does not claim a specific missing symbol was observed. PR #147 replaces the fragile direct multi-name import with an explicit durable-store API contract check and a fail-closed diagnostic if the module or required functions are unavailable.
+
+**Scope limitation:** these checks verify the public unauthenticated entry screen, registration form rendering and public module-explorer content only. Authenticated login/logout, subscription decisions, all 96 engineering modules, tier enforcement, real file round trips, cross-account isolation, migration rollout and disaster recovery remain open. The smoke report also recorded some nonfatal 404 requests from analytics/Streamlit endpoints; they did not trigger the fatal application-error gate, but should be reviewed separately if they affect product telemetry.
+
 ## Audit-only hosted smoke probe — 2026-10-19
 
-This documentation-only commit triggers the existing Playwright smoke workflow against the currently hosted public Streamlit application. It makes no runtime code, database, subscription, account, or deployment changes. The smoke checks only public entry-screen rendering and is not a substitute for authenticated release verification. Record the actual run and artifact outcome before updating the release decision.
+This documentation-only branch requests a fresh desktop/mobile Playwright check of the currently hosted public Streamlit app. It does not change application logic, credentials, account/subscription records, production data or deployment configuration. Record the exact workflow run and artifact outcome against the hosted revision actually observed. This public probe is not authenticated release verification and cannot close the remaining module, tier, persistence, export or tenant-isolation gates.
