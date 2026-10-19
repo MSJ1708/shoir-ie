@@ -60,7 +60,13 @@ def main() -> int:
             check("public_shell_loads", response is not None and response.status == 200 and app_frame is not None,
                   "Public application frame and sign-in surface found." if app_frame else "App frame/sign-in surface not found.")
             if app_frame is None:
-                return 1
+                raise RuntimeError("App frame/sign-in surface not found; refusing to enter test credentials.")
+            initial_body = app_frame.locator("body").inner_text(timeout=8_000)
+            is_staging = "STAGING TEST ENVIRONMENT" in initial_body
+            check("staging_environment_marker", is_staging,
+                  "App declared staging before credentials were entered." if is_staging else "Staging marker is missing; credentials were not submitted.")
+            if not is_staging:
+                raise RuntimeError("Staging marker missing; refusing to submit test credentials to a possibly production-backed app.")
 
             signin_tab = app_frame.get_by_role("tab", name=re.compile("Sign In", re.I))
             signin_tab.click(timeout=10_000)
