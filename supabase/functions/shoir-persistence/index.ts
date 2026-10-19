@@ -118,7 +118,7 @@ Deno.serve(async(req)=>{
 
   if(action==="login"){
    const username=String(body.username||"").trim(),password=String(body.password||""),row=await getAccount(username);
-   if(!row||!await verifyPassword(row.password_hash,password))return response({error:"Invalid username or password."},401);
+   if(!row||row.active===false||!await verifyPassword(row.password_hash,password))return response({error:"Invalid username or password."},401);
    // The canonical master-admin identity receives Enterprise Plus, while its
    // existing password, role, email, account identity and expiry remain intact.
    const isMasterAdmin = row.username_lc==="sho"&&row.role==="Enterprise Admin";
@@ -130,6 +130,18 @@ Deno.serve(async(req)=>{
    const effectiveTier=isMasterAdmin?adminTier:row.tier;
    if(!isMasterAdmin&&isExpired(row.subscription_expires_at)){const token=await createSession(row.username_lc,"renewal",60*60*1000);return response({error:"SUBSCRIPTION_EXPIRED",token,username:row.username,tier:effectiveTier,email:row.email,expires_at:row.subscription_expires_at,renewal_only:true},403);}
    const token=await createSession(row.username_lc); return response({ok:true,token,username:row.username,role:row.role,tier:effectiveTier,email:row.email,expires_at:row.subscription_expires_at});
+  }
+
+  if(action==="logout"){
+   const token=String(body.token||"").trim();
+   const usernameLc=String(body.username||"").trim().toLowerCase();
+   if(!token||!usernameLc)return response({ok:true,revoked:false});
+   const tokenHash=bytesToHex(await crypto.subtle.digest("SHA-256",new TextEncoder().encode(token)));
+   // Revocation is idempotent and account-scoped. Never store or log the bearer token.
+   const {data,error}=await supabase.from("shoir_sessions").delete()
+     .eq("token_hash",tokenHash).eq("username_lc",usernameLc).select("token_hash");
+   if(error)throw error;
+   return response({ok:true,revoked:!!(data&&data.length)});
   }
 
   if(action==="workspace_load"){await getSession(String(body.token),String(body.username));const {data,error}=await supabase.from("shoir_workspace_states").select("state_json,updated_at").eq("username_lc",String(body.username).trim().toLowerCase()).maybeSingle();if(error)throw error;return response({ok:true,state_json:data?.state_json||null,updated_at:data?.updated_at||null});}

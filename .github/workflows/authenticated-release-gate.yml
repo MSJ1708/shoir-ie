@@ -1,0 +1,72 @@
+name: Authenticated release gate
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: shoir-authenticated-release-gate
+  cancel-in-progress: false
+
+jobs:
+  authenticated-release-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SHOIR_E2E_EDGE_URL: ${{ secrets.SHOIR_E2E_EDGE_URL }}
+      SHOIR_E2E_PUBLISHABLE_KEY: ${{ secrets.SHOIR_E2E_PUBLISHABLE_KEY }}
+      SHOIR_E2E_APP_URL: ${{ secrets.SHOIR_E2E_APP_URL }}
+      SHOIR_E2E_ACTIVE_USERNAME: ${{ secrets.SHOIR_E2E_ACTIVE_USERNAME }}
+      SHOIR_E2E_ACTIVE_PASSWORD: ${{ secrets.SHOIR_E2E_ACTIVE_PASSWORD }}
+      SHOIR_E2E_ACTIVE_EXPECTED_TIER: ${{ vars.SHOIR_E2E_ACTIVE_EXPECTED_TIER }}
+      SHOIR_E2E_SECOND_USERNAME: ${{ secrets.SHOIR_E2E_SECOND_USERNAME }}
+      SHOIR_E2E_SECOND_PASSWORD: ${{ secrets.SHOIR_E2E_SECOND_PASSWORD }}
+      SHOIR_E2E_STARTER_USERNAME: ${{ secrets.SHOIR_E2E_STARTER_USERNAME }}
+      SHOIR_E2E_STARTER_PASSWORD: ${{ secrets.SHOIR_E2E_STARTER_PASSWORD }}
+      SHOIR_E2E_EXPIRED_USERNAME: ${{ secrets.SHOIR_E2E_EXPIRED_USERNAME }}
+      SHOIR_E2E_EXPIRED_PASSWORD: ${{ secrets.SHOIR_E2E_EXPIRED_PASSWORD }}
+      SHOIR_E2E_INACTIVE_USERNAME: ${{ secrets.SHOIR_E2E_INACTIVE_USERNAME }}
+      SHOIR_E2E_INACTIVE_PASSWORD: ${{ secrets.SHOIR_E2E_INACTIVE_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m playwright install --with-deps chromium
+      - name: Verify dedicated test-account configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          required=(SHOIR_E2E_EDGE_URL SHOIR_E2E_PUBLISHABLE_KEY SHOIR_E2E_ACTIVE_USERNAME SHOIR_E2E_ACTIVE_PASSWORD SHOIR_E2E_SECOND_USERNAME SHOIR_E2E_SECOND_PASSWORD SHOIR_E2E_STARTER_USERNAME SHOIR_E2E_STARTER_PASSWORD SHOIR_E2E_EXPIRED_USERNAME SHOIR_E2E_EXPIRED_PASSWORD)
+          for name in "${required[@]}"; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "::error::Missing required Actions secret/variable: $name"
+              exit 2
+            fi
+          done
+          for name in SHOIR_E2E_ACTIVE_USERNAME SHOIR_E2E_SECOND_USERNAME SHOIR_E2E_STARTER_USERNAME SHOIR_E2E_EXPIRED_USERNAME; do
+            value="${!name}"
+            if [[ "${value,,}" != shoir-e2e-* ]]; then
+              echo "::error::$name must use a dedicated shoir-e2e-* test account; production/customer/admin identities are refused."
+              exit 2
+            fi
+          done
+      - name: Verify authenticated Edge API lifecycle and workspace isolation
+        run: python scripts/authenticated_release_gate.py
+      - name: Verify authenticated browser shell, Excel module and logout
+        run: python scripts/authenticated_browser_matrix.py
+      - name: Upload redacted verification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: shoir-ie-authenticated-release-evidence
+          path: artifacts/authenticated-release-gate/
+          if-no-files-found: warn
+          retention-days: 14

@@ -387,6 +387,11 @@ def edge_login(username: str, password: str) -> dict[str, Any]:
     return _edge_call("login", {"username": username, "password": password})
 
 
+def edge_logout(username: str, token: str) -> dict[str, Any]:
+    """Revoke only the current server session for this account."""
+    return _edge_call("logout", {"username": username, "token": token})
+
+
 def edge_register_request(request: Mapping[str, Any]) -> dict[str, Any]:
     return _edge_call("register_request", {
         "username": request["username"],
