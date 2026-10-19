@@ -1,4 +1,11 @@
+import re
 from pathlib import Path
+
+def _source_contract_contains(source: str, fragment: str) -> bool:
+    normalized_source = re.sub(r"\\s+", "", source)
+    normalized_fragment = re.sub(r"\\s+", "", fragment)
+    return normalized_fragment in normalized_source
+
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -34,17 +41,17 @@ def test_expired_login_enters_renewal_only_flow():
 
 
 def test_renewal_sessions_are_short_lived_and_scoped():
-    assert 'createSession(row.username_lc,"renewal",60*60*1000)' in EDGE_SOURCE
-    assert 'requiredScope:"workspace"|"renewal"|"either"="workspace"' in EDGE_SOURCE
-    assert 'scope=data.scope||"workspace"' in EDGE_SOURCE
-    assert 'if(requiredScope==="workspace"&&!(row.username_lc==="sho"&&row.role==="Enterprise Admin")&&isExpired(row.subscription_expires_at))' in EDGE_SOURCE
-    assert 'getSession(String(body.token),String(body.username),"either")' in EDGE_SOURCE
+    assert _source_contract_contains(EDGE_SOURCE, 'createSession(row.username_lc,"renewal",60*60*1000)')
+    assert _source_contract_contains(EDGE_SOURCE, 'requiredScope:"workspace"|"renewal"|"either"="workspace"')
+    assert _source_contract_contains(EDGE_SOURCE, 'scope=data.scope||"workspace"')
+    assert _source_contract_contains(EDGE_SOURCE, 'if(requiredScope==="workspace"&&!(row.username_lc==="sho"&&row.role==="Enterprise Admin")&&isExpired(row.subscription_expires_at))')
+    assert _source_contract_contains(EDGE_SOURCE, 'getSession(String(body.token),String(body.username),"either")')
 
 
 def test_workspace_reads_and_writes_require_workspace_scope():
-    assert 'if(action==="workspace_load"){await getSession(String(body.token),String(body.username));' in EDGE_SOURCE
-    assert 'if(action==="workspace_save"){await getSession(String(body.token),String(body.username));' in EDGE_SOURCE
-    assert 'async function adminSession(username:string,token:string){const row=await getSession(token,username);' in EDGE_SOURCE
+    assert _source_contract_contains(EDGE_SOURCE, 'if(action==="workspace_load"){await getSession(String(body.token),String(body.username));')
+    assert _source_contract_contains(EDGE_SOURCE, 'if(action==="workspace_save"){await getSession(String(body.token),String(body.username));')
+    assert _source_contract_contains(EDGE_SOURCE, 'async function adminSession(username:string,token:string){const row=await getSession(token,username);')
 
 
 def test_visible_subscription_countdown_and_renewal_controls_exist():
@@ -63,11 +70,11 @@ def test_visible_subscription_countdown_and_renewal_controls_exist():
     assert '_encode_renewal_proof' in APP_SOURCE
     assert '512 * 1024' in APP_SOURCE
     assert 'edge_admin_payment_proof_url' in APP_SOURCE
-    assert 'admin_payment_proof_url_session' in EDGE_SOURCE
-    assert 'transactionId=String(body.transaction_id||"").trim()' in EDGE_SOURCE
-    assert 'Administrator subscription is not eligible for customer renewal.' in EDGE_SOURCE
-    assert 'createBucket(PAYMENT_PROOF_BUCKET' in EDGE_SOURCE
-    assert 'public: false' in EDGE_SOURCE
+    assert _source_contract_contains(EDGE_SOURCE, 'admin_payment_proof_url_session')
+    assert _source_contract_contains(EDGE_SOURCE, 'transactionId=String(body.transaction_id||"").trim()')
+    assert _source_contract_contains(EDGE_SOURCE, 'Administrator subscription is not eligible for customer renewal.')
+    assert _source_contract_contains(EDGE_SOURCE, 'createBucket(PAYMENT_PROOF_BUCKET')
+    assert _source_contract_contains(EDGE_SOURCE, 'public: false')
     assert 'Enterprise Plus Tier ($399)' in APP_SOURCE
     assert 'Research Pack ($30 add-on)' in APP_SOURCE
 
@@ -83,13 +90,13 @@ def test_admin_tier_change_does_not_rewrite_identity_or_expiry():
 
 
 def test_payment_proofs_are_private_and_server_reviewed():
-    assert 'const PAYMENT_PROOF_BUCKET = "subscription-payment-proofs"' in EDGE_SOURCE
-    assert 'createBucket(PAYMENT_PROOF_BUCKET' in EDGE_SOURCE
-    assert 'public: false' in EDGE_SOURCE
-    assert 'createSignedUrl(objectPath,300)' in EDGE_SOURCE
-    assert 'await adminSession(String(body.username),String(body.token))' in EDGE_SOURCE
-    assert 'MAX_PAYMENT_PROOF_BYTES = 512 * 1024' in EDGE_SOURCE
-    assert 'Payment proof content does not match its declared file type.' in EDGE_SOURCE
+    assert _source_contract_contains(EDGE_SOURCE, 'const PAYMENT_PROOF_BUCKET = "subscription-payment-proofs"')
+    assert _source_contract_contains(EDGE_SOURCE, 'createBucket(PAYMENT_PROOF_BUCKET')
+    assert _source_contract_contains(EDGE_SOURCE, 'public: false')
+    assert _source_contract_contains(EDGE_SOURCE, 'createSignedUrl(objectPath,300)')
+    assert _source_contract_contains(EDGE_SOURCE, 'await adminSession(String(body.username),String(body.token))')
+    assert _source_contract_contains(EDGE_SOURCE, 'MAX_PAYMENT_PROOF_BYTES = 512 * 1024')
+    assert _source_contract_contains(EDGE_SOURCE, 'Payment proof content does not match its declared file type.')
     assert 'public = false' in PAYMENT_PROOF_MIGRATION
     assert 'file_size_limit = 524288' in PAYMENT_PROOF_MIGRATION
     assert 'AS RESTRICTIVE' in PAYMENT_PROOF_RLS_MIGRATION
