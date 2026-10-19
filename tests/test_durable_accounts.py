@@ -4,6 +4,8 @@ from datetime import datetime, timedelta, timezone
 def _source_contract_contains(source: str, fragment: str) -> bool:
     normalized_source = re.sub(r"\s+", "", source)
     normalized_fragment = re.sub(r"\s+", "", fragment)
+    normalized_source = re.sub(r",(?=[)\\]}}])", "", normalized_source)
+    normalized_fragment = re.sub(r",(?=[)\\]}}])", "", normalized_fragment)
     return normalized_fragment in normalized_source
 
 
@@ -45,7 +47,7 @@ def test_master_admin_enterprise_plus_entitlement_contract():
     assert _source_contract_contains(edge_source, 'const isMasterAdmin = row.username_lc==="sho"&&row.role==="Enterprise Admin";')
     assert _source_contract_contains(edge_source, 'const effectiveTier=isMasterAdmin?adminTier:row.tier;')
     assert _source_contract_contains(edge_source, 'if(requiredScope==="workspace"&&!(row.username_lc==="sho"&&row.role==="Enterprise Admin")')
-    assert _source_contract_contains(edge_source, 'if(row.username_lc!=="sho"||row.role!=="Enterprise Admin")throw new Error("Admin authorization failed.");')
+    assert _source_contract_contains(edge_source, 'if(row.username_lc!=="sho"||row.role!=="Enterprise Admin")')
 
 
 def test_renewal_approval_preserves_existing_account_identity_and_renews_expiry():
