@@ -37,7 +37,7 @@ def test_renewal_sessions_are_short_lived_and_scoped():
     assert 'createSession(row.username_lc,"renewal",60*60*1000)' in EDGE_SOURCE
     assert 'requiredScope:"workspace"|"renewal"|"either"="workspace"' in EDGE_SOURCE
     assert 'scope=data.scope||"workspace"' in EDGE_SOURCE
-    assert 'if(requiredScope==="workspace"&&row.username_lc!=="sho"&&isExpired(row.subscription_expires_at))' in EDGE_SOURCE
+    assert 'if(requiredScope==="workspace"&&!(row.username_lc==="sho"&&row.role==="Enterprise Admin")&&isExpired(row.subscription_expires_at))' in EDGE_SOURCE
     assert 'getSession(String(body.token),String(body.username),"either")' in EDGE_SOURCE
 
 
