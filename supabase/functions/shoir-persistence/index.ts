@@ -397,20 +397,10 @@ Deno.serve(async (req) => {
     }
 
     if (action === "account_exists") {
-      const username = String(body.username || "").trim();
-      if (!/^[A-Za-z0-9._-]{3,32}$/.test(username)) {
-        return response({ exists: false });
-      }
-      const row = await getAccount(username);
-      const { data: pending, error: pendingError } = await supabase
-        .from("shoir_subscription_requests")
-        .select("id")
-        .eq("username_lc", username.toLowerCase())
-        .eq("request_type", "New")
-        .eq("status", "Pending")
-        .limit(1);
-      if (pendingError) throw pendingError;
-      return response({ exists: Boolean(row || (pending && pending.length)) });
+      // Do not expose account or registration status through a public username
+      // probe. The serialized registration transaction enforces duplicates and
+      // returns the same generic conflict response to every caller.
+      return response({ exists: false });
     }
 
     if (action === "register_request") {
