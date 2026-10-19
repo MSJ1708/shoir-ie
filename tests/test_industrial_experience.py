@@ -1,5 +1,8 @@
+import io
+import json
 import sqlite3
 import tempfile
+import zipfile
 from pathlib import Path
 
 import pandas as pd
@@ -21,6 +24,7 @@ from industrial_experience import (
     register_research_run,
     import_research_run_csv,
     research_runs_frame,
+    research_evidence_bundle,
     save_project,
     analyze_fallback_module,
     fallback_module_blueprint,
@@ -362,13 +366,31 @@ def test_research_protocol_id_cannot_be_overwritten_by_another_owner(monkeypatch
         assert row == (research_id, "alice", "Alice's protected study", "Original owner protocol")
 
 
-def test_load_research_protocol_enforces_owner_when_supplied(monkeypatch):
+def test_load_research_protocol_and_evidence_bundle_enforce_owner(monkeypatch):
     with tempfile.TemporaryDirectory() as td:
         db = str(Path(td) / "research-read-owner.db")
         monkeypatch.setattr(ie, "_db", lambda path=db: sqlite3.connect(db, timeout=30))
         ensure_experience_db(db)
-        protocol = {"title": "Private Alice study", "objective": "Alice's objective"}
-        create_research_protocol("PRJ-READ-OWNER", protocol, "alice")
+        create_research_protocol(
+            "PRJ-ALICE-PRIVATE",
+            {"title": "Private Alice study", "objective": "Alice's objective"},
+            "alice",
+        )
+        create_research_protocol(
+            "PRJ-BOB-PRIVATE",
+            {"title": "Private Bob study", "objective": "Bob's objective"},
+            "bob",
+        )
 
-        assert ie.load_research_protocol("PRJ-READ-OWNER", owner="alice") is not None
-        assert ie.load_research_protocol("PRJ-READ-OWNER", owner="bob") is None
+        assert ie.load_research_protocol("PRJ-ALICE-PRIVATE", owner="alice") is not None
+        assert ie.load_research_protocol("PRJ-BOB-PRIVATE", owner="alice") is None
+        with pytest.raises(PermissionError):
+            research_evidence_bundle("PRJ-BOB-PRIVATE", owner="alice")
+
+        bundle = research_evidence_bundle("PRJ-ALICE-PRIVATE", owner="alice")
+        with zipfile.ZipFile(io.BytesIO(bundle)) as archive:
+            exported = json.loads(archive.read("research_protocol.json").decode("utf-8"))
+            manifest = json.loads(archive.read("manifest.json").decode("utf-8"))
+        assert exported["title"] == "Private Alice study"
+        assert manifest["owner"] == "alice"
+        assert manifest["study_id"] == "PRJ-ALICE-PRIVATE"
