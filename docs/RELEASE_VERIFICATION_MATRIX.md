@@ -123,3 +123,7 @@ Server-side login rate limiting is being added in the same reviewed release seri
 For each run, retain commit SHA, CI workflow URL, environment/build, timestamp, account class (never password), scenario, expected outcome, actual outcome, artifact or screenshot reference, and linked issue for each failure. Redact emails, receipts, tokens, personal data and production datasets.
 
 **Definition of done:** every required automated job passes; the hosted browser walkthroughs pass using authorized test accounts; all relevant module, export, persistence, role, tier and security cases have evidence; high-severity findings are resolved; and remaining limitations are explicitly accepted. Do not use “fully verified” when a browser pass or a required matrix row is still blocked.
+
+## Import-guard redeployment probe — 2026-10-19
+
+Public desktop/mobile smoke triggered after merge commit `cf50437887fce04fc5cf0450d7f3317d0a358d7f` to verify the hosted Streamlit app no longer fails while importing `durable_account_store`. Record the observed smoke outcome; no production data or application logic is changed by this audit-only commit.
