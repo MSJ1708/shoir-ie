@@ -122,3 +122,19 @@ def test_admin_receipt_ui_handles_pdf_and_private_storage():
     assert 'st.link_button("Open private payment receipt (expires in 5 minutes)"' in APP_SOURCE
     assert 'Download payment receipt' in APP_SOURCE
     assert '_encode_renewal_proof' in APP_SOURCE
+
+
+def test_admin_decline_only_changes_pending_requests():
+    decline_branch = EDGE_SOURCE.split(
+        'if (action === "admin_decline_session") {', 1
+    )[1].split(
+        'return response({ error: "Unknown action." }, 400);', 1
+    )[0]
+
+    assert "Number.isSafeInteger(id)" in decline_branch
+    assert "id <= 0" in decline_branch
+    assert '.eq("status", "Pending")' in decline_branch
+    assert '.select("id")' in decline_branch
+    assert ".maybeSingle()" in decline_branch
+    assert "if (!data)" in decline_branch
+    assert "Pending request not found." in decline_branch
