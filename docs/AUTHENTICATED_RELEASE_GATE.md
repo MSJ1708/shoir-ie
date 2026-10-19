@@ -18,6 +18,18 @@ Provision these distinct accounts in the approved staging environment through th
 
 The Active test workspace should be a small JSON object and contain no real customer or business data. During the round-trip probe, the script records its prior serialized state, writes a unique temporary marker, logs in again to read that marker, and restores the original state before revoking test sessions. A workspace that is not a JSON object or exceeds 1 MB is not overwritten. Review the JSON evidence artifact for any `FAIL` result or restore warning.
 
+## One-time staging administrator bootstrap
+
+The historical administrator seed migration is intentionally a no-op. If the isolated staging project does not yet have an administrator, use the one-time helper in `scripts/bootstrap_staging_admin.py` from a trusted computer:
+
+```bash
+python scripts/bootstrap_staging_admin.py
+```
+
+The helper is hard-pinned to staging project `hfhrosthswcybccepmak` and refuses to overwrite an existing `sho` identity. It prompts without echoing for a staging-only Supabase server secret/service-role key and a unique password of at least 16 characters, then requires typing an explicit staging confirmation phrase. It never prints or saves either secret. The key is used locally for a single verified bootstrap and must not be committed, pasted into chat, or added to GitHub Actions.
+
+If the helper says the `sho` identity already exists, stop and use the approved administrator-recovery procedure rather than rerunning bootstrap. After the staging administrator is verified, provision disposable E2E accounts through the application's regular registration and approval process. Do not insert or alter E2E account rows directly.
+
 ## GitHub Actions configuration
 
 Add these as **GitHub Actions secrets** under repository Settings → Secrets and variables → Actions → Secrets:
