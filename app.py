@@ -520,7 +520,7 @@ def init_db():
                 UPDATE enterprise_users
                 SET password_hash=?, role=?, tier=?, email=?
                 WHERE LOWER(username)='sho'
-            """, (admin_pass_hash, "Enterprise Admin", "Enterprise Tier", "mohsuhailji@gmail.com"))
+            """, (admin_pass_hash, "Enterprise Admin", "Enterprise Plus Tier ($399)", "mohsuhailji@gmail.com"))
         else:
             # Preserve an existing admin credential; only seed metadata for a
             # first-run account when one does not already exist.
