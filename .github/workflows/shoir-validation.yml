@@ -3,6 +3,7 @@ name: Shoir-IE validation
 on:
   push:
   pull_request:
+  workflow_dispatch:
 
 jobs:
   test:
@@ -74,12 +75,14 @@ jobs:
           if-no-files-found: warn
 
   live-deployment-smoke:
-    # This audit branch gets a real browser probe of the currently hosted
-    # unauthenticated shell. Do not make ordinary feature PRs depend on a
-    # third-party demo host or on undisclosed account credentials.
+    # Probe the currently hosted, anonymous shell for audit PRs and after
+    # every main push. This is a service-availability/rendering check, not proof
+    # that the hosted app has deployed the triggering Git SHA. Manual runs on
+    # main allow an explicit post-deployment check without account credentials.
     if: >-
       (github.event_name == 'pull_request' && startsWith(github.head_ref, 'audit/')) ||
-      (github.event_name == 'push' && startsWith(github.ref_name, 'audit/'))
+      (github.event_name == 'push' && (startsWith(github.ref_name, 'audit/') || github.ref_name == 'main')) ||
+      (github.event_name == 'workflow_dispatch' && github.ref_name == 'main')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
