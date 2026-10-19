@@ -233,10 +233,10 @@ def _overview(username: str) -> None:
 
     st.markdown("#### What changed")
     items = [
-        ("✓", "Every major action can leave an evidence trail.", "Governance"),
-        ("✓", "Scenario work can become a durable decision record.", "Decision"),
-        ("✓", "Exports are designed as evidence bundles, not screenshots.", "Reporting"),
-        ("✓", "Copilot actions are previewed and approval-gated.", "AI"),
+        ("✓", "Supported workflows can record source and run evidence.", "Evidence"),
+        ("✓", "Decision records can preserve assumptions and approval transitions.", "Decision"),
+        ("✓", "Evidence-bundle export paths exist for supported workflows.", "Reporting"),
+        ("✓", "Copilot previews are logged; execution controls remain workflow-specific.", "AI"),
     ]
     cols = st.columns(4)
     for col, (icon, title, tag) in zip(cols, items):
@@ -477,7 +477,7 @@ def _governance(username: str, tier: str) -> None:
         cols = st.columns(len(states))
         for i, state in enumerate(states):
             cols[i].markdown(f'<div class="px-state">{"✓" if i < 1 else "○"}<br><small>{state}</small></div>', unsafe_allow_html=True)
-        st.caption("The lifecycle is persistent; each transition is written to the approval history.")
+        st.caption("Reference lifecycle only. The selected decision's actual state is shown above; each saved transition is written to the approval history.")
         st.markdown("#### Workspace comments")
         with _db() as conn:
             comments = pd.read_sql(
@@ -665,7 +665,7 @@ def _platform_health(username: str) -> None:
 
     st.markdown("#### Delivery verification status")
     checks = pd.DataFrame([
-        {"Control":"Python compile and CI regression", "Status":"CI-verified", "Evidence":"Automated repository workflows; not proof every hosted workflow was exercised"},
+        {"Control":"Automated CI", "Status":"Not queried live", "Evidence":"This panel does not fetch GitHub workflow state; check the repository Actions page"},
         {"Control":"Export resilience", "Status":"UNVERIFIED end-to-end", "Evidence":"Export paths exist; generated files still require round-trip validation"},
         {"Control":"Approval gating", "Status":"Source present; e2e UNVERIFIED", "Evidence":"Persistent action ledger exists; authorized browser journey remains open"},
         {"Control":"Data lineage", "Status":"Source present; coverage UNVERIFIED", "Evidence":"Lineage store exists; not every module is proven to emit complete lineage"},
