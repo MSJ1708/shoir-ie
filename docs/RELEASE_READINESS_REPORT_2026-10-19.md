@@ -11,7 +11,7 @@ Do not invite workers to depend on the live app until the startup error is diagn
 - Repository: [MSJ1708/shoir-ie](https://github.com/MSJ1708/shoir-ie)
 - Baseline `main` revision examined: `6bc1f0bf5aca1ff7c09a87565c736f88cc291210`
 - Candidate branch: `fix/pending-renewal-decline-guard-2026-10-19`
-- Current PR head (documentation included): `0426bcb93920910018064ed8e516e8eb6a93c598`; candidate source-code validation passed on `b7c9da43d0c3c51aa5fb94b71c6fe3f0844afadc` before the final documentation-only updates.
+- Latest implementation-code revision with a full passing CI set: `b7c9da43d0c3c51aa5fb94b71c6fe3f0844afadc`. Subsequent commits on the same PR update the readiness report and matrix; they do not change application code.
 - Candidate PR: [#145 — Guard subscription decline transitions](https://github.com/MSJ1708/shoir-ie/pull/145). Open, **not merged**, **not deployed**.
 - Public application: https://shoir-ie-app.streamlit.app/
 - Supabase project: `shoir-ie-production`, ref `gcsamrdaeraxieaagsta`
