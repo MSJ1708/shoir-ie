@@ -126,7 +126,7 @@ def route_module(page, frame, module_name: str, account_class: str) -> dict[str,
         search.fill(module_name, timeout=10_000)
         open_button = frame.get_by_role(
             "button",
-            name=re.compile(r"^Open\\s*[·•]\\s*" + re.escape(module_name) + r"$", re.I),
+            name=re.compile(r"^Open\s*[·•]\s*" + re.escape(module_name) + r"$", re.I),
         )
         open_button.wait_for(state="visible", timeout=12_000)
         open_button.click(timeout=10_000)
