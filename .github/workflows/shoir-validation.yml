@@ -31,6 +31,8 @@ jobs:
           for name in required:
               ast.parse(Path(name).read_text(encoding="utf-8"), filename=name)
           print("Required application modules parsed successfully.")
+      - name: Execute application top-level import smoke test
+        run: python scripts/runtime_import_smoke.py
           PY
 
   live-deployment-smoke:
