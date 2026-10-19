@@ -105,7 +105,10 @@ Test every current catalog item and legacy route that remains reachable, not onl
 
 ## Authentication abuse protection
 
-Server-side login rate limiting is being added in the same reviewed release series. It requires migration `20261019123300_server_side_login_rate_limits.sql` to be applied before deploying the Edge Function revision that calls it. The throttle table and RPC deny `anon`/`authenticated` access and grant the RPC only to `service_role`. Verify this order and the live behavior before marking AUTH-02 complete.
+> Status note (2026-10-19): production and staging were inspected read-only. Production has the login-throttle migration under version `20261019124815`; staging records the same SQL fingerprint under an imported migration-ledger version and also contains the separate atomic subscription-decision migration. Production still lacks `shoir_create_registration_request` and `shoir_finalize_subscription_request`. The two migration versions and function state are not interchangeable; do not deploy the newer Edge Function or atomic migration to production until staging acceptance, migration-history review, and explicit release approval are complete.
+
+
+Server-side login rate limiting is already recorded as applied in production under migration version `20261019124815`. Read-only comparison found the production and staging migration ledger statements have the same fingerprint. The tracked migration filename now matches the production-applied version to keep clean replays and source references aligned. The throttle table and RPC deny `anon`/`authenticated` access and grant the RPC only to `service_role`; staging has the expected function and grants. The authenticated invalid-password/throttle behavior still requires the dedicated staging release gate before AUTH-02 can be marked browser-verified.
 
 ## Role, tier and tenant isolation matrix
 
