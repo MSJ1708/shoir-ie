@@ -45,7 +45,21 @@ python scripts/bootstrap_staging_admin.py
 
 The helper is hard-pinned to staging project `hfhrosthswcybccepmak` and refuses to overwrite an existing `sho` identity. It prompts without echoing for a staging-only Supabase server secret/service-role key and a unique password of at least 16 characters, then requires typing an explicit staging confirmation phrase. It never prints or saves either secret. The key is used locally for a single verified bootstrap and must not be committed, pasted into chat, or added to GitHub Actions.
 
-If the helper says the `sho` identity already exists, stop and use the approved administrator-recovery procedure rather than rerunning bootstrap. After the staging administrator is verified, provision disposable E2E accounts through the application's regular registration and approval process. Do not insert or alter E2E account rows directly.
+If the helper says the `sho` identity already exists, stop and use the approved administrator-recovery procedure rather than rerunning bootstrap. Keep the staging admin password in a password manager because the E2E provisioner below requires it. Never use the admin password as a test-account password.
+
+## Provision the six disposable E2E identities
+
+After the staging app configuration and staging administrator are ready, run this from the repository root on a trusted computer:
+
+```bash
+python scripts/provision_staging_e2e_accounts.py
+```
+
+The helper is hard-pinned to the staging project, rejects the known production project, asks for the staging publishable key, the staging service-role/secret key, and the staging administrator password via hidden prompts, and requires a confirmation phrase. It checks that all six planned usernames are unused before making changes. It creates each test account via `register_request` and approves it via the normal admin approval action. The transaction references are explicitly synthetic **no-charge staging fixtures**; no payment service is contacted.
+
+Only the intentionally expired test fixture's `subscription_expires_at` is updated after approval, using the staging server key, so the expired-login/renewal-only path can be verified. The helper verifies all five active accounts' tier/login results and the expired account's renewal-only result, then revokes verification sessions. It does not use production, does not overwrite matching identities, and does not print keys, passwords, session tokens, or API response bodies.
+
+The script writes six random test passwords to `.staging-e2e-credentials.json` in the repository root, with file permissions restricted to the current user; the filename is git-ignored. Review the `github_actions_secret_map` in this file to copy each username/password into the matching Actions secrets. Keep the file private until all secrets are set, then securely delete it. If provisioning stops part-way, the file records each account status; inspect the staging admin queue and that file before retrying. **Do not rerun to create duplicate accounts.**
 
 ## GitHub Actions configuration
 
