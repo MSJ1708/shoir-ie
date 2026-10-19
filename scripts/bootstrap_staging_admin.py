@@ -50,7 +50,7 @@ def hash_password(password: str, salt_hex: str | None = None) -> str:
         PBKDF2_ITERATIONS,
         dklen=32,
     ).hex()
-    return f"{salt}\${digest}"
+    return salt + "$" + digest
 
 
 def verify_password(stored_hash: str, password: str) -> bool:
@@ -106,7 +106,7 @@ def _request_json(
         "Content-Type": "application/json",
     }
     if method == "POST":
-        headers["Prefer"] = "resolution=ignore-duplicates,return=minimal"
+        headers["Prefer"] = "resolution=ignore-duplicates,return=representation"
     req = Request(url, data=data, headers=headers, method=method)
     try:
         with urlopen(req, timeout=REQUEST_TIMEOUT_SECONDS) as response:
@@ -181,11 +181,13 @@ def bootstrap() -> int:
     }
     # The insert ignores a duplicate instead of updating it, protecting against
     # a concurrent provisioning operation.
-    status, _ = _request_json(
+    status, inserted = _request_json(
         service_key, "POST", "shoir_accounts?on_conflict=username_lc", row
     )
-    if status not in (200, 201, 204):
-        raise RuntimeError(f"Staging administrator insert returned unexpected HTTP status {status}.")
+    if status not in (200, 201) or not isinstance(inserted, list) or not inserted:
+        raise RuntimeError(
+            "Staging administrator insert was not confirmed; a concurrent record may exist. No retry was attempted."
+        )
 
     verified = _existing_admin(service_key)
     if len(verified) != 1:
