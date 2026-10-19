@@ -1,6 +1,9 @@
 import re
 from pathlib import Path
 
+import pytest
+import durable_account_store as das
+
 def _source_contract_contains(source: str, fragment: str) -> bool:
     normalized_source = re.sub(r"\s+", "", source)
     normalized_fragment = re.sub(r"\s+", "", fragment)
@@ -176,11 +179,67 @@ def test_registration_submit_validates_proof_before_any_persistence():
         "# TAB 3: EXPLORE THE MODULES", 1
     )[0]
 
+    assert "elif reg_name and reg_pass and reg_email:" in registration_block
+    assert "if uploaded_screenshot is not None:" in registration_block
+    assert "Please upload your payment screenshot." not in registration_block
     assert registration_block.index("_encode_renewal_proof(uploaded_screenshot)") < registration_block.index("INSERT INTO pending_payments")
     assert registration_block.index("insert_remote_request({") < registration_block.index("INSERT INTO pending_payments")
     assert '"proof_base64": _registration_proof_base64' in registration_block
     assert '"proof_content_type": _registration_proof_content_type' in registration_block
     assert "Password must be between 8 and 128 characters." in registration_block
+
+    edge_registration = EDGE_SOURCE.split(
+        'if (action === "register_request") {', 1
+    )[1].split(
+        'if (action === "logout") {', 1
+    )[0]
+    migration = (
+        ROOT / "supabase" / "migrations" /
+        "20261019140600_atomic_subscription_request_decisions.sql"
+    ).read_text(encoding="utf-8")
+    assert "A payment screenshot is required for registration." not in edge_registration
+    assert "proof_uploaded: !!proofPath" in edge_registration
+    assert "p_screenshot_path IS NULL" not in migration
+    assert "Invalid private payment proof reference." in migration
+    assert "Invalid payment reference." in migration
+
+
+def test_registration_accepts_no_optional_proof_and_rejects_partial_proof(monkeypatch):
+    calls = []
+
+    def fake_edge_call(action, payload):
+        calls.append((action, payload))
+        return {"ok": True, "status": "Pending", "request_id": 17}
+
+    monkeypatch.setattr(das, "_edge_call", fake_edge_call)
+    result = das.edge_register_request({
+        "username": "shoir-e2e-optional-proof",
+        "password": "Strong-Test-Password-123",
+        "email": "test@example.invalid",
+        "tier": "Starter Tier ($29)",
+        "payment_method": "STC Pay (QR)",
+        "transaction_id": None,
+        "screenshot_path": None,
+        "proof_base64": None,
+        "proof_content_type": None,
+    })
+
+    assert result["ok"] is True
+    assert len(calls) == 1
+    assert calls[0][0] == "register_request"
+    assert calls[0][1]["proof_base64"] is None
+    assert calls[0][1]["proof_content_type"] is None
+
+    with pytest.raises(ValueError, match="Payment proof data or content type is invalid"):
+        das.edge_register_request({
+            "username": "shoir-e2e-optional-proof",
+            "password": "Strong-Test-Password-123",
+            "email": "test@example.invalid",
+            "tier": "Starter Tier ($29)",
+            "payment_method": "STC Pay (QR)",
+            "proof_base64": None,
+            "proof_content_type": "image/png",
+        })
 
 
 def test_registration_preflight_does_not_disclose_durable_account_existence():
