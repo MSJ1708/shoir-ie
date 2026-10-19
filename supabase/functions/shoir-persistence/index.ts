@@ -481,11 +481,13 @@ Deno.serve(async (req) => {
         },
       );
       if (error) {
-        const objectPath = proofPath.replace(
-          `storage://${PAYMENT_PROOF_BUCKET}/`,
-          "",
-        );
-        await supabase.storage.from(PAYMENT_PROOF_BUCKET).remove([objectPath]);
+        if (proofPath) {
+          const objectPath = proofPath.replace(
+            `storage://${PAYMENT_PROOF_BUCKET}/`,
+            "",
+          );
+          await supabase.storage.from(PAYMENT_PROOF_BUCKET).remove([objectPath]);
+        }
         if (error.code === "P0002") {
           return response({
             error:
@@ -503,11 +505,13 @@ Deno.serve(async (req) => {
         status?: string;
       } | null;
       if (!result?.ok || !result.request_id) {
-        const objectPath = proofPath.replace(
-          `storage://${PAYMENT_PROOF_BUCKET}/`,
-          "",
-        );
-        await supabase.storage.from(PAYMENT_PROOF_BUCKET).remove([objectPath]);
+        if (proofPath) {
+          const objectPath = proofPath.replace(
+            `storage://${PAYMENT_PROOF_BUCKET}/`,
+            "",
+          );
+          await supabase.storage.from(PAYMENT_PROOF_BUCKET).remove([objectPath]);
+        }
         throw new Error(
           "Registration request could not be confirmed by the persistence service.",
         );
