@@ -63,9 +63,13 @@ function decodePaymentProof(base64Value: string) {
 async function storePaymentProof(
   body: Record<string, unknown>,
 ): Promise<string | null> {
-  const encoded = String(body.proof_base64 || "");
-  if (!encoded) return null;
-  const contentType = String(body.proof_content_type || "").toLowerCase();
+  const encoded = String(body.proof_base64 || "").trim();
+  const rawContentType = String(body.proof_content_type || "").trim().toLowerCase();
+  if (!encoded && !rawContentType) return null;
+  if (!encoded || !rawContentType) {
+    throw new Error("Payment proof data or content type is invalid.");
+  }
+  const contentType = rawContentType;
   const extensionByType: Record<string, string> = {
     "image/png": "png",
     "image/jpeg": "jpg",
@@ -462,12 +466,6 @@ Deno.serve(async (req) => {
             : "Payment proof could not be validated.",
         }, 400);
       }
-      if (!proofPath) {
-        return response({
-          error: "A payment screenshot is required for registration.",
-        }, 400);
-      }
-
       const { data, error } = await supabase.rpc(
         "shoir_create_registration_request",
         {
@@ -517,7 +515,7 @@ Deno.serve(async (req) => {
         ok: true,
         request_id: result.request_id,
         status: result.status || "Pending",
-        proof_uploaded: true,
+        proof_uploaded: !!proofPath,
       });
     }
 
