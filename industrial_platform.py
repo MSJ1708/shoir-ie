@@ -98,12 +98,15 @@ TIER_FEATURES = {
         "Engineering Validation Center",
         "Excel Data Cleaning & Import",
         "Carbon Accounting",
+        "MEIO Matrix",
+        "Fleet Routing",
+        "Production Planning & Control (PPC)",
     ],
     "Professional": [
         "Industrial Data Model & Digital Thread","Advanced Planning & Scheduling","Quality Engineering & Reliability",
         "Capital Investment & Engineering Economics","Workforce Engineering","Industrial Sustainability & LCA",
         "Benchmarking & Engineering Standards","Engineering Validation Center","Excel Data Cleaning & Import",
-        "Carbon Accounting","MEIO Matrix","Fleet Routing","Production Planning & Control (PPC)",
+        "Carbon Accounting",
     ],
     "Enterprise": [
         "Autonomous Global Supply Chain & Resilient Logistics Network",
