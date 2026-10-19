@@ -32,6 +32,7 @@ def test_master_admin_enterprise_plus_entitlement_contract():
     edge_source = (root / "supabase/functions/shoir-persistence/index.ts").read_text(encoding="utf-8")
 
     assert '("sho", admin_pass_hash, "Enterprise Admin", "Enterprise Plus Tier ($399)",' in app_source
+    assert '(admin_pass_hash, "Enterprise Admin", "Enterprise Plus Tier ($399)", "mohsuhailji@gmail.com")' in app_source
     assert '("Enterprise Admin", "Enterprise Plus Tier ($399)", "mohsuhailji@gmail.com")' in app_source
     assert 'const isMasterAdmin = row.username_lc==="sho"&&row.role==="Enterprise Admin";' in edge_source
     assert 'const effectiveTier=isMasterAdmin?adminTier:row.tier;' in edge_source
