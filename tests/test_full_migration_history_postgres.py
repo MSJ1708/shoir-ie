@@ -126,6 +126,18 @@ def test_versioned_migration_history_replays_from_clean_local_postgres():
                         UNIQUE (bucket_id, name)
                     );
                     ALTER TABLE storage.objects ENABLE ROW LEVEL SECURITY;
+                    GRANT USAGE, CREATE ON SCHEMA storage TO service_role;
+                    GRANT ALL ON ALL TABLES IN SCHEMA storage TO service_role;
+                    GRANT ALL ON ALL SEQUENCES IN SCHEMA storage TO service_role;
+                    GRANT USAGE, CREATE ON SCHEMA public TO service_role;
+                    ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public
+                        GRANT ALL ON TABLES TO service_role;
+                    ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public
+                        GRANT ALL ON SEQUENCES TO service_role;
+                    ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA storage
+                        GRANT ALL ON TABLES TO service_role;
+                    ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA storage
+                        GRANT ALL ON SEQUENCES TO service_role;
                     """
                 )
             target.commit()
@@ -196,6 +208,17 @@ def test_versioned_migration_history_replays_from_clean_local_postgres():
                     (table,),
                 )[0] is True, f"RLS is not enabled on {table}"
 
+                assert _fetchone(
+                    target,
+                    "SELECT has_table_privilege('anon', %s, 'SELECT');",
+                    (f"public.{table}",),
+                )[0] is False, f"anon has a direct SELECT grant on {table}"
+                assert _fetchone(
+                    target,
+                    "SELECT has_table_privilege('authenticated', %s, 'SELECT');",
+                    (f"public.{table}",),
+                )[0] is False, f"authenticated has a direct SELECT grant on {table}"
+
             assert _fetchone(
                 target,
                 "SELECT public IS FALSE FROM storage.buckets WHERE id='subscription-payment-proofs';",
@@ -227,40 +250,46 @@ def test_versioned_migration_history_replays_from_clean_local_postgres():
                     (signature,),
                 )[0] is False, f"authenticated can execute privileged function: {signature}"
 
-            # Exercise the final registration and approval functions with synthetic
-            # local-only records to prove the replayed schema and RPC contract work.
+            # Exercise the RPCs as the same least-privilege service_role used
+            # by the Edge Function, not as the postgres migration owner.
             username = "shoir-e2e-replay"
             password_hash = ("a" * 32) + "$" + ("b" * 64)
-            with target.cursor() as cursor:
-                cursor.execute(
-                    """
-                    SELECT public.shoir_create_registration_request(
-                        %s, %s, %s, %s, %s, %s, %s, %s
-                    );
-                    """,
-                    (
-                        username,
-                        username.lower(),
-                        password_hash,
-                        "migration-replay@example.invalid",
-                        "Starter Tier ($29)",
-                        "STC Pay (QR)",
-                        "SYNTHETIC-REPLAY-REFERENCE",
-                        "storage://subscription-payment-proofs/renewals/synthetic.png",
-                    ),
-                )
-                request_result = cursor.fetchone()[0]
+            target.autocommit = False
+            try:
+                with target.cursor() as cursor:
+                    cursor.execute("SET ROLE service_role;")
+                    cursor.execute(
+                        """
+                        SELECT public.shoir_create_registration_request(
+                            %s, %s, %s, %s, %s, %s, %s, %s
+                        );
+                        """,
+                        (
+                            username,
+                            username.lower(),
+                            password_hash,
+                            "migration-replay@example.invalid",
+                            "Starter Tier ($29)",
+                            "STC Pay (QR)",
+                            "SYNTHETIC-REPLAY-REFERENCE",
+                            "storage://subscription-payment-proofs/renewals/synthetic.png",
+                        ),
+                    )
+                    request_result = cursor.fetchone()[0]
+                    cursor.execute(
+                        "SELECT public.shoir_finalize_subscription_request(%s, 'Approved');",
+                        (int(request_result["request_id"] if isinstance(request_result, dict) else json.loads(request_result)["request_id"]),),
+                    )
+                    approval_result = cursor.fetchone()[0]
+                    cursor.execute("RESET ROLE;")
+                target.commit()
+            except Exception:
+                target.rollback()
+                raise
             if isinstance(request_result, str):
                 request_result = json.loads(request_result)
             assert request_result.get("ok") is True
             request_id = int(request_result["request_id"])
-
-            with target.cursor() as cursor:
-                cursor.execute(
-                    "SELECT public.shoir_finalize_subscription_request(%s, 'Approved');",
-                    (request_id,),
-                )
-                approval_result = cursor.fetchone()[0]
             if isinstance(approval_result, str):
                 approval_result = json.loads(approval_result)
             assert approval_result.get("ok") is True
