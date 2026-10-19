@@ -347,35 +347,57 @@ def load_decision_spec(decision_id: str, owner: str | None = None) -> dict[str, 
     return out
 
 
-def decision_approval_history(decision_id: str) -> pd.DataFrame:
+def decision_approval_history(decision_id: str, owner: Optional[str] = None) -> pd.DataFrame:
+    """Return approval events, optionally restricted to the decision owner."""
     ensure_experience_db()
     with _db() as conn:
-        rows = conn.execute(
-            """
-            SELECT from_status,to_status,actor,comment,created_at
-            FROM experience_decision_approvals
-            WHERE decision_id=?
-            ORDER BY id ASC
-            """,
-            (str(decision_id),),
-        ).fetchall()
+        if owner is not None:
+            rows = conn.execute(
+                """
+                SELECT a.from_status,a.to_status,a.actor,a.comment,a.created_at
+                FROM experience_decision_approvals AS a
+                JOIN experience_decisions AS d ON d.decision_id=a.decision_id
+                WHERE a.decision_id=? AND d.owner=?
+                ORDER BY a.id ASC
+                """,
+                (str(decision_id), str(owner)),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """
+                SELECT from_status,to_status,actor,comment,created_at
+                FROM experience_decision_approvals
+                WHERE decision_id=?
+                ORDER BY id ASC
+                """,
+                (str(decision_id),),
+            ).fetchall()
     return pd.DataFrame(rows, columns=["From","To","Actor","Comment","Timestamp"]) if rows else pd.DataFrame(
         columns=["From","To","Actor","Comment","Timestamp"]
     )
 
 
-def transition_decision(decision_id: str, actor: str, to_status: str, comment: str = "") -> None:
+def transition_decision(
+    decision_id: str,
+    actor: str,
+    to_status: str,
+    comment: str = "",
+    require_owner: bool = False,
+) -> None:
+    """Transition a decision; user-facing surfaces can enforce decision ownership."""
     states = ["Draft", "Validated", "Proposed", "Review", "Approved", "Implemented", "Verified"]
     if to_status not in states:
         raise ValueError("Invalid approval state.")
     with _db() as conn:
         row = conn.execute(
-            "SELECT status FROM experience_decisions WHERE decision_id=?",
+            "SELECT status,owner FROM experience_decisions WHERE decision_id=?",
             (decision_id,),
         ).fetchone()
         if not row:
             raise ValueError("Decision not found.")
-        current = str(row[0])
+        current, owner = str(row[0]), row[1]
+        if require_owner and (owner is None or str(owner) != str(actor)):
+            raise PermissionError("Decision not found or not owned by this user.")
         if current in states and states.index(to_status) < states.index(current) and to_status not in {"Draft", "Review"}:
             raise ValueError("Decision cannot move backward to that state.")
         conn.execute(
