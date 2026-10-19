@@ -3,14 +3,18 @@ name: Subscription transaction integration
 on:
   pull_request:
     paths:
-      - "supabase/migrations/20261019140600_atomic_subscription_request_decisions.sql"
+      - "supabase/migrations/**"
       - "tests/test_atomic_subscription_migration_postgres.py"
+      - "tests/test_full_migration_history_postgres.py"
+      - "tests/test_migration_source_inventory.py"
       - ".github/workflows/subscription-transaction-integration.yml"
   push:
     branches: [main]
     paths:
-      - "supabase/migrations/20261019140600_atomic_subscription_request_decisions.sql"
+      - "supabase/migrations/**"
       - "tests/test_atomic_subscription_migration_postgres.py"
+      - "tests/test_full_migration_history_postgres.py"
+      - "tests/test_migration_source_inventory.py"
       - ".github/workflows/subscription-transaction-integration.yml"
 
 permissions:
@@ -43,5 +47,5 @@ jobs:
           python-version: "3.12"
       - name: Install isolated integration-test dependencies
         run: python -m pip install --upgrade pip pytest psycopg2-binary
-      - name: Apply migration and verify PostgreSQL decisions
-        run: python -m pytest -q tests/test_atomic_subscription_migration_postgres.py
+      - name: Verify complete versioned migration replay and security contracts
+        run: python -m pytest -q tests/test_migration_source_inventory.py tests/test_full_migration_history_postgres.py tests/test_atomic_subscription_migration_postgres.py
