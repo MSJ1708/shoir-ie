@@ -27,3 +27,8 @@ The current source inventory is **96 unique module names**, derived by merging t
 5. Do not mark the module/tier release matrix complete until the real registry is audited and the relevant tests pass.
 
 This report does not claim that every module has been inventoried or authenticated-browser verified. The existing release-verification matrix remains the source of truth for outstanding end-to-end checks.
+
+
+## Machine-readable module inventory
+
+See [`MODULE_TIER_INVENTORY.csv`](MODULE_TIER_INVENTORY.csv) for the full 96-name source-level inventory, the currently declared minimum subscription tier, which app tier list first introduces each name, the catalog source(s), and the authenticated-browser status. Every row intentionally remains `UNVERIFIED` for authenticated module walkthroughs until the per-module browser and functional matrix is actually completed. The regression suite checks that this inventory stays synchronized with the source catalog and tier lists.
