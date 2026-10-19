@@ -31,6 +31,7 @@ jobs:
           for name in required:
               ast.parse(Path(name).read_text(encoding="utf-8"), filename=name)
           print("Required application modules parsed successfully.")
+          PY
       - name: Execute application top-level import smoke test
         run: python scripts/runtime_import_smoke.py
       - name: Install Chromium for local runtime smoke
@@ -71,7 +72,6 @@ jobs:
           name: shoir-ie-local-runtime-smoke
           path: artifacts/live-deployment-smoke/
           if-no-files-found: warn
-          PY
 
   live-deployment-smoke:
     # This audit branch gets a real browser probe of the currently hosted
