@@ -167,3 +167,39 @@ This conflict resolution retains the current `main` matrix—including the durab
 Push validation on conflict-resolution head `3aa6200d5628d6a808cda232a9c91e249a94a3f4` passed compilation, all 489 regression tests, module/import smoke checks and the hosted anonymous desktop/mobile probe, but its local browser-smoke job failed on the mobile viewport. The artifact showed HTTP 200 and no fatal marker or horizontal overflow, but the final mobile snapshot contained only the partial Streamlit header and no stable application frame; the script could not proceed to the public tab checks. Evidence: [push validation run 39288898854](https://github.com/MSJ1708/shoir-ie/actions/runs/39288898854), [local smoke artifact 12203144215](https://github.com/MSJ1708/shoir-ie/actions/runs/39288898854/artifacts/12203144215).
 
 The smoke harness now waits specifically for a real welcome/sign-in application marker and requires the same frame to expose it in consecutive polls. Generic sidebar/header text is no longer sufficient to declare readiness. The new head's validation run is authoritative: the change does not relax the app-rendering requirement, and the local browser job must pass before merge.
+
+## Latest main-push and production-scope audit — 2026-10-19
+
+**Reviewed repository main:** `e9524db88cf7d20de965e38cf2705e80e1af1906` (PR #153 merged).
+
+### Hosted-smoke trigger repair and check evidence
+
+PR [#153](https://github.com/MSJ1708/shoir-ie/pull/153) adds `workflow_dispatch` and enables the existing anonymous, read-only hosted shell smoke on pushes to `main`. Regression tests cover manual dispatch, main push, existing audit PR/push paths and the key limitation that a shell smoke does not prove the hosted Git SHA.
+
+The PR-head checks passed on `2c38aefe847fd320038ba88952315a2fa8a10271`:
+- [Validation run 39293083599](https://github.com/MSJ1708/shoir-ie/actions/runs/39293083599): local compile, regression, import/runtime and browser checks passed. The hosted-smoke job was skipped on the `fix/` pull-request branch, consistent with the old branch filter and the purpose of this change.
+- [Engine regression 39293083584](https://github.com/MSJ1708/shoir-ie/actions/runs/39293083584): PASS.
+- [Tests 39293083403](https://github.com/MSJ1708/shoir-ie/actions/runs/39293083403): PASS.
+- [Security and quality 39293083466](https://github.com/MSJ1708/shoir-ie/actions/runs/39293083466): PASS.
+- [Platform tests 39293083526](https://github.com/MSJ1708/shoir-ie/actions/runs/39293083526): PASS.
+
+**Post-merge hosted smoke:** NOT YET VERIFIED on the exact merge SHA `e9524db88cf7d20de965e38cf2705e80e1af1906`. Do not mark it passed based on the PR-head checks or the earlier hosted smoke run on `47b300f96a80e2923c71534f12eed020623f8f23`. Record the actual main-push workflow outcome and deployment revision evidence when available.
+
+### Read-only production check
+
+Supabase project `shoir-ie-production` is `ACTIVE_HEALTHY` on PostgreSQL 17.6.1.166. No production mutation was performed.
+
+- The deployed `shoir-persistence` Edge Function is active at version 8 with source fingerprint `410e22f7af0be8f3ec74bae5a15aec70f8b6a807a540e98a2c5143f4e6b8790d`.
+- The current repository Edge Function contains `account_exists`, `register_request` and the subscription-finalization RPC path. The deployed version 8 source does not expose these actions and still uses separate account/request approval writes. This is material code/schema drift.
+- Production migration history ends at `20261019124815 server_side_login_rate_limits`. Migration `20261019140600_atomic_subscription_request_decisions` is not recorded as applied, and catalog lookup found neither `shoir_create_registration_request` nor `shoir_finalize_subscription_request` in production.
+- The live project returned no existing development/staging branches. Do not create a paid staging resource without explicit approval. Do not deploy the current Edge Function without successful staging replay of its dependency migration.
+- Read-only query confirmed the protected master administrator is active with role `Enterprise Admin`, tier `Enterprise Plus Tier ($399)`, and expiry `2099-01-01 UTC`. No identity, password, workspace, role, tier or expiry was changed.
+- For `shoir_accounts`, `shoir_pending_credentials`, `shoir_sessions`, `shoir_subscription_requests` and `shoir_workspace_states`, read-only queries returned no direct `anon`/`authenticated` table grants and confirmed RLS is enabled. This is a scoped check, not a full tenant-isolation certification.
+
+### Current release gate interpretation
+
+- Current source inventory: **96 unique module names**.
+- Authenticated browser status for every inventory entry: **UNVERIFIED**.
+- Authenticated account lifecycle, live entitlement-denial tests, real import/export round trips, durable workspace restoration, full migration replay, production function compatibility and disaster recovery: **OPEN / BLOCKED / NOT RUN** as appropriate.
+- The main master administrator invariant: **PASS by read-only query**.
+- The release decision remains **NO-GO** until the migration/function drift, staging, authenticated acceptance, module matrix and deployed-revision evidence are closed.
