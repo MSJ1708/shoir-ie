@@ -254,7 +254,7 @@ def test_versioned_migration_history_replays_from_clean_local_postgres():
             # by the Edge Function, not as the postgres migration owner.
             username = "shoir-e2e-replay"
             password_hash = ("a" * 32) + "$" + ("b" * 64)
-            target.autocommit = False
+            # psycopg2 connections default to autocommit=False; keep the current transaction mode.
             try:
                 with target.cursor() as cursor:
                     cursor.execute("SET ROLE service_role;")
