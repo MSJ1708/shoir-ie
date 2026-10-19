@@ -432,11 +432,14 @@ Deno.serve(async (req) => {
 
       if (!/^[A-Za-z0-9._-]{3,32}$/.test(username)) {
         return response({
-          error: "Username must be 3-32 letters, numbers, periods, underscores or hyphens.",
+          error:
+            "Username must be 3-32 letters, numbers, periods, underscores or hyphens.",
         }, 400);
       }
       if (password.length < 8 || password.length > 128) {
-        return response({ error: "Password must be between 8 and 128 characters." }, 400);
+        return response({
+          error: "Password must be between 8 and 128 characters.",
+        }, 400);
       }
       if (
         email.length > 254 ||
@@ -448,10 +451,15 @@ Deno.serve(async (req) => {
         return response({ error: "Select a valid subscription tier." }, 400);
       }
       if (paymentMethod !== "STC Pay (QR)") {
-        return response({ error: "Unsupported registration payment method." }, 400);
+        return response(
+          { error: "Unsupported registration payment method." },
+          400,
+        );
       }
       if (transactionId.length > 128) {
-        return response({ error: "Payment reference must be 128 characters or fewer." }, 400);
+        return response({
+          error: "Payment reference must be 128 characters or fewer.",
+        }, 400);
       }
 
       let proofPath: string | null = null;
@@ -459,11 +467,15 @@ Deno.serve(async (req) => {
         proofPath = await storePaymentProof(body);
       } catch (err) {
         return response({
-          error: err instanceof Error ? err.message : "Payment proof could not be validated.",
+          error: err instanceof Error
+            ? err.message
+            : "Payment proof could not be validated.",
         }, 400);
       }
       if (!proofPath) {
-        return response({ error: "A payment screenshot is required for registration." }, 400);
+        return response({
+          error: "A payment screenshot is required for registration.",
+        }, 400);
       }
 
       const { data, error } = await supabase.rpc(
@@ -487,7 +499,8 @@ Deno.serve(async (req) => {
         await supabase.storage.from(PAYMENT_PROOF_BUCKET).remove([objectPath]);
         if (error.code === "P0002") {
           return response({
-            error: "Registration request could not be submitted. Sign in if you have an account or contact support.",
+            error:
+              "Registration request could not be submitted. Sign in if you have an account or contact support.",
           }, 409);
         }
         if (error.code === "22023") {
@@ -495,14 +508,20 @@ Deno.serve(async (req) => {
         }
         throw error;
       }
-      const result = data as { ok?: boolean; request_id?: number; status?: string } | null;
+      const result = data as {
+        ok?: boolean;
+        request_id?: number;
+        status?: string;
+      } | null;
       if (!result?.ok || !result.request_id) {
         const objectPath = proofPath.replace(
           `storage://${PAYMENT_PROOF_BUCKET}/`,
           "",
         );
         await supabase.storage.from(PAYMENT_PROOF_BUCKET).remove([objectPath]);
-        throw new Error("Registration request could not be confirmed by the persistence service.");
+        throw new Error(
+          "Registration request could not be confirmed by the persistence service.",
+        );
       }
       return response({
         ok: true,
