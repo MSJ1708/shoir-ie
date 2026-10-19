@@ -11,7 +11,7 @@ Do not invite workers to depend on the live app until the startup error is diagn
 - Repository: [MSJ1708/shoir-ie](https://github.com/MSJ1708/shoir-ie)
 - Baseline `main` revision examined: `6bc1f0bf5aca1ff7c09a87565c736f88cc291210`
 - Candidate branch: `fix/pending-renewal-decline-guard-2026-10-19`
-- Candidate revision with the latest passing CI recorded for this report: `b7c9da43d0c3c51aa5fb94b71c6fe3f0844afadc`
+- Current PR head (documentation included): `0426bcb93920910018064ed8e516e8eb6a93c598`; candidate source-code validation passed on `b7c9da43d0c3c51aa5fb94b71c6fe3f0844afadc` before the final documentation-only updates.
 - Candidate PR: [#145 — Guard subscription decline transitions](https://github.com/MSJ1708/shoir-ie/pull/145). Open, **not merged**, **not deployed**.
 - Public application: https://shoir-ie-app.streamlit.app/
 - Supabase project: `shoir-ie-production`, ref `gcsamrdaeraxieaagsta`
@@ -38,7 +38,7 @@ Do not invite workers to depend on the live app until the startup error is diagn
 
 ## Critical live failure
 
-The most recent public browser smoke **failed** at [run 39238591641, attempt 2](https://github.com/MSJ1708/shoir-ie/actions/runs/39238591641). The hosted page text showed Streamlit's redacted `ImportError` error page; the application frame could not be located, so the desktop/mobile public-tab checks could not proceed. Evidence artifact: [live smoke screenshots and report](https://github.com/MSJ1708/shoir-ie/actions/runs/39238591641/artifacts/12193660986).
+The most recent public browser smoke **failed** at [run 39238591641, attempt 3](https://github.com/MSJ1708/shoir-ie/actions/runs/39238591641). The hosted page text showed Streamlit's redacted `ImportError` error page; the application frame could not be located, so the desktop/mobile public-tab checks could not proceed. Evidence artifact from latest failed attempt: [live smoke screenshots and report](https://github.com/MSJ1708/shoir-ie/actions/runs/39238591641/artifacts/12194522007). Earlier attempts in the same run also failed with the same redacted ImportError.
 
 This overrides the earlier smoke pass recorded in older versions of the matrix. The exact ImportError is **unknown** from public evidence. Do not guess at the root cause. The owner must inspect Streamlit Cloud → Manage app → runtime logs, record the actual deployed commit/dependency environment, fix the underlying error, and rerun the public desktop/mobile smoke on that build.
 
