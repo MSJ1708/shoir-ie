@@ -164,3 +164,123 @@ REVOKE ALL ON FUNCTION public.shoir_finalize_subscription_request(bigint, text)
     FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.shoir_finalize_subscription_request(bigint, text)
     TO service_role;
+
+
+-- New registration is also a single transaction: one normalized username can
+-- have only one active account or pending New request, and its credentials and
+-- payment reference are recorded together with the private proof reference.
+CREATE OR REPLACE FUNCTION public.shoir_create_registration_request(
+    p_username text,
+    p_username_lc text,
+    p_password_hash text,
+    p_email text,
+    p_tier text,
+    p_payment_method text,
+    p_transaction_id text,
+    p_screenshot_path text
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY INVOKER
+SET search_path = public
+AS $function$
+DECLARE
+    request_id bigint;
+    normalized_username text := lower(btrim(p_username));
+    now_at timestamptz := clock_timestamp();
+BEGIN
+    IF p_username IS NULL OR btrim(p_username) !~ '^[A-Za-z0-9._-]{3,32}$'
+       OR p_username_lc IS DISTINCT FROM normalized_username THEN
+        RAISE EXCEPTION 'Invalid registration username.'
+            USING ERRCODE = '22023';
+    END IF;
+
+    IF p_password_hash IS NULL
+       OR p_password_hash !~ '^[0-9a-f]{32}\$[0-9a-f]{64}$' THEN
+        RAISE EXCEPTION 'Registration credentials are invalid.'
+            USING ERRCODE = '22023';
+    END IF;
+
+    IF p_email IS NULL
+       OR length(btrim(p_email)) > 254
+       OR btrim(p_email) !~ '^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$' THEN
+        RAISE EXCEPTION 'Invalid registration email address.'
+            USING ERRCODE = '22023';
+    END IF;
+
+    IF p_tier NOT IN (
+        'Starter Tier ($29)',
+        'Mid-Tier Pro ($79)',
+        'Professional Tier ($129)',
+        'Enterprise Tier ($199)',
+        'Enterprise Plus Tier ($399)',
+        'Research Pack ($30 add-on)'
+    ) THEN
+        RAISE EXCEPTION 'Invalid subscription tier.'
+            USING ERRCODE = '22023';
+    END IF;
+
+    IF p_payment_method IS DISTINCT FROM 'STC Pay (QR)' THEN
+        RAISE EXCEPTION 'Unsupported registration payment method.'
+            USING ERRCODE = '22023';
+    END IF;
+
+    IF p_screenshot_path IS NULL
+       OR p_screenshot_path NOT LIKE 'storage://subscription-payment-proofs/renewals/%' THEN
+        RAISE EXCEPTION 'A privately stored payment proof is required.'
+            USING ERRCODE = '22023';
+    END IF;
+
+    -- Serialize registration attempts for the same normalized username, even
+    -- when no account row exists yet.
+    PERFORM pg_advisory_xact_lock(
+        hashtextextended('shoir-registration:' || normalized_username, 0)
+    );
+
+    IF EXISTS (
+        SELECT 1 FROM public.shoir_accounts
+        WHERE username_lc = normalized_username
+    ) OR EXISTS (
+        SELECT 1 FROM public.shoir_subscription_requests
+        WHERE username_lc = normalized_username
+          AND request_type = 'New'
+          AND status = 'Pending'
+    ) THEN
+        RAISE EXCEPTION 'Registration request could not be submitted. Sign in if you have an account or contact support.'
+            USING ERRCODE = 'P0002';
+    END IF;
+
+    INSERT INTO public.shoir_pending_credentials (
+        username_lc, username, password_hash, email, updated_at
+    ) VALUES (
+        normalized_username, btrim(p_username), p_password_hash,
+        btrim(p_email), now_at
+    )
+    ON CONFLICT (username_lc) DO UPDATE SET
+        username = EXCLUDED.username,
+        password_hash = EXCLUDED.password_hash,
+        email = EXCLUDED.email,
+        updated_at = EXCLUDED.updated_at;
+
+    INSERT INTO public.shoir_subscription_requests (
+        username, username_lc, email, tier, request_type, payment_method,
+        transaction_id, screenshot_path, status, requested_at, updated_at
+    ) VALUES (
+        btrim(p_username), normalized_username, btrim(p_email), p_tier,
+        'New', p_payment_method, NULLIF(btrim(p_transaction_id), ''),
+        p_screenshot_path, 'Pending', now_at, now_at
+    )
+    RETURNING id INTO request_id;
+
+    RETURN jsonb_build_object(
+        'ok', true,
+        'request_id', request_id,
+        'status', 'Pending'
+    );
+END;
+$function$;
+
+REVOKE ALL ON FUNCTION public.shoir_create_registration_request(text, text, text, text, text, text, text, text)
+    FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.shoir_create_registration_request(text, text, text, text, text, text, text, text)
+    TO service_role;
