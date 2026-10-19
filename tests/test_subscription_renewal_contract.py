@@ -181,3 +181,21 @@ def test_registration_submit_validates_proof_before_any_persistence():
     assert '"proof_base64": _registration_proof_base64' in registration_block
     assert '"proof_content_type": _registration_proof_content_type' in registration_block
     assert "Password must be between 8 and 128 characters." in registration_block
+
+
+def test_registration_preflight_does_not_disclose_durable_account_existence():
+    edge_block = EDGE_SOURCE.split(
+        'if (action === "account_exists") {', 1
+    )[1].split(
+        'if (action === "register_request") {', 1
+    )[0]
+    registration_block = APP_SOURCE.split(
+        'if st.button("Send Verification Request", type="primary", key="btn_send_request"):', 1
+    )[1].split(
+        "# TAB 3: EXPLORE THE MODULES", 1
+    )[0]
+
+    assert "return response({ exists: false });" in edge_block
+    assert "getAccount(" not in edge_block
+    assert "shoir_subscription_requests" not in edge_block
+    assert "(not _durable_accounts_ready and local_account_exists(reg_name))" in registration_block
