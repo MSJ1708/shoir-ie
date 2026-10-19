@@ -2,7 +2,7 @@ import sqlite3
 
 import pytest
 
-from industrial_experience import create_job, ensure_experience_db, update_job
+from industrial_experience import create_job, ensure_experience_db, research_runs_frame, update_job
 from industrial_excellence_hub import _self_diagnostic_report
 
 
@@ -65,3 +65,22 @@ def test_excellence_self_diagnostic_does_not_claim_unrun_integrations_pass(tmp_p
     assert connectivity == "NOT TESTED"
     assert e2e == "NOT TESTED"
     assert "PASS" not in {connectivity, e2e}
+
+
+
+def test_research_run_compatibility_view_does_not_mix_users_jobs(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    ensure_experience_db()
+    alice_job = create_job(
+        "Research module", "experiment", "alice",
+        {"study_id": "study-alpha", "experiment_code": "alice-only"},
+    )
+    bob_job = create_job(
+        "Research module", "experiment", "bob",
+        {"study_id": "study-alpha", "experiment_code": "bob-only"},
+    )
+
+    alice_view = research_runs_frame("study-alpha", owner="alice")
+
+    assert alice_job in set(alice_view["Run ID"])
+    assert bob_job not in set(alice_view["Run ID"])
