@@ -469,7 +469,8 @@ Deno.serve(async (req) => {
       }
       if (!transactionId && !proofPath) {
         return response({
-          error: "Provide a payment reference or upload payment proof before submitting registration.",
+          error:
+            "Provide a payment reference or upload payment proof before submitting registration.",
         }, 400);
       }
 
