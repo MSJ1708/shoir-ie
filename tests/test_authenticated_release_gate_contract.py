@@ -61,3 +61,20 @@ def test_authenticated_gate_requires_explicit_staging_targets_and_guard():
     assert "https://shoir-ie-app.streamlit.app/" not in browser
     assert "https://shoir-ie-app.streamlit.app/" not in module_matrix
     assert "There is intentionally no default application URL" in docs
+
+
+def test_staging_app_must_declare_staging_and_refuses_production_backend_fallback():
+    durable = (ROOT / "durable_account_store.py").read_text(encoding="utf-8")
+    app = (ROOT / "app.py").read_text(encoding="utf-8")
+    browser = (ROOT / "scripts/authenticated_browser_matrix.py").read_text(encoding="utf-8")
+    module_matrix = (ROOT / "scripts/authenticated_module_matrix.py").read_text(encoding="utf-8")
+    docs = (ROOT / "docs/AUTHENTICATED_RELEASE_GATE.md").read_text(encoding="utf-8")
+
+    assert "hfhrosthswcybccepmak.supabase.co" in durable
+    assert "production fallback is disabled" in durable
+    assert "Direct PostgreSQL URLs are forbidden in Shoir-IE staging mode" in durable
+    assert "STAGING TEST ENVIRONMENT" in app
+    assert "if not is_staging" in browser
+    assert "STAGING TEST ENVIRONMENT" in module_matrix
+    assert "edge_url = " in docs
+    assert "environment = \"staging\"" in docs
