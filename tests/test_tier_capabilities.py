@@ -1,4 +1,5 @@
 import ast
+import csv
 from pathlib import Path
 
 from shoir_tier_capabilities import (MODULE_REQUIREMENTS, TIER_ORDER, audit_module_entitlement_coverage, available_modules, copilot_gate, module_required_tier, normalize_tier, tier_allows)
@@ -269,3 +270,25 @@ def test_runtime_module_catalog_matches_the_tiered_module_inventory():
 
     assert len(catalog_names) == 96
     assert catalog_names == set(minimum)
+
+
+
+def test_checked_in_module_tier_inventory_matches_live_source_declarations():
+    root = Path(__file__).resolve().parents[1]
+    inventory_path = root / "docs" / "MODULE_TIER_INVENTORY.csv"
+    with inventory_path.open(encoding="utf-8", newline="") as handle:
+        rows = list(csv.DictReader(handle))
+
+    minimum = _app_minimum_tier_by_module()
+    assert len(rows) == 96
+    assert len({row["module_name"] for row in rows}) == 96
+    assert {row["module_name"] for row in rows} == set(minimum)
+    assert {
+        row["module_name"]: row["minimum_tier"] for row in rows
+    } == minimum
+    assert all(row["declared_in"].startswith("app.py:") for row in rows)
+    assert all(row["authenticated_browser_status"] == "UNVERIFIED" for row in rows)
+    assert all(
+        module_required_tier(row["module_name"]) == row["minimum_tier"]
+        for row in rows
+    )
