@@ -145,36 +145,6 @@ def test_edge_login_contract_denies_inactive_accounts_and_supports_session_revoc
 
 
 
-def test_edge_logout_revokes_only_the_requested_account_session(monkeypatch):
-    calls = []
-
-    def fake_edge_call(action, payload):
-        calls.append((action, payload))
-        return {"ok": True, "revoked": True}
-
-    monkeypatch.setattr(das, "_edge_call", fake_edge_call)
-    result = das.edge_logout("shoir-e2e-active", "temporary-token")
-
-    assert result == {"ok": True, "revoked": True}
-    assert calls == [("logout", {"username": "shoir-e2e-active", "token": "temporary-token"})]
-
-
-def test_edge_login_contract_denies_inactive_accounts_and_supports_session_revocation():
-    from pathlib import Path
-
-    root = Path(__file__).resolve().parents[1]
-    edge_source = (root / "supabase/functions/shoir-persistence/index.ts").read_text(encoding="utf-8")
-    app_source = (root / "app.py").read_text(encoding="utf-8")
-
-    assert 'if(!row||row.active===false||!await verifyPassword(row.password_hash,password))' in edge_source
-    assert 'if(action==="logout")' in edge_source
-    assert '.eq("token_hash",tokenHash).eq("username_lc",usernameLc).select("token_hash")' in edge_source
-    assert 'edge_logout(_logout_user, _logout_token)' in app_source
-    assert 'if _shell_surface == "logout":' in app_source
-    assert 'edge_logout(_renew_username, _renew_token)' in app_source
-
-
-
 def test_login_throttle_contract_is_server_only_and_atomic():
     from pathlib import Path
 

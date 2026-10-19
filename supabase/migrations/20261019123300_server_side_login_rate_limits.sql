@@ -51,9 +51,12 @@ BEGIN
     -- counter atomic even when several login requests arrive at once.
     PERFORM pg_advisory_xact_lock(hashtextextended(p_key_hash, 0));
 
-    -- Bound table growth and remove only stale throttle state.
-    DELETE FROM public.shoir_login_throttle
-    WHERE updated_at < v_now - interval '7 days';
+    -- Bound table growth without forcing a cleanup scan on every login.
+    -- The HMAC key is server-generated, so callers cannot choose cleanup frequency.
+    IF get_byte(decode(p_key_hash, 'hex'), 0) = 0 THEN
+        DELETE FROM public.shoir_login_throttle
+        WHERE updated_at < v_now - interval '7 days';
+    END IF;
 
     SELECT * INTO v_row
     FROM public.shoir_login_throttle
