@@ -1526,8 +1526,22 @@ def register_research_run(
     config: Mapping[str, Any],
     results: pd.DataFrame,
 ) -> str:
-    """Persist a completed controlled experiment and its evidence data."""
+    """Persist a run only for the owner of the parent research protocol."""
     ensure_experience_db()
+    study_id = str(study_id or "").strip()
+    research_id = str(research_id or "").strip()
+    owner = str(owner or "").strip()
+    if not study_id or not research_id or not owner:
+        raise ValueError("Research study ID, research ID and owner are required.")
+
+    # Remote-only records can be restored into the local cache through the same
+    # owner-scoped loader before validating the new run.
+    parent = load_research_protocol(study_id, owner=owner)
+    if not parent:
+        raise PermissionError("Research study not found or not owned by this user.")
+    if str(parent.get("research_id") or "") != research_id:
+        raise ValueError("Research ID does not match the selected study's protocol.")
+
     run_id = "RRUN-" + uuid.uuid4().hex[:12].upper()
     cfg = dict(config)
     cfg["study_id"] = study_id
@@ -1556,6 +1570,16 @@ def register_research_run(
     created_at = _now()
     raw_results = results.to_csv(index=False) if isinstance(results, pd.DataFrame) else ""
     with _db() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        # Recheck parent ownership and protocol identity at the write boundary.
+        parent_row = conn.execute(
+            "SELECT research_id,owner FROM experience_research_studies WHERE study_id=?",
+            (study_id,),
+        ).fetchone()
+        if not parent_row or str(parent_row[1] or "") != owner:
+            raise PermissionError("Research study not found or not owned by this user.")
+        if str(parent_row[0] or "") != research_id:
+            raise ValueError("Research ID does not match the selected study's protocol.")
         conn.execute(
             """
             INSERT INTO experience_research_runs(
@@ -1564,7 +1588,7 @@ def register_research_run(
             ) VALUES(?,?,?,?,?,?,?,?,?)
             """,
             (
-                run_id, str(study_id), str(research_id), str(owner), code,
+                run_id, study_id, research_id, owner, code,
                 json.dumps(cfg, ensure_ascii=False, default=str),
                 json.dumps(summary, ensure_ascii=False, default=str),
                 raw_results,
