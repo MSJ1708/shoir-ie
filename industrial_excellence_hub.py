@@ -30,6 +30,7 @@ from industrial_experience import (
     update_job,
     create_decision,
     transition_decision,
+    decision_approval_history,
     add_comment,
     log_copilot_action,
     save_project,
@@ -143,10 +144,10 @@ def _hero(username: str, tier: str) -> None:
           <div class="px-title">The industrial engineering command layer.</div>
           <div class="px-sub">One calm workspace for data → models → experiments → decisions → implementation → verified results.</div>
           <div class="px-pills">
-            <span>✓ {stats["implemented"]}/60 capabilities active</span>
+            <span>✓ {stats["implemented"]}/60 catalog entries marked Implemented</span>
             <span>◈ Evidence-first</span>
             <span>⌁ {tier}</span>
-            <span>● Workspace ready · {username}</span>
+            <span>● Workspace · {username}</span>
           </div>
         </div>
         <style>
@@ -176,46 +177,67 @@ def _overview(username: str) -> None:
     stats = feature_stats()
     with _db() as conn:
         counts = {
-            "projects": conn.execute("SELECT COUNT(*) FROM experience_projects").fetchone()[0],
-            "decisions": conn.execute("SELECT COUNT(*) FROM experience_decisions").fetchone()[0],
-            "jobs": conn.execute("SELECT COUNT(*) FROM experience_jobs").fetchone()[0],
-            "copilot": conn.execute("SELECT COUNT(*) FROM experience_copilot_actions").fetchone()[0],
-            "lineage": conn.execute("SELECT COUNT(*) FROM experience_lineage").fetchone()[0],
+            "projects": conn.execute(
+                "SELECT COUNT(*) FROM experience_projects WHERE owner=?", (username,)
+            ).fetchone()[0],
+            "decisions": conn.execute(
+                "SELECT COUNT(*) FROM experience_decisions WHERE owner=?", (username,)
+            ).fetchone()[0],
+            "jobs": conn.execute(
+                "SELECT COUNT(*) FROM experience_jobs WHERE owner=?", (username,)
+            ).fetchone()[0],
+            "copilot": conn.execute(
+                "SELECT COUNT(*) FROM experience_copilot_actions WHERE actor=?", (username,)
+            ).fetchone()[0],
+            "lineage": conn.execute(
+                "SELECT COUNT(*) FROM experience_lineage WHERE actor=?", (username,)
+            ).fetchone()[0],
         }
+        run_status = pd.read_sql_query(
+            """SELECT status, COUNT(*) AS count
+               FROM experience_module_runs WHERE owner=?
+               GROUP BY status ORDER BY status""",
+            conn,
+            params=(username,),
+        )
     c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("Capabilities", f'{stats["implemented"]}/60', "active")
-    c2.metric("Studies", f'{counts["projects"]:,}', "saved")
-    c3.metric("Decisions", f'{counts["decisions"]:,}', "governed")
-    c4.metric("Runs", f'{counts["jobs"]:,}', "tracked")
-    c5.metric("Lineage links", f'{counts["lineage"]:,}', "traceable")
+    c1.metric("Catalog labels", f'{stats["implemented"]}/60', "source metadata; not runtime tests")
+    c2.metric("Your studies", f'{counts["projects"]:,}', "saved")
+    c3.metric("Your decisions", f'{counts["decisions"]:,}', "governed")
+    c4.metric("Your jobs", f'{counts["jobs"]:,}', "owned records")
+    c5.metric("Your lineage links", f'{counts["lineage"]:,}', "attributed records")
 
+    st.caption("Workspace counts are filtered to this account. Catalog statuses are source-declared labels, not module readiness certification.")
     left, right = st.columns([1.05, 1.95])
     with left:
-        st.markdown("#### Operating loop")
-        loop = pd.DataFrame({
-            "Stage": ["Prepare", "Validate", "Run", "Inspect", "Decide", "Verify"],
-            "Coverage": [96, 98, 94, 91, 89, 86],
-        })
-        fig = px.line(loop, x="Stage", y="Coverage", markers=True, range_y=[70, 100])
-        fig.update_layout(height=260, margin=dict(l=8,r=8,t=15,b=8), yaxis_title="Coverage %", xaxis_title=None)
-        fig.update_traces(line_width=3)
-        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+        st.markdown("#### Your recorded module runs")
+        if run_status.empty:
+            st.info("No module-run records are saved for this account yet. No workflow coverage percentage is inferred.")
+        else:
+            fig = px.bar(
+                run_status, x="status", y="count", text="count",
+                title="Recorded runs by status",
+            )
+            fig.update_layout(height=260, margin=dict(l=8,r=8,t=35,b=8), xaxis_title=None, yaxis_title="Recorded runs")
+            fig.update_traces(textposition="outside")
+            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
     with right:
-        st.markdown("#### Capability health")
+        st.markdown("#### Capability status declarations")
         catalog = feature_catalog().copy()
         catalog["Group"] = catalog["Feature"].str.extract(r"^(.+?)(?: /| &|,|$)")[0]
         groups = catalog.groupby("Status", as_index=False).size().rename(columns={"size":"Count"})
         fig = px.bar(groups, x="Status", y="Count", text="Count")
-        fig.update_layout(height=260, margin=dict(l=8,r=8,t=15,b=8), xaxis_title=None, yaxis_title=None)
+        fig.update_layout(height=260, margin=dict(l=8,r=8,t=15,b=8), xaxis_title=None, yaxis_title="Catalog entries")
         fig.update_traces(textposition="outside")
         st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+        st.caption("Counts show static catalog labels. They do not prove runtime functionality or authenticated verification.")
 
     st.markdown("#### What changed")
     items = [
-        ("✓", "Every major action can leave an evidence trail.", "Governance"),
-        ("✓", "Scenario work can become a durable decision record.", "Decision"),
-        ("✓", "Exports are designed as evidence bundles, not screenshots.", "Reporting"),
-        ("✓", "Copilot actions are previewed and approval-gated.", "AI"),
+        ("✓", "Supported workflows can record source and run evidence.", "Evidence"),
+        ("✓", "Decision records can preserve assumptions and approval transitions.", "Decision"),
+        ("✓", "Evidence-bundle export paths exist for supported workflows.", "Reporting"),
+        ("✓", "Copilot previews are logged; execution controls remain workflow-specific.", "AI"),
     ]
     cols = st.columns(4)
     for col, (icon, title, tag) in zip(cols, items):
@@ -237,6 +259,7 @@ def _overview(username: str) -> None:
         _benchmark_lab(username)
     with st.expander("📊 Visualization Readiness Audit", expanded=False):
         _visualization_readiness(username)
+
 
 def _benchmark_lab(username: str) -> None:
     st.markdown("### 🧪 Benchmark Laboratory")
@@ -288,10 +311,16 @@ def _visualization_readiness(username: str) -> None:
 
 def _digital_thread(username: str) -> None:
     st.markdown("### 🔗 Digital Thread")
-    st.caption("A shared industrial graph connecting the objects that modules reason about.")
+    st.caption("Shared seeded examples plus entities and relationships owned by this account. Seeded examples are illustrative, not customer evidence.")
     with _db() as conn:
-        entities = pd.read_sql("SELECT entity_id,entity_type,name,status,owner,updated_at FROM excellence_entities ORDER BY entity_type,name", conn)
-        edges = pd.read_sql("SELECT source_id,target_id,relation,created_at FROM excellence_edges ORDER BY created_at DESC", conn)
+        entities = pd.read_sql(
+            "SELECT entity_id,entity_type,name,status,owner,updated_at FROM excellence_entities WHERE owner=? OR owner='platform' ORDER BY entity_type,name",
+            conn, params=(username,),
+        )
+        edges = pd.read_sql(
+            "SELECT source_id,target_id,relation,created_at FROM excellence_edges WHERE owner=? OR owner='platform' ORDER BY created_at DESC",
+            conn, params=(username,),
+        )
     c1, c2, c3 = st.columns(3)
     c1.metric("Entities", len(entities), "shared IDs")
     c2.metric("Relationships", len(edges), "traceable")
@@ -376,7 +405,7 @@ def _data_lab(username: str) -> None:
         st.success(f"Validation recorded · {run}")
     if b.button("🧪 Queue experiment", use_container_width=True):
         jid = create_job("Platform Excellence", "scenario-sweep", username, {"rows": len(df), "metric": nums[0] if nums else None})
-        update_job(jid, "Running", 25, "Experiment prepared")
+        update_job(jid, "Running", 25, "Experiment prepared", actor=username)
         st.session_state["px_job"] = jid
         st.success(f"Experiment queued · {jid}")
     if c.button("💾 Save study", use_container_width=True):
@@ -401,20 +430,22 @@ def _governance(username: str, tier: str) -> None:
     st.caption("Move from analysis to an auditable decision without hiding assumptions or approval state.")
     tab1, tab2, tab3, tab4 = st.tabs(["Decision cards","Copilot","Approval flow","Decision memory"])
 
+    selected_decision_id: str | None = None
     with tab1:
         with _db() as conn:
-            decisions = pd.read_sql("SELECT decision_id,title,module,status,owner,created_at,updated_at FROM experience_decisions ORDER BY updated_at DESC", conn)
+            decisions = pd.read_sql("SELECT decision_id,title,module,status,owner,created_at,updated_at FROM experience_decisions WHERE owner=? ORDER BY updated_at DESC", conn, params=(username,))
         if decisions.empty:
             st.info("No decision cards yet. Create one from the action bar below.")
         else:
             st.dataframe(decisions, use_container_width=True, hide_index=True)
             did = st.selectbox("Decision", decisions["decision_id"].tolist(), key="px_decision_pick")
+            selected_decision_id = str(did)
             status = decisions.loc[decisions["decision_id"] == did, "status"].iloc[0]
             next_state = st.selectbox("Move to", ["Validated","Proposed","Review","Approved","Implemented","Verified"], key="px_decision_next")
             comment = st.text_input("Approval note", key="px_decision_note")
             if st.button("➡️ Transition decision", type="primary", use_container_width=True):
                 try:
-                    transition_decision(did, username, next_state, comment)
+                    transition_decision(did, username, next_state, comment, require_owner=True)
                     st.success(f"Decision moved to {next_state}.")
                     st.rerun()
                 except Exception as exc:
@@ -445,19 +476,35 @@ def _governance(username: str, tier: str) -> None:
         st.markdown("**Guardrail:** imported text is data; execution requires an explicit approval event.")
 
     with tab3:
-        states = ["Draft","Validated","Proposed","Review","Approved","Implemented","Verified"]
-        cols = st.columns(len(states))
-        for i, state in enumerate(states):
-            cols[i].markdown(f'<div class="px-state">{"✓" if i < 1 else "○"}<br><small>{state}</small></div>', unsafe_allow_html=True)
-        st.caption("The lifecycle is persistent; each transition is written to the approval history.")
+        st.markdown("#### Recorded approval history")
+        if selected_decision_id:
+            history = decision_approval_history(selected_decision_id, owner=username)
+            if history.empty:
+                st.info("No approval transitions have been recorded for this decision yet.")
+            else:
+                st.dataframe(history, use_container_width=True, hide_index=True)
+        else:
+            st.info("Create or select one of your decision cards to view its recorded approval history.")
         st.markdown("#### Workspace comments")
         with _db() as conn:
-            comments = pd.read_sql("SELECT actor,comment,created_at FROM experience_comments ORDER BY id DESC LIMIT 12", conn)
+            comments = pd.read_sql(
+                """SELECT c.actor,c.comment,c.created_at
+                   FROM experience_comments AS c
+                   WHERE c.decision_id IN (
+                       SELECT decision_id FROM experience_decisions WHERE owner=?
+                   )
+                   OR c.project_id IN (
+                       SELECT project_id FROM experience_projects WHERE owner=?
+                   )
+                   OR (c.decision_id IS NULL AND c.project_id IS NULL AND c.actor=?)
+                   ORDER BY c.id DESC LIMIT 12""",
+                conn, params=(username, username, username),
+            )
         st.dataframe(comments, use_container_width=True, hide_index=True)
 
     with tab4:
         with _db() as conn:
-            memory = pd.read_sql("SELECT memory_id,problem,decision,outcome,lesson,owner,created_at FROM excellence_memory ORDER BY created_at DESC", conn)
+            memory = pd.read_sql("SELECT memory_id,problem,decision,outcome,lesson,owner,created_at FROM excellence_memory WHERE owner=? ORDER BY created_at DESC", conn, params=(username,))
         if memory.empty:
             st.info("Decision Memory is ready. Record the first verified lesson after an implementation.")
         else:
@@ -480,64 +527,169 @@ def _governance(username: str, tier: str) -> None:
                     st.rerun()
 
 
+def _self_diagnostic_report() -> pd.DataFrame:
+    """Run real structural checks and explicitly mark checks not performed."""
+    records: list[dict[str, str]] = []
+    try:
+        with _db() as conn:
+            integrity = str(conn.execute("PRAGMA integrity_check").fetchone()[0])
+            table_names = {
+                str(row[0])
+                for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            }
+            job_columns = {
+                str(row[1]) for row in conn.execute("PRAGMA table_info(experience_jobs)")
+            }
+        required_tables = {
+            "experience_projects", "experience_decisions", "experience_jobs",
+            "experience_copilot_actions", "experience_lineage",
+            "experience_module_runs",
+        }
+        missing_tables = sorted(required_tables - table_names)
+        records.extend([
+            {
+                "Check": "SQLite integrity",
+                "Status": "PASS" if integrity.lower() == "ok" else "FAIL",
+                "Evidence": integrity,
+            },
+            {
+                "Check": "Required experience tables",
+                "Status": "PASS" if not missing_tables else "FAIL",
+                "Evidence": "All present" if not missing_tables else "Missing: " + ", ".join(missing_tables),
+            },
+            {
+                "Check": "Job owner column",
+                "Status": "PASS" if "owner" in job_columns else "FAIL",
+                "Evidence": "Owner column present" if "owner" in job_columns else "Owner column missing",
+            },
+        ])
+    except Exception as exc:
+        records.extend([
+            {"Check": "SQLite integrity", "Status": "FAIL", "Evidence": f"Check raised {type(exc).__name__}"},
+            {"Check": "Required experience tables", "Status": "FAIL", "Evidence": "Schema inspection failed"},
+            {"Check": "Job owner column", "Status": "FAIL", "Evidence": "Schema inspection failed"},
+        ])
+
+    records.extend([
+        {
+            "Check": "Feature catalog declarations",
+            "Status": "PASS" if len(FEATURES_60) == 60 else "REVIEW",
+            "Evidence": f"{len(FEATURES_60)} declared rows; module behavior was not tested",
+        },
+        {
+            "Check": "Copilot tool registry",
+            "Status": "PASS" if len(COPILOT_TOOLS) >= 8 else "REVIEW",
+            "Evidence": f"{len(COPILOT_TOOLS)} declared tool entries; execution was not tested",
+        },
+        {
+            "Check": "Live connector connectivity",
+            "Status": "NOT TESTED",
+            "Evidence": "Stored profile/demo metadata is not evidence of a live handshake",
+        },
+        {
+            "Check": "Authenticated imports, exports and tenant isolation",
+            "Status": "NOT TESTED",
+            "Evidence": "Requires authorized integration/browser walkthroughs",
+        },
+    ])
+    return pd.DataFrame(records)
+
+
 def _platform_health(username: str) -> None:
     st.markdown("### ⚙️ Platform Health & Delivery")
     with _db() as conn:
-        connectors = pd.read_sql("SELECT name,connector_type,status,freshness_min,error_rate,last_sync FROM excellence_connectors", conn)
-        jobs = pd.read_sql("SELECT job_id,module,job_type,status,progress,message,started_at,finished_at FROM experience_jobs ORDER BY rowid DESC LIMIT 20", conn)
-        obs = pd.read_sql("SELECT run_id,module,event_type,duration_ms,created_at FROM experience_observability ORDER BY id DESC LIMIT 20", conn)
+        connectors = pd.read_sql(
+            """SELECT name,connector_type,status,freshness_min,error_rate,last_sync,owner
+               FROM excellence_connectors WHERE owner=? OR owner='platform'""",
+            conn, params=(username,),
+        )
+        jobs = pd.read_sql(
+            """SELECT job_id,module,job_type,status,progress,message,started_at,finished_at
+               FROM experience_jobs WHERE owner=? ORDER BY rowid DESC LIMIT 20""",
+            conn, params=(username,),
+        )
+        job_count = int(conn.execute(
+            "SELECT COUNT(*) FROM experience_jobs WHERE owner=?", (username,)
+        ).fetchone()[0])
+        run_count = int(conn.execute(
+            "SELECT COUNT(*) FROM experience_module_runs WHERE owner=?", (username,)
+        ).fetchone()[0])
+        integrity = str(conn.execute("PRAGMA integrity_check").fetchone()[0])
+
+    if not connectors.empty:
+        connectors["Evidence"] = connectors["owner"].map(
+            lambda owner: (
+                "Seeded sample metadata — no live connection test"
+                if str(owner) == "platform"
+                else "Saved profile metadata — live connection not verified"
+            )
+        )
 
     c1,c2,c3,c4 = st.columns(4)
-    connector_score = max(0.0, 100.0 - connectors["error_rate"].mean()*10) if not connectors.empty else 0
-    c1.metric("Connector health", f"{connector_score:.0f}%", _metric_status(connector_score))
-    c2.metric("Jobs tracked", len(jobs))
-    c3.metric("Observability events", len(obs))
-    c4.metric("Schema", "WAL + indexed", "ready")
+    c1.metric("Connector profiles", f"{len(connectors):,}", "live connectivity unverified")
+    c2.metric("Your jobs", f"{job_count:,}", "owner-scoped")
+    c3.metric("Your recorded runs", f"{run_count:,}", "owner-scoped")
+    c4.metric("SQLite integrity", "PASS" if integrity.lower() == "ok" else "CHECK", "PRAGMA integrity_check")
 
     a,b = st.columns(2)
     with a:
-        st.markdown("#### Connector freshness")
+        st.markdown("#### Stored connector metadata")
+        st.caption("Freshness and error values below are stored metadata. Seeded demo rows are not live connectivity measurements.")
         if not connectors.empty:
-            fig = px.bar(connectors, x="name", y="freshness_min", text="freshness_min", title="Minutes since last sync")
-            fig.update_layout(height=280, margin=dict(l=8,r=8,t=45,b=8), yaxis_title="Minutes")
+            fig = px.bar(
+                connectors, x="name", y="freshness_min", text="freshness_min",
+                title="Stored freshness metadata (minutes; not live-tested)",
+            )
+            fig.update_layout(height=280, margin=dict(l=8,r=8,t=45,b=8), yaxis_title="Stored minutes")
             st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
             st.dataframe(connectors, use_container_width=True, hide_index=True)
+        else:
+            st.info("No connector profiles are saved for this account.")
+
     with b:
-        st.markdown("#### Recent jobs")
+        st.markdown("#### Your recent jobs")
         if jobs.empty:
-            st.info("No background jobs have been recorded yet.")
+            st.info("No owned job records are available for this account. Existing legacy jobs without owner metadata are retained but not shown in another user's workspace.")
         else:
             st.dataframe(jobs, use_container_width=True, hide_index=True)
             if st.button("🛑 Cancel newest queued job", use_container_width=True):
                 queued = jobs[jobs["status"] == "Queued"]
                 if not queued.empty:
-                    update_job(str(queued.iloc[0]["job_id"]), "Cancelled", float(queued.iloc[0]["progress"]), "Cancelled by operator")
-                    st.success("Queued job cancelled safely.")
-                    st.rerun()
+                    try:
+                        update_job(
+                            str(queued.iloc[0]["job_id"]),
+                            "Cancelled",
+                            float(queued.iloc[0]["progress"]),
+                            "Cancelled by operator",
+                            actor=username,
+                        )
+                        st.success("Your queued job was cancelled.")
+                        st.rerun()
+                    except PermissionError:
+                        st.error("The job could not be updated because it is not owned by this account.")
+                else:
+                    st.info("No queued jobs owned by this account need cancellation.")
 
-    st.markdown("#### Delivery checklist")
+    st.markdown("#### Delivery verification status")
     checks = pd.DataFrame([
-        {"Control":"Runtime validation", "Status":"✓", "Evidence":"Pytest + compileall in CI"},
-        {"Control":"Export resilience", "Status":"✓", "Evidence":"XLSX / evidence bundle paths"},
-        {"Control":"Approval gating", "Status":"✓", "Evidence":"Persistent Copilot action ledger"},
-        {"Control":"Data lineage", "Status":"✓", "Evidence":"Experience lineage store"},
-        {"Control":"Accessibility", "Status":"✓", "Evidence":"Reduced-motion CSS + labeled controls"},
-        {"Control":"RTL readiness", "Status":"✓", "Evidence":"Persisted locale/direction preference"},
+        {"Control":"Automated CI", "Status":"Not queried live", "Evidence":"This panel does not fetch GitHub workflow state; check the repository Actions page"},
+        {"Control":"Export resilience", "Status":"UNVERIFIED end-to-end", "Evidence":"Export paths exist; generated files still require round-trip validation"},
+        {"Control":"Approval gating", "Status":"Source present; e2e UNVERIFIED", "Evidence":"Persistent action ledger exists; authorized browser journey remains open"},
+        {"Control":"Data lineage", "Status":"Source present; coverage UNVERIFIED", "Evidence":"Lineage store exists; not every module is proven to emit complete lineage"},
+        {"Control":"Accessibility", "Status":"Partially implemented", "Evidence":"Some labels and reduced-motion CSS exist; formal accessibility audit not run"},
+        {"Control":"Arabic / RTL", "Status":"Preference support present", "Evidence":"Locale/direction persistence exists; complete RTL walkthrough not verified"},
     ])
     st.dataframe(checks, use_container_width=True, hide_index=True)
 
     if st.button("🔍 Run self-diagnostic", type="primary", use_container_width=True):
-        tests = {
-            "Experience database": True,
-            "Feature catalog": len(FEATURES_60) == 60,
-            "Copilot registry": len(COPILOT_TOOLS) >= 8,
-            "Connector metadata": not connectors.empty,
-            "Job registry": True,
-        }
-        result = pd.DataFrame([{"Check": k, "Status": "✓ PASS" if v else "⚠ REVIEW"} for k,v in tests.items()])
+        result = _self_diagnostic_report()
         st.dataframe(result, use_container_width=True, hide_index=True)
-        st.success("Self-diagnostic completed. Review any flagged control before production use.")
-
+        if (result["Status"] == "FAIL").any():
+            st.error("One or more structural checks failed. Review the evidence above.")
+        elif (result["Status"] == "NOT TESTED").any():
+            st.warning("Structural checks completed, but NOT TESTED controls remain unverified.")
+        else:
+            st.info("Structural checks passed. This is not a production-readiness or end-to-end certification.")
 
 def render_platform_excellence_hub(username: str, tier: str) -> None:
     """Render the polished cross-cutting command center."""

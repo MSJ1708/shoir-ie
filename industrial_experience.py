@@ -147,7 +147,7 @@ def ensure_experience_db(path: str = "enterprise_full_workspace.db") -> None:
             "CREATE TABLE IF NOT EXISTS experience_comments(id INTEGER PRIMARY KEY AUTOINCREMENT,project_id TEXT,decision_id TEXT,actor TEXT,comment TEXT,created_at TEXT)",
             "CREATE TABLE IF NOT EXISTS experience_decision_outcomes(outcome_id TEXT PRIMARY KEY,decision_id TEXT NOT NULL,owner TEXT NOT NULL,implementation_status TEXT NOT NULL,predicted_json TEXT NOT NULL,actual_json TEXT NOT NULL,variance_json TEXT NOT NULL,lesson TEXT,verified_at TEXT,created_at TEXT)",
             "CREATE INDEX IF NOT EXISTS idx_exp_decision_outcomes_decision ON experience_decision_outcomes(decision_id,created_at DESC)",
-            "CREATE TABLE IF NOT EXISTS experience_jobs(job_id TEXT PRIMARY KEY,module TEXT,job_type TEXT,status TEXT,progress REAL,message TEXT,payload_json TEXT,started_at TEXT,finished_at TEXT)",
+            "CREATE TABLE IF NOT EXISTS experience_jobs(job_id TEXT PRIMARY KEY,module TEXT,job_type TEXT,status TEXT,progress REAL,message TEXT,payload_json TEXT,started_at TEXT,finished_at TEXT,owner TEXT)",
             "CREATE TABLE IF NOT EXISTS experience_copilot_actions(id INTEGER PRIMARY KEY AUTOINCREMENT,run_id TEXT,module TEXT,action TEXT,status TEXT,requires_approval INTEGER,evidence_json TEXT,actor TEXT,created_at TEXT)",
             "CREATE TABLE IF NOT EXISTS experience_observability(id INTEGER PRIMARY KEY AUTOINCREMENT,run_id TEXT,module TEXT,event_type TEXT,duration_ms REAL,details_json TEXT,created_at TEXT)",
             "CREATE TABLE IF NOT EXISTS experience_module_runs(run_id TEXT PRIMARY KEY,module TEXT NOT NULL,owner TEXT NOT NULL,display_name TEXT NOT NULL,project_name TEXT,site_name TEXT,input_hash TEXT NOT NULL,input_rows INTEGER NOT NULL,input_columns_json TEXT NOT NULL,result_columns_json TEXT NOT NULL,input_snapshot_gzip BLOB,result_snapshot_gzip BLOB,profile_json TEXT NOT NULL,metrics_json TEXT NOT NULL,method TEXT,guardrail TEXT,duration_ms REAL NOT NULL,status TEXT NOT NULL,snapshot_status TEXT NOT NULL,created_at TEXT NOT NULL)",
@@ -164,6 +164,14 @@ def ensure_experience_db(path: str = "enterprise_full_workspace.db") -> None:
         ]
         for statement in statements:
             conn.execute(statement)
+        # Backward-compatible migration: keep prior rows with owner=NULL.
+        job_columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(experience_jobs)")}
+        if "owner" not in job_columns:
+            conn.execute("ALTER TABLE experience_jobs ADD COLUMN owner TEXT")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_exp_jobs_owner_status "
+            "ON experience_jobs(owner,status,started_at DESC)"
+        )
         conn.commit()
 
 
@@ -339,41 +347,71 @@ def load_decision_spec(decision_id: str, owner: str | None = None) -> dict[str, 
     return out
 
 
-def decision_approval_history(decision_id: str) -> pd.DataFrame:
+def decision_approval_history(decision_id: str, owner: Optional[str] = None) -> pd.DataFrame:
+    """Return approval events, optionally restricted to the decision owner."""
     ensure_experience_db()
     with _db() as conn:
-        rows = conn.execute(
-            """
-            SELECT from_status,to_status,actor,comment,created_at
-            FROM experience_decision_approvals
-            WHERE decision_id=?
-            ORDER BY id ASC
-            """,
-            (str(decision_id),),
-        ).fetchall()
+        if owner is not None:
+            rows = conn.execute(
+                """
+                SELECT a.from_status,a.to_status,a.actor,a.comment,a.created_at
+                FROM experience_decision_approvals AS a
+                JOIN experience_decisions AS d ON d.decision_id=a.decision_id
+                WHERE a.decision_id=? AND d.owner=?
+                ORDER BY a.id ASC
+                """,
+                (str(decision_id), str(owner)),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """
+                SELECT from_status,to_status,actor,comment,created_at
+                FROM experience_decision_approvals
+                WHERE decision_id=?
+                ORDER BY id ASC
+                """,
+                (str(decision_id),),
+            ).fetchall()
     return pd.DataFrame(rows, columns=["From","To","Actor","Comment","Timestamp"]) if rows else pd.DataFrame(
         columns=["From","To","Actor","Comment","Timestamp"]
     )
 
 
-def transition_decision(decision_id: str, actor: str, to_status: str, comment: str = "") -> None:
+def transition_decision(
+    decision_id: str,
+    actor: str,
+    to_status: str,
+    comment: str = "",
+    require_owner: bool = False,
+) -> None:
+    """Transition a decision; user-facing surfaces can enforce decision ownership."""
     states = ["Draft", "Validated", "Proposed", "Review", "Approved", "Implemented", "Verified"]
     if to_status not in states:
         raise ValueError("Invalid approval state.")
     with _db() as conn:
         row = conn.execute(
-            "SELECT status FROM experience_decisions WHERE decision_id=?",
+            "SELECT status,owner FROM experience_decisions WHERE decision_id=?",
             (decision_id,),
         ).fetchone()
         if not row:
             raise ValueError("Decision not found.")
-        current = str(row[0])
+        current, owner = str(row[0]), row[1]
+        if require_owner and (owner is None or str(owner) != str(actor)):
+            raise PermissionError("Decision not found or not owned by this user.")
         if current in states and states.index(to_status) < states.index(current) and to_status not in {"Draft", "Review"}:
             raise ValueError("Decision cannot move backward to that state.")
-        conn.execute(
-            "UPDATE experience_decisions SET status=?,updated_at=? WHERE decision_id=?",
-            (to_status, _now(), decision_id),
-        )
+        if require_owner:
+            cursor = conn.execute(
+                "UPDATE experience_decisions SET status=?,updated_at=? WHERE decision_id=? AND owner=?",
+                (to_status, _now(), decision_id, str(actor)),
+            )
+            if cursor.rowcount == 0:
+                raise PermissionError("Decision not found or not owned by this user.")
+        else:
+            conn.execute(
+                "UPDATE experience_decisions SET status=?,updated_at=? WHERE decision_id=?",
+                (to_status, _now(), decision_id),
+            )
         conn.execute(
             "INSERT INTO experience_decision_approvals(decision_id,from_status,to_status,actor,comment,created_at) VALUES(?,?,?,?,?,?)",
             (decision_id, current, to_status, actor, str(comment)[:500], _now()),
@@ -630,18 +668,35 @@ def log_copilot_action(
 
 
 def create_job(module: str, job_type: str, actor: str, payload: Mapping[str, Any]) -> str:
+    """Create an owned job record; actor is its durable owner identifier."""
     ensure_experience_db()
     jid = "JOB-" + uuid.uuid4().hex[:12].upper()
     with _db() as conn:
         conn.execute(
-            "INSERT INTO experience_jobs VALUES(?,?,?,?,?,?,?,?,?)",
-            (jid, module, job_type, "Queued", 0.0, "Queued by operator", json.dumps(dict(payload), default=str), None, None),
+            """INSERT INTO experience_jobs
+               (job_id,module,job_type,status,progress,message,payload_json,started_at,finished_at,owner)
+               VALUES(?,?,?,?,?,?,?,?,?,?)""",
+            (
+                jid, module, job_type, "Queued", 0.0, "Queued by operator",
+                json.dumps(dict(payload), default=str), None, None, str(actor or "").strip() or None,
+            ),
         )
         conn.commit()
     return jid
 
 
-def update_job(job_id: str, status: str, progress: float, message: str = "") -> None:
+def update_job(
+    job_id: str,
+    status: str,
+    progress: float,
+    message: str = "",
+    actor: str | None = None,
+) -> None:
+    """Update a job; user-facing callers should supply actor to enforce ownership.
+
+    The actor-less form is retained for trusted internal workers for backwards
+    compatibility. Do not use it to authorize a user-facing request.
+    """
     fields = ["status=?", "progress=?", "message=?"]
     values = [status, float(max(0.0, min(100.0, progress))), str(message)[:500]]
     if status == "Running":
@@ -650,13 +705,16 @@ def update_job(job_id: str, status: str, progress: float, message: str = "") -> 
     if status in {"Completed", "Failed", "Cancelled"}:
         fields.append("finished_at=?")
         values.append(_now())
+    query = "UPDATE experience_jobs SET " + ",".join(fields) + " WHERE job_id=?"
     values.append(job_id)
+    if actor is not None:
+        query += " AND owner=?"
+        values.append(str(actor))
     with _db() as conn:
-        conn.execute(
-            "UPDATE experience_jobs SET " + ",".join(fields) + " WHERE job_id=?",
-            values,
-        )
+        cursor = conn.execute(query, values)
         conn.commit()
+        if actor is not None and cursor.rowcount == 0:
+            raise PermissionError("Job not found or not owned by this user.")
 
 
 def benchmark_duration(module: str, start_ns: int, actor: str, rows: int, event: str = "run") -> str:
@@ -1685,17 +1743,28 @@ def research_runs_frame(study_id: Optional[str], owner: Optional[str] = None) ->
         except Exception:
             pass
 
-    # Primary source: persisted research runs with full evidence data.
+    # Primary source: persisted research runs scoped to the requested owner.
     with _db() as conn:
-        rows = conn.execute(
-            """
-            SELECT run_id,experiment_code,config_json,summary_json,created_at
-            FROM experience_research_runs
-            WHERE study_id=?
-            ORDER BY created_at DESC
-            """,
-            (str(study_id),),
-        ).fetchall()
+        if owner:
+            rows = conn.execute(
+                """
+                SELECT run_id,experiment_code,config_json,summary_json,created_at
+                FROM experience_research_runs
+                WHERE study_id=? AND owner=?
+                ORDER BY created_at DESC
+                """,
+                (str(study_id), str(owner)),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """
+                SELECT run_id,experiment_code,config_json,summary_json,created_at
+                FROM experience_research_runs
+                WHERE study_id=?
+                ORDER BY created_at DESC
+                """,
+                (str(study_id),),
+            ).fetchall()
     for run_id, code, raw_cfg, raw_summary, created_at in rows:
         try: cfg = json.loads(raw_cfg or "{}")
         except Exception: cfg = {}
@@ -1713,16 +1782,29 @@ def research_runs_frame(study_id: Optional[str], owner: Optional[str] = None) ->
             created_at, created_at,
         ])
 
-    # Compatibility source: governed experience jobs created by the generic shell.
+    # Compatibility source: jobs attributed to the requested owner. Legacy
+    # ownerless rows are deliberately not assigned to a user.
     with _db() as conn:
-        jobs = conn.execute(
-            """
-            SELECT job_id,module,job_type,status,progress,message,payload_json,
-                   started_at,finished_at
-            FROM experience_jobs
-            ORDER BY COALESCE(started_at,finished_at) DESC
-            """
-        ).fetchall()
+        if owner:
+            jobs = conn.execute(
+                """
+                SELECT job_id,module,job_type,status,progress,message,payload_json,
+                       started_at,finished_at
+                FROM experience_jobs
+                WHERE owner=?
+                ORDER BY COALESCE(started_at,finished_at) DESC
+                """,
+                (str(owner),),
+            ).fetchall()
+        else:
+            jobs = conn.execute(
+                """
+                SELECT job_id,module,job_type,status,progress,message,payload_json,
+                       started_at,finished_at
+                FROM experience_jobs
+                ORDER BY COALESCE(started_at,finished_at) DESC
+                """
+            ).fetchall()
     existing_ids = {str(r[0]) for r in records}
     for job_id, module, job_type, status, progress, message, raw, started, finished in jobs:
         try: payload = json.loads(raw or "{}")
