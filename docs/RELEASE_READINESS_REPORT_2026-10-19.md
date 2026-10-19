@@ -84,3 +84,34 @@ The branch includes these changes, and the source/CI checks above pass:
 ## Final assessment
 
 This audit verified meaningful source and backend safeguards and obtained passing automated CI for the PR candidate. It also exposed gaps that CI alone does not cover and a failed live application smoke test. Therefore **Shoir-IE is not yet verified as ready for workers or approved for production release**. The release decision stays blocked until the live startup failure is fixed and the critical authenticated, migration, module and data-round-trip evidence is captured.
+
+## Recheck addendum — 2026-10-19 14:56 UTC
+
+### Fresh live versus local runtime result
+
+A fresh hosted Playwright run (Actions run 39273186987, artifact 12196580808) failed on both desktop (1440×1000) and mobile (390×844). The server returned HTTP 200, but the embedded Streamlit frame displayed its redacted ImportError page instead of the sign-in screen. The public response does not reveal the Python exception; no private Streamlit Cloud runtime log connector is available here.
+
+The same run's local test job passed compileall, regression tests, AST/module checks, execution of app.py's top-level import/bootstrap block, and Chromium browser smoke at desktop and mobile widths (artifact 12196146718). Therefore the hosted error is not reproduced in the CI runtime. This is not proof that the deployment works, and the root cause remains **blocked on the owner inspecting Streamlit Cloud → Manage app → runtime logs** and recording the actual deployed commit and runtime/dependency versions.
+
+The import/browser smoke-gate improvement was merged separately in PR #146, commit 198abd964a9fe2b3a99a144e5411d8f02e33055e. The local runtime/browser gate is now part of main validation. The separate live-host smoke remains conditional on the audit branch and must stay red until the hosted failure is resolved.
+
+### Production backend reconciliation
+
+Read-only inspection of the connected production project confirms:
+- The master admin row remains active, role Enterprise Admin, tier Enterprise Plus Tier ($399), existing expiry 2099-01-01 00:00:00+00. No account mutation was performed.
+- The active shoir-persistence Edge Function is version 8, updated 2026-10-19 13:53:42 UTC, SHA-256 source fingerprint 410e22f7af0be8f3ec74bae5a15aec70f8b6a807a540e98a2c5143f4e6b8790d.
+- That deployed source calls the login-throttle RPC. Catalog queries confirmed EXECUTE is denied to anon/authenticated and granted to service_role; the shoir_login_throttle table has RLS enabled and no SELECT/INSERT/UPDATE/DELETE grants to anon/authenticated.
+- Production's recorded migration version for the login throttle is 20261019124815, while the repository filename is 20261019123300_server_side_login_rate_limits.sql. Reconcile the source/version discrepancy before the next release migration.
+- The currently deployed function source does not expose the candidate's register_request, account_exists or shoir_finalize_subscription_request actions. The candidate migration 20261019140600_atomic_subscription_request_decisions.sql is absent from production migration history. Do not deploy that function independently of its migration.
+
+The production security advisor returned no security lints. The performance advisor returned 17 INFO-level unused-index observations; these are not, by themselves, proof that any index should be dropped.
+
+### Latest candidate CI and registration correction
+
+Candidate code commit cceff8490976c862b1dfaf15b09668cef654a9f8 passed the current automated checks, including Python test suites, engine regression, platform tests, security/quality gates, Deno format/type-check and the isolated PostgreSQL transaction-contract integration test. This does not substitute for staging validation, deployed authenticated tests, or the failed public smoke.
+
+The registration request was corrected to match the specification that payment-proof upload is optional. When a proof is supplied, format, size and signature validation still apply; incomplete proof metadata is rejected; absent proof is represented as null through the form/client/Edge Function/SQL path; and the response's proof_uploaded flag reflects the actual result. The activation/ticket code remains optional for new registration as described by the UI and is bounded/validated when provided. Renewal still requires its transaction/payment reference. The transaction-contract CI passed after these changes; production behavior remains untested because the candidate migration has not been applied.
+
+### Readiness decision
+
+**NO-GO for workforce production use.** The release decision does not change until all of the following are closed: the actual hosted Streamlit ImportError, isolated staging migration/RPC verification and controlled rollout plan, dedicated authenticated release workflow, all 96 module-specific browser/engineering cases, every tier's allowed/denied path tests, real import/export round-trips, full cross-owner isolation, and backup/restore/load/security review. The 96-row module inventory remains accurate with every authenticated_browser_status value set to UNVERIFIED.
