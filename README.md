@@ -116,7 +116,7 @@ Prices and entitlements should be confirmed in the running application before pu
 
 ## Account lifecycle and data continuity
 
-Paid subscriptions use a **30-day period from activation or approved renewal**. When the period expires, normal workspace access is paused instead of deleting the account.
+Each newly approved paid subscription receives a **30-day access period**. While active, customers see a sidebar countdown (days and hours) and expiry timestamp that refreshes during app activity. When the expiry time is reached, normal workspace access is paused instead of deleting the account. A renewal approved after expiry starts a fresh 30-day period; an early approved renewal extends from the later of the current expiry or approval time so remaining paid time is not lost.
 
 The renewal workflow is designed to:
 1. authenticate the existing account;
