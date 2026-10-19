@@ -1,5 +1,5 @@
 from shoir_tier_capabilities import (MODULE_REQUIREMENTS, TIER_ORDER, audit_module_entitlement_coverage, available_modules, copilot_gate, module_required_tier, normalize_tier, tier_allows)
-from industrial_platform import tier_allows as platform_tier_allows
+from industrial_platform import PLATFORM_CATALOG, tier_allows as platform_tier_allows
 
 
 def test_tier_order_and_research_are_distinct():
@@ -110,3 +110,19 @@ def test_module_entitlement_audit_exposes_invalid_policy_tier(monkeypatch):
 
 def test_declared_module_entitlement_tiers_are_known_tiers():
     assert set(MODULE_REQUIREMENTS.values()).issubset(set(TIER_ORDER))
+
+
+
+def test_every_platform_catalog_entry_has_an_explicit_matching_shared_tier_policy():
+    names = [str(item["name"]) for item in PLATFORM_CATALOG]
+    report = audit_module_entitlement_coverage(names)
+
+    assert report["status"] == "COMPLETE"
+    assert report["total_modules"] == len(names)
+    assert report["total_modules"] == len(set(names))
+    assert report["unmapped_modules"] == []
+    assert report["invalid_policy_modules"] == []
+    assert all(
+        module_required_tier(str(item["name"])) == normalize_tier(str(item["tier"]))
+        for item in PLATFORM_CATALOG
+    )
