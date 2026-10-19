@@ -168,3 +168,11 @@ A module status describes the evidence actually obtained, not whether a renderer
 - [x] Run hosted public-entry browser verification with GitHub Actions Chromium at desktop/mobile widths, including registration field labels, module-explorer evidence content and inner-frame overflow checks.
 - [ ] Complete authenticated browser walkthroughs for module navigation, imports/downloads, persistence, roles and tiers using authorized test accounts.
 - [ ] Complete remaining module and security matrices before declaring the full definition of done satisfied.
+
+## Follow-up: durable account-store ImportError recovery (2026-10-19)
+
+After the public hosted app reported a redacted `ImportError` at the multi-symbol import in `app.py`, PR #147 was merged to `main` as `cf50437887fce04fc5cf0450d7f3317d0a358d7f`. The direct named import was replaced with module loading plus validation of the required exported functions. If the module or any required export is absent, the app now renders an explicit fail-closed deployment diagnostic instead of silently falling back to local account storage.
+
+The regression suite, engine regression, security/quality checks and local desktop/mobile browser smoke passed. A fresh public hosted smoke then passed at both 1440×1000 and 390×844, including registration fields, Explore Modules, Enterprise Plus plan-card detection and the Venture Studio section. Evidence: [Actions run 39276620207](https://github.com/MSJ1708/shoir-ie/actions/runs/39276620207), artifact `12198120719`.
+
+This closes the **observed public startup error** for the tested hosted revision. The prior exact internal exception remains unknown because Streamlit redacted it on the public page. Authenticated browser tests and the full worker-readiness acceptance matrix remain incomplete; the overall production release is therefore still gated. No master-admin or customer subscription records were modified during this repair.
