@@ -69,6 +69,12 @@ Venture Studio supports the business-building loop around an industrial product 
 
 Its intended workflow brings together customer and stakeholder context, pilot milestones, measurable hypotheses, ROI/value evidence, product readiness, traction and curated investor artifacts. The evidence chain is designed to support transparent customer-specific claims rather than unsupported universal savings promises.
 
+### AKDT — Autonomous Kinetic-Digital Twin for Industrial Logistics Resilience
+
+AKDT is positioned as an **Enterprise Plus scenario workflow** for exploring how disruptions can propagate through a connected logistics network. The intended workflow is to represent suppliers, routes, hand-offs, capacity limits and demand; stress-test assumptions such as route availability or lead time; compare alternatives; and record the evidence still needed before a plant-level decision.
+
+Use synthetic inputs for demonstrations unless approved operational data is connected and validated. A scenario result is not a live autonomous controller, a guaranteed recovery plan, or proof of realized savings.
+
 ### Industrial decision and digital-thread workflow
 
 The wider platform direction connects:
