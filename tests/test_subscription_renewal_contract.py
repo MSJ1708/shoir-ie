@@ -166,3 +166,18 @@ def test_subscription_decision_migration_is_transactional_and_pending_only():
     assert "INTERVAL '30 days'" in migration
 
 
+
+
+
+def test_registration_submit_validates_proof_before_any_persistence():
+    registration_block = APP_SOURCE.split(
+        'if st.button("Send Verification Request", type="primary", key="btn_send_request"):', 1
+    )[1].split(
+        "# TAB 3: EXPLORE THE MODULES", 1
+    )[0]
+
+    assert registration_block.index("_encode_renewal_proof(uploaded_screenshot)") < registration_block.index("INSERT INTO pending_payments")
+    assert registration_block.index("insert_remote_request({") < registration_block.index("INSERT INTO pending_payments")
+    assert '"proof_base64": _registration_proof_base64' in registration_block
+    assert '"proof_content_type": _registration_proof_content_type' in registration_block
+    assert "Password must be between 8 and 128 characters." in registration_block
