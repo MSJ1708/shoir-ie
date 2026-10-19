@@ -112,3 +112,53 @@ def test_remote_research_upsert_rejects_cross_owner_conflict(monkeypatch):
     assert "ON CONFLICT (study_id) DO UPDATE SET" in sql
     assert "WHERE shoir_research_studies.owner_lc = EXCLUDED.owner_lc" in sql
     assert fake_connection.committed is False
+
+
+
+def test_edge_logout_revokes_only_the_requested_account_session(monkeypatch):
+    calls = []
+
+    def fake_edge_call(action, payload):
+        calls.append((action, payload))
+        return {"ok": True, "revoked": True}
+
+    monkeypatch.setattr(das, "_edge_call", fake_edge_call)
+    result = das.edge_logout("shoir-e2e-active", "temporary-token")
+
+    assert result == {"ok": True, "revoked": True}
+    assert calls == [("logout", {"username": "shoir-e2e-active", "token": "temporary-token"})]
+
+
+def test_edge_login_contract_denies_inactive_accounts_and_supports_session_revocation():
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    edge_source = (root / "supabase/functions/shoir-persistence/index.ts").read_text(encoding="utf-8")
+    app_source = (root / "app.py").read_text(encoding="utf-8")
+
+    assert 'if(!row||row.active===false||!await verifyPassword(row.password_hash,password))' in edge_source
+    assert 'if(action==="logout")' in edge_source
+    assert '.eq("token_hash",tokenHash).eq("username_lc",usernameLc).select("token_hash")' in edge_source
+    assert 'edge_logout(_logout_user, _logout_token)' in app_source
+    assert 'if _shell_surface == "logout":' in app_source
+    assert 'edge_logout(_renew_username, _renew_token)' in app_source
+
+
+
+def test_login_throttle_contract_is_server_only_and_atomic():
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    edge_source = (root / "supabase/functions/shoir-persistence/index.ts").read_text(encoding="utf-8")
+    migration = (root / "supabase/migrations/20261019123300_server_side_login_rate_limits.sql").read_text(encoding="utf-8")
+
+    assert 'loginThrottleBuckets(usernameLc,req)' in edge_source
+    assert 'checkLoginThrottle(bucket.key_hash,bucket.max_attempts,"attempt")' in edge_source
+    assert 'response({error:"Too many sign-in attempts. Please wait and try again."},429)' in edge_source
+    assert 'response({error:"Authentication protection is temporarily unavailable. Please retry shortly."},503)' in edge_source
+    assert 'SECURITY INVOKER' in migration
+    assert 'pg_advisory_xact_lock' in migration
+    assert 'ALTER TABLE public.shoir_login_throttle ENABLE ROW LEVEL SECURITY' in migration
+    assert 'REVOKE ALL ON TABLE public.shoir_login_throttle FROM anon, authenticated' in migration
+    assert 'REVOKE EXECUTE ON FUNCTION public.shoir_check_login_throttle' in migration
+    assert 'TO service_role' in migration

@@ -98,27 +98,58 @@ async function createSession(usernameLc:string,scope:"workspace"|"renewal"="work
 async function getSession(token:string,username?:string,requiredScope:"workspace"|"renewal"|"either"="workspace"){const h=bytesToHex(await crypto.subtle.digest("SHA-256",new TextEncoder().encode(token)));const {data,error}=await supabase.from("shoir_sessions").select("username_lc,expires_at,scope").eq("token_hash",h).maybeSingle();if(error||!data||isExpired(data.expires_at))throw new Error("Unauthorized session.");if(username&&data.username_lc!==username.trim().toLowerCase())throw new Error("Unauthorized session.");const scope=data.scope||"workspace";if(requiredScope!=="either"&&scope!==requiredScope)throw new Error("Session scope does not permit this action.");const row=await getAccount(data.username_lc);if(!row||row.active===false)throw new Error("Account is inactive.");if(requiredScope==="workspace"&&!(row.username_lc==="sho"&&row.role==="Enterprise Admin")&&isExpired(row.subscription_expires_at))throw new Error("SUBSCRIPTION_EXPIRED");return row;}
 async function adminSession(username:string,token:string){const row=await getSession(token,username);if(row.username_lc!=="sho"||row.role!=="Enterprise Admin")throw new Error("Admin authorization failed.");return row;}
 
+async function loginThrottleKey(raw:string){
+ const hmacKey=await crypto.subtle.importKey("raw",new TextEncoder().encode(SERVICE_ROLE_KEY),{name:"HMAC",hash:"SHA-256"},false,["sign"]);
+ const signature=await crypto.subtle.sign("HMAC",hmacKey,new TextEncoder().encode(raw));
+ return bytesToHex(signature);
+}
+async function checkLoginThrottle(keyHash:string,maxAttempts:number,mode:"attempt"|"clear"){
+ const {data,error}=await supabase.rpc("shoir_check_login_throttle",{
+  p_key_hash:keyHash,p_mode:mode,p_max_attempts:maxAttempts,
+  p_window_seconds:600,p_block_seconds:600
+ });
+ if(error)throw new Error("Authentication protection is temporarily unavailable.");
+ const result=data as {blocked?:boolean}|null;
+ return Boolean(result?.blocked);
+}
+async function loginThrottleBuckets(usernameLc:string,req:Request){
+ const keys:Array<{key_hash:string,max_attempts:number,reset_on_success:boolean}>=[
+  {key_hash:await loginThrottleKey("user:"+usernameLc),max_attempts:8,reset_on_success:true}
+ ];
+ // Trust only the reverse-proxy-populated Cloudflare IP header; never accept a
+ // client-controlled X-Forwarded-For value as the source of an IP limit.
+ const clientIp=String(req.headers.get("cf-connecting-ip")||"").trim();
+ if(clientIp&&clientIp.length<=128)keys.push({
+  key_hash:await loginThrottleKey("ip:"+clientIp),max_attempts:30,reset_on_success:false
+ });
+ return keys;
+}
+
 Deno.serve(async(req)=>{
- if(req.method==="OPTIONS")return response({ok:true});
- try{
-  const body=await req.json(); const action=String(body.action||"");
-
-  if(action==="account_exists"){const row=await getAccount(String(body.username||""));return response({exists:!!row,username:row?.username||null});}
-
-  if(action==="register_request"){
-   const username=String(body.username||"").trim(), password=String(body.password||""), email=String(body.email||"").trim(), tier=String(body.tier||"Starter Tier ($29)");
-   if(!username||!password||!email)return response({error:"Missing registration fields."},400);
-   if(await getAccount(username))return response({error:"An account already exists for this username."},409);
-   const passwordHash=await hashPassword(password);
-   const cred=await supabase.from("shoir_pending_credentials").upsert({username_lc:username.toLowerCase(),username,password_hash:passwordHash,email,updated_at:new Date().toISOString()},{onConflict:"username_lc"});
-   if(cred.error)throw cred.error;
-   const pending=await supabase.from("shoir_subscription_requests").insert({username,username_lc:username.toLowerCase(),email,tier,request_type:"New",payment_method:body.payment_method||"",transaction_id:body.transaction_id||null,screenshot_path:body.screenshot_path||null,status:"Pending"}).select("id").single();
-   if(pending.error)throw pending.error; return response({ok:true,request_id:pending.data.id});
-  }
-
-  if(action==="login"){
-   const username=String(body.username||"").trim(),password=String(body.password||""),row=await getAccount(username);
-   if(!row||!await verifyPassword(row.password_hash,password))return response({error:"Invalid username or password."},401);
+ if(req.method==="OPTIONS")retu  if(action==="login"){
+   const username=String(body.username||"").trim(),password=String(body.password||"");
+   const usernameLc=username.toLowerCase();
+   let throttleBuckets:Array<{key_hash:string,max_attempts:number,reset_on_success:boolean}>;
+   let blocked=false;
+   try{
+    throttleBuckets=await loginThrottleBuckets(usernameLc,req);
+    for(const bucket of throttleBuckets){
+     if(await checkLoginThrottle(bucket.key_hash,bucket.max_attempts,"attempt"))blocked=true;
+    }
+   }catch{
+    return response({error:"Authentication protection is temporarily unavailable. Please retry shortly."},503);
+   }
+   if(blocked)return response({error:"Too many sign-in attempts. Please wait and try again."},429);
+   const row=await getAccount(username);
+   if(!row||row.active===false||!await verifyPassword(row.password_hash,password))
+    return response({error:"Invalid username or password."},401);
+   try{
+    for(const bucket of throttleBuckets){
+     if(bucket.reset_on_success)await checkLoginThrottle(bucket.key_hash,bucket.max_attempts,"clear");
+    }
+   }catch{
+    return response({error:"Authentication protection is temporarily unavailable. Please retry shortly."},503);
+   }
    // The canonical master-admin identity receives Enterprise Plus, while its
    // existing password, role, email, account identity and expiry remain intact.
    const isMasterAdmin = row.username_lc==="sho"&&row.role==="Enterprise Admin";
@@ -130,6 +161,24 @@ Deno.serve(async(req)=>{
    const effectiveTier=isMasterAdmin?adminTier:row.tier;
    if(!isMasterAdmin&&isExpired(row.subscription_expires_at)){const token=await createSession(row.username_lc,"renewal",60*60*1000);return response({error:"SUBSCRIPTION_EXPIRED",token,username:row.username,tier:effectiveTier,email:row.email,expires_at:row.subscription_expires_at,renewal_only:true},403);}
    const token=await createSession(row.username_lc); return response({ok:true,token,username:row.username,role:row.role,tier:effectiveTier,email:row.email,expires_at:row.subscription_expires_at});
+  }tierError}=await supabase.from("shoir_accounts").update({tier:adminTier,updated_at:new Date().toISOString()}).eq("username_lc","sho");
+    if(tierError)throw tierError;
+   }
+   const effectiveTier=isMasterAdmin?adminTier:row.tier;
+   if(!isMasterAdmin&&isExpired(row.subscription_expires_at)){const token=await createSession(row.username_lc,"renewal",60*60*1000);return response({error:"SUBSCRIPTION_EXPIRED",token,username:row.username,tier:effectiveTier,email:row.email,expires_at:row.subscription_expires_at,renewal_only:true},403);}
+   const token=await createSession(row.username_lc); return response({ok:true,token,username:row.username,role:row.role,tier:effectiveTier,email:row.email,expires_at:row.subscription_expires_at});
+  }
+
+  if(action==="logout"){
+   const token=String(body.token||"").trim();
+   const usernameLc=String(body.username||"").trim().toLowerCase();
+   if(!token||!usernameLc)return response({ok:true,revoked:false});
+   const tokenHash=bytesToHex(await crypto.subtle.digest("SHA-256",new TextEncoder().encode(token)));
+   // Revocation is idempotent and account-scoped. Never store or log the bearer token.
+   const {data,error}=await supabase.from("shoir_sessions").delete()
+     .eq("token_hash",tokenHash).eq("username_lc",usernameLc).select("token_hash");
+   if(error)throw error;
+   return response({ok:true,revoked:!!(data&&data.length)});
   }
 
   if(action==="workspace_load"){await getSession(String(body.token),String(body.username));const {data,error}=await supabase.from("shoir_workspace_states").select("state_json,updated_at").eq("username_lc",String(body.username).trim().toLowerCase()).maybeSingle();if(error)throw error;return response({ok:true,state_json:data?.state_json||null,updated_at:data?.updated_at||null});}

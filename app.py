@@ -63,7 +63,7 @@ except ImportError:
 from shoir_copilot_orchestrator import build_workflow_plan, recommend_module, run_orchestration, stage_copilot_decision
 from shoir_digital_thread import render_global_project_digital_thread
 from shoir_enterprise_services import render_enterprise_bridge
-from durable_account_store import (durable_backend_configured, sync_durable_accounts, sync_remote_requests_to_local, edge_login, edge_admin_list_requests, edge_renew_request, upsert_remote_account, insert_remote_request, remote_account, account_is_expired, renewed_expiry)
+from durable_account_store import (durable_backend_configured, sync_durable_accounts, sync_remote_requests_to_local, edge_login, edge_logout, edge_admin_list_requests, edge_renew_request, upsert_remote_account, insert_remote_request, remote_account, account_is_expired, renewed_expiry)
 
 # Compatibility guard: a hosted deployment can briefly have a newer app.py than
 # its supporting module during a rolling rebuild. Keep a receipt-preview import
@@ -1394,6 +1394,14 @@ if st.session_state.get("renewal_mode") and not st.session_state.get("current_us
         st.success(f"Renewal request reference: {st.session_state['renewal_request_submitted']}")
         st.caption("You can close this page safely. Sign in again after the administrator confirms approval.")
     if st.button("Back to sign in", key="expired_renewal_back"):
+        _renew_username = str(st.session_state.get("renewal_username") or "")
+        _renew_token = str(st.session_state.get("renewal_session_token") or "")
+        if _renew_username and _renew_token:
+            try:
+                edge_logout(_renew_username, _renew_token)
+            except Exception:
+                st.error("The renewal session could not be revoked. Please retry before leaving this screen.")
+                st.stop()
         st.session_state.pop("renewal_mode", None)
         st.session_state.pop("renewal_session_token", None)
         st.session_state.pop("renewal_request_submitted", None)
@@ -2150,6 +2158,25 @@ selected_module, _shell_surface = render_application_shell(
     module_catalog=MODULE_CATALOG,
 )
 st.session_state.pop("_shoir_requested_module", None)
+
+if _shell_surface == "logout":
+    _logout_user = str(st.session_state.get("current_user") or "")
+    _logout_token = str(st.session_state.get("remote_session_token") or st.session_state.get("renewal_session_token") or "")
+    if _logout_user and _logout_token:
+        try:
+            edge_logout(_logout_user, _logout_token)
+        except Exception:
+            st.error("Server logout could not revoke this session. Please retry; you are still signed in.")
+            st.stop()
+    if _logout_user:
+        try:
+            save_user_workspace(_logout_user, st.session_state)
+            log_audit(_logout_user, "User Logged Out")
+        except Exception:
+            pass
+    for _logout_key in list(st.session_state.keys()):
+        del st.session_state[_logout_key]
+    st.rerun()
 # Compatibility contract retained for existing smoke tests and legacy integrations.
 # IMPORTANT: this is state only; it is intentionally NOT reused as a Streamlit widget key,
 # avoiding the historical widget-instantiation conflict while preserving the old selector name.
@@ -2393,6 +2420,15 @@ if str(st.session_state.get("current_user", "")).strip().lower() != "sho":
                     save_user_workspace(_expired_user, st.session_state)
                 except Exception:
                     pass
+                _expiry_username = str(st.session_state.get("current_user") or "")
+                _expiry_token = str(st.session_state.get("remote_session_token") or "")
+                if _expiry_username and _expiry_token:
+                    try:
+                        edge_logout(_expiry_username, _expiry_token)
+                    except Exception:
+                        # The server has already expired this workspace scope; local
+                        # logout must still complete if revocation transport is down.
+                        pass
                 for _expiry_key in list(st.session_state.keys()):
                     try:
                         del st.session_state[_expiry_key]
@@ -2495,10 +2531,20 @@ if str(st.session_state.get("current_user", "")).strip().lower() != "sho":
 
 st.sidebar.markdown("---")
 if st.sidebar.button("Lock / Logout Workspace"):
-    _logout_user = st.session_state.get("current_user", "")
+    _logout_user = str(st.session_state.get("current_user") or "")
+    _logout_token = str(st.session_state.get("remote_session_token") or st.session_state.get("renewal_session_token") or "")
     if _logout_user:
-        save_user_workspace(_logout_user, st.session_state)
-        log_audit(_logout_user, "User Logged Out")
+        try:
+            save_user_workspace(_logout_user, st.session_state)
+            log_audit(_logout_user, "User Logged Out")
+        except Exception:
+            pass
+    if _logout_user and _logout_token:
+        try:
+            edge_logout(_logout_user, _logout_token)
+        except Exception:
+            st.error("Server logout could not revoke this session. Please retry; you are still signed in.")
+            st.stop()
     for _key in list(st.session_state.keys()):
         del st.session_state[_key]
     st.rerun()

@@ -33,6 +33,10 @@ This record reflects the 2026-10-19 release-readiness consolidation. Current `ma
 
 **Release decision:** automated and public-shell checks passed, but **the full definition of done remains OPEN** until authorized authenticated browser tests and the remaining module/import/export/persistence/security matrix rows are recorded with evidence.
 
+## Authenticated end-to-end test runner
+
+The manual, secrets-backed test runner and its account-safety requirements are documented in [AUTHENTICATED_RELEASE_GATE.md](AUTHENTICATED_RELEASE_GATE.md). Do not use the master administrator or customer accounts. Results remain **unverified until a maintainer runs the workflow against the intended deployed build**.
+
 ## Account, subscription and session matrix
 
 | ID | Scenario | Expected result | Minimum evidence |
@@ -79,6 +83,10 @@ Test every current catalog item and legacy route that remains reachable, not onl
 - Change a workspace field, reload the page, sign out/in, then repeat after app restart.
 - Verify workspace states, research records, payment request metadata, profile attributes and report artifacts stay associated with the same normalized account.
 - Verify save/load errors remain visible and actionable; do not silently claim durability if the managed backend fails.
+
+## Authentication abuse protection
+
+Server-side login rate limiting is being added in the same reviewed release series. It requires migration `20261019123300_server_side_login_rate_limits.sql` to be applied before deploying the Edge Function revision that calls it. The throttle table and RPC deny `anon`/`authenticated` access and grant the RPC only to `service_role`. Verify this order and the live behavior before marking AUTH-02 complete.
 
 ## Role, tier and tenant isolation matrix
 
