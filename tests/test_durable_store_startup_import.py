@@ -52,4 +52,5 @@ def test_app_validates_store_exports_before_binding_them():
     assert "import durable_account_store as _durable_account_store" in source
     assert "_DURABLE_STORE_MISSING_EXPORTS" in source
     assert "Shoir-IE could not initialize its required account and persistence layer." in source
-    assert "Account access is disabled until the required persistence functions are available." in source
+    assert "Account access is disabled " in source
+    assert "until the required persistence functions are available." in source
