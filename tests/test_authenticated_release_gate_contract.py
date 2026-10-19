@@ -27,3 +27,11 @@ def test_authenticated_browser_gate_checks_module_route_and_shell_logout():
     assert "Excel Data Cleaning & Import" in script
     assert "sidebar_logout_returns_to_signin" in script
     assert "Lock / Logout Workspace" in script
+
+
+
+def test_server_login_throttle_is_reviewed_and_migration_first():
+    migration = (ROOT / "supabase/migrations/20261019123300_server_side_login_rate_limits.sql").read_text(encoding="utf-8")
+    edge = (ROOT / "supabase/functions/shoir-persistence/index.ts").read_text(encoding="utf-8")
+    assert "shoir_check_login_throttle" in migration
+    assert 'supabase.rpc("shoir_check_login_throttle"' in edge

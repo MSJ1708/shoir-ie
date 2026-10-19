@@ -40,7 +40,7 @@ Do not put passwords or tokens in workflow inputs, source files, issues, pull re
 3. Review the run summary and download `shoir-ie-authenticated-release-evidence`.
 4. Record the run URL, commit SHA, timestamp, target environment, and each case's result in `docs/RELEASE_VERIFICATION_MATRIX.md`. Treat any failed cleanup or workspace restore as a release blocker.
 
-The gate checks active/invalid-password/expired authentication, dedicated-account tier metadata, server-side non-admin denial, owner-bound workspace access, workspace save/re-login/restore, renewal-only restrictions and reference validation, server logout revocation, and an authenticated browser route to the Excel module.
+The gate checks active/invalid-password/expired authentication, dedicated-account tier metadata, server-side non-admin denial, owner-bound workspace access, workspace save/re-login/restore, renewal-only restrictions and reference validation, server logout revocation, and an authenticated browser route to the Excel module. Login throttling is a separate guarded feature: deploy the migration before the Edge Function that calls its RPC.
 
 ## Explicit limits
 

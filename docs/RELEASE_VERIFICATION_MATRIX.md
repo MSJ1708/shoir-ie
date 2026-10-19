@@ -84,6 +84,10 @@ Test every current catalog item and legacy route that remains reachable, not onl
 - Verify workspace states, research records, payment request metadata, profile attributes and report artifacts stay associated with the same normalized account.
 - Verify save/load errors remain visible and actionable; do not silently claim durability if the managed backend fails.
 
+## Authentication abuse protection
+
+Server-side login rate limiting is being added in the same reviewed release series. It requires migration `20261019123300_server_side_login_rate_limits.sql` to be applied before deploying the Edge Function revision that calls it. The throttle table and RPC deny `anon`/`authenticated` access and grant the RPC only to `service_role`. Verify this order and the live behavior before marking AUTH-02 complete.
+
 ## Role, tier and tenant isolation matrix
 
 - Admin account is Enterprise Plus and retains Enterprise Admin role.
