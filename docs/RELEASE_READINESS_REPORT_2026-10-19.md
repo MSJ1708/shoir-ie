@@ -38,6 +38,7 @@ The principal blockers are a deployed Edge Function/source mismatch, no availabl
 | Existing staging/development branches | None returned by the current Supabase branch listing | Full production-matched staging replay is **BLOCKED**. No paid branch/project was created as part of this audit. |
 | Master administrator invariant | Read-only result: active `true`; role `Enterprise Admin`; tier `Enterprise Plus Tier ($399)`; expiry `2099-01-01 00:00:00+00` | **PASS.** No password, identity, role, workspace, tier, expiry, or account data was modified. No admin account was used for testing. |
 | Production mutation boundary | No migration or Edge Function deployment was performed during this audit | Production remains on the observed version 8 function and listed migration history. |
+| Protected account/workspace tables | **PASS for the five reviewed tables only** | Read-only SQL returned no direct `anon`/`authenticated` table grants on `shoir_accounts`, `shoir_pending_credentials`, `shoir_sessions`, `shoir_subscription_requests` or `shoir_workspace_states`; RLS is enabled on all five. Catalog lookup found neither atomic registration nor subscription-finalization RPC in production. This is a scoped check, not a complete tenant-isolation certification. |
 
 ### Module inventory and actual workforce acceptance
 
