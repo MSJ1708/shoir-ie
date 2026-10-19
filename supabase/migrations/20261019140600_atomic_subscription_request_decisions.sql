@@ -208,7 +208,7 @@ BEGIN
             USING ERRCODE = '22023';
     END IF;
 
-    IF p_tier NOT IN (
+    IF p_tier IS NULL OR p_tier NOT IN (
         'Starter Tier ($29)',
         'Mid-Tier Pro ($79)',
         'Professional Tier ($129)',
@@ -225,9 +225,23 @@ BEGIN
             USING ERRCODE = '22023';
     END IF;
 
-    IF p_screenshot_path IS NULL
-       OR p_screenshot_path NOT LIKE 'storage://subscription-payment-proofs/renewals/%' THEN
-        RAISE EXCEPTION 'A privately stored payment proof is required.'
+    -- The activation/ticket reference is optional on initial registration, but
+    -- reject excessively long values and control characters when one is supplied.
+    IF p_transaction_id IS NOT NULL AND (
+        length(btrim(p_transaction_id)) > 128
+        OR btrim(p_transaction_id) ~ '[[:cntrl:]]'
+    ) THEN
+        RAISE EXCEPTION 'Invalid payment reference.'
+            USING ERRCODE = '22023';
+    END IF;
+
+    -- Proof upload is optional. If present, only a private server-generated
+    -- storage reference is accepted; clients cannot supply arbitrary file paths.
+    IF p_screenshot_path IS NOT NULL AND (
+        btrim(p_screenshot_path) = ''
+        OR p_screenshot_path NOT LIKE 'storage://subscription-payment-proofs/renewals/%'
+    ) THEN
+        RAISE EXCEPTION 'Invalid private payment proof reference.'
             USING ERRCODE = '22023';
     END IF;
 
