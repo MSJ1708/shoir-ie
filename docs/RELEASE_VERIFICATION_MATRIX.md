@@ -11,25 +11,6 @@ This matrix is the release gate for the subscription renewal, account, module, i
 - **Browser verified** — completed against the hosted application using an authorized account; record date, account class, build, steps and observed outcome.
 - **Blocked** — a dependency prevents a trustworthy test; document the dependency and do not mark the release definition of done complete.
 
-## Latest release decision — 2026-10-19 (supersedes older smoke result below)
-
-**Current decision: NO-GO for workforce production use.** The fresh public-browser rerun (attempt 3) failed again against the hosted Streamlit URL: the page showed Streamlit's redacted `ImportError` screen and the application frame was not found. See [failed live smoke run](https://github.com/MSJ1708/shoir-ie/actions/runs/39238591641) and [latest failed evidence artifact](https://github.com/MSJ1708/shoir-ie/actions/runs/39238591641/artifacts/12194522007). The exact runtime exception and deployed Streamlit SHA are not available from the public response; inspect Streamlit Cloud private runtime logs and record the actual deployed revision before further release claims. Do not rely on the earlier smoke-pass row later in this document; it is superseded by this failure.
-
-The PR #145 candidate implementation and isolated PostgreSQL test revision is [`c375ec70240849fa607d3426cad18c8682004e0b`](https://github.com/MSJ1708/shoir-ie/commit/c375ec70240849fa607d3426cad18c8682004e0b), still open and not deployed. Candidate CI passed: [482 tests, 1 skipped, 2 warnings](https://github.com/MSJ1708/shoir-ie/actions/runs/39270884924), [engine regression](https://github.com/MSJ1708/shoir-ie/actions/runs/39270884941), [platform tests](https://github.com/MSJ1708/shoir-ie/actions/runs/39270884928), [security/quality](https://github.com/MSJ1708/shoir-ie/actions/runs/39270884906), [Deno format/type-check](https://github.com/MSJ1708/shoir-ie/actions/runs/39270884957), [consolidated validation](https://github.com/MSJ1708/shoir-ie/actions/runs/39270884903), and [isolated PostgreSQL transaction integration](https://github.com/MSJ1708/shoir-ie/actions/runs/39270884993) (1 passed). The PostgreSQL run executes the migration on a minimal synthetic schema; it is not an actual staging replay. The candidate contains fixes for durable registration/duplicate handling and atomic pending-only approval/decline decisions. These are candidate source and CI results, not live production verification.
-
-| Current gate | Status | Evidence / closure requirement |
-|---|---|---|
-| Current public Streamlit entry screen | **FAIL — release blocker** | Fresh smoke shows redacted ImportError page, no app frame. Diagnose the exact Streamlit runtime exception, establish deployed SHA, fix and rerun public desktop/mobile smoke. |
-| Production database and security boundary | **PASS — read-only checks only** | Supabase active/healthy; deployed Edge version 8; throttle grants, protected table privileges/RLS, private proof bucket and admin invariant checked. Does not equal full tenant-isolation certification. |
-| Protected master admin invariant | **PASS — no writes** | Existing account is active, role `Enterprise Admin`, tier `Enterprise Plus Tier ($399)`, expiry `2099-01-01 UTC`; no admin account used for tests. |
-| PR #145 application/Edge candidate checks | **PASS — candidate only** | Candidate automated checks above passed at revision `b7c9da43...`; PR remains unmerged and not deployed. |
-| PR #145 database migration | **PARTIAL — synthetic PostgreSQL CI passed; staging replay still blocked** | [Isolated PostgreSQL integration](https://github.com/MSJ1708/shoir-ie/actions/runs/39270884993) validates SQL/function behavior against a minimal synthetic schema. Replay the migration and verify constraints/grants against a production-matching staging database before production use. |
-| Authenticated release workflow | **UNVERIFIED** | No completed authenticated release-gate evidence was found. Run with protected secrets and disposable `shoir-e2e-*` accounts; do not use admin or customer identities. |
-| 96-module browser matrix | **UNVERIFIED** | Inventory has 96 distinct module names, but all authenticated browser statuses are `UNVERIFIED`. Each module needs suitable inputs/outputs, rendering, entitlement, error/empty state and export verification as applicable. |
-| Worker go-live | **NO-GO** | Do not onboard workers until the public app starts correctly and critical authenticated, migration, module and import/export acceptance evidence is recorded. |
-
-Full dated analysis and closure sequence: [Release Readiness Report](RELEASE_READINESS_REPORT_2026-10-19.md).
-
 ## Latest repair and deployment update — 2026-10-19
 
 This section supersedes the earlier commit/version references below for the Edge dispatcher repair only. The latest verified repository commit is `9572feef9b970f1c2fc0029d963af327aed83b6b` (PR #144 merged). Production Supabase project `shoir-ie-production` reports `shoir-persistence` active at version 8 after deploying the source from that commit.
@@ -124,7 +105,7 @@ Test every current catalog item and legacy route that remains reachable, not onl
 
 ## Authentication abuse protection
 
-Read-only production inspection on 2026-10-19 confirmed that active Edge Function v8 calls `shoir_check_login_throttle`; the function denies EXECUTE to `anon` and `authenticated` and grants it to `service_role`. The `shoir_login_throttle` table has RLS enabled and denies SELECT/INSERT/UPDATE/DELETE to both client roles. This verifies deployed permissions, **not** the complete behavioral abuse suite: synthetic account/IP throttling, concurrency, fail-closed behavior, expiry and cleanup still require controlled tests. One migration-history discrepancy remains: production records version `20261019124815` (`server_side_login_rate_limits`), while the repository filename is `20261019123300_server_side_login_rate_limits.sql`. Reconcile this timestamp/source difference before the next migration release.
+Server-side login rate limiting is being added in the same reviewed release series. It requires migration `20261019123300_server_side_login_rate_limits.sql` to be applied before deploying the Edge Function revision that calls it. The throttle table and RPC deny `anon`/`authenticated` access and grant the RPC only to `service_role`. Verify this order and the live behavior before marking AUTH-02 complete.
 
 ## Role, tier and tenant isolation matrix
 
@@ -143,16 +124,26 @@ For each run, retain commit SHA, CI workflow URL, environment/build, timestamp, 
 
 **Definition of done:** every required automated job passes; the hosted browser walkthroughs pass using authorized test accounts; all relevant module, export, persistence, role, tier and security cases have evidence; high-severity findings are resolved; and remaining limitations are explicitly accepted. Do not use “fully verified” when a browser pass or a required matrix row is still blocked.
 
-## Latest deployment evidence — 2026-10-19 14:55 UTC
+## Durable account-store import recovery — 2026-10-19 15:17–15:18 UTC
 
-| Check | Result | Evidence / remaining action |
-|---|---|---|
-| Public hosted entry screen, desktop 1440×1000 | **FAIL** | Actions run [39273186987](https://github.com/MSJ1708/shoir-ie/actions/runs/39273186987), artifact ID 12196580808. HTTP 200, but the Streamlit frame displays the redacted ImportError screen; the application sign-in surface is absent. |
-| Public hosted entry screen, mobile 390×844 | **FAIL** | Same run/artifact; redacted ImportError screen; no app sign-in surface. |
-| Local Streamlit startup and public shell, desktop/mobile | **PASS** | Same run's local runtime smoke artifact 12196146718; top-level import execution and Playwright smoke passed, with no horizontal overflow or fatal app marker. This does not prove the hosted deployment is healthy. |
-| Production Edge Function / migration alignment | **BLOCKED** | The production function is active version 8 (source hash 410e22f7af0be8f3ec74bae5a15aec70f8b6a807a540e98a2c5143f4e6b8790d). Read-only source inspection found the login-throttle RPC call, but not the candidate's registration, account-existence preflight or atomic subscription-decision actions. Production migration history ends at 20261019124815_server_side_login_rate_limits; candidate migration 20261019140600_atomic_subscription_request_decisions.sql is absent. |
-| Master administrator invariant | **PASS — READ ONLY** | Production query returned active Enterprise Admin, Enterprise Plus Tier ($399), expiry 2099-01-01 00:00:00+00. No fields changed. |
-| 96-module browser matrix | **UNVERIFIED** | docs/MODULE_TIER_INVENTORY.csv contains 96 unique modules; all 96 authenticated_browser_status values remain UNVERIFIED. |
-| Candidate registration/atomic decision checks | **AUTOMATED PASS / STAGING NOT RUN** | Candidate PR CI passes at the time of this update, including Deno format/type checks and PostgreSQL transaction-contract integration. The migration remains unapplied to production and must first be checked against an isolated staging schema. |
+**PUBLIC STARTUP SMOKE: PASS after main merge `cf50437887fce04fc5cf0450d7f3317d0a358d7f`.**
 
-The Streamlit traceback is private to Streamlit Cloud and is not exposed by its redacted public error page. Close the hosted-startup gate only after the owner inspects **Manage app → runtime logs**, records the actual deployed revision/runtime/dependency versions, fixes the exact exception, and repeats the public desktop/mobile smoke. No authenticated release test is claimed: protected test credentials and dedicated disposable accounts were not supplied to CI.
+Evidence: [GitHub Actions run 39276620207](https://github.com/MSJ1708/shoir-ie/actions/runs/39276620207), artifact `12198120719` (`shoir-ie-live-deployment-smoke`).
+
+- Desktop 1440×1000: HTTP 200; Shoir-IE welcome/sign-in surface found; no fatal startup marker; no uncaught browser JavaScript errors; no horizontal overflow.
+- Mobile 390×844: same result.
+- Subscription-registration tab: passed on desktop and mobile; expected tier, username, email, password and activation/ticket fields were found.
+- Public module explorer: passed on desktop and mobile; Enterprise Plus plan card was found; Venture Studio section was reached.
+- Main-branch validation run [39276609544](https://github.com/MSJ1708/shoir-ie/actions/runs/39276609544): local tests and public live smoke both succeeded.
+
+This closes the previously failing **public startup/shell smoke**. The previous redacted Streamlit ImportError no longer appeared in the post-merge run. The exact internal exception from the earlier redacted runtime was not available in the public page, so the record does not claim a specific missing symbol was observed. PR #147 replaces the fragile direct multi-name import with an explicit durable-store API contract check and a fail-closed diagnostic if the module or required functions are unavailable.
+
+**Scope limitation:** these checks verify the public unauthenticated entry screen, registration form rendering and public module-explorer content only. Authenticated login/logout, subscription decisions, all 96 engineering modules, tier enforcement, real file round trips, cross-account isolation, migration rollout and disaster recovery remain open. The smoke report also recorded some nonfatal 404 requests from analytics/Streamlit endpoints; they did not trigger the fatal application-error gate, but should be reviewed separately if they affect product telemetry.
+
+## Candidate registration and atomic subscription decisions — 2026-10-19
+
+**Status: candidate CI passed; staging and production release remain blocked.** PR [#145](https://github.com/MSJ1708/shoir-ie/pull/145) adds durable registration/preflight actions and atomic, pending-only subscription approval/decline. Candidate checks passed for [Python tests](https://github.com/MSJ1708/shoir-ie/actions/runs/39277362985), [engine regression](https://github.com/MSJ1708/shoir-ie/actions/runs/39277363273), [platform tests](https://github.com/MSJ1708/shoir-ie/actions/runs/39277362885), [security/quality](https://github.com/MSJ1708/shoir-ie/actions/runs/39277363279), [Edge Function checks](https://github.com/MSJ1708/shoir-ie/actions/runs/39277363015), and [subscription transaction integration](https://github.com/MSJ1708/shoir-ie/actions/runs/39277363454).
+
+The PostgreSQL test uses an isolated synthetic schema; it is not a migration replay against a production-matched staging database. Migration `20261019140600_atomic_subscription_request_decisions.sql` is not recorded in production migration history and must not be applied to production until staging replay, migration-order review and matching Edge Function verification pass. Then run the authenticated release gate with disposable `shoir-e2e-*` accounts and protected Actions secrets.
+
+The durable-store startup guard is already on `main`; the later public smoke pass recorded above supersedes earlier failed smoke attempts for those earlier revisions. No master-admin/customer account, subscription or production record was modified by the candidate checks.
