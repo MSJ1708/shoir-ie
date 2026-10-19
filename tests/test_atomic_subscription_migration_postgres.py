@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import json
 import os
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlparse
@@ -305,3 +307,138 @@ def test_atomic_subscription_migration_and_state_transitions():
         "TEST-AFFILIATE",
     )
     assert renewed[10] is True
+
+    # Race two registrations for the same normalized username using independent
+    # PostgreSQL sessions. Exactly one may create the Pending request.
+    concurrent_registration_user = "shoir-e2e-conreg"
+    registration_barrier = Barrier(2)
+
+    def register_concurrently():
+        registration_barrier.wait(timeout=5)
+        try:
+            result = _registration(concurrent_registration_user)
+            return ("success", result)
+        except psycopg2.Error as exc:
+            return ("error", exc.pgcode)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        registration_futures = [
+            pool.submit(register_concurrently),
+            pool.submit(register_concurrently),
+        ]
+        registration_results = [future.result(timeout=15) for future in registration_futures]
+
+    assert sum(result[0] == "success" for result in registration_results) == 1
+    registration_errors = [result[1] for result in registration_results if result[0] == "error"]
+    assert registration_errors == ["P0002"]
+    assert _sql(
+        "SELECT count(*) FROM public.shoir_subscription_requests WHERE username_lc=%s AND request_type='New' AND status='Pending'",
+        (concurrent_registration_user,),
+    ) == 1
+    assert _sql(
+        "SELECT count(*) FROM public.shoir_pending_credentials WHERE username_lc=%s",
+        (concurrent_registration_user,),
+    ) == 1
+
+    # Race two decisions for the same Pending request. The row lock and status
+    # guard must allow one durable transition and reject the stale contender.
+    decision_request = _registration("shoir-e2e-condec")
+    decision_request_id = int(decision_request["request_id"])
+    decision_barrier = Barrier(2)
+
+    def decide_concurrently():
+        decision_barrier.wait(timeout=5)
+        try:
+            return ("success", _decision(decision_request_id, "Approved"))
+        except psycopg2.Error as exc:
+            return ("error", exc.pgcode)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        decision_futures = [
+            pool.submit(decide_concurrently),
+            pool.submit(decide_concurrently),
+        ]
+        decision_results = [future.result(timeout=15) for future in decision_futures]
+
+    assert sum(result[0] == "success" for result in decision_results) == 1
+    decision_errors = [result[1] for result in decision_results if result[0] == "error"]
+    assert decision_errors == ["P0002"]
+    assert _sql(
+        "SELECT status FROM public.shoir_subscription_requests WHERE id=%s",
+        (decision_request_id,),
+    ) == "Approved"
+    assert _sql(
+        "SELECT count(*) FROM public.shoir_accounts WHERE username_lc=%s",
+        ("shoir-e2e-condec",),
+    ) == 1
+
+    # Force a failure after the approval function has inserted/updated the
+    # account but before the request transition succeeds. PostgreSQL must roll
+    # back both writes as one transaction, leaving the request Pending and no
+    # account created. The trigger is test-only and is always removed.
+    rollback_request = _registration("shoir-e2e-postgres-rollback")
+    rollback_request_id = int(rollback_request["request_id"])
+    rollback_user = "shoir-e2e-postgres-rollback"
+    _sql(
+        "UPDATE public.shoir_subscription_requests SET transaction_id=%s WHERE id=%s",
+        ("SYNTHETIC-ROLLBACK-REFERENCE", rollback_request_id),
+        fetchone=False,
+    )
+    _sql(
+        """
+        CREATE OR REPLACE FUNCTION public.shoir_test_force_approval_rollback()
+        RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN
+            IF NEW.status = 'Approved'
+               AND NEW.transaction_id = 'SYNTHETIC-ROLLBACK-REFERENCE' THEN
+                RAISE EXCEPTION 'synthetic approval failure for rollback test'
+                    USING ERRCODE = 'P0001';
+            END IF;
+            RETURN NEW;
+        END;
+        $$;
+        """,
+        fetchone=False,
+    )
+    _sql(
+        """
+        CREATE TRIGGER shoir_test_force_approval_rollback
+        BEFORE UPDATE ON public.shoir_subscription_requests
+        FOR EACH ROW EXECUTE FUNCTION public.shoir_test_force_approval_rollback();
+        """,
+        fetchone=False,
+    )
+    try:
+        with pytest.raises(psycopg2.Error) as forced_failure:
+            _decision(rollback_request_id, "Approved")
+        assert forced_failure.value.pgcode == "P0001"
+        assert _sql(
+            "SELECT status FROM public.shoir_subscription_requests WHERE id=%s",
+            (rollback_request_id,),
+        ) == "Pending"
+        assert _sql(
+            "SELECT count(*) FROM public.shoir_accounts WHERE username_lc=%s",
+            (rollback_user,),
+        ) == 0
+    finally:
+        _sql(
+            "DROP TRIGGER IF EXISTS shoir_test_force_approval_rollback ON public.shoir_subscription_requests",
+            fetchone=False,
+        )
+        _sql(
+            "DROP FUNCTION IF EXISTS public.shoir_test_force_approval_rollback()",
+            fetchone=False,
+        )
+
+    # Once the synthetic failure hook is removed, the same request remains
+    # processable; this proves the failed transaction did not leave a half-state.
+    recovered = _decision(rollback_request_id, "Approved")
+    assert recovered["status"] == "Approved"
+    assert _sql(
+        "SELECT status FROM public.shoir_subscription_requests WHERE id=%s",
+        (rollback_request_id,),
+    ) == "Approved"
+    assert _sql(
+        "SELECT count(*) FROM public.shoir_accounts WHERE username_lc=%s",
+        (rollback_user,),
+    ) == 1
