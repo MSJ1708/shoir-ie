@@ -19,7 +19,7 @@ import sys
 from datetime import datetime, timezone
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 STAGING_PROJECT_REF = "hfhrosthswcybccepmak"
 PRODUCTION_PROJECT_REF = "gcsamrdaeraxieaagsta"
@@ -91,6 +91,13 @@ def is_service_role_key(key: str) -> bool:
     return isinstance(decoded, dict) and decoded.get("role") == "service_role"
 
 
+class _NoRedirect(HTTPRedirectHandler):
+    """Never forward a privileged staging key through an HTTP redirect."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
 def _request_json(
     key: str,
     method: str,
@@ -109,7 +116,7 @@ def _request_json(
         headers["Prefer"] = "resolution=ignore-duplicates,return=representation"
     req = Request(url, data=data, headers=headers, method=method)
     try:
-        with urlopen(req, timeout=REQUEST_TIMEOUT_SECONDS) as response:
+        with build_opener(_NoRedirect()).open(req, timeout=REQUEST_TIMEOUT_SECONDS) as response:
             body = response.read()
             if not body:
                 return response.status, None
