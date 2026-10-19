@@ -1,0 +1,12 @@
+-- Historical version: 20260925093748 seed_shoir_admin_account.
+--
+-- Security note: the originally applied bootstrap statement included a static
+-- password hash for the protected master administrator. Do not commit or replay
+-- that credential-bearing statement. This source-tree replacement deliberately
+-- does not create, reset, or mutate any administrator account. Fresh deployments
+-- must provision an initial administrator through an approved, one-time secure
+-- bootstrap procedure outside ordinary migrations.
+--
+-- Existing production databases already record this migration as applied; this
+-- no-op replacement is intended for clean non-production migration replays only.
+SELECT 1;
