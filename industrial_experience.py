@@ -1107,18 +1107,55 @@ def _research_hash(protocol: Mapping[str, Any]) -> str:
 
 
 def create_research_protocol(study_id: str, protocol: Mapping[str, Any], owner: str) -> tuple[str, str]:
+    """Create/update a protocol without allowing a different owner to claim its ID.
+
+    The local owner check and upsert run in one SQLite write transaction. When
+    the managed backend is configured, its upsert has the same owner-conflict
+    rule and must succeed before the local write continues.
+    """
     ensure_experience_db()
+    study_id = str(study_id or "").strip()
+    owner = str(owner or "").strip()
+    if not study_id:
+        raise ValueError("A research study ID is required.")
+    if not owner:
+        raise ValueError("A research study owner is required.")
+
     payload = dict(protocol)
-    with _db() as conn:
-        existing = conn.execute(
-            "SELECT research_id,created_at FROM experience_research_studies WHERE study_id=?",
-            (study_id,),
-        ).fetchone()
-    research_id = str(existing[0]) if existing else "RSH-" + uuid.uuid4().hex[:12].upper()
     stamp = _now()
-    created_at = str(existing[1]) if existing and existing[1] else stamp
     protocol_hash = _research_hash(payload)
     with _db() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        existing = conn.execute(
+            "SELECT research_id,created_at,owner FROM experience_research_studies WHERE study_id=?",
+            (study_id,),
+        ).fetchone()
+        if existing and str(existing[2] or "").strip() != owner:
+            raise PermissionError("Research study not found or not owned by this user.")
+
+        research_id = str(existing[0]) if existing else "RSH-" + uuid.uuid4().hex[:12].upper()
+        created_at = str(existing[1]) if existing and existing[1] else stamp
+
+        remote_record = {
+            "study_id": study_id,
+            "research_id": research_id,
+            "owner": owner,
+            "title": payload.get("title"),
+            "protocol": payload,
+            "created_at": created_at,
+            "updated_at": stamp,
+        }
+        try:
+            if durable_backend_configured():
+                upsert_remote_research_study(remote_record)
+        except PermissionError:
+            # An owner conflict is a security result, not a transient fallback.
+            raise
+        except Exception:
+            # Non-authoritative transport failures retain the existing local
+            # fallback behavior; an explicit ownership conflict never does.
+            pass
+
         conn.execute(
             """
             INSERT OR REPLACE INTO experience_research_studies(
@@ -1166,20 +1203,6 @@ def create_research_protocol(study_id: str, protocol: Mapping[str, Any], owner: 
             ),
         )
         conn.commit()
-    try:
-        if durable_backend_configured():
-            upsert_remote_research_study({
-                "study_id": study_id,
-                "research_id": research_id,
-                "owner": owner,
-                "title": payload.get("title"),
-                "protocol": payload,
-                "created_at": created_at,
-                "updated_at": stamp,
-            })
-    except Exception:
-        # Local persistence remains the fallback if managed storage is temporarily unavailable.
-        pass
     return research_id, protocol_hash
 
 
