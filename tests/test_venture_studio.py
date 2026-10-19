@@ -231,3 +231,34 @@ def test_artifact_version_history_is_scoped_to_parent_artifact_owner(tmp_path, m
     assert bob_history.empty
     assert len(bob_own_history) == 1
     assert bob_own_history.iloc[0]["source_url"] == "https://bob.example/1"
+
+
+def test_investor_room_export_contains_only_the_requested_owners_artifacts(tmp_path, monkeypatch):
+    monkeypatch.setattr(vs, "DB_PATH", str(tmp_path / "venture-export.sqlite"))
+    monkeypatch.setattr(vs, "ensure_experience_db", lambda *args, **kwargs: None)
+    vs.ensure_venture_db()
+    alice_id = vs.save_artifact(
+        "alice", "Product", "Alice confidential", "Alice-only content",
+        "https://example.com/alice", "2026-10-10", "High",
+    )
+    vs.save_artifact(
+        "bob", "Product", "Bob confidential", "Bob-only content",
+        "https://example.com/bob", "2026-10-11", "High",
+    )
+    vs.save_artifact(
+        "alice", "Product", "Alice confidential", "Alice updated content",
+        "https://example.com/alice-v2", "2026-10-12", "Audited",
+    )
+
+    with zipfile.ZipFile(io.BytesIO(vs._room_export("alice"))) as archive:
+        artifacts = pd.read_json(archive.open("artifact_content.json"))
+        versions = pd.read_csv(archive.open("artifact_versions.csv"))
+        manifest = pd.read_json(archive.open("manifest.json"), typ="series")
+
+    assert alice_id in set(artifacts["artifact_id"])
+    assert artifacts["title"].tolist() == ["Alice confidential"]
+    assert "Bob-only content" not in artifacts.to_json()
+    assert "Bob confidential" not in artifacts.to_json()
+    assert set(versions["artifact_id"]) == {alice_id}
+    assert manifest["owner"] == "alice"
+    assert int(artifacts.iloc[0]["version"]) == 2
