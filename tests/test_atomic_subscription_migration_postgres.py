@@ -51,7 +51,9 @@ def _sql(query: str, args=(), fetchone=True):
             cur.execute(query, args)
             result = cur.fetchone() if fetchone else None
         conn.commit()
-        return result[0] if result else None
+        if not result:
+            return None
+        return result[0] if len(result) == 1 else result
     except Exception:
         conn.rollback()
         raise
