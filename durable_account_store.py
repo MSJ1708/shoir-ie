@@ -395,16 +395,30 @@ def edge_logout(username: str, token: str) -> dict[str, Any]:
 
 def edge_register_request(request: Mapping[str, Any]) -> dict[str, Any]:
     proof_path = str(request.get("screenshot_path") or "").strip()
-    proof_base64: str | None = None
-    proof_content_type: str | None = None
-    if proof_path:
+    proof_base64 = str(request.get("proof_base64") or "").strip() or None
+    proof_content_type = str(request.get("proof_content_type") or "").strip().lower() or None
+    allowed_types = {
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".pdf": "application/pdf",
+    }
+
+    if proof_base64 or proof_content_type:
+        if not proof_base64 or proof_content_type not in set(allowed_types.values()):
+            raise ValueError("Payment proof data or content type is invalid.")
+        try:
+            proof_bytes = base64.b64decode(proof_base64, validate=True)
+        except Exception as exc:
+            raise ValueError("Payment proof data is not valid base64.") from exc
+        if not proof_bytes:
+            raise ValueError("The payment proof file is empty.")
+        if len(proof_bytes) > 512 * 1024:
+            raise ValueError("Payment proofs must be 512 KiB or smaller.")
+        proof_base64 = base64.b64encode(proof_bytes).decode("ascii")
+    elif proof_path:
         extension = os.path.splitext(proof_path)[1].lower()
-        proof_content_type = {
-            ".png": "image/png",
-            ".jpg": "image/jpeg",
-            ".jpeg": "image/jpeg",
-            ".pdf": "application/pdf",
-        }.get(extension)
+        proof_content_type = allowed_types.get(extension)
         if not proof_content_type:
             raise ValueError("Payment proofs must be PNG, JPG, JPEG or PDF files.")
         with open(proof_path, "rb") as proof_file:
@@ -414,6 +428,8 @@ def edge_register_request(request: Mapping[str, Any]) -> dict[str, Any]:
         if len(proof_bytes) > 512 * 1024:
             raise ValueError("Payment proofs must be 512 KiB or smaller.")
         proof_base64 = base64.b64encode(proof_bytes).decode("ascii")
+    else:
+        raise ValueError("A payment proof is required for registration.")
 
     return _edge_call("register_request", {
         "username": request["username"],
