@@ -30,6 +30,9 @@ from industrial_experience import (
     fallback_module_blueprint,
     _starter_data,
     FALLBACK_MODULE_BLUEPRINTS,
+    create_decision,
+    load_decision_spec,
+    save_decision_spec,
 )
 
 
@@ -430,3 +433,94 @@ def test_research_run_registration_rejects_another_owner_and_mismatched_protocol
                 ("PRJ-ALICE-RUNS",),
             ).fetchone()[0]
         assert count == 0
+
+
+def test_project_autosave_rejects_other_owner_without_mutating_snapshot_or_payload(monkeypatch):
+    with tempfile.TemporaryDirectory() as td:
+        db = str(Path(td) / "project-autosave-owner.db")
+        monkeypatch.setattr(ie, "_db", lambda path=db: sqlite3.connect(db, timeout=30))
+        ensure_experience_db(db)
+        project_id = save_project(
+            "Alice project", "Experiment Lab", "alice", {"value": "original"}
+        )
+
+        snapshot = ie.autosave_project(project_id, {"value": "alice update"}, owner="alice")
+        assert snapshot == 2
+        with pytest.raises(PermissionError):
+            ie.autosave_project(project_id, {"value": "bob overwrite"}, owner="bob")
+
+        with sqlite3.connect(db) as conn:
+            owner, payload = conn.execute(
+                "SELECT owner,payload_json FROM experience_projects WHERE project_id=?",
+                (project_id,),
+            ).fetchone()
+            snapshots = conn.execute(
+                "SELECT snapshot_no,payload_json FROM experience_project_snapshots WHERE project_id=? ORDER BY snapshot_no",
+                (project_id,),
+            ).fetchall()
+
+        assert owner == "alice"
+        assert __import__("json").loads(payload) == {"value": "alice update"}
+        assert len(snapshots) == 2
+        assert __import__("json").loads(snapshots[-1][1]) == {"value": "alice update"}
+
+
+def test_autosave_materializes_missing_legacy_project_only_for_research_owner(monkeypatch):
+    with tempfile.TemporaryDirectory() as td:
+        db = str(Path(td) / "restored-research-project.db")
+        monkeypatch.setattr(ie, "_db", lambda path=db: sqlite3.connect(db, timeout=30))
+        ensure_experience_db(db)
+        study_id = "PRJ-RESTORED-REMOTE"
+        protocol = {"title": "Alice restored protocol", "module": "Experiment Lab"}
+        create_research_protocol(study_id, protocol, "alice")
+
+        snapshot = ie.autosave_project(
+            study_id,
+            {"research_protocol": protocol, "protocol_type": "local_research_protocol"},
+            owner="alice",
+        )
+        assert snapshot == 1
+        with pytest.raises(PermissionError):
+            ie.autosave_project(
+                study_id,
+                {"research_protocol": {"title": "Bob overwrite"}},
+                owner="bob",
+            )
+
+        with sqlite3.connect(db) as conn:
+            owner, title = conn.execute(
+                "SELECT owner,name FROM experience_projects WHERE project_id=?",
+                (study_id,),
+            ).fetchone()
+            count = conn.execute(
+                "SELECT COUNT(*) FROM experience_project_snapshots WHERE project_id=?",
+                (study_id,),
+            ).fetchone()[0]
+        assert (owner, title, count) == ("alice", "Alice restored protocol", 1)
+
+
+def test_decision_spec_save_rejects_non_owner_and_preserves_original_spec(monkeypatch):
+    with tempfile.TemporaryDirectory() as td:
+        db = str(Path(td) / "decision-spec-owner.db")
+        monkeypatch.setattr(ie, "_db", lambda path=db: sqlite3.connect(db, timeout=30))
+        ensure_experience_db(db)
+        decision_id = create_decision(
+            "Alice decision", "Quality", {"Cpk": 1.25}, {"baseline": "measured"},
+            {"uncertainty": "medium"}, "alice"
+        )
+        save_decision_spec(
+            decision_id, "alice", {"Cpk": 1.0}, [{"name": "current"}], {},
+            ["Cpk"], {"interval": "95%"}, [{"source": "quality log"}], [],
+        )
+
+        with pytest.raises(PermissionError):
+            save_decision_spec(
+                decision_id, "bob", {"Cpk": -999}, [{"name": "overwrite"}], {},
+                ["Cpk"], {}, [], [],
+            )
+
+        saved = load_decision_spec(decision_id, owner="alice")
+        assert saved is not None
+        assert saved["baseline"] == {"Cpk": 1.0}
+        assert saved["owner"] == "alice"
+        assert load_decision_spec(decision_id, owner="bob") is None
