@@ -29,6 +29,7 @@ jobs:
       SHOIR_E2E_EXPIRED_PASSWORD: ${{ secrets.SHOIR_E2E_EXPIRED_PASSWORD }}
       SHOIR_E2E_INACTIVE_USERNAME: ${{ secrets.SHOIR_E2E_INACTIVE_USERNAME }}
       SHOIR_E2E_INACTIVE_PASSWORD: ${{ secrets.SHOIR_E2E_INACTIVE_PASSWORD }}
+      SHOIR_E2E_VERIFY_LOGIN_THROTTLE: ${{ vars.SHOIR_E2E_VERIFY_LOGIN_THROTTLE }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7

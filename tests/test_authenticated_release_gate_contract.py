@@ -35,3 +35,12 @@ def test_server_login_throttle_is_reviewed_and_migration_first():
     edge = (ROOT / "supabase/functions/shoir-persistence/index.ts").read_text(encoding="utf-8")
     assert "shoir_check_login_throttle" in migration
     assert 'supabase.rpc("shoir_check_login_throttle"' in edge
+
+
+
+def test_authenticated_gate_makes_live_login_throttle_probe_opt_in():
+    script = (ROOT / "scripts/authenticated_release_gate.py").read_text(encoding="utf-8")
+    workflow = (ROOT / ".github/workflows/authenticated-release-gate.yml").read_text(encoding="utf-8")
+    assert "SHOIR_E2E_VERIFY_LOGIN_THROTTLE" in script
+    assert 'observed == [401] * 8 + [429]' in script
+    assert "SHOIR_E2E_VERIFY_LOGIN_THROTTLE" in workflow

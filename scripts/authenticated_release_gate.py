@@ -251,6 +251,36 @@ def main() -> int:
                    st_renew == 400 and "reference" in str(renew_data.get("error") or "").casefold(),
                    "Missing transaction reference is rejected before a renewal record is created.")
 
+        if os.environ.get("SHOIR_E2E_VERIFY_LOGIN_THROTTLE", "").strip().casefold() in {"1", "true", "yes", "on"}:
+            # Use a synthetic non-account identity so the test cannot lock a real
+            # user's bucket. This uses 9 attempts from the runner IP bucket and
+            # should only be enabled for an intentional release-gate run.
+            throttle_user = PREFIX + "throttle-" + secrets.token_hex(8)
+            observed = []
+            for attempt_number in range(9):
+                code, payload = safe_call(
+                    api, "login_throttle_probe", "synthetic", "login",
+                    {"username": throttle_user, "password": "invalid-" + secrets.token_hex(16)},
+                )
+                observed.append(code)
+                if code is None:
+                    break
+            record(
+                "login_throttle_blocks_excess_attempts",
+                "synthetic",
+                observed == [401] * 8 + [429],
+                "Eight synthetic attempts were rejected generically and the ninth was rate-limited."
+                if observed == [401] * 8 + [429]
+                else "Rate-limit responses differed from the expected 8x401 then 429 sequence.",
+            )
+        else:
+            record(
+                "login_throttle_blocks_excess_attempts",
+                "synthetic",
+                None,
+                "Skipped: set the GitHub Actions variable SHOIR_E2E_VERIFY_LOGIN_THROTTLE=true for an intentional live limiter probe.",
+            )
+
         inactive_user = os.environ.get("SHOIR_E2E_INACTIVE_USERNAME", "").strip()
         inactive_password = os.environ.get("SHOIR_E2E_INACTIVE_PASSWORD", "")
         if inactive_user or inactive_password:
