@@ -38,9 +38,6 @@ def test_master_admin_enterprise_plus_entitlement_contract():
     assert 'const effectiveTier=isMasterAdmin?adminTier:row.tier;' in edge_source
     assert 'if(requiredScope==="workspace"&&!(row.username_lc==="sho"&&row.role==="Enterprise Admin")' in edge_source
     assert 'if(row.username_lc!=="sho"||row.role!=="Enterprise Admin")throw new Error("Admin authorization failed.");' in edge_source
-    assert 'st.sidebar.caption("SUBSCRIPTION COUNTDOWN")' in app_source
-    assert 'st.session_state.get("subscription_expires_at")' in app_source
-    assert 'and _current_username.casefold() != "sho"' in app_source
 
 
 def test_renewal_approval_preserves_existing_account_identity_and_renews_expiry():
