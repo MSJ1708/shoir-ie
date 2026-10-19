@@ -2,8 +2,8 @@ import re
 from datetime import datetime, timedelta, timezone
 
 def _source_contract_contains(source: str, fragment: str) -> bool:
-    normalized_source = re.sub(r"\\s+", "", source)
-    normalized_fragment = re.sub(r"\\s+", "", fragment)
+    normalized_source = re.sub(r"\s+", "", source)
+    normalized_fragment = re.sub(r"\s+", "", fragment)
     return normalized_fragment in normalized_source
 
 
