@@ -144,20 +144,3 @@ def test_each_module_is_present_in_every_catalogue_it_claims(
                 f"Module {module_name!r} is listed in {label!r} but its name "
                 f"is absent from {path.relative_to(ROOT)}."
             )
-
-
-def test_inventory_status_does_not_mistake_static_presence_for_browser_proof(
-    inventory_rows: list[dict[str, str]],
-) -> None:
-    """Keep the distinction explicit in test output and future maintenance."""
-    unverified = [
-        row["module_name"]
-        for row in inventory_rows
-        if row["authenticated_browser_status"].strip().upper() == "UNVERIFIED"
-    ]
-    if unverified:
-        pytest.skip(
-            f"{len(unverified)} module(s) remain explicitly UNVERIFIED for "
-            "authenticated browser acceptance; static catalogue tests do not "
-            "upgrade their verification status."
-        )
