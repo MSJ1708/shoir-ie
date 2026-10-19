@@ -1,8 +1,12 @@
+import io
+import json
 import sqlite3
 import tempfile
+import zipfile
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 import industrial_experience as ie
 from industrial_experience import (
@@ -20,6 +24,7 @@ from industrial_experience import (
     register_research_run,
     import_research_run_csv,
     research_runs_frame,
+    research_evidence_bundle,
     save_project,
     analyze_fallback_module,
     fallback_module_blueprint,
@@ -324,3 +329,34 @@ def test_all_named_fallback_modules_run_on_their_starter_data():
         except Exception as exc:
             failures.append(f"{module}: {type(exc).__name__}: {exc}")
     assert not failures, "\\n".join(failures)
+
+
+
+def test_research_protocol_read_and_evidence_bundle_enforce_owner(monkeypatch):
+    with tempfile.TemporaryDirectory() as td:
+        db = str(Path(td) / "research-bundle-owner.db")
+        monkeypatch.setattr(ie, "_db", lambda path=db: sqlite3.connect(db, timeout=30))
+        ensure_experience_db(db)
+
+        create_research_protocol(
+            "PRJ-ALICE-PRIVATE",
+            {"title": "Alice's private protocol", "objective": "Alice-only evidence"},
+            "alice",
+        )
+        create_research_protocol(
+            "PRJ-BOB-PRIVATE",
+            {"title": "Bob's private protocol", "objective": "Bob-only evidence"},
+            "bob",
+        )
+
+        assert ie.load_research_protocol("PRJ-BOB-PRIVATE", owner="alice") is None
+        with pytest.raises(PermissionError):
+            research_evidence_bundle("PRJ-BOB-PRIVATE", owner="alice")
+
+        bundle = research_evidence_bundle("PRJ-ALICE-PRIVATE", owner="alice")
+        with zipfile.ZipFile(io.BytesIO(bundle)) as archive:
+            exported = json.loads(archive.read("research_protocol.json").decode("utf-8"))
+            manifest = json.loads(archive.read("manifest.json").decode("utf-8"))
+        assert exported["title"] == "Alice's private protocol"
+        assert manifest["owner"] == "alice"
+        assert manifest["study_id"] == "PRJ-ALICE-PRIVATE"
