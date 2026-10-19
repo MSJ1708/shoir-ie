@@ -183,7 +183,7 @@ The PR-head checks passed on `2c38aefe847fd320038ba88952315a2fa8a10271`:
 - [Security and quality 39293083466](https://github.com/MSJ1708/shoir-ie/actions/runs/39293083466): PASS.
 - [Platform tests 39293083526](https://github.com/MSJ1708/shoir-ie/actions/runs/39293083526): PASS.
 
-**Post-merge hosted smoke:** NOT YET VERIFIED on the exact merge SHA `e9524db88cf7d20de965e38cf2705e80e1af1906`. Do not mark it passed based on the PR-head checks or the earlier hosted smoke run on `47b300f96a80e2923c71534f12eed020623f8f23`. Record the actual main-push workflow outcome and deployment revision evidence when available.
+**Post-merge hosted smoke: PASS on the exact merge SHA** `e9524db88cf7d20de965e38cf2705e80e1af1906` via [validation run 39293599824](https://github.com/MSJ1708/shoir-ie/actions/runs/39293599824). The `test` job and `live-deployment-smoke` job both completed successfully. [Engine regression 39293599937](https://github.com/MSJ1708/shoir-ie/actions/runs/39293599937) and [security/quality 39293599857](https://github.com/MSJ1708/shoir-ie/actions/runs/39293599857) also passed on that exact SHA. These checks establish local runtime and anonymous public-shell health only; the Streamlit Cloud deployed Git SHA and authenticated workflows remain unverified.
 
 ### Read-only production check
 
