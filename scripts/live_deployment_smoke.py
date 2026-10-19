@@ -32,6 +32,8 @@ APP_MARKERS = (
 )
 FATAL_TEXT_MARKERS = (
     "application runtime could not be loaded",
+    "this app has encountered an error.",
+    "importerror",
     "modulenotfounderror",
     "nameerror:",
     "traceback (most recent call last)",
