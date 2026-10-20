@@ -165,6 +165,10 @@ def route_module(page, frame, module_name: str, account_class: str) -> dict[str,
     try:
         search = frame.get_by_placeholder(MODULE_SEARCH)
         search.fill(module_name, timeout=10_000)
+        # The live input explicitly says "Press Enter to apply". Streamlit's
+        # search state is not committed by fill() alone, so submit the query
+        # before expecting the "Open · <module>" result button.
+        search.press("Enter", timeout=10_000)
         open_button = frame.get_by_role(
             "button",
             name=re.compile(r"^Open\s*[·•]\s*" + re.escape(module_name) + r"$", re.I),
