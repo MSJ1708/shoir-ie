@@ -42,6 +42,9 @@ def test_navigation_and_logout_defer_widget_state_reset_until_before_render():
     assert 'del st.session_state[_logout_key]' not in app
     assert 'del st.session_state[_key]' not in app
     assert 'Active module:' in browser
+    assert 'data-testid="shoir-active-module"' in browser
+    assert "candidate shell marker" in browser
+    assert "ACTIVE_MODULE_SELECTOR" in browser
     assert 'full_page=False' in browser
 
 
@@ -120,3 +123,13 @@ def test_browser_gates_locate_visible_streamlit_signin_inputs_without_label_asso
         assert "input[type='password']:visible" in script
         assert "fill_signin_credentials" in script
         assert 'get_by_label("Username", exact=True)' not in script
+
+
+def test_logout_saves_workspace_before_server_session_revocation():
+    app = (ROOT / "app.py").read_text(encoding="utf-8")
+    logout_start = app.index('if _shell_surface == "logout":')
+    logout_end = app.index("# Compatibility contract retained", logout_start)
+    logout_block = app[logout_start:logout_end]
+    assert logout_block.index("save_user_workspace") < logout_block.index("edge_logout")
+    assert 'st.session_state["_shoir_clear_session_before_render"] = True' in logout_block
+    assert "st.rerun()" in logout_block
