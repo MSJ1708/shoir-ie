@@ -261,6 +261,16 @@ def run_recovery() -> int:
     print(f"Fixed project: {STAGING_PROJECT_REF}")
     print("Scope: six already-existing shoir-e2e-* accounts. No account creation or deletion.")
 
+    # Validate the publishable key against the fixed staging REST API before
+    # storing it in GitHub. This prevents accidentally replacing the Actions
+    # secret with an opaque sb_publishable_* key copied from another project.
+    try:
+        key_status, _ = _request_json(publishable_key, "GET", f"{PROJECT_URL}/rest/v1/")
+    except Exception as exc:
+        raise RuntimeError(f"Staging publishable-key preflight failed ({type(exc).__name__}); no passwords were changed.") from None
+    if key_status != 200:
+        raise RuntimeError(f"Publishable key was not accepted by the fixed staging REST API (HTTP {key_status}); no passwords were changed.")
+
     # Check every target row before the first write. No fallback to production.
     initial_rows: dict[str, dict[str, Any]] = {}
     now = datetime.now(timezone.utc)
