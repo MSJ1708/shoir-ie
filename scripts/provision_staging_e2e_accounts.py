@@ -247,16 +247,26 @@ def provision() -> int:
     print("Shoir-IE disposable staging E2E-account provisioner")
     print(f"Fixed target: {PROJECT_URL}")
     print("Creates synthetic registration records only; it does not charge or contact a payment provider.")
-    publishable_key = get_hidden_key("Staging publishable key (input hidden; type @clipboard to read clipboard): ").strip()
+    # Prefer credentials passed by the trusted local PowerShell wrapper so the
+    # operator does not need to paste long values into hidden prompts.
+    # Interactive fallbacks remain available for manual/local use.
+    publishable_key = os.environ.pop("SHOIR_STAGING_PUBLISHABLE_KEY", "").strip()
+    if not publishable_key:
+        publishable_key = get_hidden_key("Staging publishable key (input hidden; type @clipboard to read clipboard): ").strip()
     if not is_publishable_key(publishable_key):
         raise ValueError("The first key was not recognized as a publishable/anon client key.")
-    service_key = get_hidden_key("Staging service key (input hidden; type @clipboard to read clipboard): ").strip()
+
+    service_key = os.environ.pop("SHOIR_STAGING_SERVICE_KEY", "").strip()
+    if not service_key:
+        service_key = get_hidden_key("Staging service key (input hidden; type @clipboard to read clipboard): ").strip()
     if not is_service_role_key(service_key):
         raise ValueError("The second key was not recognized as a Supabase server secret/service_role key.")
     if secrets.compare_digest(publishable_key, service_key):
         raise ValueError("The publishable key and service key must be different.")
 
-    admin_password = getpass.getpass("Staging administrator password for 'sho' (input hidden): ")
+    admin_password = os.environ.pop("SHOIR_STAGING_ADMIN_PASSWORD", "")
+    if not admin_password:
+        admin_password = getpass.getpass("Staging administrator password for 'sho' (input hidden): ")
     if not admin_password:
         raise ValueError("Administrator password cannot be empty.")
 
