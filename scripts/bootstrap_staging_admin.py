@@ -109,10 +109,13 @@ def _request_json(
     data = None if payload is None else json.dumps(payload).encode("utf-8")
     headers = {
         "apikey": key,
-        "Authorization": f"Bearer {key}",
         "Accept": "application/json",
         "Content-Type": "application/json",
     }
+    # Supabase's new sb_secret_ keys belong in the apikey header only. Legacy
+    # service_role JWTs continue to use both apikey and Authorization headers.
+    if not key.startswith("sb_secret_"):
+        headers["Authorization"] = f"Bearer {key}"
     if method == "POST":
         headers["Prefer"] = "resolution=ignore-duplicates,return=representation"
     req = Request(url, data=data, headers=headers, method=method)
