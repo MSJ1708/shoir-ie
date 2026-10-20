@@ -170,6 +170,35 @@ def get_hidden_service_key(prompt: str) -> str:
     print("Read staging key from clipboard; the key value was not displayed.")
     return key
 
+def get_hidden_value_from_clipboard(prompt: str, label: str) -> str:
+    """Avoid Windows hidden-input paste issues by reading a copied value on explicit request."""
+    choice = input(
+        f"{label}: copy the value first, then type CLIPBOARD and press Enter; "
+        "or type MANUAL to enter it with hidden input: "
+    ).strip().casefold()
+    if choice == "manual":
+        return getpass.getpass(prompt)
+    if choice != "clipboard":
+        raise ValueError("Enter CLIPBOARD or MANUAL.")
+    if sys.platform != "win32":
+        raise RuntimeError("Clipboard retrieval is supported only on Windows.")
+    try:
+        result = subprocess.run(
+            ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", "Get-Clipboard -Raw"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        raise RuntimeError("Could not read the Windows clipboard. Copy the value again and retry.") from None
+    value = result.stdout.strip()
+    if not value:
+        raise RuntimeError("The Windows clipboard was empty. Copy the value again and retry.")
+    print(f"Read {label.lower()} from clipboard; the value was not displayed.")
+    return value
+
+
 def bootstrap() -> int:
     if STAGING_PROJECT_REF == PRODUCTION_PROJECT_REF:
         raise RuntimeError("The staging and production project references must be different.")
@@ -188,8 +217,8 @@ def bootstrap() -> int:
             "The staging 'sho' identity already exists. No record was changed; use the approved admin-recovery process."
         )
 
-    password = getpass.getpass("New staging admin password (input hidden; 16+ characters): ")
-    confirmation = getpass.getpass("Re-enter staging admin password (input hidden): ")
+    password = get_hidden_value_from_clipboard("New staging admin password (input hidden; 16+ characters): ", "New password")
+    confirmation = get_hidden_value_from_clipboard("Re-enter staging admin password (input hidden): ", "Password confirmation")
     if password != confirmation:
         raise ValueError("Password confirmation did not match.")
     if len(password) < 16:
