@@ -45,6 +45,14 @@ def fill_signin_credentials(frame, username: str, password: str) -> None:
     password_inputs.first.fill(password)
 
 
+def take_evidence_screenshot(page, path: Path) -> None:
+    """Capture viewport evidence without letting a long page fail functional tests."""
+    try:
+        page.screenshot(path=str(path), full_page=False, timeout=10_000)
+    except Exception as exc:
+        print(f"[WARN] Evidence screenshot skipped ({type(exc).__name__}); functional checks remain authoritative.")
+
+
 def main() -> int:
     try:
         target_url = validate_app_from_env()
@@ -112,7 +120,7 @@ def main() -> int:
             check("authenticated_workspace_renders", username.casefold() in logged_body.casefold()
                   and "SHOIR-IE" in logged_body,
                   "Authenticated shell rendered for the dedicated test identity.")
-            page.screenshot(path=str(REPORT.parent / "authenticated-home.png"), full_page=True)
+            take_evidence_screenshot(page, REPORT.parent / "authenticated-home.png")
 
             # Navigate to the specific Excel Data Cleaning & Import module via
             # the global module search. The UI requires Enter to apply searches;
@@ -131,22 +139,41 @@ def main() -> int:
             step = "open Excel Data Cleaning & Import module"
             open_excel.wait_for(state="visible", timeout=20_000)
             open_excel.click(timeout=10_000)
-            step = "verify Excel Data Cleaning & Import module"
-            app_frame.get_by_text(re.compile("Excel Data Cleaning & Import", re.I)).first.wait_for(timeout=45_000)
-            module_body = app_frame.locator("body").inner_text(timeout=8000)
-            check("excel_module_renders", "Excel Data Cleaning & Import".casefold() in module_body.casefold()
-                  and "Traceback (most recent call last)" not in module_body,
-                  "Excel module route rendered without a visible traceback.")
-            page.screenshot(path=str(REPORT.parent / "authenticated-excel-module.png"), full_page=True)
+            step = "verify Excel Data Cleaning & Import is the active module"
+            active_excel = re.compile(
+                r"Active module:\s*Excel Data Cleaning & Import(?=\s|·|$)", re.I
+            )
+            app_frame.get_by_text(active_excel).first.wait_for(timeout=45_000)
+            main_body = app_frame.get_by_role("main").inner_text(timeout=8_000)
+            excel_is_active = bool(active_excel.search(main_body))
+            check(
+                "excel_module_renders",
+                excel_is_active and "Traceback (most recent call last)" not in main_body,
+                "Active module label confirms Excel Data Cleaning & Import."
+                if excel_is_active else
+                "Excel text was present, but the active-module label did not confirm navigation.",
+            )
+            take_evidence_screenshot(page, REPORT.parent / "authenticated-excel-module.png")
 
-            # Exercise the sidebar logout action first. It used to set a shell surface
-            # that the entrypoint did not process.
+            # Verify genuine sign-out by waiting for the public sign-in heading.
+            step = "click sidebar logout"
             app_frame.get_by_role("button", name="Lock / Logout Workspace").first.click(timeout=10_000)
-            app_frame.get_by_role("tab", name=re.compile("Sign In", re.I)).wait_for(timeout=45_000)
-            signed_out_body = app_frame.locator("body").inner_text(timeout=8000)
-            check("sidebar_logout_returns_to_signin",
-                  "Sign In to Your Workspace" in signed_out_body and "shoir-e2e-" not in signed_out_body.casefold(),
-                  "Sidebar logout returned to the unauthenticated sign-in screen.")
+            step = "verify unauthenticated sign-in after logout"
+            app_frame.get_by_text(
+                re.compile(r"Sign In to Your Workspace", re.I)
+            ).first.wait_for(state="visible", timeout=45_000)
+            signed_out_body = app_frame.locator("body").inner_text(timeout=8_000)
+            signed_out = (
+                "Sign In to Your Workspace" in signed_out_body
+                and username.casefold() not in signed_out_body.casefold()
+                and "Lock / Logout Workspace" not in signed_out_body
+            )
+            check(
+                "sidebar_logout_returns_to_signin",
+                signed_out,
+                "Logout returned to the unauthenticated sign-in screen."
+                if signed_out else "Sign-in heading or cleared-session indicators were missing.",
+            )
         except Exception as exc:
             # Keep diagnostics safe: never print credentials, response bodies, or input values.
             detail = f"Browser step '{step}' failed ({type(exc).__name__})."

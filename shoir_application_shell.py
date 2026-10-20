@@ -375,6 +375,9 @@ def render_global_search(
     module_metadata: Mapping[str, Any] | None = None,
 ) -> None:
     """Search modules and durable engineering objects from the same shell."""
+    # Apply pending widget resets before constructing their Streamlit widgets.
+    if st.session_state.pop("_shoir_clear_global_search_before_render", False):
+        st.session_state["shoir_shell_global_search"] = ""
     query = st.text_input(
         "⌘ Search Shoir-IE",
         placeholder="Search modules, datasets, runs, decisions…",
@@ -419,8 +422,9 @@ def render_global_search(
                 if st.button(f"Open · {name}", key=f"shoir_global_module_{idx}", use_container_width=True):
                     st.session_state["_shoir_requested_module"] = str(name)
                     st.session_state["shoir_shell_section"] = _module_target_section(str(name), module_metadata)
-                    st.session_state.pop("shoir_shell_section_radio", None)
-                    st.session_state["shoir_shell_global_search"] = ""
+                    # Clear keyed widget state on the following run, before it is
+                    # instantiated; changing it after rendering causes Streamlit errors.
+                    st.session_state["_shoir_clear_global_search_before_render"] = True
                     st.rerun()
         if not dataset_hits.empty:
             st.markdown("**Datasets**")
@@ -941,6 +945,9 @@ def render_application_shell(
             if name:
                 module_metadata[name] = item
     nav_labels = [key for key in NAV_GROUPS.keys() if is_admin or key != "ADMIN"]
+    # A deep link must take control of the navigation widget before st.radio mounts.
+    if st.session_state.get("_shoir_requested_module"):
+        st.session_state.pop("shoir_shell_section_radio", None)
     current_section = str(st.session_state.get("shoir_shell_section", "HOME"))
     if not is_admin and current_section == "ADMIN":
         current_section = "HOME"
@@ -953,10 +960,8 @@ def render_application_shell(
 
     previous_section = st.session_state.get("_shoir_shell_previous_section")
     section_changed = previous_section != current_section
-    explicit_module_request = bool(
-        st.session_state.get("_shoir_requested_module")
-        and str(current_module or "") == str(st.session_state.get("_shoir_requested_module"))
-    )
+    requested_module = str(st.session_state.get("_shoir_requested_module") or "").strip()
+    explicit_module_request = bool(requested_module and requested_module in allowed_modules)
 
     with st.sidebar:
         st.markdown("## SHOIR-IE")
@@ -1013,6 +1018,10 @@ def render_application_shell(
         selector_key = f"shoir_shell_module_selector_{section}"
         if st.session_state.get(selector_key) not in choices:
             st.session_state.pop(selector_key, None)
+        # Selectboxes retain state across reruns; override that state before the
+        # widget is created so an explicit navigation request cannot be ignored.
+        if explicit_module_request and requested_module in choices:
+            st.session_state[selector_key] = requested_module
         if choices:
             selected_label = st.selectbox(
                 "Select module",
@@ -1677,8 +1686,7 @@ def render_shell_surface(surface: str, username: str, tier: str, module: str, al
                 save_user_workspace(user, st.session_state)
             except Exception:
                 pass
-        for key in list(st.session_state.keys()):
-            del st.session_state[key]
+        st.session_state["_shoir_clear_session_before_render"] = True
         st.rerun()
 
 

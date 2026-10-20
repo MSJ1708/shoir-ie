@@ -30,6 +30,21 @@ def test_authenticated_browser_gate_checks_module_route_and_shell_logout():
 
 
 
+def test_navigation_and_logout_defer_widget_state_reset_until_before_render():
+    shell = (ROOT / "shoir_application_shell.py").read_text(encoding="utf-8")
+    app = (ROOT / "app.py").read_text(encoding="utf-8")
+    browser = (ROOT / "scripts/authenticated_browser_matrix.py").read_text(encoding="utf-8")
+
+    assert 'st.session_state[selector_key] = requested_module' in shell
+    assert '_shoir_clear_global_search_before_render' in shell
+    assert 'st.session_state.pop("shoir_shell_section_radio", None)' in shell
+    assert '_shoir_clear_session_before_render' in app
+    assert 'del st.session_state[_logout_key]' not in app
+    assert 'del st.session_state[_key]' not in app
+    assert 'Active module:' in browser
+    assert 'full_page=False' in browser
+
+
 def test_server_login_throttle_is_reviewed_and_migration_first():
     migration = (ROOT / "supabase/migrations/20261019124815_server_side_login_rate_limits.sql").read_text(encoding="utf-8")
     edge = (ROOT / "supabase/functions/shoir-persistence/index.ts").read_text(encoding="utf-8")

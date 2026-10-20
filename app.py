@@ -1,4 +1,16 @@
 import streamlit as st
+
+# Session keys owned by widgets must be cleared only before those widgets are
+# instantiated in a rerun. Logout handlers mark the reset and rerun to this point.
+if st.session_state.pop("_shoir_clear_session_before_render", False):
+    _preserve_expired_notice = bool(
+        st.session_state.pop("_shoir_preserve_expired_notice_on_reset", False)
+    )
+    for _reset_key in list(st.session_state.keys()):
+        del st.session_state[_reset_key]
+    if _preserve_expired_notice:
+        st.session_state["subscription_expired_notice"] = True
+
 import pulp
 import math
 import folium
@@ -2253,8 +2265,7 @@ if _shell_surface == "logout":
             log_audit(_logout_user, "User Logged Out")
         except Exception:
             pass
-    for _logout_key in list(st.session_state.keys()):
-        del st.session_state[_logout_key]
+    st.session_state["_shoir_clear_session_before_render"] = True
     st.rerun()
 # Compatibility contract retained for existing smoke tests and legacy integrations.
 # IMPORTANT: this is state only; it is intentionally NOT reused as a Streamlit widget key,
@@ -2508,12 +2519,8 @@ if str(st.session_state.get("current_user", "")).strip().lower() != "sho":
                         # The server has already expired this workspace scope; local
                         # logout must still complete if revocation transport is down.
                         pass
-                for _expiry_key in list(st.session_state.keys()):
-                    try:
-                        del st.session_state[_expiry_key]
-                    except Exception:
-                        pass
-                st.session_state["subscription_expired_notice"] = True
+                st.session_state["_shoir_preserve_expired_notice_on_reset"] = True
+                st.session_state["_shoir_clear_session_before_render"] = True
                 st.rerun()
             st.caption(
                 f"⏳ Subscription: {int(_sidebar_remaining // 86400)}d "
@@ -2624,8 +2631,7 @@ if st.sidebar.button("Lock / Logout Workspace"):
         except Exception:
             st.error("Server logout could not revoke this session. Please retry; you are still signed in.")
             st.stop()
-    for _key in list(st.session_state.keys()):
-        del st.session_state[_key]
+    st.session_state["_shoir_clear_session_before_render"] = True
     st.rerun()
 elif selected_module in ["Autonomous Cognitive Operations & Zero-Knowledge Mesh (ACO-ZKMS)", "⚡ ACO-ZKMS Master Engine"]:
     import streamlit as st

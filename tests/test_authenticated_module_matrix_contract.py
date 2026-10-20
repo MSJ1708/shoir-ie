@@ -28,6 +28,14 @@ def test_module_matrix_fails_closed_for_missing_or_broken_routes():
     assert "horizontal overflow" in source.casefold()
 
 
+def test_module_matrix_confirms_active_route_not_search_result_text():
+    source = SCRIPT.read_text(encoding="utf-8")
+    assert "def active_module_confirmed(" in source
+    assert 'case["active_module_confirmed"]' in source
+    assert "search result or unrelated module is not sufficient" in source
+    assert '"failed_non_route_cases"' in source
+
+
 def test_authenticated_release_workflow_runs_matrix_and_requires_disposable_accounts():
     workflow = WORKFLOW.read_text(encoding="utf-8")
     assert "python scripts/authenticated_module_matrix.py" in workflow

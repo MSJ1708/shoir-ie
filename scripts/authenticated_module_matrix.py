@@ -96,6 +96,15 @@ def find_app_frame(page):
     return None
 
 
+def active_module_confirmed(main_text: str, module_name: str) -> bool:
+    """Only accept an explicit active-module label, not a mention in search results."""
+    marker = re.compile(
+        r"Active module:\s*" + re.escape(module_name) + r"(?=\s|·|$)",
+        re.IGNORECASE,
+    )
+    return bool(marker.search(main_text))
+
+
 def fill_signin_credentials(frame, username: str, password: str) -> None:
     """Fill visible Streamlit sign-in inputs without relying on label association.
 
@@ -184,15 +193,19 @@ def route_module(page, frame, module_name: str, account_class: str) -> dict[str,
                 main_text = main.inner_text(timeout=1_500)
             except Exception:
                 main_text = ""
-            if module_name.casefold() in main_text.casefold():
+            if active_module_confirmed(main_text, module_name):
                 break
             page.wait_for_timeout(350)
 
         case["main_text_length"] = len(main_text)
         folded = main_text.casefold()
         case["fatal_markers"] = [marker for marker in FATAL_MARKERS if marker in folded]
-        if module_name.casefold() not in folded:
-            raise AssertionError("Requested module name did not appear in the main content after navigation.")
+        case["active_module_confirmed"] = active_module_confirmed(main_text, module_name)
+        if not case["active_module_confirmed"]:
+            raise AssertionError(
+                "Main content did not confirm the requested module as active; "
+                "a search result or unrelated module is not sufficient."
+            )
         if len(main_text.strip()) < 40:
             raise AssertionError("Main content is effectively blank after module navigation.")
         if case["fatal_markers"]:
@@ -269,15 +282,24 @@ def run_account(browser, account_class: str, username: str, password: str, rows:
     finally:
         if frame is not None:
             try:
-                frame.get_by_role("button", name="Lock / Logout Workspace").first.click(timeout=5_000)
-                frame.get_by_role("tab", name=re.compile("Sign In", re.I)).wait_for(timeout=15_000)
-            except Exception:
+                frame.get_by_role("button", name="Lock / Logout Workspace").first.click(timeout=10_000)
+                frame.get_by_text(
+                    re.compile(r"Sign In to Your Workspace", re.I)
+                ).wait_for(state="visible", timeout=25_000)
+                signed_out_body = frame.locator("body").inner_text(timeout=8_000)
+                if (
+                    "Sign In to Your Workspace" not in signed_out_body
+                    or username.casefold() in signed_out_body.casefold()
+                    or "Lock / Logout Workspace" in signed_out_body
+                ):
+                    raise AssertionError("Logout did not clear the authenticated workspace.")
+            except Exception as exc:
                 cases.append({
                     "case_id": f"MODULE-LOGOUT-{account_class.upper()}",
                     "module_name": None,
                     "account_class": account_class,
                     "status": "FAIL",
-                    "failure_reason": "Dedicated module-matrix account did not return to the sign-in surface on logout.",
+                    "failure_reason": f"{type(exc).__name__}: {str(exc)[:240]}",
                 })
         context.close()
 
@@ -348,6 +370,15 @@ def main() -> int:
     passed_routes = sum(case.get("status") == "PASS" and case.get("module_name") is not None for case in report["cases"])
     report["passed_module_routes"] = passed_routes
     report["failed_module_routes"] = sum(case.get("status") == "FAIL" and case.get("module_name") is not None for case in report["cases"])
+    report["failed_non_route_cases"] = [
+        {
+            "case_id": case.get("case_id"),
+            "account_class": case.get("account_class"),
+            "failure_reason": case.get("failure_reason", ""),
+        }
+        for case in report["cases"]
+        if case.get("status") == "FAIL" and case.get("module_name") is None
+    ]
     report["overall"] = (
         "PASS"
         if expected > 0
@@ -368,6 +399,7 @@ def main() -> int:
         "failed_module_routes": report["failed_module_routes"],
         "preflight_error": report.get("preflight_error"),
         "missing_modules": report.get("missing_modules"),
+        "failed_non_route_cases": report.get("failed_non_route_cases"),
     }, indent=2))
     return 0 if report["overall"] == "PASS" else 1
 
