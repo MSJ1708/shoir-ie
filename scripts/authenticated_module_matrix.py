@@ -51,6 +51,7 @@ APP_MARKERS = (
     "Welcome to Shoir-IE Workspace",
 )
 MODULE_SEARCH = re.compile(r"Search modules, datasets, runs, decisions", re.I)
+ACTIVE_MODULE_SELECTOR = '[data-testid="shoir-active-module"]'
 
 
 def read_inventory() -> list[dict[str, str]]:
@@ -156,6 +157,13 @@ def login_test_account(page, account_class: str, username: str, password: str) -
     fill_signin_credentials(frame, username, password)
     frame.get_by_role("button", name=re.compile("^Sign In$", re.I)).click(timeout=10_000)
     frame.get_by_role("button", name="Lock / Logout Workspace").first.wait_for(timeout=60_000)
+    try:
+        frame.locator(ACTIVE_MODULE_SELECTOR).wait_for(state="visible", timeout=10_000)
+    except PlaywrightError as exc:
+        raise RuntimeError(
+            "Staging app is missing the candidate shell active-module marker; deploy the updated "
+            "staging-e2e-20261019 branch before running the authenticated release gate."
+        ) from exc
     return frame
 
 
@@ -186,24 +194,31 @@ def route_module(page, frame, module_name: str, account_class: str) -> dict[str,
         open_button.click(timeout=10_000)
 
         main = frame.get_by_role("main")
+        active_marker = frame.locator(ACTIVE_MODULE_SELECTOR)
         deadline = time.monotonic() + 45
         main_text = ""
+        active_text = ""
         while time.monotonic() < deadline:
             try:
                 main_text = main.inner_text(timeout=1_500)
             except Exception:
                 main_text = ""
-            if active_module_confirmed(main_text, module_name):
+            try:
+                active_text = active_marker.inner_text(timeout=1_000).strip()
+            except Exception:
+                active_text = ""
+            if active_module_confirmed(active_text, module_name):
                 break
             page.wait_for_timeout(350)
 
         case["main_text_length"] = len(main_text)
+        case["active_module_label"] = active_text[:160]
         folded = main_text.casefold()
         case["fatal_markers"] = [marker for marker in FATAL_MARKERS if marker in folded]
-        case["active_module_confirmed"] = active_module_confirmed(main_text, module_name)
+        case["active_module_confirmed"] = active_module_confirmed(active_text, module_name)
         if not case["active_module_confirmed"]:
             raise AssertionError(
-                "Main content did not confirm the requested module as active; "
+                "The explicit shell active-module marker did not confirm the requested module; "
                 "a search result or unrelated module is not sufficient."
             )
         if len(main_text.strip()) < 40:
@@ -283,9 +298,23 @@ def run_account(browser, account_class: str, username: str, password: str, rows:
         if frame is not None:
             try:
                 frame.get_by_role("button", name="Lock / Logout Workspace").first.click(timeout=10_000)
-                frame.get_by_text(
-                    re.compile(r"Sign In to Your Workspace", re.I)
-                ).wait_for(state="visible", timeout=25_000)
+                try:
+                    frame.get_by_text(
+                        re.compile(r"Sign In to Your Workspace", re.I)
+                    ).wait_for(state="visible", timeout=25_000)
+                except Exception as exc:
+                    current_body = frame.locator("body").inner_text(timeout=5_000).casefold()
+                    if "server logout could not revoke this session" in current_body:
+                        raise RuntimeError(
+                            "Application refused logout because server-side session revocation failed."
+                        ) from exc
+                    if "lock / logout workspace" in current_body:
+                        raise RuntimeError(
+                            "Logout click left the authenticated workspace visible; the app did not clear its session."
+                        ) from exc
+                    raise RuntimeError(
+                        "Logout did not return to the sign-in surface; inspect the saved evidence for the deployed app state."
+                    ) from exc
                 signed_out_body = frame.locator("body").inner_text(timeout=8_000)
                 if (
                     "Sign In to Your Workspace" not in signed_out_body
