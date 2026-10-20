@@ -33,8 +33,10 @@ def test_module_matrix_confirms_active_route_not_search_result_text():
     assert "def active_module_confirmed(" in source
     assert 'case["active_module_confirmed"]' in source
     assert "search result or unrelated module is not sufficient" in source
-    assert "ACTIVE_MODULE_SELECTOR = '[data-testid="shoir-active-module"]'" in source
+    assert "ACTIVE_MODULE_SELECTOR" in source
+    assert 'data-testid="shoir-active-module"' in source
     assert "frame.locator(ACTIVE_MODULE_SELECTOR)" in source
+    assert "active_module_confirmed(active_text, module_name)" in source
     assert "missing the candidate shell active-module marker" in source
     assert '"failed_non_route_cases"' in source
 
