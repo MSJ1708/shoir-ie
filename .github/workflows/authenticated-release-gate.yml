@@ -47,6 +47,7 @@ jobs:
           python -m pip install -r requirements.txt
           python -m playwright install --with-deps chromium
       - name: Verify dedicated test-account configuration
+        id: staging_preflight
         shell: bash
         run: |
           set -euo pipefail
@@ -67,9 +68,13 @@ jobs:
           python scripts/staging_e2e_guard.py
       - name: Verify authenticated 96-module rendering matrix
         run: python scripts/authenticated_module_matrix.py
+      # These checks are independent of the module-route matrix. Run them after
+      # a matrix failure too, but only after the fail-closed staging preflight passes.
       - name: Verify authenticated Edge API lifecycle and workspace isolation
+        if: ${{ always() && steps.staging_preflight.conclusion == 'success' }}
         run: python scripts/authenticated_release_gate.py
       - name: Verify authenticated browser shell, Excel module and logout
+        if: ${{ always() && steps.staging_preflight.conclusion == 'success' }}
         run: python scripts/authenticated_browser_matrix.py
       - name: Upload redacted verification evidence
         if: always()
