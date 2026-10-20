@@ -70,16 +70,18 @@ def main() -> int:
 
             signin_tab = app_frame.get_by_role("tab", name=re.compile("Sign In", re.I))
             signin_tab.click(timeout=10_000)
-            # Sign-in and registration tabs may both expose aria-labelled fields.
-            # Restrict to visible inputs so Playwright does not match hidden duplicates.
-            username_input = app_frame.locator('input[aria-label="Username"]:visible')
-            password_input = app_frame.locator('input[aria-label="Password"]:visible')
-            if username_input.count() != 1:
-                raise RuntimeError(f"Expected exactly one visible Username field on Sign In tab; found {username_input.count()}.")
-            if password_input.count() != 1:
-                raise RuntimeError(f"Expected exactly one visible Password field on Sign In tab; found {password_input.count()}.")
-            username_input.fill(username)
-            password_input.fill(password)
+            # Streamlit's labelled inputs do not reliably carry an aria-label
+            # attribute. Match exact labels and select visible controls only.
+            username_candidates = app_frame.get_by_label("Username", exact=True).all()
+            password_candidates = app_frame.get_by_label("Password", exact=True).all()
+            visible_usernames = [item for item in username_candidates if item.is_visible()]
+            visible_passwords = [item for item in password_candidates if item.is_visible()]
+            if len(visible_usernames) != 1:
+                raise RuntimeError(f"Expected exactly one visible exact-labelled Username field on Sign In tab; found {len(visible_usernames)}.")
+            if len(visible_passwords) != 1:
+                raise RuntimeError(f"Expected exactly one visible exact-labelled Password field on Sign In tab; found {len(visible_passwords)}.")
+            visible_usernames[0].fill(username)
+            visible_passwords[0].fill(password)
             app_frame.get_by_role("button", name=re.compile("^Sign In$", re.I)).click(timeout=10_000)
             app_frame.get_by_role("button", name=re.compile("Lock / Logout Workspace", re.I)).first.wait_for(timeout=60_000)
             logged_body = app_frame.locator("body").inner_text(timeout=8000)
