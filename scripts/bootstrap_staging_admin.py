@@ -217,10 +217,19 @@ def bootstrap() -> int:
             "The staging 'sho' identity already exists. No record was changed; use the approved admin-recovery process."
         )
 
-    password = get_hidden_value_from_clipboard("New staging admin password (input hidden; 16+ characters): ", "New password")
-    confirmation = get_hidden_value_from_clipboard("Re-enter staging admin password (input hidden): ", "Password confirmation")
-    if password != confirmation:
-        raise ValueError("Password confirmation did not match.")
+    # The trusted Windows bootstrap wrapper generates a high-entropy password locally.
+    # Accept it through the process environment to avoid unreliable repeated clipboard reads.
+    # Interactive/manual runs still require the normal confirmation check.
+    generated_password = os.environ.pop("SHOIR_STAGING_GENERATED_ADMIN_PASSWORD", "").strip()
+    if generated_password:
+        password = generated_password
+        confirmation = generated_password
+        print("Using a locally generated staging password; its value was not displayed.")
+    else:
+        password = get_hidden_value_from_clipboard("New staging admin password (input hidden; 16+ characters): ", "New password")
+        confirmation = get_hidden_value_from_clipboard("Re-enter staging admin password (input hidden): ", "Password confirmation")
+        if password != confirmation:
+            raise ValueError("Password confirmation did not match.")
     if len(password) < 16:
         raise ValueError("Use a unique staging password with at least 16 characters.")
     if password.casefold() == ADMIN_USERNAME:
