@@ -6,7 +6,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_authenticated_gate_is_manual_and_has_explicit_one-shot_push_opt_in():
+def test_authenticated_gate_is_manual_and_has_explicit_one_shot_push_opt_in():
     workflow = (ROOT / ".github/workflows/authenticated-release-gate.yml").read_text(encoding="utf-8")
     script = (ROOT / "scripts/authenticated_release_gate.py").read_text(encoding="utf-8")
 
