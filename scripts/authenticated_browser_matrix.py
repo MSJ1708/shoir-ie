@@ -7,6 +7,7 @@ import os
 import re
 import sys
 from datetime import datetime, timezone
+import time
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
@@ -16,6 +17,7 @@ from staging_e2e_guard import validate_app_from_env
 REPORT = Path(os.environ.get("SHOIR_E2E_UI_REPORT", "artifacts/authenticated-release-gate/browser-report.json"))
 PREFIX = "shoir-e2e-"
 URL = os.environ.get("SHOIR_E2E_APP_URL", "").strip()
+ACTIVE_MODULE_SELECTOR = '[data-testid="shoir-active-module"]'
 
 
 def fill_signin_credentials(frame, username: str, password: str) -> None:
@@ -115,6 +117,15 @@ def main() -> int:
             app_frame.get_by_role("button", name=re.compile("^Sign In$", re.I)).click(timeout=10_000)
             step = "wait for authenticated workspace"
             app_frame.get_by_role("button", name="Lock / Logout Workspace").first.wait_for(timeout=60_000)
+            step = "verify candidate shell build marker"
+            active_marker = app_frame.locator(ACTIVE_MODULE_SELECTOR)
+            try:
+                active_marker.wait_for(state="visible", timeout=10_000)
+            except Exception as exc:
+                raise RuntimeError(
+                    "Staging app does not contain the candidate shell marker; deploy branch "
+                    "staging-e2e-20261019 before rerunning this gate."
+                ) from exc
             step = "verify authenticated home"
             logged_body = app_frame.locator("body").inner_text(timeout=8000)
             check("authenticated_workspace_renders", username.casefold() in logged_body.casefold()
@@ -143,15 +154,25 @@ def main() -> int:
             active_excel = re.compile(
                 r"Active module:\s*Excel Data Cleaning & Import(?=\s|·|$)", re.I
             )
-            app_frame.get_by_text(active_excel).first.wait_for(timeout=45_000)
+            active_marker = app_frame.locator(ACTIVE_MODULE_SELECTOR)
+            active_module_text = ""
+            active_deadline = time.monotonic() + 45
+            while time.monotonic() < active_deadline:
+                try:
+                    active_module_text = active_marker.inner_text(timeout=1_000).strip()
+                except Exception:
+                    active_module_text = ""
+                if active_excel.search(active_module_text):
+                    break
+                page.wait_for_timeout(350)
             main_body = app_frame.get_by_role("main").inner_text(timeout=8_000)
-            excel_is_active = bool(active_excel.search(main_body))
+            excel_is_active = bool(active_excel.search(active_module_text))
             check(
                 "excel_module_renders",
                 excel_is_active and "Traceback (most recent call last)" not in main_body,
-                "Active module label confirms Excel Data Cleaning & Import."
+                "Explicit shell marker confirms Excel Data Cleaning & Import."
                 if excel_is_active else
-                "Excel text was present, but the active-module label did not confirm navigation.",
+                f"Excel search result did not navigate; active shell marker was {active_module_text[:120]!r}.",
             )
             take_evidence_screenshot(page, REPORT.parent / "authenticated-excel-module.png")
 
@@ -159,9 +180,17 @@ def main() -> int:
             step = "click sidebar logout"
             app_frame.get_by_role("button", name="Lock / Logout Workspace").first.click(timeout=10_000)
             step = "verify unauthenticated sign-in after logout"
-            app_frame.get_by_text(
-                re.compile(r"Sign In to Your Workspace", re.I)
-            ).first.wait_for(state="visible", timeout=45_000)
+            try:
+                app_frame.get_by_text(
+                    re.compile(r"Sign In to Your Workspace", re.I)
+                ).first.wait_for(state="visible", timeout=45_000)
+            except Exception as exc:
+                visible_body = app_frame.locator("body").inner_text(timeout=5_000).casefold()
+                if "server logout could not revoke this session" in visible_body:
+                    raise RuntimeError("App refused logout because server-side session revocation failed.") from exc
+                if "lock / logout workspace" in visible_body:
+                    raise RuntimeError("Logout click left the authenticated workspace visible.") from exc
+                raise RuntimeError("Logout did not return to the sign-in screen; inspect staging deployment/evidence.") from exc
             signed_out_body = app_frame.locator("body").inner_text(timeout=8_000)
             signed_out = (
                 "Sign In to Your Workspace" in signed_out_body
