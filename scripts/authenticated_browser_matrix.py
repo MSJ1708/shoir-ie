@@ -126,7 +126,7 @@ def main() -> int:
             search.press("Enter", timeout=10_000)
             open_excel = app_frame.get_by_role(
                 "button",
-                name=re.compile(r"^Open\\s*[·•]\\s*Excel Data Cleaning & Import$", re.I),
+                name=re.compile(r"^Open\s*[·•]\s*Excel Data Cleaning & Import$", re.I),
             )
             step = "open Excel Data Cleaning & Import module"
             open_excel.wait_for(state="visible", timeout=20_000)
