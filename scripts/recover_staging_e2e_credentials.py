@@ -261,15 +261,19 @@ def run_recovery() -> int:
     print(f"Fixed project: {STAGING_PROJECT_REF}")
     print("Scope: six already-existing shoir-e2e-* accounts. No account creation or deletion.")
 
-    # Validate the publishable key against the fixed staging REST API before
-    # storing it in GitHub. This prevents accidentally replacing the Actions
-    # secret with an opaque sb_publishable_* key copied from another project.
+    # Validate the publishable key against the public Auth settings endpoint.
+    # Do not use /rest/v1/ for this check: that exact PostgREST OpenAPI root
+    # can require an elevated service-role/secret key, so it is not a valid
+    # preflight for a publishable/anon key. This public endpoint still checks
+    # that the supplied API key is accepted by the fixed staging project.
     try:
-        key_status, _ = _request_json(publishable_key, "GET", f"{PROJECT_URL}/rest/v1/")
+        key_status, key_data = _request_json(
+            publishable_key, "GET", f"{PROJECT_URL}/auth/v1/settings"
+        )
     except Exception as exc:
         raise RuntimeError(f"Staging publishable-key preflight failed ({type(exc).__name__}); no passwords were changed.") from None
-    if key_status != 200:
-        raise RuntimeError(f"Publishable key was not accepted by the fixed staging REST API (HTTP {key_status}); no passwords were changed.")
+    if key_status != 200 or not isinstance(key_data, dict):
+        raise RuntimeError(f"Publishable key was not accepted by the fixed staging Auth API (HTTP {key_status}); no passwords were changed.")
 
     # Check every target row before the first write. No fallback to production.
     initial_rows: dict[str, dict[str, Any]] = {}
