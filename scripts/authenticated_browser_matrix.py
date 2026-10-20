@@ -114,14 +114,24 @@ def main() -> int:
                   "Authenticated shell rendered for the dedicated test identity.")
             page.screenshot(path=str(REPORT.parent / "authenticated-home.png"), full_page=True)
 
-            # The home action selects the canonical Excel module route without changing saved data.
-            open_excel = app_frame.get_by_role("button", name=re.compile("Open Excel Intelligence", re.I))
-            if open_excel.count():
-                open_excel.first.click(timeout=10_000)
-            else:
-                search = app_frame.get_by_placeholder(re.compile("Excel, forecasting, quality, MILP", re.I))
-                search.fill("Excel Data Cleaning & Import")
-                app_frame.get_by_role("button", name=re.compile("Open.*Excel Data Cleaning", re.I)).first.click(timeout=10_000)
+            # Navigate to the specific Excel Data Cleaning & Import module via
+            # the global module search. The UI requires Enter to apply searches;
+            # the generic "Open Excel Intelligence" home CTA is not a reliable
+            # assertion that this exact module route was opened.
+            step = "search for Excel Data Cleaning & Import module"
+            search = app_frame.get_by_placeholder(
+                re.compile("Search modules, datasets, runs, decisions", re.I)
+            )
+            search.fill("Excel Data Cleaning & Import", timeout=10_000)
+            search.press("Enter", timeout=10_000)
+            open_excel = app_frame.get_by_role(
+                "button",
+                name=re.compile(r"^Open\\s*[·•]\\s*Excel Data Cleaning & Import$", re.I),
+            )
+            step = "open Excel Data Cleaning & Import module"
+            open_excel.wait_for(state="visible", timeout=20_000)
+            open_excel.click(timeout=10_000)
+            step = "verify Excel Data Cleaning & Import module"
             app_frame.get_by_text(re.compile("Excel Data Cleaning & Import", re.I)).first.wait_for(timeout=45_000)
             module_body = app_frame.locator("body").inner_text(timeout=8000)
             check("excel_module_renders", "Excel Data Cleaning & Import".casefold() in module_body.casefold()
