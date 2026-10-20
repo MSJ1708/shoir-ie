@@ -127,7 +127,7 @@ def _request_json(key: str, method: str, url: str, payload: dict | None = None):
     }
     # New secret API keys are used through apikey only. Legacy service-role JWTs
     # also need Bearer authorization.
-    if not key.startswith("sb_secret_"):
+    if not key.startswith(("sb_secret_", "sb_publishable_")):
         headers["Authorization"] = f"Bearer {key}"
     if method in {"POST", "PATCH"}:
         headers["Prefer"] = "return=representation"
