@@ -55,9 +55,12 @@ class EdgeAPI:
         self.url = url.rstrip("/")
         self.headers = {
             "apikey": publishable_key,
-            "Authorization": f"Bearer {publishable_key}",
             "Content-Type": "application/json",
         }
+        # Supabase's current sb_publishable_* keys are not JWTs and must be
+        # sent in the apikey header only. Legacy anon JWTs still need Bearer auth.
+        if not publishable_key.startswith("sb_publishable_"):
+            self.headers["Authorization"] = f"Bearer {publishable_key}"
 
     def call(self, action: str, payload: dict[str, Any]) -> tuple[int, dict[str, Any]]:
         body = dict(payload)

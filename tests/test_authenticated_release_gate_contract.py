@@ -78,3 +78,23 @@ def test_staging_app_must_declare_staging_and_refuses_production_backend_fallbac
     assert "STAGING TEST ENVIRONMENT" in module_matrix
     assert "edge_url = " in docs
     assert "environment = \"staging\"" in docs
+
+
+
+def test_current_supabase_publishable_key_is_not_sent_as_bearer_auth():
+    script = (ROOT / "scripts/authenticated_release_gate.py").read_text(encoding="utf-8")
+    assert 'publishable_key.startswith("sb_publishable_")' in script
+    assert 'self.headers["Authorization"] = f"Bearer {publishable_key}"' in script
+    assert '"apikey": publishable_key' in script
+
+
+def test_browser_gates_locate_visible_streamlit_signin_inputs_without_label_association():
+    for relative_path in (
+        "scripts/authenticated_browser_matrix.py",
+        "scripts/authenticated_module_matrix.py",
+    ):
+        script = (ROOT / relative_path).read_text(encoding="utf-8")
+        assert "input[type='text']:visible" in script
+        assert "input[type='password']:visible" in script
+        assert "fill_signin_credentials" in script
+        assert 'get_by_label("Username", exact=True)' not in script

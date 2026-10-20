@@ -96,6 +96,29 @@ def find_app_frame(page):
     return None
 
 
+def fill_signin_credentials(frame, username: str, password: str) -> None:
+    """Fill visible Streamlit sign-in inputs without relying on label association.
+
+    Streamlit's generated labels are not consistently connected to native inputs
+    via accessible-name metadata. Select only visible text/password inputs, fail
+    closed unless each is unique, and never guess at hidden registration controls.
+    """
+    username_inputs = frame.locator("input[type='text']:visible")
+    password_inputs = frame.locator("input[type='password']:visible")
+    username_count = username_inputs.count()
+    password_count = password_inputs.count()
+    if username_count != 1:
+        raise RuntimeError(
+            f"Expected exactly one visible text input on Sign In tab; found {username_count}."
+        )
+    if password_count != 1:
+        raise RuntimeError(
+            f"Expected exactly one visible password input on Sign In tab; found {password_count}."
+        )
+    username_inputs.first.fill(username)
+    password_inputs.first.fill(password)
+
+
 def login_test_account(page, account_class: str, username: str, password: str) -> Any:
     response = page.goto(URL, wait_until="domcontentloaded", timeout=90_000)
     if response is None or response.status != 200:
@@ -107,19 +130,7 @@ def login_test_account(page, account_class: str, username: str, password: str) -
     if "STAGING TEST ENVIRONMENT" not in initial_body:
         raise RuntimeError(f"{account_class}: staging marker is missing; refusing to submit credentials to a possibly production-backed app.")
     frame.get_by_role("tab", name=re.compile("Sign In", re.I)).click(timeout=10_000)
-    # Streamlit associates labels with inputs rather than reliably exposing
-    # an aria-label attribute. Restrict exact label matches to visible controls;
-    # hidden inputs in the registration tab must never make sign-in ambiguous.
-    username_candidates = frame.get_by_label("Username", exact=True).all()
-    password_candidates = frame.get_by_label("Password", exact=True).all()
-    visible_usernames = [item for item in username_candidates if item.is_visible()]
-    visible_passwords = [item for item in password_candidates if item.is_visible()]
-    if len(visible_usernames) != 1:
-        raise RuntimeError(f"Expected exactly one visible exact-labelled Username field on Sign In tab; found {len(visible_usernames)}.")
-    if len(visible_passwords) != 1:
-        raise RuntimeError(f"Expected exactly one visible exact-labelled Password field on Sign In tab; found {len(visible_passwords)}.")
-    visible_usernames[0].fill(username)
-    visible_passwords[0].fill(password)
+    fill_signin_credentials(frame, username, password)
     frame.get_by_role("button", name=re.compile("^Sign In$", re.I)).click(timeout=10_000)
     frame.get_by_role("button", name=re.compile("Lock / Logout Workspace", re.I)).first.wait_for(timeout=60_000)
     return frame
