@@ -11,10 +11,12 @@ from __future__ import annotations
 
 import base64
 import getpass
+import os
 import hashlib
 import hmac
 import json
 import secrets
+import subprocess
 import sys
 from datetime import datetime, timezone
 from urllib.error import HTTPError, URLError
@@ -108,10 +110,13 @@ def _request_json(
     data = None if payload is None else json.dumps(payload).encode("utf-8")
     headers = {
         "apikey": key,
-        "Authorization": f"Bearer {key}",
         "Accept": "application/json",
         "Content-Type": "application/json",
     }
+    # Supabase's new sb_secret_ keys belong in the apikey header only. Legacy
+    # service_role JWTs continue to use both apikey and Authorization headers.
+    if not key.startswith("sb_secret_"):
+        headers["Authorization"] = f"Bearer {key}"
     if method == "POST":
         headers["Prefer"] = "resolution=ignore-duplicates,return=representation"
     req = Request(url, data=data, headers=headers, method=method)
@@ -141,6 +146,59 @@ def _existing_admin(key: str) -> list[dict]:
     return [row for row in result if isinstance(row, dict)]
 
 
+
+def get_hidden_service_key(prompt: str) -> str:
+    """Read a service key safely; Windows users may type @clipboard instead of pasting into getpass."""
+    value = getpass.getpass(prompt).strip()
+    if value.casefold() != "@clipboard":
+        return value
+    if sys.platform != "win32":
+        raise RuntimeError("@clipboard is supported only on Windows PowerShell.")
+    try:
+        result = subprocess.run(
+            ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", "Get-Clipboard -Raw"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        raise RuntimeError("Could not read the Windows clipboard. Copy the staging key again and retry.") from None
+    key = result.stdout.strip()
+    if not key:
+        raise RuntimeError("The Windows clipboard was empty. Copy the staging key again and retry.")
+    print("Read staging key from clipboard; the key value was not displayed.")
+    return key
+
+def get_hidden_value_from_clipboard(prompt: str, label: str) -> str:
+    """Avoid Windows hidden-input paste issues by reading a copied value on explicit request."""
+    choice = input(
+        f"{label}: copy the value first, then type CLIPBOARD and press Enter; "
+        "or type MANUAL to enter it with hidden input: "
+    ).strip().casefold()
+    if choice == "manual":
+        return getpass.getpass(prompt)
+    if choice != "clipboard":
+        raise ValueError("Enter CLIPBOARD or MANUAL.")
+    if sys.platform != "win32":
+        raise RuntimeError("Clipboard retrieval is supported only on Windows.")
+    try:
+        result = subprocess.run(
+            ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", "Get-Clipboard -Raw"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        raise RuntimeError("Could not read the Windows clipboard. Copy the value again and retry.") from None
+    value = result.stdout.strip()
+    if not value:
+        raise RuntimeError("The Windows clipboard was empty. Copy the value again and retry.")
+    print(f"Read {label.lower()} from clipboard; the value was not displayed.")
+    return value
+
+
 def bootstrap() -> int:
     if STAGING_PROJECT_REF == PRODUCTION_PROJECT_REF:
         raise RuntimeError("The staging and production project references must be different.")
@@ -149,7 +207,7 @@ def bootstrap() -> int:
     print(f"Fixed target: {PROJECT_URL}")
     print("This utility cannot target production and will not overwrite an existing administrator.")
     print("Use a one-time staging service key from Supabase Dashboard → Project Settings → API.")
-    service_key = getpass.getpass("Staging service key (input hidden): ").strip()
+    service_key = os.environ.pop("SHOIR_STAGING_SERVICE_KEY", "").strip() or getpass.getpass("Staging service key (input hidden): ").strip()
     if not is_service_role_key(service_key):
         raise ValueError("The key was not recognized as a Supabase server secret/service_role key.")
 
@@ -159,10 +217,19 @@ def bootstrap() -> int:
             "The staging 'sho' identity already exists. No record was changed; use the approved admin-recovery process."
         )
 
-    password = getpass.getpass("New staging admin password (input hidden; 16+ characters): ")
-    confirmation = getpass.getpass("Re-enter staging admin password (input hidden): ")
-    if password != confirmation:
-        raise ValueError("Password confirmation did not match.")
+    # The trusted Windows bootstrap wrapper generates a high-entropy password locally.
+    # Accept it through the process environment to avoid unreliable repeated clipboard reads.
+    # Interactive/manual runs still require the normal confirmation check.
+    generated_password = os.environ.pop("SHOIR_STAGING_GENERATED_ADMIN_PASSWORD", "").strip()
+    if generated_password:
+        password = generated_password
+        confirmation = generated_password
+        print("Using a locally generated staging password; its value was not displayed.")
+    else:
+        password = get_hidden_value_from_clipboard("New staging admin password (input hidden; 16+ characters): ", "New password")
+        confirmation = get_hidden_value_from_clipboard("Re-enter staging admin password (input hidden): ", "Password confirmation")
+        if password != confirmation:
+            raise ValueError("Password confirmation did not match.")
     if len(password) < 16:
         raise ValueError("Use a unique staging password with at least 16 characters.")
     if password.casefold() == ADMIN_USERNAME:

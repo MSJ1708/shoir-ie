@@ -28,6 +28,19 @@ def test_module_matrix_fails_closed_for_missing_or_broken_routes():
     assert "horizontal overflow" in source.casefold()
 
 
+def test_module_matrix_confirms_active_route_not_search_result_text():
+    source = SCRIPT.read_text(encoding="utf-8")
+    assert "def active_module_confirmed(" in source
+    assert 'case["active_module_confirmed"]' in source
+    assert "search result or unrelated module is not sufficient" in source
+    assert "ACTIVE_MODULE_SELECTOR" in source
+    assert 'data-testid="shoir-active-module"' in source
+    assert "frame.locator(ACTIVE_MODULE_SELECTOR)" in source
+    assert "active_module_confirmed(active_text, module_name)" in source
+    assert "missing the candidate shell active-module marker" in source
+    assert '"failed_non_route_cases"' in source
+
+
 def test_authenticated_release_workflow_runs_matrix_and_requires_disposable_accounts():
     workflow = WORKFLOW.read_text(encoding="utf-8")
     assert "python scripts/authenticated_module_matrix.py" in workflow
@@ -42,3 +55,10 @@ def test_runbook_documents_matrix_scope_and_account_setup():
     assert "SHOIR_E2E_MODULE_USERNAME" in docs
     assert "SHOIR_E2E_RESEARCH_MODULE_USERNAME" in docs
     assert "not calculation correctness" in docs.casefold()
+
+
+def test_shell_emits_escaped_active_module_marker_for_browser_assertions():
+    shell = (ROOT / "shoir_application_shell.py").read_text(encoding="utf-8")
+    assert "module_safe = html.escape(str(module))" in shell
+    assert 'data-testid="shoir-active-module"' in shell
+    assert "Active module: {module_safe}" in shell

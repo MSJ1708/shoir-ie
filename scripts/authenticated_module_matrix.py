@@ -51,6 +51,7 @@ APP_MARKERS = (
     "Welcome to Shoir-IE Workspace",
 )
 MODULE_SEARCH = re.compile(r"Search modules, datasets, runs, decisions", re.I)
+ACTIVE_MODULE_SELECTOR = '[data-testid="shoir-active-module"]'
 
 
 def read_inventory() -> list[dict[str, str]]:
@@ -96,6 +97,100 @@ def find_app_frame(page):
     return None
 
 
+def read_active_module_label(frame) -> str:
+    """Read the visible active-route label without depending on custom HTML attributes."""
+    candidates = (
+        frame.locator(ACTIVE_MODULE_SELECTOR),
+        frame.get_by_text(re.compile(r"^\s*Active module:\s*.+$", re.I)),
+    )
+    for candidate in candidates:
+        try:
+            if candidate.count() and candidate.first.is_visible():
+                label = candidate.first.inner_text(timeout=1_000).strip()
+                if label:
+                    return label
+        except Exception:
+            continue
+    return ""
+
+
+def visible_logout_button(frame):
+    """Expand Streamlit's real sidebar control before attempting workspace logout."""
+    sidebar = frame.locator('section[data-testid="stSidebar"]')
+    try:
+        if sidebar.is_visible() and sidebar.get_attribute("aria-expanded") != "false":
+            button = frame.get_by_role("button", name="Lock / Logout Workspace").first
+            button.wait_for(state="visible", timeout=2_000)
+            button.scroll_into_view_if_needed(timeout=5_000)
+            return button
+    except Exception:
+        pass
+
+    for selector in (
+        '[data-testid="stSidebarCollapsedControl"]',
+        'button[data-testid="stSidebarCollapseButton"]',
+    ):
+        toggle = frame.locator(selector)
+        try:
+            if toggle.count() and toggle.first.is_visible():
+                toggle.first.click(timeout=5_000)
+                break
+        except Exception:
+            continue
+
+    sidebar.wait_for(state="visible", timeout=10_000)
+    button = frame.get_by_role("button", name="Lock / Logout Workspace").first
+    button.wait_for(state="visible", timeout=10_000)
+    button.scroll_into_view_if_needed(timeout=5_000)
+    return button
+
+
+def active_module_confirmed(main_text: str, module_name: str) -> bool:
+    """Only accept an explicit active-module label, not a mention in search results."""
+    marker = re.compile(
+        r"Active module:\s*" + re.escape(module_name) + r"(?=\s|·|$)",
+        re.IGNORECASE,
+    )
+    return bool(marker.search(main_text))
+
+
+def fill_signin_credentials(frame, username: str, password: str) -> None:
+    """Fill visible Streamlit sign-in inputs without relying on label association.
+
+    Streamlit's generated labels are not consistently connected to native inputs
+    via accessible-name metadata. Select only visible text/password inputs, fail
+    closed unless each is unique, and never guess at hidden registration controls.
+    """
+    # Streamlit reruns after switching tabs. Wait for the selected tab's
+    # controls to finish rendering before counting them; an immediate count()
+    # can observe zero inputs during the rerun even though the controls appear
+    # moments later.
+    frame.get_by_role("button", name=re.compile(r"^Sign In$", re.I)).wait_for(
+        state="visible", timeout=10_000
+    )
+    username_inputs = frame.locator("input[type='text']:visible")
+    password_inputs = frame.locator("input[type='password']:visible")
+    try:
+        username_inputs.first.wait_for(state="visible", timeout=10_000)
+        password_inputs.first.wait_for(state="visible", timeout=10_000)
+    except PlaywrightError as exc:
+        raise RuntimeError(
+            "Sign-in inputs did not finish rendering after selecting the Sign In tab."
+        ) from exc
+    username_count = username_inputs.count()
+    password_count = password_inputs.count()
+    if username_count != 1:
+        raise RuntimeError(
+            f"Expected exactly one visible text input on Sign In tab; found {username_count}."
+        )
+    if password_count != 1:
+        raise RuntimeError(
+            f"Expected exactly one visible password input on Sign In tab; found {password_count}."
+        )
+    username_inputs.first.fill(username)
+    password_inputs.first.fill(password)
+
+
 def login_test_account(page, account_class: str, username: str, password: str) -> Any:
     response = page.goto(URL, wait_until="domcontentloaded", timeout=90_000)
     if response is None or response.status != 200:
@@ -107,10 +202,21 @@ def login_test_account(page, account_class: str, username: str, password: str) -
     if "STAGING TEST ENVIRONMENT" not in initial_body:
         raise RuntimeError(f"{account_class}: staging marker is missing; refusing to submit credentials to a possibly production-backed app.")
     frame.get_by_role("tab", name=re.compile("Sign In", re.I)).click(timeout=10_000)
-    frame.get_by_label("Username").fill(username)
-    frame.get_by_label("Password").fill(password)
+    fill_signin_credentials(frame, username, password)
     frame.get_by_role("button", name=re.compile("^Sign In$", re.I)).click(timeout=10_000)
-    frame.get_by_role("button", name=re.compile("Lock / Logout Workspace", re.I)).first.wait_for(timeout=60_000)
+    frame.get_by_role("button", name="Lock / Logout Workspace").first.wait_for(timeout=60_000)
+    marker_deadline = time.monotonic() + 10
+    active_label = ""
+    while time.monotonic() < marker_deadline:
+        active_label = read_active_module_label(frame)
+        if re.match(r"^\s*Active module:\s*.+$", active_label, re.I):
+            break
+        page.wait_for_timeout(250)
+    if not re.match(r"^\s*Active module:\s*.+$", active_label, re.I):
+        raise RuntimeError(
+            "Staging app is missing the candidate shell active-module marker; deploy the updated "
+            "staging-e2e-20261019 branch before running the authenticated release gate."
+        )
     return frame
 
 
@@ -128,31 +234,65 @@ def route_module(page, frame, module_name: str, account_class: str) -> dict[str,
     }
     try:
         search = frame.get_by_placeholder(MODULE_SEARCH)
-        search.fill(module_name, timeout=10_000)
-        open_button = frame.get_by_role(
-            "button",
-            name=re.compile(r"^Open\s*[·•]\s*" + re.escape(module_name) + r"$", re.I),
-        )
-        open_button.wait_for(state="visible", timeout=12_000)
-        open_button.click(timeout=10_000)
+        open_button = None
+        last_click_error = None
+        for attempt in range(2):
+            if active_module_confirmed(read_active_module_label(frame), module_name):
+                break
+            search.fill(module_name, timeout=10_000)
+            # The live input explicitly says "Press Enter to apply". Streamlit's
+            # search state is not committed by fill() alone.
+            search.press("Enter", timeout=10_000)
+            open_button = frame.get_by_role(
+                "button",
+                name=re.compile(r"^Open\s*[·•]\s*" + re.escape(module_name) + r"$", re.I),
+            )
+            open_button.wait_for(state="visible", timeout=12_000)
+            open_button.scroll_into_view_if_needed(timeout=5_000)
+            try:
+                open_button.click(timeout=15_000)
+                last_click_error = None
+                break
+            except PlaywrightError as exc:
+                # Streamlit may rerun while the click is being acknowledged.
+                # Accept only if the shell actually switched to this exact route;
+                # otherwise retry once and preserve a hard failure if it did not.
+                if active_module_confirmed(read_active_module_label(frame), module_name):
+                    last_click_error = None
+                    break
+                last_click_error = exc
+                if attempt == 0:
+                    page.wait_for_timeout(500)
+        if last_click_error is not None:
+            raise last_click_error
 
         main = frame.get_by_role("main")
         deadline = time.monotonic() + 45
         main_text = ""
+        active_text = ""
         while time.monotonic() < deadline:
             try:
                 main_text = main.inner_text(timeout=1_500)
             except Exception:
                 main_text = ""
-            if module_name.casefold() in main_text.casefold():
+            try:
+                active_text = read_active_module_label(frame)
+            except Exception:
+                active_text = ""
+            if active_module_confirmed(active_text, module_name):
                 break
             page.wait_for_timeout(350)
 
         case["main_text_length"] = len(main_text)
+        case["active_module_label"] = active_text[:160]
         folded = main_text.casefold()
         case["fatal_markers"] = [marker for marker in FATAL_MARKERS if marker in folded]
-        if module_name.casefold() not in folded:
-            raise AssertionError("Requested module name did not appear in the main content after navigation.")
+        case["active_module_confirmed"] = active_module_confirmed(active_text, module_name)
+        if not case["active_module_confirmed"]:
+            raise AssertionError(
+                "The explicit shell active-module marker did not confirm the requested module; "
+                "a search result or unrelated module is not sufficient."
+            )
         if len(main_text.strip()) < 40:
             raise AssertionError("Main content is effectively blank after module navigation.")
         if case["fatal_markers"]:
@@ -229,15 +369,38 @@ def run_account(browser, account_class: str, username: str, password: str, rows:
     finally:
         if frame is not None:
             try:
-                frame.get_by_role("button", name=re.compile("Lock / Logout Workspace", re.I)).first.click(timeout=5_000)
-                frame.get_by_role("tab", name=re.compile("Sign In", re.I)).wait_for(timeout=15_000)
-            except Exception:
+                visible_logout_button(frame).click(timeout=15_000)
+                try:
+                    frame.get_by_text(
+                        re.compile(r"Sign In to Your Workspace", re.I)
+                    ).wait_for(state="visible", timeout=25_000)
+                except Exception as exc:
+                    current_body = frame.locator("body").inner_text(timeout=5_000).casefold()
+                    if "server logout could not revoke this session" in current_body:
+                        raise RuntimeError(
+                            "Application refused logout because server-side session revocation failed."
+                        ) from exc
+                    if "lock / logout workspace" in current_body:
+                        raise RuntimeError(
+                            "Logout click left the authenticated workspace visible; the app did not clear its session."
+                        ) from exc
+                    raise RuntimeError(
+                        "Logout did not return to the sign-in surface; inspect the saved evidence for the deployed app state."
+                    ) from exc
+                signed_out_body = frame.locator("body").inner_text(timeout=8_000)
+                if (
+                    "Sign In to Your Workspace" not in signed_out_body
+                    or username.casefold() in signed_out_body.casefold()
+                    or "Lock / Logout Workspace" in signed_out_body
+                ):
+                    raise AssertionError("Logout did not clear the authenticated workspace.")
+            except Exception as exc:
                 cases.append({
                     "case_id": f"MODULE-LOGOUT-{account_class.upper()}",
                     "module_name": None,
                     "account_class": account_class,
                     "status": "FAIL",
-                    "failure_reason": "Dedicated module-matrix account did not return to the sign-in surface on logout.",
+                    "failure_reason": f"{type(exc).__name__}: {str(exc)[:240]}",
                 })
         context.close()
 
@@ -308,6 +471,15 @@ def main() -> int:
     passed_routes = sum(case.get("status") == "PASS" and case.get("module_name") is not None for case in report["cases"])
     report["passed_module_routes"] = passed_routes
     report["failed_module_routes"] = sum(case.get("status") == "FAIL" and case.get("module_name") is not None for case in report["cases"])
+    report["failed_non_route_cases"] = [
+        {
+            "case_id": case.get("case_id"),
+            "account_class": case.get("account_class"),
+            "failure_reason": case.get("failure_reason", ""),
+        }
+        for case in report["cases"]
+        if case.get("status") == "FAIL" and case.get("module_name") is None
+    ]
     report["overall"] = (
         "PASS"
         if expected > 0
@@ -328,6 +500,7 @@ def main() -> int:
         "failed_module_routes": report["failed_module_routes"],
         "preflight_error": report.get("preflight_error"),
         "missing_modules": report.get("missing_modules"),
+        "failed_non_route_cases": report.get("failed_non_route_cases"),
     }, indent=2))
     return 0 if report["overall"] == "PASS" else 1
 
