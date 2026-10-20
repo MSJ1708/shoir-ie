@@ -103,8 +103,22 @@ def fill_signin_credentials(frame, username: str, password: str) -> None:
     via accessible-name metadata. Select only visible text/password inputs, fail
     closed unless each is unique, and never guess at hidden registration controls.
     """
+    # Streamlit reruns after switching tabs. Wait for the selected tab's
+    # controls to finish rendering before counting them; an immediate count()
+    # can observe zero inputs during the rerun even though the controls appear
+    # moments later.
+    frame.get_by_role("button", name=re.compile(r"^Sign In$", re.I)).wait_for(
+        state="visible", timeout=10_000
+    )
     username_inputs = frame.locator("input[type='text']:visible")
     password_inputs = frame.locator("input[type='password']:visible")
+    try:
+        username_inputs.first.wait_for(state="visible", timeout=10_000)
+        password_inputs.first.wait_for(state="visible", timeout=10_000)
+    except PlaywrightError as exc:
+        raise RuntimeError(
+            "Sign-in inputs did not finish rendering after selecting the Sign In tab."
+        ) from exc
     username_count = username_inputs.count()
     password_count = password_inputs.count()
     if username_count != 1:
