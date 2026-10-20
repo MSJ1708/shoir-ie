@@ -87,7 +87,7 @@ Do not put passwords or tokens in workflow inputs, source files, issues, pull re
 
 1. Confirm a dedicated staging Streamlit deployment exists and that its own app secrets point to staging Supabase project `hfhrosthswcybccepmak` (not production). Confirm the Edge Function endpoint and publishable key refer to that same project. Changing the approved staging project requires an explicit reviewed code change.
 2. Confirm the configured Edge Function and Streamlit deployment contain the revisions being tested.
-3. Open GitHub Actions → **Authenticated release gate** → **Run workflow** on `main`.
+3. Open GitHub Actions → **Authenticated release gate** → **Run workflow**, then select the branch containing the release-candidate commit. For this unmerged PR, select `staging-e2e-20261019` (PR #165). Do not select `main` until these changes have landed there: `workflow_dispatch` runs the workflow code from the selected branch, so choosing `main` would test the older base revision instead of this candidate.
 4. Review the run summary and download `shoir-ie-authenticated-release-evidence`.
 5. Record the run URL, commit SHA, timestamp, target environment, and each case's result in `docs/RELEASE_VERIFICATION_MATRIX.md`. Treat any failed cleanup or workspace restore as a release blocker.
 

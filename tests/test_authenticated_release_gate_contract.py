@@ -45,6 +45,13 @@ def test_navigation_and_logout_defer_widget_state_reset_until_before_render():
     assert 'full_page=False' in browser
 
 
+def test_manual_release_gate_runbook_targets_the_unmerged_candidate_branch():
+    docs = (ROOT / "docs/AUTHENTICATED_RELEASE_GATE.md").read_text(encoding="utf-8")
+    assert "select the branch containing the release-candidate commit" in docs
+    assert "select `staging-e2e-20261019` (PR #165)" in docs
+    assert "choosing `main` would test the older base revision" in docs
+
+
 def test_server_login_throttle_is_reviewed_and_migration_first():
     migration = (ROOT / "supabase/migrations/20261019124815_server_side_login_rate_limits.sql").read_text(encoding="utf-8")
     edge = (ROOT / "supabase/functions/shoir-persistence/index.ts").read_text(encoding="utf-8")
