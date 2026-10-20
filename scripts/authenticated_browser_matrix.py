@@ -47,6 +47,23 @@ def fill_signin_credentials(frame, username: str, password: str) -> None:
     password_inputs.first.fill(password)
 
 
+def read_active_module_label(frame) -> str:
+    """Read the visible active-route label without depending on custom HTML attributes."""
+    candidates = (
+        frame.locator(ACTIVE_MODULE_SELECTOR),
+        frame.get_by_text(re.compile(r"^\\s*Active module:\\s*.+$", re.I)),
+    )
+    for candidate in candidates:
+        try:
+            if candidate.count() and candidate.first.is_visible():
+                label = candidate.first.inner_text(timeout=1_000).strip()
+                if label:
+                    return label
+        except Exception:
+            continue
+    return ""
+
+
 def take_evidence_screenshot(page, path: Path) -> None:
     """Capture viewport evidence without letting a long page fail functional tests."""
     try:
@@ -118,14 +135,18 @@ def main() -> int:
             step = "wait for authenticated workspace"
             app_frame.get_by_role("button", name="Lock / Logout Workspace").first.wait_for(timeout=60_000)
             step = "verify candidate shell build marker"
-            active_marker = app_frame.locator(ACTIVE_MODULE_SELECTOR)
-            try:
-                active_marker.wait_for(state="visible", timeout=10_000)
-            except Exception as exc:
+            marker_deadline = time.monotonic() + 10
+            active_module_text = ""
+            while time.monotonic() < marker_deadline:
+                active_module_text = read_active_module_label(app_frame)
+                if re.match(r"^\\s*Active module:\\s*.+$", active_module_text, re.I):
+                    break
+                page.wait_for_timeout(250)
+            if not re.match(r"^\\s*Active module:\\s*.+$", active_module_text, re.I):
                 raise RuntimeError(
                     "Staging app does not contain the candidate shell marker; deploy branch "
                     "staging-e2e-20261019 before rerunning this gate."
-                ) from exc
+                )
             step = "verify authenticated home"
             logged_body = app_frame.locator("body").inner_text(timeout=8000)
             check("authenticated_workspace_renders", username.casefold() in logged_body.casefold()
@@ -154,12 +175,11 @@ def main() -> int:
             active_excel = re.compile(
                 r"Active module:\s*Excel Data Cleaning & Import(?=\s|·|$)", re.I
             )
-            active_marker = app_frame.locator(ACTIVE_MODULE_SELECTOR)
             active_module_text = ""
             active_deadline = time.monotonic() + 45
             while time.monotonic() < active_deadline:
                 try:
-                    active_module_text = active_marker.inner_text(timeout=1_000).strip()
+                    active_module_text = read_active_module_label(app_frame)
                 except Exception:
                     active_module_text = ""
                 if active_excel.search(active_module_text):

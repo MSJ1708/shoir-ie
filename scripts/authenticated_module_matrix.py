@@ -97,6 +97,23 @@ def find_app_frame(page):
     return None
 
 
+def read_active_module_label(frame) -> str:
+    """Read the visible active-route label without depending on custom HTML attributes."""
+    candidates = (
+        frame.locator(ACTIVE_MODULE_SELECTOR),
+        frame.get_by_text(re.compile(r"^\\s*Active module:\\s*.+$", re.I)),
+    )
+    for candidate in candidates:
+        try:
+            if candidate.count() and candidate.first.is_visible():
+                label = candidate.first.inner_text(timeout=1_000).strip()
+                if label:
+                    return label
+        except Exception:
+            continue
+    return ""
+
+
 def active_module_confirmed(main_text: str, module_name: str) -> bool:
     """Only accept an explicit active-module label, not a mention in search results."""
     marker = re.compile(
@@ -157,13 +174,18 @@ def login_test_account(page, account_class: str, username: str, password: str) -
     fill_signin_credentials(frame, username, password)
     frame.get_by_role("button", name=re.compile("^Sign In$", re.I)).click(timeout=10_000)
     frame.get_by_role("button", name="Lock / Logout Workspace").first.wait_for(timeout=60_000)
-    try:
-        frame.locator(ACTIVE_MODULE_SELECTOR).wait_for(state="visible", timeout=10_000)
-    except PlaywrightError as exc:
+    marker_deadline = time.monotonic() + 10
+    active_label = ""
+    while time.monotonic() < marker_deadline:
+        active_label = read_active_module_label(frame)
+        if re.match(r"^\\s*Active module:\\s*.+$", active_label, re.I):
+            break
+        page.wait_for_timeout(250)
+    if not re.match(r"^\\s*Active module:\\s*.+$", active_label, re.I):
         raise RuntimeError(
             "Staging app is missing the candidate shell active-module marker; deploy the updated "
             "staging-e2e-20261019 branch before running the authenticated release gate."
-        ) from exc
+        )
     return frame
 
 
@@ -194,7 +216,6 @@ def route_module(page, frame, module_name: str, account_class: str) -> dict[str,
         open_button.click(timeout=10_000)
 
         main = frame.get_by_role("main")
-        active_marker = frame.locator(ACTIVE_MODULE_SELECTOR)
         deadline = time.monotonic() + 45
         main_text = ""
         active_text = ""
@@ -204,7 +225,7 @@ def route_module(page, frame, module_name: str, account_class: str) -> dict[str,
             except Exception:
                 main_text = ""
             try:
-                active_text = active_marker.inner_text(timeout=1_000).strip()
+                active_text = read_active_module_label(frame)
             except Exception:
                 active_text = ""
             if active_module_confirmed(active_text, module_name):

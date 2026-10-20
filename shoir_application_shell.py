@@ -564,9 +564,27 @@ def render_shell_css() -> None:
 
 
 def render_application_header(username: str, tier: str, module: str) -> None:
-    df, source_key = _first_dataframe()
-    ready = data_readiness(df)
-    provenance = infer_provenance()
+    # This identity label must render before optional readiness/provenance work.
+    # The release browser uses it to confirm the actual active route, and a
+    # diagnostic calculation must never prevent that label or module UI from rendering.
+    module_safe = html.escape(str(module))
+    st.markdown(
+        f'<div class="shoir-shell-muted" data-testid="shoir-active-module">Active module: {module_safe}</div>',
+        unsafe_allow_html=True,
+    )
+
+    try:
+        df, source_key = _first_dataframe()
+        ready = data_readiness(df)
+        provenance = infer_provenance()
+    except Exception:
+        # Keep navigation/modules usable when the optional workspace summary
+        # encounters a legacy or partially restored dataset in session state.
+        source_key = ""
+        ready = {"score": 0.0}
+        provenance = "DEMO"
+        st.caption("Workspace readiness details are temporarily unavailable; the active module remains available.")
+
     project = (
         st.session_state.get("shoir_project_name")
         or st.session_state.get("active_workspace_name")
@@ -589,7 +607,6 @@ def render_application_header(username: str, tier: str, module: str) -> None:
     username_safe = html.escape(str(username))
     run_safe = html.escape(str(run_id))
     tier_safe = html.escape(str(tier))
-    module_safe = html.escape(str(module))
     st.markdown(
         f"""
 <div class="shoir-shell-top">
@@ -600,7 +617,6 @@ def render_application_header(username: str, tier: str, module: str) -> None:
   <div class="shoir-shell-cell"><div class="shoir-shell-label">Run</div><div class="shoir-shell-value">{run_safe}</div></div>
   <div class="shoir-shell-cell"><div class="shoir-shell-label">Tier</div><div class="shoir-shell-value">{tier_safe}</div></div>
 </div>
-<div class="shoir-shell-muted" data-testid="shoir-active-module">Active module: {module_safe}</div>
 """,
         unsafe_allow_html=True,
     )

@@ -52,6 +52,24 @@ def test_navigation_and_logout_defer_widget_state_reset_until_before_render():
     assert 'full_page=False' in browser
 
 
+def test_active_module_identity_renders_before_optional_header_diagnostics_and_has_visible_text_fallback():
+    shell = (ROOT / "shoir_application_shell.py").read_text(encoding="utf-8")
+    shell_start = shell.index("def render_application_header(")
+    shell_end = shell.index("\\ndef render_module_workflow(", shell_start)
+    header = shell[shell_start:shell_end]
+    assert header.index('data-testid="shoir-active-module"') < header.index("_first_dataframe()")
+    assert header.count('data-testid="shoir-active-module"') == 1
+
+    for relative_path in (
+        "scripts/authenticated_browser_matrix.py",
+        "scripts/authenticated_module_matrix.py",
+    ):
+        script = (ROOT / relative_path).read_text(encoding="utf-8")
+        assert "def read_active_module_label(frame)" in script
+        assert "get_by_text(re.compile" in script
+        assert "ACTIVE_MODULE_SELECTOR" in script
+
+
 def test_manual_release_gate_runbook_targets_the_unmerged_candidate_branch():
     docs = (ROOT / "docs/AUTHENTICATED_RELEASE_GATE.md").read_text(encoding="utf-8")
     assert "select the branch containing the release-candidate commit" in docs
