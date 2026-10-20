@@ -12,6 +12,7 @@ import getpass
 import json
 import os
 import secrets
+import subprocess
 import sys
 import tempfile
 from datetime import datetime, timezone
@@ -31,6 +32,30 @@ ACTIVE_TIER = "Enterprise Plus Tier ($399)"
 STARTER_TIER = "Starter Tier ($29)"
 RESEARCH_TIER = "Research Pack ($30 add-on)"
 PAYMENT_METHOD = "STC Pay (QR)"
+
+
+def get_hidden_key(prompt: str) -> str:
+    """Read a key via hidden input; type @clipboard to retrieve Windows clipboard text."""
+    value = getpass.getpass(prompt).strip()
+    if value.casefold() != "@clipboard":
+        return value
+    if sys.platform != "win32":
+        raise RuntimeError("@clipboard is supported only on Windows PowerShell.")
+    try:
+        result = subprocess.run(
+            ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", "Get-Clipboard -Raw"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        raise RuntimeError("Could not read the Windows clipboard. Copy the key again and retry.") from None
+    key = result.stdout.strip()
+    if not key:
+        raise RuntimeError("The Windows clipboard was empty. Copy the key again and retry.")
+    print("Read key from clipboard; the key value was not displayed.")
+    return key
 
 
 class _NoRedirect(HTTPRedirectHandler):
@@ -101,7 +126,7 @@ def edge_call(publishable_key: str, action: str, payload: dict) -> tuple[int, di
         data=json.dumps(body).encode("utf-8"),
         headers={
             "apikey": publishable_key,
-            "Authorization": f"Bearer {publishable_key}",
+            **({} if publishable_key.startswith("sb_publishable_") else {"Authorization": f"Bearer {publishable_key}"}),
             "Content-Type": "application/json",
             "Accept": "application/json",
         },
@@ -117,10 +142,13 @@ def rest_call(service_key: str, method: str, path: str, payload: dict | None = N
     data = None if payload is None else json.dumps(payload).encode("utf-8")
     headers = {
         "apikey": service_key,
-        "Authorization": f"Bearer {service_key}",
         "Content-Type": "application/json",
         "Accept": "application/json",
     }
+    # New Supabase secret keys are accepted through apikey only; legacy
+    # service_role JWTs continue to use the Authorization header.
+    if not service_key.startswith("sb_secret_"):
+        headers["Authorization"] = f"Bearer {service_key}"
     if method in {"POST", "PATCH"}:
         headers["Prefer"] = "return=representation"
     req = Request(f"{PROJECT_URL}/rest/v1/{path}", data=data, headers=headers, method=method)
@@ -219,10 +247,10 @@ def provision() -> int:
     print("Shoir-IE disposable staging E2E-account provisioner")
     print(f"Fixed target: {PROJECT_URL}")
     print("Creates synthetic registration records only; it does not charge or contact a payment provider.")
-    publishable_key = getpass.getpass("Staging publishable key (input hidden): ").strip()
+    publishable_key = get_hidden_key("Staging publishable key (input hidden; type @clipboard to read clipboard): ").strip()
     if not is_publishable_key(publishable_key):
         raise ValueError("The first key was not recognized as a publishable/anon client key.")
-    service_key = getpass.getpass("Staging service key (input hidden; server-side only): ").strip()
+    service_key = get_hidden_key("Staging service key (input hidden; type @clipboard to read clipboard): ").strip()
     if not is_service_role_key(service_key):
         raise ValueError("The second key was not recognized as a Supabase server secret/service_role key.")
     if secrets.compare_digest(publishable_key, service_key):
