@@ -51,7 +51,7 @@ def test_runbook_documents_matrix_scope_and_account_setup():
     assert "SHOIR_E2E_RESEARCH_MODULE_USERNAME" in docs
     assert "not calculation correctness" in docs.casefold()
 
-    
+
 def test_shell_emits_escaped_active_module_marker_for_browser_assertions():
     shell = (ROOT / "shoir_application_shell.py").read_text(encoding="utf-8")
     assert "module_safe = html.escape(str(module))" in shell
