@@ -6,13 +6,17 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_authenticated_gate_is_manual_only_and_uses_dedicated_test_accounts():
+def test_authenticated_gate_is_manual_and_has_explicit_one-shot_push_opt_in():
     workflow = (ROOT / ".github/workflows/authenticated-release-gate.yml").read_text(encoding="utf-8")
     script = (ROOT / "scripts/authenticated_release_gate.py").read_text(encoding="utf-8")
 
     assert "workflow_dispatch:" in workflow
     assert "pull_request:" not in workflow
-    assert "push:" not in workflow
+    assert "push:" in workflow
+    assert "branches:" in workflow
+    assert "staging-e2e-20261019" in workflow
+    assert "[run-authenticated-gate]" in workflow
+    assert "github.event_name == 'workflow_dispatch'" in workflow
     assert "shoir-e2e-*" in workflow
     assert "shoir-e2e-" in script
     assert "admin_approve_session" not in script
