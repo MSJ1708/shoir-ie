@@ -239,12 +239,47 @@ def _set_status(document: dict, account: dict, status: str) -> None:
 def provision() -> int:
     if STAGING_PROJECT_REF == PRODUCTION_PROJECT_REF:
         raise RuntimeError("Staging and production project references must differ.")
-    if OUTPUT_PATH.exists():
-        raise RuntimeError(
-            f"{OUTPUT_PATH} already exists. Keep the existing credential file; do not overwrite it or duplicate accounts."
-        )
+
+    resume_existing = OUTPUT_PATH.exists()
+    existing_document: dict | None = None
+    if resume_existing:
+        # Resume only the known safe first-registration failure. Reuse the
+        # credential file's original identities/passwords; never generate new
+        # credentials on top of an interrupted run.
+        try:
+            with OUTPUT_PATH.open("r", encoding="utf-8") as stream:
+                candidate = json.load(stream)
+        except (OSError, json.JSONDecodeError):
+            raise RuntimeError("The existing credential file cannot be read safely; do not delete or overwrite it.") from None
+        if not isinstance(candidate, dict) or candidate.get("schema_version") != 1:
+            raise RuntimeError("The existing credential file has an unsupported schema; no action taken.")
+        if candidate.get("target_project_ref") != STAGING_PROJECT_REF:
+            raise RuntimeError("The existing credential file is not pinned to this staging project; no action taken.")
+        if candidate.get("overall") == "PASS" or candidate.get("finished_at_utc"):
+            raise RuntimeError("The existing credential file records a completed run; do not provision duplicates.")
+        candidate_accounts = candidate.get("accounts")
+        expected_names = {
+            "shoir-e2e-active", "shoir-e2e-second", "shoir-e2e-starter",
+            "shoir-e2e-expired", "shoir-e2e-module", "shoir-e2e-research",
+        }
+        if not isinstance(candidate_accounts, list) or {
+            str(a.get("username", "")).casefold() for a in candidate_accounts
+            if isinstance(a, dict)
+        } != expected_names:
+            raise RuntimeError("The existing credential file does not contain exactly the six expected staging identities.")
+        safe_resume_statuses = {"NOT_STARTED", "REGISTRATION_FAILED"}
+        for account in candidate_accounts:
+            if not isinstance(account, dict) or account.get("status") not in safe_resume_statuses or "request_id" in account:
+                raise RuntimeError("The existing run may have made partial account changes. Automatic resume is blocked to prevent duplicates.")
+            if not account.get("password") or not account.get("email"):
+                raise RuntimeError("The existing credential file is incomplete; automatic resume is blocked.")
+        existing_document = candidate
 
     print("Shoir-IE disposable staging E2E-account provisioner")
+    if resume_existing:
+        print("Recovery mode: reusing the existing private credentials file after a failed first registration.")
+    else:
+        print("Fresh provisioning mode: a new private credentials file will be created.")
     print(f"Fixed target: {PROJECT_URL}")
     print("Creates synthetic registration records only; it does not charge or contact a payment provider.")
     # Prefer credentials passed by the trusted local PowerShell wrapper so the
@@ -270,13 +305,16 @@ def provision() -> int:
     if not admin_password:
         raise ValueError("Administrator password cannot be empty.")
 
-    accounts = _expected_accounts()
-    print("This will create six new staging identities through registration and admin approval.")
-    print("It refuses to reuse any matching identity. The expired account gets a past expiry timestamp as a test fixture.")
-    confirmation = input(
-        f"Type PROVISION SHOIR STAGING E2E ACCOUNTS {STAGING_PROJECT_REF} to proceed: "
-    ).strip()
-    if confirmation != f"PROVISION SHOIR STAGING E2E ACCOUNTS {STAGING_PROJECT_REF}":
+    accounts = existing_document["accounts"] if existing_document is not None else _expected_accounts()
+    print("This will create six disposable staging identities through registration and admin approval.")
+    print("It refuses to reuse matching identities. The expired account is a synthetic test fixture.")
+    confirmation_phrase = (
+        f"RESUME SHOIR STAGING E2E ACCOUNTS {STAGING_PROJECT_REF}"
+        if resume_existing
+        else f"PROVISION SHOIR STAGING E2E ACCOUNTS {STAGING_PROJECT_REF}"
+    )
+    confirmation = input(f"Type {confirmation_phrase} to proceed: ").strip()
+    if confirmation != confirmation_phrase:
         raise ValueError("Confirmation phrase did not match. No account was created.")
 
     _assert_none_exist(service_key, accounts)
@@ -289,23 +327,29 @@ def provision() -> int:
     if status != 200 or not admin_token or str(admin.get("role") or "") != "Enterprise Admin":
         raise RuntimeError("Staging administrator login failed or did not return an admin session.")
 
-    document = {
-        "schema_version": 1,
-        "target_project_ref": STAGING_PROJECT_REF,
-        "generated_at_utc": datetime.now(timezone.utc).isoformat(),
-        "notice": "Disposable staging credentials. Keep private. Do not commit. Never use with production.",
-        "accounts": accounts,
-        "github_actions_secret_map": {
-            "active": ["SHOIR_E2E_ACTIVE_USERNAME", "SHOIR_E2E_ACTIVE_PASSWORD"],
-            "second": ["SHOIR_E2E_SECOND_USERNAME", "SHOIR_E2E_SECOND_PASSWORD"],
-            "starter": ["SHOIR_E2E_STARTER_USERNAME", "SHOIR_E2E_STARTER_PASSWORD"],
-            "expired": ["SHOIR_E2E_EXPIRED_USERNAME", "SHOIR_E2E_EXPIRED_PASSWORD"],
-            "module": ["SHOIR_E2E_MODULE_USERNAME", "SHOIR_E2E_MODULE_PASSWORD"],
-            "research_module": ["SHOIR_E2E_RESEARCH_MODULE_USERNAME", "SHOIR_E2E_RESEARCH_MODULE_PASSWORD"],
-        },
-        "results": [],
-    }
-    _write_private_json(OUTPUT_PATH, document, exclusive=True)
+    if existing_document is not None:
+        document = existing_document
+        document["accounts"] = accounts
+        document["last_resume_attempt_at_utc"] = datetime.now(timezone.utc).isoformat()
+        _write_private_json(OUTPUT_PATH, document)
+    else:
+        document = {
+            "schema_version": 1,
+            "target_project_ref": STAGING_PROJECT_REF,
+            "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+            "notice": "Disposable staging credentials. Keep private. Do not commit. Never use with production.",
+            "accounts": accounts,
+            "github_actions_secret_map": {
+                "active": ["SHOIR_E2E_ACTIVE_USERNAME", "SHOIR_E2E_ACTIVE_PASSWORD"],
+                "second": ["SHOIR_E2E_SECOND_USERNAME", "SHOIR_E2E_SECOND_PASSWORD"],
+                "starter": ["SHOIR_E2E_STARTER_USERNAME", "SHOIR_E2E_STARTER_PASSWORD"],
+                "expired": ["SHOIR_E2E_EXPIRED_USERNAME", "SHOIR_E2E_EXPIRED_PASSWORD"],
+                "module": ["SHOIR_E2E_MODULE_USERNAME", "SHOIR_E2E_MODULE_PASSWORD"],
+                "research_module": ["SHOIR_E2E_RESEARCH_MODULE_USERNAME", "SHOIR_E2E_RESEARCH_MODULE_PASSWORD"],
+            },
+            "results": [],
+        }
+        _write_private_json(OUTPUT_PATH, document, exclusive=True)
     regular_tokens: list[tuple[str, str]] = []
 
     try:
