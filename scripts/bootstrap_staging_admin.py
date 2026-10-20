@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import base64
 import getpass
+import os
 import hashlib
 import hmac
 import json
@@ -177,7 +178,7 @@ def bootstrap() -> int:
     print(f"Fixed target: {PROJECT_URL}")
     print("This utility cannot target production and will not overwrite an existing administrator.")
     print("Use a one-time staging service key from Supabase Dashboard → Project Settings → API.")
-    service_key = get_hidden_service_key("Staging service key (input hidden; type @clipboard to read clipboard): ").strip()
+    service_key = os.environ.pop("SHOIR_STAGING_SERVICE_KEY", "").strip() or getpass.getpass("Staging service key (input hidden): ").strip()
     if not is_service_role_key(service_key):
         raise ValueError("The key was not recognized as a Supabase server secret/service_role key.")
 
