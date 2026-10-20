@@ -589,6 +589,7 @@ def render_application_header(username: str, tier: str, module: str) -> None:
     username_safe = html.escape(str(username))
     run_safe = html.escape(str(run_id))
     tier_safe = html.escape(str(tier))
+    module_safe = html.escape(str(module))
     st.markdown(
         f"""
 <div class="shoir-shell-top">
@@ -599,6 +600,7 @@ def render_application_header(username: str, tier: str, module: str) -> None:
   <div class="shoir-shell-cell"><div class="shoir-shell-label">Run</div><div class="shoir-shell-value">{run_safe}</div></div>
   <div class="shoir-shell-cell"><div class="shoir-shell-label">Tier</div><div class="shoir-shell-value">{tier_safe}</div></div>
 </div>
+<div class="shoir-shell-muted" data-testid="shoir-active-module">Active module: {module_safe}</div>
 """,
         unsafe_allow_html=True,
     )
