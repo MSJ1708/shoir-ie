@@ -52,6 +52,19 @@ def test_navigation_and_logout_defer_widget_state_reset_until_before_render():
     assert 'full_page=False' in browser
 
 
+def test_authenticated_sidebar_starts_expanded_and_browser_gate_expands_it_before_logout():
+    app = (ROOT / "app.py").read_text(encoding="utf-8")
+    matrix = (ROOT / "scripts/authenticated_module_matrix.py").read_text(encoding="utf-8")
+    browser = (ROOT / "scripts/authenticated_browser_matrix.py").read_text(encoding="utf-8")
+    assert 'initial_sidebar_state="expanded"' in app
+    assert "def visible_logout_button(frame)" in matrix
+    assert "def visible_logout_button(frame)" in browser
+    assert "visible_logout_button(frame).click" in matrix
+    assert "visible_logout_button(app_frame).click" in browser
+    assert "open_button.scroll_into_view_if_needed" in matrix
+    assert "for attempt in range(2)" in matrix
+
+
 def test_active_module_identity_renders_before_optional_header_diagnostics_and_has_visible_text_fallback():
     shell = (ROOT / "shoir_application_shell.py").read_text(encoding="utf-8")
     shell_start = shell.index("def render_application_header(")

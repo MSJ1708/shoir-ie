@@ -114,6 +114,37 @@ def read_active_module_label(frame) -> str:
     return ""
 
 
+def visible_logout_button(frame):
+    """Expand Streamlit's real sidebar control before attempting workspace logout."""
+    sidebar = frame.locator('section[data-testid="stSidebar"]')
+    try:
+        if sidebar.is_visible() and sidebar.get_attribute("aria-expanded") != "false":
+            button = frame.get_by_role("button", name="Lock / Logout Workspace").first
+            button.wait_for(state="visible", timeout=2_000)
+            button.scroll_into_view_if_needed(timeout=5_000)
+            return button
+    except Exception:
+        pass
+
+    for selector in (
+        '[data-testid="stSidebarCollapsedControl"]',
+        'button[data-testid="stSidebarCollapseButton"]',
+    ):
+        toggle = frame.locator(selector)
+        try:
+            if toggle.count() and toggle.first.is_visible():
+                toggle.first.click(timeout=5_000)
+                break
+        except Exception:
+            continue
+
+    sidebar.wait_for(state="visible", timeout=10_000)
+    button = frame.get_by_role("button", name="Lock / Logout Workspace").first
+    button.wait_for(state="visible", timeout=10_000)
+    button.scroll_into_view_if_needed(timeout=5_000)
+    return button
+
+
 def active_module_confirmed(main_text: str, module_name: str) -> bool:
     """Only accept an explicit active-module label, not a mention in search results."""
     marker = re.compile(
@@ -203,17 +234,37 @@ def route_module(page, frame, module_name: str, account_class: str) -> dict[str,
     }
     try:
         search = frame.get_by_placeholder(MODULE_SEARCH)
-        search.fill(module_name, timeout=10_000)
-        # The live input explicitly says "Press Enter to apply". Streamlit's
-        # search state is not committed by fill() alone, so submit the query
-        # before expecting the "Open · <module>" result button.
-        search.press("Enter", timeout=10_000)
-        open_button = frame.get_by_role(
-            "button",
-            name=re.compile(r"^Open\s*[·•]\s*" + re.escape(module_name) + r"$", re.I),
-        )
-        open_button.wait_for(state="visible", timeout=12_000)
-        open_button.click(timeout=10_000)
+        open_button = None
+        last_click_error = None
+        for attempt in range(2):
+            if active_module_confirmed(read_active_module_label(frame), module_name):
+                break
+            search.fill(module_name, timeout=10_000)
+            # The live input explicitly says "Press Enter to apply". Streamlit's
+            # search state is not committed by fill() alone.
+            search.press("Enter", timeout=10_000)
+            open_button = frame.get_by_role(
+                "button",
+                name=re.compile(r"^Open\s*[·•]\s*" + re.escape(module_name) + r"$", re.I),
+            )
+            open_button.wait_for(state="visible", timeout=12_000)
+            open_button.scroll_into_view_if_needed(timeout=5_000)
+            try:
+                open_button.click(timeout=15_000)
+                last_click_error = None
+                break
+            except PlaywrightError as exc:
+                # Streamlit may rerun while the click is being acknowledged.
+                # Accept only if the shell actually switched to this exact route;
+                # otherwise retry once and preserve a hard failure if it did not.
+                if active_module_confirmed(read_active_module_label(frame), module_name):
+                    last_click_error = None
+                    break
+                last_click_error = exc
+                if attempt == 0:
+                    page.wait_for_timeout(500)
+        if last_click_error is not None:
+            raise last_click_error
 
         main = frame.get_by_role("main")
         deadline = time.monotonic() + 45
@@ -318,7 +369,7 @@ def run_account(browser, account_class: str, username: str, password: str, rows:
     finally:
         if frame is not None:
             try:
-                frame.get_by_role("button", name="Lock / Logout Workspace").first.click(timeout=10_000)
+                visible_logout_button(frame).click(timeout=15_000)
                 try:
                     frame.get_by_text(
                         re.compile(r"Sign In to Your Workspace", re.I)

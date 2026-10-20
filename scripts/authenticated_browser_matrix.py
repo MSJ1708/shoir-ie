@@ -64,6 +64,37 @@ def read_active_module_label(frame) -> str:
     return ""
 
 
+def visible_logout_button(frame):
+    """Expand Streamlit's real sidebar control before attempting workspace logout."""
+    sidebar = frame.locator('section[data-testid="stSidebar"]')
+    try:
+        if sidebar.is_visible() and sidebar.get_attribute("aria-expanded") != "false":
+            button = frame.get_by_role("button", name="Lock / Logout Workspace").first
+            button.wait_for(state="visible", timeout=2_000)
+            button.scroll_into_view_if_needed(timeout=5_000)
+            return button
+    except Exception:
+        pass
+
+    for selector in (
+        '[data-testid="stSidebarCollapsedControl"]',
+        'button[data-testid="stSidebarCollapseButton"]',
+    ):
+        toggle = frame.locator(selector)
+        try:
+            if toggle.count() and toggle.first.is_visible():
+                toggle.first.click(timeout=5_000)
+                break
+        except Exception:
+            continue
+
+    sidebar.wait_for(state="visible", timeout=10_000)
+    button = frame.get_by_role("button", name="Lock / Logout Workspace").first
+    button.wait_for(state="visible", timeout=10_000)
+    button.scroll_into_view_if_needed(timeout=5_000)
+    return button
+
+
 def take_evidence_screenshot(page, path: Path) -> None:
     """Capture viewport evidence without letting a long page fail functional tests."""
     try:
@@ -198,7 +229,7 @@ def main() -> int:
 
             # Verify genuine sign-out by waiting for the public sign-in heading.
             step = "click sidebar logout"
-            app_frame.get_by_role("button", name="Lock / Logout Workspace").first.click(timeout=10_000)
+            visible_logout_button(app_frame).click(timeout=15_000)
             step = "verify unauthenticated sign-in after logout"
             try:
                 app_frame.get_by_text(
