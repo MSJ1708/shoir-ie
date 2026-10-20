@@ -15,6 +15,7 @@ import hashlib
 import hmac
 import json
 import secrets
+import subprocess
 import sys
 from datetime import datetime, timezone
 from urllib.error import HTTPError, URLError
@@ -141,6 +142,30 @@ def _existing_admin(key: str) -> list[dict]:
     return [row for row in result if isinstance(row, dict)]
 
 
+
+def get_hidden_service_key(prompt: str) -> str:
+    """Read a service key safely; Windows users may type @clipboard instead of pasting into getpass."""
+    value = getpass.getpass(prompt).strip()
+    if value.casefold() != "@clipboard":
+        return value
+    if sys.platform != "win32":
+        raise RuntimeError("@clipboard is supported only on Windows PowerShell.")
+    try:
+        result = subprocess.run(
+            ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", "Get-Clipboard -Raw"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        raise RuntimeError("Could not read the Windows clipboard. Copy the staging key again and retry.") from None
+    key = result.stdout.strip()
+    if not key:
+        raise RuntimeError("The Windows clipboard was empty. Copy the staging key again and retry.")
+    print("Read staging key from clipboard; the key value was not displayed.")
+    return key
+
 def bootstrap() -> int:
     if STAGING_PROJECT_REF == PRODUCTION_PROJECT_REF:
         raise RuntimeError("The staging and production project references must be different.")
@@ -149,7 +174,7 @@ def bootstrap() -> int:
     print(f"Fixed target: {PROJECT_URL}")
     print("This utility cannot target production and will not overwrite an existing administrator.")
     print("Use a one-time staging service key from Supabase Dashboard → Project Settings → API.")
-    service_key = getpass.getpass("Staging service key (input hidden): ").strip()
+    service_key = get_hidden_service_key("Staging service key (input hidden; type @clipboard to read clipboard): ").strip()
     if not is_service_role_key(service_key):
         raise ValueError("The key was not recognized as a Supabase server secret/service_role key.")
 
