@@ -106,7 +106,7 @@ def main() -> int:
             step = "submit sign-in credentials"
             app_frame.get_by_role("button", name=re.compile("^Sign In$", re.I)).click(timeout=10_000)
             step = "wait for authenticated workspace"
-            app_frame.get_by_role("button", name=re.compile("Lock / Logout Workspace", re.I)).first.wait_for(timeout=60_000)
+            app_frame.get_by_role("button", name="Lock / Logout Workspace").first.wait_for(timeout=60_000)
             step = "verify authenticated home"
             logged_body = app_frame.locator("body").inner_text(timeout=8000)
             check("authenticated_workspace_renders", username.casefold() in logged_body.casefold()
@@ -131,7 +131,7 @@ def main() -> int:
 
             # Exercise the sidebar logout action first. It used to set a shell surface
             # that the entrypoint did not process.
-            app_frame.get_by_role("button", name=re.compile("Lock / Logout Workspace", re.I)).first.click(timeout=10_000)
+            app_frame.get_by_role("button", name="Lock / Logout Workspace").first.click(timeout=10_000)
             app_frame.get_by_role("tab", name=re.compile("Sign In", re.I)).wait_for(timeout=45_000)
             signed_out_body = app_frame.locator("body").inner_text(timeout=8000)
             check("sidebar_logout_returns_to_signin",
