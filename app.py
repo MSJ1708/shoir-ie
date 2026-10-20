@@ -2253,18 +2253,21 @@ st.session_state.pop("_shoir_requested_module", None)
 if _shell_surface == "logout":
     _logout_user = str(st.session_state.get("current_user") or "")
     _logout_token = str(st.session_state.get("remote_session_token") or st.session_state.get("renewal_session_token") or "")
-    if _logout_user and _logout_token:
-        try:
-            edge_logout(_logout_user, _logout_token)
-        except Exception:
-            st.error("Server logout could not revoke this session. Please retry; you are still signed in.")
-            st.stop()
+    # Flush the last workspace snapshot before revoking its server session. A
+    # post-revocation save cannot be relied on because the Edge API correctly
+    # rejects writes made with a revoked token.
     if _logout_user:
         try:
             save_user_workspace(_logout_user, st.session_state)
             log_audit(_logout_user, "User Logged Out")
         except Exception:
             pass
+    if _logout_user and _logout_token:
+        try:
+            edge_logout(_logout_user, _logout_token)
+        except Exception:
+            st.error("Server logout could not revoke this session. Please retry; you are still signed in.")
+            st.stop()
     st.session_state["_shoir_clear_session_before_render"] = True
     st.rerun()
 # Compatibility contract retained for existing smoke tests and legacy integrations.
