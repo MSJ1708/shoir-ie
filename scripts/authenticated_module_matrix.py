@@ -146,7 +146,7 @@ def login_test_account(page, account_class: str, username: str, password: str) -
     frame.get_by_role("tab", name=re.compile("Sign In", re.I)).click(timeout=10_000)
     fill_signin_credentials(frame, username, password)
     frame.get_by_role("button", name=re.compile("^Sign In$", re.I)).click(timeout=10_000)
-    frame.get_by_role("button", name=re.compile("Lock / Logout Workspace", re.I)).first.wait_for(timeout=60_000)
+    frame.get_by_role("button", name="Lock / Logout Workspace").first.wait_for(timeout=60_000)
     return frame
 
 
@@ -265,7 +265,7 @@ def run_account(browser, account_class: str, username: str, password: str, rows:
     finally:
         if frame is not None:
             try:
-                frame.get_by_role("button", name=re.compile("Lock / Logout Workspace", re.I)).first.click(timeout=5_000)
+                frame.get_by_role("button", name="Lock / Logout Workspace").first.click(timeout=5_000)
                 frame.get_by_role("tab", name=re.compile("Sign In", re.I)).wait_for(timeout=15_000)
             except Exception:
                 cases.append({
