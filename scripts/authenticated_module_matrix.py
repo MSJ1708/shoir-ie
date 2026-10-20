@@ -107,16 +107,19 @@ def login_test_account(page, account_class: str, username: str, password: str) -
     if "STAGING TEST ENVIRONMENT" not in initial_body:
         raise RuntimeError(f"{account_class}: staging marker is missing; refusing to submit credentials to a possibly production-backed app.")
     frame.get_by_role("tab", name=re.compile("Sign In", re.I)).click(timeout=10_000)
-    # The Streamlit sign-in and account-creation tabs can leave duplicate
-    # aria-labelled inputs in the DOM. Select only the visible sign-in fields.
-    username_input = frame.locator('input[aria-label="Username"]:visible')
-    password_input = frame.locator('input[aria-label="Password"]:visible')
-    if username_input.count() != 1:
-        raise RuntimeError(f"Expected exactly one visible Username field on Sign In tab; found {username_input.count()}.")
-    if password_input.count() != 1:
-        raise RuntimeError(f"Expected exactly one visible Password field on Sign In tab; found {password_input.count()}.")
-    username_input.fill(username)
-    password_input.fill(password)
+    # Streamlit associates labels with inputs rather than reliably exposing
+    # an aria-label attribute. Restrict exact label matches to visible controls;
+    # hidden inputs in the registration tab must never make sign-in ambiguous.
+    username_candidates = frame.get_by_label("Username", exact=True).all()
+    password_candidates = frame.get_by_label("Password", exact=True).all()
+    visible_usernames = [item for item in username_candidates if item.is_visible()]
+    visible_passwords = [item for item in password_candidates if item.is_visible()]
+    if len(visible_usernames) != 1:
+        raise RuntimeError(f"Expected exactly one visible exact-labelled Username field on Sign In tab; found {len(visible_usernames)}.")
+    if len(visible_passwords) != 1:
+        raise RuntimeError(f"Expected exactly one visible exact-labelled Password field on Sign In tab; found {len(visible_passwords)}.")
+    visible_usernames[0].fill(username)
+    visible_passwords[0].fill(password)
     frame.get_by_role("button", name=re.compile("^Sign In$", re.I)).click(timeout=10_000)
     frame.get_by_role("button", name=re.compile("Lock / Logout Workspace", re.I)).first.wait_for(timeout=60_000)
     return frame
