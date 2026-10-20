@@ -55,7 +55,7 @@ def test_navigation_and_logout_defer_widget_state_reset_until_before_render():
 def test_active_module_identity_renders_before_optional_header_diagnostics_and_has_visible_text_fallback():
     shell = (ROOT / "shoir_application_shell.py").read_text(encoding="utf-8")
     shell_start = shell.index("def render_application_header(")
-    shell_end = shell.index("\\ndef render_module_workflow(", shell_start)
+    shell_end = shell.index("\ndef render_module_workflow(", shell_start)
     header = shell[shell_start:shell_end]
     assert header.index('data-testid="shoir-active-module"') < header.index("_first_dataframe()")
     assert header.count('data-testid="shoir-active-module"') == 1

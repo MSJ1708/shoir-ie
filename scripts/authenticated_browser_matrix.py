@@ -51,7 +51,7 @@ def read_active_module_label(frame) -> str:
     """Read the visible active-route label without depending on custom HTML attributes."""
     candidates = (
         frame.locator(ACTIVE_MODULE_SELECTOR),
-        frame.get_by_text(re.compile(r"^\\s*Active module:\\s*.+$", re.I)),
+        frame.get_by_text(re.compile(r"^\s*Active module:\s*.+$", re.I)),
     )
     for candidate in candidates:
         try:
@@ -139,10 +139,10 @@ def main() -> int:
             active_module_text = ""
             while time.monotonic() < marker_deadline:
                 active_module_text = read_active_module_label(app_frame)
-                if re.match(r"^\\s*Active module:\\s*.+$", active_module_text, re.I):
+                if re.match(r"^\s*Active module:\s*.+$", active_module_text, re.I):
                     break
                 page.wait_for_timeout(250)
-            if not re.match(r"^\\s*Active module:\\s*.+$", active_module_text, re.I):
+            if not re.match(r"^\s*Active module:\s*.+$", active_module_text, re.I):
                 raise RuntimeError(
                     "Staging app does not contain the candidate shell marker; deploy branch "
                     "staging-e2e-20261019 before rerunning this gate."
