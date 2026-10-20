@@ -134,8 +134,25 @@ def main() -> int:
                   "Sign In to Your Workspace" in signed_out_body and "shoir-e2e-" not in signed_out_body.casefold(),
                   "Sidebar logout returned to the unauthenticated sign-in screen.")
         except Exception as exc:
-            # Include only the named step and exception class; never print secrets or response bodies.
-            check("browser_walkthrough", False, f"Browser step '{step}' failed ({type(exc).__name__}).")
+            # Keep diagnostics safe: never print credentials, response bodies, or input values.
+            detail = f"Browser step '{step}' failed ({type(exc).__name__})."
+            if step == "wait for authenticated workspace" and app_frame is not None:
+                try:
+                    visible_body = app_frame.locator("body").inner_text(timeout=3_000).casefold()
+                    if "invalid username or password" in visible_body:
+                        detail = (
+                            "Sign-in was submitted, but the staging app remained unauthenticated and displayed "
+                            "its generic credential/authentication rejection. Verify the disposable account/password "
+                            "and the Streamlit staging Supabase configuration."
+                        )
+                    elif "too many failed sign-in attempts" in visible_body:
+                        detail = (
+                            "The staging app's login-throttle message appeared. Do not keep retrying; verify the "
+                            "dedicated test account and clear/wait out the test limiter through the approved process."
+                        )
+                except Exception:
+                    pass
+            check("browser_walkthrough", False, detail)
         finally:
             check("no_uncaught_javascript_errors", not page_errors,
                   "No uncaught JavaScript errors." if not page_errors else f"{len(page_errors)} uncaught JavaScript error(s).")
