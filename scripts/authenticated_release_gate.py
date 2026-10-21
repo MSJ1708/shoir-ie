@@ -98,7 +98,7 @@ def login_failure_detail(status: int | None, data: dict[str, Any], expected: str
         return f"{expected}; HTTP 429 indicates the staging login throttle is active. Stop retries and let the window expire."
     if status == 503:
         return f"{expected}; HTTP 503 indicates staging authentication protection is unavailable. Inspect the Edge Function and login-throttle RPC."
-    if status == 403 and error == "SUBSCRIPTION_EXPIRED"::
+    if status == 403 and error == "SUBSCRIPTION_EXPIRED":
         return f"{expected}; HTTP 403 reports an expired subscription, not an active workspace session."
     if status == 200:
         return f"{expected}; HTTP 200 was returned but the session/tier metadata did not satisfy the release-gate contract."
@@ -271,7 +271,7 @@ def main() -> int:
         expired_token = str(expired_data.get("token") or "")
         expired_ok = expired_status == 403 and expired_data.get("error") == "SUBSCRIPTION_EXPIRED" and bool(expired_token) and expired_data.get("renewal_only") is True
         record("expired_login_renewal_only", "expired", expired_ok,
-               "Expired account receives a renewal-only session, not a workspace session." if valid else login_failure_detail(status4, data4, "Expired-account renewal-only login contract failed"))
+               "Expired account receives a renewal-only session, not a workspace session." if expired_ok else login_failure_detail(expired_status, expired_data, "Expired-account renewal-only login contract failed"))
         if expired_token:
             st_load, load_data = safe_call(api, "expired_workspace_load_denied", "expired", "workspace_load",
                                            {"username": expired_user, "token": expired_token})
