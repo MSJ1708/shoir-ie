@@ -748,6 +748,10 @@ Depending on which features are used, Shoir-IE may process:
 
 Do not submit passwords from other services, payment-card credentials, government identifiers, sensitive personal data, confidential trade secrets, export-controlled material, or another person's information unless you are authorized to share it and the deployment has been approved for that data.
 
+### Legal basis for processing
+
+The lawful basis depends on the particular purpose and applicable law. Processing may be necessary to provide an account or service you request, administer a subscription, comply with a legal obligation, protect the service, or rely on consent or another lawful basis where applicable. Before commercial production, the operator must document and disclose the lawful basis for each processing purpose under Saudi law, and request consent before any processing for which consent is required. Where processing is based on consent, you may withdraw it for future processing by contacting the service, subject to applicable law; withdrawal does not make earlier lawful processing retroactively unlawful.
+
 ### Purposes and sharing
 Information is used to operate accounts and subscriptions, process requested analyses, maintain requested workspace features, protect the service, respond to support requests, record referral attribution and comply with legal obligations. We do not sell personal information.
 
