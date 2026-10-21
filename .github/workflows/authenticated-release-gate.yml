@@ -75,15 +75,27 @@ jobs:
             fi
           done
           python scripts/staging_e2e_guard.py
-      - name: Verify authenticated 96-module rendering matrix
-        run: python scripts/authenticated_module_matrix.py
-      # These checks are independent of the module-route matrix. Run them after
-      # a matrix failure too, but only after the fail-closed staging preflight passes.
+      - name: Verify staging candidate build
+        id: candidate_build
+        if: ${{ steps.staging_preflight.conclusion == 'success' }}
+        run: python scripts/staging_candidate_build_preflight.py
+      # Backend authentication is independent of Streamlit UI deployment. Keep
+      # it running after a stale UI failure so credential problems are diagnosed
+      # in seconds rather than hidden behind a long browser wait.
       - name: Verify authenticated Edge API lifecycle and workspace isolation
+        id: backend_check
         if: ${{ always() && steps.staging_preflight.conclusion == 'success' }}
         run: python scripts/authenticated_release_gate.py
+      # Browser suites are meaningful only when the test identities authenticate
+      # and the exact candidate build is deployed. Never repeat a deployment wait
+      # for every account or for every module.
+      - name: Verify authenticated 96-module rendering matrix
+        id: module_matrix
+        if: ${{ always() && steps.staging_preflight.conclusion == 'success' && steps.candidate_build.conclusion == 'success' && steps.backend_check.conclusion == 'success' }}
+        run: python scripts/authenticated_module_matrix.py
       - name: Verify authenticated browser shell, Excel module and logout
-        if: ${{ always() && steps.staging_preflight.conclusion == 'success' }}
+        id: browser_check
+        if: ${{ always() && steps.staging_preflight.conclusion == 'success' && steps.candidate_build.conclusion == 'success' && steps.backend_check.conclusion == 'success' }}
         run: python scripts/authenticated_browser_matrix.py
       - name: Upload redacted verification evidence
         if: always()
