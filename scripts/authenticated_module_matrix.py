@@ -433,15 +433,35 @@ def run_account(browser, account_class: str, username: str, password: str, rows:
                     raise RuntimeError(
                         "Logout did not return to the sign-in surface; inspect the saved evidence for the deployed app state."
                     ) from exc
-                signed_out_body = frame.locator("body").inner_text(timeout=8_000)
-                sign_in_visible = "Sign In to Your Workspace" in signed_out_body
-                logout_control_visible = "Lock / Logout Workspace" in signed_out_body
-                active_module_visible = bool(
-                    re.search(r"Active module:\s*\S", signed_out_body, re.I)
-                )
+                # Streamlit updates iframe elements incrementally during reruns. The
+                # sign-in heading can become visible before the previous authenticated
+                # shell's active-module marker has disappeared from the rendered DOM.
+                # Wait for the complete signed-out surface to settle, not just the first
+                # sign-in heading, and require that state in consecutive samples.
+                signed_out_deadline = time.monotonic() + 12
+                signed_out_body = ""
+                sign_in_visible = False
+                logout_control_visible = False
+                active_module_visible = False
+                stable_signed_out_samples = 0
+                while time.monotonic() < signed_out_deadline:
+                    signed_out_body = frame.locator("body").inner_text(timeout=8_000)
+                    sign_in_visible = "Sign In to Your Workspace" in signed_out_body
+                    logout_control_visible = "Lock / Logout Workspace" in signed_out_body
+                    active_module_visible = bool(
+                        re.search(r"Active module:\\s*\\S", signed_out_body, re.I)
+                    )
+                    if sign_in_visible and not logout_control_visible and not active_module_visible:
+                        stable_signed_out_samples += 1
+                        if stable_signed_out_samples >= 2:
+                            break
+                    else:
+                        stable_signed_out_samples = 0
+                    page.wait_for_timeout(350)
+
                 if not sign_in_visible or logout_control_visible or active_module_visible:
                     raise AssertionError(
-                        "Logout did not replace the authenticated shell with sign-in "
+                        "Logout did not settle into a fully unauthenticated sign-in surface "
                         f"(sign_in_visible={sign_in_visible}, "
                         f"logout_control_visible={logout_control_visible}, "
                         f"active_module_visible={active_module_visible})."
