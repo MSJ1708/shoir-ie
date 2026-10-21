@@ -30,7 +30,6 @@ REPORT = Path(os.environ.get("SHOIR_E2E_MODULE_REPORT", "artifacts/authenticated
 URL = os.environ.get("SHOIR_E2E_APP_URL", "").strip()
 PREFIX = "shoir-e2e-"
 CANDIDATE_BUILD_MARKER = "SHOIR-IE SHELL VERSION: 3.2"
-STAGING_BUILD_WAIT_SECONDS = 12 * 60
 EXPECTED_TIERS = {
     "Starter", "Mid-Tier Pro", "Professional", "Enterprise",
     "Enterprise Plus", "Research Pack",
@@ -204,31 +203,14 @@ def login_test_account(page, account_class: str, username: str, password: str) -
     if "STAGING TEST ENVIRONMENT" not in initial_body:
         raise RuntimeError(f"{account_class}: staging marker is missing; refusing to submit credentials to a possibly production-backed app.")
 
-    # Streamlit Cloud deployment can lag behind the Git push that triggers this
-    # workflow. Do not test old app code against new source expectations, and
-    # never submit credentials until the candidate marker is visible.
-    build_deadline = time.monotonic() + STAGING_BUILD_WAIT_SECONDS
-    last_build_log = 0.0
-    while CANDIDATE_BUILD_MARKER not in initial_body:
-        now = time.monotonic()
-        if now >= build_deadline:
-            raise RuntimeError(
-                f"{account_class}: staging app did not publish the candidate shell marker "
-                f"within {STAGING_BUILD_WAIT_SECONDS // 60} minutes; refusing to test a stale deployment."
-            )
-        if now - last_build_log >= 60:
-            print("[WAIT] Staging app is safe but still on an older shell build; waiting before login.")
-            last_build_log = now
-        page.wait_for_timeout(15_000)
-        response = page.goto(URL, wait_until="domcontentloaded", timeout=90_000)
-        if response is None or response.status != 200:
-            raise RuntimeError(f"{account_class}: staging app stopped returning HTTP 200 while waiting for the candidate build.")
-        frame = find_app_frame(page)
-        if frame is None:
-            raise RuntimeError(f"{account_class}: sign-in frame disappeared while waiting for the candidate build.")
-        initial_body = frame.locator("body").inner_text(timeout=8_000)
-        if "STAGING TEST ENVIRONMENT" not in initial_body:
-            raise RuntimeError(f"{account_class}: staging safety marker disappeared; refusing to submit credentials.")
+    if CANDIDATE_BUILD_MARKER not in initial_body:
+        version_match = re.search(r"SHOIR-IE SHELL VERSION:\s*([^\s—·]+)", initial_body)
+        observed_version = version_match.group(1) if version_match else "not reported"
+        raise RuntimeError(
+            f"{account_class}: candidate build preflight should have confirmed "
+            f"{CANDIDATE_BUILD_MARKER!r}, but this page serves shell version "
+            f"{observed_version}; refusing to test a stale deployment."
+        )
 
     frame.get_by_role("tab", name=re.compile("Sign In", re.I)).click(timeout=10_000)
     fill_signin_credentials(frame, username, password)
