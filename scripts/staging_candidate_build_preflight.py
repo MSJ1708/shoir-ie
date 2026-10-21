@@ -29,17 +29,21 @@ REPORT = Path(os.environ.get(
 
 
 def read_signin_surface(page):
-    for frame in list(page.frames):
-        try:
-            body = frame.locator("body").inner_text(timeout=1_500)
-        except Exception:
-            continue
-        if (
-            "Sign In to Your Workspace" in body
-            or "Welcome to Shoir-IE, " in body
-            or "Welcome to Shoir-IE Workspace" in body
-        ):
-            return frame, body
+    """Wait briefly for Streamlit's iframe and widgets after the HTTP document loads."""
+    deadline = time.monotonic() + 20
+    while time.monotonic() < deadline:
+        for frame in list(page.frames):
+            try:
+                body = frame.locator("body").inner_text(timeout=1_000)
+            except Exception:
+                continue
+            if (
+                "Sign In to Your Workspace" in body
+                or "Welcome to Shoir-IE, " in body
+                or "Welcome to Shoir-IE Workspace" in body
+            ):
+                return frame, body
+        page.wait_for_timeout(300)
     return None, ""
 
 
