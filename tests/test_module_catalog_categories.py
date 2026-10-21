@@ -14,6 +14,8 @@ from shoir_application_shell import (
     module_group,
     _module_target_section,
     _preferred_module,
+    _ensure_requested_module_choice,
+    _global_module_button_key,
 )
 
 
@@ -142,6 +144,32 @@ def test_global_search_routes_modules_to_matching_primary_sections():
     assert _module_target_section("Statistical Hypothesis Testing", metadata) == "RESEARCH"
     assert _module_target_section("Digital Twin & Discrete-Event Simulation", metadata) == "OPERATIONS"
     assert _module_target_section("Engineering Decision Center", metadata) == "DECISIONS"
+
+
+def test_explicit_global_search_request_survives_section_filter_mismatch():
+    allowed = ["Cryptographic Ledger", "Predictive Maintenance Digital Twin"]
+    metadata = {
+        "Cryptographic Ledger": {"category": "Trust & Security"},
+        "Predictive Maintenance Digital Twin": {"category": "Maintenance"},
+    }
+
+    # The operations section excludes governance tools, but a deliberate global
+    # search selection must still be selectable in the destination shell.
+    choices = _module_choices(allowed, "OPERATIONS", "", metadata)
+    assert "Cryptographic Ledger" not in choices
+
+    requested_choices = _ensure_requested_module_choice(
+        choices, "Cryptographic Ledger", allowed
+    )
+    assert requested_choices[0] == "Cryptographic Ledger"
+    assert requested_choices.count("Cryptographic Ledger") == 1
+
+
+def test_global_search_button_keys_are_stable_and_unique_per_module():
+    ledger_key = _global_module_button_key("Cryptographic Ledger")
+    assert ledger_key == _global_module_button_key("Cryptographic Ledger")
+    assert ledger_key != _global_module_button_key("Control Tower")
+    assert ledger_key.startswith("shoir_global_module_")
 
 
 def test_recently_added_resilience_tools_have_meaningful_shell_groups():
