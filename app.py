@@ -975,17 +975,17 @@ TIER_BENEFITS = {
     "Starter": {
         "price": "$29",
         "pitch": "The core industrial-engineering toolkit - replace spreadsheet-based network and inventory decisions with solved, defensible answers.",
-        "gain": "What used to take a spreadsheet model and a free afternoon (or a week, for a real MILP network design) now takes minutes, with a mathematically optimal answer instead of a good guess.",
+        "gain": "Use the examples to compare candidate network and inventory decisions against explicit objectives and constraints. Runtime and solution quality depend on problem size, data quality, and model setup.",
     },
     "Mid-Tier Pro": {
         "price": "$79",
         "pitch": "Adds the day-to-day operations layer - routing, scheduling, quality, and finance - so the whole plant or supply chain runs through one system.",
-        "gain": "Replaces 4-5 separate specialist tools (a routing app, a Six Sigma add-in, a capex spreadsheet, a scheduling board) with one connected workspace, so nothing has to be re-entered twice.",
+        "gain": "Explore routing, scheduling, quality, and finance workflows in one workspace. The amount of re-entry avoided depends on your current tools and the integrations you configure.",
     },
     "Enterprise": {
         "price": "$199",
         "pitch": "Adds automation, simulation-under-uncertainty, and a natural-language copilot - built for a team running live operations, not a single analyst running one-off studies.",
-        "gain": "Moves from reactive (find out something broke) to proactive (get warned before it breaks), and from one person driving the tool to a team working off one shared, always-current picture.",
+        "gain": "Explore simulation, automation, and operational visibility. Live alerts, shared data, and proactive maintenance depend on configured capabilities and connected systems.",
     },
     "Professional": {
         "price": "Plan details",
@@ -1000,7 +1000,7 @@ TIER_BENEFITS = {
     "Research Pack": {
         "price": "+$30 add-on",
         "pitch": "A genuinely research-grade layer on top of Enterprise: statistics, reproducibility, adversarial review, and a paper-to-simulation pipeline built for people who have to defend their results to reviewers, not just to a manager.",
-        "gain": "Cuts the gap between 'I have a model' and 'I have a submittable, defensible, reproducible result' - the adversarial review and falsification tools specifically catch the weaknesses a real peer reviewer would catch, before submission instead of after rejection.",
+        "gain": "Use statistical, reproducibility, and review workflows to make methods and evidence easier to inspect. Verify outputs, assumptions, and citations before submitting or publishing.",
     },
 }
 
@@ -1783,6 +1783,7 @@ if not st.session_state.get("current_user"):
         }
         .module-value-card .module-name {font-weight:850;color:#0f172a;font-size:16px;}
         .module-value-card .module-category {font-size:11px;color:#0f766e;font-weight:800;text-transform:uppercase;letter-spacing:.06em;}
+        .module-value-card .module-access {font-size:11px;color:#64748b;font-weight:700;margin-top:8px;}
         .module-value-card .module-when {font-size:13px;color:#475569;line-height:1.45;margin-top:6px;}
         .module-example {border-left:3px solid #0f766e;padding:8px 11px;background:#f8fafc;border-radius:8px;color:#334155;font-size:13px;line-height:1.5;}
         </style>
@@ -1802,6 +1803,264 @@ if not st.session_state.get("current_user"):
                     f'<div class="value-strip"><b>{_label}</b><span>{_copy}</span></div>',
                     unsafe_allow_html=True
                 )
+
+        st.markdown("### Find a capability for the problem you need to solve")
+        st.markdown(
+            "Start with a real work problem, or search a module name. Choose a plan to see the capabilities "
+            "available at that level, open an example, and use it to picture how the workflow fits your situation."
+        )
+
+        _goal_options = [
+            "Any industrial problem",
+            "Reduce cost, time, or waste",
+            "Improve quality or reliability",
+            "Plan production or capacity",
+            "Improve warehouse or facility flow",
+            "Manage suppliers, stock, or delivery",
+            "Test uncertainty or disruption",
+            "Research or validate a model",
+            "Connect data or automate work",
+            "Build or validate an industrial venture",
+        ]
+        _goal_keywords = {
+            "Any industrial problem": (),
+            "Reduce cost, time, or waste": (
+                "cost", "waste", "lean", "optimization", "optimisation", "inventory",
+                "cycle", "bottleneck", "capacity", "economics", "carbon", "routing",
+                "milp", "facility", "slotting", "meio", "value",
+            ),
+            "Improve quality or reliability": (
+                "quality", "six sigma", "reliability", "defect", "maintenance",
+                "human factors", "ergonom", "sensitivity", "control chart", "niosh",
+            ),
+            "Plan production or capacity": (
+                "production", "capacity", "planning", "bottleneck", "simulation",
+                "lean", "line balancing", "time study", "gantt", "digital twin",
+            ),
+            "Improve warehouse or facility flow": (
+                "warehouse", "facility", "layout", "slotting", "heatmap", "agv",
+                "fleet", "inventory", "travel", "storage", "dispatch",
+            ),
+            "Manage suppliers, stock, or delivery": (
+                "supplier", "fleet", "logistics", "network", "stock", "inventory",
+                "carbon", "route", "meio", "geospatial", "risk", "lead time",
+            ),
+            "Test uncertainty or disruption": (
+                "risk", "scenario", "monte carlo", "simulation", "sensitivity",
+                "adversarial", "shock", "resilience", "uncertainty", "stress",
+            ),
+            "Research or validate a model": (
+                "research", "statistical", "hypothesis", "literature", "regression",
+                "paper", "reproducibility", "peer-review", "formal proof", "quantum",
+                "surrogate", "evidence degradation",
+            ),
+            "Connect data or automate work": (
+                "data", "integration", "copilot", "gateway", "webhook", "agentic",
+                "control tower", "cryptographic", "persistence", "subscription",
+                "operating system", "digital twin", "api",
+            ),
+            "Build or validate an industrial venture": (
+                "venture", "innovation", "commercialization", "pilot", "investor",
+                "customer", "roi", "hypothesis", "evidence",
+            ),
+        }
+
+        def _reset_explorer_filters():
+            st.session_state["explore_goal_filter_v3"] = "Any industrial problem"
+            st.session_state["explore_tier_filter_v3"] = "All capabilities"
+            st.session_state["explore_category_filter_v3"] = "All categories"
+            st.session_state["explore_module_search_v3"] = ""
+
+        _filter_cols = st.columns([1.45, 1.0, 1.15])
+        with _filter_cols[0]:
+            _browse_goal = st.selectbox(
+                "What are you trying to do?",
+                _goal_options,
+                key="explore_goal_filter_v3",
+            )
+        _tier_options = list(MODULE_EXPLORER_TIERS)
+        with _filter_cols[1]:
+            _browse_tier = st.selectbox(
+                "Plan / access level",
+                _tier_options,
+                key="explore_tier_filter_v3",
+                help="Plan filters include the lower tiers already covered by a higher plan. Research Pack is treated as an add-on.",
+            )
+        _category_options = ["All categories"] + sorted({
+            str(m.get("category", "Other")) for m in MODULE_CATALOG
+        })
+        with _filter_cols[2]:
+            _browse_category = st.selectbox(
+                "Area",
+                _category_options,
+                key="explore_category_filter_v3",
+            )
+
+        _search_cols = st.columns([4, 1])
+        with _search_cols[0]:
+            _search = st.text_input(
+                "Search by module, problem, or example",
+                placeholder="Try: warehouse layout, Cpk, supplier risk, forecasting, research, simulation…",
+                key="explore_module_search_v3",
+            )
+        with _search_cols[1]:
+            st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
+            st.button(
+                "Clear filters",
+                key="explore_reset_filters_v3",
+                on_click=_reset_explorer_filters,
+                use_container_width=True,
+            )
+
+        _base_tier_order = [
+            str(t) for t in _tier_options
+            if t not in ("All capabilities", "Research Pack")
+        ]
+        _base_tier_rank = {tier: index for index, tier in enumerate(_base_tier_order)}
+        _research_base_rank = _base_tier_rank.get("Enterprise", len(_base_tier_order) - 1)
+        _query_terms = [
+            token for token in re.findall(r"[a-z0-9]+", _search.lower())
+            if len(token) > 1
+        ]
+        _goal_terms = _goal_keywords.get(_browse_goal, ())
+        _filtered_modules = []
+
+        for _m in MODULE_CATALOG:
+            _module_tier = str(_m.get("tier", "")).strip()
+
+            if _browse_tier == "Research Pack":
+                # The Research Pack is positioned as an add-on to the core
+                # Enterprise layer, not as a replacement for that plan.
+                _available_at_selected_plan = (
+                    _module_tier == "Research Pack"
+                    or (
+                        _module_tier in _base_tier_rank
+                        and _base_tier_rank[_module_tier] <= _research_base_rank
+                    )
+                    or _module_tier not in _base_tier_rank
+                )
+            elif _browse_tier == "All capabilities":
+                _available_at_selected_plan = True
+            elif _module_tier == "Research Pack":
+                _available_at_selected_plan = False
+            elif _module_tier in _base_tier_rank:
+                _available_at_selected_plan = (
+                    _base_tier_rank[_module_tier] <= _base_tier_rank.get(_browse_tier, -1)
+                )
+            else:
+                # Do not silently hide a future or specialist catalog entry
+                # because its tier label is newer than this filter.
+                _available_at_selected_plan = True
+
+            if not _available_at_selected_plan:
+                continue
+            if _browse_category != "All categories" and _m.get("category") != _browse_category:
+                continue
+
+            _haystack = " ".join([
+                str(_m.get("name", "")),
+                str(_m.get("category", "")),
+                str(_m.get("tier", "")),
+                str(_m.get("when", "")),
+                str(_m.get("example", "")),
+            ]).lower()
+            if _query_terms and not all(term in _haystack for term in _query_terms):
+                continue
+            if _goal_terms and not any(term in _haystack for term in _goal_terms):
+                continue
+            _filtered_modules.append(_m)
+
+        st.markdown(
+            f"**{len(_filtered_modules)} matches** out of **{len(MODULE_CATALOG)} capabilities**. "
+            "Open any example to see the situation, a possible workflow, and what to review."
+        )
+
+        if _browse_tier != "All capabilities":
+            _benefit = TIER_BENEFITS.get(_browse_tier, {})
+            _tier_price = _benefit.get("price", "")
+            _tier_pitch = _benefit.get("pitch", "")
+            _tier_gain = _benefit.get("gain", "")
+            st.markdown(
+                f"#### {_browse_tier} · {_tier_price}\n"
+                f"**What it is for:** {_tier_pitch}\n\n"
+                f"**What to explore:** {_tier_gain}"
+            )
+
+        _value_hints = {
+            "Core Optimization": "Compare options against a stated objective and constraints.",
+            "Production": "See where capacity is tight and which plan deserves a closer look.",
+            "Quality": "Turn variation or defects into a clearer next investigation.",
+            "Facilities": "Compare flow and space choices before making a physical change.",
+            "Inventory": "Review the trade-off between stock availability and inventory held.",
+            "Logistics": "Compare route, delivery, and resource choices using consistent inputs.",
+            "Risk": "Identify dependencies and decide what evidence would reduce uncertainty.",
+            "Risk & Simulation": "Compare a range of possible outcomes instead of relying on one estimate.",
+            "Research AI": "Make the research question, method, and evidence easier to inspect.",
+            "Research & Experimentation": "Explore how assumptions and evidence quality affect a decision.",
+            "Research Authoring": "Make analysis and supporting evidence easier to explain and reproduce.",
+            "Paper-to-Simulation Pipeline": "Turn a stated model into something that can be examined and tested.",
+            "Peer Review & Stress-Testing": "Surface weaknesses and edge cases before relying on a result.",
+            "Innovation & Commercialization": "Connect a customer problem to a testable pilot and documented evidence.",
+            "Platform": "Keep the workflow, saved context, or decision record easier to follow.",
+            "AI & Automation": "Reduce repetitive hand-offs where the required tools are configured.",
+            "Trust & Security": "Make access, integrity, and review requirements easier to inspect.",
+            "Digital Twin": "Compare a modelled operating condition before considering a live change.",
+            "Sustainability": "Review environmental measures alongside operational trade-offs.",
+            "Finance": "Compare investment choices using explicit financial assumptions.",
+            "Human Factors": "Evaluate a task using a structured method rather than visual guesswork.",
+            "Network Design": "Compare candidate sites and service coverage on a common basis.",
+        }
+
+        for _idx in range(0, len(_filtered_modules), 2):
+            _pair = _filtered_modules[_idx:_idx + 2]
+            _cols = st.columns(len(_pair))
+            for _col, _m in zip(_cols, _pair):
+                with _col:
+                    _module_name = str(_m.get("name", "Capability"))
+                    _module_category = str(_m.get("category", "Industrial Engineering"))
+                    _module_tier = str(_m.get("tier", "")).strip()
+                    _access_label = (
+                        "Research add-on"
+                        if _module_tier == "Research Pack"
+                        else f"Included from {_module_tier}"
+                        if _module_tier in _base_tier_rank
+                        else "Confirm plan access"
+                    )
+                    _use_case = str(_m.get("when", "")).strip()
+                    _example = str(_m.get("example", "")).strip()
+                    _value_hint = _value_hints.get(
+                        _module_category,
+                        "A documented result you can compare with your starting point.",
+                    )
+                    st.markdown(
+                        f'<div class="module-value-card">'
+                        f'<div class="module-category">{html.escape(_module_category)}</div>'
+                        f'<div class="module-name">{html.escape(_module_name)}</div>'
+                        f'<div class="module-when"><b>Use it when:</b> {html.escape(_use_case)}</div>'
+                        f'<div class="module-access">{html.escape(_access_label)}</div>'
+                        f'</div>',
+                        unsafe_allow_html=True,
+                    )
+                    with st.expander(f"Example & how to use it: {_module_name}"):
+                        st.markdown(f"**Example situation**\n\n{_example}")
+                        st.markdown(
+                            "**A simple way to try it**\n\n"
+                            "1. Start with this situation, the module's demo data if offered, or a small suitable dataset.\n"
+                            "2. Check the inputs, units, and assumptions before running the workflow.\n"
+                            "3. Compare the output with your current baseline and record the next action; export options depend on the module."
+                        )
+                        st.markdown(f"**What to look for**\n\n{_value_hint}")
+        if not _filtered_modules:
+            st.info(
+                "No capabilities match those choices. Select **Any industrial problem**, choose **All categories**, "
+                "clear the search, or try broader terms such as cost, quality, inventory, production, warehouse, or research."
+            )
+        st.caption(
+            "Examples are illustrative, not verified Shoir-IE customer outcomes. Results depend on the data, assumptions, "
+            "configured integrations, and the workflow you run."
+        )
+
+        st.markdown("---")
 
         st.markdown("### Why industrial teams are moving this way")
         st.markdown(
@@ -1979,83 +2238,6 @@ if not st.session_state.get("current_user"):
             "Plan access: Enterprise and Enterprise Plus. Observed records, projected shift/annual exposure and "
             "scenario-only stress are shown as separate quantities; estimates are not verified savings."
         )
-
-        st.markdown("### Find the capability for the problem you have")
-        _tier_options = list(MODULE_EXPLORER_TIERS)
-        _browse_tier = st.selectbox(
-            "Plan / access level",
-            _tier_options,
-            key="explore_tier_filter_v2"
-        )
-        _search = st.text_input(
-            "Search capabilities",
-            placeholder="Try: ShadowShift, Venture Studio, AKDT, logistics resilience, inventory, quality, warehouse, simulation…",
-            key="explore_module_search_v2"
-        )
-        _category_options = ["All categories"] + sorted({str(m.get("category","Other")) for m in MODULE_CATALOG})
-        _browse_category = st.selectbox(
-            "Area",
-            _category_options,
-            key="explore_category_filter_v2"
-        )
-
-        _query = _search.strip().lower()
-        _filtered_modules = []
-        for _m in MODULE_CATALOG:
-            if _browse_tier != "All capabilities" and _m.get("tier") != _browse_tier:
-                continue
-            if _browse_category != "All categories" and _m.get("category") != _browse_category:
-                continue
-            _haystack = " ".join([
-                str(_m.get("name","")),
-                str(_m.get("category","")),
-                str(_m.get("when","")),
-                str(_m.get("example","")),
-            ]).lower()
-            if _query and _query not in _haystack:
-                continue
-            _filtered_modules.append(_m)
-
-        st.markdown(
-            f"**{len(_filtered_modules)} capabilities shown** · "
-            f"{len(MODULE_CATALOG)} capabilities in the complete catalog"
-        )
-
-        if _browse_tier != "All capabilities":
-            _benefit = TIER_BENEFITS.get(_browse_tier, {})
-            _tier_price = _benefit.get("price", "")
-            _tier_pitch = _benefit.get("pitch", "")
-            _tier_gain = _benefit.get("gain", "")
-            st.markdown(
-                f"#### {_browse_tier} · {_tier_price}\n"
-                f"**{_tier_pitch}**\n\n{_tier_gain}"
-            )
-
-        # Every catalog entry remains visible through the filters and keeps
-        # its concrete "when" and "example" story. No internal implementation
-        # details are exposed on the public buying page.
-        for _idx in range(0, len(_filtered_modules), 2):
-            _pair = _filtered_modules[_idx:_idx + 2]
-            _cols = st.columns(len(_pair))
-            for _col, _m in zip(_cols, _pair):
-                with _col:
-                    st.markdown(
-                        f'<div class="module-value-card">'
-                        f'<div class="module-category">{html.escape(str(_m.get("category","Industrial Engineering")))}</div>'
-                        f'<div class="module-name">{html.escape(str(_m.get("name","Capability")))}</div>'
-                        f'<div class="module-when"><b>Helps when:</b> {html.escape(str(_m.get("when","")))}</div>'
-                        f'</div>',
-                        unsafe_allow_html=True
-                    )
-                    with st.expander("See a real-world example"):
-                        st.markdown(
-                            f'<div class="module-example"><b>Example:</b> '
-                            f'{html.escape(str(_m.get("example","")))}</div>',
-                            unsafe_allow_html=True
-                        )
-
-        if not _filtered_modules:
-            st.info("No capability matches those filters. Try a broader search or select All capabilities.")
 
         st.markdown("---")
         st.markdown("### What changes for the person using it?")
