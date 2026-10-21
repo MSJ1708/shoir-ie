@@ -44,7 +44,7 @@ def read_signin_surface(page):
 
 
 def shell_version(body: str) -> str:
-    match = re.search(r"SHOIR-IE SHELL VERSION:\\s*([^\\s—·]+)", body)
+    match = re.search(r"SHOIR-IE SHELL VERSION:\s*([^\s—·]+)", body)
     return match.group(1) if match else "not reported"
 
 
