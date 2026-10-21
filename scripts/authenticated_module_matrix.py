@@ -29,6 +29,8 @@ INVENTORY = ROOT / "docs" / "MODULE_TIER_INVENTORY.csv"
 REPORT = Path(os.environ.get("SHOIR_E2E_MODULE_REPORT", "artifacts/authenticated-release-gate/module-matrix-report.json"))
 URL = os.environ.get("SHOIR_E2E_APP_URL", "").strip()
 PREFIX = "shoir-e2e-"
+CANDIDATE_BUILD_MARKER = "SHOIR-IE SHELL VERSION: 3.2"
+STAGING_BUILD_WAIT_SECONDS = 12 * 60
 EXPECTED_TIERS = {
     "Starter", "Mid-Tier Pro", "Professional", "Enterprise",
     "Enterprise Plus", "Research Pack",
@@ -201,6 +203,33 @@ def login_test_account(page, account_class: str, username: str, password: str) -
     initial_body = frame.locator("body").inner_text(timeout=8_000)
     if "STAGING TEST ENVIRONMENT" not in initial_body:
         raise RuntimeError(f"{account_class}: staging marker is missing; refusing to submit credentials to a possibly production-backed app.")
+
+    # Streamlit Cloud deployment can lag behind the Git push that triggers this
+    # workflow. Do not test old app code against new source expectations, and
+    # never submit credentials until the candidate marker is visible.
+    build_deadline = time.monotonic() + STAGING_BUILD_WAIT_SECONDS
+    last_build_log = 0.0
+    while CANDIDATE_BUILD_MARKER not in initial_body:
+        now = time.monotonic()
+        if now >= build_deadline:
+            raise RuntimeError(
+                f"{account_class}: staging app did not publish the candidate shell marker "
+                f"within {STAGING_BUILD_WAIT_SECONDS // 60} minutes; refusing to test a stale deployment."
+            )
+        if now - last_build_log >= 60:
+            print("[WAIT] Staging app is safe but still on an older shell build; waiting before login.")
+            last_build_log = now
+        page.wait_for_timeout(15_000)
+        response = page.goto(URL, wait_until="domcontentloaded", timeout=90_000)
+        if response is None or response.status != 200:
+            raise RuntimeError(f"{account_class}: staging app stopped returning HTTP 200 while waiting for the candidate build.")
+        frame = find_app_frame(page)
+        if frame is None:
+            raise RuntimeError(f"{account_class}: sign-in frame disappeared while waiting for the candidate build.")
+        initial_body = frame.locator("body").inner_text(timeout=8_000)
+        if "STAGING TEST ENVIRONMENT" not in initial_body:
+            raise RuntimeError(f"{account_class}: staging safety marker disappeared; refusing to submit credentials.")
+
     frame.get_by_role("tab", name=re.compile("Sign In", re.I)).click(timeout=10_000)
     fill_signin_credentials(frame, username, password)
     frame.get_by_role("button", name=re.compile("^Sign In$", re.I)).click(timeout=10_000)
@@ -234,14 +263,19 @@ def route_module(page, frame, module_name: str, account_class: str) -> dict[str,
     }
     try:
         search = frame.get_by_placeholder(MODULE_SEARCH)
-        open_button = None
-        last_click_error = None
-        for attempt in range(2):
+        main = frame.get_by_role("main")
+        active_text = ""
+        main_text = ""
+        navigation_attempts = 0
+
+        # A successful Playwright click is not proof that Streamlit applied the
+        # rerun. Verify the active-module contract after each click and retry once
+        # if the shell stayed on its previous module.
+        for navigation_attempt in range(2):
             if active_module_confirmed(read_active_module_label(frame), module_name):
                 break
+            navigation_attempts += 1
             search.fill(module_name, timeout=10_000)
-            # The live input explicitly says "Press Enter to apply". Streamlit's
-            # search state is not committed by fill() alone.
             search.press("Enter", timeout=10_000)
             open_button = frame.get_by_role(
                 "button",
@@ -249,28 +283,40 @@ def route_module(page, frame, module_name: str, account_class: str) -> dict[str,
             )
             open_button.wait_for(state="visible", timeout=12_000)
             open_button.scroll_into_view_if_needed(timeout=5_000)
-            try:
-                open_button.click(timeout=15_000)
-                last_click_error = None
-                break
-            except PlaywrightError as exc:
-                # Streamlit may rerun while the click is being acknowledged.
-                # Accept only if the shell actually switched to this exact route;
-                # otherwise retry once and preserve a hard failure if it did not.
-                if active_module_confirmed(read_active_module_label(frame), module_name):
-                    last_click_error = None
-                    break
-                last_click_error = exc
-                if attempt == 0:
-                    page.wait_for_timeout(500)
-        if last_click_error is not None:
-            raise last_click_error
+            open_button.click(timeout=15_000)
 
-        main = frame.get_by_role("main")
-        deadline = time.monotonic() + 45
-        main_text = ""
-        active_text = ""
-        while time.monotonic() < deadline:
+            active_deadline = time.monotonic() + 22
+            while time.monotonic() < active_deadline:
+                try:
+                    active_text = read_active_module_label(frame)
+                except Exception:
+                    active_text = ""
+                if active_module_confirmed(active_text, module_name):
+                    break
+                page.wait_for_timeout(350)
+            if active_module_confirmed(active_text, module_name):
+                break
+            # Clear stale rendered results and allow the Streamlit rerun to finish
+            # before attempting the same explicit route request one more time.
+            page.wait_for_timeout(750)
+
+        case["navigation_attempts"] = navigation_attempts
+        try:
+            active_text = read_active_module_label(frame)
+        except Exception:
+            active_text = ""
+        if not active_module_confirmed(active_text, module_name):
+            raise AssertionError(
+                "The explicit shell active-module marker did not confirm the requested module "
+                f"after {navigation_attempts} click attempt(s); active marker was {active_text[:160]!r}."
+            )
+
+        # Wait for the module body to settle before starting the next route, so
+        # long Streamlit reruns do not race with the following click or logout.
+        settle_deadline = time.monotonic() + 10
+        previous_text = None
+        stable_samples = 0
+        while time.monotonic() < settle_deadline:
             try:
                 main_text = main.inner_text(timeout=1_500)
             except Exception:
@@ -279,9 +325,16 @@ def route_module(page, frame, module_name: str, account_class: str) -> dict[str,
                 active_text = read_active_module_label(frame)
             except Exception:
                 active_text = ""
-            if active_module_confirmed(active_text, module_name):
-                break
-            page.wait_for_timeout(350)
+            if active_module_confirmed(active_text, module_name) and len(main_text.strip()) >= 40:
+                if main_text == previous_text:
+                    stable_samples += 1
+                else:
+                    stable_samples = 0
+                if stable_samples >= 1:
+                    break
+            previous_text = main_text
+            page.wait_for_timeout(500)
+        page.wait_for_timeout(300)
 
         case["main_text_length"] = len(main_text)
         case["active_module_label"] = active_text[:160]
@@ -369,6 +422,8 @@ def run_account(browser, account_class: str, username: str, password: str, rows:
     finally:
         if frame is not None:
             try:
+                # Let the last module rerun finish before dispatching logout.
+                page.wait_for_timeout(1_000)
                 visible_logout_button(frame).click(timeout=15_000)
                 try:
                     frame.get_by_text(
@@ -423,6 +478,7 @@ def main() -> int:
     report: dict[str, Any] = {
         "started_at_utc": datetime.now(timezone.utc).isoformat(),
         "target": URL,
+        "candidate_build_marker": CANDIDATE_BUILD_MARKER,
         "scope": "authenticated module route/default-state rendering; not calculation or full data I/O acceptance",
         "overall": "FAIL",
         "module_inventory_count": 0,
