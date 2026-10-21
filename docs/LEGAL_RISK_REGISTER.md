@@ -16,6 +16,15 @@ The public app displays a beta warning; the terms explain that calculations, AI 
 
 **Important:** these changes are on branch legal-beta-referral-readiness-2026-10-21. They do not change the live website until reviewed, merged and correctly deployed. User-facing notices must remain consistent with the code and actual deployment.
 
+## Live Supabase state checked read-only on October 21, 2026
+
+A read-only query against the connected Supabase projects found additional confirmed release blockers:
+
+- **Production project** shoir-ie-production (gcsamrdaeraxieaagsta): the recorded migration history stops at 20261019124815_server_side_login_rate_limits; the query did not find either public.shoir_create_registration_request or public.shoir_finalize_subscription_request. The active shoir-persistence Edge Function is version 8 and does not include versioned legal-consent handling or referral attribution. The query also found none of the new legal-consent columns on shoir_subscription_requests and no shoir_referrals table.
+- **Staging project** shoir-ie-staging-2026-10-19 (hfhrosthswcybccepmak): the query did find shoir_create_registration_request and shoir_finalize_subscription_request, but not the new legal-consent columns or shoir_referrals. The active shoir-persistence Edge Function is version 7 and also lacks the new consent/referral actions.
+
+These results come from read-only metadata/function-source inspection; no database changes or Edge Function deployments were made. **Do not merge/deploy the new UI and Edge Function to the live app until the migration history and registration RPC implementation have been reconciled.** If production uses this recorded history and active function together, the missing RPCs are likely to prevent registration/approval requests from succeeding; verify via a controlled staging test before changing production. Staging also needs the new migration and matching Edge Function deployed as a coordinated, reviewed change, followed by authenticated end-to-end tests.
+
 ## Findings and required actions
 
 | Priority | Finding | Status and required evidence to close |
