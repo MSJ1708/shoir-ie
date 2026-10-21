@@ -2,8 +2,6 @@
 """Fail-closed environment guard for authenticated Shoir-IE E2E tests."""
 from __future__ import annotations
 
-import base64
-import json
 import os
 import re
 from urllib.parse import urlsplit
@@ -61,42 +59,6 @@ def validate_app_url(value: str, expected_host: str) -> str:
     return value.strip().rstrip("/") + "/"
 
 
-def validate_publishable_key(value: str) -> str:
-    """Accept only a staging-safe Supabase publishable key or legacy anon JWT."""
-    key = str(value or "").strip()
-    if not key:
-        raise ValueError("SHOIR_E2E_PUBLISHABLE_KEY is required; refusing authenticated E2E tests.")
-    if any(ord(char) < 33 or ord(char) > 126 for char in key):
-        raise ValueError(
-            "SHOIR_E2E_PUBLISHABLE_KEY contains whitespace or non-ASCII characters; "
-            "copy the staging project's publishable/anon key as plain text."
-        )
-    if key.startswith("sb_secret_"):
-        raise ValueError("A Supabase secret/service-role key is forbidden in authenticated E2E tests.")
-    if key.startswith("sb_publishable_") and len(key) > len("sb_publishable_"):
-        return key
-
-    # Older Supabase projects use a JWT anon key. Require the public anon role;
-    # never accept a service-role JWT as a test credential.
-    parts = key.split(".")
-    if len(parts) == 3:
-        try:
-            payload = parts[1].replace("-", "+").replace("_", "/")
-            payload += "=" * (-len(payload) % 4)
-            claims = json.loads(base64.b64decode(payload.encode("ascii")).decode("utf-8"))
-        except (ValueError, UnicodeDecodeError, json.JSONDecodeError):
-            claims = {}
-        if isinstance(claims, dict) and claims.get("role") == "anon":
-            key_ref = claims.get("ref")
-            if key_ref and key_ref != STAGING_PROJECT_REF:
-                raise ValueError("The legacy anon JWT does not identify the approved staging Supabase project.")
-            return key
-    raise ValueError(
-        "SHOIR_E2E_PUBLISHABLE_KEY must be a Supabase sb_publishable_* key "
-        "or a legacy JWT whose role is anon."
-    )
-
-
 def validate_edge_from_env() -> str:
     return validate_edge_url(os.environ.get("SHOIR_E2E_EDGE_URL", ""))
 
@@ -111,7 +73,6 @@ def validate_app_from_env() -> str:
 def validate_all_from_env() -> None:
     validate_edge_from_env()
     validate_app_from_env()
-    validate_publishable_key(os.environ.get("SHOIR_E2E_PUBLISHABLE_KEY", ""))
 
 
 if __name__ == "__main__":

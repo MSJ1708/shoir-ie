@@ -55,12 +55,9 @@ class EdgeAPI:
         self.url = url.rstrip("/")
         self.headers = {
             "apikey": publishable_key,
+            "Authorization": f"Bearer {publishable_key}",
             "Content-Type": "application/json",
         }
-        # Supabase's current sb_publishable_* keys are not JWTs and must be
-        # sent in the apikey header only. Legacy anon JWTs still need Bearer auth.
-        if not publishable_key.startswith("sb_publishable_"):
-            self.headers["Authorization"] = f"Bearer {publishable_key}"
 
     def call(self, action: str, payload: dict[str, Any]) -> tuple[int, dict[str, Any]]:
         body = dict(payload)
@@ -87,14 +84,6 @@ def main() -> int:
     try:
         edge_url = validate_edge_from_env()
         key = require_env("SHOIR_E2E_PUBLISHABLE_KEY")
-        # HTTP header values must be ASCII/Latin-1 encodable. Supabase
-        # publishable keys and legacy anon JWTs are ASCII; reject a pasted
-        # non-ASCII character or hidden formatting before making live requests.
-        if not key.isascii():
-            raise ValueError(
-                "SHOIR_E2E_PUBLISHABLE_KEY contains non-ASCII characters; replace it with the exact "
-                "staging project's publishable/anon key copied as plain text, without quotes or hidden formatting."
-            )
         active_user = validate_test_username(require_env("SHOIR_E2E_ACTIVE_USERNAME"), "active account")
         active_password = require_env("SHOIR_E2E_ACTIVE_PASSWORD")
         second_user = validate_test_username(require_env("SHOIR_E2E_SECOND_USERNAME"), "second account")

@@ -165,15 +165,11 @@ if APP_ENVIRONMENT == "staging" and _configured_direct_database_url():
 
 
 def _edge_headers() -> dict[str, str]:
-    # Supabase's new publishable keys are not JWTs and must be sent via the
-    # apikey header only. Keep Bearer auth for legacy anon JWTs.
-    headers = {
+    return {
         "apikey": SUPABASE_PUBLISHABLE_KEY,
+        "Authorization": f"Bearer {SUPABASE_PUBLISHABLE_KEY}",
         "Content-Type": "application/json",
     }
-    if not SUPABASE_PUBLISHABLE_KEY.startswith("sb_publishable_"):
-        headers["Authorization"] = f"Bearer {SUPABASE_PUBLISHABLE_KEY}"
-    return headers
 
 
 def _edge_call(action: str, payload: Optional[dict[str, Any]] = None) -> dict[str, Any]:

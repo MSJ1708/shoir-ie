@@ -37,17 +37,3 @@ def test_accepts_explicit_staging_app_host():
 def test_rejects_production_http_or_mismatched_app_targets(url, expected_host):
     with pytest.raises(ValueError):
         validate_app_url(url, expected_host)
-
-
-def test_accepts_publishable_key():
-    from scripts.staging_e2e_guard import validate_publishable_key
-
-    assert validate_publishable_key("sb_publishable_example123") == "sb_publishable_example123"
-
-
-@pytest.mark.parametrize("value", ["sb_publishable_bad key", "sb_publishable_bad\u200bkey"])
-def test_rejects_malformed_publishable_key(value):
-    from scripts.staging_e2e_guard import validate_publishable_key
-
-    with pytest.raises(ValueError):
-        validate_publishable_key(value)

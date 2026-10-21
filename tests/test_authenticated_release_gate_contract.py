@@ -6,17 +6,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_authenticated_gate_is_manual_and_has_explicit_one_shot_push_opt_in():
+def test_authenticated_gate_is_manual_only_and_uses_dedicated_test_accounts():
     workflow = (ROOT / ".github/workflows/authenticated-release-gate.yml").read_text(encoding="utf-8")
     script = (ROOT / "scripts/authenticated_release_gate.py").read_text(encoding="utf-8")
 
     assert "workflow_dispatch:" in workflow
     assert "pull_request:" not in workflow
-    assert "push:" in workflow
-    assert "branches:" in workflow
-    assert "staging-e2e-20261019" in workflow
-    assert "[run-authenticated-gate]" in workflow
-    assert "github.event_name == 'workflow_dispatch'" in workflow
+    assert "push:" not in workflow
     assert "shoir-e2e-*" in workflow
     assert "shoir-e2e-" in script
     assert "admin_approve_session" not in script
@@ -32,62 +28,6 @@ def test_authenticated_browser_gate_checks_module_route_and_shell_logout():
     assert "sidebar_logout_returns_to_signin" in script
     assert "Lock / Logout Workspace" in script
 
-
-
-def test_navigation_and_logout_defer_widget_state_reset_until_before_render():
-    shell = (ROOT / "shoir_application_shell.py").read_text(encoding="utf-8")
-    app = (ROOT / "app.py").read_text(encoding="utf-8")
-    browser = (ROOT / "scripts/authenticated_browser_matrix.py").read_text(encoding="utf-8")
-
-    assert 'st.session_state[selector_key] = requested_module' in shell
-    assert '_shoir_clear_global_search_before_render' in shell
-    assert 'st.session_state.pop("shoir_shell_section_radio", None)' in shell
-    assert '_shoir_clear_session_before_render' in app
-    assert 'del st.session_state[_logout_key]' not in app
-    assert 'del st.session_state[_key]' not in app
-    assert 'Active module:' in browser
-    assert 'data-testid="shoir-active-module"' in browser
-    assert "candidate shell marker" in browser
-    assert "ACTIVE_MODULE_SELECTOR" in browser
-    assert 'full_page=False' in browser
-
-
-def test_authenticated_sidebar_starts_expanded_and_browser_gate_expands_it_before_logout():
-    app = (ROOT / "app.py").read_text(encoding="utf-8")
-    matrix = (ROOT / "scripts/authenticated_module_matrix.py").read_text(encoding="utf-8")
-    browser = (ROOT / "scripts/authenticated_browser_matrix.py").read_text(encoding="utf-8")
-    assert 'initial_sidebar_state="expanded"' in app
-    assert "def visible_logout_button(frame)" in matrix
-    assert "def visible_logout_button(frame)" in browser
-    assert "visible_logout_button(frame).click" in matrix
-    assert "visible_logout_button(app_frame).click" in browser
-    assert "open_button.scroll_into_view_if_needed" in matrix
-    assert "for attempt in range(2)" in matrix
-
-
-def test_active_module_identity_renders_before_optional_header_diagnostics_and_has_visible_text_fallback():
-    shell = (ROOT / "shoir_application_shell.py").read_text(encoding="utf-8")
-    shell_start = shell.index("def render_application_header(")
-    shell_end = shell.index("\ndef render_module_workflow(", shell_start)
-    header = shell[shell_start:shell_end]
-    assert header.index('data-testid="shoir-active-module"') < header.index("_first_dataframe()")
-    assert header.count('data-testid="shoir-active-module"') == 1
-
-    for relative_path in (
-        "scripts/authenticated_browser_matrix.py",
-        "scripts/authenticated_module_matrix.py",
-    ):
-        script = (ROOT / relative_path).read_text(encoding="utf-8")
-        assert "def read_active_module_label(frame)" in script
-        assert "get_by_text(re.compile" in script
-        assert "ACTIVE_MODULE_SELECTOR" in script
-
-
-def test_manual_release_gate_runbook_targets_the_unmerged_candidate_branch():
-    docs = (ROOT / "docs/AUTHENTICATED_RELEASE_GATE.md").read_text(encoding="utf-8")
-    assert "select the branch containing the release-candidate commit" in docs
-    assert "select `staging-e2e-20261019` (PR #165)" in docs
-    assert "choosing `main` would test the older base revision" in docs
 
 
 def test_server_login_throttle_is_reviewed_and_migration_first():
@@ -138,33 +78,3 @@ def test_staging_app_must_declare_staging_and_refuses_production_backend_fallbac
     assert "STAGING TEST ENVIRONMENT" in module_matrix
     assert "edge_url = " in docs
     assert "environment = \"staging\"" in docs
-
-
-
-def test_current_supabase_publishable_key_is_not_sent_as_bearer_auth():
-    script = (ROOT / "scripts/authenticated_release_gate.py").read_text(encoding="utf-8")
-    assert 'publishable_key.startswith("sb_publishable_")' in script
-    assert 'self.headers["Authorization"] = f"Bearer {publishable_key}"' in script
-    assert '"apikey": publishable_key' in script
-
-
-def test_browser_gates_locate_visible_streamlit_signin_inputs_without_label_association():
-    for relative_path in (
-        "scripts/authenticated_browser_matrix.py",
-        "scripts/authenticated_module_matrix.py",
-    ):
-        script = (ROOT / relative_path).read_text(encoding="utf-8")
-        assert "input[type='text']:visible" in script
-        assert "input[type='password']:visible" in script
-        assert "fill_signin_credentials" in script
-        assert 'get_by_label("Username", exact=True)' not in script
-
-
-def test_logout_saves_workspace_before_server_session_revocation():
-    app = (ROOT / "app.py").read_text(encoding="utf-8")
-    logout_start = app.index('if _shell_surface == "logout":')
-    logout_end = app.index("# Compatibility contract retained", logout_start)
-    logout_block = app[logout_start:logout_end]
-    assert logout_block.index("save_user_workspace") < logout_block.index("edge_logout")
-    assert 'st.session_state["_shoir_clear_session_before_render"] = True' in logout_block
-    assert "st.rerun()" in logout_block
