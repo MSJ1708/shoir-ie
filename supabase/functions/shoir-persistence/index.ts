@@ -512,9 +512,16 @@ Deno.serve(async (req) => {
           error: "Password must be between 8 and 128 characters.",
         }, 400);
       }
+      const emailParts = email.split("@");
       if (
         email.length > 254 ||
-        !/^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/.test(email)
+        emailParts.length !== 2 ||
+        !emailParts[0] ||
+        !emailParts[1] ||
+        !emailParts[1].includes(".") ||
+        emailParts[1].startsWith(".") ||
+        emailParts[1].endsWith(".") ||
+        email.includes(" ") || email.includes("\t") || email.includes("\n") || email.includes("\r")
       ) {
         return response({ error: "Enter a valid email address." }, 400);
       }
