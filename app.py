@@ -590,7 +590,7 @@ def init_db():
                 (username, password_hash, role, tier, email, trial_expires, affiliate_code, ticket_expiry)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """, ("sho", admin_pass_hash, "Enterprise Admin", "Enterprise Plus Tier ($399)",
-                  "mohsuhailji@gmail.com", "2030-01-01T00:00:00", "AFF-SHO-15", "2030-01-01T00:00:00"))
+                  "mohsuhailji@gmail.com", "2030-01-01T00:00:00", "SHR-ADMIN01", "2030-01-01T00:00:00"))
             cursor.execute("""
                 UPDATE enterprise_users
                 SET password_hash=?, role=?, tier=?, email=?
@@ -609,7 +609,7 @@ def init_db():
                 (username, role, tier, email, trial_expires, affiliate_code, ticket_expiry)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
             """, ("sho", "Enterprise Admin", "Enterprise Plus Tier ($399)",
-                  "mohsuhailji@gmail.com", "2030-01-01T00:00:00", "AFF-SHO-15", "2030-01-01T00:00:00"))
+                  "mohsuhailji@gmail.com", "2030-01-01T00:00:00", "SHR-ADMIN01", "2030-01-01T00:00:00"))
             cursor.execute("""
                 UPDATE enterprise_users
                 SET role=?, tier=?, email=?
