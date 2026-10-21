@@ -7,6 +7,7 @@ It deliberately reuses existing specialist modules instead of replacing them.
 
 from __future__ import annotations
 
+import hashlib
 import html
 import json
 import math
@@ -369,6 +370,24 @@ def _module_target_section(module: str, module_metadata: Mapping[str, Any] | Non
         return "OPERATIONS"
     return "WORKBENCH"
 
+def _global_module_button_key(module_name: str) -> str:
+    """Return a stable, module-specific key for a global-search result button."""
+    digest = hashlib.sha256(str(module_name).strip().encode("utf-8")).hexdigest()[:16]
+    return f"shoir_global_module_{digest}"
+
+
+def _ensure_requested_module_choice(
+    choices: Sequence[str],
+    requested_module: str,
+    allowed_modules: Sequence[str],
+) -> list[str]:
+    """Keep an authorized explicit deep-link selectable despite section-filter drift."""
+    result = [str(choice) for choice in choices]
+    requested = str(requested_module or "").strip()
+    if requested and requested in {str(item).strip() for item in allowed_modules} and requested not in result:
+        result.insert(0, requested)
+    return result
+
 
 def render_global_search(
     allowed_modules: Sequence[str],
@@ -418,8 +437,8 @@ def render_global_search(
     with st.expander("⌘ Search results", expanded=True):
         if module_hits:
             st.markdown("**Modules**")
-            for idx, name in enumerate(module_hits[:12]):
-                if st.button(f"Open · {name}", key=f"shoir_global_module_{idx}", use_container_width=True):
+            for name in module_hits[:12]:
+                if st.button(f"Open · {name}", key=_global_module_button_key(name), use_container_width=True):
                     st.session_state["_shoir_requested_module"] = str(name)
                     st.session_state["shoir_shell_section"] = _module_target_section(str(name), module_metadata)
                     # Clear keyed widget state on the following run, before it is
@@ -1029,6 +1048,8 @@ def render_application_shell(
             )
 
         choices = _module_choices(allowed_modules, section, search, module_metadata)
+        if explicit_module_request:
+            choices = _ensure_requested_module_choice(choices, requested_module, allowed_modules)
         default_module = _preferred_module(choices, current_module, recent_choice)
 
         default_index = choices.index(default_module) if default_module in choices else 0
