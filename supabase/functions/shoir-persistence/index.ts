@@ -11,6 +11,7 @@ const TERMS_VERSION = "2026-10-21-beta-v1";
 const PRIVACY_POLICY_VERSION = "2026-10-21-v1";
 const REFUND_POLICY_VERSION = "2026-10-21-v1";
 const COOKIE_POLICY_VERSION = "2026-10-21-v1";
+// Keep these values aligned with the public notices and the matching SQL migration.
 
 async function ensurePaymentProofBucket() {
   const { data, error } = await supabase.storage.getBucket(
