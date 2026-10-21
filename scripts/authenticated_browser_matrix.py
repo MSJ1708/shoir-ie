@@ -17,7 +17,6 @@ from staging_e2e_guard import validate_app_from_env
 REPORT = Path(os.environ.get("SHOIR_E2E_UI_REPORT", "artifacts/authenticated-release-gate/browser-report.json"))
 PREFIX = "shoir-e2e-"
 CANDIDATE_BUILD_MARKER = "SHOIR-IE SHELL VERSION: 3.2"
-STAGING_BUILD_WAIT_SECONDS = 12 * 60
 URL = os.environ.get("SHOIR_E2E_APP_URL", "").strip()
 ACTIVE_MODULE_SELECTOR = '[data-testid="shoir-active-module"]'
 
@@ -158,39 +157,13 @@ def main() -> int:
             if not is_staging:
                 raise RuntimeError("Staging marker missing; refusing to submit test credentials to a possibly production-backed app.")
 
-            # The workflow can start before Streamlit Cloud has deployed the
-            # triggering commit. Wait for its candidate marker while remaining
-            # fail-closed; credentials are never submitted to an older build.
-            build_deadline = time.monotonic() + STAGING_BUILD_WAIT_SECONDS
-            last_build_log = 0.0
-            while CANDIDATE_BUILD_MARKER not in initial_body:
-                now = time.monotonic()
-                if now >= build_deadline:
-                    raise RuntimeError(
-                        f"Staging app did not publish {CANDIDATE_BUILD_MARKER!r} within "
-                        f"{STAGING_BUILD_WAIT_SECONDS // 60} minutes; credentials were not submitted."
-                    )
-                if now - last_build_log >= 60:
-                    print("[WAIT] Staging app is safe but still on an older shell build; waiting before login.")
-                    last_build_log = now
-                page.wait_for_timeout(15_000)
-                response = page.goto(target_url, wait_until="domcontentloaded", timeout=90_000)
-                if response is None or response.status != 200:
-                    raise RuntimeError("Staging app stopped returning HTTP 200 while waiting for the candidate build.")
-                app_frame = None
-                for frame in page.frames:
-                    try:
-                        text = frame.locator("body").inner_text(timeout=4_000)
-                    except Exception:
-                        continue
-                    if "Sign In to Your Workspace" in text or "Welcome to Shoir-IE, " in text:
-                        app_frame = frame
-                        break
-                if app_frame is None:
-                    raise RuntimeError("Staging sign-in frame disappeared while waiting for the candidate build.")
-                initial_body = app_frame.locator("body").inner_text(timeout=8_000)
-                if "STAGING TEST ENVIRONMENT" not in initial_body:
-                    raise RuntimeError("Staging safety marker disappeared; credentials were not submitted.")
+            if CANDIDATE_BUILD_MARKER not in initial_body:
+                version_match = re.search(r"SHOIR-IE SHELL VERSION:\s*([^\s—·]+)", initial_body)
+                observed_version = version_match.group(1) if version_match else "not reported"
+                raise RuntimeError(
+                    f"Staging app serves shell version {observed_version}; expected "
+                    f"{CANDIDATE_BUILD_MARKER}. The candidate preflight must pass before credentials are submitted."
+                )
 
             check("candidate_shell_build", True, f"Candidate marker {CANDIDATE_BUILD_MARKER!r} is visible before sign-in.")
             step = "select sign-in tab"
