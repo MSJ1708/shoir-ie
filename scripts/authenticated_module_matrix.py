@@ -267,6 +267,7 @@ def route_module(page, frame, module_name: str, account_class: str) -> dict[str,
         active_text = ""
         main_text = ""
         navigation_attempts = 0
+        last_click_error: str | None = None
 
         # A successful Playwright click is not proof that Streamlit applied the
         # rerun. Verify the active-module contract after each click and retry once
@@ -283,7 +284,13 @@ def route_module(page, frame, module_name: str, account_class: str) -> dict[str,
             )
             open_button.wait_for(state="visible", timeout=12_000)
             open_button.scroll_into_view_if_needed(timeout=5_000)
-            open_button.click(timeout=15_000)
+            try:
+                open_button.click(timeout=15_000)
+                last_click_error = None
+            except PlaywrightError as exc:
+                # A Streamlit rerun can detach the clicked node after the click
+                # has already been sent. Trust only the active-module marker.
+                last_click_error = f"{type(exc).__name__}: {str(exc)[:180]}"
 
             active_deadline = time.monotonic() + 22
             while time.monotonic() < active_deadline:
@@ -301,6 +308,8 @@ def route_module(page, frame, module_name: str, account_class: str) -> dict[str,
             page.wait_for_timeout(750)
 
         case["navigation_attempts"] = navigation_attempts
+        if last_click_error:
+            case["last_click_error"] = last_click_error
         try:
             active_text = read_active_module_label(frame)
         except Exception:
