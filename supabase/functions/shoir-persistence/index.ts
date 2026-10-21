@@ -906,11 +906,12 @@ Deno.serve(async (req) => {
       if (!Number.isSafeInteger(id) || id <= 0) {
         return response({ error: "Invalid request identifier." }, 400);
       }
-      const { data: declinedRequest, error: declinedRequestError } = await supabase
-        .from("shoir_subscription_requests").select(
-          "username_lc,request_type",
-        )
-        .eq("id", id).eq("status", "Pending").maybeSingle();
+      const { data: declinedRequest, error: declinedRequestError } =
+        await supabase
+          .from("shoir_subscription_requests").select(
+            "username_lc,request_type",
+          )
+          .eq("id", id).eq("status", "Pending").maybeSingle();
       if (declinedRequestError) throw declinedRequestError;
       if (!declinedRequest) {
         return response({
