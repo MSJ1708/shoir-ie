@@ -82,6 +82,29 @@ def safe_call(api: EdgeAPI, case: str, account_class: str, action: str, payload:
         return None, {}
 
 
+def login_failure_detail(status: int | None, data: dict[str, Any], expected: str) -> str:
+    """Return actionable authentication diagnostics without exposing secrets or raw API bodies."""
+    if status is None:
+        return f"{expected}; the Edge request did not return a valid HTTP response."
+    error = str(data.get("error") or "")
+    if status == 401 and error == "Invalid username or password.":
+        return (
+            f"{expected}; HTTP 401 means the staging API rejected the credentials or account state. "
+            "The dedicated E2E password may be out of sync with the staging account. "
+            "Run scripts/recover_staging_e2e_credentials.py on the trusted workstation; "
+            "do not create duplicate accounts or modify production."
+        )
+    if status == 429:
+        return f"{expected}; HTTP 429 indicates the staging login throttle is active. Stop retries and let the window expire."
+    if status == 503:
+        return f"{expected}; HTTP 503 indicates staging authentication protection is unavailable. Inspect the Edge Function and login-throttle RPC."
+    if status == 403 and error == "SUBSCRIPTION_EXPIRED"::
+        return f"{expected}; HTTP 403 reports an expired subscription, not an active workspace session."
+    if status == 200:
+        return f"{expected}; HTTP 200 was returned but the session/tier metadata did not satisfy the release-gate contract."
+    return f"{expected}; staging Edge API returned unexpected HTTP {status}. Response details were suppressed."
+
+
 def main() -> int:
     REPORT_PATH.parent.mkdir(parents=True, exist_ok=True)
     try:
@@ -134,7 +157,7 @@ def main() -> int:
                status == 200 and bool(active_token) and data.get("username", "").casefold() == active_user.casefold()
                and str(data.get("tier") or "").strip() == active_expected_tier
                and str(data.get("role") or "") != "Enterprise Admin",
-               "Expected active non-admin session and configured tier." if status == 200 else "Active login was not accepted as a workspace session.")
+               "Expected active non-admin session and configured tier." if (status == 200 and bool(active_token) and data.get("username", "").casefold() == active_user.casefold() and str(data.get("tier") or "").strip() == active_expected_tier and str(data.get("role") or "") != "Enterprise Admin") else login_failure_detail(status, data, "Active account login failed"))
 
         # Verify generic invalid-password behavior; use a random wrong value, never an actual secret.
         bad_status, bad = safe_call(api, "invalid_password", "active", "login",
@@ -148,7 +171,7 @@ def main() -> int:
         second_token = str(data2.get("token") or "")
         record("second_login", "second",
                status2 == 200 and bool(second_token) and str(data2.get("role") or "") != "Enterprise Admin",
-               "Second dedicated non-admin account can authenticate.")
+               "Second dedicated non-admin account can authenticate." if (status2 == 200 and bool(second_token) and str(data2.get("role") or "") != "Enterprise Admin") else login_failure_detail(status2, data2, "Second account login failed"))
 
         status3, data3 = safe_call(api, "starter_login", "starter", "login",
                                    {"username": starter_user, "password": starter_password})
@@ -156,7 +179,7 @@ def main() -> int:
         record("starter_tier", "starter",
                status3 == 200 and bool(starter_token) and "starter" in str(data3.get("tier") or "").casefold()
                and str(data3.get("role") or "") != "Enterprise Admin",
-               "Starter tier is returned for the dedicated Starter test identity.")
+               "Starter tier is returned for the dedicated Starter test identity." if (status3 == 200 and bool(starter_token) and "starter" in str(data3.get("tier") or "").casefold() and str(data3.get("role") or "") != "Enterprise Admin") else login_failure_detail(status3, data3, "Starter account login failed"))
 
         # An active non-admin must not invoke administrator APIs even with a valid token.
         if active_token:
@@ -248,7 +271,7 @@ def main() -> int:
         expired_token = str(expired_data.get("token") or "")
         expired_ok = expired_status == 403 and expired_data.get("error") == "SUBSCRIPTION_EXPIRED" and bool(expired_token) and expired_data.get("renewal_only") is True
         record("expired_login_renewal_only", "expired", expired_ok,
-               "Expired account receives a renewal-only session, not a workspace session.")
+               "Expired account receives a renewal-only session, not a workspace session." if valid else login_failure_detail(status4, data4, "Expired-account renewal-only login contract failed"))
         if expired_token:
             st_load, load_data = safe_call(api, "expired_workspace_load_denied", "expired", "workspace_load",
                                            {"username": expired_user, "token": expired_token})
