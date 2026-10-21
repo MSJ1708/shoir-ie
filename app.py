@@ -1686,7 +1686,18 @@ if not st.session_state.get("current_user"):
 
         if accepted_terms:
             if st.button("Proceed to Pay & Show QR", type="primary", key="btn_confirm_pay"):
+                st.session_state["_registration_accepted_terms_version"] = TERMS_VERSION
+                st.session_state["_registration_accepted_policy_versions"] = (
+                    PRIVACY_POLICY_VERSION,
+                    REFUND_POLICY_VERSION,
+                    COOKIE_POLICY_VERSION,
+                )
+                st.session_state["_registration_accepted_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
                 st.session_state.show_qr = True
+        else:
+            st.session_state.pop("_registration_accepted_terms_version", None)
+            st.session_state.pop("_registration_accepted_policy_versions", None)
+            st.session_state.pop("_registration_accepted_at", None)
 
         if st.session_state.get("show_qr", False):
             st.markdown("---")
@@ -1709,8 +1720,18 @@ if not st.session_state.get("current_user"):
 
             if confirmed_delivery:
                 if st.button("Send Verification Request", type="primary", key="btn_send_request"):
-                    if not accepted_terms:
-                        st.warning("Please accept the current Beta Terms & Conditions and acknowledge the notices before submitting.")
+                    _accepted_policy_versions = (
+                        PRIVACY_POLICY_VERSION,
+                        REFUND_POLICY_VERSION,
+                        COOKIE_POLICY_VERSION,
+                    )
+                    if (
+                        not accepted_terms
+                        or st.session_state.get("_registration_accepted_terms_version") != TERMS_VERSION
+                        or st.session_state.get("_registration_accepted_policy_versions") != _accepted_policy_versions
+                        or not st.session_state.get("_registration_accepted_at")
+                    ):
+                        st.warning("Review the current Beta Terms & Conditions and policy notices, tick the acknowledgement, then click Proceed to Pay & Show QR before submitting.")
                         st.stop()
                     referral_code = str(reg_referral_code or "").strip().upper()
                     if referral_code and not re.fullmatch(r"[A-Z0-9-]{3,32}", referral_code):
@@ -1797,6 +1818,7 @@ if not st.session_state.get("current_user"):
                                     "proof_content_type": _registration_proof_content_type,
                                     "referral_code": referral_code or None,
                                     "terms_accepted": True,
+                                    "accepted_at": st.session_state.get("_registration_accepted_at"),
                                     "terms_version": TERMS_VERSION,
                                     "privacy_policy_version": PRIVACY_POLICY_VERSION,
                                     "refund_policy_version": REFUND_POLICY_VERSION,
@@ -1851,6 +1873,9 @@ if not st.session_state.get("current_user"):
                                 st.warning(str(_registration_result.get("referral_warning") or "The account service did not confirm referral attribution. No reward or discount is implied."))
                         st.success("Request received. Account activation still requires manual payment review.")
                         st.session_state.show_qr = False
+                        st.session_state.pop("_registration_accepted_terms_version", None)
+                        st.session_state.pop("_registration_accepted_policy_versions", None)
+                        st.session_state.pop("_registration_accepted_at", None)
                         st.rerun()
                     else:
                         st.warning("Please fill in your name, password, and email address.")
