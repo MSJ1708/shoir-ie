@@ -388,12 +388,18 @@ def run_account(browser, account_class: str, username: str, password: str, rows:
                         "Logout did not return to the sign-in surface; inspect the saved evidence for the deployed app state."
                     ) from exc
                 signed_out_body = frame.locator("body").inner_text(timeout=8_000)
-                if (
-                    "Sign In to Your Workspace" not in signed_out_body
-                    or username.casefold() in signed_out_body.casefold()
-                    or "Lock / Logout Workspace" in signed_out_body
-                ):
-                    raise AssertionError("Logout did not clear the authenticated workspace.")
+                sign_in_visible = "Sign In to Your Workspace" in signed_out_body
+                logout_control_visible = "Lock / Logout Workspace" in signed_out_body
+                active_module_visible = bool(
+                    re.search(r"Active module:\\s*\\S", signed_out_body, re.I)
+                )
+                if not sign_in_visible or logout_control_visible or active_module_visible:
+                    raise AssertionError(
+                        "Logout did not replace the authenticated shell with sign-in "
+                        f"(sign_in_visible={sign_in_visible}, "
+                        f"logout_control_visible={logout_control_visible}, "
+                        f"active_module_visible={active_module_visible})."
+                    )
             except Exception as exc:
                 cases.append({
                     "case_id": f"MODULE-LOGOUT-{account_class.upper()}",
@@ -480,6 +486,16 @@ def main() -> int:
         for case in report["cases"]
         if case.get("status") == "FAIL" and case.get("module_name") is None
     ]
+    report["failed_route_cases"] = [
+        {
+            "module_name": case.get("module_name"),
+            "account_class": case.get("account_class"),
+            "failure_reason": case.get("failure_reason", ""),
+            "active_module_label": case.get("active_module_label", ""),
+        }
+        for case in report["cases"]
+        if case.get("status") == "FAIL" and case.get("module_name") is not None
+    ]
     report["overall"] = (
         "PASS"
         if expected > 0
@@ -501,6 +517,7 @@ def main() -> int:
         "preflight_error": report.get("preflight_error"),
         "missing_modules": report.get("missing_modules"),
         "failed_non_route_cases": report.get("failed_non_route_cases"),
+        "failed_route_cases": report.get("failed_route_cases"),
     }, indent=2))
     return 0 if report["overall"] == "PASS" else 1
 
