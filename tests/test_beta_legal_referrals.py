@@ -31,7 +31,8 @@ def test_no_unsupported_referral_discount_or_fake_stats_remain_in_active_ui():
 
 
 def test_registration_requires_and_records_versioned_acceptance():
-    assert "if not accepted_terms:" in APP
+    assert "not accepted_terms" in APP
+    assert 'st.session_state.get("_registration_accepted_terms_version") != TERMS_VERSION' in APP
     assert '"terms_accepted": True' in APP
     assert '"terms_version": TERMS_VERSION' in APP
     assert "body.terms_accepted !== true" in EDGE
@@ -46,7 +47,7 @@ def test_registration_requires_and_records_versioned_acceptance():
 def test_referral_codes_are_server_checked_attributed_and_qualified_manually():
     assert 'action === "referral_summary_session"' in EDGE
     assert "referrerUsernameLc" in EDGE
-    assert 'from("shoir_referrals").insert' in EDGE
+    assert '.from(\n          "shoir_referrals",\n        ).insert({' in EDGE
     assert 'status: "Qualified"' in EDGE
     assert 'status: "Declined"' in EDGE
     assert 'status: "Pending"' in EDGE
