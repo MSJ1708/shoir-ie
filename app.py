@@ -152,7 +152,7 @@ from shoir_enterprise_layer import (
     build_research_paper_bundle,
 )
 from shoir_unified_product import render_unified_workspace, render_global_product_dock, copilot_context
-from shoir_application_shell import render_application_shell, render_shell_surface, render_post_module_context, shell_health_snapshot
+from shoir_application_shell import SHELL_VERSION, render_application_shell, render_shell_surface, render_post_module_context, shell_health_snapshot
 from shoir_adoption_engine import render_adoption_center
 from shoir_universal_engine import render_universal_engine_surface, postflight_contract
 from shoir_commercial import render_module_enrichment
@@ -1474,7 +1474,7 @@ if st.session_state.get("renewal_mode") and not st.session_state.get("current_us
 
 if not st.session_state.get("current_user"):
     if getattr(_durable_account_store, "APP_ENVIRONMENT", "production") == "staging":
-        st.warning("STAGING TEST ENVIRONMENT — use disposable test accounts and synthetic data only.", icon="🧪")
+        st.warning(f"STAGING TEST ENVIRONMENT · SHOIR-IE SHELL VERSION: {SHELL_VERSION} — use disposable test accounts and synthetic data only.", icon="🧪")
     st.title("🔐 Welcome to Shoir-IE Workspace")
     if st.session_state.pop("subscription_expired_notice", False):
         st.warning(
