@@ -62,7 +62,9 @@ def test_authenticated_sidebar_starts_expanded_and_browser_gate_expands_it_befor
     assert "visible_logout_button(frame).click" in matrix
     assert "visible_logout_button(app_frame).click" in browser
     assert "open_button.scroll_into_view_if_needed" in matrix
-    assert "for attempt in range(2)" in matrix
+    assert "for navigation_attempt in range(2)" in matrix
+    assert "CANDIDATE_BUILD_MARKER" in matrix
+    assert "within {STAGING_BUILD_WAIT_SECONDS // 60} minutes" in matrix
 
 
 def test_active_module_identity_renders_before_optional_header_diagnostics_and_has_visible_text_fallback():

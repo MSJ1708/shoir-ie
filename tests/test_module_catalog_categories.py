@@ -16,6 +16,7 @@ from shoir_application_shell import (
     _preferred_module,
     _ensure_requested_module_choice,
     _global_module_button_key,
+    _resolve_requested_module_selection,
 )
 
 
@@ -163,6 +164,25 @@ def test_explicit_global_search_request_survives_section_filter_mismatch():
     )
     assert requested_choices[0] == "Cryptographic Ledger"
     assert requested_choices.count("Cryptographic Ledger") == 1
+
+
+def test_authorized_explicit_route_overrides_stale_module_widget_state():
+    allowed = ["Production Planning & Control (PPC)", "Predictive Maintenance Digital Twin"]
+
+    selected = _resolve_requested_module_selection(
+        "Predictive Maintenance Digital Twin",
+        "Production Planning & Control (PPC)",
+        allowed,
+    )
+    assert selected == "Production Planning & Control (PPC)"
+
+    # An unauthorized or expired route cannot bypass subscription entitlement.
+    selected = _resolve_requested_module_selection(
+        "Predictive Maintenance Digital Twin",
+        "Admin Panel",
+        allowed,
+    )
+    assert selected == "Predictive Maintenance Digital Twin"
 
 
 def test_global_search_button_keys_are_stable_and_unique_per_module():
