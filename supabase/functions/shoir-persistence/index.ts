@@ -522,8 +522,8 @@ Deno.serve(async (req) => {
         if (priorReferralError) throw priorReferralError;
         if (priorReferral) {
           return response({
-          error: "This account already has referral attribution recorded.",
-        }, 409);
+            error: "This account already has referral attribution recorded.",
+          }, 409);
         }
       }
       const allowedTiers = new Set([
