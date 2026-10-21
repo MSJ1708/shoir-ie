@@ -64,7 +64,15 @@ def test_authenticated_sidebar_starts_expanded_and_browser_gate_expands_it_befor
     assert "open_button.scroll_into_view_if_needed" in matrix
     assert "for navigation_attempt in range(2)" in matrix
     assert "CANDIDATE_BUILD_MARKER" in matrix
-    assert "within {STAGING_BUILD_WAIT_SECONDS // 60} minutes" in matrix
+    assert "candidate build preflight should have confirmed" in matrix
+    assert "STAGING_BUILD_WAIT_SECONDS" not in matrix
+    candidate = (ROOT / "scripts/staging_candidate_build_preflight.py").read_text(encoding="utf-8")
+    workflow = (ROOT / ".github/workflows/authenticated-release-gate.yml").read_text(encoding="utf-8")
+    assert "SHOIR-IE SHELL VERSION: 3.2" in candidate
+    assert "WAIT_SECONDS = 90" in candidate
+    assert "python scripts/staging_candidate_build_preflight.py" in workflow
+    assert "steps.candidate_build.conclusion == 'success'" in workflow
+    assert "steps.backend_check.conclusion == 'success'" in workflow
 
 
 def test_active_module_identity_renders_before_optional_header_diagnostics_and_has_visible_text_fallback():
@@ -170,3 +178,12 @@ def test_logout_saves_workspace_before_server_session_revocation():
     assert logout_block.index("save_user_workspace") < logout_block.index("edge_logout")
     assert 'st.session_state["_shoir_clear_session_before_render"] = True' in logout_block
     assert "st.rerun()" in logout_block
+
+
+def test_backend_authentication_failures_give_safe_actionable_diagnostics():
+    backend = (ROOT / "scripts/authenticated_release_gate.py").read_text(encoding="utf-8")
+    assert "HTTP 401 means the staging API rejected the credentials or account state" in backend
+    assert "HTTP 429 indicates the staging login throttle is active" in backend
+    assert "HTTP 503 indicates staging authentication protection is unavailable" in backend
+    assert "scripts/recover_staging_e2e_credentials.py" in backend
+    assert "Response details were suppressed." in backend
