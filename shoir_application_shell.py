@@ -19,7 +19,7 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-SHELL_VERSION = "3.1"
+SHELL_VERSION = "3.2"
 
 NAV_GROUPS = {
     "HOME": "⌂ Home",
@@ -388,6 +388,18 @@ def _ensure_requested_module_choice(
         result.insert(0, requested)
     return result
 
+def _resolve_requested_module_selection(
+    selected_label: str | None,
+    requested_module: str,
+    allowed_modules: Sequence[str],
+) -> str | None:
+    """Treat an authorized global-search request as authoritative over stale widget state."""
+    requested = str(requested_module or "").strip()
+    allowed = {str(item).strip() for item in allowed_modules}
+    if requested and requested in allowed:
+        return requested
+    return str(selected_label) if selected_label is not None else None
+
 
 def render_global_search(
     allowed_modules: Sequence[str],
@@ -440,6 +452,9 @@ def render_global_search(
             for name in module_hits[:12]:
                 if st.button(f"Open · {name}", key=_global_module_button_key(name), use_container_width=True):
                     st.session_state["_shoir_requested_module"] = str(name)
+                    # Keep both the transient route request and the durable shell
+                    # selection aligned so a stale widget cannot restore an old module.
+                    st.session_state["selected_module"] = str(name)
                     st.session_state["shoir_shell_section"] = _module_target_section(str(name), module_metadata)
                     # Clear keyed widget state on the following run, before it is
                     # instantiated; changing it after rendering causes Streamlit errors.
@@ -1070,6 +1085,9 @@ def render_application_shell(
                 key=selector_key,
                 label_visibility="collapsed",
             )
+            selected_label = _resolve_requested_module_selection(
+                selected_label, requested_module, allowed_modules
+            )
             remember_module(selected_label)
         else:
             # An empty filtered list is a real empty state. Never open the first
@@ -1155,10 +1173,17 @@ def render_application_shell(
     if st.session_state.pop("shoir_shell_logout_requested", False):
         surface = "logout"
 
-    if surface in {"navigation_empty", "search_empty"}:
+    if surface in {"navigation_empty", "search_empty"} and not explicit_module_request:
         selected_module = ""
     else:
-        selected_module = str(selected_label or current_module or (list(allowed_modules)[0] if allowed_modules else "MILP Solvers"))
+        selected_module = str(
+            _resolve_requested_module_selection(
+                selected_label or current_module or (list(allowed_modules)[0] if allowed_modules else "MILP Solvers"),
+                requested_module,
+                allowed_modules,
+            )
+            or ""
+        )
 
     render_application_header(username, tier, selected_module)
     render_global_search(allowed_modules, module_metadata)
