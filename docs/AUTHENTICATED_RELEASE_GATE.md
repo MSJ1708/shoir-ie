@@ -83,6 +83,20 @@ Optional inactive-account verification uses `SHOIR_E2E_INACTIVE_USERNAME` and `S
 
 Do not put passwords or tokens in workflow inputs, source files, issues, pull requests, or chat messages. Reports deliberately omit usernames, passwords, tokens, workspace payloads, and response bodies.
 
+## Recovery when dedicated test-account logins return HTTP 401
+
+The initial workflow preflight confirms that all required Actions secrets are present; it cannot prove that a password stored in GitHub matches the hash in the staging account database. If `active_login`, `second_login`, `starter_tier`, or `expired_login_renewal_only` fails with HTTP 401, do not keep retrying and do not create duplicate identities.
+
+On the trusted Windows workstation where this repository is checked out and `gh auth status` succeeds, run:
+
+```powershell
+.\scripts\Recover-StagingE2ECredentials.ps1
+```
+
+The wrapper prompts for the **staging** Supabase server key and publishable/anon key through hidden inputs. The recovery helper is hard-pinned to staging project `hfhrosthswcybccepmak`, checks that all six expected test-account rows already exist and have the expected roles, tiers, active states, and expiry states, then resets only those six disposable passwords and synchronizes their matching `SHOIR_E2E_*_USERNAME` / `SHOIR_E2E_*_PASSWORD` GitHub Actions secrets. It verifies login through the staging Edge Function and revokes temporary sessions. It does not create or delete accounts, modify the `sho` administrator, target production, print secrets, or write new passwords to disk.
+
+Use only the current workflow-managed secrets for automated testing. The E2E accounts are disposable automation identities; do not treat a previously copied password or an old `.staging-e2e-credentials.json` file as current after recovery. Once recovery succeeds, rerun this workflow on `staging-e2e-20261019`.
+
 ## Running and evidence
 
 1. Confirm a dedicated staging Streamlit deployment exists and that its own app secrets point to staging Supabase project `hfhrosthswcybccepmak` (not production). Confirm the Edge Function endpoint and publishable key refer to that same project. Changing the approved staging project requires an explicit reviewed code change.
