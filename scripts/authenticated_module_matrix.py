@@ -449,7 +449,7 @@ def run_account(browser, account_class: str, username: str, password: str, rows:
                     sign_in_visible = "Sign In to Your Workspace" in signed_out_body
                     logout_control_visible = "Lock / Logout Workspace" in signed_out_body
                     active_module_visible = bool(
-                        re.search(r"Active module:\\s*\\S", signed_out_body, re.I)
+                        re.search(r"Active module:\s*\S", signed_out_body, re.I)
                     )
                     if sign_in_visible and not logout_control_visible and not active_module_visible:
                         stable_signed_out_samples += 1
