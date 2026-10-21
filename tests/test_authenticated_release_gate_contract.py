@@ -187,3 +187,13 @@ def test_backend_authentication_failures_give_safe_actionable_diagnostics():
     assert "HTTP 503 indicates staging authentication protection is unavailable" in backend
     assert "scripts/recover_staging_e2e_credentials.py" in backend
     assert "Response details were suppressed." in backend
+
+def test_staging_credential_recovery_reads_clipboard_without_echo_and_clears_it():
+    wrapper = (ROOT / "scripts/Recover-StagingE2ECredentials.ps1").read_text(encoding="utf-8")
+    assert "function Read-StagingKeyFromClipboard" in wrapper
+    assert "Get-Clipboard -Raw" in wrapper
+    assert "Clear-Clipboard" in wrapper
+    assert "[Console]::ReadKey($true)" in wrapper
+    assert "Read-Host" not in wrapper
+    assert "STAGING server secret/service-role key" in wrapper
+    assert "STAGING publishable/anon key" in wrapper
