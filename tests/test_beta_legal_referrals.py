@@ -30,6 +30,13 @@ def test_no_unsupported_referral_discount_or_fake_stats_remain_in_active_ui():
     assert 'reg_referral_code = st.text_input("referral code (optional)"' in lowered
 
 
+def test_legacy_local_referral_generation_no_longer_implies_a_discount():
+    assert 'new_aff = f"AFF-{st.session_state.current_user.upper()}-15"' not in APP
+    assert '"SHR-" + os.urandom(6).hex().upper()' in APP
+    assert "affiliate_code = 'SHR-' || upper(hex(randomblob(6)))" in APP
+    assert '"SHR-ADMIN01"' in APP
+
+
 def test_registration_requires_and_records_versioned_acceptance():
     assert "not accepted_terms" in APP
     assert 'st.session_state.get("_registration_accepted_terms_version") != TERMS_VERSION' in APP
