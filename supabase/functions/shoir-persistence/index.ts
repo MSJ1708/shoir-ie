@@ -692,10 +692,7 @@ Deno.serve(async (req) => {
           const { error: cleanupProofError } = await supabase.storage
             .from(PAYMENT_PROOF_BUCKET).remove([objectPath]);
           if (cleanupProofError) {
-            console.error(
-              "Unable to remove unneeded payment proof.",
-              cleanupProofError.code || "unknown",
-            );
+            console.error("Unable to remove unneeded payment proof.");
           }
         }
         return response({
