@@ -68,10 +68,16 @@ def classify_missing_surface(body: str) -> str:
 
 
 def collect_surface_diagnostics(page) -> dict:
-    """Capture only coarse DOM facts; never write raw page text or URLs."""
-    details = {"title": "unavailable", "frame_count": 0, "iframe_count": 0,
-               "top_body_chars": 0, "streamlit_root": False,
-               "streamlit_app": False, "error_element": False}
+    """Capture coarse DOM facts only; never store raw page text or query strings."""
+    details = {
+        "title": "unavailable",
+        "frame_count": 0,
+        "iframe_count": 0,
+        "top_body_chars": 0,
+        "streamlit_root": False,
+        "streamlit_iframe": False,
+        "frame_summary": [],
+    }
     try:
         details["title"] = str(page.title() or "")[:80]
     except Exception:
@@ -87,10 +93,40 @@ def collect_surface_diagnostics(page) -> dict:
         pass
     try:
         details["streamlit_root"] = page.locator("[data-testid='stApp']").count() > 0
-        details["streamlit_app"] = page.locator("iframe[title*='Streamlit']").count() > 0
-        details["error_element"] = page.locator("[data-testid='stException'], .stException, [data-testid='stAlert']").count() > 0
+        details["streamlit_iframe"] = page.locator("iframe[title*='Streamlit']").count() > 0
     except Exception:
         pass
+    for frame in list(page.frames)[:6]:
+        entry = {"name": "", "host": "", "body_chars": 0, "signin_marker": False,
+                 "staging_marker": False, "shell_marker": False, "startup_error": False}
+        try:
+            entry["name"] = str(frame.name or "")[:60]
+        except Exception:
+            pass
+        try:
+            from urllib.parse import urlsplit
+            entry["host"] = str(urlsplit(frame.url).hostname or "")[:100]
+        except Exception:
+            pass
+        try:
+            text = frame.locator("body").inner_text(timeout=1_000)
+            entry["body_chars"] = len(text)
+            entry["signin_marker"] = any(marker in text for marker in (
+                "Sign In to Your Workspace", "Welcome to Shoir-IE, ",
+                "Welcome to Shoir-IE Workspace",
+            ))
+            entry["staging_marker"] = "STAGING TEST ENVIRONMENT" in text
+            entry["shell_marker"] = "SHOIR-IE SHELL VERSION:" in text
+            lowered = text.casefold()
+            entry["startup_error"] = any(term in lowered for term in (
+                "could not initialize its required account and persistence layer",
+                "application runtime could not be loaded",
+                "modulenotfounderror",
+                "traceback",
+            ))
+        except Exception:
+            pass
+        details["frame_summary"].append(entry)
     return details
 
 
