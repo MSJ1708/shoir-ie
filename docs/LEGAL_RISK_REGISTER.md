@@ -1,6 +1,6 @@
 # Shoir-IE Legal and Launch-Risk Register
 
-**Review date:** October 21, 2026  
+**Review date:** October 22, 2026  
 **Review type:** Targeted repository/source review of public legal notices, registration, referral claims and selected persistence code.  
 **Overall status:** **NOT LEGALLY CLEARED FOR COMMERCIAL PRODUCTION.** This document is not legal advice, a compliance certificate, a full security assessment or a formula-by-formula engineering audit. A Saudi-qualified lawyer and appropriately skilled technical reviewers should confirm unresolved items.
 
@@ -14,16 +14,17 @@ Current branch drafts are versioned in:
 
 The public app displays a beta warning; the terms explain that calculations, AI responses, simulations, reports, integrations and stored work may be incomplete or wrong; the output disclaimers require independent verification; and the limitation-of-liability wording expressly preserves legal rights that cannot be excluded. The current referral copy no longer promises a 15% discount or displays invented referral counts. Rewards are inactive unless separate program rules are published.
 
-**Important:** these changes are on branch legal-beta-referral-readiness-2026-10-21. They do not change the live website until reviewed, merged and correctly deployed. User-facing notices must remain consistent with the code and actual deployment.
+**Implementation status as of October 22, 2026:** PR #171 has been merged into the isolated staging branch and the staging Edge Function was redeployed as version 8 with the matching consent/referral implementation. The matching app source and notice documents are now in staging. A staging-only database approval trigger was tested using a synthetic row: it blocked approval without all current notices, allowed a fully acknowledged request, and the test row was removed. The authenticated browser/API end-to-end release gate still must pass before this staging build is treated as accepted. Production has not been modified. User-facing notices and server-enforced policy versions must remain aligned.
 
-## Live Supabase state checked read-only on October 21, 2026
+## Supabase state and staging deployment checked October 22, 2026
 
-A read-only query against the connected Supabase projects found additional confirmed release blockers:
+- **Production project** `shoir-ie-production` (`gcsamrdaeraxieaagsta`) remains untouched. The recorded migration history still stops at the login-rate-limit migration; the read-only inspection did not find `public.shoir_create_registration_request` or `public.shoir_finalize_subscription_request`, the new policy-acceptance columns, or `public.shoir_referrals`. Its active `shoir-persistence` Edge Function version 8 was not changed. This mismatch is a **P0 production release blocker** until reconciled using a reviewed, staging-proven migration/function bundle.
+- **Staging project** `shoir-ie-staging-2026-10-19` (`hfhrosthswcybccepmak`) now has the additive legal/referral migration and the approval-guard migration applied. The account/request tables have all five acceptance fields, `shoir_referrals` exists with RLS enabled and no client policies, the unique case-insensitive referral-code index is present, and the old `AFF-...-15` codes were rotated to neutral `SHR-...` identifiers.
+- The staging `shoir-persistence` Edge Function was deployed from the merged staging branch as **version 8**. Source verification confirms it validates current policy versions, fails closed if the consent record cannot be persisted, validates referral attribution server-side, and checks consent versions before approval. JWT verification remains at the pre-existing setting; application-level session/admin controls remain in the function.
+- A rollback-safe synthetic database test verified the new trigger blocks a new-request approval without all current policy versions and an acceptance timestamp, allows the synthetic request once current consent is recorded, and removes the test row afterward.
+- GitHub's Shoir-IE validation and Subscription transaction integration checks for the staging-targeted PR both passed; the standard validation workflow's live deployment smoke job was skipped. The authenticated staging browser/API release gate is therefore still the required next verification, not something these CI results replace.
 
-- **Production project** shoir-ie-production (gcsamrdaeraxieaagsta): the recorded migration history stops at 20261019124815_server_side_login_rate_limits; the query did not find either public.shoir_create_registration_request or public.shoir_finalize_subscription_request. The active shoir-persistence Edge Function is version 8 and does not include versioned legal-consent handling or referral attribution. The query also found none of the new legal-consent columns on shoir_subscription_requests and no shoir_referrals table.
-- **Staging project** shoir-ie-staging-2026-10-19 (hfhrosthswcybccepmak): the query did find shoir_create_registration_request and shoir_finalize_subscription_request, but not the new legal-consent columns or shoir_referrals. The active shoir-persistence Edge Function is version 7 and also lacks the new consent/referral actions.
-
-These results come from read-only metadata/function-source inspection; no database changes or Edge Function deployments were made. **Do not merge/deploy the new UI and Edge Function to the live app until the migration history and registration RPC implementation have been reconciled.** If production uses this recorded history and active function together, the missing RPCs are likely to prevent registration/approval requests from succeeding; verify via a controlled staging test before changing production. Staging also needs the new migration and matching Edge Function deployed as a coordinated, reviewed change, followed by authenticated end-to-end tests.
+**Do not deploy these changes to production now.** First pass the authenticated staging gate, verify registration, current-consent persistence, approval/decline, renewals, referral attribution, workspace isolation and UI flows. Then prepare a separately reviewed production migration/function rollout. If the production mismatch is confirmed, the older Edge function/schema may prevent registration or approval; check it through a controlled staging-proven procedure before changing production.
 
 ## Findings and required actions
 
