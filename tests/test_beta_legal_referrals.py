@@ -41,7 +41,10 @@ def test_registration_requires_and_records_versioned_acceptance():
     assert "legal_acceptance_recorded" in EDGE
     assert "accepted_at TIMESTAMPTZ" in MIGRATION
     assert "privacy_policy_version TEXT" in MIGRATION
-    assert "terms_version, privacy_policy_version, refund_policy_version, cookie_policy_version, accepted_at" in APP
+    assert "privacy_policy_version" in STORE
+    assert "refund_policy_version" in STORE
+    assert "cookie_policy_version" in STORE
+    assert "accepted_at" in STORE
 
 
 def test_referral_codes_are_server_checked_attributed_and_qualified_manually():
