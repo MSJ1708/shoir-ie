@@ -209,7 +209,7 @@ def main() -> int:
             **current_notices,
             "referral_code": "SHR-NOT-" + secrets.token_hex(6).upper(),
         },
-        "not found or inactive",
+        "not found",
     )
 
     active_token = ""
