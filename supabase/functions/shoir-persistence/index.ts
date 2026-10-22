@@ -665,14 +665,36 @@ Deno.serve(async (req) => {
         .eq("username_lc", usernameLc)
         .eq("status", "Pending")
         .select("id").maybeSingle();
-      if (consentError) {
+      if (consentError || !consentRow?.id) {
         console.error(
           "Unable to persist registration policy acknowledgement.",
-          consentError.code || "unknown",
+          consentError?.code || "missing-row",
         );
-      } else {
-        legalAcceptanceRecorded = !!consentRow?.id;
+        // Fail closed: leave no approvable request with missing consent. This is
+        // also protected by a database trigger for every approval path.
+        const { error: closeRequestError } = await supabase
+          .from("shoir_subscription_requests")
+          .update({ status: "Declined", updated_at: acceptedAt })
+          .eq("id", result.request_id)
+          .eq("username_lc", usernameLc)
+          .eq("status", "Pending");
+        if (closeRequestError) {
+          console.error("Unable to close request after consent persistence failure.", closeRequestError.code || "unknown");
+        }
+        if (proofPath) {
+          const objectPath = proofPath.replace(
+            `storage://${PAYMENT_PROOF_BUCKET}/`,
+            "",
+          );
+          const { error: cleanupProofError } = await supabase.storage
+            .from(PAYMENT_PROOF_BUCKET).remove([objectPath]);
+          if (cleanupProofError) console.error("Unable to remove unneeded payment proof.", cleanupProofError.code || "unknown");
+        }
+        return response({
+          error: "The registration was not accepted because its legal-acceptance record could not be saved. No subscription was activated. Refresh and retry, or contact support if the issue continues.",
+        }, 500);
       }
+      legalAcceptanceRecorded = true;
       if (referrerUsernameLc && legalAcceptanceRecorded) {
         const { error: attributionError } = await supabase.from(
           "shoir_referrals",
@@ -854,10 +876,20 @@ Deno.serve(async (req) => {
       if (error) throw error;
       const request = data?.[0];
       if (!request) return response({ error: "Request not found." }, 404);
-      if (request.request_type === "New" && request.terms_accepted !== true) {
+      if (
+        request.request_type === "New" &&
+        (
+          request.terms_accepted !== true ||
+          request.terms_version !== TERMS_VERSION ||
+          request.privacy_policy_version !== PRIVACY_POLICY_VERSION ||
+          request.refund_policy_version !== REFUND_POLICY_VERSION ||
+          request.cookie_policy_version !== COOKIE_POLICY_VERSION ||
+          !request.accepted_at
+        )
+      ) {
         return response({
           error:
-            "This registration has no confirmed beta-terms acceptance. Do not approve it; have the user resubmit after the current terms are recorded.",
+            "This registration has no confirmed current beta-terms and policy acknowledgement. Do not approve it; have the user resubmit.",
         }, 409);
       }
       const { data: decision, error: decisionError } = await supabase.rpc(
