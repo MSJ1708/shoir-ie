@@ -67,6 +67,33 @@ def classify_missing_surface(body: str) -> str:
     return "sign_in_surface_not_rendered"
 
 
+def collect_surface_diagnostics(page) -> dict:
+    """Capture only coarse DOM facts; never write raw page text or URLs."""
+    details = {"title": "unavailable", "frame_count": 0, "iframe_count": 0,
+               "top_body_chars": 0, "streamlit_root": False,
+               "streamlit_app": False, "error_element": False}
+    try:
+        details["title"] = str(page.title() or "")[:80]
+    except Exception:
+        pass
+    try:
+        details["frame_count"] = len(page.frames)
+        details["iframe_count"] = int(page.locator("iframe").count())
+    except Exception:
+        pass
+    try:
+        details["top_body_chars"] = len(page.locator("body").inner_text(timeout=1_000))
+    except Exception:
+        pass
+    try:
+        details["streamlit_root"] = page.locator("[data-testid='stApp']").count() > 0
+        details["streamlit_app"] = page.locator("iframe[title*='Streamlit']").count() > 0
+        details["error_element"] = page.locator("[data-testid='stException'], .stException, [data-testid='stAlert']").count() > 0
+    except Exception:
+        pass
+    return details
+
+
 def shell_version(body: str) -> str:
     match = re.search(r"SHOIR-IE SHELL VERSION:\s*([^\s—·]+)", body)
     return match.group(1) if match else "not reported"
@@ -105,6 +132,12 @@ def main() -> int:
                     if frame is None:
                         diagnostic = classify_missing_surface(body)
                         result["surface_diagnostic"] = diagnostic
+                        result["dom_diagnostics"] = collect_surface_diagnostics(page)
+                        print(
+                            "[DIAGNOSTIC] sign-in surface not found: "
+                            + json.dumps(result["dom_diagnostics"], sort_keys=True)
+                            + f"; category={diagnostic}"
+                        )
                         if diagnostic in {
                             "persistence_initialization_error",
                             "application_startup_error",
