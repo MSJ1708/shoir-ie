@@ -7,6 +7,11 @@ const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 const ITERATIONS = 200_000;
 const PAYMENT_PROOF_BUCKET = "subscription-payment-proofs";
 const MAX_PAYMENT_PROOF_BYTES = 512 * 1024;
+const TERMS_VERSION = "2026-10-21-beta-v1";
+const PRIVACY_POLICY_VERSION = "2026-10-21-v1";
+const REFUND_POLICY_VERSION = "2026-10-21-v1";
+const COOKIE_POLICY_VERSION = "2026-10-21-v1";
+// Keep these values aligned with the public notices and the matching SQL migration.
 
 async function ensurePaymentProofBucket() {
   const { data, error } = await supabase.storage.getBucket(
@@ -401,6 +406,64 @@ Deno.serve(async (req) => {
       });
     }
 
+    if (action === "referral_summary_session") {
+      const username = String(body.username || "").trim();
+      const row = await getSession(String(body.token || ""), username);
+      let referralCode = String(row.affiliate_code || "").trim().toUpperCase();
+      if (!referralCode || referralCode.startsWith("AFF-")) {
+        let assigned = false;
+        for (let attempt = 0; attempt < 6 && !assigned; attempt++) {
+          const candidate = "SHR-" +
+            crypto.randomUUID().replace(/-/g, "").slice(0, 10).toUpperCase();
+          const { data: existing, error: lookupError } = await supabase
+            .from("shoir_accounts").select("username_lc").ilike(
+              "affiliate_code",
+              candidate,
+            ).maybeSingle();
+          if (lookupError) throw lookupError;
+          if (existing) continue;
+          const { data: changed, error: updateError } = await supabase
+            .from("shoir_accounts")
+            .update({
+              affiliate_code: candidate,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("username_lc", row.username_lc)
+            .select("affiliate_code").maybeSingle();
+          if (updateError) {
+            if (String(updateError.code || "") === "23505") continue;
+            throw updateError;
+          }
+          if (changed?.affiliate_code) {
+            referralCode = String(changed.affiliate_code);
+            assigned = true;
+          }
+        }
+        if (!assigned) {
+          throw new Error(
+            "A unique referral code could not be assigned. Please retry.",
+          );
+        }
+      }
+      const { data: referrals, error: referralError } = await supabase
+        .from("shoir_referrals").select("status").eq(
+          "referrer_username_lc",
+          row.username_lc,
+        );
+      if (referralError) throw referralError;
+      const counts = {
+        pending_count: 0,
+        qualified_count: 0,
+        declined_count: 0,
+      };
+      for (const referral of referrals || []) {
+        if (referral.status === "Pending") counts.pending_count++;
+        else if (referral.status === "Qualified") counts.qualified_count++;
+        else if (referral.status === "Declined") counts.declined_count++;
+      }
+      return response({ ok: true, referral_code: referralCode, ...counts });
+    }
+
     if (action === "account_exists") {
       // Do not expose account or registration status through a public username
       // probe. The serialized registration transaction enforces duplicates and
@@ -416,6 +479,54 @@ Deno.serve(async (req) => {
       const tier = String(body.tier || "Starter Tier ($29)").trim();
       const paymentMethod = String(body.payment_method || "").trim();
       const transactionId = String(body.transaction_id || "").trim();
+      const referralCode = String(body.referral_code || "").trim()
+        .toUpperCase();
+      if (
+        body.terms_accepted !== true ||
+        String(body.terms_version || "") !== TERMS_VERSION ||
+        String(body.privacy_policy_version || "") !== PRIVACY_POLICY_VERSION ||
+        String(body.refund_policy_version || "") !== REFUND_POLICY_VERSION ||
+        String(body.cookie_policy_version || "") !== COOKIE_POLICY_VERSION
+      ) {
+        return response({
+          error:
+            "Please accept the current beta terms and acknowledge the current policy notices before registering.",
+        }, 400);
+      }
+      if (referralCode && !/^[A-Z0-9-]{3,32}$/.test(referralCode)) {
+        return response({
+          error:
+            "Referral codes may contain only letters, numbers and hyphens.",
+        }, 400);
+      }
+      let referrerUsernameLc: string | null = null;
+      if (referralCode) {
+        const { data: referrer, error: referrerError } = await supabase
+          .from("shoir_accounts").select("username_lc,active")
+          .ilike("affiliate_code", referralCode).maybeSingle();
+        if (referrerError) throw referrerError;
+        if (!referrer || referrer.active === false) {
+          return response({
+            error: "Referral code was not found or is inactive.",
+          }, 400);
+        }
+        if (String(referrer.username_lc).toLowerCase() === usernameLc) {
+          return response({ error: "Self-referrals are not allowed." }, 400);
+        }
+        referrerUsernameLc = String(referrer.username_lc).toLowerCase();
+        const { data: priorReferral, error: priorReferralError } =
+          await supabase
+            .from("shoir_referrals").select("id").eq(
+              "referred_username_lc",
+              usernameLc,
+            ).maybeSingle();
+        if (priorReferralError) throw priorReferralError;
+        if (priorReferral) {
+          return response({
+            error: "This account already has referral attribution recorded.",
+          }, 409);
+        }
+      }
       const allowedTiers = new Set([
         "Starter Tier ($29)",
         "Mid-Tier Pro ($79)",
@@ -436,9 +547,17 @@ Deno.serve(async (req) => {
           error: "Password must be between 8 and 128 characters.",
         }, 400);
       }
+      const emailParts = email.split("@");
       if (
         email.length > 254 ||
-        !/^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/.test(email)
+        emailParts.length !== 2 ||
+        !emailParts[0] ||
+        !emailParts[1] ||
+        !emailParts[1].includes(".") ||
+        emailParts[1].startsWith(".") ||
+        emailParts[1].endsWith(".") ||
+        email.includes(" ") || email.includes("\t") || email.includes("\n") ||
+        email.includes("\r")
       ) {
         return response({ error: "Enter a valid email address." }, 400);
       }
@@ -527,11 +646,64 @@ Deno.serve(async (req) => {
           "Registration request could not be confirmed by the persistence service.",
         );
       }
+      const acceptedAt = new Date().toISOString();
+      let legalAcceptanceRecorded = false;
+      let referralAttributed = false;
+      let referralWarning: string | undefined;
+      const { data: consentRow, error: consentError } = await supabase
+        .from("shoir_subscription_requests")
+        .update({
+          terms_accepted: true,
+          terms_version: TERMS_VERSION,
+          privacy_policy_version: PRIVACY_POLICY_VERSION,
+          refund_policy_version: REFUND_POLICY_VERSION,
+          cookie_policy_version: COOKIE_POLICY_VERSION,
+          accepted_at: acceptedAt,
+          updated_at: acceptedAt,
+        })
+        .eq("id", result.request_id)
+        .eq("username_lc", usernameLc)
+        .eq("status", "Pending")
+        .select("id").maybeSingle();
+      if (consentError) {
+        console.error(
+          "Unable to persist registration policy acknowledgement.",
+          consentError.code || "unknown",
+        );
+      } else {
+        legalAcceptanceRecorded = !!consentRow?.id;
+      }
+      if (referrerUsernameLc && legalAcceptanceRecorded) {
+        const { error: attributionError } = await supabase.from(
+          "shoir_referrals",
+        ).insert({
+          referrer_username_lc: referrerUsernameLc,
+          referred_username_lc: usernameLc,
+          referral_code: referralCode,
+          status: "Pending",
+        });
+        if (attributionError) {
+          referralWarning =
+            "Registration was received, but the server could not confirm referral attribution. No reward or discount is implied.";
+          console.error(
+            "Unable to persist beta referral attribution.",
+            attributionError.code || "unknown",
+          );
+        } else {
+          referralAttributed = true;
+        }
+      } else if (referrerUsernameLc) {
+        referralWarning =
+          "Registration was received, but the legal-acceptance record could not be confirmed. Referral attribution was not recorded.";
+      }
       return response({
         ok: true,
         request_id: result.request_id,
         status: result.status || "Pending",
         proof_uploaded: !!proofPath,
+        legal_acceptance_recorded: legalAcceptanceRecorded,
+        referral_attributed: referralAttributed,
+        referral_warning: referralWarning,
       });
     }
 
@@ -682,6 +854,12 @@ Deno.serve(async (req) => {
       if (error) throw error;
       const request = data?.[0];
       if (!request) return response({ error: "Request not found." }, 404);
+      if (request.request_type === "New" && request.terms_accepted !== true) {
+        return response({
+          error:
+            "This registration has no confirmed beta-terms acceptance. Do not approve it; have the user resubmit after the current terms are recorded.",
+        }, 409);
+      }
       const { data: decision, error: decisionError } = await supabase.rpc(
         "shoir_finalize_subscription_request",
         { p_request_id: request.id, p_decision: "Approved" },
@@ -695,7 +873,31 @@ Deno.serve(async (req) => {
         }
         throw decisionError;
       }
-      return response(decision || { ok: true, request_id: request.id });
+      let referralStatusUpdated = true;
+      if (request.request_type === "New") {
+        const { error: referralStatusError } = await supabase
+          .from("shoir_referrals")
+          .update({
+            status: "Qualified",
+            qualified_at: new Date().toISOString(),
+          })
+          .eq("referred_username_lc", request.username_lc)
+          .eq("status", "Pending");
+        if (referralStatusError) {
+          referralStatusUpdated = false;
+          console.error(
+            "Approved account, but referral qualification update failed.",
+            referralStatusError.code || "unknown",
+          );
+        }
+      }
+      const decisionBody = decision && typeof decision === "object"
+        ? decision as Record<string, unknown>
+        : { ok: true, request_id: request.id };
+      return response({
+        ...decisionBody,
+        referral_status_updated: referralStatusUpdated,
+      });
     }
 
     if (action === "admin_decline_session") {
@@ -703,6 +905,18 @@ Deno.serve(async (req) => {
       const id = Number(body.request_id);
       if (!Number.isSafeInteger(id) || id <= 0) {
         return response({ error: "Invalid request identifier." }, 400);
+      }
+      const { data: declinedRequest, error: declinedRequestError } =
+        await supabase
+          .from("shoir_subscription_requests").select(
+            "username_lc,request_type",
+          )
+          .eq("id", id).eq("status", "Pending").maybeSingle();
+      if (declinedRequestError) throw declinedRequestError;
+      if (!declinedRequest) {
+        return response({
+          error: "Pending request not found or already processed.",
+        }, 404);
       }
       const { data: decision, error: decisionError } = await supabase.rpc(
         "shoir_finalize_subscription_request",
@@ -717,7 +931,28 @@ Deno.serve(async (req) => {
         }
         throw decisionError;
       }
-      return response(decision || { ok: true, request_id: id });
+      let referralStatusUpdated = true;
+      if (declinedRequest.request_type === "New") {
+        const { error: referralStatusError } = await supabase
+          .from("shoir_referrals")
+          .update({ status: "Declined" })
+          .eq("referred_username_lc", declinedRequest.username_lc)
+          .eq("status", "Pending");
+        if (referralStatusError) {
+          referralStatusUpdated = false;
+          console.error(
+            "Declined request, but referral status update failed.",
+            referralStatusError.code || "unknown",
+          );
+        }
+      }
+      const decisionBody = decision && typeof decision === "object"
+        ? decision as Record<string, unknown>
+        : { ok: true, request_id: id };
+      return response({
+        ...decisionBody,
+        referral_status_updated: referralStatusUpdated,
+      });
     }
 
     return response({ error: "Unknown action." }, 400);
