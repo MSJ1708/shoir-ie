@@ -85,6 +85,8 @@ _DURABLE_STORE_REQUIRED_EXPORTS = (
     "edge_login",
     "edge_logout",
     "edge_admin_list_requests",
+    "edge_admin_approve",
+    "edge_admin_decline",
     "edge_referral_summary",
     "edge_renew_request",
     "upsert_remote_account",
