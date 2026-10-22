@@ -53,16 +53,35 @@ def read_signin_surface(page):
     return None, last_body
 
 
+def wake_if_hibernated(page) -> bool:
+    """Wake only the dedicated public staging app if Streamlit shows its sleep prompt."""
+    candidates = (
+        page.get_by_role("button", name=re.compile(r"yes,?\s*get this app back up", re.I)),
+        page.get_by_text(re.compile(r"yes,?\s*get this app back up", re.I)),
+        page.get_by_role("button", name=re.compile(r"wake.*app|wake up", re.I)),
+    )
+    for locator in candidates:
+        try:
+            if locator.count() and locator.first.is_visible(timeout=500):
+                locator.first.click(timeout=2_000)
+                return True
+        except Exception:
+            continue
+    return False
+
+
 def classify_missing_surface(body: str) -> str:
     """Return a low-risk diagnostic label without persisting arbitrary page text."""
     lowered = str(body or "").casefold()
+    if "this app has gone to sleep" in lowered or "get this app back up" in lowered:
+        return "streamlit_hibernation_prompt"
     if "could not initialize its required account and persistence layer" in lowered:
         return "persistence_initialization_error"
-    if "shoir-ie startup" in lowered or "application runtime could not be loaded" in lowered:
+    if "shoir-ie startup" in lowered or "application runtime could not be loaded" in lowered or "error running your app" in lowered:
         return "application_startup_error"
     if "traceback" in lowered or "modulenotfounderror" in lowered or "importerror" in lowered:
         return "python_runtime_error"
-    if not lowered.strip() or "please wait" in lowered or "running..." in lowered:
+    if not lowered.strip() or "please wait" in lowered or "running..." in lowered or "app is starting" in lowered:
         return "blank_or_loading_ui"
     return "sign_in_surface_not_rendered"
 
@@ -76,6 +95,8 @@ def collect_surface_diagnostics(page) -> dict:
         "top_body_chars": 0,
         "streamlit_root": False,
         "streamlit_iframe": False,
+        "sleep_prompt": False,
+        "runtime_error_text": False,
         "frame_summary": [],
     }
     try:
@@ -88,7 +109,11 @@ def collect_surface_diagnostics(page) -> dict:
     except Exception:
         pass
     try:
-        details["top_body_chars"] = len(page.locator("body").inner_text(timeout=1_000))
+        top_text = page.locator("body").inner_text(timeout=1_000)
+        details["top_body_chars"] = len(top_text)
+        lowered_top = top_text.casefold()
+        details["sleep_prompt"] = "this app has gone to sleep" in lowered_top or "get this app back up" in lowered_top
+        details["runtime_error_text"] = "error running your app" in lowered_top or "application runtime could not be loaded" in lowered_top
     except Exception:
         pass
     try:
@@ -164,6 +189,10 @@ def main() -> int:
                         raise RuntimeError(
                             "Staging app did not return HTTP 200 during candidate-build preflight."
                         )
+                    if wake_if_hibernated(page):
+                        print("[WAIT] Streamlit showed its sleep prompt; requested wake-up for the staging app only.")
+                        page.wait_for_timeout(POLL_SECONDS * 1000)
+                        continue
                     frame, body = read_signin_surface(page)
                     if frame is None:
                         diagnostic = classify_missing_surface(body)
