@@ -12608,8 +12608,8 @@ if mod == "Admin Panel":
                             conn.commit()
                             conn.close()
 
-                            # Remote approval already succeeded before local activation;
-                            # do not submit the same request for approval twice.
+                            # Remote approval already succeeded before local activation.
+                            # Do not submit the same request for approval twice.
 
                             email_success = send_tier_email(row['email'], row['username'], t_code, row['tier'])
                             if email_success:
