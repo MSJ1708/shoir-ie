@@ -57,6 +57,8 @@ def test_registration_requires_and_records_versioned_acceptance():
 def test_local_admin_approval_requires_current_consent_and_remote_confirmation():
     assert '"remote_request_id", "INTEGER"' in APP
     assert 'row.get("terms_accepted") in (True, 1)' in APP
+    assert '"edge_admin_approve"' in APP
+    assert '"edge_admin_decline"' in APP
     assert "edge_admin_approve(" in APP
     assert 'if _remote_approval_result.get("ok") is not True' in APP
     assert "Remote approval already succeeded before local activation." in APP
