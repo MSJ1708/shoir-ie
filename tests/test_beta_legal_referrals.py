@@ -54,6 +54,17 @@ def test_registration_requires_and_records_versioned_acceptance():
     assert "accepted_at" in STORE
 
 
+def test_local_admin_approval_requires_current_consent_and_remote_confirmation():
+    assert '"remote_request_id", "INTEGER"' in APP
+    assert 'row.get("terms_accepted") in (True, 1)' in APP
+    assert "edge_admin_approve(" in APP
+    assert 'if _remote_approval_result.get("ok") is not True' in APP
+    assert "Remote approval already succeeded before local activation." in APP
+    assert "No local activation or ticket email was completed." in APP
+    assert "edge_admin_decline(" in APP
+    assert "No local status was changed." in APP
+
+
 def test_referral_codes_are_server_checked_attributed_and_qualified_manually():
     assert 'action === "referral_summary_session"' in EDGE
     assert "referrerUsernameLc" in EDGE
