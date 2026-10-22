@@ -207,7 +207,7 @@ def main() -> int:
             "payment_method": "STC Pay (QR)",
             "transaction_id": "SYNTHETIC-REFERRAL-PROBE",
             **current_notices,
-            "referral_code": "SHR-E2E-NOT-REAL",
+            "referral_code": "SHR-NOT-" + secrets.token_hex(6).upper(),
         },
         "not found or inactive",
     )
