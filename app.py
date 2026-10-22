@@ -85,6 +85,7 @@ _DURABLE_STORE_REQUIRED_EXPORTS = (
     "edge_login",
     "edge_logout",
     "edge_admin_list_requests",
+    "edge_referral_summary",
     "edge_renew_request",
     "upsert_remote_account",
     "insert_remote_request",
@@ -713,79 +714,132 @@ def local_account_exists(username):
 # different registered legal entity (an LLC, for example), swap the
 # name below for that entity's registered name.
 # =====================================================================
+TERMS_VERSION = "2026-10-21-beta-v1"
+PRIVACY_POLICY_VERSION = "2026-10-21-v1"
+REFUND_POLICY_VERSION = "2026-10-21-v1"
+COOKIE_POLICY_VERSION = "2026-10-21-v1"
+
 PRIVACY_POLICY_TEXT = """
-**Last updated:** September 8, 2026
+**Last updated:** October 21, 2026
+**Version:** 2026-10-21-v1
 
-**Who we are:** Shoir-IE ("we", "us"). Contact: shoirtheagent@gmail.com.
+### Who operates Shoir-IE
+Shoir-IE is the product name of an evolving industrial-engineering software platform. Contact: **shoirtheagent@gmail.com**. Before a public commercial launch, the operator must publish its full legal name, official business address and any applicable registration details.
 
-**What we collect, and why:**
-| Data | Why we collect it |
-|---|---|
-| Username, email address | To create and identify your account, and to contact you about it |
-| Password | To secure your account (stored as a salted hash - we never see or store your actual password) |
-| Selected subscription tier, payment method, transaction ID | To verify your payment and activate the correct tier |
-| Payment screenshot you upload | To manually verify that payment was made before activating your account |
-| Account activity (logins, admin actions) | Security audit log, so we can investigate misuse if it happens |
+### Personal information and workspace data
+Depending on which features are used, Shoir-IE may process:
+- Username and email address for account creation, support, sign-in and account recovery.
+- Password submitted during registration and its salted password hash for authentication. The account service hashes the password before persistent account storage; the password is handled transiently to complete registration or sign-in.
+- Selected subscription tier, transaction/reference number, payment status and optional payment evidence for manual STC Pay verification and dispute handling.
+- User-uploaded spreadsheets, datasets, workbook content, analysis inputs, outputs, reports and saved workspace records to deliver the features requested.
+- Optional profile details and referral code/status information.
+- Security, session, audit, support and error-diagnostic events.
+- AI Copilot prompts and relevant context when the AI integration is enabled and you request it.
 
-We only collect what's needed to run this registration-and-approval process. We don't collect analytics, advertising, or behavioral tracking data - there is none of that on this platform.
+Do not submit passwords from other services, payment-card credentials, government identifiers, sensitive personal data, confidential trade secrets, export-controlled material, or another person's information unless you are authorized to share it and the deployment has been approved for that data.
 
-**Who sees it:** Only the platform administrator, for the purpose of verifying your payment and managing your account. We do not sell, rent, or share your data with third parties, advertisers, or analytics providers.
+### Legal basis for processing
 
-**How it's stored:** In a private database on our servers. Passwords are hashed (PBKDF2, salted) - not stored in plain text.
+The lawful basis depends on the particular purpose and applicable law. Processing may be necessary to provide an account or service you request, administer a subscription, comply with a legal obligation, protect the service, or rely on consent or another lawful basis where applicable. Before commercial production, the operator must document and disclose the lawful basis for each processing purpose under Saudi law, and request consent before any processing for which consent is required. Where processing is based on consent, you may withdraw it for future processing by contacting the service, subject to applicable law; withdrawal does not make earlier lawful processing retroactively unlawful.
 
-**How long we keep it:** For as long as your account is active. Payment screenshots are kept only as long as needed to resolve any payment dispute, then deleted.
+### Purposes and sharing
+Information is used to operate accounts and subscriptions, process requested analyses, maintain requested workspace features, protect the service, respond to support requests, record referral attribution and comply with legal obligations. We do not sell personal information.
 
-**Your rights:** You can request a copy of your data, a correction, or deletion, by emailing shoirtheagent@gmail.com. If you're in Saudi Arabia, this is also your right under the Personal Data Protection Law (PDPL); if you're elsewhere, your local data protection law may give you similar rights.
+Shoir-IE uses or is designed to use third-party infrastructure, including Streamlit for hosting, Supabase for account/database/storage functions, Anthropic when AI Copilot is used, and the email provider configured for service messages. Providers process information as needed for the requested service and under their own terms and privacy practices. The exact providers and settings active in a deployment may vary. Information may also be disclosed when reasonably necessary to protect users or the service, or to comply with applicable law.
 
-**Changes:** If this policy changes, we'll update the date above.
+When you use AI Copilot, your prompt and relevant context may be processed by the configured AI provider. Do not include information in a prompt unless you are authorized to share it with that provider and have reviewed the provider's applicable terms and handling practices. We do not promise that third-party providers never retain prompts; consult the provider's policies and the applicable account/deployment settings.
+
+### Hosting location and international transfers
+Information is stored or processed in the regions configured by hosting, database, storage, email and AI providers. Some processing may occur outside the Kingdom of Saudi Arabia. The operator must verify the actual provider regions, contracts, transfer safeguards and applicable Saudi Personal Data Protection Law requirements before production use with regulated or sensitive data. The beta is not certified for sensitive industrial or personal data.
+
+### Security and retention
+We use controls intended to protect accounts and stored information, but the beta has not been independently security-certified and no online service can be guaranteed completely secure. Information may be retained while needed for service delivery, account lifecycle, security, payment review, legal obligations and disputes. A single end-to-end automatic deletion schedule covering every database, backup, cache, log and third-party system is not yet promised. We will review data-access, correction and deletion requests under applicable law; records may need to be retained where the law permits or requires.
+
+### Your requests and rights
+Subject to applicable law, you may request access to your personal information, a readable copy, correction or updating, and destruction where permitted once the information is no longer needed. Contact **shoirtheagent@gmail.com** and avoid including unnecessary sensitive information. We may need to verify your identity. You may also contact the competent Saudi data-protection authority where applicable.
+
+### Changes
+This notice may change as beta features and integrations evolve. We will update the version and date for material changes and seek any consent required by law. Do not use the beta as a substitute for an approved enterprise data-processing arrangement.
 """
 
 TERMS_AND_CONDITIONS_TEXT = """
-**Last updated:** September 8, 2026
+**Last updated:** October 21, 2026
+**Version:** 2026-10-21-beta-v1
 
-**1. The service.** Shoir-IE ("the platform") provides access to a set of operations-research, simulation, and engineering tools, organized into subscription tiers (Starter, Mid-Tier Pro, Enterprise, Research Pack).
+### 1. Beta testing — important
+Shoir-IE is in **beta testing and active development**. Features, calculations, module availability, AI responses, reports, integrations, persistence and security controls may be incomplete, experimental, changed or unavailable. Errors, inaccurate outputs, interruptions, lost work or incompatible exports may occur. Improvements and corrections may be added, but no delivery date is promised. Use synthetic or non-sensitive test data unless the operator has specifically approved your deployment and data type. Keep independent backups.
 
-**2. Accounts & registration.** You must provide accurate registration information. Accounts are activated manually after payment verification by an administrator - this may take time, and we don't guarantee a specific activation window. You're responsible for keeping your password confidential and for all activity on your account.
+### 2. Operator and contact
+Shoir-IE is the product name of the service. Contact: **shoirtheagent@gmail.com**. Before a public commercial launch, the operator must publish its full legal name, official business address and applicable registration details. This beta notice is not a representation that every business-registration or e-commerce obligation has been completed.
 
-**3. Subscription period & renewal.** Each paid subscription is active for **30 days from the date it is activated or renewed**. When the 30-day period ends, access to the Shoir-IE workspace is blocked until a renewal payment is submitted and approved. Your account, saved workspace, research data, and profile are preserved; subscription expiry does not delete your data.
+### 3. Service and feature status
+The platform provides evolving industrial-engineering, data preparation, analytics, simulation, optimization, reporting, research, collaboration and AI-assisted workflows. Availability depends on the selected plan and deployed version. A catalogue entry, demonstration, sample output or marketing example does not mean that a feature is fully verified, certified, connected to a live plant, or available in every deployment.
 
-**4. Payment.** You agree to pay the exact price listed for your selected tier. See the separate Refund Policy for cancellation terms.
+### 4. Accounts and acceptable use
+Provide accurate registration information and protect your credentials. You are responsible for activity using your account except to the extent applicable law provides otherwise. Do not access another user's workspace or the administrator area, bypass plan restrictions, disrupt the service, upload malicious files, scrape or resell access, or use the service unlawfully. Do not use referral codes for fake accounts, self-referrals, misleading claims or unsolicited spam.
 
-**5. Acceptable use.** You may not: share your account with others, attempt to access another user's data or the administrator area, attempt to reverse-engineer, scrape, or resell access to the platform, or use it for any unlawful purpose.
+### 5. Subscription and payment
+Subscription requests are manually reviewed. In the current beta, payment is made separately using the displayed STC Pay QR/payment instructions; there is no integrated card-processing checkout. A transaction reference or receipt is used for manual review. Access begins only after approval and is subject to the period shown in the account. Confirm the selected plan, total amount, subscription period and any applicable tax or fees before paying. Never send payment credentials or one-time verification codes to Shoir-IE.
 
-**6. Outputs are not professional advice.** Simulation results, optimizations, and analyses produced by the platform are decision-support tools, not certified engineering, financial, or legal advice. You're responsible for independently verifying anything you rely on for real-world decisions.
+### 6. Referral codes
+Referral codes are currently beta attribution tools. They may record which code was submitted and whether the referred account was approved after manual payment review. **No discount, free month, commission, cash payment or other referral reward is currently offered or guaranteed.** A reward may be introduced only through separate, current, published program terms. Self-referrals, duplicate/fraudulent accounts and spam are prohibited.
 
-**7. Availability.** The service is provided "as is." We don't guarantee uninterrupted or error-free operation.
+### 7. User content and intellectual property
+You retain rights in data and content that you own and upload. You confirm that you have the required rights, permissions and legal basis to submit it and authorize processing only as needed to provide the features you request. Do not upload content that infringes another person's copyright, trademark, database right, trade secret, privacy or other rights.
 
-**8. Termination.** We may suspend or terminate accounts that violate these terms or that were activated based on fraudulent payment proof.
+Shoir-IE's software, branding, original interface, documentation and owned content are protected by applicable intellectual-property laws and made available only under rights expressly granted by the operator. The repository's proprietary LICENSE applies to the repository code; it does not remove conditions in separately licensed third-party packages or assets. No ownership of Shoir-IE is transferred to you, and no rights to third-party material are granted beyond its own license.
 
-**9. Intellectual property.** The platform, its modules, and its content are owned by Shoir-IE. Nothing here transfers ownership of that to you.
+### 8. Calculations, AI and decision support
+Calculations, forecasts, optimization results, simulations, recommendations, generated text and reports are decision-support outputs for testing and evaluation. Inputs may be incomplete, stale, mis-mapped, incorrectly typed or based on assumptions; formulas, units, solver settings, models, AI responses or exports may be wrong. Outputs may omit constraints, fail to represent actual plant conditions or be unsuitable for your intended purpose. Demonstration values and scenario estimates are not actual customer results, verified savings, causal proof or guarantees of performance.
 
-**10. Limitation of liability.** To the extent permitted by applicable law, Shoir-IE is not liable for indirect or consequential damages arising from use of the platform.
+Independently validate source data, formulas, assumptions, units, solver status, boundary conditions and outputs with a suitably qualified professional before acting on them. Do not use Shoir-IE as the sole or real-time controller for safety-critical operations, machinery, medical decisions, legal or regulatory filings, investment decisions or other high-consequence activity. Obtain plant-specific engineering, safety, security, financial and legal review where appropriate. AI-generated material can be inaccurate or fabricated and must be checked.
 
-**11. Governing law.** _(state the jurisdiction whose law governs this agreement, e.g. Kingdom of Saudi Arabia)_.
+### 9. Availability, changes and termination
+The beta is provided on an evolving, best-efforts basis. We do not promise uninterrupted operation, error-free results, compatibility, permanent storage, a particular uptime, a specific date for improvements, or that a feature will remain available. Features may be changed, suspended or removed for testing, maintenance, security or legal reasons. Access may be suspended for abuse, security risks or unlawful use, subject to applicable law and any mandatory notice or remedy.
 
-**12. Changes.** We may update these terms; continued use after a change means you accept the update.
+### 10. Disclaimers and limitation of liability
+To the maximum extent permitted by applicable law, the service is provided without a promise that it will be fit for a particular purpose or produce a particular operational or financial outcome. To the extent legally permitted, Shoir-IE is not liable for indirect or consequential loss arising from use of, or inability to use, the beta. You remain responsible for decisions, independent backups, validation and obligations under your control.
+
+**Nothing in these terms excludes or limits liability that cannot lawfully be excluded or limited, waives mandatory consumer rights, or excuses fraud, intentional misconduct or other non-waivable obligations.** No contract wording can guarantee that a claim will never be brought or decided against the operator.
+
+### 11. Privacy and third-party services
+The Privacy Policy, Refund Policy and Cookie Policy describe current intended practices. Third-party hosting, database/storage, email and AI providers may process information to deliver requested features. Review the Privacy Policy before submitting personal, confidential or regulated data.
+
+### 12. Refunds and complaints
+Refund requests are handled under the published Refund Policy and applicable law, including mandatory consumer protections. Contact **shoirtheagent@gmail.com** with the account name, payment reference and a short description of the issue. Send only the minimum information needed to locate a transaction.
+
+### 13. Governing law and disputes
+These terms are intended to be governed by the laws and regulations of the **Kingdom of Saudi Arabia**, subject to mandatory rules applying to a user or transaction and the jurisdiction of competent authorities and courts. Nothing here prevents a consumer from exercising a non-waivable statutory right.
+
+### 14. Updates
+Material changes will be reflected in a new version and date. Where required by law, renewed acceptance will be requested before a material change is applied to an existing user's service. Continued use alone does not override mandatory notice or consent requirements.
 """
 
 REFUND_POLICY_TEXT = """
-**Last updated:** September 8, 2026
+**Last updated:** October 21, 2026
+**Version:** 2026-10-21-v1
 
-Subscription purchases are **final and non-refundable**, except in the following cases:
+Payments are reviewed manually; STC Pay QR is a separate payment step, not an integrated card checkout. Refund requests are assessed under applicable law and mandatory consumer rights. Nothing in this policy waives rights that cannot lawfully be waived.
 
-- You were charged but your account was never activated and the issue isn't resolved within a reasonable time after you contact us.
-- You were charged more than once for the same registration (duplicate/double charge).
-- You were charged the wrong amount for the tier you selected due to a platform error.
+Contact **shoirtheagent@gmail.com** with your username, payment reference, amount, date and a short description of the issue. Do not email passwords, card details, one-time codes or unnecessary identity documents.
 
-To request a refund under one of these cases, email shoirtheagent@gmail.com with your username and payment proof.
+Requests may include:
+- Duplicate payment or payment for the wrong amount.
+- Payment where requested access was not activated and the issue was not resolved after contacting support.
+- A material service failure, billing mistake or other circumstance in which a refund or remedy is required by law or appropriate to resolve the issue.
+
+Where the service was correctly supplied and the law permits, a refund may not be available. Any approved refund will be handled using a reasonable method available for the original payment route; timing can depend on the payment provider and manual verification.
 """
 
 COOKIE_POLICY_TEXT = """
-**Last updated:** September 8, 2026
+**Last updated:** October 21, 2026
+**Version:** 2026-10-21-v1
 
-We use one strictly-necessary session identifier so the platform can keep you signed in while you use it. This is a core function of the underlying web framework (Streamlit) - it's not used to track you, build a profile, or follow you across other sites.
+Shoir-IE relies on session and security mechanisms provided by the Streamlit framework, hosting and account providers to keep sessions working, protect access and deliver requested features. Providers may use additional cookies or similar technologies under their own policies.
 
-**We do not use any analytics, advertising, or third-party tracking cookies.** If that changes in the future, this policy will be updated to reflect it.
+The application source reviewed does not intentionally implement behavioral-advertising cookies. Session, authentication, security and operational logging are not the same as advertising tracking. Blocking required session mechanisms may prevent sign-in or other features from working.
+
+If analytics, advertising or non-essential tracking is introduced, the operator must update this notice and obtain any consent required by applicable law before enabling it.
 """
 
 # =====================================================================
@@ -1600,10 +1654,11 @@ if not st.session_state.get("current_user"):
         reg_email = st.text_input("Email Address", placeholder="name@company.com", key="reg_email")
         reg_pass = st.text_input("Password", type="password", key="reg_pass")
         reg_ticket_code = st.text_input("Activation / Ticket Code (If you already have one)", placeholder="Enter ticket code here", key="reg_ticket")
+        reg_referral_code = st.text_input("Referral code (optional)", placeholder="Enter a referral code if someone invited you", key="reg_referral_code")
 
         st.markdown("---")
         st.markdown("### Legal & Privacy")
-        st.caption("Please read before registering. Collecting this data without disclosing it here is what creates legal exposure - showing it isn't optional.")
+        st.caption("Shoir-IE is in beta. Review the current notices before submitting a registration request. Your Terms version and acceptance time are recorded with the request where the connected account service supports it.")
 
         with st.expander("📄 Privacy Policy"):
             st.markdown(PRIVACY_POLICY_TEXT)
@@ -1615,13 +1670,24 @@ if not st.session_state.get("current_user"):
             st.markdown(COOKIE_POLICY_TEXT)
 
         accepted_terms = st.checkbox(
-            "I have read and accept the Privacy Policy, Terms & Conditions, Refund Policy, and Cookie Policy above.",
+            "I agree to the Beta Terms & Conditions and acknowledge the Privacy, Refund, and Cookie notices above.",
             key="reg_chk"
         )
 
         if accepted_terms:
             if st.button("Proceed to Pay & Show QR", type="primary", key="btn_confirm_pay"):
+                st.session_state["_registration_accepted_terms_version"] = TERMS_VERSION
+                st.session_state["_registration_accepted_policy_versions"] = (
+                    PRIVACY_POLICY_VERSION,
+                    REFUND_POLICY_VERSION,
+                    COOKIE_POLICY_VERSION,
+                )
+                st.session_state["_registration_accepted_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
                 st.session_state.show_qr = True
+        else:
+            st.session_state.pop("_registration_accepted_terms_version", None)
+            st.session_state.pop("_registration_accepted_policy_versions", None)
+            st.session_state.pop("_registration_accepted_at", None)
 
         if st.session_state.get("show_qr", False):
             st.markdown("---")
@@ -1644,6 +1710,47 @@ if not st.session_state.get("current_user"):
 
             if confirmed_delivery:
                 if st.button("Send Verification Request", type="primary", key="btn_send_request"):
+                    _accepted_policy_versions = (
+                        PRIVACY_POLICY_VERSION,
+                        REFUND_POLICY_VERSION,
+                        COOKIE_POLICY_VERSION,
+                    )
+                    if (
+                        not accepted_terms
+                        or st.session_state.get("_registration_accepted_terms_version") != TERMS_VERSION
+                        or st.session_state.get("_registration_accepted_policy_versions") != _accepted_policy_versions
+                        or not st.session_state.get("_registration_accepted_at")
+                    ):
+                        st.warning("Review the current Beta Terms & Conditions and policy notices, tick the acknowledgement, then click Proceed to Pay & Show QR before submitting.")
+                        st.stop()
+                    referral_code = str(reg_referral_code or "").strip().upper()
+                    if referral_code and not re.fullmatch(r"[A-Z0-9-]{3,32}", referral_code):
+                        st.warning("Referral codes may contain only letters, numbers and hyphens (3-32 characters).")
+                        st.stop()
+                    local_referrer_username = None
+                    if referral_code and not _durable_accounts_ready:
+                        with sqlite3.connect("enterprise_full_workspace.db") as _ref_conn:
+                            _ref_matches = _ref_conn.execute(
+                                "SELECT username FROM enterprise_users WHERE UPPER(affiliate_code)=? LIMIT 2",
+                                (referral_code,),
+                            ).fetchall()
+                            _existing_referral = _ref_conn.execute(
+                                "SELECT 1 FROM affiliate_referrals WHERE LOWER(referred_user)=LOWER(?) LIMIT 1",
+                                (str(reg_name or "").strip(),),
+                            ).fetchone()
+                        if not _ref_matches:
+                            st.warning("That referral code was not found. Check it or leave the field blank.")
+                            st.stop()
+                        if len(_ref_matches) > 1:
+                            st.warning("That referral code is ambiguous. Please contact support rather than submitting it.")
+                            st.stop()
+                        local_referrer_username = str(_ref_matches[0][0])
+                        if local_referrer_username.strip().lower() == str(reg_name or "").strip().lower():
+                            st.warning("Self-referrals are not allowed.")
+                            st.stop()
+                        if _existing_referral:
+                            st.warning("This username already has referral attribution recorded.")
+                            st.stop()
                     # SECURITY: usernames get displayed elsewhere in the app
                     # with raw HTML rendering allowed. Restricting the
                     # character set here (letters, numbers, . _ -, 3-32
@@ -1686,11 +1793,12 @@ if not st.session_state.get("current_user"):
                             st.warning("Password must be between 8 and 128 characters.")
                             st.stop()
 
+                        _registration_result = {}
                         # The durable service is authoritative. Submit it first so a
                         # failed remote write cannot leave a local-only pending request.
                         if _durable_accounts_ready:
                             try:
-                                insert_remote_request({
+                                _registration_result = insert_remote_request({
                                     "username": reg_name, "password": reg_pass,
                                     "email": reg_email, "tier": reg_tier,
                                     "request_type": "New", "payment_method": "STC Pay (QR)",
@@ -1698,6 +1806,13 @@ if not st.session_state.get("current_user"):
                                     "screenshot_path": file_path, "status": "Pending",
                                     "proof_base64": _registration_proof_base64,
                                     "proof_content_type": _registration_proof_content_type,
+                                    "referral_code": referral_code or None,
+                                    "terms_accepted": True,
+                                    "accepted_at": st.session_state.get("_registration_accepted_at"),
+                                    "terms_version": TERMS_VERSION,
+                                    "privacy_policy_version": PRIVACY_POLICY_VERSION,
+                                    "refund_policy_version": REFUND_POLICY_VERSION,
+                                    "cookie_policy_version": COOKIE_POLICY_VERSION,
                                 })
                             except Exception as exc:
                                 if file_path:
@@ -1712,8 +1827,9 @@ if not st.session_state.get("current_user"):
                         cursor = conn.cursor()
                         cursor.execute("""
                             INSERT INTO pending_payments
-                                (username, password, email, tier, payment_method, transaction_id, screenshot_path, status, timestamp, request_type)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'New')
+                                (username, password, email, tier, payment_method, transaction_id, screenshot_path, status, timestamp, request_type,
+                                 terms_version, privacy_policy_version, refund_policy_version, cookie_policy_version, accepted_at)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'New', ?, ?, ?, ?, ?)
                         """, (
                             reg_name,
                             hash_password(reg_pass),
@@ -1723,14 +1839,33 @@ if not st.session_state.get("current_user"):
                             reg_ticket_code if reg_ticket_code else None,
                             file_path,
                             "Pending",
-                            datetime.datetime.now().isoformat()
+                            datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                            TERMS_VERSION,
+                            PRIVACY_POLICY_VERSION,
+                            REFUND_POLICY_VERSION,
+                            COOKIE_POLICY_VERSION,
+                            datetime.datetime.now(datetime.timezone.utc).isoformat(),
                         ))
+                        if referral_code and local_referrer_username:
+                            cursor.execute(
+                                """INSERT INTO affiliate_referrals
+                                   (referrer, referred_user, discount_applied, timestamp, referral_code, status)
+                                   VALUES (?, ?, 0, ?, ?, 'Pending')""",
+                                (local_referrer_username, reg_name, datetime.datetime.now(datetime.timezone.utc).isoformat(), referral_code),
+                            )
 
                         conn.commit()
                         conn.close()
-
-                        st.success("Request sent successfully! Your code will be emailed to you from shoirtheagent@gmail.com")
+                        if _durable_accounts_ready:
+                            if _registration_result.get("legal_acceptance_recorded") is not True:
+                                st.warning("The account service did not confirm the versioned legal-acceptance record. Check the deployment before relying on that record.")
+                            if referral_code and _registration_result.get("referral_attributed") is not True:
+                                st.warning(str(_registration_result.get("referral_warning") or "The account service did not confirm referral attribution. No reward or discount is implied."))
+                        st.success("Request received. Account activation still requires manual payment review.")
                         st.session_state.show_qr = False
+                        st.session_state.pop("_registration_accepted_terms_version", None)
+                        st.session_state.pop("_registration_accepted_policy_versions", None)
+                        st.session_state.pop("_registration_accepted_at", None)
                         st.rerun()
                     else:
                         st.warning("Please fill in your name, password, and email address.")
@@ -9557,23 +9692,69 @@ if current_view == "Edit Account":
             st.success("Profile successfully updated!")
 
 elif current_view == "Become an affiliate":
-    st.header("🤝 Become an Affiliate & Earn Discounts")
-    st.markdown("Share your unique affiliate code with colleagues, friends, or fellow engineers. When someone uses your code during sign-up or login, **both you and the new user receive a 15% discount on your next month's subscription**.")
-    
-    my_code = st.session_state.get("user_affiliate", f"AFF-{st.session_state.current_user.upper()}-15")
-    st.markdown(f"""
-    <div class="api-card" style="text-align: center;">
-        <h3>Your Personal Affiliate Referral Code</h3>
-        <h2><code>{my_code}</code></h2>
-        <p>Share this code to grant new users 15% off and earn a 15% discount on your next month's renewal!</p>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    st.subheader("Affiliate Performance Stats")
-    col_aff1, col_aff2, col_aff3 = st.columns(3)
-    col_aff1.markdown(f"**Total Referrals:** <span class='blue-metric'>3</span>", unsafe_allow_html=True)
-    col_aff2.markdown(f"**Active Discounts Earned:** <span class='blue-metric'>1 Free 15% Month</span>", unsafe_allow_html=True)
-    col_aff3.markdown(f"**Affiliate Tier:** <span class='blue-metric'>Partner Level 1</span>", unsafe_allow_html=True)
+    st.header("🤝 Referral Program — Beta")
+    st.markdown(
+        "Share your referral code with colleagues who may genuinely benefit from testing Shoir-IE. "
+        "Codes are used to attribute sign-ups and, after manual payment approval, track completed referrals."
+    )
+    st.warning(
+        "Referral tracking is in beta. No discount, free month, commission, cash payment or other reward is currently offered or guaranteed. "
+        "A reward may only be introduced through separate, current, published program terms."
+    )
+
+    _referral_counts = {"Pending": 0, "Qualified": 0, "Declined": 0}
+    _referral_summary = None
+    _referral_service_error = None
+    if _durable_accounts_ready:
+        try:
+            _referral_summary = edge_referral_summary(
+                str(st.session_state.get("current_user", "")),
+                str(st.session_state.get("remote_session_token", "")),
+            )
+        except Exception as _referral_exc:
+            _referral_service_error = type(_referral_exc).__name__
+            st.error("The connected account service has not confirmed referral tracking is enabled in this deployment. Do not rely on referral attribution until the server migration and function update are deployed.")
+            _fallback_code = str(st.session_state.get("user_affiliate", "") or "")
+            if _fallback_code:
+                st.code(_fallback_code, language="text")
+            st.caption("No reward is active. This fallback code display is informational and may not be accepted by the connected registration service.")
+    else:
+        with sqlite3.connect("enterprise_full_workspace.db") as _ref_conn:
+            _ref_conn.execute("INSERT OR IGNORE INTO enterprise_users (username) VALUES (?)", (st.session_state.current_user,))
+            _code_row = _ref_conn.execute(
+                "SELECT affiliate_code FROM enterprise_users WHERE LOWER(username)=LOWER(?)",
+                (st.session_state.current_user,),
+            ).fetchone()
+            _local_code = str(_code_row[0] or "").strip() if _code_row else ""
+            if not _local_code or _local_code.upper().startswith("AFF-"):
+                _local_code = "SHR-" + os.urandom(6).hex().upper()
+                _ref_conn.execute(
+                    "UPDATE enterprise_users SET affiliate_code=? WHERE LOWER(username)=LOWER(?)",
+                    (_local_code, st.session_state.current_user),
+                )
+            _counts = _ref_conn.execute(
+                "SELECT status, COUNT(*) FROM affiliate_referrals WHERE LOWER(referrer)=LOWER(?) GROUP BY status",
+                (st.session_state.current_user,),
+            ).fetchall()
+        _referral_counts.update({str(status): int(count) for status, count in _counts})
+        _referral_summary = {"referral_code": _local_code}
+
+    if _referral_summary:
+        my_code = str(_referral_summary.get("referral_code") or "").strip()
+        if my_code:
+            st.session_state.user_affiliate = my_code
+            st.subheader("Your referral code")
+            st.code(my_code, language="text")
+            st.caption("Share this code. The invited person enters it in the optional Referral code field during registration.")
+        if _referral_service_error is None:
+            _referral_counts["Pending"] = int(_referral_summary.get("pending_count", _referral_counts["Pending"]) or 0)
+            _referral_counts["Qualified"] = int(_referral_summary.get("qualified_count", _referral_counts["Qualified"]) or 0)
+            _referral_counts["Declined"] = int(_referral_summary.get("declined_count", _referral_counts["Declined"]) or 0)
+            col_r1, col_r2, col_r3 = st.columns(3)
+            col_r1.metric("Awaiting payment approval", _referral_counts["Pending"])
+            col_r2.metric("Approved referrals", _referral_counts["Qualified"])
+            col_r3.metric("Declined referrals", _referral_counts["Declined"])
+    st.caption("Self-referrals, duplicate/fraudulent accounts, misleading claims and unsolicited spam are prohibited. Referral status is based on recorded attribution and manual account approval; it is not a promise of savings, revenue or a reward.")
 
 elif current_view == "Feedback":
     st.header("💬 User Feedback & Support Center")
