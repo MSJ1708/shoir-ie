@@ -54,21 +54,32 @@ def read_signin_surface(page):
 
 
 def wake_if_hibernated(page) -> bool:
-    """Wake only the dedicated public staging app if Streamlit shows its sleep prompt."""
-    candidates = (
-        page.get_by_role("button", name=re.compile(r"yes,?\s*get this app back up", re.I)),
-        page.get_by_text(re.compile(r"yes,?\s*get this app back up", re.I)),
-        page.get_by_role("button", name=re.compile(r"wake.*app|wake up", re.I)),
-    )
-    for locator in candidates:
-        try:
-            if locator.count() and locator.first.is_visible(timeout=500):
-                locator.first.click(timeout=2_000)
+    """Wake the dedicated public staging app if Community Cloud shows its sleep prompt."""
+    prompt = re.compile(r"yes,?\s*get this app back up|this app has gone to sleep|wake.*app|wake up", re.I)
+    for frame in list(page.frames):
+        candidates = (
+            frame.get_by_role("button", name=prompt),
+            frame.get_by_text(re.compile(r"yes,?\s*get this app back up", re.I)),
+            frame.locator("button").filter(has_text=prompt),
+            frame.locator("a").filter(has_text=prompt),
+            frame.locator("input[type='button'], input[type='submit']"),
+        )
+        for locator in candidates:
+            try:
+                if not locator.count():
+                    continue
+                candidate = locator.first
+                if not candidate.is_visible(timeout=500):
+                    continue
+                if candidate.evaluate("(el) => el.tagName === 'INPUT'") and not prompt.search(
+                    str(candidate.get_attribute("value") or "")
+                ):
+                    continue
+                candidate.click(timeout=2_000)
                 return True
-        except Exception:
-            continue
+            except Exception:
+                continue
     return False
-
 
 def classify_missing_surface(body: str) -> str:
     """Return a low-risk diagnostic label without persisting arbitrary page text."""
@@ -196,8 +207,15 @@ def main() -> int:
                     frame, body = read_signin_surface(page)
                     if frame is None:
                         diagnostic = classify_missing_surface(body)
-                        result["surface_diagnostic"] = diagnostic
                         result["dom_diagnostics"] = collect_surface_diagnostics(page)
+                        if result["dom_diagnostics"].get("sleep_prompt"):
+                            diagnostic = "streamlit_hibernation_prompt"
+                            result["surface_diagnostic"] = diagnostic
+                            if wake_if_hibernated(page):
+                                print("[WAIT] Detected the Community Cloud sleep prompt and clicked its wake control; retrying without credentials.")
+                                page.wait_for_timeout(POLL_SECONDS * 1000)
+                                continue
+                        result["surface_diagnostic"] = diagnostic
                         print(
                             "[DIAGNOSTIC] sign-in surface not found: "
                             + json.dumps(result["dom_diagnostics"], sort_keys=True)
