@@ -1,0 +1,15 @@
+# Shoir-IE Refund Policy
+
+**Last updated:** October 21, 2026  
+**Version:** 2026-10-21-v1
+
+Payments are reviewed manually; STC Pay QR is a separate payment step, not an integrated card checkout. Refund requests are assessed under applicable law and mandatory consumer rights. Nothing in this policy waives rights that cannot lawfully be waived.
+
+Contact **shoirtheagent@gmail.com** with your username, payment reference, amount, date and a short description of the issue. Do not email passwords, card details, one-time codes or unnecessary identity documents.
+
+Requests may include:
+- Duplicate payment or payment for the wrong amount.
+- Payment where requested access was not activated and the issue was not resolved after contacting support.
+- A material service failure, billing mistake or other circumstance in which a refund or remedy is required by law or appropriate to resolve the issue.
+
+Where the service was correctly supplied and the law permits, a refund may not be available. Any approved refund will be handled using a reasonable method available for the original payment route; timing can depend on the payment provider and manual verification.
