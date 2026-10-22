@@ -621,6 +621,14 @@ def init_db():
                 WHERE LOWER(username)='sho'
             """, ("Enterprise Admin", "Enterprise Plus Tier ($399)", "mohsuhailji@gmail.com"))
 
+        # Rotate legacy discount-looking codes to neutral referral attribution.
+        # Existing sign-ups keep working; this promises no reward and changes no subscription/payment.
+        cursor.execute("""
+            UPDATE enterprise_users
+               SET affiliate_code = 'SHR-' || upper(hex(randomblob(6)))
+             WHERE affiliate_code LIKE 'AFF-%'
+        """)
+
         # Never recreate/delete accounts on app startup.
         cursor.execute("SELECT 1 FROM users WHERE LOWER(username)='sho' LIMIT 1")
         if cursor.fetchone() is None and admin_pass_hash:
