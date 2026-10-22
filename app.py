@@ -532,6 +532,24 @@ def init_db():
         except sqlite3.OperationalError:
             pass
 
+        # Versioned consent must exist in the local fallback store too, and the
+        # remote request identifier is required to approve/decline the exact
+        # server-side request rather than just a matching username.
+        for _column, _definition in (
+            ("terms_accepted", "INTEGER NOT NULL DEFAULT 0"),
+            ("terms_version", "TEXT"),
+            ("privacy_policy_version", "TEXT"),
+            ("refund_policy_version", "TEXT"),
+            ("cookie_policy_version", "TEXT"),
+            ("accepted_at", "TEXT"),
+            ("remote_request_id", "INTEGER"),
+            ("referral_code", "TEXT"),
+        ):
+            try:
+                cursor.execute(f"ALTER TABLE pending_payments ADD COLUMN {_column} {_definition}")
+            except sqlite3.OperationalError:
+                pass
+
         # 8. System Settings Table (Stores global free-mode toggle)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS system_settings (
@@ -1834,11 +1852,18 @@ if not st.session_state.get("current_user"):
 
                         conn = sqlite3.connect("enterprise_full_workspace.db")
                         cursor = conn.cursor()
+                        _local_acceptance_at = st.session_state.get("_registration_accepted_at")
+                        _remote_request_id = (
+                            _registration_result.get("request_id")
+                            if _durable_accounts_ready and isinstance(_registration_result, dict)
+                            else None
+                        )
                         cursor.execute("""
                             INSERT INTO pending_payments
-                                (username, password, email, tier, payment_method, transaction_id, screenshot_path, status, timestamp, request_type,
+                                (username, password, email, tier, payment_method, transaction_id, screenshot_path,
+                                 status, timestamp, request_type, terms_accepted, remote_request_id, referral_code,
                                  terms_version, privacy_policy_version, refund_policy_version, cookie_policy_version, accepted_at)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'New', ?, ?, ?, ?, ?)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'New', ?, ?, ?, ?, ?, ?, ?, ?)
                         """, (
                             reg_name,
                             hash_password(reg_pass),
@@ -1849,11 +1874,14 @@ if not st.session_state.get("current_user"):
                             file_path,
                             "Pending",
                             datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                            1,
+                            _remote_request_id,
+                            referral_code or None,
                             TERMS_VERSION,
                             PRIVACY_POLICY_VERSION,
                             REFUND_POLICY_VERSION,
                             COOKIE_POLICY_VERSION,
-                            datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                            _local_acceptance_at,
                         ))
                         if referral_code and local_referrer_username:
                             cursor.execute(
@@ -12097,6 +12125,21 @@ if mod == "Admin Panel":
             cursor.execute("ALTER TABLE pending_payments ADD COLUMN password TEXT")
         except sqlite3.OperationalError:
             pass
+        for _column, _definition in (
+            ("request_type", "TEXT DEFAULT 'New'"),
+            ("terms_accepted", "INTEGER NOT NULL DEFAULT 0"),
+            ("terms_version", "TEXT"),
+            ("privacy_policy_version", "TEXT"),
+            ("refund_policy_version", "TEXT"),
+            ("cookie_policy_version", "TEXT"),
+            ("accepted_at", "TEXT"),
+            ("remote_request_id", "INTEGER"),
+            ("referral_code", "TEXT"),
+        ):
+            try:
+                cursor.execute(f"ALTER TABLE pending_payments ADD COLUMN {_column} {_definition}")
+            except sqlite3.OperationalError:
+                pass
         
         # Robust migration check for license_codes: Drop and recreate cleanly if 'id' column is missing
         cursor.execute("PRAGMA table_info(license_codes);")
@@ -12124,16 +12167,20 @@ if mod == "Admin Panel":
                     st.session_state.get("remote_session_token",""),
                 )
                 for rp in remote_pending:
-                    exists = cursor.execute(
-                        "SELECT 1 FROM pending_payments WHERE LOWER(username)=? AND COALESCE(transaction_id,'')=COALESCE(?, '') AND COALESCE(request_type,'New')=? AND status='Pending' LIMIT 1",
+                    _remote_id = int(rp.get("id")) if rp.get("id") is not None else None
+                    _existing_pending = cursor.execute(
+                        "SELECT id, remote_request_id FROM pending_payments WHERE LOWER(username)=? AND COALESCE(transaction_id,'')=COALESCE(?, '') AND COALESCE(request_type,'New')=? AND status='Pending' LIMIT 1",
                         (str(rp.get("username","")).lower(), rp.get("transaction_id"), rp.get("request_type","New")),
                     ).fetchone()
-                    if not exists:
+                    _remote_terms_accepted = 1 if rp.get("terms_accepted") is True else 0
+                    if not _existing_pending:
                         cursor.execute(
                             """
                             INSERT INTO pending_payments
-                            (username,password,email,tier,payment_method,transaction_id,screenshot_path,status,timestamp,request_type)
-                            VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                            (username,password,email,tier,payment_method,transaction_id,screenshot_path,status,timestamp,
+                             request_type,terms_accepted,remote_request_id,terms_version,privacy_policy_version,
+                             refund_policy_version,cookie_policy_version,accepted_at)
+                            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                             """,
                             (
                                 rp.get("username",""),
@@ -12144,8 +12191,41 @@ if mod == "Admin Panel":
                                 rp.get("transaction_id"),
                                 rp.get("screenshot_path") or "",
                                 "Pending",
-                                str(rp.get("requested_at") or datetime.datetime.now().isoformat()),
+                                str(rp.get("requested_at") or datetime.datetime.now(datetime.timezone.utc).isoformat()),
                                 rp.get("request_type","New"),
+                                _remote_terms_accepted,
+                                _remote_id,
+                                rp.get("terms_version"),
+                                rp.get("privacy_policy_version"),
+                                rp.get("refund_policy_version"),
+                                rp.get("cookie_policy_version"),
+                                rp.get("accepted_at"),
+                            ),
+                        )
+                    else:
+                        # Populate the exact server request id and consent metadata
+                        # on legacy local mirrors without overwriting a newer local value.
+                        cursor.execute(
+                            """
+                            UPDATE pending_payments
+                               SET remote_request_id=COALESCE(remote_request_id, ?),
+                                   terms_accepted=CASE WHEN ? = 1 THEN 1 ELSE terms_accepted END,
+                                   terms_version=COALESCE(terms_version, ?),
+                                   privacy_policy_version=COALESCE(privacy_policy_version, ?),
+                                   refund_policy_version=COALESCE(refund_policy_version, ?),
+                                   cookie_policy_version=COALESCE(cookie_policy_version, ?),
+                                   accepted_at=COALESCE(accepted_at, ?)
+                             WHERE id=?
+                            """,
+                            (
+                                _remote_id,
+                                _remote_terms_accepted,
+                                rp.get("terms_version"),
+                                rp.get("privacy_policy_version"),
+                                rp.get("refund_policy_version"),
+                                rp.get("cookie_policy_version"),
+                                rp.get("accepted_at"),
+                                int(_existing_pending[0]),
                             ),
                         )
                 conn.commit()
@@ -12228,6 +12308,52 @@ if mod == "Admin Panel":
                     with col_p2:
                         st.markdown("### Action Controls")
                         if st.button(f"✅ Approve & Send Code", key=f"approve_{row['id']}_{idx}"):
+                            login_username = str(row["username"]).strip()
+                            request_type = str(row.get("request_type", "New") or "New")
+                            request_type = request_type if request_type in {"New", "Renewal"} else "New"
+                            _remote_approval_result = None
+
+                            if _durable_accounts_ready:
+                                # The Edge Function is authoritative. Confirm the
+                                # exact request is approved before making any local
+                                # account changes or emailing a ticket code.
+                                _remote_request_id_value = row.get("remote_request_id")
+                                _approval_request_id = None
+                                try:
+                                    if _remote_request_id_value is not None and not pd.isna(_remote_request_id_value) and str(_remote_request_id_value).strip():
+                                        _approval_request_id = int(_remote_request_id_value)
+                                    _remote_approval_result = edge_admin_approve(
+                                        str(st.session_state.get("current_user", "")),
+                                        str(st.session_state.get("remote_session_token", "")),
+                                        request_id=_approval_request_id,
+                                        target_username=None if _approval_request_id is not None else login_username,
+                                        request_type=request_type,
+                                    )
+                                    if (
+                                        _remote_approval_result.get("ok") is not True
+                                        or _remote_approval_result.get("status") != "Approved"
+                                    ):
+                                        st.error("The account service did not confirm approval. No local activation or ticket email was completed.")
+                                        st.stop()
+                                except Exception as _approval_exc:
+                                    st.error("The account service rejected or could not confirm approval. No local activation or ticket email was completed.")
+                                    st.caption(f"Approval diagnostic: {type(_approval_exc).__name__}")
+                                    st.stop()
+                            elif request_type == "New":
+                                # Local-only fallback must obey the same current
+                                # acceptance contract when no Edge backend is configured.
+                                _local_acceptance_is_current = (
+                                    row.get("terms_accepted") in (True, 1)
+                                    and str(row.get("terms_version") or "") == TERMS_VERSION
+                                    and str(row.get("privacy_policy_version") or "") == PRIVACY_POLICY_VERSION
+                                    and str(row.get("refund_policy_version") or "") == REFUND_POLICY_VERSION
+                                    and str(row.get("cookie_policy_version") or "") == COOKIE_POLICY_VERSION
+                                    and bool(str(row.get("accepted_at") or "").strip())
+                                )
+                                if not _local_acceptance_is_current:
+                                    st.error("This registration cannot be approved because current beta Terms and policy acceptance is missing. Ask the user to resubmit after reviewing the notices.")
+                                    st.stop()
+
                             t_code = "SUB-" + "".join(random.choices(string.ascii_uppercase + string.digits, k=4)) + "-" + "".join(random.choices(string.ascii_uppercase + string.digits, k=4))
                             
                             conn = sqlite3.connect("enterprise_full_workspace.db")
@@ -12244,10 +12370,8 @@ if mod == "Admin Panel":
                                 WHERE username = ?
                             """, (row['tier'], row['email'], row['username']))
                             
-                            # Create or renew the durable login account without deleting it.
-                            login_username = str(row["username"]).strip()
-                            request_type = str(row.get("request_type", "New") or "New")
-                            request_type = request_type if request_type in {"New", "Renewal"} else "New"
+                            # Create or renew the local mirror only after the authoritative
+                            # remote request was approved above, if Edge mode is enabled.
                             login_password = str(row.get("password") or "")
                             now_dt = datetime.datetime.now(datetime.timezone.utc)
 
@@ -12313,28 +12437,8 @@ if mod == "Admin Panel":
                             conn.commit()
                             conn.close()
 
-                            if _durable_accounts_ready:
-                                try:
-                                    upsert_remote_account({
-                                        "username": login_username,
-                                        "password_hash": login_password,
-                                        "role": "User",
-                                        "tier": row["tier"],
-                                        "email": row["email"],
-                                        "created_at": (
-                                            existing_local[5]
-                                            if existing_local and request_type == "Renewal"
-                                            else now_dt.isoformat()
-                                        ),
-                                        "subscription_expires_at": new_expiry,
-                                        "active": True,
-                                        "admin_username": st.session_state.get("current_user",""),
-                                        "admin_session_token": st.session_state.get("remote_session_token",""),
-                                        "target_username": login_username,
-                                        "request_type": request_type,
-                                    })
-                                except Exception:
-                                    pass
+                            # Remote approval already succeeded before local activation.
+                            # Do not call the pending-request approval endpoint twice.
 
                             email_success = send_tier_email(row['email'], row['username'], t_code, row['tier'])
                             if email_success:
@@ -12348,6 +12452,27 @@ if mod == "Admin Panel":
                         # as Declined (so it drops out of the Pending list below) and logs
                         # who declined it, without creating any account or emailing anyone.
                         if st.button("❌ Decline Request", key=f"decline_{row['id']}_{idx}"):
+                            if _durable_accounts_ready:
+                                _decline_id_value = row.get("remote_request_id")
+                                _decline_request_id = None
+                                try:
+                                    if _decline_id_value is not None and not pd.isna(_decline_id_value) and str(_decline_id_value).strip():
+                                        _decline_request_id = int(_decline_id_value)
+                                    if _decline_request_id is None:
+                                        st.error("The exact server request ID is missing. Refresh the administrator queue before declining; no local status was changed.")
+                                        st.stop()
+                                    _remote_decline_result = edge_admin_decline(
+                                        str(st.session_state.get("current_user", "")),
+                                        str(st.session_state.get("remote_session_token", "")),
+                                        _decline_request_id,
+                                    )
+                                    if _remote_decline_result.get("ok") is not True or _remote_decline_result.get("status") != "Declined":
+                                        st.error("The account service did not confirm the decline. No local status was changed.")
+                                        st.stop()
+                                except Exception as _decline_exc:
+                                    st.error("The account service rejected or could not confirm the decline. No local status was changed.")
+                                    st.caption(f"Decline diagnostic: {type(_decline_exc).__name__}")
+                                    st.stop()
                             conn = sqlite3.connect("enterprise_full_workspace.db")
                             cursor = conn.cursor()
                             cursor.execute("UPDATE pending_payments SET status = 'Declined' WHERE id = ?", (row['id'],))
