@@ -30,6 +30,13 @@ def test_no_unsupported_referral_discount_or_fake_stats_remain_in_active_ui():
     assert 'reg_referral_code = st.text_input("referral code (optional)"' in lowered
 
 
+def test_legacy_local_referral_generation_no_longer_implies_a_discount():
+    assert 'new_aff = f"AFF-{st.session_state.current_user.upper()}-15"' not in APP
+    assert '"SHR-" + os.urandom(6).hex().upper()' in APP
+    assert "affiliate_code = 'SHR-' || upper(hex(randomblob(6)))" in APP
+    assert '"SHR-ADMIN01"' in APP
+
+
 def test_registration_requires_and_records_versioned_acceptance():
     assert "not accepted_terms" in APP
     assert 'st.session_state.get("_registration_accepted_terms_version") != TERMS_VERSION' in APP
@@ -41,7 +48,23 @@ def test_registration_requires_and_records_versioned_acceptance():
     assert "legal_acceptance_recorded" in EDGE
     assert "accepted_at TIMESTAMPTZ" in MIGRATION
     assert "privacy_policy_version TEXT" in MIGRATION
-    assert "terms_version, privacy_policy_version, refund_policy_version, cookie_policy_version, accepted_at" in APP
+    assert "privacy_policy_version" in STORE
+    assert "refund_policy_version" in STORE
+    assert "cookie_policy_version" in STORE
+    assert "accepted_at" in STORE
+
+
+def test_local_admin_approval_requires_current_consent_and_remote_confirmation():
+    assert '"remote_request_id", "INTEGER"' in APP
+    assert 'row.get("terms_accepted") in (True, 1)' in APP
+    assert '"edge_admin_approve"' in APP
+    assert '"edge_admin_decline"' in APP
+    assert "edge_admin_approve(" in APP
+    assert '_remote_approval_result.get("ok") is not True' in APP
+    assert "Remote approval already succeeded before local activation." in APP
+    assert "No local activation or ticket email was completed." in APP
+    assert "edge_admin_decline(" in APP
+    assert "No local status was changed." in APP
 
 
 def test_referral_codes_are_server_checked_attributed_and_qualified_manually():
