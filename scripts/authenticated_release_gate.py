@@ -136,6 +136,82 @@ def main() -> int:
         return 2
 
     api = EdgeAPI(edge_url, key)
+
+    # Non-persistent integration probes for the new legal/referral contract.
+    # Missing/stale notice versions and unknown referral codes must be rejected
+    # before a request row or payment proof is created.
+    current_notices = {
+        "terms_accepted": True,
+        "terms_version": "2026-10-21-beta-v1",
+        "privacy_policy_version": "2026-10-21-v1",
+        "refund_policy_version": "2026-10-21-v1",
+        "cookie_policy_version": "2026-10-21-v1",
+    }
+
+    def registration_probe(case: str, payload: dict[str, Any], expected_error: str) -> None:
+        try:
+            response_status, response_body = api.call("register_request", payload)
+            error_text = str(response_body.get("error") or "")
+            passed = response_status == 400 and expected_error.casefold() in error_text.casefold()
+            record(
+                case,
+                "registration_gate",
+                passed,
+                "Registration request was rejected before persistence as expected."
+                if passed
+                else f"Expected HTTP 400 with the {expected_error!r} validation message; received HTTP {response_status}. Response body suppressed.",
+            )
+        except Exception as exc:
+            record(
+                case,
+                "registration_gate",
+                False,
+                f"Edge request failed ({type(exc).__name__}); response body suppressed.",
+            )
+
+    registration_probe(
+        "registration_requires_current_acceptance",
+        {
+            "username": "shoir-e2e-legal-probe",
+            "password": "synthetic-test-only-password",
+            "email": "shoir-e2e-legal-probe@example.invalid",
+            "tier": "Starter Tier ($29)",
+            "payment_method": "STC Pay (QR)",
+            "transaction_id": "SYNTHETIC-NO-CONSENT-PROBE",
+        },
+        "current beta terms",
+    )
+
+    registration_probe(
+        "registration_rejects_stale_policy_version",
+        {
+            "username": "shoir-e2e-stale-policy-probe",
+            "password": "synthetic-test-only-password",
+            "email": "shoir-e2e-stale-policy-probe@example.invalid",
+            "tier": "Starter Tier ($29)",
+            "payment_method": "STC Pay (QR)",
+            "transaction_id": "SYNTHETIC-STALE-POLICY-PROBE",
+            **current_notices,
+            "privacy_policy_version": "obsolete-e2e-probe",
+        },
+        "current beta terms",
+    )
+
+    registration_probe(
+        "registration_rejects_unknown_referral",
+        {
+            "username": "shoir-e2e-referral-probe",
+            "password": "synthetic-test-only-password",
+            "email": "shoir-e2e-referral-probe@example.invalid",
+            "tier": "Starter Tier ($29)",
+            "payment_method": "STC Pay (QR)",
+            "transaction_id": "SYNTHETIC-REFERRAL-PROBE",
+            **current_notices,
+            "referral_code": "SHR-E2E-NOT-REAL",
+        },
+        "not found or inactive",
+    )
+
     active_token = ""
     second_token = ""
     starter_token = ""
