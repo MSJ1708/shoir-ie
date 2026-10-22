@@ -39,6 +39,7 @@ EXPECTED_VERSIONS = [
     "20261019124815",
     "20261019140600",
     "20261021130000",
+    "20261022110000",
 ]
 pytestmark = pytest.mark.skipif(
     not DATABASE_URL or psycopg2 is None,
@@ -279,9 +280,32 @@ def test_versioned_migration_history_replays_from_clean_local_postgres():
                         ),
                     )
                     request_result = cursor.fetchone()[0]
+                    replay_request = request_result if isinstance(request_result, dict) else json.loads(request_result)
+                    replay_request_id = int(replay_request["request_id"])
+                    cursor.execute("SAVEPOINT shoir_missing_consent_approval")
+                    with pytest.raises(psycopg2.Error) as blocked_approval:
+                        cursor.execute(
+                            "UPDATE public.shoir_subscription_requests SET status='Approved' WHERE id=%s;",
+                            (replay_request_id,),
+                        )
+                    assert blocked_approval.value.pgcode == "23514"
+                    cursor.execute("ROLLBACK TO SAVEPOINT shoir_missing_consent_approval")
+                    cursor.execute(
+                        """
+                        UPDATE public.shoir_subscription_requests
+                           SET terms_accepted=TRUE,
+                               terms_version='2026-10-21-beta-v1',
+                               privacy_policy_version='2026-10-21-v1',
+                               refund_policy_version='2026-10-21-v1',
+                               cookie_policy_version='2026-10-21-v1',
+                               accepted_at=NOW()
+                         WHERE id=%s;
+                        """,
+                        (replay_request_id,),
+                    )
                     cursor.execute(
                         "SELECT public.shoir_finalize_subscription_request(%s, 'Approved');",
-                        (int(request_result["request_id"] if isinstance(request_result, dict) else json.loads(request_result)["request_id"]),),
+                        (replay_request_id,),
                     )
                     approval_result = cursor.fetchone()[0]
                     cursor.execute("RESET ROLE;")
