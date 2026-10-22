@@ -31,12 +31,15 @@ REPORT = Path(os.environ.get(
 def read_signin_surface(page):
     """Wait briefly for Streamlit's iframe and widgets after the HTTP document loads."""
     deadline = time.monotonic() + 20
+    last_body = ""
     while time.monotonic() < deadline:
         for frame in list(page.frames):
             try:
                 body = frame.locator("body").inner_text(timeout=1_000)
             except Exception:
                 continue
+            if body.strip():
+                last_body = body[:8_000]
             if (
                 "Sign In to Your Workspace" in body
                 or "Welcome to Shoir-IE, " in body
@@ -44,7 +47,24 @@ def read_signin_surface(page):
             ):
                 return frame, body
         page.wait_for_timeout(300)
-    return None, ""
+    # Keep only an in-memory observation for coarse diagnostics. It is never
+    # written verbatim to an artifact because a public error page can contain
+    # implementation details.
+    return None, last_body
+
+
+def classify_missing_surface(body: str) -> str:
+    """Return a low-risk diagnostic label without persisting arbitrary page text."""
+    lowered = str(body or "").casefold()
+    if "could not initialize its required account and persistence layer" in lowered:
+        return "persistence_initialization_error"
+    if "shoir-ie startup" in lowered or "application runtime could not be loaded" in lowered:
+        return "application_startup_error"
+    if "traceback" in lowered or "modulenotfounderror" in lowered or "importerror" in lowered:
+        return "python_runtime_error"
+    if not lowered.strip() or "please wait" in lowered or "running..." in lowered:
+        return "blank_or_loading_ui"
+    return "sign_in_surface_not_rendered"
 
 
 def shell_version(body: str) -> str:
@@ -83,9 +103,30 @@ def main() -> int:
                         )
                     frame, body = read_signin_surface(page)
                     if frame is None:
-                        raise RuntimeError(
-                            "Could not find the Shoir-IE sign-in surface; candidate build was not verified."
+                        diagnostic = classify_missing_surface(body)
+                        result["surface_diagnostic"] = diagnostic
+                        if diagnostic in {
+                            "persistence_initialization_error",
+                            "application_startup_error",
+                            "python_runtime_error",
+                        }:
+                            raise RuntimeError(
+                                "The staging app returned an application/runtime error instead of the sign-in surface "
+                                f"({diagnostic}); candidate build was not verified and no credentials were submitted."
+                            )
+                        if time.monotonic() >= deadline:
+                            raise RuntimeError(
+                                "The staging app did not render the Shoir-IE sign-in surface within "
+                                f"{WAIT_SECONDS} seconds ({diagnostic}); candidate build was not verified and "
+                                "no credentials were submitted. Check Streamlit Cloud app logs and the deployed commit."
+                            )
+                        print(
+                            "[WAIT] Staging returned HTTP 200 but the sign-in surface is not rendered yet "
+                            f"({diagnostic}); retrying without submitting credentials."
                         )
+                        page.wait_for_timeout(POLL_SECONDS * 1000)
+                        continue
+                    result["surface_diagnostic"] = "sign_in_surface_found"
                     last_body = body
                     if "STAGING TEST ENVIRONMENT" not in body:
                         raise RuntimeError(
