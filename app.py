@@ -1536,6 +1536,7 @@ if not st.session_state.get("current_user"):
             "Your existing account, profile and saved workspace are preserved."
         )
     st.markdown("Please sign in with your approved account or register and submit your payment ticket below.")
+    st.warning("BETA — Shoir-IE is still in testing. Independently validate source data, formulas and outputs before operational decisions; do not rely on beta output alone for safety-critical work.")
     auth_tab1, auth_tab2, auth_tab3 = st.tabs(["🔑 Sign In", "📝 Get Ticket & Register", "🧭 Explore the Modules"])
 
     # ------------------------------------------
