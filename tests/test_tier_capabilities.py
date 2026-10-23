@@ -78,6 +78,23 @@ def test_available_modules_fails_closed_for_unmapped_or_blank_names():
     assert available_modules("Starter", ["Module with no explicit policy"]) == []
 
 
+def test_copilot_gates_added_focused_methods_at_their_target_tier():
+    prompts = (
+        "calculate OEE",
+        "calculate process capability",
+        "calculate economic order quantity",
+        "calculate reorder point",
+        "calculate carbon emissions",
+        "calculate engineering economics",
+        "calculate payback period",
+    )
+    for prompt in prompts:
+        gate = copilot_gate(prompt, "Starter Tier")
+        assert gate is not None and gate["required_tier"] == "Mid-Tier Pro", prompt
+        # Research Pack inherits ordinary tiers through Enterprise.
+        assert copilot_gate(prompt, "Research Pack") is None, prompt
+
+
 def test_module_entitlement_audit_reports_unmapped_catalog_items():
     report = audit_module_entitlement_coverage([
         "AI Copilot",
