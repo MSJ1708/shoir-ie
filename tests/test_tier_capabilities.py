@@ -80,17 +80,26 @@ def test_available_modules_fails_closed_for_unmapped_or_blank_names():
 
 def test_copilot_gates_added_focused_methods_at_their_target_tier():
     prompts = (
-        "calculate OEE",
-        "calculate process capability",
-        "calculate economic order quantity",
-        "calculate reorder point",
-        "calculate carbon emissions",
-        "calculate engineering economics",
-        "calculate payback period",
+        ("convert units", "Starter"),
+        ("calculate OEE", "Mid-Tier Pro"),
+        ("calculate process capability", "Mid-Tier Pro"),
+        ("calculate statistical process control", "Mid-Tier Pro"),
+        ("calculate quality cost", "Mid-Tier Pro"),
+        ("calculate MTBF", "Professional"),
+        ("calculate MTTR", "Professional"),
+        ("calculate ABC/XYZ inventory", "Mid-Tier Pro"),
+        ("calculate economic order quantity", "Mid-Tier Pro"),
+        ("calculate reorder point", "Mid-Tier Pro"),
+        ("calculate carbon emissions", "Mid-Tier Pro"),
+        ("calculate engineering economics", "Mid-Tier Pro"),
+        ("calculate payback period", "Mid-Tier Pro"),
     )
-    for prompt in prompts:
+    for prompt, required_tier in prompts:
         gate = copilot_gate(prompt, "Starter Tier")
-        assert gate is not None and gate["required_tier"] == "Mid-Tier Pro", prompt
+        if required_tier == "Starter":
+            assert gate is None, prompt
+        else:
+            assert gate is not None and gate["required_tier"] == required_tier, prompt
         # Research Pack inherits ordinary tiers through Enterprise.
         assert copilot_gate(prompt, "Research Pack") is None, prompt
 
