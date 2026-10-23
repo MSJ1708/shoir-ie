@@ -255,11 +255,11 @@ TOOL_CATALOG: list[dict[str, Any]] = json.loads(r'''[
     "method_or_action": "Import CSV/XLSX safely with sheet preview, type/size checks, clear errors, and no destructive partial import.",
     "external_dependency": "None implied by catalog; check route-specific dependencies.",
     "entitlement_enforcement_points": "tool_access_allowed(tier, tool_id) in the shared registry; current module renderer/access control for related_module routes; direct execution dispatcher rechecks the canonical tool ID.",
-    "unit_test": "No dedicated target-specific golden fixture established; see existing route tests and remaining_gap.",
+    "unit_test": "tests/test_shoir_100_tool_workbench.py::test_csv_importer_stages_a_parsed_dataset_with_fingerprint_without_replacing_workspace; tests/test_shoir_100_tool_workbench.py::test_excel_importer_selects_a_requested_sheet_and_rejects_unknown_sheet",
     "integration_test": "UNVERIFIED — authenticated end-to-end workflow not run on this branch yet.",
     "browser_test": "UNVERIFIED",
     "evidence_link_or_artifact": "docs/SHOIR_100_TOOL_IMPLEMENTATION_REPORT.md and docs/SHOIR_100_TOOL_IMPLEMENTATION_MATRIX.csv",
-    "remaining_gap": "Related route or deterministic helper exists, but target-specific authenticated browser, persistence/export, and complete method verification remain outstanding.",
+    "remaining_gap": "Golden tests now cover staged CSV and selected XLSX sheet parsing; authenticated browser, stale-input, persistence and large/malformed-file acceptance remains outstanding.",
     "owner_or_next_action": "Engineering: verify the mapped renderer against the acceptance target, add independent golden fixtures, then run authenticated desktop/mobile and import/export persistence checks."
   },
   {
@@ -321,11 +321,11 @@ TOOL_CATALOG: list[dict[str, Any]] = json.loads(r'''[
     "method_or_action": "Preview transformations and keep an audit/change summary with a route to undo.",
     "external_dependency": "None implied by catalog; check route-specific dependencies.",
     "entitlement_enforcement_points": "tool_access_allowed(tier, tool_id) in the shared registry; current module renderer/access control for related_module routes; direct execution dispatcher rechecks the canonical tool ID.",
-    "unit_test": "No dedicated target-specific golden fixture established; see existing route tests and remaining_gap.",
+    "unit_test": "tests/test_shoir_100_tool_workbench.py::test_reversible_cleaner_preview_does_not_mutate_source_and_audits_changes",
     "integration_test": "UNVERIFIED — authenticated end-to-end workflow not run on this branch yet.",
     "browser_test": "UNVERIFIED",
     "evidence_link_or_artifact": "docs/SHOIR_100_TOOL_IMPLEMENTATION_REPORT.md and docs/SHOIR_100_TOOL_IMPLEMENTATION_MATRIX.csv",
-    "remaining_gap": "Related route or deterministic helper exists, but target-specific authenticated browser, persistence/export, and complete method verification remain outstanding.",
+    "remaining_gap": "Golden test covers non-mutating preview and audit reconciliation; browser stale-preview, cross-session persistence and full workflow evidence remain outstanding.",
     "owner_or_next_action": "Engineering: verify the mapped renderer against the acceptance target, add independent golden fixtures, then run authenticated desktop/mobile and import/export persistence checks."
   },
   {
