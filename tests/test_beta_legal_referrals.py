@@ -89,6 +89,14 @@ def test_privacy_notice_does_not_promise_no_third_party_processing():
     assert "We do not promise that third-party providers never retain prompts" in PRIVACY
 
 
+def test_refund_policy_preserves_statutory_saudi_consumer_rights():
+    refund = (ROOT / "docs" / "REFUND_POLICY.md").read_text(encoding="utf-8")
+    assert "Statutory rights are preserved" in refund
+    assert "Article 13 of the Saudi E-Commerce Law" in refund
+    assert "not a blanket denial of statutory rights" in refund
+    assert "Saudi-qualified counsel must confirm this wording" in refund
+
+
 def test_terms_have_a_real_governing_law_clause_and_no_template_placeholder():
     assert "Kingdom of Saudi Arabia" in TERMS
     assert "state the jurisdiction whose law governs this agreement" not in TERMS.lower()
