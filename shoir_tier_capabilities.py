@@ -47,6 +47,7 @@ def unique_modules(modules: Iterable[str]) -> list[str]:
 
 MODULE_REQUIREMENTS = {
     "AI Copilot": "Starter",
+    "100-Tool Engineering Hub": "Starter",
     "ShadowShift — Micro-Loss & Recovery Intelligence": "Enterprise",
     "Excel Data Cleaning & Import": "Starter",
     "Industrial Workbook": "Starter",
@@ -213,15 +214,41 @@ def normalize_tier(value: str) -> str:
     return "Starter"
 
 
-def tier_allows(current: str, required: str) -> bool:
-    """Enforce the product menu: Research Pack inherits Enterprise, plus research.
+def _recognized_tier(value: str) -> Optional[str]:
+    """Return a known canonical tier, or None for missing/unrecognized policy input.
 
-    Research Pack is an add-on package in the app, not a grant of the
-    Enterprise Plus-only tier. Keep research entitlement independent from
-    the ordinary tier ladder so one package never implies another add-on.
+    normalize_tier remains a legacy display normalizer, but authorization must
+    never turn arbitrary text into Starter access.
     """
-    current_tier = normalize_tier(current)
-    required_tier = normalize_tier(required)
+    raw = str(value or "").strip().lower()
+    if not raw:
+        return None
+    if "research pack" in raw or raw == "research":
+        return "Research Pack"
+    if "enterprise plus" in raw or "industrial enterprise" in raw:
+        return "Enterprise Plus"
+    if "enterprise" in raw:
+        return "Enterprise"
+    if "professional" in raw:
+        return "Professional"
+    if "mid-tier pro" in raw or "mid tier pro" in raw or re.search(r"\\bpro\\b", raw):
+        return "Mid-Tier Pro"
+    if "starter" in raw or raw in {"free", "free tier"}:
+        return "Starter"
+    return None
+
+
+def tier_allows(current: str, required: str) -> bool:
+    """Enforce the product menu and fail closed for unknown tier inputs.
+
+    Research Pack inherits Starter through Enterprise plus research-only
+    capabilities; it does not imply Enterprise Plus, and Enterprise Plus does
+    not imply Research Pack.
+    """
+    current_tier = _recognized_tier(current)
+    required_tier = _recognized_tier(required)
+    if current_tier is None or required_tier is None:
+        return False
 
     if current_tier == "Research Pack":
         return required_tier in {
@@ -278,10 +305,15 @@ def audit_module_entitlement_coverage(modules: Iterable[str]) -> dict[str, objec
 
 
 def available_modules(tier: str, modules: Iterable[str]) -> list[str]:
+    """Return only modules with a known, valid policy that the current tier allows.
+
+    Unmapped names stay out of the executable/available list until their policy
+    is explicitly resolved; they are never assumed to be Starter/free.
+    """
     result = []
     for module in modules:
         required = module_required_tier(str(module))
-        if required is None or tier_allows(tier, required):
+        if required in TIER_ORDER and tier_allows(tier, required):
             result.append(str(module))
     return result
 
