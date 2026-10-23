@@ -14,6 +14,7 @@ from typing import Any, Mapping, Sequence
 
 import numpy as np
 import pandas as pd
+from scipy.optimize import brentq
 
 from shoir_100_tool_registry import (
     TOOL_BY_ID,
@@ -464,12 +465,18 @@ def engineering_economics(cash_flows: Any, discount_rate_pct: Any) -> dict[str, 
         raise ValueError("Cash flows must be a comma-separated list ordered by period.")
     if len(raw_values) < 2:
         raise ValueError("Enter at least a period-0 cash flow and one future period.")
+    if len(raw_values) > 60:
+        raise ValueError("At most 60 equally spaced cash-flow periods are supported.")
     flows = [_finite_number(value, f"Cash flow for period {i}") for i, value in enumerate(raw_values)]
+    if any(abs(value) > 1e15 for value in flows):
+        raise ValueError("Cash flows exceed the supported numerical magnitude of 1e15.")
     rate = _finite_number(discount_rate_pct, "Discount rate")
     if rate <= -100 or rate > 1000:
         raise ValueError("Discount rate must be greater than -100% and no more than 1,000%.")
     discount = rate / 100.0
-    npv = sum(flow / ((1.0 + discount) ** period) for period, flow in enumerate(flows))
+    def npv_at(discount_rate: float) -> float:
+        return sum(flow / ((1.0 + discount_rate) ** period) for period, flow in enumerate(flows))
+    npv = npv_at(discount)
     cumulative, cumulative_discounted = flows[0], flows[0]
     simple_payback = discounted_payback = None
     for period in range(1, len(flows)):
@@ -481,14 +488,32 @@ def engineering_economics(cash_flows: Any, discount_rate_pct: Any) -> dict[str, 
             simple_payback = (period - 1) + (-prior / flows[period]) if flows[period] > 0 else float(period)
         if discounted_payback is None and prior_discounted < 0 <= cumulative_discounted:
             discounted_payback = (period - 1) + (-prior_discounted / discounted_flow) if discounted_flow > 0 else float(period)
-    warnings = ["IRR is not calculated by this method; use a separately validated IRR solver before investment decisions."]
+
+    warnings = []
+    irr_pct = None
+    conventional_flow = flows[0] < 0 and any(value > 0 for value in flows[1:]) and all(value >= 0 for value in flows[1:])
+    if conventional_flow:
+        if abs(npv_at(0.0)) < 1e-12:
+            irr_pct = 0.0
+        else:
+            low_rate, high_rate = -0.99, 1000.0
+            low_npv, high_npv = npv_at(low_rate), npv_at(high_rate)
+            if math.isfinite(low_npv) and math.isfinite(high_npv) and low_npv * high_npv < 0:
+                try:
+                    irr_pct = 100.0 * brentq(npv_at, low_rate, high_rate, maxiter=500)
+                except (ValueError, RuntimeError, OverflowError):
+                    warnings.append("IRR root search did not converge; inspect the cash-flow values and use an independently verified financial model.")
+            else:
+                warnings.append("A unique IRR could not be bracketed in the supported rate domain (-99%, 100,000%).")
+    else:
+        warnings.append("IRR is omitted because the series is not a conventional initial-outflow-then-nonnegative-inflows pattern; non-conventional cash flows can have multiple IRRs.")
     if simple_payback is None:
         warnings.append("The cash-flow series does not recover its initial cumulative investment during the supplied periods.")
     return {
         "status": "CALCULATED", "tool_id": "T081",
-        "method": "NPV = sum(CF_t/(1+r)^t), including period-0 cash flow. Payback is linearly interpolated in the first period where cumulative cash flow becomes non-negative.",
-        "metrics": {"period_count_including_period_zero": len(flows), "discount_rate_pct": rate, "NPV": npv, "simple_payback_periods": simple_payback, "discounted_payback_periods": discounted_payback},
-        "assumptions": ["Cash flows are equally spaced periods in one currency; period 0 occurs now; the discount rate is per period."],
+        "method": "NPV = sum(CF_t/(1+r)^t), including period-0 cash flow. For a conventional initial-outflow then nonnegative-inflow series, IRR is the bracketed rate in (-99%, 100,000%) with NPV equal to zero. Payback is linearly interpolated in the first period where cumulative cash flow becomes non-negative.",
+        "metrics": {"period_count_including_period_zero": len(flows), "discount_rate_pct": rate, "NPV": npv, "IRR_pct": irr_pct, "simple_payback_periods": simple_payback, "discounted_payback_periods": discounted_payback},
+        "assumptions": ["Cash flows are equally spaced periods in one currency; period 0 occurs now; the discount rate is per period.", "IRR is reported only for conventional cash-flow patterns with one bracketed root."],
         "warnings": warnings,
         "cash_flows": flows,
         "data_status": "USER_INPUT",
