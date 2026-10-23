@@ -11,12 +11,12 @@ The catalog contains exactly 100 target IDs, T001–T100. The status field descr
 | Status | Count |
 |---|---:|
 | `EXTERNAL_CONFIGURATION_REQUIRED` | 5 |
-| `FOUNDATION_ONLY` | 45 |
-| `IMPLEMENTED_NEEDS_VALIDATION` | 47 |
+| `FOUNDATION_ONLY` | 43 |
+| `IMPLEMENTED_NEEDS_VALIDATION` | 49 |
 | `MISSING` | 3 |
 | **Total** | **100** |
 
-Six deterministic quick methods are directly executable inside the existing Core IE Tools screen: T013 Data Quality Profiler, T016 Unit and Currency Converter (currency uses an explicitly supplied rate/source/date), T019 Synthetic Industrial Data Generator, T021 Time Study and Standard Time, T022 Work Sampling Analyzer, and T023 Takt Time and Capacity Calculator. The corresponding functions have golden/validation tests in `tests/test_shoir_100_tool_workbench.py`. These six are **implemented but still need browser/workflow verification**, so they are not marked verified.
+Twelve deterministic quick methods are directly executable inside the existing Core IE Tools screen: T013 Data Quality Profiler, T016 Unit and Currency Converter (currency uses an explicitly supplied rate/source/date), T019 Synthetic Industrial Data Generator, T021 Time Study and Standard Time, T022 Work Sampling Analyzer, T023 Takt Time and Capacity Calculator, T026 OEE, T032 process capability, T042 MTBF/MTTR, T055 EOQ/safety-stock/reorder point, T078 carbon emissions using a user-supplied dated factor, and T081 NPV/simple and discounted payback. T081 intentionally does not calculate IRR; it warns that a separate validated IRR solver is needed. The corresponding functions have golden/validation tests in `tests/test_shoir_100_tool_workbench.py`. These six are **implemented but still need browser/workflow verification**, so they are not marked verified.
 
 The other entries are connected to a related existing workspace only where the source crosswalk provides a route. Selecting “Open related workspace” still goes through the existing shell and subscription policy. A related route is not proof that every specialist acceptance criterion is complete. Foundation-only and missing entries remain visibly identified; `run_tool_calculation` raises `ToolNotImplementedError` rather than fabricating a result for a target without a declared engine.
 
