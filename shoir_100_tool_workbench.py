@@ -874,33 +874,7 @@ def _render_quick_tools(st: Any, tier: str) -> None:
                     else:
                         st.info("No prior dataset snapshot is available in this session.")
 
-        with st.expander("T013 · Profile a file without loading it into the workspace", expanded=False):
-            st.write("Read-only profile for a staged CSV/XLSX file. The active dataset is not replaced.")
-            upload = st.file_uploader("Choose CSV or Excel workbook", type=["csv", "xlsx", "xlsm", "xls"], key="shoir100_profiler_upload")
-            if upload is not None:
-                if upload.size > MAX_PROFILE_BYTES:
-                    st.error("This profiler accepts files up to 20 MiB. Your active dataset was not changed.")
-                else:
-                    try:
-                        raw_bytes = upload.getvalue()
-                        if upload.name.lower().endswith(".csv"):
-                            frame = pd.read_csv(io.BytesIO(raw_bytes))
-                        else:
-                            xls = pd.ExcelFile(io.BytesIO(raw_bytes))
-                            sheet = st.selectbox("Source sheet", xls.sheet_names, key="shoir100_profiler_sheet")
-                            frame = pd.read_excel(xls, sheet_name=sheet)
-                        st.caption(f"Staged: {upload.name} · {len(frame):,} rows × {len(frame.columns):,} columns. Source is preserved.")
-                        st.dataframe(frame.head(10), use_container_width=True, hide_index=True)
-                        if st.button("Profile staged data", key="shoir100_profile_button", type="primary"):
-                            result = run_tool_calculation(tier, "T013", {"dataframe": frame})
-                            st.session_state["shoir100_last_profile"] = result
-                    except ToolEntitlementError as exc:
-                        st.error(str(exc))
-                    except Exception as exc:
-                        st.error(f"Could not read/profile this file. The previous valid result is preserved. Details: {type(exc).__name__}: {exc}")
-            prior = st.session_state.get("shoir100_last_profile")
-            if isinstance(prior, Mapping) and prior.get("tool_id") == "T013":
-                _show_result(st, prior)
+
     with tabs[1]:
         mode = st.radio("Conversion type", ["Physical unit", "Currency with supplied rate"], horizontal=True, key="shoir100_convert_mode")
         value = st.number_input("Value to convert", value=100.0, key="shoir100_convert_value")
