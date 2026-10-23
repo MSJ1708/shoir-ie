@@ -329,26 +329,22 @@ def copilot_gate(prompt: str, tier: str) -> Optional[dict[str, str]]:
             }
     # Canonical T001-T100 names are checked along with legacy Copilot phrases.
     # Display text does not alter the stable tool ID or its entitlement mapping.
-    try:
-        from shoir_100_tool_registry import TOOL_CATALOG
-        for tool in sorted(TOOL_CATALOG, key=lambda item: len(item["canonical_name"]), reverse=True):
-            name = str(tool.get("canonical_name", "")).casefold()
-            required_tier = tool.get("target_minimum_tier")
-            if name and name in p and not tier_allows(tier, required_tier):
-                return {
-                    "required_tier": required_tier,
-                    "current_tier": normalize_tier(tier),
-                    "phrase": name,
-                    "message": (
-                        f"🔒 **{tool['canonical_name']}** is outside your current package. "
-                        f"Your package is **{normalize_tier(tier)}**; this capability requires "
-                        f"**{required_tier}**. I can still explain the method or help with "
-                        "capabilities included in your package."
-                    ),
-                }
-    except Exception:
-        # Legacy gates remain in force if the canonical catalog cannot be loaded.
-        pass
+    from shoir_100_tool_registry import TOOL_CATALOG
+    for tool in sorted(TOOL_CATALOG, key=lambda item: len(item["canonical_name"]), reverse=True):
+        name = str(tool.get("canonical_name", "")).casefold()
+        required_tier = tool.get("target_minimum_tier")
+        if name and name in p and not tier_allows(tier, required_tier):
+            return {
+                "required_tier": required_tier,
+                "current_tier": normalize_tier(tier),
+                "phrase": name,
+                "message": (
+                    f"🔒 **{tool['canonical_name']}** is outside your current package. "
+                    f"Your package is **{normalize_tier(tier)}**; this capability requires "
+                    f"**{required_tier}**. I can still explain the method or help with "
+                    "capabilities included in your package."
+                ),
+            }
     return None
 
 
