@@ -286,7 +286,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=False):
                                 help='Each item needs a unique name, positive length and positive integer quantity.',
                                 key="tool066_parts_json"
                             )
-                            run_method = st.form_submit_button("Solve cutting plan", type="primary", use_container_width=True)
+                            run_method = st.form_submit_button("Solve cutting plan", type="primary", use_container_width=True, key="tool066_run")
                         elif selected_tool["tool_id"] == "T075":
                             st.caption("Checks aligned forecast/actual observations against an absolute mean-absolute-error threshold.")
                             predictions_text = st.text_input(
@@ -303,7 +303,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=False):
                                 "Trailing window (0 = all observations)", min_value=0, max_value=10000,
                                 value=0, step=1, key="tool075_window"
                             )
-                            run_method = st.form_submit_button("Check forecast drift", type="primary", use_container_width=True)
+                            run_method = st.form_submit_button("Check forecast drift", type="primary", use_container_width=True, key="tool075_run")
                         else:
                             st.caption("Balanced, independent, two-sided two-sample t-test; normal outcomes and equal-variance assumptions.")
                             effect_size = st.number_input(
@@ -322,7 +322,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=False):
                                 "Maximum sample size per group to search", min_value=2, max_value=100000,
                                 value=10000, step=100, key="tool085_search_limit"
                             )
-                            run_method = st.form_submit_button("Calculate sample size", type="primary", use_container_width=True)
+                            run_method = st.form_submit_button("Calculate sample size", type="primary", use_container_width=True, key="tool085_run")
 
                     if run_method:
                         # Drop the prior output before a new run; a failed run must not appear current.
