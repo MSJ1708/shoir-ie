@@ -242,7 +242,9 @@ def calculate_carbon_emissions(activity_quantity: float, emission_factor_kg_per_
 def calculate_economics(initial_investment: float, annual_cash_flows: Iterable[float], discount_rate_percent: float) -> dict[str, Any]:
     """NPV, IRR and simple payback for conventional profiles with nonnegative future flows."""
     investment = _number(initial_investment, "Initial investment", 0, True)
-    flows = [_number(v, "Annual cash flow", 0) for v in annual_cash_flows]
+    flows = [_number(v, "Annual cash flow") for v in annual_cash_flows]
+    if any(v < 0 for v in flows):
+        raise ValueError("Annual cash flows after the initial investment must be nonnegative for this supported IRR/payback method.")
     if not flows or not any(v > 0 for v in flows):
         raise ValueError("Enter at least one positive annual cash flow.")
     rate = _number(discount_rate_percent, "Discount rate (%)") / 100
