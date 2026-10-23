@@ -316,7 +316,7 @@ def analyze_work_sampling(
             raise ValueError("Every activity category needs a non-empty name.")
         key = name.casefold()
         if key in seen:
-            raise ValueError(f"Activity category names must be unique after trimming/case normalization: {name}.")
+            raise ValueError(f"Activity category names must be unique after trimming/case normalization (normalized names must be unique): {name}.")
         seen.add(key)
         if isinstance(raw_count, bool):
             raise ValueError(f"Observation count for {name} must be a whole number.")
@@ -418,7 +418,7 @@ def analyze_pareto_root_cause(
             raise ValueError("Every Pareto category needs a non-empty name.")
         key = name.casefold()
         if key in seen:
-            raise ValueError(f"Pareto category names must be unique after trimming/case normalization: {name}.")
+            raise ValueError(f"Pareto category names must be unique after trimming/case normalization (normalized names must be unique): {name}.")
         seen.add(key)
         if isinstance(raw_count, bool):
             raise ValueError(f"Count for {name} must be a non-negative whole number.")
@@ -600,9 +600,10 @@ def assess_5s_audit(items: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         "formula": "Pillar score = mean item score / 4 × 100; overall score = unweighted mean of the five pillar scores.",
         "rubric": "0 = absent; 1 = largely absent; 2 = inconsistent/partial; 3 = implemented with gaps; 4 = consistently sustained. Adapt and approve this rubric locally.",
         "warning": (
-            f"{len(priority_actions)} checklist item(s) scored 2 or below; {owner_gaps} need an assigned owner and ISO due date. This is a self-assessment, not a certified audit."
-            if len(priority_actions) else
-            "No item scored 2 or below on this self-assessed checklist. This is not a certified audit or independent verification."
+            (f"{len(priority_actions)} checklist item(s) scored 2 or below; {owner_gaps} need an assigned owner and ISO due date."
+             if len(priority_actions) else
+             "No item scored 2 or below on this self-assessed checklist.")
+            + " This is a self-assessment, not a certified audit or independent verification."
         ),
     }
 
@@ -690,6 +691,11 @@ def build_kaizen_a3_record(
         outcome_status = "HUMAN_REVIEW_RECORDED"
     if progress is not None and (progress < 0.0 or progress > 100.0):
         warnings.append("Progress falls outside 0–100%; inspect measurement timing, target direction and process variation.")
+    warning_text = " ".join(warnings)
+    if outcome_status != "HUMAN_REVIEW_RECORDED" and "do not report realized benefit or verified savings" not in warning_text.casefold():
+        warning_text = (warning_text + " " if warning_text else "") + "Do not report realized benefit or verified savings without a dated human review and supporting evidence."
+    if outcome_status == "HUMAN_REVIEW_RECORDED" and not warning_text:
+        warning_text = "A dated human review and post-change evidence reference are recorded; this is not an audited savings certificate."
 
     return {
         "status": status,
@@ -713,7 +719,7 @@ def build_kaizen_a3_record(
         "formula": "Progress (%) = (actual after change − baseline) / (target − baseline) × 100. Values are not clamped; direction is not inferred.",
         "assumptions": "The metric, unit, baseline, target and time window must be comparable; a root-cause statement is a hypothesis unless independently evidenced.",
         "warnings": warnings,
-        "warning": " ".join(warnings) if warnings else "A dated human review and post-change evidence reference are recorded; this is not an audited savings certificate.",
+        "warning": warning_text,
     }
 
 
