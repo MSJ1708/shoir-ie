@@ -154,6 +154,13 @@ MODULE_REQUIREMENTS = {
 }
 
 COPILOT_TOOL_REQUIREMENTS = {
+    "acceptance sampling": "Professional",
+    "quality cost": "Mid-Tier Pro",
+    "cost of poor quality": "Mid-Tier Pro",
+    "portfolio scoring": "Professional",
+    "project portfolio": "Professional",
+    "statistical power": "Research Pack",
+    "sample size": "Research Pack",
     "100-tool engineering hub": "Starter",
     "standard time": "Starter",
     "work sampling": "Starter",
