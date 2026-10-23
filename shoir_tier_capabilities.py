@@ -154,6 +154,20 @@ MODULE_REQUIREMENTS = {
 }
 
 COPILOT_TOOL_REQUIREMENTS = {
+    "100-tool engineering hub": "Starter",
+    "standard time": "Starter",
+    "work sampling": "Starter",
+    "takt time": "Starter",
+    "flow distance": "Starter",
+    "flow-distance": "Starter",
+    "handling cost": "Starter",
+    "calculate oee": "Mid-Tier Pro",
+    "oee analysis": "Mid-Tier Pro",
+    "mtbf": "Professional",
+    "mttr": "Professional",
+    "eoq": "Mid-Tier Pro",
+    "inventory policy": "Mid-Tier Pro",
+    "carbon emissions": "Mid-Tier Pro",
     "shadowshift": "Enterprise",
     "run milp": "Starter",
     "optimize the network": "Starter",
