@@ -183,3 +183,21 @@ def test_stage_copilot_decision_propagates_explicit_gate_denial(monkeypatch):
     monkeypatch.setattr(shoir_enterprise_layer, "enforce_action_gate", deny)
     with pytest.raises(PermissionError, match="test authorization denial"):
         stage_copilot_decision({"result": pd.DataFrame()}, actor="test-actor")
+
+
+def test_stage_copilot_decision_surfaces_canonical_audit_failure(monkeypatch):
+    import industrial_experience
+    import shoir_enterprise_layer as enterprise_layer
+
+    monkeypatch.setattr(enterprise_layer, "enforce_action_gate", lambda *a, **kw: None)
+    monkeypatch.setattr(industrial_experience, "create_decision", lambda *a, **kw: "DECISION-TEST")
+    monkeypatch.setattr(industrial_experience, "save_decision_spec", lambda *a, **kw: None)
+    monkeypatch.setattr(industrial_experience, "register_lineage", lambda *a, **kw: None)
+    monkeypatch.setattr(enterprise_layer, "upsert_canonical_entity", lambda *a, **kw: "ENTITY-TEST")
+
+    def fail_audit(*args, **kwargs):
+        raise RuntimeError("audit store unavailable")
+
+    monkeypatch.setattr(enterprise_layer, "record_canonical_event", fail_audit)
+    with pytest.raises(RuntimeError, match="Decision DECISION-TEST was created.*canonical audit/linkage completion failed"):
+        stage_copilot_decision({"result": pd.DataFrame()}, actor="test-actor", workspace="test-workspace")
