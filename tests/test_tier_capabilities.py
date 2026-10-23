@@ -2,7 +2,7 @@ import ast
 import csv
 from pathlib import Path
 
-from shoir_tier_capabilities import (MODULE_REQUIREMENTS, TIER_ORDER, audit_module_entitlement_coverage, available_modules, copilot_gate, module_required_tier, normalize_tier, tier_allows)
+from shoir_tier_capabilities import (COPILOT_TOOL_REQUIREMENTS, MODULE_REQUIREMENTS, TIER_ORDER, audit_module_entitlement_coverage, available_modules, copilot_gate, module_required_tier, normalize_tier, tier_allows)
 from industrial_platform import PLATFORM_CATALOG, TIER_FEATURES, tier_allows as platform_tier_allows
 
 
@@ -36,6 +36,20 @@ def test_copilot_protected_actions_fail_closed_for_unresolved_tier():
     assert gate is not None
     assert gate["current_tier"] == "UNRESOLVED"
     assert "could not be verified" in gate["message"]
+
+def test_all_target_ids_and_names_are_enforced_by_copilot_policy():
+    from shoir_100_tool_registry import TOOL_TARGETS
+    for target in TOOL_TARGETS:
+        canonical = target["canonical_name"].casefold()
+        identifier = target["tool_id"].casefold()
+        assert COPILOT_TOOL_REQUIREMENTS[canonical] == target["target_minimum_tier"]
+        assert COPILOT_TOOL_REQUIREMENTS[identifier] == target["target_minimum_tier"]
+    gate = copilot_gate("run T066 bin packing", "Starter Tier")
+    assert gate is not None
+    assert gate["required_tier"] == "Professional"
+    gate = copilot_gate("run Cutting Stock and Bin Packing", "Mid-Tier Pro")
+    assert gate is not None
+    assert gate["required_tier"] == "Professional"
 
 
 def test_platform_tier_gate_matches_shared_research_add_on_policy():
