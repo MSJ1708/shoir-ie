@@ -16,6 +16,27 @@ def test_tier_order_and_research_are_distinct():
     assert not tier_allows("Research Pack", "Enterprise Plus")
     assert not tier_allows("Enterprise Plus", "Research Pack")
 
+def test_unknown_tiers_and_unknown_required_levels_fail_closed():
+    assert normalize_tier("Super Enterprise") == "UNRESOLVED"
+    assert normalize_tier("premium-but-unrecognized") == "UNRESOLVED"
+    assert not tier_allows("Super Enterprise", "Starter")
+    assert not tier_allows("Enterprise", "unrecognized protected tier")
+    assert not tier_allows("", "Starter")
+
+
+def test_unmapped_module_names_are_not_assumed_to_be_free():
+    candidates = ["AI Copilot", "Module with no explicit policy"]
+    assert available_modules("Enterprise", candidates) == ["AI Copilot"]
+    assert available_modules("unknown package", candidates) == []
+    assert available_modules("Research Pack ($30 add-on)", candidates) == []
+
+
+def test_copilot_protected_actions_fail_closed_for_unresolved_tier():
+    gate = copilot_gate("execute MILP optimization", "Super Enterprise")
+    assert gate is not None
+    assert gate["current_tier"] == "UNRESOLVED"
+    assert "could not be verified" in gate["message"]
+
 
 def test_platform_tier_gate_matches_shared_research_add_on_policy():
     # Research Pack inherits the Enterprise base but not Enterprise Plus.
