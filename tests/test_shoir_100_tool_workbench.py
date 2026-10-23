@@ -35,7 +35,7 @@ from shoir_100_tool_workbench import (
     carbon_emissions,
     engineering_economics,
 )
-from shoir_tier_capabilities import available_modules, copilot_gate, tier_allows
+from shoir_tier_capabilities import available_modules, copilot_capabilities, copilot_gate, tier_allows
 
 
 ORDINARY = ("Starter", "Mid-Tier Pro", "Professional", "Enterprise", "Enterprise Plus")
@@ -108,6 +108,12 @@ def test_both_entitlement_helpers_fail_closed_for_unknown_values():
     assert copilot_gate("run MTBF analysis", "Mid-Tier Pro") is not None
     assert copilot_gate("calculate NPV", "Starter") is not None
     assert copilot_gate("calculate NPV", "Mid-Tier Pro") is None
+    unknown_copilot = copilot_capabilities("Researcher", ["Core IE Tools", "Research AI"])
+    assert unknown_copilot["tier"] == "Unrecognized package"
+    assert unknown_copilot["modules"] == []
+    assert not unknown_copilot["can_research"]
+    assert not unknown_copilot["can_enterprise"]
+    assert not unknown_copilot["can_professional"]
 
 
 def test_visible_tools_preserves_locked_entries_and_reports_access_separately():
