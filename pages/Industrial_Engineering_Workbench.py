@@ -380,7 +380,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                 "Copilot action, API and export path must enforce their own server-side entitlement checks."
             )
 
-            if selected_tool["tool_id"] in {"T021", "T022", "T023", "T026", "T028", "T029", "T030", "T032", "T055", "T066", "T075", "T078", "T081", "T085"}:
+            if selected_tool["tool_id"] in {"T016", "T021", "T022", "T023", "T026", "T028", "T029", "T030", "T031", "T032", "T040", "T042", "T055", "T056", "T066", "T075", "T078", "T081", "T085"}:
                 st.markdown("---")
                 st.markdown("**Run focused specialist method**")
                 st.caption(
@@ -394,7 +394,48 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                     )
                 else:
                     with st.form("shoir_target_method_form_" + selected_tool["tool_id"]):
-                        if selected_tool["tool_id"] == "T021":
+                        if selected_tool["tool_id"] == "T016":
+                            st.caption("Physical units use fixed conversion factors. Currency conversion requires a dated, sourced rate you provide.")
+                            amount_to_convert = st.number_input("Value to convert", value=100.0, step=1.0, key="tool016_amount")
+                            unit_choices = ["mm", "cm", "m", "km", "in", "ft", "mi", "mg", "g", "kg", "lb", "oz", "ms", "s", "min", "h", "day", "mL", "L", "m³", "gal", "Wh", "kWh", "MJ", "GJ", "Pa", "kPa", "bar", "psi", "°C", "°F", "K", "SAR", "USD", "EUR", "GBP", "AED", "INR", "JPY"]
+                            source_unit = st.selectbox("Source unit or currency", unit_choices, index=0, key="tool016_source")
+                            target_unit = st.selectbox("Target unit or currency", unit_choices, index=1, key="tool016_target")
+                            exchange_rate_value = st.number_input("Exchange rate (target currency per source currency unit)", min_value=0.000001, value=1.0, step=0.01, key="tool016_rate")
+                            exchange_rate_date_value = st.text_input("Exchange-rate date (YYYY-MM-DD; currency conversion only)", key="tool016_rate_date")
+                            exchange_rate_source_value = st.text_input("Exchange-rate source (currency conversion only)", key="tool016_rate_source")
+                            run_method = st.form_submit_button("Convert value", type="primary", use_container_width=True, key="tool016_run")
+                        elif selected_tool["tool_id"] == "T031":
+                            st.caption("Individuals/Moving-Range control chart. Only points outside calculated 3-sigma limits are reported; control limits are not specification limits.")
+                            spc_measurements_text = st.text_input("Chronological measurements (comma-separated)", "10, 11, 9, 10, 12, 11", key="tool031_measurements")
+                            spc_unit = st.text_input("Measurement unit", "units", key="tool031_unit")
+                            run_method = st.form_submit_button("Calculate I-MR control limits", type="primary", use_container_width=True, key="tool031_run")
+                        elif selected_tool["tool_id"] == "T040":
+                            st.caption("Scoped cost-of-poor-quality estimate. Scrap and rework are mutually exclusive dispositions of defective units.")
+                            quality_period = st.text_input("Measurement period", "Example period — replace with actual period", key="tool040_period")
+                            quality_currency = st.text_input("Cost currency code", "SAR", key="tool040_currency")
+                            quality_total_units = st.number_input("Total produced units", min_value=1, value=1000, step=100, key="tool040_total")
+                            quality_defects = st.number_input("Defective units", min_value=0, value=40, step=5, key="tool040_defects")
+                            quality_scrap_units = st.number_input("Scrap units", min_value=0, value=10, step=1, key="tool040_scrap_units")
+                            quality_rework_units = st.number_input("Reworked units", min_value=0, value=20, step=1, key="tool040_rework_units")
+                            quality_scrap_cost = st.number_input("Scrap cost per unit", min_value=0.0, value=20.0, step=1.0, key="tool040_scrap_cost")
+                            quality_rework_cost = st.number_input("Rework cost per unit", min_value=0.0, value=8.0, step=1.0, key="tool040_rework_cost")
+                            quality_inspection_cost = st.number_input("Inspection cost for period", min_value=0.0, value=400.0, step=25.0, key="tool040_inspection_cost")
+                            run_method = st.form_submit_button("Calculate quality costs", type="primary", use_container_width=True, key="tool040_run")
+                        elif selected_tool["tool_id"] == "T042":
+                            st.caption("Uses complete recorded repair events only. Censored intervals and incomplete observation windows are not inferred.")
+                            mtbf_operating_hours = st.number_input("Accumulated operating hours (repair downtime excluded)", min_value=0.001, value=600.0, step=50.0, key="tool042_operating_hours")
+                            repair_durations_text = st.text_input("Repair durations in hours (comma-separated)", "2, 1.5, 3", key="tool042_repairs")
+                            run_method = st.form_submit_button("Calculate MTBF / MTTR", type="primary", use_container_width=True, key="tool042_run")
+                        elif selected_tool["tool_id"] == "T056":
+                            st.caption("ABC uses annual usage value; XYZ uses population coefficient of variation over aligned historical periods.")
+                            inventory_items_json = st.text_area("SKU data (JSON list)", value='[{"sku":"A","annual_demand":100,"unit_cost":8,"period_demand":[8,10,12]},{"sku":"B","annual_demand":50,"unit_cost":3,"period_demand":[1,10,3]},{"sku":"C","annual_demand":25,"unit_cost":2,"period_demand":[1,20,0]}]', key="tool056_items")
+                            inventory_currency = st.text_input("Unit-cost currency", "SAR", key="tool056_currency")
+                            abc_a_threshold = st.number_input("A-class cumulative cutoff (fraction)", min_value=0.01, max_value=0.99, value=0.80, step=0.01, key="tool056_a_threshold")
+                            abc_b_threshold = st.number_input("B-class cumulative cutoff (fraction)", min_value=0.02, max_value=1.0, value=0.95, step=0.01, key="tool056_b_threshold")
+                            xyz_x_cutoff = st.number_input("Maximum X demand CV", min_value=0.0, value=0.50, step=0.05, key="tool056_x_cv")
+                            xyz_y_cutoff = st.number_input("Maximum Y demand CV", min_value=0.01, value=1.0, step=0.05, key="tool056_y_cv")
+                            run_method = st.form_submit_button("Classify ABC / XYZ inventory", type="primary", use_container_width=True, key="tool056_run")
+                        elif selected_tool["tool_id"] == "T021":
                             st.caption("Observed times are retained as entered. The allowance is defined as a percentage of standard time.")
                             observation_text = st.text_input(
                                 "Observed times (comma-separated)", "1, 2, 3",
@@ -669,6 +710,16 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                         current_tool_inputs = {"activity_amount": carbon_amount, "activity_unit": carbon_unit, "emission_factor": carbon_factor, "factor_unit": carbon_factor_unit, "factor_source": carbon_source, "factor_date": carbon_date, "boundary": carbon_boundary}
                     elif selected_tool["tool_id"] == "T081":
                         current_tool_inputs = {"cash_flows_text": economics_cash_flows, "discount_rate_pct": economics_rate, "currency": economics_currency, "period_unit": economics_period}
+                    elif selected_tool["tool_id"] == "T016":
+                        current_tool_inputs = {"amount": amount_to_convert, "source_unit": source_unit, "target_unit": target_unit, "exchange_rate": exchange_rate_value, "exchange_rate_date": exchange_rate_date_value, "exchange_rate_source": exchange_rate_source_value}
+                    elif selected_tool["tool_id"] == "T031":
+                        current_tool_inputs = {"measurements_text": spc_measurements_text, "unit": spc_unit}
+                    elif selected_tool["tool_id"] == "T040":
+                        current_tool_inputs = {"period": quality_period, "currency": quality_currency, "total_units": quality_total_units, "defective_units": quality_defects, "scrap_units": quality_scrap_units, "rework_units": quality_rework_units, "scrap_cost_per_unit": quality_scrap_cost, "rework_cost_per_unit": quality_rework_cost, "inspection_cost": quality_inspection_cost}
+                    elif selected_tool["tool_id"] == "T042":
+                        current_tool_inputs = {"operating_hours": mtbf_operating_hours, "repair_durations_hours_text": repair_durations_text}
+                    elif selected_tool["tool_id"] == "T056":
+                        current_tool_inputs = {"items_json": inventory_items_json, "currency": inventory_currency, "a_threshold": abc_a_threshold, "b_threshold": abc_b_threshold, "x_cv_max": xyz_x_cutoff, "y_cv_max": xyz_y_cutoff}
                     else:
                         current_tool_inputs = {
                             "cohen_d": effect_size, "alpha": alpha,
@@ -692,6 +743,9 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 plan_two_sample_t_sample_size, calculate_oee,
                                 analyze_process_capability, plan_inventory_policy,
                                 calculate_carbon_emissions, analyze_engineering_economics,
+                                convert_units_or_currency, analyze_spc_individuals,
+                                analyze_quality_cost_defects, analyze_mtbf_mttr,
+                                analyze_abc_xyz_inventory,
                             )
                             if selected_tool["tool_id"] == "T021":
                                 try:
@@ -856,6 +910,27 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 except ValueError as exc:
                                     raise ValueError("Cash flows must be comma-separated numbers.") from exc
                                 result = analyze_engineering_economics(cash_flows, economics_rate, currency=economics_currency, period_unit=economics_period)
+                            elif selected_tool["tool_id"] == "T016":
+                                result = convert_units_or_currency(amount_to_convert, source_unit, target_unit, exchange_rate=exchange_rate_value, exchange_rate_date=exchange_rate_date_value, exchange_rate_source=exchange_rate_source_value)
+                            elif selected_tool["tool_id"] == "T031":
+                                try:
+                                    values = [float(item.strip()) for item in spc_measurements_text.split(",") if item.strip()]
+                                except ValueError as exc:
+                                    raise ValueError("SPC measurements must be comma-separated numbers.") from exc
+                                result = analyze_spc_individuals(values, unit=spc_unit)
+                            elif selected_tool["tool_id"] == "T040":
+                                result = analyze_quality_cost_defects(quality_total_units, quality_defects, quality_scrap_units, quality_rework_units, quality_scrap_cost, quality_rework_cost, quality_inspection_cost, currency=quality_currency, period=quality_period)
+                            elif selected_tool["tool_id"] == "T042":
+                                try:
+                                    durations = [float(item.strip()) for item in repair_durations_text.split(",") if item.strip()]
+                                except ValueError as exc:
+                                    raise ValueError("Repair durations must be comma-separated numbers.") from exc
+                                result = analyze_mtbf_mttr(mtbf_operating_hours, durations)
+                            elif selected_tool["tool_id"] == "T056":
+                                inventory_items = json.loads(inventory_items_json)
+                                if not isinstance(inventory_items, list):
+                                    raise ValueError("SKU data must be a JSON list of objects.")
+                                result = analyze_abc_xyz_inventory(inventory_items, a_threshold=abc_a_threshold, b_threshold=abc_b_threshold, x_cv_max=xyz_x_cutoff, y_cv_max=xyz_y_cutoff, currency=inventory_currency)
                             else:
                                 result = plan_two_sample_t_sample_size(
                                     effect_size, alpha, target_power,
@@ -867,7 +942,67 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                         except Exception as exc:
                             st.error(f"Tool run could not be completed safely: {exc}")
 
-                    if selected_tool["tool_id"] == "T021":
+                    if selected_tool["tool_id"] == "T016":
+                        result = st.session_state.get("shoir_tool_result_T016")
+                        if result:
+                            _show_focused_tool_persistence("T016", result, current_tool_inputs)
+                            st.metric(f"Converted value ({result['target_unit']})", f"{result['converted_value']:,.8g}")
+                            st.markdown(f"**Source value:** {result['input_value']:,.8g} {result['source_unit']}")
+                            st.caption(result["formula"])
+                            st.warning(result["warning"])
+                            if result.get("exchange_rate_date"):
+                                st.caption(f"Rate source: {result['exchange_rate_source']} · rate date: {result['exchange_rate_date']} · rate direction: target per source")
+                    elif selected_tool["tool_id"] == "T031":
+                        result = st.session_state.get("shoir_tool_result_T031")
+                        if result:
+                            _show_focused_tool_persistence("T031", result, current_tool_inputs)
+                            c1, c2, c3 = st.columns(3)
+                            c1.metric("Process mean", f"{result['mean']:,.5g} {result['unit']}")
+                            c2.metric("Moving-range average", f"{result['moving_range_average']:,.5g}")
+                            c3.metric("I-chart UCL / LCL", f"{result['individuals_ucl']:,.5g} / {result['individuals_lcl']:,.5g}")
+                            st.markdown(f"**Signal status:** {result['status']}")
+                            st.caption(result["formula"])
+                            st.warning(result["warning"])
+                            st.dataframe(result["chart_data"], use_container_width=True, hide_index=True)
+                            chart = result["chart_data"]
+                            st.plotly_chart(px.line(chart, x="Observation", y=[f"Measurement ({result['unit']})", f"I center ({result['unit']})", f"I UCL ({result['unit']})", f"I LCL ({result['unit']})"], markers=True, title="Individuals control chart"), use_container_width=True)
+                            st.plotly_chart(px.line(chart, x="Observation", y=["Moving range", "MR center", "MR UCL", "MR LCL"], markers=True, title="Moving-range control chart"), use_container_width=True)
+                    elif selected_tool["tool_id"] == "T040":
+                        result = st.session_state.get("shoir_tool_result_T040")
+                        if result:
+                            _show_focused_tool_persistence("T040", result, current_tool_inputs)
+                            c1, c2, c3 = st.columns(3)
+                            c1.metric(f"Scoped COPQ ({result['currency']})", f"{result['cost_of_poor_quality']:,.2f}")
+                            c2.metric("Defective-unit rate", f"{result['defective_rate_pct']:.2f}%")
+                            c3.metric(f"COPQ per unit ({result['currency']})", f"{result['copq_per_produced_unit']:,.3f}")
+                            st.caption(result["formula"])
+                            st.warning(result["warning"])
+                            st.dataframe(result["cost_breakdown"], use_container_width=True, hide_index=True)
+                            st.plotly_chart(px.bar(result["cost_breakdown"], x="Cost component", y=f"Cost ({result['currency']})", title="Scoped quality-cost components"), use_container_width=True)
+                    elif selected_tool["tool_id"] == "T042":
+                        result = st.session_state.get("shoir_tool_result_T042")
+                        if result:
+                            _show_focused_tool_persistence("T042", result, current_tool_inputs)
+                            c1, c2, c3 = st.columns(3)
+                            c1.metric("MTBF", f"{result['mtbf_hours']:,.3f} h")
+                            c2.metric("MTTR", f"{result['mttr_hours']:,.3f} h")
+                            c3.metric("Availability estimate", f"{result['steady_state_availability_estimate_pct']:.3f}%")
+                            st.caption(result["formula"])
+                            st.warning(result["warning"])
+                            st.dataframe(result["repair_summary"], use_container_width=True, hide_index=True)
+                    elif selected_tool["tool_id"] == "T056":
+                        result = st.session_state.get("shoir_tool_result_T056")
+                        if result:
+                            _show_focused_tool_persistence("T056", result, current_tool_inputs)
+                            c1, c2 = st.columns(2)
+                            c1.metric("SKUs classified", str(result["sku_count"]))
+                            c2.metric(f"Total annual usage value ({result['currency']})", f"{result['annual_usage_value_total']:,.2f}")
+                            st.caption(result["formula"])
+                            st.warning(result["warning"])
+                            st.dataframe(result["classification"], use_container_width=True, hide_index=True)
+                            value_column = f"Annual usage value ({result['currency']})"
+                            st.plotly_chart(px.bar(result["classification"], x="SKU", y=value_column, color="ABC", title="ABC value segmentation"), use_container_width=True)
+                    elif selected_tool["tool_id"] == "T021":
                         result = st.session_state.get("shoir_tool_result_T021")
                         if result:
                             _show_focused_tool_persistence("T021", result, current_tool_inputs)
