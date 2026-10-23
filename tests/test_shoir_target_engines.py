@@ -290,3 +290,109 @@ def test_pareto_root_cause_rejects_invalid_counts_incomplete_whys_and_bad_dates(
         analyze_pareto_root_cause({"Machine": 1}, why_chain=["a", "b", "c", "d", "e"])
     with pytest.raises(ValueError, match="ISO YYYY-MM-DD"):
         analyze_pareto_root_cause({"Machine": 1}, due_date="tomorrow")
+
+
+def test_5s_audit_reports_equal_pillar_scores_and_action_assignment_gaps():
+    from shoir_target_engines import assess_5s_audit
+
+    items = [
+        {"category": "Sort", "criterion": "Remove unnecessary items", "score": 1, "evidence": "photo-1", "owner": "", "due_date": ""},
+        {"category": "Set in Order", "criterion": "Label storage locations", "score": 2, "evidence": "audit-2", "owner": "Shift lead", "due_date": "2026-11-01"},
+        {"category": "Shine", "criterion": "Clean stations", "score": 3},
+        {"category": "Standardize", "criterion": "Display standard work", "score": 4},
+        {"category": "Sustain", "criterion": "Run weekly reviews", "score": 4},
+    ]
+    result = assess_5s_audit(items)
+    assert result["status"] == "FOLLOW_UP_DETAILS_MISSING"
+    assert result["overall_5s_score_pct_equal_pillar_weight"] == pytest.approx(70.0)
+    assert result["item_weighted_score_pct"] == pytest.approx(70.0)
+    assert result["priority_action_count"] == 2
+    assert result["priority_action_assignment_gaps"] == 1
+    assert result["pillar_summary"]["5S pillar"].tolist() == [
+        "Sort", "Set in Order", "Shine", "Standardize", "Sustain"
+    ]
+
+    items[0]["owner"] = "Area owner"
+    items[0]["due_date"] = "2026-11-05"
+    assigned = assess_5s_audit(items)
+    assert assigned["status"] == "FOLLOW_UP_REQUIRED"
+    assert assigned["priority_action_assignment_gaps"] == 0
+    assert "not a certified audit" in assigned["warning"]
+
+
+def test_5s_audit_rejects_missing_pillar_duplicate_criteria_bad_scores_and_dates():
+    from shoir_target_engines import assess_5s_audit
+
+    five = [
+        {"category": category, "criterion": f"Criterion {index}", "score": 3}
+        for index, category in enumerate(["Sort", "Set in Order", "Shine", "Standardize", "Sustain"])
+    ]
+    with pytest.raises(ValueError, match="each 5S pillar"):
+        assess_5s_audit(five[:-1])
+    duplicate = [dict(row) for row in five]
+    duplicate[-1]["criterion"] = duplicate[0]["criterion"]
+    with pytest.raises(ValueError, match="must be unique"):
+        assess_5s_audit(duplicate)
+    fractional = [dict(row) for row in five]
+    fractional[0]["score"] = 2.5
+    with pytest.raises(ValueError, match="whole number from 0 to 4"):
+        assess_5s_audit(fractional)
+    invalid_date = [dict(row) for row in five]
+    invalid_date[0].update(score=1, owner="Owner", due_date="next week")
+    with pytest.raises(ValueError, match="ISO YYYY-MM-DD"):
+        assess_5s_audit(invalid_date)
+
+
+def test_kaizen_a3_computes_signed_progress_without_claiming_unverified_savings():
+    from shoir_target_engines import build_kaizen_a3_record
+
+    result = build_kaizen_a3_record(
+        title="Reduce cycle time",
+        problem_statement="Cycle time exceeds target",
+        metric_name="Cycle time",
+        unit="minutes per unit",
+        baseline_value=100,
+        target_value=80,
+        actual_after_value=90,
+        root_cause_hypothesis="Setup standard is not followed",
+        countermeasure="Standardize and audit setup steps",
+        owner="Process engineer",
+        due_date="2026-11-15",
+        baseline_evidence="baseline-run-101",
+        implementation_status="In Progress",
+    )
+    assert result["status"] == "In Progress"
+    assert result["outcome_status"] == "OBSERVED_NOT_VERIFIED"
+    assert result["target_progress_pct"] == pytest.approx(50.0)
+    assert result["remaining_difference_to_target"] == pytest.approx(-10.0)
+    assert result["baseline_evidence"] == "baseline-run-101"
+    assert "do not report realized benefit or verified savings" in result["warning"]
+
+
+def test_kaizen_a3_requires_comparable_targets_and_evidence_for_verified_status():
+    from shoir_target_engines import build_kaizen_a3_record
+
+    required = dict(
+        title="Improve yield",
+        problem_statement="Yield below target",
+        metric_name="Yield",
+        unit="percent",
+        baseline_value=80,
+        target_value=90,
+        root_cause_hypothesis="Cause pending review",
+        countermeasure="Test revised process settings",
+        owner="Quality engineer",
+        due_date="2026-11-15",
+    )
+    with pytest.raises(ValueError, match="differ from baseline"):
+        build_kaizen_a3_record(**{**required, "target_value": 80})
+    with pytest.raises(ValueError, match="post-change evidence reference"):
+        build_kaizen_a3_record(**required, actual_after_value=88, implementation_status="Verified")
+    verified = build_kaizen_a3_record(
+        **required, actual_after_value=88, implementation_status="Verified",
+        post_change_evidence="quality-review-23", review_date="2026-11-20",
+    )
+    assert verified["outcome_status"] == "HUMAN_REVIEW_RECORDED"
+    assert verified["warnings"] == []
+    with pytest.raises(ValueError, match="ISO YYYY-MM-DD"):
+        build_kaizen_a3_record(**{**required, "due_date": "Friday"})
