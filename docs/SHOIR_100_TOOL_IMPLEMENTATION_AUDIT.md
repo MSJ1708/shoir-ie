@@ -2,8 +2,7 @@
 
 **Source baseline:** `3a73ada0be2ea5e85903b9c8937f8a9387ee061d` (main, 2026-10-21)  
 **Implementation branch:** `audit/shoir-100-tools-20261023`  
-**Latest branch head:** `a76237f204ba2c6136c16d732c6e8fbc55367899`  
-**Last completed full-test code revision:** `9a1a61c330a70bc9efa22af0c24acc3d839cd8bd`  
+**Latest validated code-bearing revision:** `a76237f204ba2c6136c16d732c6e8fbc55367899`  
 **Release decision for the full 100-tool scope:** **NO-GO — incomplete scope and hosted/authenticated verification blocked**
 
 ## Summary
@@ -47,17 +46,20 @@ These counts are conservative source-audit classifications. They are not a tool 
 
 ## Verification evidence
 
-The last completed full-suite code revision tested by GitHub Actions is `9a1a61c330a70bc9efa22af0c24acc3d839cd8bd`. The subsequent authenticated-execution guard and guest-denial regression were added afterward; CI workflows for the latest branch head `a76237f204ba2c6136c16d732c6e8fbc55367899` are running, so the results below must not be represented as validation of that final access-control change. Results observed for revision `9a1a61c330a70bc9efa22af0c24acc3d839cd8bd`:
+The current code-bearing revision verified by the completed automated/local checks is `a76237f204ba2c6136c16d732c6e8fbc55367899`. Verified results:
 
-- Full test workflow [39977967543](https://github.com/MSJ1708/shoir-ie/actions/runs/39977967543): `python -m pytest -q tests` **659 passed, 2 skipped, 28 warnings**.
-- Platform tests [39977967664](https://github.com/MSJ1708/shoir-ie/actions/runs/39977967664): **passed**.
-- Engine regression [39977967572](https://github.com/MSJ1708/shoir-ie/actions/runs/39977967572): **6 passed, 1 warning**.
-- Security/quality workflow [39977967603](https://github.com/MSJ1708/shoir-ie/actions/runs/39977967603): **passed**, including compile, regression tests, dependency audit and secret-pattern guard.
-- Validation job [39977967700](https://github.com/MSJ1708/shoir-ie/actions/runs/39977967700): compilation, regression tests, required-module parse checks, and top-level application import smoke (**54 statements**) passed. The final local Chromium desktop/mobile smoke was still in progress at the time this section was updated; do not treat it as a pass until its job and artifact are complete.
-- Hosted public-site smoke in [39977967700](https://github.com/MSJ1708/shoir-ie/actions/runs/39977967700): **failed**. The public Streamlit endpoint returned HTTP 200, but its rendered text was the Streamlit “This app has gone to sleep due to inactivity” screen; the Shoir-IE application frame could not be located. The browser recorded no uncaught JavaScript errors, but it did record a failed 404 resource. This is an availability/hosted-rendering failure, not a pass.
-- A test on the preceding revision caught a strict DataFrame round-trip dtype mismatch in the new persistence test; dtype metadata restoration was added after that failure. The current full test suite above passes the corrected test.
+- Full test workflow [39979010804](https://github.com/MSJ1708/shoir-ie/actions/runs/39979010804): `python -m pytest -q tests` **660 passed, 2 skipped, 28 warnings**. This includes the T021 DataFrame/input round-trip test and guest-denial Workbench AppTest.
+- Platform tests [39979011334](https://github.com/MSJ1708/shoir-ie/actions/runs/39979011334): **passed**.
+- Engine regression [39979011150](https://github.com/MSJ1708/shoir-ie/actions/runs/39979011150): **6 passed, 1 warning**.
+- Security/quality workflow [39979010930](https://github.com/MSJ1708/shoir-ie/actions/runs/39979010930): **passed**, including compile, regression tests, dependency audit and secret-pattern guard.
+- Validation/local smoke [39979010782](https://github.com/MSJ1708/shoir-ie/actions/runs/39979010782): **passed** — compilation, full regression tests, required-module parse checks, application import smoke (**54 statements**), local Streamlit startup, and Chromium browser smoke at desktop and mobile widths.
+- Local runtime smoke evidence artifact: `shoir-ie-local-runtime-smoke`, artifact ID `12513530314`, SHA-256 digest `62e84c29a295780bde16207b56f36c0a239314b46fcf431379308dd74c6fce2f`. [Download artifact ZIP](https://api.github.com/repos/MSJ1708/shoir-ie/actions/artifacts/12513530314/zip).
+- The hosted public-site smoke job in [39979010782](https://github.com/MSJ1708/shoir-ie/actions/runs/39979010782) was still running when this section was updated. The most recent completed public-site smoke, [39977967700](https://github.com/MSJ1708/shoir-ie/actions/runs/39977967700), **failed**: the public Streamlit endpoint returned HTTP 200, but rendered “This app has gone to sleep due to inactivity” instead of the Shoir-IE frame. It showed no uncaught JavaScript errors, but the app frame was not located and a 404 resource was logged. This is an availability/hosted-rendering failure, not a pass.
 
-No authenticated per-tier module walkthrough was run, and the matrix accurately marks all 100 browser-acceptance fields unverified. Local test success does not establish hosted application availability, real connector state, managed persistence configuration or the full six-package authorization matrix.
+Earlier, a strict DataFrame save/load test caught a dtype mismatch for integral-valued floating-point cells. Workspace serialization was updated to store column dtypes, and the current 660-test suite passes the corrected round-trip test.
+
+No authenticated per-tier module walkthrough was run. The matrix accurately marks all 100 browser-acceptance fields unverified. Passing unit tests and local browser smoke do not establish that the hosted application is awake, each tool works under every subscription state, managed persistence is configured, or integrations are live.
+
 
 ## Remaining release blockers
 
@@ -70,4 +72,4 @@ No authenticated per-tier module walkthrough was run, and the matrix accurately 
 
 ## Release recommendation
 
-**NO-GO for merging this as completion of the requested 100-tool implementation or for declaring Shoir-IE fully verified/workforce-ready.** On revision `9a1a61c330a70bc9efa22af0c24acc3d839cd8bd`, the full, platform, engine-regression and security/quality workflows passed. The local desktop/mobile smoke for that run remains incomplete, and the hosted public-site smoke failed because the deployed app was asleep. The current branch adds an authentication check and guest-denial test after that tested revision; its workflows are pending, so that change remains unverified until CI finishes. The branch provides a reviewable registry/gap matrix, five focused specialist methods, improved per-user result persistence handling and DataFrame type-preservation coverage; it does not deliver 100 verified tools or authenticated end-to-end acceptance. The remaining work above is required before the full master prompt can be marked done.
+**NO-GO for merging this as completion of the requested 100-tool implementation or for declaring Shoir-IE fully verified/workforce-ready.** Revision `a76237f204ba2c6136c16d732c6e8fbc55367899` passed the full 660-test suite, platform, engine-regression, security/quality, compile/import, and local desktop/mobile smoke gates. The hosted public-site smoke remains an external release blocker until it can locate the actual app instead of a sleeping-page message. The branch provides an auditable 100-target matrix, five focused methods, a corrected Research Pack/Enterprise Plus boundary, authenticated execution gating, and improved workspace serialization/persistence coverage. It does not deliver 100 fully implemented/verified tools or authenticated per-tier end-to-end acceptance. The remaining work above is required before the full master prompt can be marked done.
