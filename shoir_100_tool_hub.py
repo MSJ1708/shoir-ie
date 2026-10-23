@@ -4,7 +4,6 @@ from __future__ import annotations
 import csv
 import math
 import re
-from datetime import date
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -103,7 +102,7 @@ def calculate_work_sampling(active_count: int, total_count: int, z_value: float 
     if active < 0 or active > total:
         raise ValueError("Active observations must be between zero and total observations.")
     z = _number(z_value, "Confidence z value", 0, True)
-    p, z2 = active / total, z_value * z_value
+    p, z2 = active / total, z * z
     denom = 1 + z2 / total
     center = (p + z2 / (2 * total)) / denom
     half = z * math.sqrt(p * (1 - p) / total + z2 / (4 * total * total)) / denom
