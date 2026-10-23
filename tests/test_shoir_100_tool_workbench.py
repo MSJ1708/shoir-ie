@@ -190,7 +190,7 @@ def test_workbench_runs_5s_and_revisioned_kaizen_a3():
     at.run(timeout=45)
     assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
     a3 = at.session_state.get("shoir_tool_result_T030")
-    assert a3 is not None
+    assert a3 is not None, "visible Streamlit errors: " + " | ".join(str(error.value) for error in at.error)
     assert a3["target_progress_pct"] == pytest.approx(50.0)
     assert a3["revision_number"] == 1
     record_id = a3["record_id"]
