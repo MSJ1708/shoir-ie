@@ -461,9 +461,9 @@ def _render_calculator(st: Any, tool_id: str) -> None:
         elif tool_id == "T078":
             with st.form("shoir100_t078_form"):
                 quantity = st.number_input("Activity quantity", min_value=0.0, value=5000.0, step=100.0)
-                factor = st.number_input("Declared factor (kg CO2e per activity unit)", min_value=0.0, value=0.42, step=0.01, format="%.5f")
-                source = st.text_input("Factor source/document", "User-provided example factor")
-                effective = st.text_input("Factor publication/effective date", date.today().isoformat())
+                factor = st.number_input("Declared factor (kg CO2e per activity unit)", min_value=0.0, value=0.0, step=0.01, format="%.5f")
+                source = st.text_input("Factor source/document", "")
+                effective = st.text_input("Factor publication/effective date", "")
                 submitted = st.form_submit_button("Calculate emissions")
             if submitted:
                 _show_result(st, calculate_carbon_emissions(quantity, factor, source, effective))
