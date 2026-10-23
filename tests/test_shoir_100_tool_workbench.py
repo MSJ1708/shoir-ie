@@ -34,6 +34,8 @@ from shoir_100_tool_workbench import (
     inventory_policy,
     carbon_emissions,
     engineering_economics,
+    import_dataset_preview,
+    reversible_clean_candidate,
 )
 from shoir_tier_capabilities import available_modules, copilot_capabilities, copilot_gate, tier_allows
 
@@ -372,3 +374,64 @@ def test_oee_and_capability_cannot_be_run_below_declared_minimum_tier():
         run_tool_calculation("Starter", "T026", {"planned_production_time": 480, "downtime": 45, "ideal_cycle_time": 0.5, "total_count": 800, "good_count": 784})
     with pytest.raises(ToolEntitlementError):
         run_tool_calculation("Starter", "T032", {"measurements": "1,2,3", "lower_spec_limit": 0, "upper_spec_limit": 4})
+
+
+def test_csv_importer_stages_a_parsed_dataset_with_fingerprint_without_replacing_workspace():
+    payload = b"station,count\nA,2\nB,3\n"
+    result = import_dataset_preview("fixture.csv", payload)
+    assert result["tool_id"] == "T011"
+    assert result["data_status"] == "IMPORTED"
+    assert result["metrics"]["row_count"] == 2
+    assert result["metrics"]["column_count"] == 2
+    assert result["dataframe"].to_dict(orient="records") == [
+        {"station": "A", "count": 2}, {"station": "B", "count": 3}
+    ]
+    assert result["source_fingerprint"]
+    with pytest.raises(ValueError, match="Unsupported file type"):
+        import_dataset_preview("fixture.txt", payload)
+    with pytest.raises(ValueError, match="empty"):
+        import_dataset_preview("fixture.csv", b"")
+
+
+def test_excel_importer_selects_a_requested_sheet_and_rejects_unknown_sheet():
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        pd.DataFrame({"from": ["A"], "to": ["B"], "flow": [7]}).to_excel(writer, sheet_name="Flows", index=False)
+        pd.DataFrame({"dept": ["A", "B"], "area": [12, 15]}).to_excel(writer, sheet_name="Departments", index=False)
+    payload = output.getvalue()
+    result = import_dataset_preview("fixture.xlsx", payload, "Flows")
+    assert result["sheet_name"] == "Flows"
+    assert result["dataframe"].to_dict(orient="records") == [{"from": "A", "to": "B", "flow": 7}]
+    with pytest.raises(ValueError, match="not found"):
+        import_dataset_preview("fixture.xlsx", payload, "Missing sheet")
+
+
+def test_reversible_cleaner_preview_does_not_mutate_source_and_audits_changes():
+    source = pd.DataFrame({"measurement": [1.0, 1.0, None, 4.0], "area": ["A", "A", "B", None]})
+    before = source.copy(deep=True)
+    result = reversible_clean_candidate(source, drop_duplicates=True, missing_strategy="fill_median")
+    pd.testing.assert_frame_equal(source, before)
+    assert result["tool_id"] == "T014"
+    assert result["metrics"]["source_rows"] == 4
+    assert result["metrics"]["candidate_rows"] == 3
+    assert result["metrics"]["removed_duplicate_rows"] == 1
+    assert result["metrics"]["imputed_numeric_cells"] == 1
+    assert result["metrics"]["candidate_missing_cells"] == 1
+    assert result["source_fingerprint"] != result["candidate_fingerprint"]
+    assert result["dataframe"]["measurement"].isna().sum() == 0
+    assert result["dataframe"]["area"].isna().sum() == 1
+
+
+def test_import_and_cleaner_dispatch_are_tier_gated_and_unknown_methods_fail_closed():
+    payload = b"value\n1\n2\n"
+    imported = run_tool_calculation("Starter", "T011", {"filename": "fixture.csv", "payload": payload})
+    assert imported["tool_id"] == "T011"
+    assert imported["data_status"] == "IMPORTED"
+    cleaned = run_tool_calculation("Starter", "T014", {
+        "dataframe": pd.DataFrame({"x": [1, 1, 2]}), "drop_duplicates": True, "missing_strategy": "keep"
+    })
+    assert cleaned["metrics"]["removed_duplicate_rows"] == 1
+    with pytest.raises(ToolEntitlementError):
+        run_tool_calculation("Unrecognized Tier", "T011", {"filename": "fixture.csv", "payload": payload})
+    with pytest.raises(ToolNotImplementedError):
+        run_tool_calculation("Starter", "T012", {})
