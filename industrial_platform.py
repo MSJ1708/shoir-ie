@@ -143,13 +143,12 @@ TIER_FEATURES = {
 TIER_ORDER = ["Starter","Mid-Tier Pro","Professional","Enterprise","Enterprise Plus","Research Pack"]
 
 def normalize_tier(value: str) -> str:
-    v=str(value or "Starter").lower()
-    if "research" in v: return "Research Pack"
-    if "enterprise plus" in v or "industrial enterprise" in v: return "Enterprise Plus"
-    if "enterprise" in v: return "Enterprise"
-    if "professional" in v: return "Professional"
-    if "pro" in v: return "Mid-Tier Pro"
-    return "Starter"
+    """Use the shared strict tier parser; unknown labels never become Starter."""
+    try:
+        from shoir_tier_capabilities import normalize_tier as shared_normalize_tier
+        return shared_normalize_tier(value)
+    except Exception:
+        return "UNRESOLVED"
 
 def tier_allows(current: str, required: str) -> bool:
     """Delegate authorization to the shared fail-closed subscription policy."""
