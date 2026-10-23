@@ -2228,21 +2228,32 @@ RESEARCH_PACK_BASE_TIERS = {"Starter", "Mid-Tier Pro", "Professional", "Enterpri
 
 
 def _known_tier(value: str) -> str | None:
-    """Normalize known package labels while rejecting unknown values fail-closed."""
-    raw = str(value or "").strip().casefold()
+    """Recognize known subscription labels only; reject generic descriptions and unknown tiers."""
+    raw = " ".join(str(value or "").strip().casefold().split())
     if not raw:
         return None
-    if "research" in raw:
+
+    def matches(*bases: str) -> bool:
+        for base in bases:
+            if raw in {base, f"{base} tier"}:
+                return True
+            if raw.startswith(f"{base} tier (") and raw.endswith(")"):
+                return True
+            if raw.startswith(f"{base} (") and raw.endswith(")"):
+                return True
+        return False
+
+    if matches("research pack"):
         return "Research Pack"
-    if "enterprise plus" in raw or "industrial enterprise" in raw:
+    if matches("enterprise plus", "industrial enterprise"):
         return "Enterprise Plus"
-    if "enterprise" in raw:
+    if matches("enterprise"):
         return "Enterprise"
-    if "professional" in raw:
+    if matches("professional"):
         return "Professional"
-    if "mid-tier pro" in raw or "mid tier pro" in raw or raw == "pro" or "pro tier" in raw:
+    if matches("mid-tier pro", "mid tier pro", "pro"):
         return "Mid-Tier Pro"
-    if "starter" in raw:
+    if matches("starter"):
         return "Starter"
     return None
 
