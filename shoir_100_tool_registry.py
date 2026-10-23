@@ -140,13 +140,13 @@ for _target in TOOL_TARGETS:
          "shoir_100_tool_registry.target_tool_execution_decision",
          "legacy route/action/API/export must be tested separately"]
     )
-    _target.setdefault("unit_test_id", f"tests/test_shoir_100_tool_registry.py::{_target['tool_id']}")
-    _target.setdefault(
-        "integration_test_id",
-        f"tests/test_shoir_100_tool_engines.py::{_target['tool_id']}"
-        if _target["tool_id"] in {"T066", "T076"}
-        else "NOT RUN — method-specific integration fixtures outstanding"
-    )
+    if _target["tool_id"] == "T066":
+        _target.setdefault("unit_test_id", "tests/test_shoir_100_tool_engines.py::test_first_fit_decreasing_known_fixture_and_capacity_accounting")
+    elif _target["tool_id"] == "T076":
+        _target.setdefault("unit_test_id", "tests/test_shoir_100_tool_engines.py::test_process_mining_timezone_duration_and_transition_fixture")
+    else:
+        _target.setdefault("unit_test_id", "tests/test_shoir_100_tool_registry.py::test_six_package_tier_truth_table_for_every_target (policy coverage only)")
+    _target.setdefault("integration_test_id", "NOT RUN — authenticated UI, persistence and export round trip outstanding")
     _target.setdefault("browser_test_id", "UNVERIFIED — authenticated browser acceptance gate outstanding")
     _target.setdefault("acceptance_gate_id", f"SHOIR-100-{_target['tool_id']}-ACCEPTANCE")
     _target.setdefault("evidence_state", "SOURCE_TRIAGE_ONLY")
