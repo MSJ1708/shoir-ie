@@ -1795,11 +1795,11 @@ TOOL_CATALOG: list[dict[str, Any]] = json.loads(r'''[
     "method_or_action": "Calculate NPV, IRR and payback with explicit cash-flow and discount-rate conventions.",
     "external_dependency": "None implied by catalog; check route-specific dependencies.",
     "entitlement_enforcement_points": "tool_access_allowed(tier, tool_id) in the shared registry; current module renderer/access control for related_module routes; direct execution dispatcher rechecks the canonical tool ID.",
-    "unit_test": "tests/test_shoir_100_tool_workbench.py (deterministic golden/validation tests)",
+    "unit_test": "tests/test_shoir_100_tool_workbench.py (NPV/payback/IRR root fixture and ambiguous-root denial)",
     "integration_test": "UNVERIFIED — target-specific authenticated end-to-end workflow not run.",
     "browser_test": "UNVERIFIED",
     "evidence_link_or_artifact": "docs/SHOIR_100_TOOL_IMPLEMENTATION_REPORT.md and docs/SHOIR_100_TOOL_IMPLEMENTATION_MATRIX.csv",
-    "remaining_gap": "NPV and simple/discounted payback are calculated. IRR is explicitly not calculated by this supported method and requires a separately validated implementation.",
+    "remaining_gap": "IRR is bracketed only for a conventional initial-outflow then nonnegative-inflows series; non-conventional cash flows can have multiple IRRs and are deliberately left unresolved. Independently validate on broader financial fixtures and browser workflows.",
     "owner_or_next_action": "Engineering: verify the mapped renderer against the acceptance target, add independent golden fixtures, then run authenticated desktop/mobile and import/export persistence checks."
   },
   {
