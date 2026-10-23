@@ -287,7 +287,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=False):
                 "Copilot action, API and export path must enforce their own server-side entitlement checks."
             )
 
-            if selected_tool["tool_id"] in {"T066", "T075", "T085"}:
+            if selected_tool["tool_id"] in {"T021", "T023", "T066", "T075", "T085"}:
                 st.markdown("---")
                 st.markdown("**Run focused specialist method**")
                 st.caption(
@@ -301,7 +301,45 @@ with st.expander("🧭 100-tool directory & readiness", expanded=False):
                     )
                 else:
                     with st.form("shoir_target_method_form_" + selected_tool["tool_id"]):
-                        if selected_tool["tool_id"] == "T066":
+                        if selected_tool["tool_id"] == "T021":
+                            st.caption("Observed times are retained as entered. The allowance is defined as a percentage of standard time.")
+                            observation_text = st.text_input(
+                                "Observed times (comma-separated)", "1, 2, 3",
+                                key="tool021_observations"
+                            )
+                            unit = st.selectbox(
+                                "Time unit for all observations", ["seconds", "minutes", "hours"],
+                                index=1, key="tool021_unit"
+                            )
+                            rating = st.number_input(
+                                "Performance rating (%)", min_value=0.001, value=100.0, step=5.0,
+                                key="tool021_rating"
+                            )
+                            allowance = st.number_input(
+                                "Allowance (% of standard time)", min_value=0.0, max_value=99.9,
+                                value=10.0, step=1.0, key="tool021_allowance"
+                            )
+                            run_method = st.form_submit_button("Calculate standard time", type="primary", use_container_width=True, key="tool021_run")
+                        elif selected_tool["tool_id"] == "T023":
+                            st.caption("Available time, demand and cycle time must refer to the same production period and time unit.")
+                            available_time = st.number_input(
+                                "Net available production time per period", min_value=0.001,
+                                value=480.0, step=30.0, key="tool023_available"
+                            )
+                            demand_units = st.number_input(
+                                "Demand (whole units per period)", min_value=1, value=120, step=1,
+                                key="tool023_demand"
+                            )
+                            cycle_time = st.number_input(
+                                "Observed cycle time per unit", min_value=0.001,
+                                value=3.0, step=0.25, key="tool023_cycle"
+                            )
+                            unit = st.selectbox(
+                                "Time unit shared by available time and cycle time",
+                                ["seconds", "minutes", "hours"], index=1, key="tool023_unit"
+                            )
+                            run_method = st.form_submit_button("Calculate takt and capacity", type="primary", use_container_width=True, key="tool023_run")
+                        elif selected_tool["tool_id"] == "T066":
                             st.caption("One-dimensional cutting stock. Kerf is charged as an allowance per produced piece.")
                             stock_len = st.number_input(
                                 "Stock length (consistent length unit)", min_value=0.001,
@@ -360,10 +398,25 @@ with st.expander("🧭 100-tool directory & readiness", expanded=False):
                         try:
                             require_tool_access(RAW_TIER, selected_tool["tool_id"])
                             from shoir_target_engines import (
+                                calculate_time_study, calculate_takt_capacity,
                                 solve_cutting_stock, monitor_forecast_drift,
                                 plan_two_sample_t_sample_size,
                             )
-                            if selected_tool["tool_id"] == "T066":
+                            if selected_tool["tool_id"] == "T021":
+                                try:
+                                    observation_times = [float(item.strip()) for item in observation_text.split(",") if item.strip()]
+                                except ValueError as exc:
+                                    raise ValueError("Observed times must be comma-separated numbers.") from exc
+                                result = calculate_time_study(
+                                    observation_times, rating, allowance, time_unit=unit,
+                                )
+                                st.session_state["shoir_tool_result_T021"] = result
+                            elif selected_tool["tool_id"] == "T023":
+                                result = calculate_takt_capacity(
+                                    available_time, demand_units, cycle_time, time_unit=unit,
+                                )
+                                st.session_state["shoir_tool_result_T023"] = result
+                            elif selected_tool["tool_id"] == "T066":
                                 parsed_parts = json.loads(parts_json)
                                 if not isinstance(parsed_parts, list):
                                     raise ValueError("Parts input must be a JSON list of part definitions.")
@@ -389,7 +442,42 @@ with st.expander("🧭 100-tool directory & readiness", expanded=False):
                         except Exception as exc:
                             st.error(f"Tool run could not be completed safely: {exc}")
 
-                    if selected_tool["tool_id"] == "T066":
+                    if selected_tool["tool_id"] == "T021":
+                        result = st.session_state.get("shoir_tool_result_T021")
+                        if result:
+                            c1, c2, c3 = st.columns(3)
+                            c1.metric(f"Mean observed time ({result['time_unit']})", f"{result['mean_observed_time']:,.4g}")
+                            c2.metric(f"Normal time ({result['time_unit']})", f"{result['normal_time']:,.4g}")
+                            c3.metric(f"Standard time ({result['time_unit']})", f"{result['standard_time']:,.4g}")
+                            st.caption(result["formula"])
+                            st.caption(result["warning"])
+                            st.dataframe(result["observations"], use_container_width=True, hide_index=True)
+                            fig = px.line(
+                                result["observations"],
+                                x="Observation", y=f"Observed time ({result['time_unit']})",
+                                markers=True, title="Observed cycle times",
+                            )
+                            st.plotly_chart(fig, use_container_width=True)
+                    elif selected_tool["tool_id"] == "T023":
+                        result = st.session_state.get("shoir_tool_result_T023")
+                        if result:
+                            c1, c2, c3 = st.columns(3)
+                            c1.metric(f"Takt time ({result['time_unit']}/unit)", f"{result['takt_time_per_unit']:,.4g}")
+                            c2.metric("Implied capacity (units/period)", f"{result['implied_capacity_units_per_period']:,.4g}")
+                            c3.metric("Capacity gap (units/period)", f"{result['capacity_gap_units_per_period']:+,.4g}")
+                            st.markdown(f"**Capacity status:** {result['status']}")
+                            st.caption(result["formula"])
+                            st.caption(result["assumptions"])
+                            comparison = pd.DataFrame({
+                                "Measure": ["Demand", "Implied capacity"],
+                                "Units per period": [result["demand_units_per_period"], result["implied_capacity_units_per_period"]],
+                            })
+                            st.dataframe(comparison, use_container_width=True, hide_index=True)
+                            st.plotly_chart(
+                                px.bar(comparison, x="Measure", y="Units per period", title="Demand versus implied capacity"),
+                                use_container_width=True,
+                            )
+                    elif selected_tool["tool_id"] == "T066":
                         result = st.session_state.get("shoir_tool_result_T066")
                         if result:
                             st.markdown(f"**Solver status:** {result['status']}")
@@ -426,7 +514,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=False):
                                 markers=True, title="Forecasts versus later actuals",
                             )
                             st.plotly_chart(fig, use_container_width=True)
-                    else:
+                    elif selected_tool["tool_id"] == "T085":
                         result = st.session_state.get("shoir_tool_result_T085")
                         if result:
                             c1, c2, c3 = st.columns(3)
