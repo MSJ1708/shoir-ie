@@ -3,6 +3,8 @@
 Scope:
 * T022 estimates work-sampling proportions with individual Wilson confidence intervals.
 * T028 builds a count-based Pareto summary and optional 5-Why/action record.
+* T029 scores an editable 5S checklist with transparent owner/due-date follow-up flags.
+* T030 validates A3 baseline/target/outcome records and calculates signed target progress.
 * T066 is a one-dimensional cutting/bin-packing MILP with a per-piece kerf allowance.
 * T075 is a threshold-based forecast error monitor, not an automatic retraining service.
 * T085 is a balanced independent two-sample t-test planner using the noncentral t distribution.
@@ -490,6 +492,231 @@ def analyze_pareto_root_cause(
     }
 
 
+def assess_5s_audit(items: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """Score an editable 5S checklist on a transparent 0–4 rubric.
+
+    Each of the five pillars must be represented. Scores and notes are
+    self-assessments, not a safety or quality certification. Items scoring 0–2
+    should have an accountable owner and ISO due date.
+    """
+    if not isinstance(items, Sequence) or isinstance(items, (str, bytes)) or not items:
+        raise ValueError("Provide a non-empty 5S checklist as a list of item objects.")
+
+    canonical_categories = {
+        "sort": "Sort",
+        "set in order": "Set in Order",
+        "shine": "Shine",
+        "standardize": "Standardize",
+        "sustain": "Sustain",
+    }
+    normalized: list[dict[str, Any]] = []
+    seen_criteria: set[str] = set()
+    for index, raw in enumerate(items, start=1):
+        if not isinstance(raw, Mapping):
+            raise ValueError(f"Checklist row {index} must be an object.")
+        raw_category = " ".join(str(raw.get("category", "") or "").strip().replace("_", " ").split())
+        category = canonical_categories.get(raw_category.casefold())
+        if category is None:
+            raise ValueError(
+                f"Checklist row {index} category must be one of Sort, Set in Order, Shine, Standardize or Sustain."
+            )
+        criterion = str(raw.get("criterion", "") or "").strip()
+        if not criterion:
+            raise ValueError(f"Checklist row {index} needs a criterion.")
+        criterion_key = criterion.casefold()
+        if criterion_key in seen_criteria:
+            raise ValueError(f"Checklist criteria must be unique; duplicate: {criterion}.")
+        seen_criteria.add(criterion_key)
+        raw_score = raw.get("score")
+        if isinstance(raw_score, bool):
+            raise ValueError(f"Score for {criterion} must be a whole number from 0 to 4.")
+        score_value = _finite_number(raw_score, f"Score for {criterion}")
+        if not score_value.is_integer() or not 0 <= score_value <= 4:
+            raise ValueError(f"Score for {criterion} must be a whole number from 0 to 4.")
+        evidence = str(raw.get("evidence", "") or "").strip()
+        owner = str(raw.get("owner", "") or "").strip()
+        due_date = str(raw.get("due_date", "") or "").strip()
+        if due_date:
+            try:
+                _date.fromisoformat(due_date)
+            except ValueError as exc:
+                raise ValueError(f"Due date for {criterion} must use ISO YYYY-MM-DD format.") from exc
+        needs_follow_up = score_value <= 2
+        normalized.append({
+            "Category": category,
+            "Criterion": criterion,
+            "Score (0–4)": int(score_value),
+            "Score (%)": score_value / 4.0 * 100.0,
+            "Evidence reference": evidence,
+            "Owner": owner,
+            "Due date": due_date,
+            "Follow-up": (
+                "Assigned" if needs_follow_up and owner and due_date
+                else "Owner/date needed" if needs_follow_up
+                else "No low-score action flagged"
+            ),
+        })
+
+    covered = {row["Category"] for row in normalized}
+    expected = set(canonical_categories.values())
+    if covered != expected:
+        missing = sorted(expected - covered)
+        raise ValueError("Checklist must include at least one criterion for each 5S pillar; missing: " + ", ".join(missing))
+
+    checklist = pd.DataFrame(normalized)
+    pillar_rows = []
+    for category in canonical_categories.values():
+        part = checklist[checklist["Category"] == category]
+        average = float(part["Score (0–4)"].mean())
+        pillar_rows.append({
+            "5S pillar": category,
+            "Criteria": int(len(part)),
+            "Average score (0–4)": average,
+            "Pillar score (%)": average / 4.0 * 100.0,
+            "Low-score items (≤2)": int((part["Score (0–4)"] <= 2).sum()),
+        })
+    pillar_summary = pd.DataFrame(pillar_rows)
+    overall_equal_pillar_pct = float(pillar_summary["Pillar score (%)"].mean())
+    item_weighted_pct = float(checklist["Score (0–4)"].mean() / 4.0 * 100.0)
+    priority_actions = checklist[checklist["Score (0–4)"] <= 2].copy().reset_index(drop=True)
+    owner_gaps = int(((priority_actions["Owner"].str.strip() == "") | (priority_actions["Due date"].str.strip() == "")).sum())
+    if len(priority_actions) and owner_gaps:
+        status = "FOLLOW_UP_DETAILS_MISSING"
+    elif len(priority_actions):
+        status = "FOLLOW_UP_REQUIRED"
+    else:
+        status = "AUDIT_RECORDED"
+    return {
+        "status": status,
+        "method": "Editable 5S checklist with a disclosed 0–4 self-assessment rubric",
+        "overall_5s_score_pct_equal_pillar_weight": overall_equal_pillar_pct,
+        "item_weighted_score_pct": item_weighted_pct,
+        "criteria_count": int(len(checklist)),
+        "priority_action_count": int(len(priority_actions)),
+        "priority_action_assignment_gaps": owner_gaps,
+        "checklist": checklist,
+        "pillar_summary": pillar_summary,
+        "priority_actions": priority_actions,
+        "formula": "Pillar score = mean item score / 4 × 100; overall score = unweighted mean of the five pillar scores.",
+        "rubric": "0 = absent; 1 = largely absent; 2 = inconsistent/partial; 3 = implemented with gaps; 4 = consistently sustained. Adapt and approve this rubric locally.",
+        "warning": (
+            f"{len(priority_actions)} checklist item(s) scored 2 or below; {owner_gaps} need an assigned owner and ISO due date."
+            if len(priority_actions) else
+            "No item scored 2 or below on this self-assessed checklist. This is not a certified audit or independent verification."
+        ),
+    }
+
+
+def build_kaizen_a3_record(
+    *,
+    title: str,
+    problem_statement: str,
+    metric_name: str,
+    unit: str,
+    baseline_value: Any,
+    target_value: Any,
+    root_cause_hypothesis: str,
+    countermeasure: str,
+    owner: str,
+    due_date: str,
+    actual_after_value: Any = None,
+    baseline_evidence: str = "",
+    post_change_evidence: str = "",
+    implementation_status: str = "Planned",
+    review_date: str = "",
+) -> dict[str, Any]:
+    """Validate an A3 improvement record and calculate signed progress toward target.
+
+    Target progress is an algebraic ratio; it does not assume which direction is
+    operationally desirable. Actual outcomes are explicitly unverified unless
+    a human review state, review date and post-change evidence reference exist.
+    This builder records one revision's method/fields; UI persistence owns history.
+    """
+    fields = {
+        "A3 title": title,
+        "Problem statement": problem_statement,
+        "Metric name": metric_name,
+        "Metric unit": unit,
+        "Root-cause hypothesis": root_cause_hypothesis,
+        "Countermeasure": countermeasure,
+        "Owner": owner,
+        "Due date": due_date,
+    }
+    cleaned = {key: str(value or "").strip() for key, value in fields.items()}
+    for field_name, value in cleaned.items():
+        if not value:
+            raise ValueError(f"{field_name} is required.")
+    due = cleaned["Due date"]
+    try:
+        _date.fromisoformat(due)
+    except ValueError as exc:
+        raise ValueError("Due date must use ISO YYYY-MM-DD format.") from exc
+
+    status = str(implementation_status or "").strip()
+    allowed_statuses = {"Planned", "In Progress", "Implemented", "Verified", "Closed"}
+    if status not in allowed_statuses:
+        raise ValueError("Status must be Planned, In Progress, Implemented, Verified or Closed.")
+
+    baseline = _finite_number(baseline_value, "Baseline value")
+    target = _finite_number(target_value, "Target value")
+    if math.isclose(target, baseline, rel_tol=1e-12, abs_tol=1e-12):
+        raise ValueError("Target value must differ from baseline value.")
+    if isinstance(actual_after_value, str) and not actual_after_value.strip():
+        actual_after_value = None
+    actual = None if actual_after_value is None else _finite_number(actual_after_value, "Actual after-change value")
+    baseline_ref = str(baseline_evidence or "").strip()
+    post_ref = str(post_change_evidence or "").strip()
+    review = str(review_date or "").strip()
+    if review:
+        try:
+            _date.fromisoformat(review)
+        except ValueError as exc:
+            raise ValueError("Review date must use ISO YYYY-MM-DD format.") from exc
+    if status in {"Verified", "Closed"} and (actual is None or not post_ref or not review):
+        raise ValueError("Verified/Closed status requires an actual result, post-change evidence reference and review date.")
+
+    progress = None if actual is None else (actual - baseline) / (target - baseline) * 100.0
+    remaining = None if actual is None else target - actual
+    warnings = []
+    if not baseline_ref:
+        warnings.append("Baseline evidence reference was not provided.")
+    if actual is None:
+        outcome_status = "NOT_MEASURED"
+        warnings.append("No post-change measurement is recorded; do not report realized benefit or verified savings.")
+    elif status not in {"Verified", "Closed"}:
+        outcome_status = "OBSERVED_NOT_VERIFIED"
+        warnings.append("A post-change value is present but is not marked verified by a dated human review with evidence.")
+    else:
+        outcome_status = "HUMAN_REVIEW_RECORDED"
+    if progress is not None and (progress < 0.0 or progress > 100.0):
+        warnings.append("Progress falls outside 0–100%; inspect measurement timing, target direction and process variation.")
+
+    return {
+        "status": status,
+        "outcome_status": outcome_status,
+        "title": cleaned["A3 title"],
+        "problem_statement": cleaned["Problem statement"],
+        "metric_name": cleaned["Metric name"],
+        "unit": cleaned["Metric unit"],
+        "baseline_value": baseline,
+        "target_value": target,
+        "actual_after_value": actual,
+        "target_progress_pct": progress,
+        "remaining_difference_to_target": remaining,
+        "root_cause_hypothesis": cleaned["Root-cause hypothesis"],
+        "countermeasure": cleaned["Countermeasure"],
+        "owner": cleaned["Owner"],
+        "due_date": due,
+        "baseline_evidence": baseline_ref,
+        "post_change_evidence": post_ref,
+        "review_date": review,
+        "formula": "Progress (%) = (actual after change − baseline) / (target − baseline) × 100. Values are not clamped; direction is not inferred.",
+        "assumptions": "The metric, unit, baseline, target and time window must be comparable; a root-cause statement is a hypothesis unless independently evidenced.",
+        "warnings": warnings,
+        "warning": " ".join(warnings) if warnings else "A dated human review and post-change evidence reference are recorded; this is not an audited savings certificate.",
+    }
+
+
 def calculate_time_study(
     observation_times: Sequence[float],
     performance_rating_pct: float = 100.0,
@@ -696,6 +923,8 @@ def plan_two_sample_t_sample_size(
 __all__ = [
     "analyze_work_sampling",
     "analyze_pareto_root_cause",
+    "assess_5s_audit",
+    "build_kaizen_a3_record",
     "calculate_time_study",
     "calculate_takt_capacity",
     "monitor_forecast_drift",
