@@ -1,8 +1,10 @@
 """Additive Engineering Tool Library for Shoir-IE.
 
-This page is intentionally status-led. It does not execute a target unless the
-registry marks it VERIFIED_WORKING and the current tier is allowed. Existing
-module routes and navigation are left unchanged.
+This page is status-led and checks the logged-in tier before displaying actions.
+Only VERIFIED_WORKING is a production-readiness assertion. The two limited-scope
+methods T066/T076 may be exercised as explicitly labelled validation-mode tools;
+they remain IMPLEMENTED_NEEDS_VALIDATION until authenticated E2E and independent
+acceptance checks pass. Existing routes and navigation are left unchanged.
 """
 import hashlib
 import io
@@ -116,6 +118,7 @@ if rows:
                 )
 
         if selected_id == "T066":
+            st.warning("LIMITED VALIDATION MODE — check the result against an independent reference before using it for an operational decision.")
             st.markdown("### Run bin packing")
             st.caption("Supported method: one-dimensional First-Fit Decreasing. This is a feasible heuristic, not proof of a minimum-bin optimum; cutting-stock patterns and 2-D/3-D packing are not supported.")
             upload = st.file_uploader("Optional item CSV", type=["csv"], key="t066_binpack_upload")
@@ -188,6 +191,7 @@ if rows:
                     st.warning(warning)
 
         elif selected_id == "T076":
+            st.warning("LIMITED VALIDATION MODE — this is event-log exploration, not a certified process-conformance assessment.")
             st.markdown("### Analyze a process event log")
             st.caption("Calculates directly-follows transitions, case duration and inter-event waits. Optional reference-trace comparison is exact sequence matching, not a full Petri-net conformance method.")
             upload = st.file_uploader("Optional process event-log CSV", type=["csv"], key="t076_process_upload")
