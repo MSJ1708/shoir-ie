@@ -120,3 +120,20 @@ def test_status_summary_counts_all_targets_and_never_infers_verified_from_presen
     # No authenticated browser matrix or engine fixture suite has yet run for all
     # targets on this branch, so source mapping alone must not create "verified".
     assert counts["VERIFIED_WORKING"] == 0
+
+
+def test_workbench_tier_gate_keeps_research_pack_separate_from_enterprise_plus():
+    from industrial_platform_excellence import module_availability, tier_allows as workbench_tier_allows
+
+    assert workbench_tier_allows("Research Pack", "Starter")
+    assert workbench_tier_allows("Research Pack", "Professional")
+    assert workbench_tier_allows("Research Pack", "Operations")
+    assert workbench_tier_allows("Research Pack", "Enterprise")
+    assert workbench_tier_allows("Research Pack", "Research")
+    assert not workbench_tier_allows("Research Pack", "Enterprise Plus")
+    assert not workbench_tier_allows("Enterprise Plus", "Research")
+    assert workbench_tier_allows("Enterprise Plus", "Enterprise Plus")
+
+    research_view = module_availability("Research Pack")
+    plus_rows = research_view[research_view["Required Tier"] == "Enterprise Plus"]
+    assert not plus_rows["Available"].any()
