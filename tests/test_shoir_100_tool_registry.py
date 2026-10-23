@@ -87,15 +87,26 @@ def test_registry_exposes_full_contract_metadata_for_every_target():
 
 def test_numerical_targets_reference_their_actual_golden_fixture_tests():
     expected = {
+        "T016": "test_unit_converter_checks_dimensions_and_converts_temperature",
         "T021": "test_standard_time_golden_fixture_and_allowance_conventions",
+        "T022": "test_work_sampling_wilson_intervals_match_hand_checked_counts",
         "T023": "test_takt_time_and_capacity_golden_fixture",
         "T026": "test_oee_golden_fixture_and_loss_decomposition",
+        "T028": "test_pareto_root_cause_matches_hand_checked_cumulative_counts_and_records_five_whys",
+        "T029": "test_5s_audit_reports_equal_pillar_scores_and_action_assignment_gaps",
+        "T030": "test_kaizen_a3_computes_signed_progress_without_claiming_unverified_savings",
+        "T031": "test_spc_individuals_chart_matches_hand_calculated_limits",
         "T032": "test_process_capability_golden_fixture_with_two_subgroups",
+        "T040": "test_quality_cost_reconciles_scrap_rework_and_inspection",
+        "T042": "test_mtbf_mttr_matches_hand_calculated_reliability_measures",
         "T055": "test_inventory_policy_golden_fixture_and_boundaries",
-        "T066": "test_first_fit_decreasing_known_fixture_and_capacity_accounting",
+        "T056": "test_abc_xyz_uses_value_thresholds_and_demand_cv",
+        "T066": "test_cutting_stock_known_case_and_material_reconciliation",
+        "T075": "test_forecast_drift_monitor_has_hand_calculated_error_values",
         "T076": "test_process_mining_timezone_duration_and_transition_fixture",
         "T078": "test_carbon_emissions_requires_sourced_versioned_factor",
         "T081": "test_engineering_economics_npv_irr_and_payback_golden_fixture",
+        "T085": "test_power_planner_matches_known_balanced_t_test_reference",
     }
     from shoir_100_tool_registry import get_target_tool
     for tool_id, test_name in expected.items():
