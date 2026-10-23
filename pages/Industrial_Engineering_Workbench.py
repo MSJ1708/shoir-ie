@@ -258,10 +258,12 @@ else:
     )
 
 required = next((x[2] for x in MODULE_MATRIX if x[1] == selected), "Starter")
-if not tier_allows(RAW_TIER, required):
+_selected_module_allowed = tier_allows(RAW_TIER, required)
+if not _selected_module_allowed:
+    # Keep the tool directory usable for discovery on every tier, but do not
+    # render the selected legacy module until the directory has completed.
     st.warning(f"🔒 {selected} requires the {required} capability level. Your current tier maps to {TIER}.")
     st.dataframe(available[["Category","Module","Required Tier","Available"]], use_container_width=True, hide_index=True)
-    st.stop()
 
 # New cross-cutting platform controls
 top1,top2,top3,top4 = st.columns(4)
@@ -1131,6 +1133,10 @@ with st.expander("🧭 100-tool directory & readiness", expanded=False):
                             st.plotly_chart(px.line(result["cash_flow_schedule"], x="Period", y=f"Cumulative cash flow ({result['currency']})", markers=True, title="Cumulative project cash flow"), use_container_width=True)
     else:
         st.info("No target tools match these filters. Clear the search or select All workbenches / All statuses.")
+
+# A denied legacy module may not render, but users can still discover tools and see their tier requirements.
+if not _selected_module_allowed:
+    st.stop()
 
 # Specialized upgraded surfaces
 if selected == "Engineering Validation Center":
