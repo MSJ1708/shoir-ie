@@ -27,9 +27,21 @@ The key tier-policy weakness found in source was that `available_modules()` retu
 
 The implementation branch adds one **Tool Library** sector to the existing shell. It groups the 100 targets into their 10 workbenches and adds search, workbench/status filters, target tier labels, readiness status, and guarded links to related existing modules. A link is clearly labeled as a related-route navigation aid; it does not assert that the route fully implements the target capability. No 100 new primary-navigation entries are introduced and the existing layout is otherwise preserved.
 
+## CI evidence for the current implementation revision
+
+**Tested head:** `b6bcd840bd5b32c1d198936bd86b8acecaae93e2` on `feat/100-tool-workbench-and-closed-entitlements-2026-10-23`.
+
+- [Shoir-IE tests](https://github.com/MSJ1708/shoir-ie/actions/runs/40000386017): **550 passed, 2 skipped, 5 warnings**.
+- [Shoir-IE Platform Tests](https://github.com/MSJ1708/shoir-ie/actions/runs/40000386218): **550 passed, 2 skipped, 5 warnings**.
+- [Engine Regression](https://github.com/MSJ1708/shoir-ie/actions/runs/40000385878): **6 passed, 1 warning**.
+- [Security and quality](https://github.com/MSJ1708/shoir-ie/actions/runs/40000385913): passed; its regression suite reports **550 passed, 2 skipped, 5 warnings**.
+- [Shoir-IE validation](https://github.com/MSJ1708/shoir-ie/actions/runs/40000386371): passed compileall, app top-level/guarded import smoke (54 statements), local Streamlit start and desktop/mobile browser shell smoke; **550 passed, 2 skipped, 5 warnings**.
+- Validation artifact: [local runtime smoke artifact 12522425408](https://github.com/MSJ1708/shoir-ie/actions/runs/40000386371/artifacts/12522425408), SHA-256 `399d1a358c4c8ea5821b002c7087121a186f154698c48b682dc636e5dab6560f`.
+- The validation job's `live-deployment-smoke` was **SKIPPED**. These checks do not exercise all 100 target tools using authenticated plan-specific accounts.
+
 ## Required remaining validation
 
-- Run current and new regression suites on this exact branch and fix any failures.
+- Exercise each target with disposable authenticated plan-specific test accounts and record per-tool screenshots/logs on the tested SHA.
 - Exercise each target with disposable authenticated plan-specific test accounts and record per-tool screenshots/logs on the tested SHA.
 - Independently verify numerical methods using hand-calculated golden fixtures, including boundaries and invalid/mixed units.
 - Verify real multi-sheet workbook import → analysis → scenario → XLSX/PDF/PPTX/ZIP export round trips by reopening each file.
@@ -41,4 +53,4 @@ The implementation branch adds one **Tool Library** sector to the existing shell
 
 The full 19-column matrix is `SHOIR_100_TOOL_IMPLEMENTATION_MATRIX.csv`. It carries each exact acceptance statement from the master prompt, and the authenticated Tool Library displays that statement for every target. It records source review, target status, related route (if one is evidenced), policy check points, tests, and explicit `UNVERIFIED` values where integration/browser evidence does not exist. The browser column is intentionally not marked PASS from static inspection or public-shell smoke alone.
 
-**Release decision at audit start: NO-GO for claims of full tool completion or workforce/production readiness.** This is not a claim that no usable tools exist. It is a statement that the 100 target acceptance contracts, authenticated route matrix, engineering calculation correctness, persistence, and exports have not yet all been demonstrated.
+**Release decision: NO-GO for claims of full tool completion or workforce/production readiness.** This is not a claim that no usable tools exist. It is a statement that the 100 target acceptance contracts, authenticated route matrix, engineering calculation correctness, persistence, and exports have not yet all been demonstrated.
