@@ -155,7 +155,7 @@ for _target in TOOL_TARGETS:
         "T042": "tests/test_shoir_100_tool_extended_engines.py::test_mtbf_mttr_matches_hand_calculated_reliability_measures",
         "T055": "tests/test_shoir_100_tool_extended_engines.py::test_inventory_policy_golden_fixture_and_boundaries",
         "T056": "tests/test_shoir_100_tool_extended_engines.py::test_abc_xyz_uses_value_thresholds_and_demand_cv",
-        "T066": "tests/test_shoir_100_tool_extended_engines.py::test_cutting_stock_known_case_and_material_reconciliation; test_first_fit_decreasing_known_fixture_and_capacity_accounting",
+        "T066": "tests/test_shoir_100_tool_extended_engines.py::test_cutting_stock_known_case_and_material_reconciliation; tests/test_shoir_100_tool_engines.py::test_first_fit_decreasing_known_fixture_and_capacity_accounting",
         "T075": "tests/test_shoir_100_tool_extended_engines.py::test_forecast_drift_monitor_has_hand_calculated_error_values",
         "T076": "tests/test_shoir_100_tool_extended_engines.py::test_process_mining_timezone_duration_and_transition_fixture",
         "T078": "tests/test_shoir_100_tool_extended_engines.py::test_carbon_emissions_requires_sourced_versioned_factor",
