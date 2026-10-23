@@ -308,3 +308,11 @@ def test_every_app_module_follows_the_shared_allow_deny_matrix_for_all_tiers():
             if tier_allows(current_tier, required_tier)
         }
         assert actual == expected, f"Tier policy mismatch for {current_tier}"
+
+
+
+def test_shared_tier_policy_fails_closed_for_unknown_strings_and_unmapped_modules():
+    assert not __import__("shoir_tier_capabilities").tier_allows("not-a-real-tier", "Starter")
+    assert not __import__("shoir_tier_capabilities").tier_allows("Starter", "unresolved-protected-tier")
+    assert available_modules("Starter", ["AI Copilot", "Unmapped route"]) == ["AI Copilot"]
+    assert available_modules("unknown package", ["AI Copilot"]) == []
