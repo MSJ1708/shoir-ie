@@ -1,4 +1,4 @@
-"""Validated first-pass deterministic engines for seven focused Shoir-IE targets.
+"""Validated first-pass deterministic engines for twelve focused Shoir-IE targets.
 
 Scope:
 * T022 estimates work-sampling proportions with individual Wilson confidence intervals.
@@ -920,10 +920,298 @@ def plan_two_sample_t_sample_size(
     }
 
 
+def calculate_oee(
+    planned_time: float, downtime: float, ideal_cycle_time: float,
+    total_count: float, good_count: float, *, time_unit: str = "minutes",
+) -> dict[str, Any]:
+    """Calculate OEE using aligned time/count inputs; never silently cap values."""
+    planned = _finite_number(planned_time, "Planned production time")
+    down = _finite_number(downtime, "Downtime")
+    ideal_cycle = _finite_number(ideal_cycle_time, "Ideal cycle time")
+    total_value = _finite_number(total_count, "Total count")
+    good_value = _finite_number(good_count, "Good count")
+    unit = str(time_unit or "").strip()
+    if planned <= 0:
+        raise ValueError("Planned production time must be greater than zero.")
+    if down < 0 or down >= planned:
+        raise ValueError("Downtime must be non-negative and less than planned production time.")
+    if ideal_cycle <= 0:
+        raise ValueError("Ideal cycle time must be greater than zero.")
+    if total_value <= 0 or not total_value.is_integer():
+        raise ValueError("Total count must be a positive whole number.")
+    if good_value < 0 or not good_value.is_integer():
+        raise ValueError("Good count must be a non-negative whole number.")
+    if good_value > total_value:
+        raise ValueError("Good count cannot exceed total count.")
+    if not unit:
+        raise ValueError("Time unit must be provided explicitly.")
+
+    total, good = int(total_value), int(good_value)
+    operating = planned - down
+    availability = operating / planned
+    performance = ideal_cycle * total / operating
+    quality = good / total
+    oee = availability * performance * quality
+    expected = ideal_cycle * good / planned
+    if not math.isclose(oee, expected, rel_tol=1e-10, abs_tol=1e-12):
+        raise ArithmeticError("OEE reconciliation failed; inspect inputs and calculation.")
+    ideal_total_time = ideal_cycle * total
+    losses = pd.DataFrame([
+        {"Component": "Recorded downtime", f"Time equivalent ({unit})": down},
+        {"Component": "Performance gap (operating minus ideal total-output time)", f"Time equivalent ({unit})": operating - ideal_total_time},
+        {"Component": "Rejected units at ideal cycle time", f"Time equivalent ({unit})": ideal_cycle * (total - good)},
+    ])
+    review = performance > 1.0 + 1e-9 or oee > 1.0 + 1e-9
+    return {
+        "status": "REVIEW_PERFORMANCE_OR_OEE_ABOVE_100_PERCENT" if review else "CALCULATED",
+        "method": "OEE = availability × performance × quality",
+        "planned_time": planned, "downtime": down, "operating_time": operating,
+        "ideal_cycle_time": ideal_cycle, "total_count": total, "good_count": good,
+        "availability_pct": availability * 100.0,
+        "performance_pct": performance * 100.0,
+        "quality_pct": quality * 100.0,
+        "oee_pct": oee * 100.0,
+        "time_unit": unit, "losses": losses,
+        "formula": "Availability=(planned−downtime)/planned; performance=ideal cycle×total/operating; quality=good/total; OEE=product.",
+        "assumptions": "Downtime is within planned time; ideal cycle is appropriate for the product mix; counts cover the same period and scope.",
+        "warning": "Performance/OEE above 100% indicates definitions or inputs need reconciliation; no metric is silently capped." if review else "Confirm source timestamps, cycle-time basis and loss definitions before making operational decisions.",
+    }
+
+
+def analyze_process_capability(
+    measurements: Sequence[float], lsl: float, usl: float, *,
+    subgroup_size: int, unit: str = "units",
+) -> dict[str, Any]:
+    """Compute Cp/Cpk using pooled within-subgroup sigma, and Pp/Ppk overall sigma."""
+    if isinstance(measurements, (str, bytes)):
+        raise ValueError("Measurements must be a numeric sequence, not text.")
+    try:
+        raw = list(measurements)
+    except TypeError as exc:
+        raise ValueError("Measurements must be a numeric sequence.") from exc
+    if len(raw) < 4:
+        raise ValueError("Provide at least four measurements across at least two subgroups.")
+    if any(isinstance(value, bool) for value in raw):
+        raise ValueError("Measurements must be numeric values, not booleans.")
+    values = [_finite_number(v, "Measurement") for v in raw]
+    lower, upper = _finite_number(lsl, "Lower specification limit"), _finite_number(usl, "Upper specification limit")
+    if lower >= upper:
+        raise ValueError("Lower specification limit must be less than upper specification limit.")
+    if isinstance(subgroup_size, bool) or not isinstance(subgroup_size, int) or subgroup_size < 2:
+        raise ValueError("Subgroup size must be an integer of at least 2.")
+    if len(values) % subgroup_size:
+        raise ValueError("Measurement count must be divisible by subgroup size.")
+    subgroup_count = len(values) // subgroup_size
+    if subgroup_count < 2:
+        raise ValueError("Provide at least two consecutive subgroups.")
+    normalized_unit = str(unit or "").strip()
+    if not normalized_unit:
+        raise ValueError("Measurement unit must be provided explicitly.")
+    n = len(values)
+    mean_value = sum(values) / n
+    overall_sigma = math.sqrt(sum((v - mean_value) ** 2 for v in values) / (n - 1))
+    within_sumsq = 0.0
+    subgroup_means = []
+    for offset in range(0, n, subgroup_size):
+        subgroup = values[offset:offset + subgroup_size]
+        subgroup_mean = sum(subgroup) / subgroup_size
+        subgroup_means.append(subgroup_mean)
+        within_sumsq += sum((v - subgroup_mean) ** 2 for v in subgroup)
+    within_sigma = math.sqrt(within_sumsq / (n - subgroup_count))
+    if within_sigma <= 0 or overall_sigma <= 0:
+        raise ValueError("Capability indices are undefined when within or overall variation is zero.")
+    cp = (upper - lower) / (6.0 * within_sigma)
+    cpk = min(upper - mean_value, mean_value - lower) / (3.0 * within_sigma)
+    pp = (upper - lower) / (6.0 * overall_sigma)
+    ppk = min(upper - mean_value, mean_value - lower) / (3.0 * overall_sigma)
+    frame = pd.DataFrame({
+        "Observation": range(1, n + 1),
+        f"Measurement ({normalized_unit})": values,
+        "Subgroup": [i // subgroup_size + 1 for i in range(n)],
+    })
+    return {
+        "status": "CALCULATED",
+        "method": "Cp/Cpk use pooled within-subgroup sample sigma; Pp/Ppk use overall sample sigma.",
+        "sample_count": n, "subgroup_count": subgroup_count, "subgroup_size": subgroup_size,
+        "mean": mean_value, "lsl": lower, "usl": upper, "unit": normalized_unit,
+        "within_sigma": within_sigma, "overall_sigma": overall_sigma,
+        "cp": cp, "cpk": cpk, "pp": pp, "ppk": ppk,
+        "cpl": (mean_value - lower) / (3.0 * within_sigma),
+        "cpu": (upper - mean_value) / (3.0 * within_sigma),
+        "ppl": (mean_value - lower) / (3.0 * overall_sigma),
+        "ppu": (upper - mean_value) / (3.0 * overall_sigma),
+        "subgroup_means": subgroup_means, "series": frame,
+        "formula": "Cp=(USL−LSL)/(6×within sigma); Cpk=min(USL−mean,mean−LSL)/(3×within sigma); Pp/Ppk use overall sample sigma.",
+        "assumptions": "Consecutive equal-size rational subgroups and a stable measurement method; this function does not perform normality or statistical-control tests.",
+        "warning": "Fewer than 25 subgroups supplied. Review stability, normality, measurement system and sampling design before interpreting capability.",
+    }
+
+
+def plan_inventory_policy(
+    mean_daily_demand: float, daily_demand_stddev: float, lead_time_days: float,
+    order_cost_per_order: float, annual_holding_cost_per_unit: float, *,
+    operating_days_per_year: int = 365, service_factor_z: float = 1.645,
+) -> dict[str, Any]:
+    """Classical EOQ, safety stock and reorder point with explicit assumptions."""
+    demand = _finite_number(mean_daily_demand, "Mean daily demand")
+    sigma = _finite_number(daily_demand_stddev, "Daily demand standard deviation")
+    lead = _finite_number(lead_time_days, "Lead time")
+    order_cost = _finite_number(order_cost_per_order, "Order cost")
+    holding = _finite_number(annual_holding_cost_per_unit, "Annual holding cost")
+    z = _finite_number(service_factor_z, "Service factor z")
+    if demand <= 0:
+        raise ValueError("Mean daily demand must be greater than zero.")
+    if sigma < 0 or lead < 0:
+        raise ValueError("Demand standard deviation and lead time cannot be negative.")
+    if order_cost <= 0 or holding <= 0:
+        raise ValueError("Order cost and annual holding cost must both be greater than zero.")
+    if isinstance(operating_days_per_year, bool) or not isinstance(operating_days_per_year, int) or not 1 <= operating_days_per_year <= 366:
+        raise ValueError("Operating days per year must be an integer from 1 through 366.")
+    if z < 0:
+        raise ValueError("Service factor z cannot be negative.")
+    annual_demand = demand * operating_days_per_year
+    eoq = math.sqrt(2.0 * annual_demand * order_cost / holding)
+    safety_stock = z * sigma * math.sqrt(lead)
+    reorder_point = demand * lead + safety_stock
+    return {
+        "status": "CALCULATED",
+        "method": "Classical EOQ with safety stock under independent daily demand and deterministic lead time.",
+        "annual_demand_units": annual_demand, "economic_order_quantity_units": eoq,
+        "safety_stock_units": safety_stock, "reorder_point_units": reorder_point,
+        "mean_daily_demand_units": demand, "daily_demand_stddev_units": sigma,
+        "lead_time_days": lead, "service_factor_z": z,
+        "operating_days_per_year": operating_days_per_year,
+        "order_cost_per_order": order_cost, "annual_holding_cost_per_unit": holding,
+        "formula": "EOQ=sqrt(2×annual demand×order cost/annual holding cost); safety stock=z×daily demand SD×sqrt(lead days); reorder point=mean daily demand×lead days+safety stock.",
+        "assumptions": "Demand/lead time are in days; stable independent daily demand; deterministic lead time; consistent annual holding-cost/currency basis.",
+        "warning": "Adjust for intermittent/correlated demand, variable lead time, minimum order quantities, perishability and multi-echelon effects.",
+    }
+
+
+def calculate_carbon_emissions(
+    activity_amount: float, emission_factor_kg_co2e_per_activity_unit: float, *,
+    activity_unit: str, factor_unit: str, factor_source: str, factor_date: str, boundary: str,
+) -> dict[str, Any]:
+    """Multiply activity by explicitly supplied emission factor, without audit claims."""
+    amount = _finite_number(activity_amount, "Activity amount")
+    factor = _finite_number(emission_factor_kg_co2e_per_activity_unit, "Emission factor")
+    unit, factor_units = str(activity_unit or "").strip(), str(factor_unit or "").strip()
+    source, date_text, bound = str(factor_source or "").strip(), str(factor_date or "").strip(), str(boundary or "").strip()
+    if amount < 0 or factor < 0:
+        raise ValueError("Activity amount and emission factor must be non-negative.")
+    if not all((unit, factor_units, source, bound)):
+        raise ValueError("Activity unit, factor unit, factor source and accounting boundary are required.")
+    try:
+        parsed_date = _date.fromisoformat(date_text)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Factor date must use ISO YYYY-MM-DD format.") from exc
+    if parsed_date.isoformat() != date_text:
+        raise ValueError("Factor date must use ISO YYYY-MM-DD format.")
+    kilograms = amount * factor
+    return {
+        "status": "CALCULATED_FROM_USER_SUPPLIED_FACTOR",
+        "method": "Activity data multiplied by user-supplied emission factor.",
+        "activity_amount": amount, "activity_unit": unit,
+        "emission_factor_kg_co2e_per_activity_unit": factor,
+        "factor_unit_label": factor_units, "factor_source": source, "factor_date": date_text,
+        "boundary": bound, "emissions_kg_co2e": kilograms, "emissions_tonnes_co2e": kilograms / 1000.0,
+        "formula": "Emissions (kg CO2e)=activity amount×emission factor; tonnes CO2e=kg CO2e/1,000.",
+        "warning": "The factor and activity records were not independently verified. Confirm units, source, date and accounting boundary; this is not an audited GHG disclosure.",
+    }
+
+
+def analyze_engineering_economics(
+    cash_flows: Sequence[float], discount_rate_pct: float, *,
+    currency: str, period_unit: str = "years",
+) -> dict[str, Any]:
+    """Compute NPV/simple payback; report IRR only for a conventional bracketed root."""
+    if isinstance(cash_flows, (str, bytes)):
+        raise ValueError("Cash flows must be a numeric sequence, not text.")
+    try:
+        raw = list(cash_flows)
+    except TypeError as exc:
+        raise ValueError("Cash flows must be a numeric sequence.") from exc
+    if not 2 <= len(raw) <= 101:
+        raise ValueError("Provide 2 through 101 cash flows (time zero plus up to 100 later periods).")
+    if any(isinstance(value, bool) for value in raw):
+        raise ValueError("Cash flows must be numeric values, not booleans.")
+    flows = [_finite_number(v, "Cash flow") for v in raw]
+    discount = _finite_number(discount_rate_pct, "Discount rate")
+    curr, period = str(currency or "").strip(), str(period_unit or "").strip()
+    if discount <= -100:
+        raise ValueError("Discount rate must be greater than -100 percent.")
+    if not curr or not period:
+        raise ValueError("Currency and period unit are required.")
+    rate = discount / 100.0
+    discounted = [flow / ((1.0 + rate) ** i) for i, flow in enumerate(flows)]
+    npv = sum(discounted)
+    cumulative, running = [], 0.0
+    for flow in flows:
+        running += flow
+        cumulative.append(running)
+    payback = None
+    if flows[0] < 0:
+        for i in range(1, len(flows)):
+            prior, current = cumulative[i-1], cumulative[i]
+            if prior < 0 <= current and flows[i] > 0:
+                payback = float((i - 1) + (-prior / flows[i]))
+                break
+    signs = [1 if f > 0 else -1 for f in flows if f != 0]
+    sign_changes = sum(a != b for a, b in zip(signs, signs[1:]))
+    irr_rate, irr_status = None, "NOT_CALCULATED_NONCONVENTIONAL_CASH_FLOWS"
+    if flows[0] < 0 and sign_changes == 1:
+        def npv_at(r: float) -> float:
+            return sum(flow / ((1.0 + r) ** i) for i, flow in enumerate(flows))
+        lo, hi = -0.99, 0.1
+        f_lo, f_hi = npv_at(lo), npv_at(hi)
+        while f_lo * f_hi > 0 and hi < 10.0:
+            hi = min(10.0, hi * 2.0 + 0.1)
+            f_hi = npv_at(hi)
+        if f_lo == 0:
+            irr_rate = lo
+        elif f_hi == 0:
+            irr_rate = hi
+        elif (f_lo < 0 < f_hi) or (f_hi < 0 < f_lo):
+            for _ in range(200):
+                mid = (lo + hi) / 2.0
+                f_mid = npv_at(mid)
+                if abs(f_mid) < 1e-10 or (hi - lo) < 1e-12:
+                    lo = hi = mid
+                    break
+                if (f_lo < 0 <= f_mid) or (f_mid < 0 <= f_lo):
+                    hi, f_hi = mid, f_mid
+                else:
+                    lo, f_lo = mid, f_mid
+            irr_rate = (lo + hi) / 2.0
+        irr_status = "CALCULATED" if irr_rate is not None else "IRR_OUTSIDE_SUPPORTED_SEARCH_RANGE"
+    frame = pd.DataFrame({
+        "Period": range(len(flows)), f"Cash flow ({curr})": flows,
+        f"Discounted cash flow ({curr})": discounted,
+        f"Cumulative cash flow ({curr})": cumulative,
+    })
+    return {
+        "status": "CALCULATED", "method": "End-of-period NPV; simple interpolated payback; IRR only when a supported conventional root is bracketed.",
+        "currency": curr, "period_unit": period, "cash_flows": flows,
+        "discount_rate_pct": discount, "npv": npv,
+        "irr_pct": irr_rate * 100.0 if irr_rate is not None else None,
+        "irr_status": irr_status, "simple_payback_periods": payback,
+        "sign_changes_in_nonzero_cash_flows": sign_changes, "cash_flow_schedule": frame,
+        "formula": "NPV=sum(CF_t/(1+r)^t) including CF_0 at t=0; IRR solves NPV(r)=0; simple payback is undiscounted.",
+        "assumptions": "Cash flows are evenly spaced end-of-period amounts after CF_0; currency is consistent; no tax, inflation or financing treatment is inferred.",
+        "warning": "Scenario calculation only, not verified realized benefit. IRR is omitted for nonconventional cash flows or unsupported roots." if irr_rate is None else "Scenario calculation only, not verified realized benefit. Review cash-flow timing, taxes, inflation and financing as applicable.",
+    }
+
+
+
 __all__ = [
     "analyze_work_sampling",
     "analyze_pareto_root_cause",
     "assess_5s_audit",
+    "calculate_oee",
+    "analyze_process_capability",
+    "plan_inventory_policy",
+    "calculate_carbon_emissions",
+    "analyze_engineering_economics",
     "build_kaizen_a3_record",
     "calculate_time_study",
     "calculate_takt_capacity",
