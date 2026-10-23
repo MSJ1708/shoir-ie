@@ -178,10 +178,9 @@ def test_every_catalogued_module_has_a_specialist_route_or_named_fallback_bluepr
     named_fallback_names = set(FALLBACK_MODULE_BLUEPRINTS)
     catalogue_names = set(catalogue)
 
-    # This is the shared source-defined inventory audited by PR #135.
-    # Pin the exact count so a missing or unexpectedly duplicated route cannot
-    # silently pass under the former broad lower-bound assertion.
-    assert len(catalogue_names) == 96
+    # This exact count includes the additive Engineering Tool Library route.
+    # Keep the assertion strict so missing or duplicate routes cannot slip through.
+    assert len(catalogue_names) == 97
     uncovered = catalogue_names - specialist_names - named_fallback_names
     assert not uncovered, {
         "modules_without_specialist_route_or_named_fallback": sorted(uncovered)
