@@ -124,20 +124,22 @@ _BY_NAME = {row["canonical_name"].casefold(): row for row in TOOL_TARGETS}
 
 def _normalize_known_tier(value: str | None) -> str | None:
     """Strict tier parser: unknown labels remain unresolved, never default to Starter."""
-    raw = re.sub(r"\s+", " ", str(value or "").strip().casefold())
+    raw = re.sub(r"\\s+", " ", str(value or "").strip().casefold())
+    # Accept existing subscription UI price suffixes without accepting arbitrary
+    # labels such as "Super Enterprise". The canonical entitlement tiers do not
+    # include prices; prices remain a billing/UI concern.
+    raw = re.sub(r"\\s+\\(\\+?\\$[0-9]+(?:\\.[0-9]{1,2})?\\)$", "", raw)
     aliases = {
-        "starter":"Starter", "starter tier":"Starter",
-        "mid-tier pro":"Mid-Tier Pro", "mid tier pro":"Mid-Tier Pro",
-        "mid-tier pro tier":"Mid-Tier Pro", "pro":"Mid-Tier Pro",
-        "professional":"Professional", "professional tier":"Professional",
-        "enterprise":"Enterprise", "enterprise tier":"Enterprise",
-        "enterprise plus":"Enterprise Plus", "enterprise plus tier":"Enterprise Plus",
-        "enterprise plus tier ($399)":"Enterprise Plus",
-        "research pack":"Research Pack", "research pack tier":"Research Pack",
-        "research pack add-on":"Research Pack",
+        "starter": "Starter", "starter tier": "Starter",
+        "mid-tier pro": "Mid-Tier Pro", "mid tier pro": "Mid-Tier Pro",
+        "mid-tier pro tier": "Mid-Tier Pro", "pro": "Mid-Tier Pro",
+        "professional": "Professional", "professional tier": "Professional",
+        "enterprise": "Enterprise", "enterprise tier": "Enterprise",
+        "enterprise plus": "Enterprise Plus", "enterprise plus tier": "Enterprise Plus",
+        "research pack": "Research Pack", "research pack tier": "Research Pack",
+        "research pack add-on": "Research Pack",
     }
     return aliases.get(raw)
-
 
 def get_target_tool(tool_id_or_name: str) -> dict[str, Any] | None:
     """Resolve stable ID or exact canonical name; presentation aliases do not authorize."""
