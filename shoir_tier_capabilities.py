@@ -153,6 +153,27 @@ MODULE_REQUIREMENTS = {
 }
 
 COPILOT_TOOL_REQUIREMENTS = {
+    # Deterministic tools embedded in the additive 100-tool workbench.
+    "time study": "Starter",
+    "standard time": "Starter",
+    "work sampling": "Starter",
+    "takt time": "Starter",
+    "data quality profile": "Starter",
+    "unit conversion": "Starter",
+    "currency conversion": "Starter",
+    "synthetic industrial data": "Starter",
+    "oee": "Mid-Tier Pro",
+    "process capability": "Mid-Tier Pro",
+    "cpk": "Mid-Tier Pro",
+    "mtbf": "Professional",
+    "mttr": "Professional",
+    "inventory policy": "Mid-Tier Pro",
+    "reorder point": "Mid-Tier Pro",
+    "safety stock": "Mid-Tier Pro",
+    "carbon emissions": "Mid-Tier Pro",
+    "emission factor": "Mid-Tier Pro",
+    "npv": "Mid-Tier Pro",
+    "payback period": "Mid-Tier Pro",
     "shadowshift": "Enterprise",
     "run milp": "Starter",
     "optimize the network": "Starter",
