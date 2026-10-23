@@ -153,6 +153,27 @@ MODULE_REQUIREMENTS = {
 }
 
 COPILOT_TOOL_REQUIREMENTS = {
+    # Deterministic tools embedded in the additive 100-tool workbench.
+    "time study": "Starter",
+    "standard time": "Starter",
+    "work sampling": "Starter",
+    "takt time": "Starter",
+    "data quality profile": "Starter",
+    "unit conversion": "Starter",
+    "currency conversion": "Starter",
+    "synthetic industrial data": "Starter",
+    "oee": "Mid-Tier Pro",
+    "process capability": "Mid-Tier Pro",
+    "cpk": "Mid-Tier Pro",
+    "mtbf": "Professional",
+    "mttr": "Professional",
+    "inventory policy": "Mid-Tier Pro",
+    "reorder point": "Mid-Tier Pro",
+    "safety stock": "Mid-Tier Pro",
+    "carbon emissions": "Mid-Tier Pro",
+    "emission factor": "Mid-Tier Pro",
+    "npv": "Mid-Tier Pro",
+    "payback period": "Mid-Tier Pro",
     "shadowshift": "Enterprise",
     "run milp": "Starter",
     "optimize the network": "Starter",
@@ -213,15 +234,49 @@ def normalize_tier(value: str) -> str:
     return "Starter"
 
 
-def tier_allows(current: str, required: str) -> bool:
-    """Enforce the product menu: Research Pack inherits Enterprise, plus research.
+def _recognized_tier(value: str) -> Optional[str]:
+    """Recognize known subscription labels only; reject generic descriptions and unknown tiers."""
+    raw = " ".join(str(value or "").strip().casefold().split())
+    if not raw:
+        return None
 
-    Research Pack is an add-on package in the app, not a grant of the
-    Enterprise Plus-only tier. Keep research entitlement independent from
-    the ordinary tier ladder so one package never implies another add-on.
+    def matches(*bases: str) -> bool:
+        for base in bases:
+            if raw in {base, f"{base} tier"}:
+                return True
+            if raw.startswith(f"{base} tier (") and raw.endswith(")"):
+                return True
+            if raw.startswith(f"{base} (") and raw.endswith(")"):
+                return True
+        return False
+
+    if matches("research pack"):
+        return "Research Pack"
+    if matches("enterprise plus", "industrial enterprise"):
+        return "Enterprise Plus"
+    if matches("enterprise"):
+        return "Enterprise"
+    if matches("professional"):
+        return "Professional"
+    if matches("mid-tier pro", "mid tier pro", "pro"):
+        return "Mid-Tier Pro"
+    if matches("starter"):
+        return "Starter"
+    return None
+
+
+def tier_allows(current: str, required: str) -> bool:
+    """Fail closed for unrecognized tiers while keeping Research Pack independent.
+
+    Research Pack is an add-on that inherits through Enterprise, not Enterprise Plus.
+    Enterprise Plus does not imply Research Pack. Unlike normalize_tier (which retains
+    a legacy Starter display fallback), this authorization function rejects unknown or
+    empty tier strings instead of accidentally treating them as Starter.
     """
-    current_tier = normalize_tier(current)
-    required_tier = normalize_tier(required)
+    current_tier = _recognized_tier(current)
+    required_tier = _recognized_tier(required)
+    if current_tier is None or required_tier is None:
+        return False
 
     if current_tier == "Research Pack":
         return required_tier in {
@@ -278,11 +333,20 @@ def audit_module_entitlement_coverage(modules: Iterable[str]) -> dict[str, objec
 
 
 def available_modules(tier: str, modules: Iterable[str]) -> list[str]:
-    result = []
+    """Return only explicitly mapped modules allowed for a recognized tier.
+
+    An absent or invalid requirement is unresolved, not free. Keep the original
+    module name for route compatibility, but do not expose it as executable when
+    there is no recognized policy.
+    """
+    if _recognized_tier(tier) is None:
+        return []
+    result: list[str] = []
     for module in modules:
-        required = module_required_tier(str(module))
-        if required is None or tier_allows(tier, required):
-            result.append(str(module))
+        label = str(module or "").strip()
+        required = module_required_tier(label)
+        if label and required in TIER_ORDER and tier_allows(tier, required):
+            result.append(label)
     return result
 
 
@@ -306,11 +370,11 @@ def copilot_gate(prompt: str, tier: str) -> Optional[dict[str, str]]:
         if phrase in p and not tier_allows(tier, required):
             return {
                 "required_tier": required,
-                "current_tier": normalize_tier(tier),
+                "current_tier": _recognized_tier(tier) or "Unrecognized package",
                 "phrase": phrase,
                 "message": (
                     f"🔒 **{phrase.title()}** is outside your current package. "
-                    f"Your package is **{normalize_tier(tier)}**; this capability requires "
+                    f"Your package is **{_recognized_tier(tier) or 'Unrecognized package'}**; this capability requires "
                     f"**{required}**. I can still explain the method or help you use the "
                     f"capabilities included in your package."
                 ),
@@ -319,11 +383,19 @@ def copilot_gate(prompt: str, tier: str) -> Optional[dict[str, str]]:
 
 
 def copilot_capabilities(tier: str, allowed_modules: Iterable[str]) -> dict[str, object]:
-    normalized = normalize_tier(tier)
+    recognized = _recognized_tier(tier)
+    if recognized is None:
+        return {
+            "tier": "Unrecognized package",
+            "modules": [],
+            "can_research": False,
+            "can_enterprise": False,
+            "can_professional": False,
+        }
     return {
-        "tier": normalized,
-        "modules": available_modules(normalized, allowed_modules),
-        "can_research": tier_allows(normalized, "Research Pack"),
-        "can_enterprise": tier_allows(normalized, "Enterprise"),
-        "can_professional": tier_allows(normalized, "Professional"),
+        "tier": recognized,
+        "modules": available_modules(recognized, allowed_modules),
+        "can_research": tier_allows(recognized, "Research Pack"),
+        "can_enterprise": tier_allows(recognized, "Enterprise"),
+        "can_professional": tier_allows(recognized, "Professional"),
     }

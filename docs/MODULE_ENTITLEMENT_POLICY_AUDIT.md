@@ -12,7 +12,7 @@ The helper `audit_module_entitlement_coverage(catalog_names)` provides a machine
 - `INCOMPLETE` means one or more names are unmapped or have an invalid tier value.
 - `EMPTY` means no catalogue names were supplied. It is not a pass.
 - `coverage_percent` measures explicit mapping coverage only. It is not a measure of authorization correctness, test coverage, security, or production readiness.
-- This is an audit-only helper. It intentionally does not alter runtime access decisions; changing implicit/unmapped behavior before the actual catalogue and intended free-tier rules are reconciled could break existing users.
+- `audit_module_entitlement_coverage` remains an audit helper; runtime access is enforced separately. On the 100-tool implementation branch, `available_modules()` now excludes names without a recognized explicit requirement, and `tier_allows()` returns false for unknown/empty tier labels. This is a deliberate fail-closed security behavior change; any legitimate module missing from `MODULE_REQUIREMENTS` will disappear from accessible module lists until its policy is explicitly added.
 
 ## Current source finding
 
@@ -32,3 +32,14 @@ The 96 names are confirmed source catalog and subscription-feature declarations,
 ## Machine-readable module inventory
 
 See [`MODULE_TIER_INVENTORY.csv`](MODULE_TIER_INVENTORY.csv) for the full 96-name source-level inventory, the currently declared minimum subscription tier, which app tier list first introduces each name, the catalog source(s), and the authenticated-browser status. Every row intentionally remains `UNVERIFIED` for authenticated module walkthroughs until the per-module browser and functional matrix is actually completed. The regression suite checks that this inventory stays synchronized with the source catalog and tier lists.
+
+
+## 100-tool implementation branch update (2026-10-23)
+
+The additive target catalog and grouped library are in `shoir_100_tool_registry.py`, `shoir_100_tool_workbench.py`, and `docs/SHOIR_100_TOOL_IMPLEMENTATION_MATRIX.csv`. The library is embedded inside the existing Core IE Tools screen rather than creating 100 top-level navigation items. It does not claim each existing related route meets its specialist acceptance criteria.
+
+Six deterministic quick methods are provided for data profiling, unit/dated user-supplied currency conversion, reproducible synthetic data generation, standard-time calculation, Wilson work-sampling intervals, and takt/capacity. Other target IDs do not produce a success-shaped placeholder; the calculation dispatcher raises a clear not-implemented error when no supported engine is declared.
+
+The policy update also tightens the independent `industrial_platform.tier_allows()` implementation. Research Pack continues to inherit through Enterprise and research tools only; it does not imply Enterprise Plus. Enterprise Plus does not imply Research Pack.
+
+See `docs/SHOIR_100_TOOL_IMPLEMENTATION_REPORT.md` for status counts and the current release decision. Authenticated browser status remains `UNVERIFIED` for the new tool matrix until each workflow is actually exercised with a disposable authenticated account. This branch is not a production release approval.
