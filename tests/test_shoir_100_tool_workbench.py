@@ -184,8 +184,8 @@ def test_workbench_runs_5s_and_revisioned_kaizen_a3():
     at.text_input(key="tool030_due_date").set_value("2026-11-15")
     at.text_input(key="tool030_baseline_evidence").set_value("baseline-run-101")
     at.selectbox(key="tool030_status").select("In Progress")
-    at.run(timeout=45)
-    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    # These are form fields; do not force a script rerun before submitting,
+    # because Streamlit forms commit input state together on submit.
     at.button(key="tool030_run").click()
     at.run(timeout=45)
     assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
@@ -198,7 +198,6 @@ def test_workbench_runs_5s_and_revisioned_kaizen_a3():
 
     at.text_input(key="tool030_record_id").set_value(record_id)
     at.text_input(key="tool030_actual").set_value("88")
-    at.run(timeout=45)
     at.button(key="tool030_run").click()
     at.run(timeout=45)
     assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
