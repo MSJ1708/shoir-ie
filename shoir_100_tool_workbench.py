@@ -745,13 +745,15 @@ def _render_quick_tools(st: Any, tier: str) -> None:
         with st.expander("T011 · Universal Data Importer", expanded=True):
             st.write("Preview CSV/XLS/XLSX first; nothing replaces the active session dataset until you explicitly apply a successfully parsed file.")
             upload = st.file_uploader("Choose a CSV or Excel workbook", type=["csv", "xlsx", "xlsm", "xls"], key="shoir100_import_upload")
+            selected_sheet = None
+            current_upload_hash = None
             if upload is not None:
                 if upload.size > MAX_PROFILE_BYTES:
                     st.error("The importer limit is 20 MiB. The active dataset was not changed.")
                 else:
                     try:
                         payload = upload.getvalue()
-                        selected_sheet = None
+                        current_upload_hash = hashlib.sha256(payload).hexdigest()
                         if upload.name.lower().endswith(".csv"):
                             preview_frame = pd.read_csv(io.BytesIO(payload))
                         else:
@@ -773,11 +775,22 @@ def _render_quick_tools(st: Any, tier: str) -> None:
                     except Exception as exc:
                         st.error(f"Import failed; the previous valid dataset was preserved. {type(exc).__name__}: {exc}")
             staged_import = st.session_state.get("_shoir100_staged_import")
+            if isinstance(staged_import, Mapping) and upload is not None and (
+                current_upload_hash is None
+                or staged_import.get("filename") != upload.name
+                or staged_import.get("source_fingerprint") != current_upload_hash
+                or staged_import.get("sheet_name") != selected_sheet
+            ):
+                st.warning("The uploaded file or selected sheet changed after staging. The stale staged import was discarded; stage the current selection again.")
+                st.session_state["_shoir100_staged_import"] = None
+                staged_import = None
             if isinstance(staged_import, Mapping) and isinstance(staged_import.get("dataframe"), pd.DataFrame):
                 st.caption(f"Staged source: {staged_import.get('filename')} · SHA-256 {str(staged_import.get('source_fingerprint', ''))[:16]}…")
                 st.json(staged_import.get("metrics", {}))
                 st.dataframe(staged_import["dataframe"].head(20), use_container_width=True, hide_index=True)
-                if st.button("Apply staged dataset to this session", key="shoir100_import_apply"):
+                if not tool_access_allowed(tier, "T011"):
+                    st.warning("The current package cannot apply this dataset import.")
+                elif st.button("Apply staged dataset to this session", key="shoir100_import_apply"):
                     current_dataset = st.session_state.get("_shoir100_dataset")
                     st.session_state["_shoir100_previous_dataset"] = current_dataset.copy(deep=True) if isinstance(current_dataset, pd.DataFrame) else None
                     st.session_state["_shoir100_dataset"] = staged_import["dataframe"].copy(deep=True)
@@ -855,7 +868,9 @@ def _render_quick_tools(st: Any, tier: str) -> None:
                         st.dataframe(preview["dataframe"].head(30), use_container_width=True, hide_index=True)
                         for warning in preview.get("warnings", []):
                             st.warning(str(warning))
-                        if st.button("Apply reviewed candidate", key="shoir100_clean_apply"):
+                        if not tool_access_allowed(tier, "T014"):
+                            st.warning("The current package cannot apply these cleaning changes.")
+                        elif st.button("Apply reviewed candidate", key="shoir100_clean_apply"):
                             st.session_state["_shoir100_previous_dataset"] = active_dataset.copy(deep=True)
                             st.session_state["_shoir100_dataset"] = preview["dataframe"].copy(deep=True)
                             st.session_state["_shoir100_dataset_name"] = str(st.session_state.get("_shoir100_dataset_name", "Dataset")) + " · cleaned"
