@@ -312,10 +312,11 @@ def render_100_tool_workbench(tier: str, username: str) -> None:
         with c2:
             demand = st.number_input("Required demand (units)", min_value=0.001, value=120.0, key="shoir100_takt_demand")
         with c3:
-            unit = st.selectbox("Available time unit", ["min","h","s"], key="shoir100_takt_unit")
+            cycle = st.number_input("Measured cycle time (same unit per unit)", min_value=0.001, value=3.0, key="shoir100_takt_cycle")
+        unit = st.selectbox("Available time unit", ["min","h","s"], key="shoir100_takt_unit")
         if st.button("Calculate takt and capacity", key="shoir100_takt_run"):
             try:
-                _show_result(st, takt_capacity(available, demand, unit))
+                _show_result(st, takt_capacity(available, demand, cycle, unit))
             except ValueError as exc:
                 st.error(str(exc))
         return
@@ -344,9 +345,11 @@ def render_100_tool_workbench(tier: str, username: str) -> None:
             lsl = st.number_input("Lower specification limit", value=8.0, key="shoir100_lsl")
         with c2:
             usl = st.number_input("Upper specification limit", value=12.0, key="shoir100_usl")
+        subgroup_sigma = st.number_input("Within-subgroup standard deviation (optional; needed for Cp/Cpk)", min_value=0.0, value=0.0, key="shoir100_within_sigma")
         if st.button("Calculate capability indices", key="shoir100_cap_run"):
             try:
-                _show_result(st, process_capability(_parse_numbers(values, "Observed measurements"), lsl, usl))
+                sigma = subgroup_sigma if subgroup_sigma > 0 else None
+                _show_result(st, process_capability(_parse_numbers(values, "Observed measurements"), lsl, usl, sigma))
             except ValueError as exc:
                 st.error(str(exc))
         return
