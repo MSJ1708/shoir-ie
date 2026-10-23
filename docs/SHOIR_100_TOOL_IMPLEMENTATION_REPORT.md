@@ -12,20 +12,32 @@ No target is marked `VERIFIED_WORKING`. The grouped library now wires 20 distinc
 - `shoir_100_tool_registry.py`: fail-closed target access for unknown tools/tier labels, a separate readiness gate, stable-ID lookup, metadata audit and acceptance-state fields.
 - `shoir_tier_capabilities.py`: additive exports for target policy. Existing subscription routes, prices and legacy module contracts are not silently re-tiered.
 - `pages/Engineering_Tool_Library.py`: authenticated tool explorer, filters, detail contracts and a hand-off only to legacy Workbench routes available under the logged-in user's actual tier. The page makes clear that target status does not certify a legacy route.
-- `pages/Engineering_Tool_Library.py` and `shoir_100_tool_engines.py` expose **nine limited-validation method paths** in the grouped library:
+- `pages/Engineering_Tool_Library.py`, `shoir_100_tool_engines.py` and `shoir_100_tool_extended_engines.py` expose **21 limited-validation action paths across 20 target IDs**:
+  - **T016 — Unit and Currency Converter:** documented physical-unit conversions; currency conversion requires a user-supplied sourced, dated exchange rate (not a live FX feed).
   - **T021 — Time Study and Standard Time:** observed mean/median, rating-adjusted normal time, explicit allowance convention and standard time.
+  - **T022 — Work Sampling Analyzer:** observed activity proportions with Wilson confidence intervals and conservative sample-size planning; sampling-frame representativeness remains a human responsibility.
   - **T023 — Takt Time and Capacity:** theoretical takt/capacity and capacity gap; the caller must supply compatible units and the same production period.
-  - **T026 — OEE and Loss Analysis:** availability, performance, quality, OEE and a sequential loss decomposition; plant-specific definitions still need review.
+  - **T026 — OEE and Loss Analysis:** availability, performance, quality, OEE and sequential loss decomposition; plant-specific definitions still need review.
+  - **T028 — Root-Cause Analysis Toolkit:** Pareto counts/cumulative share and 5-Why/action fields; frequency does not establish causation.
+  - **T029 — 5S and Workplace Audit:** five-pillar scoring and owner/due-date follow-up gap flags; an editable self-assessment is not a certified audit.
+  - **T030 — Kaizen and A3 Improvement Manager:** baseline/target/actual progress and evidence/status fields; progress is not verified savings.
+  - **T031 — Statistical Process Control:** Individuals/Moving Range chart limits and points outside limits only; no Nelson/Western Electric rules or stability certification.
   - **T032 — Process Capability:** Cp/Cpk/Pp/Ppk with subgroup assumptions and variation warnings.
+  - **T040 — Quality Cost and Defect Analyzer:** scoped scrap/rework/inspection cost reconciliation; not a complete quality-cost ledger.
+  - **T042 — MTBF and MTTR Analyzer:** calculations from complete recorded operating/failure/repair inputs; censoring and incomplete windows are not modeled.
   - **T055 — Inventory Policy:** EOQ, safety stock and reorder point under explicit input/service assumptions.
-  - **T066 — Cutting Stock and Bin Packing:** supported scope is one-dimensional First-Fit Decreasing; it validates positive finite capacities/sizes and integer quantities, returns item assignments/bin accounting/utilization, and does not claim minimum-bin optimality. Cutting-stock pattern generation and multi-dimensional packing are not implemented.
-  - **T076 — Process Mining:** directly-follows transition counts, activity counts, case traces, elapsed case durations and inter-event waits from a validated event log; timestamps are normalized to UTC and optional reference trace comparison is exact-sequence only. It is not full Petri-net/token-replay conformance.
-  - **T078 — Carbon Emissions:** activity data multiplied by a user-supplied, sourced/versioned factor with scope and provenance disclosure; this is not an audited emissions statement.
+  - **T056 — ABC/XYZ Inventory Analyzer:** cumulative annual-use-value and demand-coefficient-of-variation classifications under supplied history/thresholds.
+  - **T066 — Cutting Stock and Bin Packing:** first-fit-decreasing 1-D bin packing plus a separate kerf-aware 1-D cutting-stock MILP using CBC/PuLP; no multidimensional packing or unmodeled plant-specific constraints.
+  - **T075 — Forecast and Model Drift Monitor:** prediction-vs-actual MAE/RMSE/bias/MAPE and user-threshold alerts; not a persistent monitoring/retraining service.
+  - **T076 — Process Mining:** directly-follows transition counts, activity counts, case traces, elapsed case durations and inter-event waits from a validated event log; timestamps normalize to UTC and optional reference-trace comparison is exact-sequence only, not full Petri-net conformance.
+  - **T078 — Carbon Emissions:** activity data multiplied by a user-supplied, sourced/versioned factor with scope and provenance disclosure; not an audited emissions statement.
   - **T081 — Engineering Economics:** discounted cash-flow NPV/IRR and simple payback under stated timing/currency assumptions.
+  - **T085 — Statistical Power and Sample-Size Planner:** noncentral-t planning for balanced, independent two-sample t-tests under stated assumptions; other designs and multiplicity/dropout adjustments are not modeled.
 - The 20 wired target IDs show method/assumptions/warnings, stale-result labeling and CSV summaries/tables where the method emits structured outputs. Bad inputs preserve the last successful session result. The new Tool Library's validation-mode results are session-only; durable project persistence is not claimed. Synthetic example inputs must remain labelled synthetic and are not evidence of industrial savings.
-- `tests/test_shoir_100_tool_engines.py`: hand-calculated/golden fixtures for the seven calculator paths and deterministic packing/process-mining fixtures, invalid/boundary input tests, non-mutation, timezone-aware process durations, directly-follows counts, source/factor checks and CSV parse/read-back assertions. Registry metadata now links each numerical target to its actual fixture test.
+- `tests/test_shoir_100_tool_engines.py` and `tests/test_shoir_100_tool_extended_engines.py`: hand-calculated/golden fixtures for the original engines plus work-sampling intervals, Pareto cumulative shares, 5S scoring, Kaizen/A3 progress, SPC limits, quality-cost reconciliation, MTBF/MTTR, ABC/XYZ, drift statistics, sourced unit/currency conversion, two-sample t-test power and the kerf-aware cutting-stock MILP. Tests cover invalid/boundary inputs, non-mutation, timezone-aware durations, solver output and CSV parse/read-back assertions. Registry metadata links the targets to corresponding fixtures.
 - `shoir_copilot_orchestrator.py`: governed decision staging now fails closed if the enterprise approval/access-control module cannot be imported; `tests/test_shoir_copilot_orchestrator.py` contains a regression test for that case.
-- `tests/test_shoir_100_tool_registry.py`: 100 sequential stable IDs, required metadata, all 100 × six plan/package entitlement outcomes, fail-closed unknowns, Research Pack vs Enterprise Plus, display label identity and readiness rules.
+- `tests/test_shoir_100_tool_registry.py`: 100 sequential stable IDs, required metadata, all 100 × six plan/package entitlement outcomes, fail-closed unknowns, Research Pack vs Enterprise Plus, alias-to-canonical authorization, display label identity and readiness rules.
+- `tests/test_shoir_100_tool_library.py`: Streamlit AppTest checks the login gate, runs 11 new specialist forms against deterministic defaults, and exercises the cutting-stock optimization action inside the existing T066 sector.
 - `docs/SHOIR_100_TOOL_IMPLEMENTATION_MATRIX.csv`: 100 data rows and all 19 requested fields.
 - This report documents scope and limitations without marketing foundation-only tools as complete.
 
@@ -33,7 +45,7 @@ No target is marked `VERIFIED_WORKING`. The grouped library now wires 20 distinc
 
 Generated from the matrix after wiring the additional methods: 56 `IMPLEMENTED_NEEDS_VALIDATION`, 38 `FOUNDATION_ONLY`, 0 `MISSING`, 6 `EXTERNAL_CONFIGURATION_REQUIRED`, 0 `VERIFIED_WORKING` and 0 `BLOCKED`.
 
-T066 and T076 have explicit limited-scope specialist implementations; T021, T023, T026, T032, T055, T078 and T081 are also exposed through deterministic validation-mode calculators. All nine remain `IMPLEMENTED_NEEDS_VALIDATION`, not `VERIFIED_WORKING`, because authenticated end-to-end, persistence, route/action enforcement and export acceptance are incomplete. The other rows remain conservative source-triage statuses, and a matching legacy route is only a reuse candidate, not a verified specialist engine.
+The 20 wired target IDs are `IMPLEMENTED_NEEDS_VALIDATION`, not `VERIFIED_WORKING`, because hosted authenticated end-to-end, durable persistence, full route/action enforcement and export acceptance are incomplete. Numerical fixture tests support the described method scope but do not certify all broader acceptance requirements. The other rows remain conservative source-triage statuses, and a matching legacy route is only a reuse candidate, not a verified specialist engine.
 
 ## Entitlement and access
 
@@ -45,12 +57,12 @@ The legacy fail-open helpers were also corrected: shared tier normalization reco
 
 ## Verification status
 
-- Four initial CI workflows passed on an earlier registry-only revision: application tests, platform tests, engine regression, and security/quality. See links in the PR Checks tab: [PR #177](https://github.com/MSJ1708/shoir-ie/pull/177).
-- A later workflow set was queued while the branch was changing; it predates the latest engine additions. Do **not** interpret those earlier successes as proof of the newest revision.
-- A subsequent full-suite candidate recorded **1 failed, 595 passed, 2 skipped, 19 warnings**. The failure was an alias authorization path still looking up only IDs/canonical names; the resolver has now been corrected and the full matrix is rerunning on a newer SHA. Do not treat the failed run as a pass; only the latest green result can support merge.
+- Full test suite on candidate SHA `1fe730077a06100ee4b48d7227ade808d080c5fb`: **599 passed, 2 skipped, 32 warnings in 32.80 seconds**. [Run details](https://github.com/MSJ1708/shoir-ie/actions/runs/40017728610). This run includes the alias authorization fix, specialist fixtures and Tool Library AppTests.
+- Engine Regression on the same SHA passed. [Run details](https://github.com/MSJ1708/shoir-ie/actions/runs/40017728614).
+- At the time of this report refresh, Platform Tests, full application validation/browser smoke and security/quality gates for that SHA were still running. The preceding failed alias-only run is superseded for the test suite by the 599-pass run, but pending workflows must not be described as passed.
 - The local container could not clone the repository through its network path, so no local full-repo test execution is claimed.
 - No authenticated hosted browser walkthrough has been completed. `browser_test` remains `UNVERIFIED` for all 100 targets; the hosted live-deployment smoke was skipped.
-- Export tests for engine output tables cover CSV serialization and pandas read-back; the new Tool Library also provides per-table and summary CSV download controls. The latest Streamlit AppTest exercises visible method forms and cutting-stock action, but the hosted download behavior, durable persistence, and existing shared XLSX/PDF/PPTX round trips remain unverified.
+- Export tests for engine output tables cover CSV serialization and pandas read-back; the new Tool Library also provides per-table and summary CSV download controls. Streamlit AppTest exercises visible method forms and cutting-stock action, but the hosted download behavior, durable persistence, and existing shared XLSX/PDF/PPTX round trips remain unverified.
 - Existing facility-layout source already includes department CRUD, complete From-To and SLP matrices, empty REL handling, heatmap data conversion, route alternatives and four-sheet XLSX export; focused tests exist. The full authenticated user workflow still needs to be run on staging. Enterprise Integration diagnostics, real workbook-to-decision, cross-account isolation and configured connectors also remain outstanding.
 
 ## Release-critical work remaining
