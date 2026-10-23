@@ -213,7 +213,7 @@ def normalize_tier(value: str) -> str:
         return "Enterprise"
     if "professional" in v:
         return "Professional"
-    if "mid-tier pro" in v or "mid tier pro" in v or re.search(r"\\bpro\\b", v) or "trial" in v:
+    if "mid-tier pro" in v or "mid tier pro" in v or re.search(r"\bpro\b", v) or "trial" in v:
         return "Mid-Tier Pro"
     if "starter" in v or v in {"basic", "free"}:
         return "Starter"
@@ -325,7 +325,7 @@ def available_modules(tier: str, modules: Iterable[str]) -> list[str]:
 
 def _looks_like_action_request(prompt: str) -> bool:
     p = re.sub(r"\s+", " ", str(prompt or "").strip().lower())
-    return bool(re.search(
+    if "mid-tier pro" in v or "mid tier pro" in v or re.search(r"\bpro\b", v) or "trial" in v:
         r"\b(run|execute|perform|calculate|analy[sz]e|build|create|generate|export|clean|format|"
         r"compare|optimi[sz]e|fit|test|review|simulate|forecast|open|use|apply|do)\b",
         p,
