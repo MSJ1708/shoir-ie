@@ -234,9 +234,11 @@ def normalize_tier(value: str | None) -> str:
         "enterprise": "Enterprise", "enterprise tier": "Enterprise",
         "enterprise plus": "Enterprise Plus", "enterprise plus tier": "Enterprise Plus",
         "industrial enterprise": "Enterprise Plus", "industrial enterprise tier": "Enterprise Plus",
-        "research pack": "Research Pack", "research pack tier": "Research Pack",
-        "research pack add-on": "Research Pack", "research & innovation": "Research Pack",
-        "research tier": "Research Pack",
+        # Legacy label adapters are explicit mappings, never substring matching.
+        "operations": "Enterprise", "industrial operations tier": "Enterprise",
+        "research": "Research Pack", "research pack": "Research Pack",
+        "research pack tier": "Research Pack", "research pack add-on": "Research Pack",
+        "research & innovation": "Research Pack", "research tier": "Research Pack",
     }
     return aliases.get(raw, "UNRESOLVED")
 
