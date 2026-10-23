@@ -199,6 +199,11 @@ COPILOT_TOOL_REQUIREMENTS = {
 
 
 def normalize_tier(value: str) -> str:
+    """Normalize known account-plan labels without substring privilege escalation.
+
+    Unknown current-plan labels fall back to the lowest ordinary tier. Required
+    capabilities are stricter: tier_allows() rejects unknown required labels.
+    """
     v = str(value or "Starter").strip().lower()
     if "research" in v:
         return "Research Pack"
@@ -208,8 +213,10 @@ def normalize_tier(value: str) -> str:
         return "Enterprise"
     if "professional" in v:
         return "Professional"
-    if "pro" in v:
+    if "mid-tier pro" in v or "mid tier pro" in v or re.search(r"\\bpro\\b", v) or "trial" in v:
         return "Mid-Tier Pro"
+    if "starter" in v or v in {"basic", "free"}:
+        return "Starter"
     return "Starter"
 
 
