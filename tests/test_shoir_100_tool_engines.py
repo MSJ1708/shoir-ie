@@ -82,6 +82,11 @@ def test_process_mining_rejects_missing_invalid_and_empty_fields():
         analyze_process_event_log(pd.DataFrame([{"case_id":"","activity":"Start","timestamp":"2026-10-01T00:00:00Z"}]))
     with pytest.raises(ValueError, match="event records"):
         analyze_process_event_log(pd.DataFrame(columns=["case_id","activity","timestamp"]))
+    with pytest.raises(ValueError, match="share a timestamp"):
+        analyze_process_event_log(pd.DataFrame([
+            {"case_id":"C1","activity":"Start","timestamp":"2026-10-01T00:00:00Z"},
+            {"case_id":"C1","activity":"Inspect","timestamp":"2026-10-01T00:00:00Z"},
+        ]))
 
 def test_download_ready_csv_outputs_round_trip_with_expected_content():
     packed = first_fit_decreasing_bin_pack(
