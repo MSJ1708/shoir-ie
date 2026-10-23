@@ -122,9 +122,17 @@ def _render_result_chart(df,title,key_prefix):
     st.plotly_chart(fig,use_container_width=True)
 
 # Sidebar navigation
+# A directory launch selects the existing module through the normal Workbench
+# selector. This preserves the established route renderer and its native tier gate.
+_pending_tool_module = st.session_state.pop("shoir_pending_tool_module", None)
+if _pending_tool_module:
+    st.session_state["workbench_module_search"] = ""
+    st.session_state["workbench_category"] = "All"
+    st.session_state.pop("workbench_module_selector", None)
+
 st.sidebar.header("Workbench")
-search = st.sidebar.text_input("🔎 Search modules", "")
-category = st.sidebar.selectbox("Category", ["All"] + sorted({x[0] for x in MODULE_MATRIX}))
+search = st.sidebar.text_input("🔎 Search modules", "", key="workbench_module_search")
+category = st.sidebar.selectbox("Category", ["All"] + sorted({x[0] for x in MODULE_MATRIX}), key="workbench_category")
 available = module_availability(RAW_TIER)
 filtered = available.copy()
 if category != "All":
@@ -143,6 +151,10 @@ else:
         f"{_module_rows[m]['Category']} · {m}" for m in labels
     ]
     _display_to_module = dict(zip(_display_labels, labels))
+    if _pending_tool_module in _display_to_module.values():
+        _forced_label = next((label for label, module in _display_to_module.items() if module == _pending_tool_module), None)
+        if _forced_label:
+            st.session_state["workbench_module_selector"] = _forced_label
     _selected_display = st.sidebar.selectbox("Module", _display_labels, key="workbench_module_selector")
     selected = _display_to_module[_selected_display]
     _selected_row = _module_rows[selected]
@@ -239,6 +251,24 @@ with st.expander("🧭 100-tool directory & readiness", expanded=False):
         if selected_tool:
             st.markdown(f"**{selected_tool['canonical_name']}** · {selected_tool['target_minimum_tier']} minimum")
             st.write(selected_tool["calculation_or_action"])
+            mapped_route = str(selected_tool["existing_module_or_route"])
+            mapped_row = next((row for row in MODULE_MATRIX if row[1] == mapped_route), None)
+            if mapped_row:
+                legacy_required_tier = mapped_row[2]
+                if not tier_allows_tool(RAW_TIER, selected_tool["tool_id"]):
+                    st.caption(f"Target access requires {selected_tool['target_minimum_tier']}; direct opening is unavailable on this package.")
+                elif not tier_allows(RAW_TIER, legacy_required_tier):
+                    st.warning(
+                        f"The mapped module keeps its existing {legacy_required_tier} requirement. "
+                        "The target directory does not override legacy module permissions."
+                    )
+                elif st.button(
+                    "Open mapped Workbench module",
+                    key="shoir_open_mapped_" + selected_tool["tool_id"],
+                    use_container_width=True,
+                ):
+                    st.session_state["shoir_pending_tool_module"] = mapped_route
+                    st.rerun()
             st.markdown("**Required inputs**")
             st.write(selected_tool["input_contract"])
             st.markdown("**Expected outputs**")
