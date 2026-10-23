@@ -13,10 +13,18 @@ from industrial_platform_excellence import (
 
 def test_tiers_and_matrix():
     assert canonical_tier("Starter Tier") == "Starter"
+    assert canonical_tier("Mid-Tier Pro Tier ($79)") == "Mid-Tier Pro"
     assert canonical_tier("Professional Tier ($129)") == "Professional"
     assert canonical_tier("Enterprise Plus Tier ($399)") == "Enterprise Plus"
+    assert canonical_tier("Research Pack ($30 add-on)") == "Research Pack"
+    assert canonical_tier("Super Enterprise") == "UNRESOLVED"
     assert tier_allows("Enterprise Plus Tier", "Enterprise")
-    assert tier_allows("Research Pack", "Enterprise Plus")
+    assert tier_allows("Research Pack", "Enterprise")
+    assert tier_allows("Research Pack", "Research Pack")
+    assert not tier_allows("Research Pack", "Enterprise Plus")
+    assert not tier_allows("Enterprise Plus", "Research Pack")
+    assert not tier_allows("Super Enterprise", "Starter")
+    assert not tier_allows("Enterprise", "Unrecognized requirement")
     assert not tier_allows("Starter", "Enterprise")
 
 def test_validation():
