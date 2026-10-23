@@ -1,6 +1,8 @@
 """Validated first-pass deterministic engines for seven focused Shoir-IE targets.
 
 Scope:
+* T022 estimates work-sampling proportions with individual Wilson confidence intervals.
+* T028 builds a count-based Pareto summary and optional 5-Why/action record.
 * T066 is a one-dimensional cutting/bin-packing MILP with a per-piece kerf allowance.
 * T075 is a threshold-based forecast error monitor, not an automatic retraining service.
 * T085 is a balanced independent two-sample t-test planner using the noncentral t distribution.
@@ -8,6 +10,7 @@ Scope:
 from __future__ import annotations
 
 import math
+from datetime import date as _date
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -452,6 +455,11 @@ def analyze_pareto_root_cause(
     action = str(countermeasure or "").strip()
     action_owner = str(owner or "").strip()
     date_value = str(due_date or "").strip()
+    if date_value:
+        try:
+            _date.fromisoformat(date_value)
+        except ValueError as exc:
+            raise ValueError("Action due date must use ISO YYYY-MM-DD format.") from exc
     if whys and not problem:
         raise ValueError("A problem statement is required when recording a 5-Why chain.")
 
