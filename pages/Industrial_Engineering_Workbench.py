@@ -42,7 +42,7 @@ init_platform_db()
 ensure_excellence_db()
 
 USER = st.session_state.get("current_user","guest")
-RAW_TIER = st.session_state.get("user_tier","Enterprise Plus Tier")
+RAW_TIER = str(st.session_state.get("user_tier") or "Starter")
 TIER = canonical_tier(RAW_TIER)
 
 # Defaults below are explicitly labelled illustrative examples, never plant evidence.
@@ -531,6 +531,51 @@ with st.expander("🧭 100-tool directory & readiness", expanded=False):
                                 value=0, step=1, key="tool075_window"
                             )
                             run_method = st.form_submit_button("Check forecast drift", type="primary", use_container_width=True, key="tool075_run")
+                        elif selected_tool["tool_id"] == "T026":
+                            st.caption("OEE uses aligned planned time, downtime, ideal cycle, total and good output. Values above 100% are flagged for review, not capped.")
+                            oee_planned = st.number_input("Planned production time", min_value=0.001, value=480.0, step=30.0, key="tool026_planned")
+                            oee_downtime = st.number_input("Recorded downtime", min_value=0.0, value=60.0, step=5.0, key="tool026_downtime")
+                            oee_cycle = st.number_input("Ideal cycle time per unit", min_value=0.001, value=2.0, step=0.25, key="tool026_cycle")
+                            oee_total = st.number_input("Total output (whole units)", min_value=1, value=200, step=10, key="tool026_total")
+                            oee_good = st.number_input("Good output (whole units)", min_value=0, value=190, step=10, key="tool026_good")
+                            oee_unit = st.selectbox("Time unit shared by times", ["seconds", "minutes", "hours"], index=1, key="tool026_unit")
+                            run_method = st.form_submit_button("Calculate OEE and losses", type="primary", use_container_width=True, key="tool026_run")
+                        elif selected_tool["tool_id"] == "T032":
+                            st.caption("Enter measurements in chronological order, grouped into equal-size consecutive subgroups. Normality/control are not assumed.")
+                            capability_measurements = st.text_input("Measurements (comma-separated)", "9, 10, 11, 9, 10, 11", key="tool032_measurements")
+                            capability_lsl = st.number_input("Lower specification limit (LSL)", value=8.0, step=0.1, key="tool032_lsl")
+                            capability_usl = st.number_input("Upper specification limit (USL)", value=12.0, step=0.1, key="tool032_usl")
+                            capability_subgroup = st.number_input("Consecutive subgroup size", min_value=2, max_value=100, value=3, step=1, key="tool032_subgroup")
+                            capability_unit = st.text_input("Measurement unit", "units", key="tool032_unit")
+                            run_method = st.form_submit_button("Calculate capability indices", type="primary", use_container_width=True, key="tool032_run")
+                        elif selected_tool["tool_id"] == "T055":
+                            st.caption("Classical EOQ assumes stable independent daily demand and deterministic lead time.")
+                            inv_demand = st.number_input("Mean daily demand (units/day)", min_value=0.001, value=10.0, step=1.0, key="tool055_demand")
+                            inv_sd = st.number_input("Daily demand standard deviation", min_value=0.0, value=2.0, step=0.5, key="tool055_sd")
+                            inv_lead = st.number_input("Lead time (days)", min_value=0.0, value=4.0, step=1.0, key="tool055_lead")
+                            inv_order_cost = st.number_input("Ordering cost per order", min_value=0.001, value=50.0, step=5.0, key="tool055_order_cost")
+                            inv_holding_cost = st.number_input("Annual holding cost per unit", min_value=0.001, value=2.0, step=0.5, key="tool055_holding")
+                            inv_days = st.number_input("Operating days per year", min_value=1, max_value=366, value=250, step=1, key="tool055_days")
+                            service_options = {"90%": 1.2815515655, "95%": 1.6448536270, "97.5%": 1.9599639845, "99%": 2.3263478740}
+                            inv_service = st.selectbox("Target cycle service level (normal z factor)", list(service_options), index=1, key="tool055_service")
+                            run_method = st.form_submit_button("Calculate inventory policy", type="primary", use_container_width=True, key="tool055_run")
+                        elif selected_tool["tool_id"] == "T078":
+                            st.caption("Use a dated, sourced emission factor in kg CO2e per activity unit. Factor validity is not independently verified.")
+                            carbon_amount = st.number_input("Activity amount", min_value=0.0, value=250.0, step=25.0, key="tool078_amount")
+                            carbon_unit = st.text_input("Activity unit", "kWh", key="tool078_unit")
+                            carbon_factor = st.number_input("Emission factor (kg CO2e per activity unit)", min_value=0.0, value=0.4, step=0.05, key="tool078_factor")
+                            carbon_factor_unit = st.text_input("Factor unit label", "kg CO2e/kWh", key="tool078_factor_unit")
+                            carbon_source = st.text_input("Emission factor source", "User supplied factor", key="tool078_source")
+                            carbon_date = st.text_input("Factor date (YYYY-MM-DD)", "2026-01-01", key="tool078_date")
+                            carbon_boundary = st.text_input("Accounting boundary / scope", "Scope 2 location-based electricity", key="tool078_boundary")
+                            run_method = st.form_submit_button("Calculate carbon emissions", type="primary", use_container_width=True, key="tool078_run")
+                        elif selected_tool["tool_id"] == "T081":
+                            st.caption("Cash flows must be equally spaced; CF0 occurs at time zero. IRR is omitted when a supported conventional root cannot be established.")
+                            economics_cash_flows = st.text_input("Cash flows by period (comma-separated; CF0 first)", "-1000, 600, 600", key="tool081_cashflows")
+                            economics_rate = st.number_input("Discount rate (%)", min_value=-99.0, value=10.0, step=1.0, key="tool081_rate")
+                            economics_currency = st.text_input("Currency code", "SAR", key="tool081_currency")
+                            economics_period = st.selectbox("Cash-flow period unit", ["years", "months", "quarters", "weeks", "days"], index=0, key="tool081_period")
+                            run_method = st.form_submit_button("Calculate project economics", type="primary", use_container_width=True, key="tool081_run")
                         else:
                             st.caption("Balanced, independent, two-sided two-sample t-test; normal outcomes and equal-variance assumptions.")
                             effect_size = st.number_input(
@@ -611,6 +656,16 @@ with st.expander("🧭 100-tool directory & readiness", expanded=False):
                             "predictions_text": predictions_text, "actuals_text": actuals_text,
                             "maximum_mae": max_mae, "trailing_window": int(window),
                         }
+                    elif selected_tool["tool_id"] == "T026":
+                        current_tool_inputs = {"planned_time": oee_planned, "downtime": oee_downtime, "ideal_cycle_time": oee_cycle, "total_count": oee_total, "good_count": oee_good, "time_unit": oee_unit}
+                    elif selected_tool["tool_id"] == "T032":
+                        current_tool_inputs = {"measurements_text": capability_measurements, "lsl": capability_lsl, "usl": capability_usl, "subgroup_size": int(capability_subgroup), "unit": capability_unit}
+                    elif selected_tool["tool_id"] == "T055":
+                        current_tool_inputs = {"mean_daily_demand": inv_demand, "daily_demand_stddev": inv_sd, "lead_time_days": inv_lead, "order_cost_per_order": inv_order_cost, "annual_holding_cost_per_unit": inv_holding_cost, "operating_days_per_year": int(inv_days), "service_level": inv_service}
+                    elif selected_tool["tool_id"] == "T078":
+                        current_tool_inputs = {"activity_amount": carbon_amount, "activity_unit": carbon_unit, "emission_factor": carbon_factor, "factor_unit": carbon_factor_unit, "factor_source": carbon_source, "factor_date": carbon_date, "boundary": carbon_boundary}
+                    elif selected_tool["tool_id"] == "T081":
+                        current_tool_inputs = {"cash_flows_text": economics_cash_flows, "discount_rate_pct": economics_rate, "currency": economics_currency, "period_unit": economics_period}
                     else:
                         current_tool_inputs = {
                             "cohen_d": effect_size, "alpha": alpha,
@@ -631,7 +686,9 @@ with st.expander("🧭 100-tool directory & readiness", expanded=False):
                                 assess_5s_audit, build_kaizen_a3_record,
                                 calculate_time_study, calculate_takt_capacity,
                                 solve_cutting_stock, monitor_forecast_drift,
-                                plan_two_sample_t_sample_size,
+                                plan_two_sample_t_sample_size, calculate_oee,
+                                analyze_process_capability, plan_inventory_policy,
+                                calculate_carbon_emissions, analyze_engineering_economics,
                             )
                             if selected_tool["tool_id"] == "T021":
                                 try:
@@ -778,6 +835,24 @@ with st.expander("🧭 100-tool directory & readiness", expanded=False):
                                     predictions, actuals, max_mae,
                                     window=int(window) if int(window) > 0 else None,
                                 )
+                            elif selected_tool["tool_id"] == "T026":
+                                result = calculate_oee(oee_planned, oee_downtime, oee_cycle, oee_total, oee_good, time_unit=oee_unit)
+                            elif selected_tool["tool_id"] == "T032":
+                                try:
+                                    measured_values = [float(x.strip()) for x in capability_measurements.split(",") if x.strip()]
+                                except ValueError as exc:
+                                    raise ValueError("Measurements must be comma-separated numbers.") from exc
+                                result = analyze_process_capability(measured_values, capability_lsl, capability_usl, subgroup_size=int(capability_subgroup), unit=capability_unit)
+                            elif selected_tool["tool_id"] == "T055":
+                                result = plan_inventory_policy(inv_demand, inv_sd, inv_lead, inv_order_cost, inv_holding_cost, operating_days_per_year=int(inv_days), service_factor_z=service_options[inv_service])
+                            elif selected_tool["tool_id"] == "T078":
+                                result = calculate_carbon_emissions(carbon_amount, carbon_factor, activity_unit=carbon_unit, factor_unit=carbon_factor_unit, factor_source=carbon_source, factor_date=carbon_date, boundary=carbon_boundary)
+                            elif selected_tool["tool_id"] == "T081":
+                                try:
+                                    cash_flows = [float(x.strip()) for x in economics_cash_flows.split(",") if x.strip()]
+                                except ValueError as exc:
+                                    raise ValueError("Cash flows must be comma-separated numbers.") from exc
+                                result = analyze_engineering_economics(cash_flows, economics_rate, currency=economics_currency, period_unit=economics_period)
                             else:
                                 result = plan_two_sample_t_sample_size(
                                     effect_size, alpha, target_power,
@@ -997,6 +1072,63 @@ with st.expander("🧭 100-tool directory & readiness", expanded=False):
                                 st.warning(result["message"])
                             else:
                                 st.write(result["message"])
+                    elif selected_tool["tool_id"] == "T026":
+                        result = st.session_state.get("shoir_tool_result_T026")
+                        if result:
+                            _show_focused_tool_persistence("T026", result, current_tool_inputs)
+                            k1, k2, k3, k4 = st.columns(4)
+                            k1.metric("Availability", f"{result['availability_pct']:.2f}%")
+                            k2.metric("Performance", f"{result['performance_pct']:.2f}%")
+                            k3.metric("Quality", f"{result['quality_pct']:.2f}%")
+                            k4.metric("OEE", f"{result['oee_pct']:.2f}%")
+                            st.caption(result["formula"])
+                            st.warning(result["warning"]) if result["status"] != "CALCULATED" else st.caption(result["warning"])
+                            st.dataframe(result["losses"], use_container_width=True, hide_index=True)
+                            st.plotly_chart(px.bar(result["losses"], x="Component", y=f"Time equivalent ({result['time_unit']})", title="OEE loss decomposition"), use_container_width=True)
+                    elif selected_tool["tool_id"] == "T032":
+                        result = st.session_state.get("shoir_tool_result_T032")
+                        if result:
+                            _show_focused_tool_persistence("T032", result, current_tool_inputs)
+                            cols = st.columns(4)
+                            for col, label, metric in zip(cols, ("Cp", "Cpk", "Pp", "Ppk"), ("cp", "cpk", "pp", "ppk")):
+                                col.metric(label, f"{result[metric]:.4f}")
+                            st.caption(result["formula"])
+                            st.warning(result["warning"])
+                            st.dataframe(result["series"], use_container_width=True, hide_index=True)
+                            st.plotly_chart(px.line(result["series"], x="Observation", y=f"Measurement ({result['unit']})", markers=True, title="Process measurements by observation"), use_container_width=True)
+                    elif selected_tool["tool_id"] == "T055":
+                        result = st.session_state.get("shoir_tool_result_T055")
+                        if result:
+                            _show_focused_tool_persistence("T055", result, current_tool_inputs)
+                            cols = st.columns(3)
+                            cols[0].metric("Economic order quantity", f"{result['economic_order_quantity_units']:,.2f}")
+                            cols[1].metric("Safety stock", f"{result['safety_stock_units']:,.2f}")
+                            cols[2].metric("Reorder point", f"{result['reorder_point_units']:,.2f}")
+                            st.caption(result["formula"])
+                            st.warning(result["warning"])
+                            st.dataframe(pd.DataFrame([{"Measure": "Annual demand (units)", "Value": result["annual_demand_units"]}, {"Measure": "EOQ (units/order)", "Value": result["economic_order_quantity_units"]}, {"Measure": "Safety stock (units)", "Value": result["safety_stock_units"]}, {"Measure": "Reorder point (units)", "Value": result["reorder_point_units"]}]), use_container_width=True, hide_index=True)
+                    elif selected_tool["tool_id"] == "T078":
+                        result = st.session_state.get("shoir_tool_result_T078")
+                        if result:
+                            _show_focused_tool_persistence("T078", result, current_tool_inputs)
+                            cols = st.columns(2)
+                            cols[0].metric("Emissions", f"{result['emissions_kg_co2e']:,.4g} kg CO2e")
+                            cols[1].metric("Emissions", f"{result['emissions_tonnes_co2e']:,.6g} t CO2e")
+                            st.caption(result["formula"])
+                            st.warning(result["warning"])
+                            st.write(f"Factor source: {result['factor_source']} · date: {result['factor_date']} · boundary: {result['boundary']}")
+                    elif selected_tool["tool_id"] == "T081":
+                        result = st.session_state.get("shoir_tool_result_T081")
+                        if result:
+                            _show_focused_tool_persistence("T081", result, current_tool_inputs)
+                            cols = st.columns(3)
+                            cols[0].metric(f"NPV ({result['currency']})", f"{result['npv']:,.2f}")
+                            cols[1].metric("IRR", f"{result['irr_pct']:.3f}%" if result["irr_pct"] is not None else "Not established")
+                            cols[2].metric("Simple payback", f"{result['simple_payback_periods']:.3f} periods" if result["simple_payback_periods"] is not None else "Not reached")
+                            st.caption(result["formula"])
+                            st.warning(result["warning"])
+                            st.dataframe(result["cash_flow_schedule"], use_container_width=True, hide_index=True)
+                            st.plotly_chart(px.line(result["cash_flow_schedule"], x="Period", y=f"Cumulative cash flow ({result['currency']})", markers=True, title="Cumulative project cash flow"), use_container_width=True)
     else:
         st.info("No target tools match these filters. Clear the search or select All workbenches / All statuses.")
 
