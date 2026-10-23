@@ -29,8 +29,23 @@ __all__ = [
     "audit_module_entitlement_coverage",
     "copilot_gate",
     "copilot_capabilities",
+    "TOOL_TARGETS",
+    "TOOL_STATUSES",
+    "get_target_tool",
+    "list_target_tools",
+    "audit_target_tool_registry",
+    "target_tool_access_decision",
+    "target_tool_execution_decision",
 ]
 
+# The T001-T100 registry is the canonical policy source for new target-tool IDs.
+# Legacy module labels remain on their current entitlement contract until a reviewed
+# migration maps them to stable target IDs and tests all existing callers.
+from shoir_100_tool_registry import (
+    TOOL_TARGETS, TOOL_STATUSES, get_target_tool, list_target_tools,
+    audit_target_tool_registry, target_tool_access_decision,
+    target_tool_execution_decision,
+)
 
 
 def unique_modules(modules: Iterable[str]) -> list[str]:
