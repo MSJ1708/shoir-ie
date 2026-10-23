@@ -234,7 +234,7 @@ def test_work_sampling_rejects_invalid_counts_and_assumptions():
         analyze_work_sampling({"Productive": 2.5, "Idle": 1})
     with pytest.raises(ValueError, match="whole number"):
         analyze_work_sampling({"Productive": True, "Idle": 1})
-    with pytest.raises(ValueError, match="normalized"):
+    with pytest.raises(ValueError, match="normalization"):
         analyze_work_sampling({"Idle": 2, " idle ": 3})
     with pytest.raises(ValueError, match="Confidence level"):
         analyze_work_sampling({"Productive": 1, "Idle": 1}, confidence_level=1.0)
@@ -282,7 +282,7 @@ def test_pareto_root_cause_rejects_invalid_counts_incomplete_whys_and_bad_dates(
         analyze_pareto_root_cause({"Machine": -1, "Material": 2})
     with pytest.raises(ValueError, match="whole number"):
         analyze_pareto_root_cause({"Machine": 1.5, "Material": 2})
-    with pytest.raises(ValueError, match="normalized"):
+    with pytest.raises(ValueError, match="normalization"):
         analyze_pareto_root_cause({"Machine": 1, " machine ": 2})
     with pytest.raises(ValueError, match="exactly five"):
         analyze_pareto_root_cause({"Machine": 1}, why_chain=["Why one", "Why two"])
@@ -390,6 +390,7 @@ def test_kaizen_a3_requires_comparable_targets_and_evidence_for_verified_status(
         build_kaizen_a3_record(**required, actual_after_value=88, implementation_status="Verified")
     verified = build_kaizen_a3_record(
         **required, actual_after_value=88, implementation_status="Verified",
+        baseline_evidence="yield-baseline-19",
         post_change_evidence="quality-review-23", review_date="2026-11-20",
     )
     assert verified["outcome_status"] == "HUMAN_REVIEW_RECORDED"
