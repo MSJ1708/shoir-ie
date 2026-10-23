@@ -31,7 +31,9 @@ The two new methods moved from `MISSING` to `IMPLEMENTED_NEEDS_VALIDATION` becau
 
 The six target-package rules are covered by an exhaustive 600-outcome truth-table test: ordinary tiers are cumulative; Research Pack inherits through Enterprise and its research-only targets but not Enterprise Plus; Enterprise Plus does not inherit Research Pack-only targets; unknown tier/tool values deny access.
 
-**Important limitation:** the new target guard is used by the new Tool Library; it has not yet been migrated into all legacy direct route, execution action, Copilot, API/plugin, connector and export callers. Legacy enforcement remains a release gate. Prices, subscription state and old named module entitlements were not changed in this tranche.
+The legacy fail-open helpers were also corrected: shared tier normalization recognizes exact, explicit plan aliases (including existing price-suffixed labels) and returns `UNRESOLVED` for unknown labels; unknown current/required tiers deny access; `available_modules` no longer treats an unmapped module as free; and Copilot policy is populated from the canonical target IDs and names. The `industrial_platform` and `industrial_platform_excellence` tier gates now delegate to the shared policy. Regression tests were added for these behaviors.
+
+**Remaining limitation:** these changes centralize the primary module and Copilot gates, but stable target IDs are not yet wired into every individual legacy direct route/action, API/plugin, connector or export call site. Those paths still require path-by-path positive/negative tests, particularly for hidden direct access. Prices, renewal rules and customer records were not changed.
 
 ## Verification status
 
