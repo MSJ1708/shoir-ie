@@ -9,6 +9,11 @@ from shoir_tier_capabilities import tier_allows
 from shoir_100_tool_hub import (
     CALCULATOR_IDS,
     calculate_carbon_emissions,
+    binomial_acceptance_probability,
+    calculate_acceptance_sampling_plan,
+    calculate_quality_cost,
+    calculate_portfolio_scores,
+    calculate_two_group_sample_size,
     calculate_economics,
     calculate_inventory_policy,
     calculate_mtbf_mttr,
@@ -167,3 +172,64 @@ def test_100_tool_tier_truth_table_covers_all_six_packages_independently():
     assert not tier_allows("Research Pack", "Enterprise Plus")
     assert not tier_allows("Enterprise Plus", "Research Pack")
     assert tier_allows("Research Pack", "Enterprise")
+
+
+
+def test_binomial_acceptance_probability_golden_cases():
+    assert binomial_acceptance_probability(5, 0, 0.1) == pytest.approx(0.9**5)
+    assert binomial_acceptance_probability(5, 1, 0.1) == pytest.approx(0.91854)
+    assert binomial_acceptance_probability(10, 10, 0.25) == pytest.approx(1.0)
+    with pytest.raises(ValueError, match="between zero and sample size"):
+        binomial_acceptance_probability(5, 6, 0.1)
+
+
+def test_acceptance_sampling_plan_meets_both_risk_constraints():
+    result = calculate_acceptance_sampling_plan(1.0, 10.0, 5.0, 10.0, 500)
+    assert 1 <= result["sample_size"] <= 500
+    assert 0 <= result["acceptance_number"] < result["sample_size"]
+    assert result["producer_risk_actual_percent"] <= 5.0 + 1e-8
+    assert result["consumer_risk_actual_percent"] <= 10.0 + 1e-8
+    assert result["rejection_number"] == result["acceptance_number"] + 1
+    with pytest.raises(ValueError, match="AQL must be below LTPD"):
+        calculate_acceptance_sampling_plan(10.0, 1.0)
+    with pytest.raises(ValueError, match="No single-sampling plan"):
+        calculate_acceptance_sampling_plan(1.0, 2.0, 0.1, 0.1, 1)
+
+
+def test_quality_cost_reconciles_explicit_nonoverlapping_categories():
+    result = calculate_quality_cost(1000, 50, 20, 30, 10, 5, 200)
+    assert result["scrap_cost"] == pytest.approx(200)
+    assert result["rework_cost"] == pytest.approx(150)
+    assert result["internal_failure_cost"] == pytest.approx(350)
+    assert result["cost_of_poor_quality_included_costs"] == pytest.approx(550)
+    assert result["copq_per_unit_produced"] == pytest.approx(0.55)
+    assert result["defect_rate_percent"] == pytest.approx(5.0)
+    with pytest.raises(ValueError, match="non-overlapping"):
+        calculate_quality_cost(1000, 50, 30, 30, 10, 5, 200)
+    with pytest.raises(ValueError, match="cannot exceed"):
+        calculate_quality_cost(10, 11, 1, 0, 2, 1, 0)
+
+
+def test_portfolio_score_uses_normalized_visible_weights():
+    result = calculate_portfolio_scores(
+        {
+            "Automation": {"Safety": 90, "Cost": 60},
+            "Training": {"Safety": 70, "Cost": 90},
+        },
+        {"Safety": 70, "Cost": 30},
+    )
+    ranking = result["ranking"].set_index("Project")
+    assert ranking.loc["Automation", "Weighted score (0-100)"] == pytest.approx(81.0)
+    assert ranking.loc["Training", "Weighted score (0-100)"] == pytest.approx(76.0)
+    assert ranking.loc["Automation", "Rank"] == 1
+    assert sum(result["normalized_weights_percent"].values()) == pytest.approx(100)
+    with pytest.raises(ValueError, match="missing scores"):
+        calculate_portfolio_scores({"Automation": {"Safety": 50}}, {"Safety": 50, "Cost": 50})
+
+
+def test_two_group_sample_size_normal_approximation_golden_case():
+    result = calculate_two_group_sample_size(0.5, 0.05, 0.80)
+    assert result["sample_size_per_group_approx"] == 63
+    assert result["total_sample_size_approx"] == 126
+    with pytest.raises(ValueError, match="effect size"):
+        calculate_two_group_sample_size(0, 0.05, 0.8)
