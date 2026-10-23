@@ -58,7 +58,7 @@ def test_forecast_drift_monitor_has_hand_calculated_error_values():
     )
     assert result["status"] == "DRIFT_ALERT"
     assert result["mae"] == pytest.approx(7 / 3)
-    assert result["rmse"] == pytest.approx(math.sqrt(13 / 3))
+    assert result["rmse"] == pytest.approx(math.sqrt(17 / 3))
     assert result["bias_actual_minus_prediction"] == pytest.approx(1)
     assert result["mape_pct_excluding_zero_actuals"] == pytest.approx(
         (2/12 + 2/18 + 3/33) / 3 * 100
