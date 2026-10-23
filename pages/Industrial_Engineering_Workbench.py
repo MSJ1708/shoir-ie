@@ -121,6 +121,81 @@ def _render_result_chart(df,title,key_prefix):
     fig.update_layout(height=340,margin=dict(l=10,r=10,t=55,b=10))
     st.plotly_chart(fig,use_container_width=True)
 
+
+def _persist_focused_tool_result(tool_id, result, inputs):
+    """Save focused method inputs/results through the existing per-user workspace service."""
+    result_key = "shoir_tool_result_" + tool_id
+    inputs_key = "shoir_tool_inputs_" + tool_id
+    status_key = "shoir_tool_save_status_" + tool_id
+    user = str(USER or "").strip()
+    if user.casefold() in {"", "guest", "guest visitor", "anonymous"}:
+        result["_workspace_persistence"] = "SESSION_ONLY"
+        st.session_state[result_key] = result
+        st.session_state[inputs_key] = inputs
+        st.session_state[status_key] = "SESSION_ONLY"
+        return "SESSION_ONLY"
+
+    try:
+        from durable_account_store import durable_backend_configured
+        from workspace_persistence import save_user_workspace
+
+        managed_backend = bool(durable_backend_configured())
+        # The first write stores the calculation with an explicit pending marker.
+        # The second write updates that marker after the store confirms the write.
+        result["_workspace_persistence"] = "SAVE_PENDING"
+        st.session_state[result_key] = result
+        st.session_state[inputs_key] = inputs
+        st.session_state[status_key] = "SAVE_PENDING"
+        if not save_user_workspace(user, st.session_state):
+            result["_workspace_persistence"] = "SAVE_FAILED"
+            st.session_state[status_key] = "SAVE_FAILED"
+            st.session_state[result_key] = result
+            return "SAVE_FAILED"
+
+        mode = "SAVED_MANAGED_WORKSPACE" if managed_backend else "SAVED_LOCAL_FALLBACK"
+        result["_workspace_persistence"] = mode
+        st.session_state[result_key] = result
+        st.session_state[status_key] = mode
+        if save_user_workspace(user, st.session_state):
+            return mode
+
+        # First write confirmed the result/input payload but the updated status
+        # marker was not confirmed; retain the safe pending state on reload.
+        result["_workspace_persistence"] = "SAVE_STATUS_NOT_CONFIRMED"
+        st.session_state[result_key] = result
+        st.session_state[status_key] = "SAVE_STATUS_NOT_CONFIRMED"
+        return "SAVE_STATUS_NOT_CONFIRMED"
+    except Exception:
+        result["_workspace_persistence"] = "SAVE_FAILED"
+        st.session_state[result_key] = result
+        st.session_state[status_key] = "SAVE_FAILED"
+        return "SAVE_FAILED"
+
+
+def _focused_tool_inputs_match(tool_id, current_inputs):
+    saved = st.session_state.get("shoir_tool_inputs_" + tool_id)
+    return isinstance(saved, dict) and saved == current_inputs
+
+
+def _show_focused_tool_persistence(tool_id, result, current_inputs):
+    mode = str(result.get("_workspace_persistence", "SESSION_ONLY"))
+    if not _focused_tool_inputs_match(tool_id, current_inputs):
+        st.warning("This result is stale or its input snapshot cannot be confirmed. Rerun the method before using the result.")
+    if mode == "SAVED_MANAGED_WORKSPACE":
+        st.caption("Result and input snapshot saved to the configured managed per-user workspace.")
+    elif mode == "SAVED_LOCAL_FALLBACK":
+        st.warning("Result saved to the local workspace fallback only. Managed persistence is not configured; this may not survive a hosted restart.")
+    elif mode == "SESSION_ONLY":
+        st.caption("Session-only result. Sign in to attempt saving it to your per-user workspace.")
+    elif mode == "SAVE_FAILED":
+        st.warning("The current result was not confirmed as saved. It remains in this session; any previously saved workspace state was preserved.")
+    elif mode == "SAVE_STATUS_NOT_CONFIRMED" or mode == "SAVE_PENDING":
+        st.warning("The result payload may have been written, but save confirmation was incomplete. Verify persistence before relying on it after reload.")
+    else:
+        st.warning("Workspace persistence status is unknown. Rerun or save the study and verify it after reload.")
+
+
+
 # Sidebar navigation
 # A directory launch selects the existing module through the normal Workbench
 # selector. This preserves the established route renderer and its native tier gate.
