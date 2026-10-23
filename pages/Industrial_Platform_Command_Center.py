@@ -13,9 +13,10 @@ import html
 
 from industrial_experience import ensure_experience_db, feature_stats, feature_catalog
 from industrial_platform import (
-    PLATFORM_CATALOG, TIER_FEATURES, normalize_tier, tier_allows,
+    PLATFORM_CATALOG, TIER_FEATURES, tier_allows,
     init_platform_db, data_quality_report, model_health, scenario_table,
 )
+from shoir_tier_capabilities import normalize_tier
 
 st.set_page_config(page_title="Shoir-IE Command Center", page_icon="🏭", layout="wide")
 init_platform_db()
