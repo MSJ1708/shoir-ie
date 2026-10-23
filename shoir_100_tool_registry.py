@@ -35,7 +35,7 @@ T018|Time-Series Data Processor|Data and Excel intelligence|Mid-Tier Pro|FOUNDAT
 T019|Synthetic Industrial Data Generator|Data and Excel intelligence|Starter|FOUNDATION_ONLY|Core IE Tools|Generate reproducible, clearly labelled synthetic data for practice/tests; never confuse synthetic data with actual plant observations.
 T020|Dataset Versioning and Lineage|Data and Excel intelligence|Professional|FOUNDATION_ONLY|Persistence|Preserve dataset signature/version, source, transformations, mapping, and links to downstream runs; detect when changed input invalidates a result.
 T021|Time Study and Standard Time|Lean manufacturing and productivity|Starter|IMPLEMENTED_NEEDS_VALIDATION|Core IE Tools|Calculate observations, mean/appropriate summary, performance rating and allowances using explicit formulas and units.
-T022|Work Sampling Analyzer|Lean manufacturing and productivity|Starter|FOUNDATION_ONLY|Core IE Tools|Estimate activity proportions with sampling assumptions and uncertainty; warn when the sample is inadequate.
+T022|Work Sampling Analyzer|Lean manufacturing and productivity|Starter|IMPLEMENTED_NEEDS_VALIDATION|Core IE Tools|Estimate activity proportions with sampling assumptions and uncertainty; warn when the sample is inadequate.
 T023|Takt Time and Capacity Calculator|Lean manufacturing and productivity|Starter|IMPLEMENTED_NEEDS_VALIDATION|Core IE Tools|Calculate takt/capacity from explicit demand and available-time definitions; reject incompatible time units and zero denominators.
 T024|Production Line Balancer|Lean manufacturing and productivity|Mid-Tier Pro|FOUNDATION_ONLY|Lean Manufacturing & Shop Floor Operations|Assign tasks to stations subject to cycle time and precedence; report infeasibility and balance metrics.
 T025|Bottleneck and Constraint Analyzer|Lean manufacturing and productivity|Mid-Tier Pro|IMPLEMENTED_NEEDS_VALIDATION|Production Bottleneck & Capacity Recovery Study|Identify constraints from compatible measured data, distinguish observed from inferred bottlenecks, and explain throughput limits.
@@ -54,8 +54,8 @@ T037|Hypothesis Testing Assistant|Quality and statistical engineering|Research P
 T038|FMEA Manager|Quality and statistical engineering|Mid-Tier Pro|IMPLEMENTED_NEEDS_VALIDATION|Quality Control, Six Sigma & Reliability|Record failure modes, effects, causes, controls, scoring rationale, actions, and revision history; avoid implying a score is objective truth.
 T039|CAPA and 8D Manager|Quality and statistical engineering|Mid-Tier Pro|IMPLEMENTED_NEEDS_VALIDATION|Quality Control, Six Sigma & Reliability|Track containment, root cause, corrective action, owners, due dates, effectiveness, approvals, and attached evidence.
 T040|Quality Cost and Defect Analyzer|Quality and statistical engineering|Mid-Tier Pro|IMPLEMENTED_NEEDS_VALIDATION|Quality Control, Six Sigma & Reliability|Analyze defects, scrap, rework, inspection cost, and cost of poor quality with traceable cost definitions.
-T041|Weibull Reliability Analyzer|Maintenance, reliability, safety, and ergonomics|Professional|FOUNDATION_ONLY|Quality Engineering & Reliability|Fit supported reliability distributions, expose sample/censoring assumptions and fit diagnostics, and test against known data.
-T042|MTBF and MTTR Analyzer|Maintenance, reliability, safety, and ergonomics|Professional|FOUNDATION_ONLY|Quality Engineering & Reliability|Calculate from well-defined operating/failure/repair periods and handle censored or missing intervals transparently.
+T041|Weibull Reliability Analyzer|Maintenance, reliability, safety, and ergonomics|Professional|IMPLEMENTED_NEEDS_VALIDATION|Quality Engineering & Reliability|Fit supported reliability distributions, expose sample/censoring assumptions and fit diagnostics, and test against known data.
+T042|MTBF and MTTR Analyzer|Maintenance, reliability, safety, and ergonomics|Professional|IMPLEMENTED_NEEDS_VALIDATION|Quality Engineering & Reliability|Calculate from well-defined operating/failure/repair periods and handle censored or missing intervals transparently.
 T043|Preventive Maintenance Planner|Maintenance, reliability, safety, and ergonomics|Mid-Tier Pro|FOUNDATION_ONLY|Predictive Maintenance Hub|Create interval-based tasks with asset, skill, downtime-window and due-date constraints and persistent work plans.
 T044|Reliability-Centered Maintenance Assistant|Maintenance, reliability, safety, and ergonomics|Professional|FOUNDATION_ONLY||Structure failure/consequence/task decisions with explicit source assumptions and human review; do not claim certified RCM without a complete method.
 T045|Spare Parts and Criticality Planner|Maintenance, reliability, safety, and ergonomics|Professional|FOUNDATION_ONLY|MEIO Matrix|Support criticality, demand, lead time, stockout exposure, reorder and carrying-cost scenarios.
@@ -68,7 +68,7 @@ T051|Demand Forecasting Studio|Production planning and supply chain|Professional
 T052|Sales and Operations Planning|Production planning and supply chain|Professional|FOUNDATION_ONLY|Advanced Planning & Scheduling|Reconcile demand, inventory, and capacity scenarios with visible assumptions and decision-ready comparisons.
 T053|Finite-Capacity Production Scheduler|Production planning and supply chain|Professional|FOUNDATION_ONLY|Advanced Planning & Scheduling|Schedule operations with precedence, resources, calendars, setup times and capacity constraints; return feasible status or explain infeasibility.
 T054|Material Requirements Planner|Production planning and supply chain|Mid-Tier Pro|IMPLEMENTED_NEEDS_VALIDATION|Production Planning & Control (PPC)|Explode a validated bill of materials and time-phased demand using lead times, inventory, lot sizing and scheduled receipts.
-T055|Inventory Policy Optimizer|Production planning and supply chain|Mid-Tier Pro|FOUNDATION_ONLY|MEIO Matrix|Calculate EOQ/reorder points/safety stock only under stated demand/lead-time/service assumptions and compare cost/service trade-offs.
+T055|Inventory Policy Optimizer|Production planning and supply chain|Mid-Tier Pro|IMPLEMENTED_NEEDS_VALIDATION|MEIO Matrix|Calculate EOQ/reorder points/safety stock only under stated demand/lead-time/service assumptions and compare cost/service trade-offs.
 T056|ABC/XYZ Inventory Analyzer|Production planning and supply chain|Mid-Tier Pro|IMPLEMENTED_NEEDS_VALIDATION|Inventory Playback|Segment by an editable, documented value/variability rule and make thresholds/reclassification reproducible.
 T057|Workforce and Shift Planner|Production planning and supply chain|Professional|FOUNDATION_ONLY|Workforce Engineering|Assign qualified staff to shifts under availability, skill, coverage, labor-rule and fairness constraints where provided.
 T058|Supplier Performance and Risk Scorecard|Production planning and supply chain|Mid-Tier Pro|FOUNDATION_ONLY|Supplier Risk Matrix|Show score components, weights, data dates, missing evidence, mitigations, and alternate-supplier scenarios.
@@ -183,6 +183,158 @@ def _request_existing_route(route: str, section: str) -> None:
     st.session_state["shoir_shell_section"] = section
     st.session_state["shoir_shell_section_radio"] = section
 
+
+
+
+def _render_native_target_engine(item: dict[str, str]) -> None:
+    """Render selected deterministic calculation paths; not yet persisted or E2E verified."""
+    tool_id = item["tool_id"]
+    if tool_id not in {"T022", "T041", "T042", "T055", "T072"}:
+        return
+
+    from shoir_100_tool_engines import (
+        fit_weibull_uncensored,
+        inventory_policy,
+        monte_carlo_independent_sum,
+        mtbf_mttr,
+        work_sampling,
+    )
+
+    with st.expander(f"Run calculation preview · {tool_id}", expanded=False):
+        st.caption(
+            "This is an implemented deterministic/seeded calculation path. "
+            "Inputs and results are not saved by this preview; target-level authenticated, "
+            "persistence and export verification is still pending."
+        )
+
+        if tool_id == "T022":
+            st.markdown("**Work sampling · Wilson confidence interval**")
+            a, b, c = st.columns(3)
+            total = a.number_input("Total observations", min_value=1, max_value=1000000, value=100, step=1, key="shoir_T022_n")
+            activity = b.number_input("Observations in activity", min_value=0, max_value=1000000, value=35, step=1, key="shoir_T022_x")
+            confidence = c.selectbox("Confidence level", [0.90, 0.95, 0.99], index=1, key="shoir_T022_confidence")
+            if st.button("Calculate activity estimate", key="shoir_T022_run", use_container_width=True):
+                try:
+                    result = work_sampling(int(activity), int(total), float(confidence))
+                except ValueError as exc:
+                    st.error(str(exc))
+                else:
+                    left, middle, right = st.columns(3)
+                    left.metric("Observed activity", f"{result['percent']:.2f}%")
+                    middle.metric("Confidence interval", f"{result['ci_lower']*100:.2f}% – {result['ci_upper']*100:.2f}%")
+                    right.metric("Half-width", f"{result['margin_of_error']*100:.2f} pp")
+                    st.caption(f"Method: {result['method']}. Sample adequate by the displayed n≥30 and ≤10 pp half-width rule: {result['adequate_sample']}.")
+                    for warning in result["warnings"]:
+                        st.warning(warning)
+
+        elif tool_id == "T041":
+            st.markdown("**Weibull fit · complete uncensored failure times only**")
+            times_text = st.text_input(
+                "Failure times (comma-separated, in one consistent unit)",
+                value="120, 160, 200, 250, 280, 350, 390, 460, 520, 600",
+                key="shoir_T041_times",
+            )
+            if st.button("Fit two-parameter Weibull", key="shoir_T041_run", use_container_width=True):
+                try:
+                    values = [float(x.strip()) for x in times_text.split(",") if x.strip()]
+                    result = fit_weibull_uncensored(values)
+                except (ValueError, TypeError) as exc:
+                    st.error(f"Fit could not be completed: {exc}")
+                else:
+                    left, middle, right = st.columns(3)
+                    left.metric("Shape β", f"{result['shape']:.4f}")
+                    middle.metric("Scale η", f"{result['scale']:.3f}")
+                    right.metric("Median life", f"{result['median_life']:.3f}")
+                    import plotly.graph_objects as go
+                    fig = go.Figure()
+                    fig.add_trace(go.Scatter(x=result["sorted_times"], y=result["empirical_cdf"], mode="markers", name="Empirical CDF"))
+                    fig.add_trace(go.Scatter(x=result["sorted_times"], y=result["fitted_cdf"], mode="lines+markers", name="Fitted Weibull CDF"))
+                    fig.update_layout(title="Observed vs fitted CDF (descriptive)", xaxis_title="Time", yaxis_title="Cumulative probability", yaxis=dict(range=[0, 1]))
+                    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+                    st.metric("Descriptive KS distance", f"{result['ks_distance_descriptive']:.4f}")
+                    st.caption(f"Method: {result['method']}. Censoring supported: No. KS distance is descriptive; no fitted-parameter p-value is claimed.")
+                    for warning in result["warnings"]:
+                        st.warning(warning)
+
+        elif tool_id == "T042":
+            st.markdown("**MTBF and MTTR · durations in hours**")
+            c1, c2 = st.columns(2)
+            uptime = c1.number_input("Cumulative operating hours", min_value=0.01, max_value=100000000.0, value=10000.0, step=100.0, key="shoir_T042_uptime")
+            failures = c2.number_input("Counted failures", min_value=1, max_value=100000, value=5, step=1, key="shoir_T042_failures")
+            repair_text = st.text_input("One repair duration per failure (comma-separated hours)", value="2, 1.5, 3, 4, 2.5", key="shoir_T042_repairs")
+            if st.button("Calculate MTBF and MTTR", key="shoir_T042_run", use_container_width=True):
+                try:
+                    repairs = [float(x.strip()) for x in repair_text.split(",") if x.strip()]
+                    result = mtbf_mttr(float(uptime), int(failures), repairs)
+                except (ValueError, TypeError) as exc:
+                    st.error(f"Maintenance calculation could not be completed: {exc}")
+                else:
+                    c1, c2 = st.columns(2)
+                    c1.metric("MTBF", f"{result['mtbf_hours']:.2f} h")
+                    c2.metric("MTTR", f"{result['mttr_hours']:.2f} h")
+                    st.caption(result["method"])
+                    for warning in result["warnings"]:
+                        st.warning(warning)
+
+        elif tool_id == "T055":
+            st.markdown("**Inventory policy · EOQ, safety stock and reorder point**")
+            c1, c2, c3 = st.columns(3)
+            annual_demand = c1.number_input("Annual demand (units/year)", min_value=0.01, value=12000.0, step=500.0, key="shoir_T055_D")
+            order_cost = c2.number_input("Cost per order", min_value=0.0, value=50.0, step=5.0, key="shoir_T055_S")
+            holding = c3.number_input("Annual holding cost per unit", min_value=0.01, value=5.0, step=0.5, key="shoir_T055_H")
+            c4, c5, c6, c7 = st.columns(4)
+            mean_demand = c4.number_input("Mean demand / period", min_value=0.0, value=1000.0, step=50.0, key="shoir_T055_mean")
+            sigma = c5.number_input("Demand std / period", min_value=0.0, value=100.0, step=10.0, key="shoir_T055_sigma")
+            lead = c6.number_input("Lead time (periods)", min_value=0.01, value=2.0, step=0.5, key="shoir_T055_lead")
+            service_z = c7.number_input("Service factor z", min_value=0.0, value=1.645, step=0.05, key="shoir_T055_z")
+            if st.button("Optimize basic inventory policy", key="shoir_T055_run", use_container_width=True):
+                try:
+                    result = inventory_policy(float(annual_demand), float(order_cost), float(holding), float(mean_demand), float(sigma), float(lead), float(service_z))
+                except ValueError as exc:
+                    st.error(str(exc))
+                else:
+                    cols = st.columns(3)
+                    cols[0].metric("EOQ", f"{result['eoq_units']:.1f} units")
+                    cols[1].metric("Safety stock", f"{result['safety_stock_units']:.1f} units")
+                    cols[2].metric("Reorder point", f"{result['reorder_point_units']:.1f} units")
+                    st.caption(result["method"] + ". Confirm demand and lead-time periods use the same unit; EOQ assumes constant annual demand and costs.")
+                    for warning in result["warnings"]:
+                        st.warning(warning)
+
+        elif tool_id == "T072":
+            st.markdown("**Monte Carlo risk simulator · independent drivers**")
+            st.caption("All drivers must be compatible numeric components in the same unit. Cross-driver correlation is not modeled.")
+            default_drivers = '{"scrap_cost_sar":{"distribution":"triangular","low":500,"mode":1000,"high":3000},"overtime_cost_sar":{"distribution":"uniform","low":0,"high":2000},"rework_cost_sar":{"distribution":"normal","mean":1500,"sd":250}}'
+            drivers_text = st.text_area("Driver definitions (JSON)", value=default_drivers, height=140, key="shoir_T072_drivers")
+            c1, c2 = st.columns(2)
+            iterations = c1.number_input("Iterations", min_value=1000, max_value=100000, value=10000, step=1000, key="shoir_T072_n")
+            seed = c2.number_input("Random seed", min_value=0, max_value=2147483647, value=42, step=1, key="shoir_T072_seed")
+            if st.button("Run seeded Monte Carlo", key="shoir_T072_run", use_container_width=True):
+                import json
+                try:
+                    driver_config = json.loads(drivers_text)
+                    result = monte_carlo_independent_sum(driver_config, int(iterations), int(seed))
+                except (ValueError, TypeError, json.JSONDecodeError) as exc:
+                    st.error(f"Simulation could not be completed: {exc}")
+                else:
+                    cols = st.columns(4)
+                    cols[0].metric("Mean", f"{result['mean']:,.2f}")
+                    cols[1].metric("P05", f"{result['p05']:,.2f}")
+                    cols[2].metric("Median P50", f"{result['p50']:,.2f}")
+                    cols[3].metric("P95", f"{result['p95']:,.2f}")
+                    import plotly.graph_objects as go
+                    import pandas as pd
+                    fig = go.Figure(go.Histogram(x=result["outcomes"], nbinsx=40, name="Simulated outcomes"))
+                    fig.update_layout(title="Monte Carlo outcome distribution", xaxis_title="Outcome (input unit)", yaxis_title="Simulations")
+                    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+                    sensitivity = pd.DataFrame([
+                        {"Driver": name, "Correlation with total": corr}
+                        for name, corr in result["input_sensitivity_correlation"].items()
+                    ])
+                    st.dataframe(sensitivity, use_container_width=True, hide_index=True)
+                    st.caption(f"Seed: {result['seed']}; iterations: {result['iterations']}; split-half relative mean gap: {result['split_half_relative_mean_gap']:.3%}; screening threshold pass: {result['split_half_screen_passed']}. This screen is not a formal convergence proof.")
+                    for warning in result["warnings"]:
+                        st.warning(warning)
 
 def render_tool_library(username: str, tier: str, allowed_modules: Iterable[str]) -> None:
     """Render a compact, searchable catalogue inside the existing Shoir-IE shell."""
@@ -321,3 +473,5 @@ def render_tool_library(username: str, tier: str, allowed_modules: Iterable[str]
                             st.caption(reason)
                         elif item["implementation_status"] != "VERIFIED_WORKING":
                             st.caption("Discovery link only; target-specific readiness checks have not passed.")
+                    if can_open:
+                        _render_native_target_engine(item)
