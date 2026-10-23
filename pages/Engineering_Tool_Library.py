@@ -8,6 +8,7 @@ acceptance checks pass. Existing routes and navigation are left unchanged.
 """
 import hashlib
 import io
+import json
 from datetime import datetime, timezone
 import pandas as pd
 import streamlit as st
@@ -21,6 +22,12 @@ from shoir_100_tool_engines import (
     calculate_engineering_economics, calculate_inventory_policy,
     calculate_oee, calculate_process_capability, calculate_standard_time,
     calculate_takt_capacity, first_fit_decreasing_bin_pack,
+)
+from shoir_100_tool_extended_engines import (
+    analyze_abc_xyz_inventory, analyze_mtbf_mttr, analyze_pareto_root_cause,
+    analyze_quality_cost_defects, analyze_spc_individuals, analyze_work_sampling,
+    assess_5s_audit, build_kaizen_a3_record, convert_units_or_currency,
+    monitor_forecast_drift, plan_two_sample_t_sample_size, solve_cutting_stock,
 )
 
 def _fingerprint(*values):
@@ -38,7 +45,8 @@ def _run_engine_tool(tool_id, signature, button_label, calculation):
                 "The last successful result was preserved."
             )
         else:
-            if isinstance(outcome, dict) and outcome.get("status") == "CALCULATED":
+            status = outcome.get("status") if isinstance(outcome, dict) else None
+            if isinstance(status, str) and status.strip() and status.upper() not in {"FAILED", "ERROR", "INVALID"}:
                 st.session_state[f"shoir_{tool_id}_result"] = {
                     "signature": signature,
                     "source": "USER-ENTERED — not independently verified",
@@ -46,7 +54,7 @@ def _run_engine_tool(tool_id, signature, button_label, calculation):
                     "result": outcome,
                 }
             else:
-                st.error("The calculation returned an unsupported result status; the prior result was preserved.")
+                st.error("The method returned no usable result status; the prior result was preserved.")
 
     saved = st.session_state.get(f"shoir_{tool_id}_result")
     if not isinstance(saved, dict):
@@ -59,26 +67,57 @@ def _run_engine_tool(tool_id, signature, button_label, calculation):
         f"executed {saved.get('executed_at', 'timestamp unavailable')} · session-only result"
     )
     metrics = result.get("metrics", {})
+    if not isinstance(metrics, dict):
+        metrics = {}
+    if not metrics:
+        excluded = {"status", "method", "formulas", "formula", "assumptions", "warnings", "warning", "provenance", "message"}
+        metrics = {
+            key: value for key, value in result.items()
+            if key not in excluded and not isinstance(value, (dict, list, tuple, pd.DataFrame, pd.Series)) and value is not None
+        }
     if metrics:
         metric_rows = [{"Metric": key, "Value": value} for key, value in metrics.items()]
         st.dataframe(pd.DataFrame(metric_rows), use_container_width=True, hide_index=True)
+    for table_name, table in result.items():
+        if isinstance(table, pd.DataFrame):
+            st.markdown(f"**{table_name.replace('_', ' ').title()}**")
+            if table.empty:
+                st.info(f"{table_name.replace('_', ' ').title()} is empty for the current inputs.")
+            else:
+                st.dataframe(table, use_container_width=True, hide_index=True)
+                st.download_button(
+                    f"Download {table_name.replace('_', ' ').title()} CSV",
+                    table.to_csv(index=False).encode("utf-8"),
+                    f"shoir_ie_{tool_id.lower()}_{table_name}.csv", "text/csv",
+                    key=f"{tool_id}_{table_name}_export",
+                )
     with st.expander("Formula, assumptions and limitations", expanded=False):
         st.markdown("**Method**")
-        st.write(result.get("method", "Method not supplied"))
+        st.write(result.get("method", result.get("message", "Method not supplied")))
         formulas = result.get("formulas", {})
-        if formulas:
+        if isinstance(formulas, dict) and formulas:
             st.markdown("**Formulas**")
             st.dataframe(
                 pd.DataFrame([{"Result": key, "Formula": value} for key, value in formulas.items()]),
                 use_container_width=True, hide_index=True,
             )
+        elif result.get("formula"):
+            st.markdown("**Formula**")
+            st.write(result["formula"])
         st.markdown("**Assumptions**")
-        for statement in result.get("assumptions", []):
+        assumptions = result.get("assumptions", [])
+        if isinstance(assumptions, str):
+            assumptions = [assumptions]
+        for statement in assumptions:
             st.write(f"• {statement}")
         if result.get("provenance"):
-            st.markdown("**Factor provenance**")
             st.json(result["provenance"])
-    for warning in result.get("warnings", []):
+    warnings = result.get("warnings", [])
+    if isinstance(warnings, str):
+        warnings = [warnings]
+    if result.get("warning"):
+        warnings = [*warnings, str(result["warning"])]
+    for warning in warnings:
         st.warning(warning)
 
     # Include source, method, formula and assumptions in the download, not only a rendered KPI.
@@ -205,7 +244,158 @@ if rows:
                     "Your data was not changed. Use the normal Workbench navigation."
                 )
 
-        if selected_id == "T021":
+        if selected_id == "T016":
+            st.warning("VALIDATION MODE — currency rates are user-supplied and dated; this is not a live FX feed.")
+            st.markdown("### Unit and currency converter")
+            amount = st.number_input("Amount", value=100.0, step=1.0, key="t016_amount")
+            from_unit = st.text_input("From unit (e.g. cm, kWh, °C, SAR)", "cm", key="t016_from_unit")
+            to_unit = st.text_input("To unit (e.g. m, MJ, °F, USD)", "m", key="t016_to_unit")
+            rate = st.number_input("Optional target-units per source-unit currency rate (0 = not provided)", min_value=0.0, value=0.0, step=0.01, key="t016_rate")
+            rate_date = st.text_input("Exchange-rate date (YYYY-MM-DD)", "", key="t016_rate_date")
+            rate_source = st.text_input("Exchange-rate source/reference", "", key="t016_rate_source")
+            signature = _fingerprint(amount, from_unit, to_unit, rate, rate_date, rate_source)
+            _run_engine_tool("T016", signature, "Convert units / currency", lambda: convert_units_or_currency(amount, from_unit, to_unit, exchange_rate=rate if rate > 0 else None, exchange_rate_date=rate_date, exchange_rate_source=rate_source))
+
+        elif selected_id == "T022":
+            st.warning("VALIDATION MODE — work sampling estimates a proportion and uncertainty; sample-frame representativeness must be reviewed.")
+            st.markdown("### Work-sampling analyzer")
+            counts_text = st.text_area("Activity counts as JSON", '{"Productive": 60, "Idle": 40}', height=95, key="t022_counts_json")
+            confidence = st.selectbox("Confidence level", [0.90, 0.95, 0.99], index=1, key="t022_confidence")
+            margin = st.number_input("Target margin of error (percentage points)", min_value=1.0, max_value=25.0, value=5.0, step=1.0, key="t022_margin")
+            signature = _fingerprint(counts_text, confidence, margin)
+            saved = _run_engine_tool("T022", signature, "Analyze work sample", lambda: analyze_work_sampling(json.loads(counts_text), confidence_level=confidence, target_margin_pct=margin))
+            if saved and saved["signature"] == signature:
+                frame = saved["result"].get("activity_summary")
+                if isinstance(frame, pd.DataFrame) and not frame.empty and "Activity" in frame and "Observed proportion (%)" in frame:
+                    st.bar_chart(frame.set_index("Activity")["Observed proportion (%)"])
+
+        elif selected_id == "T028":
+            st.warning("VALIDATION MODE — Pareto shows frequency distribution, not proven causation. 5-Why entries are hypotheses requiring review.")
+            st.markdown("### Pareto and root-cause review")
+            counts_text = st.text_area("Category counts as JSON", '{"Machine": 60, "Material": 30, "Method": 10}', height=95, key="t028_counts_json")
+            problem = st.text_input("Problem statement", "Repeated line stoppages", key="t028_problem")
+            why_text = st.text_area("Five-Why chain (one entry per line)", "Why 1: unexpected stops occur\nWhy 2: sensor faults are recorded\nWhy 3: sensor mounts vibrate loose\nWhy 4: inspection is not specified\nWhy 5: the maintenance standard omits the mount", height=130, key="t028_whys")
+            countermeasure = st.text_input("Proposed countermeasure", "Add a mount inspection to the preventive checklist", key="t028_countermeasure")
+            owner = st.text_input("Action owner", "Maintenance lead", key="t028_owner")
+            due = st.text_input("Due date (YYYY-MM-DD)", "2026-11-01", key="t028_due")
+            signature = _fingerprint(counts_text, problem, why_text, countermeasure, owner, due)
+            saved = _run_engine_tool("T028", signature, "Build Pareto and root-cause record", lambda: analyze_pareto_root_cause(json.loads(counts_text), problem_statement=problem, why_chain=[x.strip() for x in why_text.splitlines() if x.strip()], countermeasure=countermeasure, owner=owner, due_date=due))
+            if saved and saved["signature"] == signature:
+                frame = saved["result"].get("pareto_summary")
+                if isinstance(frame, pd.DataFrame) and not frame.empty and "Category" in frame and "Count" in frame:
+                    st.bar_chart(frame.set_index("Category")["Count"])
+
+        elif selected_id == "T029":
+            st.warning("VALIDATION MODE — editable self-assessment, not a certified safety, quality or 5S audit.")
+            st.markdown("### 5S workplace audit")
+            default_5s = [
+                {"category":"Sort","criterion":"Remove unnecessary items","score":1,"evidence":"synthetic example","owner":"Area owner","due_date":"2026-11-01"},
+                {"category":"Set in Order","criterion":"Label storage locations","score":2,"evidence":"synthetic example","owner":"Shift lead","due_date":"2026-11-01"},
+                {"category":"Shine","criterion":"Clean work stations","score":3,"evidence":"synthetic example","owner":"Shift lead","due_date":"2026-11-01"},
+                {"category":"Standardize","criterion":"Display standard work","score":4,"evidence":"synthetic example","owner":"Process engineer","due_date":"2026-11-01"},
+                {"category":"Sustain","criterion":"Run weekly reviews","score":4,"evidence":"synthetic example","owner":"Area owner","due_date":"2026-11-01"},
+            ]
+            items_text = st.text_area("5S checklist items as JSON", json.dumps(default_5s, ensure_ascii=False, indent=2), height=230, key="t029_items_json")
+            signature = _fingerprint(items_text)
+            saved = _run_engine_tool("T029", signature, "Score 5S audit checklist", lambda: assess_5s_audit(json.loads(items_text)))
+            if saved and saved["signature"] == signature:
+                frame = saved["result"].get("pillar_summary")
+                if isinstance(frame, pd.DataFrame) and not frame.empty:
+                    st.bar_chart(frame.set_index("5S pillar") if "5S pillar" in frame else frame)
+
+        elif selected_id == "T030":
+            st.warning("VALIDATION MODE — progress is not savings. Outcomes remain unverified without comparable baseline/post-change evidence and human review.")
+            st.markdown("### Kaizen and A3 improvement record")
+            title = st.text_input("A3 title", "Reduce cycle time", key="t030_title")
+            problem = st.text_input("Problem statement", "Cycle time exceeds target", key="t030_problem")
+            metric = st.text_input("Metric name", "Cycle time", key="t030_metric")
+            unit = st.text_input("Metric unit", "minutes per unit", key="t030_unit")
+            baseline = st.number_input("Baseline value", value=100.0, step=1.0, key="t030_baseline")
+            target = st.number_input("Target value", value=80.0, step=1.0, key="t030_target")
+            root = st.text_input("Root-cause hypothesis", "Setup standard is not consistently followed", key="t030_root")
+            countermeasure = st.text_input("Countermeasure", "Standardize and audit setup steps", key="t030_countermeasure")
+            owner = st.text_input("Owner", "Process engineer", key="t030_owner")
+            due = st.text_input("Due date (YYYY-MM-DD)", "2026-11-15", key="t030_due")
+            actual_known = st.checkbox("Record an actual after-change measurement", value=True, key="t030_actual_known")
+            actual = st.number_input("Actual after-change value", value=90.0, step=1.0, key="t030_actual")
+            baseline_evidence = st.text_input("Baseline evidence reference", "example-baseline-id", key="t030_baseline_evidence")
+            post_evidence = st.text_input("Post-change evidence reference", "", key="t030_post_evidence")
+            status = st.selectbox("Implementation status", ["Planned", "In Progress", "Implemented", "Verified", "Closed"], index=1, key="t030_status")
+            signature = _fingerprint(title, problem, metric, unit, baseline, target, root, countermeasure, owner, due, actual_known, actual, baseline_evidence, post_evidence, status)
+            _run_engine_tool("T030", signature, "Build A3 improvement record", lambda: build_kaizen_a3_record(title=title, problem_statement=problem, metric_name=metric, unit=unit, baseline_value=baseline, target_value=target, root_cause_hypothesis=root, countermeasure=countermeasure, owner=owner, due_date=due, actual_after_value=actual if actual_known else None, baseline_evidence=baseline_evidence, post_change_evidence=post_evidence, implementation_status=status))
+
+        elif selected_id == "T031":
+            st.warning("VALIDATION MODE — Individuals/Moving Range chart detects points outside calculated 3-sigma limits only; it does not certify stability.")
+            st.markdown("### Statistical process control — Individuals / Moving Range")
+            values_text = st.text_area("Chronological measurements (comma-separated)", "10, 11, 9, 10, 12, 11", height=80, key="t031_measurements")
+            unit = st.text_input("Measurement unit", "mm", key="t031_unit")
+            signature = _fingerprint(values_text, unit)
+            saved = _run_engine_tool("T031", signature, "Calculate control limits", lambda: analyze_spc_individuals([float(x.strip()) for x in values_text.split(",") if x.strip()], unit=unit))
+            if saved and saved["signature"] == signature:
+                frame = saved["result"].get("series")
+                if isinstance(frame, pd.DataFrame) and not frame.empty and {"Observation", "Measurement"}.issubset(frame.columns):
+                    st.line_chart(frame.set_index("Observation")["Measurement"])
+
+        elif selected_id == "T040":
+            st.warning("VALIDATION MODE — scoped cost-of-poor-quality estimate, not a complete quality-cost ledger.")
+            st.markdown("### Quality cost and defect analyzer")
+            total_units = st.number_input("Total produced units", min_value=1.0, value=100.0, step=10.0, key="t040_total")
+            defective = st.number_input("Defective units", min_value=0.0, value=10.0, step=1.0, key="t040_defective")
+            scrap = st.number_input("Scrap units", min_value=0.0, value=2.0, step=1.0, key="t040_scrap")
+            rework = st.number_input("Rework units", min_value=0.0, value=5.0, step=1.0, key="t040_rework")
+            scrap_cost = st.number_input("Scrap cost per unit", min_value=0.0, value=20.0, step=1.0, key="t040_scrap_cost")
+            rework_cost = st.number_input("Rework cost per unit", min_value=0.0, value=6.0, step=1.0, key="t040_rework_cost")
+            inspect_cost = st.number_input("Inspection cost for period", min_value=0.0, value=120.0, step=10.0, key="t040_inspection_cost")
+            currency = st.text_input("Currency code", "SAR", key="t040_currency")
+            period = st.text_input("Period label", "Example month", key="t040_period")
+            signature = _fingerprint(total_units, defective, scrap, rework, scrap_cost, rework_cost, inspect_cost, currency, period)
+            _run_engine_tool("T040", signature, "Calculate scoped quality cost", lambda: analyze_quality_cost_defects(total_units, defective, scrap, rework, scrap_cost, rework_cost, inspect_cost, currency=currency, period=period))
+
+        elif selected_id == "T042":
+            st.warning("VALIDATION MODE — assumes complete failure/repair records; censoring and incomplete observation windows are not modeled.")
+            st.markdown("### MTBF and MTTR analyzer")
+            operating_hours = st.number_input("Accumulated operating hours", min_value=0.01, value=600.0, step=10.0, key="t042_operating_hours")
+            repairs_text = st.text_input("Completed repair durations in hours (comma-separated)", "2, 1, 3", key="t042_repairs")
+            signature = _fingerprint(operating_hours, repairs_text)
+            _run_engine_tool("T042", signature, "Calculate MTBF and MTTR", lambda: analyze_mtbf_mttr(operating_hours, [float(x.strip()) for x in repairs_text.split(",") if x.strip()]))
+
+        elif selected_id == "T056":
+            st.warning("VALIDATION MODE — ABC/XYZ results depend on supplied cost/demand windows and editable thresholds.")
+            st.markdown("### ABC/XYZ inventory analyzer")
+            items_text = st.text_area("Inventory items as JSON (SKU, annual_demand, unit_cost, period_demand)", '[{"sku":"A","annual_demand":100,"unit_cost":8,"period_demand":[8,10,12]},{"sku":"B","annual_demand":50,"unit_cost":3,"period_demand":[1,10,3]},{"sku":"C","annual_demand":25,"unit_cost":2,"period_demand":[1,20,0]}]', height=130, key="t056_items_json")
+            currency = st.text_input("Currency code", "SAR", key="t056_currency")
+            signature = _fingerprint(items_text, currency)
+            saved = _run_engine_tool("T056", signature, "Classify ABC/XYZ inventory", lambda: analyze_abc_xyz_inventory(json.loads(items_text), currency=currency))
+            if saved and saved["signature"] == signature:
+                frame = saved["result"].get("classification")
+                if isinstance(frame, pd.DataFrame) and not frame.empty and {"SKU", "Annual usage value"}.issubset(frame.columns):
+                    st.bar_chart(frame.set_index("SKU")["Annual usage value"])
+
+        elif selected_id == "T075":
+            st.warning("VALIDATION MODE — forecast thresholds alert on error; they do not diagnose cause or trigger retraining.")
+            st.markdown("### Forecast and model drift monitor")
+            predictions_text = st.text_input("Predictions (comma-separated)", "10, 20, 30", key="t075_predictions")
+            actuals_text = st.text_input("Later actuals (same order and length)", "12, 18, 33", key="t075_actuals")
+            max_mae = st.number_input("Maximum acceptable MAE", min_value=0.0, value=2.0, step=0.5, key="t075_max_mae")
+            window = st.number_input("Trailing evaluation window (0 = all pairs)", min_value=0, value=0, step=1, key="t075_window")
+            signature = _fingerprint(predictions_text, actuals_text, max_mae, window)
+            saved = _run_engine_tool("T075", signature, "Evaluate forecast drift", lambda: monitor_forecast_drift([float(x.strip()) for x in predictions_text.split(",") if x.strip()], [float(x.strip()) for x in actuals_text.split(",") if x.strip()], max_mae, window=int(window) if window else None))
+            if saved and saved["signature"] == signature:
+                frame = saved["result"].get("series")
+                if isinstance(frame, pd.DataFrame) and not frame.empty and {"Prediction", "Actual"}.issubset(frame.columns):
+                    st.line_chart(frame[["Prediction", "Actual"]])
+
+        elif selected_id == "T085":
+            st.warning("VALIDATION MODE — balanced independent two-sample t-test assumptions are not automatically verified.")
+            st.markdown("### Statistical power and sample-size planner")
+            effect = st.number_input("Standardized effect size (Cohen's d; positive)", min_value=0.01, value=0.5, step=0.05, key="t085_effect")
+            alpha = st.selectbox("Two-sided significance alpha", [0.01, 0.05, 0.10], index=1, key="t085_alpha")
+            power = st.slider("Target statistical power", min_value=0.5, max_value=0.99, value=0.8, step=0.01, key="t085_power")
+            max_n = st.number_input("Maximum n per group searched", min_value=10, max_value=10000, value=500, step=10, key="t085_max_n")
+            signature = _fingerprint(effect, alpha, power, max_n)
+            _run_engine_tool("T085", signature, "Estimate sample size", lambda: plan_two_sample_t_sample_size(effect_size=effect, alpha=alpha, target_power=power, max_n_per_group=int(max_n)))
+
+        elif selected_id == "T021":
             st.warning("LIMITED VALIDATION MODE — these calculations do not replace a reviewed time-study protocol.")
             st.markdown("### Time study and standard time")
             st.caption("Enter observations in one consistent time unit. Demo observations are synthetic and should be replaced with approved study data.")
@@ -431,6 +621,26 @@ if rows:
                                        key="t066_binpack_bins_export")
                 for warning in saved["result"]["warnings"]:
                     st.warning(warning)
+
+
+            with st.expander("Cutting-stock pattern optimisation (MILP)", expanded=False):
+                st.caption("Uses a constrained integer optimization model and an explicit kerf allowance. Solver output must be checked against real stock, saw and production rules before use.")
+                stock_length = st.number_input("Raw stock length (same units as part lengths)", min_value=0.01, value=12.0, step=1.0, key="t066_cut_stock_length")
+                kerf = st.number_input("Kerf per cut (same length units)", min_value=0.0, value=0.0, step=0.01, key="t066_cut_kerf")
+                parts_text = st.text_area("Parts (JSON list with name, length and integer quantity)", value='[{"name":"A","length":6,"quantity":4}]', height=110, key="t066_cut_parts_json")
+                cut_signature = _fingerprint(stock_length, kerf, parts_text)
+                def _cutting_stock_calculation():
+                    parts = json.loads(parts_text)
+                    if not isinstance(parts, list):
+                        raise ValueError("Parts must be a JSON list.")
+                    return solve_cutting_stock(stock_length, parts, kerf=kerf)
+                saved_cut = _run_engine_tool("T066_CUT", cut_signature, "Optimise cutting-stock patterns", _cutting_stock_calculation)
+                if saved_cut and saved_cut["signature"] == cut_signature:
+                    cut_result = saved_cut["result"]
+                    if "stock_count" in cut_result:
+                        st.metric("Raw stock bars", cut_result["stock_count"])
+                    if "waste_length" in cut_result:
+                        st.metric("Total estimated waste", f'{cut_result["waste_length"]:,.3f}')
 
         elif selected_id == "T076":
             st.warning("LIMITED VALIDATION MODE — this is event-log exploration, not a certified process-conformance assessment.")
