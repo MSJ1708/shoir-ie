@@ -207,3 +207,33 @@ def test_workbench_runs_5s_and_revisioned_kaizen_a3():
     assert revised["revision_number"] == 2
     assert len(revised["revision_history"]) == 1
     assert revised["actual_after_value"] == pytest.approx(88.0)
+
+
+def test_workbench_runs_oee_capability_inventory_carbon_and_economics():
+    from streamlit.testing.v1 import AppTest
+
+    page = ROOT / "pages" / "Industrial_Engineering_Workbench.py"
+    at = AppTest.from_file(page, default_timeout=60)
+    at.session_state["current_user"] = "workbench-checker"
+    at.session_state["authenticated"] = True
+    at.session_state["user_tier"] = "Enterprise Plus Tier"
+    at.run(timeout=60)
+    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+
+    cases = [
+        ("T026 · OEE and Loss Analysis", "tool026_run", "T026", "oee_pct", 79.1666666667),
+        ("T032 · Process Capability Analyzer", "tool032_run", "T032", "cp", 2 / 3),
+        ("T055 · Inventory Policy Optimizer", "tool055_run", "T055", "economic_order_quantity_units", 353.553390593),
+        ("T078 · Carbon Emissions Calculator", "tool078_run", "T078", "emissions_kg_co2e", 100.0),
+        ("T081 · Engineering Economics Calculator", "tool081_run", "T081", "npv", 100 / 2.42),
+    ]
+    for label, button_key, tool_id, metric_key, expected in cases:
+        at.selectbox(key="shoir_100_tool_inspector").select(label)
+        at.run(timeout=60)
+        assert not at.exception, f"{tool_id} selection raised: " + "\n".join(str(error.value) for error in at.exception)
+        at.button(key=button_key).click()
+        at.run(timeout=60)
+        assert not at.exception, f"{tool_id} run raised: " + "\n".join(str(error.value) for error in at.exception)
+        result = at.session_state.get(f"shoir_tool_result_{tool_id}")
+        assert result is not None, f"{tool_id} did not produce a structured result."
+        assert result[metric_key] == pytest.approx(expected, rel=1e-5)
