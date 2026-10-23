@@ -36,7 +36,7 @@ def expected_policy_decision(current: str, required: str) -> bool:
 
 def test_every_inventory_module_has_an_explicit_matching_shared_requirement():
     rows = load_inventory()
-    assert len(rows) == 96, f"Expected the audited 96-name inventory; found {len(rows)}."
+    assert len(rows) == 97, f"Expected the audited 97-name app inventory; found {len(rows)}."
     names = [row["module_name"].strip() for row in rows]
     assert len(names) == len(set(names)), "The source inventory must contain unique module names."
     assert set(TIER_ORDER) == set(ALL_TIERS)
