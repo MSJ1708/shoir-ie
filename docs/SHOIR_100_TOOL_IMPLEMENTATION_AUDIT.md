@@ -14,8 +14,8 @@ The source audit uses the required status vocabulary. `VERIFIED_WORKING` is inte
 
 - `EXTERNAL_CONFIGURATION_REQUIRED`: **2**
 - `FOUNDATION_ONLY`: **51**
-- `IMPLEMENTED_NEEDS_VALIDATION`: **44**
-- `MISSING`: **3**
+- `IMPLEMENTED_NEEDS_VALIDATION`: **47**
+- `MISSING`: **0**
 
 These are static-source classifications, **not** authenticated-browser passes and not a workforce-readiness score. All 100 browser statuses remain `UNVERIFIED` in the matrix; no rows are labelled `VERIFIED_WORKING` from source presence alone.
 
@@ -31,10 +31,10 @@ The registry delegates target decisions to `shoir_tier_capabilities.tier_allows`
 
 1. Bind each target ID to the real renderer/action; make unmapped targets visibly non-executable and ensure runtime execution, Copilot, direct routes, APIs and exports check the central policy.
 2. Close the known workbook, facility-layout, export, persistence/recovery, integration diagnostic and authenticated tier gates with dedicated staging accounts.
-3. Add hand-calculated/trusted numerical fixtures for each specialist method; validate invalid/boundary units and solver states.
+3. Three initially missing targets now have bounded deterministic engines and focused fixtures: T066 cutting/bin packing, T075 forecast error threshold monitoring, and T085 sample size for a specific two-sample t-test. Broader specialist fixtures are still required; validate units, invalid/boundary inputs and solver states.
 4. Complete all 100 authenticated browser walkthroughs, including empty/malformed data, save/reload/re-login, export parsing, direct-route denial and narrow/RTL views.
 5. Add CI gates for manifest completeness, tier drift, route/render mapping, calculation fixtures, exports and the browser matrix.
 
 ## Verification limits
 
-The code-writing environment could inspect and edit the connected GitHub repository but could not clone it locally from this execution environment. The repository's checked-in GitHub Actions workflow is therefore the source of executable test evidence for this branch; the hosted Streamlit app cannot be considered authenticated-browser-verified without authorized disposable test accounts and the matching secrets-backed workflow. Do not deploy or merge based on this phase report alone.
+Three focused methods have now been added in `shoir_target_engines.py`; this does not mean they are yet wired into the Workbench action flow. The code-writing environment could inspect and edit the connected GitHub repository but could not clone it locally from this execution environment. The repository's checked-in GitHub Actions workflow is therefore the source of executable test evidence for this branch; the hosted Streamlit app cannot be considered authenticated-browser-verified without authorized disposable test accounts and the matching secrets-backed workflow. Do not deploy or merge based on this phase report alone.
