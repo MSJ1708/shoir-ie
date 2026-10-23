@@ -4,6 +4,8 @@ This page is intentionally status-led. It does not execute a target unless the
 registry marks it VERIFIED_WORKING and the current tier is allowed. Existing
 module routes and navigation are left unchanged.
 """
+import hashlib
+import io
 import pandas as pd
 import streamlit as st
 
@@ -11,6 +13,7 @@ from shoir_100_tool_registry import (
     TOOL_TARGETS, TOOL_STATUSES, TOOL_TIER_ORDER, WORKBENCHES,
     target_tool_access_decision, target_tool_execution_decision,
 )
+from shoir_100_tool_engines import analyze_process_event_log, first_fit_decreasing_bin_pack
 
 st.set_page_config(page_title="Engineering Tool Library | Shoir-IE", page_icon="🧭", layout="wide")
 # Keep internal readiness/route-gap details behind an authenticated app session.
@@ -111,5 +114,160 @@ if rows:
                     f"Could not prepare the existing-module hand-off ({type(exc).__name__}). "
                     "Your data was not changed. Use the normal Workbench navigation."
                 )
+
+        if selected_id == "T066":
+            st.markdown("### Run bin packing")
+            st.caption("Supported method: one-dimensional First-Fit Decreasing. This is a feasible heuristic, not proof of a minimum-bin optimum; cutting-stock patterns and 2-D/3-D packing are not supported.")
+            upload = st.file_uploader("Optional item CSV", type=["csv"], key="t066_binpack_upload")
+            source = "SYNTHETIC"
+            editor_key = "t066_binpack_synthetic_editor"
+            input_frame = pd.DataFrame({
+                "item": ["Part A", "Part B", "Part C", "Part D", "Part E", "Part F"],
+                "size": [6, 5, 5, 4, 4, 2],
+                "quantity": [1, 1, 1, 1, 1, 1],
+            })
+            upload_error = None
+            if upload is not None:
+                try:
+                    raw_upload = upload.getvalue()
+                    input_frame = pd.read_csv(io.BytesIO(raw_upload))
+                    source = "IMPORTED"
+                    editor_key = "t066_binpack_import_" + hashlib.sha256(raw_upload).hexdigest()[:12]
+                except Exception as exc:
+                    upload_error = f"CSV import rejected ({type(exc).__name__}). The sample and prior result are unchanged."
+            if upload_error:
+                st.error(upload_error)
+            st.caption(f"Input provenance: {source}. The initial table is illustrative synthetic data, not plant measurements.")
+            edited_items = st.data_editor(input_frame, num_rows="dynamic", use_container_width=True,
+                                          key=editor_key, hide_index=True)
+            capacity = st.number_input("Bin capacity (same units as item size)", min_value=0.01,
+                                       value=10.0, step=0.5, key="t066_binpack_capacity")
+            signature = hashlib.sha256(
+                (edited_items.to_csv(index=True) + "|" + repr(float(capacity)) + "|" + source).encode("utf-8")
+            ).hexdigest()
+            if st.button("Run bin-packing analysis", key="t066_binpack_run", type="primary"):
+                if upload_error:
+                    st.error("Resolve the uploaded file error before running this analysis.")
+                else:
+                    try:
+                        outcome = first_fit_decreasing_bin_pack(edited_items, float(capacity))
+                        st.session_state["shoir_t066_result"] = {
+                            "signature": signature, "source": source, "result": outcome,
+                        }
+                    except ValueError as exc:
+                        st.error(f"Input validation failed: {exc}. Previous successful result was preserved.")
+            saved = st.session_state.get("shoir_t066_result")
+            if isinstance(saved, dict):
+                if saved.get("signature") != signature:
+                    st.warning("STALE — the table, capacity or provenance changed. Rerun before using the saved result.")
+                st.caption(f'Result status: {saved["result"]["status"]} · Input provenance: {saved["source"]} · current-session result (durable project save not yet implemented)')
+                metrics = saved["result"]["metrics"]
+                metric_cols = st.columns(4)
+                metric_cols[0].metric("Bins used", f'{metrics["bins_used"]:,}')
+                metric_cols[1].metric("Item instances", f'{metrics["item_instances"]:,}')
+                metric_cols[2].metric("Unused capacity", f'{metrics["unused_capacity_total"]:,.3f}')
+                metric_cols[3].metric("Utilization", f'{metrics["utilization_percent"]:,.2f}%')
+                st.dataframe(saved["result"]["assignments"], use_container_width=True, hide_index=True)
+                st.markdown("**Bin load and remaining capacity**")
+                st.dataframe(saved["result"]["bins"], use_container_width=True, hide_index=True)
+                if not saved["result"]["bins"].empty:
+                    chart = saved["result"]["bins"].set_index("Bin")[["Used capacity", "Unused capacity"]]
+                    st.bar_chart(chart)
+                col_a, col_b = st.columns(2)
+                with col_a:
+                    st.download_button("Download item assignments CSV",
+                                       saved["result"]["assignments"].to_csv(index=False).encode("utf-8"),
+                                       "shoir_ie_bin_packing_assignments.csv", "text/csv",
+                                       key="t066_binpack_assignments_export")
+                with col_b:
+                    st.download_button("Download bin summary CSV",
+                                       saved["result"]["bins"].to_csv(index=False).encode("utf-8"),
+                                       "shoir_ie_bin_packing_summary.csv", "text/csv",
+                                       key="t066_binpack_bins_export")
+                for warning in saved["result"]["warnings"]:
+                    st.warning(warning)
+
+        elif selected_id == "T076":
+            st.markdown("### Analyze a process event log")
+            st.caption("Calculates directly-follows transitions, case duration and inter-event waits. Optional reference-trace comparison is exact sequence matching, not a full Petri-net conformance method.")
+            upload = st.file_uploader("Optional process event-log CSV", type=["csv"], key="t076_process_upload")
+            source = "SYNTHETIC"
+            editor_key = "t076_process_synthetic_editor"
+            input_frame = pd.DataFrame([
+                {"case_id":"C1","activity":"Start","timestamp":"2026-10-01T08:00:00Z"},
+                {"case_id":"C1","activity":"Inspect","timestamp":"2026-10-01T08:03:00Z"},
+                {"case_id":"C1","activity":"Pack","timestamp":"2026-10-01T08:05:00Z"},
+                {"case_id":"C2","activity":"Start","timestamp":"2026-10-01T09:00:00Z"},
+                {"case_id":"C2","activity":"Inspect","timestamp":"2026-10-01T09:04:00Z"},
+                {"case_id":"C2","activity":"Pack","timestamp":"2026-10-01T09:10:00Z"},
+            ])
+            upload_error = None
+            if upload is not None:
+                try:
+                    raw_upload = upload.getvalue()
+                    input_frame = pd.read_csv(io.BytesIO(raw_upload))
+                    source = "IMPORTED"
+                    editor_key = "t076_process_import_" + hashlib.sha256(raw_upload).hexdigest()[:12]
+                except Exception as exc:
+                    upload_error = f"CSV import rejected ({type(exc).__name__}). The sample and prior result are unchanged."
+            if upload_error:
+                st.error(upload_error)
+            st.caption(f"Input provenance: {source}. The initial event log is synthetic demonstration data.")
+            edited_events = st.data_editor(input_frame, num_rows="dynamic", use_container_width=True,
+                                           key=editor_key, hide_index=True)
+            reference_text = st.text_input(
+                "Optional expected activity sequence (comma-separated)",
+                value="Start, Inspect, Pack", key="t076_reference_trace",
+            )
+            reference = [part.strip() for part in reference_text.split(",") if part.strip()]
+            signature = hashlib.sha256(
+                (edited_events.to_csv(index=True) + "|" + repr(reference) + "|" + source).encode("utf-8")
+            ).hexdigest()
+            if st.button("Analyze event log", key="t076_process_run", type="primary"):
+                if upload_error:
+                    st.error("Resolve the uploaded file error before running this analysis.")
+                else:
+                    try:
+                        outcome = analyze_process_event_log(edited_events, reference_sequence=reference or None)
+                        st.session_state["shoir_t076_result"] = {
+                            "signature": signature, "source": source, "result": outcome,
+                        }
+                    except ValueError as exc:
+                        st.error(f"Event-log validation failed: {exc}. Previous successful result was preserved.")
+            saved = st.session_state.get("shoir_t076_result")
+            if isinstance(saved, dict):
+                if saved.get("signature") != signature:
+                    st.warning("STALE — the event log or reference sequence changed. Rerun before relying on this result.")
+                st.caption(f'Result status: {saved["result"]["status"]} · Input provenance: {saved["source"]} · current-session result (durable project save not yet implemented)')
+                metrics = saved["result"]["metrics"]
+                metric_cols = st.columns(4)
+                metric_cols[0].metric("Cases", f'{metrics["case_count"]:,}')
+                metric_cols[1].metric("Events", f'{metrics["event_count"]:,}')
+                metric_cols[2].metric("Activities", f'{metrics["activity_count"]:,}')
+                metric_cols[3].metric("Mean case duration", f'{metrics["mean_case_duration_minutes"]:,.2f} min')
+                st.markdown("**Case traces and duration**")
+                st.dataframe(saved["result"]["cases"], use_container_width=True, hide_index=True)
+                st.markdown("**Directly-follows transitions and waiting time**")
+                dfg = saved["result"]["directly_follows"].copy()
+                if not dfg.empty:
+                    dfg["Transition"] = dfg["From activity"].astype(str) + " → " + dfg["To activity"].astype(str)
+                    st.bar_chart(dfg.set_index("Transition")["transition_count"])
+                else:
+                    st.info("No transitions can be calculated from the current event log; provide at least two ordered events within a case.")
+                st.dataframe(saved["result"]["directly_follows"], use_container_width=True, hide_index=True)
+                st.markdown("**Activity frequency**")
+                st.dataframe(saved["result"]["activities"], use_container_width=True, hide_index=True)
+                exports = [
+                    ("Download case metrics CSV", "cases", "shoir_ie_process_mining_cases.csv"),
+                    ("Download directly-follows CSV", "directly_follows", "shoir_ie_process_mining_transitions.csv"),
+                    ("Download activity summary CSV", "activities", "shoir_ie_process_mining_activities.csv"),
+                ]
+                export_cols = st.columns(len(exports))
+                for col, (label, key, filename) in zip(export_cols, exports):
+                    with col:
+                        st.download_button(label, saved["result"][key].to_csv(index=False).encode("utf-8"),
+                                           filename, "text/csv", key=f"t076_export_{key}")
+                for warning in saved["result"]["warnings"]:
+                    st.warning(warning)
 else:
     st.warning("No target capabilities match these filters. Change the workbench, status or search.")
