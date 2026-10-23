@@ -122,6 +122,18 @@ def test_status_summary_counts_all_targets_and_never_infers_verified_from_presen
     assert counts["VERIFIED_WORKING"] == 0
 
 
+def test_focused_workbench_tools_document_direct_gates_tests_and_transient_persistence():
+    focused = {"T021", "T023", "T066", "T075", "T085"}
+    for tool_id in focused:
+        tool = get_tool(tool_id)
+        assert tool is not None
+        assert "require_tool_access" in tool["entitlement_enforcement_points"]
+        assert "not yet wired" not in tool["entitlement_enforcement_points"]
+        assert "Transient Streamlit session result" in tool["persistence_scope"]
+        assert "tests/test_shoir_target_engines.py::" in tool["unit_test"]
+        assert tool["implementation_status"] == "IMPLEMENTED_NEEDS_VALIDATION"
+
+
 def test_workbench_tier_gate_keeps_research_pack_separate_from_enterprise_plus():
     from industrial_platform_excellence import module_availability, tier_allows as workbench_tier_allows
 
