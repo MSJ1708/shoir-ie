@@ -46,3 +46,20 @@ def test_registry_does_not_mislabel_catalog_only_items_as_executable():
             assert not tool_is_actionable(row["tool_id"])
     assert all(tool_is_actionable(tool_id) for tool_id in IMPLEMENTED_TOOL_IDS)
     assert all(TOOL_BY_ID[tool_id]["implementation_status"] == "IMPLEMENTED_NEEDS_VALIDATION" for tool_id in IMPLEMENTED_TOOL_IDS)
+
+from shoir_tier_capabilities import copilot_gate
+
+
+def test_copilot_uses_canonical_tool_tier_requirements():
+    pro_block = copilot_gate("run Process Capability Analyzer", "Starter")
+    assert pro_block is not None
+    assert pro_block["required_tier"] == "Mid-Tier Pro"
+    research_block = copilot_gate("run Statistical Power and Sample-Size Planner", "Enterprise Plus")
+    assert research_block is not None
+    assert research_block["required_tier"] == "Research Pack"
+    assert copilot_gate("run Statistical Power and Sample-Size Planner", "Research Pack") is None
+
+
+def test_invalid_required_tier_cannot_become_starter():
+    from shoir_tier_capabilities import tier_allows
+    assert not tier_allows("Enterprise Plus", "Unrecognized tier")
