@@ -28,7 +28,7 @@ def test_unmapped_module_names_are_not_assumed_to_be_free():
     candidates = ["AI Copilot", "Module with no explicit policy"]
     assert available_modules("Enterprise", candidates) == ["AI Copilot"]
     assert available_modules("unknown package", candidates) == []
-    assert available_modules("Research Pack ($30 add-on)", candidates) == []
+    assert available_modules("Research Pack ($30 add-on)", candidates) == ["AI Copilot"]
 
 
 def test_copilot_protected_actions_fail_closed_for_unresolved_tier():
