@@ -170,7 +170,7 @@ def _load_targets() -> tuple[dict[str, Any], ...]:
             "persistence_scope": persistence_scope,
             "external_dependency": external_dependency,
             "entitlement_enforcement_points": (
-                "Direct Workbench specialist methods use require_tool_access(tier, tool_id) before calculation; "
+                "Direct Workbench specialist methods require _require_focused_tool_actor() plus require_tool_access(tier, tool_id) before calculation; "
                 "the capability directory also checks target access. Mapped legacy module routes still enforce their native policy."
                 if tool_id in {"T021", "T023", "T066", "T075", "T085"}
                 else
@@ -178,7 +178,7 @@ def _load_targets() -> tuple[dict[str, Any], ...]:
                 "the mapped legacy route must also enforce its native server-side policy."
             ),
             "unit_test": {
-                "T021": "tests/test_shoir_target_engines.py::test_time_study_uses_explicit_rating_and_allowance_convention; tests/test_shoir_target_engines.py::test_time_study_rejects_empty_nonpositive_and_invalid_assumptions; tests/test_shoir_target_engines.py::test_time_study_result_and_input_snapshot_roundtrip_per_user",
+                "T021": "tests/test_shoir_target_engines.py::test_time_study_uses_explicit_rating_and_allowance_convention; tests/test_shoir_target_engines.py::test_time_study_rejects_empty_nonpositive_and_invalid_assumptions; tests/test_shoir_target_engines.py::test_time_study_result_and_input_snapshot_roundtrip_per_user; tests/test_shoir_100_tool_workbench.py::test_workbench_denies_focused_tool_execution_to_unauthenticated_guest",
                 "T023": "tests/test_shoir_target_engines.py::test_takt_capacity_calculates_capacity_gap_and_exact_boundary; tests/test_shoir_target_engines.py::test_takt_capacity_rejects_zero_mixed_or_noninteger_denominators",
                 "T066": "tests/test_shoir_target_engines.py::test_cutting_stock_known_case_and_material_reconciliation; tests/test_shoir_target_engines.py::test_cutting_stock_rejects_bad_inputs_and_reports_impossible_piece",
                 "T075": "tests/test_shoir_target_engines.py::test_forecast_drift_monitor_has_hand_calculated_error_values; tests/test_shoir_target_engines.py::test_forecast_drift_monitor_window_and_invalid_inputs",
