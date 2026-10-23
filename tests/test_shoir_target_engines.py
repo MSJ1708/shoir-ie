@@ -522,3 +522,124 @@ def test_engineering_economics_omits_irr_for_nonconventional_cashflows_and_valid
         analyze_engineering_economics([-100, 150], -100, currency="SAR")
     with pytest.raises(ValueError, match="numeric values"):
         analyze_engineering_economics([-100, True], 10, currency="SAR")
+
+
+def test_unit_converter_checks_dimensions_and_converts_temperature():
+    from shoir_target_engines import convert_units_or_currency
+
+    assert convert_units_or_currency(100, "cm", "m")["converted_value"] == pytest.approx(1.0)
+    assert convert_units_or_currency(0, "°C", "°F")["converted_value"] == pytest.approx(32.0)
+    assert convert_units_or_currency(1, "kWh", "MJ")["converted_value"] == pytest.approx(3.6)
+    with pytest.raises(ValueError, match="Incompatible dimensions"):
+        convert_units_or_currency(1, "kg", "m")
+
+
+def test_currency_converter_requires_dated_sourced_rate():
+    from shoir_target_engines import convert_units_or_currency
+
+    with pytest.raises(ValueError, match="positive exchange rate"):
+        convert_units_or_currency(100, "SAR", "USD")
+    result = convert_units_or_currency(
+        100, "SAR", "USD", exchange_rate=0.2667,
+        exchange_rate_date="2026-01-01", exchange_rate_source="Fixture rate",
+    )
+    assert result["converted_value"] == pytest.approx(26.67)
+    assert result["exchange_rate_date"] == "2026-01-01"
+    with pytest.raises(ValueError, match="ISO YYYY-MM-DD"):
+        convert_units_or_currency(1, "SAR", "USD", exchange_rate=0.25,
+                                  exchange_rate_date="not-a-date", exchange_rate_source="fixture")
+
+
+def test_spc_individuals_chart_matches_hand_calculated_limits():
+    from shoir_target_engines import analyze_spc_individuals
+
+    result = analyze_spc_individuals([10, 11, 9, 10, 12, 11], unit="mm")
+    assert result["status"] == "NO_POINT_OUTSIDE_CALCULATED_LIMITS"
+    assert result["mean"] == pytest.approx(10.5)
+    assert result["moving_range_average"] == pytest.approx(1.4)
+    assert result["estimated_within_sigma"] == pytest.approx(1.4 / 1.128)
+    assert result["individuals_ucl"] == pytest.approx(10.5 + 3 * 1.4 / 1.128)
+    assert result["moving_range_ucl"] == pytest.approx(3.267 * 1.4)
+
+
+def test_spc_rejects_insufficient_or_constant_measurements():
+    from shoir_target_engines import analyze_spc_individuals
+
+    with pytest.raises(ValueError, match="at least three"):
+        analyze_spc_individuals([1, 2])
+    with pytest.raises(ValueError, match="Moving-range average is zero"):
+        analyze_spc_individuals([5, 5, 5])
+
+
+def test_quality_cost_reconciles_scrap_rework_and_inspection():
+    from shoir_target_engines import analyze_quality_cost_defects
+
+    result = analyze_quality_cost_defects(
+        100, 10, 2, 5, 20, 6, 120, currency="SAR", period="Fixture month"
+    )
+    assert result["defective_rate_pct"] == pytest.approx(10.0)
+    assert result["scrap_cost"] == pytest.approx(40.0)
+    assert result["rework_cost"] == pytest.approx(30.0)
+    assert result["cost_of_poor_quality"] == pytest.approx(190.0)
+    assert result["copq_per_produced_unit"] == pytest.approx(1.9)
+
+
+def test_quality_cost_rejects_overlapping_dispositions():
+    from shoir_target_engines import analyze_quality_cost_defects
+
+    with pytest.raises(ValueError, match="cannot exceed the defective"):
+        analyze_quality_cost_defects(100, 10, 7, 5, 20, 6, 120)
+
+
+def test_mtbf_mttr_matches_hand_calculated_reliability_measures():
+    from shoir_target_engines import analyze_mtbf_mttr
+
+    result = analyze_mtbf_mttr(600, [2, 1, 3])
+    assert result["failure_count"] == 3
+    assert result["mtbf_hours"] == pytest.approx(200)
+    assert result["mttr_hours"] == pytest.approx(2)
+    assert result["steady_state_availability_estimate_pct"] == pytest.approx(200 / 202 * 100)
+
+
+def test_mtbf_mttr_rejects_invalid_events():
+    from shoir_target_engines import analyze_mtbf_mttr
+
+    with pytest.raises(ValueError, match="greater than zero"):
+        analyze_mtbf_mttr(0, [1])
+    with pytest.raises(ValueError, match="cannot be negative"):
+        analyze_mtbf_mttr(10, [1, -0.1])
+    with pytest.raises(ValueError, match="at least one"):
+        analyze_mtbf_mttr(10, [])
+
+
+def test_abc_xyz_uses_value_thresholds_and_demand_cv():
+    from shoir_target_engines import analyze_abc_xyz_inventory
+
+    result = analyze_abc_xyz_inventory([
+        {"sku": "A", "annual_demand": 100, "unit_cost": 8, "period_demand": [8, 10, 12]},
+        {"sku": "B", "annual_demand": 50, "unit_cost": 3, "period_demand": [1, 10, 3]},
+        {"sku": "C", "annual_demand": 25, "unit_cost": 2, "period_demand": [1, 20, 0]},
+    ], currency="SAR")
+    df = result["classification"]
+    assert result["annual_usage_value_total"] == pytest.approx(1000)
+    assert df["SKU"].tolist() == ["A", "B", "C"]
+    assert df["ABC"].tolist() == ["A", "B", "C"]
+    assert df["XYZ"].tolist() == ["X", "Y", "Z"]
+    assert df["ABC/XYZ class"].tolist() == ["A-X", "B-Y", "C-Z"]
+
+
+def test_abc_xyz_rejects_duplicates_and_inconsistent_history():
+    from shoir_target_engines import analyze_abc_xyz_inventory
+
+    duplicate = [
+        {"sku": "A", "annual_demand": 1, "unit_cost": 1, "period_demand": [1, 2]},
+        {"sku": "a", "annual_demand": 1, "unit_cost": 1, "period_demand": [2, 3]},
+    ]
+    with pytest.raises(ValueError, match="Duplicate SKU"):
+        analyze_abc_xyz_inventory(duplicate)
+    mismatch = [
+        {"sku": "A", "annual_demand": 1, "unit_cost": 1, "period_demand": [1, 2]},
+        {"sku": "B", "annual_demand": 1, "unit_cost": 2, "period_demand": [1, 2, 3]},
+    ]
+    with pytest.raises(ValueError, match="same number"):
+        analyze_abc_xyz_inventory(mismatch)
