@@ -104,7 +104,12 @@ if rows:
                     if st.button(f"Open existing module: {candidate}", key=f"open_target_legacy_{selected_id}", type="primary"):
                         st.session_state["workbench_module_selector"] = f'{available_rows[candidate]} · {candidate}'
                         st.switch_page("pages/Industrial_Engineering_Workbench.py")
-            except Exception:
-                st.caption("Existing route hand-off is unavailable in this session. Use the normal Workbench navigation.")
+            except Exception as exc:
+                # Keep the user's workspace intact and provide a safe visible reason;
+                # never silently swallow a route hand-off failure.
+                st.warning(
+                    f"Could not prepare the existing-module hand-off ({type(exc).__name__}). "
+                    "Your data was not changed. Use the normal Workbench navigation."
+                )
 else:
     st.warning("No target capabilities match these filters. Change the workbench, status or search.")
