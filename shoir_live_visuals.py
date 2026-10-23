@@ -105,6 +105,7 @@ _MODULE_KEYS = {
     "Autonomous Kinetic-Digital Twin (AKDT) for Industrial Logistics Resilience": ["akdt_asset_health_df", "akdt_supply_routes_df", "akdt_supply_shortages_df"],
     "L-SIMS — Local Capability & Dynamic Industrial Readiness Simulator": ["lsims_local_allocations_df", "lsims_local_gaps_df", "lsims_supplier_capacity_df"],
     "Production Bottleneck & Capacity Recovery Study": ["capacity_recovery_line_metrics", "capacity_recovery_scenario"],
+    "100-Tool Engineering Hub": ["shoir_100_tool_registry_df", "shoir_100_tool_status_summary_df"],
 }
 
 # Conflict-resolution registry: richer enterprise result aliases are additive.
