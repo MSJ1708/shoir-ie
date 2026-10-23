@@ -145,13 +145,19 @@ def work_sampling(activity_count: Any, total_count: Any, z_value: Any=1.96) -> d
         chart=[{"metric":"Proportion","value":p},{"metric":"CI lower","value":low},{"metric":"CI upper","value":high}],
         source_payload={"activity_count":active,"total_count":total,"z_value":z})
 
-def takt_capacity(available_time: Any, demand: Any, time_unit: str="min") -> dict[str, Any]:
-    t=_positive(available_time,"available time"); d=_positive(demand,"demand"); takt=t/d
-    return _result("T023",{"available_time":t,"demand":d,"takt_time":takt,"theoretical_capacity":t/takt},
-        units={"available_time":time_unit,"demand":"units per period","takt_time":f"{time_unit}/unit","theoretical_capacity":"units per period"},
-        method="Takt time = available production time ÷ required demand; theoretical capacity = available time ÷ takt.",
-        assumptions=["Time and demand refer to the same period.","Available time must be defined consistently for planned breaks/losses."],
-        source_payload={"available_time":t,"demand":d,"time_unit":time_unit})
+def takt_capacity(available_time: Any, demand: Any, cycle_time: Any, time_unit: str="min") -> dict[str, Any]:
+    t=_positive(available_time,"available time"); d=_positive(demand,"demand"); cycle=_positive(cycle_time,"cycle time")
+    takt=t/d; capacity=t/cycle
+    warnings=[]
+    if cycle > takt: warnings.append("Cycle time exceeds takt time; this process cannot meet stated demand without a capacity change.")
+    return _result("T023",{"available_time":t,"demand":d,"cycle_time":cycle,"takt_time":takt,"theoretical_capacity":capacity,
+        "capacity_surplus_or_shortfall":capacity-d},
+        units={"available_time":time_unit,"demand":"units per period","cycle_time":f"{time_unit}/unit","takt_time":f"{time_unit}/unit",
+        "theoretical_capacity":"units per period","capacity_surplus_or_shortfall":"units per period"},
+        method="Takt time = available production time ÷ required demand; theoretical capacity = available time ÷ measured cycle time.",
+        assumptions=["Available time and demand refer to the same period.","Cycle time and available time use the same time unit.","Capacity ignores loss, changeover, staffing, quality and constraint interactions."],
+        warnings=warnings, chart=[{"metric":"Required demand","value":d},{"metric":"Theoretical capacity","value":capacity}],
+        source_payload={"available_time":t,"demand":d,"cycle_time":cycle,"time_unit":time_unit})
 
 def oee(planned_time: Any,downtime: Any,ideal_cycle_time: Any,total_count: Any,good_count: Any,time_unit: str="min") -> dict[str, Any]:
     planned=_positive(planned_time,"planned time"); down=_finite(downtime,"downtime"); ideal=_positive(ideal_cycle_time,"ideal cycle time")
@@ -174,21 +180,30 @@ def oee(planned_time: Any,downtime: Any,ideal_cycle_time: Any,total_count: Any,g
         {"metric":"Quality %","value":100*quality},{"metric":"OEE %","value":100*combined}],
         source_payload={"planned_time":planned,"downtime":down,"ideal_cycle_time":ideal,"total_count":total,"good_count":good,"time_unit":time_unit})
 
-def process_capability(observations: Iterable[Any],lsl: Any,usl: Any) -> dict[str, Any]:
+def process_capability(observations: Iterable[Any],lsl: Any,usl: Any,within_subgroup_std: Any=None) -> dict[str, Any]:
     vals=[_finite(x,"observation") for x in observations]; lower,upper=_finite(lsl,"LSL"),_finite(usl,"USL")
     if lower>=upper: raise ValueError("Lower specification limit must be less than upper specification limit.")
-    if len(vals)<2: raise ValueError("At least two observations are required to estimate sample standard deviation.")
-    sd=stdev(vals)
-    if sd<=0: raise ValueError("Observations must have non-zero variation to calculate capability indices.")
-    avg=mean(vals); cp=(upper-lower)/(6*sd); cpu=(upper-avg)/(3*sd); cpl=(avg-lower)/(3*sd); cpk=min(cpu,cpl); warnings=[]
-    if len(vals)<30: warnings.append("Fewer than 30 observations: assess subgroup, stability and normality assumptions.")
+    if len(vals)<2: raise ValueError("At least two observations are required to estimate overall sample standard deviation.")
+    overall_sd=stdev(vals)
+    if overall_sd<=0: raise ValueError("Observations must have non-zero variation to calculate performance indices.")
+    avg=mean(vals); pp=(upper-lower)/(6*overall_sd); ppu=(upper-avg)/(3*overall_sd); ppl=(avg-lower)/(3*overall_sd); ppk=min(ppu,ppl)
+    cp=cpk=cpu=cpl=None; warnings=[]
+    if within_subgroup_std is not None:
+        within_sd=_positive(within_subgroup_std,"within-subgroup standard deviation")
+        cp=(upper-lower)/(6*within_sd); cpu=(upper-avg)/(3*within_sd); cpl=(avg-lower)/(3*within_sd); cpk=min(cpu,cpl)
+    else:
+        warnings.append("Cp/Cpk require a justified within-subgroup sigma; only overall Pp/Ppk are calculated until it is supplied.")
+    if len(vals)<30: warnings.append("Fewer than 30 observations: assess stability, subgroup design and distribution assumptions.")
     if avg<lower or avg>upper: warnings.append("Sample mean is outside the specification interval.")
-    return _result("T032",{"sample_size":len(vals),"mean":avg,"sample_std":sd,"cp":cp,"cpk":cpk,"pp":cp,"ppk":cpk,"cpu":cpu,"cpl":cpl},
-        units={"mean":"input unit","sample_std":"input unit","cp":"index","cpk":"index","pp":"index","ppk":"index","cpu":"index","cpl":"index"},
-        method="Cp=(USL−LSL)/(6s); Cpk=min(USL−mean,mean−LSL)/(3s). Pp/Ppk use the same overall sample s here.",
-        assumptions=["s is the overall sample standard deviation, not a within-subgroup estimate.","Indices do not prove statistical control or normality."],
-        warnings=warnings,chart=[{"metric":"Cp","value":cp},{"metric":"Cpk","value":cpk},{"metric":"Pp","value":cp},{"metric":"Ppk","value":cpk}],
-        source_payload={"observations":vals,"lsl":lower,"usl":upper})
+    metrics={"sample_size":len(vals),"mean":avg,"overall_sample_std":overall_sd,"cp":cp,"cpk":cpk,"pp":pp,"ppk":ppk,"cpu":cpu,"cpl":cpl}
+    units={"mean":"input unit","overall_sample_std":"input unit","cp":"index","cpk":"index","pp":"index","ppk":"index","cpu":"index","cpl":"index"}
+    chart=[{"metric":"Pp","value":pp},{"metric":"Ppk","value":ppk}]
+    if cp is not None: chart += [{"metric":"Cp","value":cp},{"metric":"Cpk","value":cpk}]
+    return _result("T032",metrics,units=units,
+        method="Pp=(USL−LSL)/(6s_overall); Ppk=min(USL−mean,mean−LSL)/(3s_overall). Cp/Cpk use a separately supplied within-subgroup sigma.",
+        assumptions=["Overall sample standard deviation is used for performance indices; it is not substituted for within-subgroup sigma.","Indices do not prove statistical control or normality."],
+        warnings=warnings,chart=chart,
+        source_payload={"observations":vals,"lsl":lower,"usl":upper,"within_subgroup_std":within_subgroup_std})
 
 def mtbf_mttr(observation_hours: Any,downtime_hours: Any,failures: Any) -> dict[str, Any]:
     period=_positive(observation_hours,"observation hours"); down=_finite(downtime_hours,"downtime hours"); count=int(failures)
