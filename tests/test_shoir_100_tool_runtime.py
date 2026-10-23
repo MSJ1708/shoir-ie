@@ -60,7 +60,7 @@ def test_oee_golden_case_and_loss_consistency():
 def test_process_capability_golden_case():
     result = process_capability([9, 10, 11], 8, 12, within_subgroup_std=1)
     assert result["metrics"]["mean"] == pytest.approx(10)
-    assert result["metrics"]["sample_std"] == pytest.approx(1)
+    assert result["metrics"]["overall_sample_std"] == pytest.approx(1)
     assert result["metrics"]["cp"] == pytest.approx(2 / 3)
     assert result["metrics"]["cpk"] == pytest.approx(2 / 3)
     assert result["metrics"]["pp"] == pytest.approx(result["metrics"]["cp"])
