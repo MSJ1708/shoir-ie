@@ -84,3 +84,21 @@ def test_registry_exposes_full_contract_metadata_for_every_target():
     assert get_target_tool("T076")["implementation_status"] == "IMPLEMENTED_NEEDS_VALIDATION"
     assert "shoir_100_tool_engines.py" in get_target_tool("T066")["source_files"]
     assert "shoir_100_tool_engines.py" in get_target_tool("T076")["source_files"]
+
+def test_numerical_targets_reference_their_actual_golden_fixture_tests():
+    expected = {
+        "T021": "test_standard_time_golden_fixture_and_allowance_conventions",
+        "T023": "test_takt_time_and_capacity_golden_fixture",
+        "T026": "test_oee_golden_fixture_and_loss_decomposition",
+        "T032": "test_process_capability_golden_fixture_with_two_subgroups",
+        "T055": "test_inventory_policy_golden_fixture_and_boundaries",
+        "T066": "test_first_fit_decreasing_known_fixture_and_capacity_accounting",
+        "T076": "test_process_mining_timezone_duration_and_transition_fixture",
+        "T078": "test_carbon_emissions_requires_sourced_versioned_factor",
+        "T081": "test_engineering_economics_npv_irr_and_payback_golden_fixture",
+    }
+    from shoir_100_tool_registry import get_target_tool
+    for tool_id, test_name in expected.items():
+        row = get_target_tool(tool_id)
+        assert row is not None
+        assert test_name in row["unit_test_id"]
