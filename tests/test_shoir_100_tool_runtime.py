@@ -41,9 +41,10 @@ def test_work_sampling_confidence_interval_fixture():
 
 
 def test_takt_capacity_golden_case():
-    result = takt_capacity(480, 120, "min")
+    result = takt_capacity(480, 120, 3, "min")
     assert result["metrics"]["takt_time"] == pytest.approx(4)
-    assert result["metrics"]["theoretical_capacity"] == pytest.approx(120)
+    assert result["metrics"]["theoretical_capacity"] == pytest.approx(160)
+    assert result["metrics"]["capacity_surplus_or_shortfall"] == pytest.approx(40)
 
 
 def test_oee_golden_case_and_loss_consistency():
@@ -57,7 +58,7 @@ def test_oee_golden_case_and_loss_consistency():
 
 
 def test_process_capability_golden_case():
-    result = process_capability([9, 10, 11], 8, 12)
+    result = process_capability([9, 10, 11], 8, 12, within_subgroup_std=1)
     assert result["metrics"]["mean"] == pytest.approx(10)
     assert result["metrics"]["sample_std"] == pytest.approx(1)
     assert result["metrics"]["cp"] == pytest.approx(2 / 3)
@@ -134,7 +135,7 @@ def test_profile_and_reversible_cleaning_do_not_mutate_source():
 
 
 def test_csv_export_is_reopenable_and_contains_method_and_fingerprint():
-    result = takt_capacity(480, 120)
+    result = takt_capacity(480, 120, 3)
     payload = result_to_csv_bytes(result).decode("utf-8-sig")
     parsed = list(csv.DictReader(io.StringIO(payload)))
     assert parsed
@@ -181,3 +182,16 @@ def test_bad_dataset_upload_is_rejected_and_csv_parses():
         read_dataset_bytes("sample.txt", b"x")
     with pytest.raises(ValueError):
         read_dataset_bytes("corrupt.xlsx", b"not a real workbook")
+
+
+def test_capability_with_missing_within_sigma_does_not_fabricate_cp_cpk():
+    result = process_capability([9, 10, 11], 8, 12)
+    assert result["metrics"]["cp"] is None
+    assert result["metrics"]["cpk"] is None
+    assert result["metrics"]["pp"] == pytest.approx(2 / 3)
+    assert any("within-subgroup sigma" in warning for warning in result["warnings"])
+
+
+def test_takt_capacity_rejects_missing_or_zero_cycle_time():
+    with pytest.raises(ValueError):
+        takt_capacity(480, 120, 0)
