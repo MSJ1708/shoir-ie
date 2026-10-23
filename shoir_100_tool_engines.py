@@ -7,6 +7,7 @@ it is not a full Petri-net conformance engine. Inputs are never mutated in place
 """
 from __future__ import annotations
 import math
+from datetime import date
 from typing import Any, Sequence
 import pandas as pd
 
@@ -352,6 +353,10 @@ def calculate_carbon_emissions(
     missing = [name for name, value in labels.items() if not value]
     if missing:
         raise ValueError("Provide " + ", ".join(missing) + " before calculating emissions.")
+    try:
+        labels["factor date"] = date.fromisoformat(labels["factor date"]).isoformat()
+    except ValueError as exc:
+        raise ValueError("Factor date must use ISO format YYYY-MM-DD.") from exc
     kg = quantity * factor
     return {
         "status": "CALCULATED",
@@ -375,6 +380,7 @@ def calculate_engineering_economics(
     cash_flows: Sequence[float],
     discount_rate_percent: float,
     *,
+    currency_code: str,
     period_unit: str = "year",
 ) -> dict[str, Any]:
     """Calculate NPV, a bracketed IRR for conventional cashflows, and simple payback."""
@@ -386,6 +392,9 @@ def calculate_engineering_economics(
     rate_pct = _finite_number(discount_rate_percent, "Discount rate")
     if rate_pct <= -100:
         raise ValueError("Discount rate must be greater than -100%.")
+    currency = str(currency_code or "").strip().upper()
+    if len(currency) != 3 or not currency.isalpha():
+        raise ValueError("Provide a three-letter currency code such as SAR, USD or EUR.")
     if period_unit not in {"year", "month", "quarter"}:
         raise ValueError("Period unit must be year, month or quarter.")
     rate = rate_pct / 100.0
@@ -465,7 +474,7 @@ def calculate_engineering_economics(
     return {
         "status": "CALCULATED",
         "method": "NPV at the specified discount rate; bracketed IRR only for conventional one-sign-change cash flows; simple undiscounted payback",
-        "units": {"cash_flows": "currency per stated period", "npv": "same currency", "irr": "percent per period"},
+        "units": {"currency_code": currency, "cash_flows": f"{currency} per stated period", "npv": currency, "irr": f"percent per {period_unit}"},
         "metrics": {"NPV": npv, "IRR_percent": irr, "IRR_status": irr_status,
                     "simple_payback_periods": payback, "period_count_after_initial": len(flows) - 1},
         "formulas": {
@@ -475,7 +484,7 @@ def calculate_engineering_economics(
         },
         "assumptions": [
             "Cash flows occur at equal period intervals and period 0 is immediate.",
-            f"Discount-rate periods are expressed in {period_unit}s; cash-flow currency is user-supplied.",
+            f"Discount-rate periods are expressed in {period_unit}s; all cash flows use the declared {currency} currency.",
             "IRR may have multiple/no roots; this method reports it only for conventional cash flows with a supported bracket.",
             "Simple payback ignores discounting and cash flows after the recovery point.",
         ],
