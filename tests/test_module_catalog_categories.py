@@ -158,6 +158,13 @@ def test_explore_modules_can_opt_in_to_target_tools_with_readiness_and_existing_
     assert '"readiness_status"' in source
     assert '"mapped_route"' in source
     assert "Open this target in Workbench" in source
+    assert 'st.session_state["shoir_100_tool_query"] = ""' in source
+    assert 'st.session_state["shoir_100_tool_workbench"] = "All workbenches"' in source
+    assert 'st.session_state["shoir_100_tool_status"] = "All statuses"' in source
+    assert 'st.session_state["shoir_expand_target_directory"] = True' in source
+    workbench_source = (APP_PATH.parent / "pages" / "Industrial_Engineering_Workbench.py").read_text(encoding="utf-8")
+    assert 'st.session_state.pop("shoir_expand_target_directory", False)' in workbench_source
+    assert 'with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_directory)' in workbench_source
     assert 'st.switch_page("pages/Industrial_Engineering_Workbench.py")' in source
 
 
