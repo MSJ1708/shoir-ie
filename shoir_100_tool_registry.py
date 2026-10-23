@@ -156,22 +156,10 @@ _BY_NAME = {row["canonical_name"].casefold(): row for row in TOOL_TARGETS}
 
 
 def _normalize_known_tier(value: str | None) -> str | None:
-    """Strict tier parser: unknown labels remain unresolved, never default to Starter."""
-    raw = re.sub(r"\s+", " ", str(value or "").strip().casefold())
-    # Accept existing subscription UI price suffixes without accepting arbitrary
-    # labels such as "Super Enterprise". Canonical tiers do not include prices.
-    raw = re.sub(r"\s+\(\+?\$[0-9]+(?:\.[0-9]{1,2})?\)$", "", raw)
-    aliases = {
-        "starter": "Starter", "starter tier": "Starter",
-        "mid-tier pro": "Mid-Tier Pro", "mid tier pro": "Mid-Tier Pro",
-        "mid-tier pro tier": "Mid-Tier Pro", "pro": "Mid-Tier Pro",
-        "professional": "Professional", "professional tier": "Professional",
-        "enterprise": "Enterprise", "enterprise tier": "Enterprise",
-        "enterprise plus": "Enterprise Plus", "enterprise plus tier": "Enterprise Plus",
-        "research pack": "Research Pack", "research pack tier": "Research Pack",
-        "research pack add-on": "Research Pack",
-    }
-    return aliases.get(raw)
+    """Use the shared fail-closed entitlement parser instead of a second policy."""
+    from shoir_tier_capabilities import normalize_tier
+    resolved = normalize_tier(value)
+    return resolved if resolved in TOOL_TIER_ORDER else None
 
 def get_target_tool(tool_id_or_name: str) -> dict[str, Any] | None:
     """Resolve stable ID or exact canonical name; presentation aliases do not authorize."""
@@ -212,12 +200,8 @@ def target_tool_access_decision(tool_id_or_name: str, current_tier: str | None) 
     if required not in TOOL_TIER_ORDER:
         return {"allowed": False, "reason": "UNRESOLVED_POLICY", "tool_id": row["tool_id"],
                 "required_tier": required, "current_tier": tier}
-    if tier == "Research Pack":
-        allowed = required in RESEARCH_BASE_TIERS or required == "Research Pack"
-    elif required == "Research Pack":
-        allowed = False
-    else:
-        allowed = ORDINARY_TIERS.index(tier) >= ORDINARY_TIERS.index(required)
+    from shoir_tier_capabilities import tier_allows
+    allowed = tier_allows(tier, required)
     return {"allowed": allowed, "reason": "ALLOWED" if allowed else "TIER_REQUIRED",
             "tool_id": row["tool_id"], "required_tier": required, "current_tier": tier}
 
