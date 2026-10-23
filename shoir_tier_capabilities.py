@@ -29,8 +29,22 @@ __all__ = [
     "audit_module_entitlement_coverage",
     "copilot_gate",
     "copilot_capabilities",
+    "TOOL_TARGETS",
+    "TOOL_STATUSES",
+    "get_target_tool",
+    "list_target_tools",
+    "audit_target_tool_registry",
+    "target_tool_access_decision",
+    "target_tool_execution_decision",
 ]
 
+# New target capabilities use a stable registry; legacy module labels retain the
+# existing entitlement contract until a reviewed mapping migration is tested.
+from shoir_100_tool_registry import (
+    TOOL_TARGETS, TOOL_STATUSES, get_target_tool, list_target_tools,
+    audit_target_tool_registry, target_tool_access_decision,
+    target_tool_execution_decision,
+)
 
 
 def unique_modules(modules: Iterable[str]) -> list[str]:
