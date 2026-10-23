@@ -152,15 +152,13 @@ def normalize_tier(value: str) -> str:
     return "Starter"
 
 def tier_allows(current: str, required: str) -> bool:
-    # The app's Research Pack menu is Enterprise-level functionality plus
-    # research tools. It must not imply the separate Enterprise Plus package.
-    c=normalize_tier(current)
-    r=normalize_tier(required)
-    if c == "Research Pack":
-        return r in {"Starter", "Mid-Tier Pro", "Professional", "Enterprise", "Research Pack"}
-    if r == "Research Pack":
-        return c == "Research Pack"
-    return TIER_ORDER.index(c) >= TIER_ORDER.index(r)
+    """Delegate authorization to the shared fail-closed subscription policy."""
+    try:
+        from shoir_tier_capabilities import tier_allows as shared_tier_allows
+        return bool(shared_tier_allows(current, required))
+    except Exception:
+        # An authorization-policy import/runtime failure must never grant access.
+        return False
 
 def init_platform_db(db_path: str="enterprise_full_workspace.db") -> bool:
     with sqlite3.connect(db_path) as conn:
