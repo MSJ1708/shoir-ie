@@ -395,7 +395,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                 else:
                     with st.form("shoir_target_method_form_" + selected_tool["tool_id"]):
                         if selected_tool["tool_id"] == "T016":
-                            st.caption("Physical units use fixed conversion factors. Currency conversion requires a dated, sourced rate you provide.")
+                            st.caption("Prefilled amount and unit pair are illustrative examples. Physical units use fixed conversion factors; currency conversion requires a dated, sourced rate you provide.")
                             amount_to_convert = st.number_input("Value to convert", value=100.0, step=1.0, key="tool016_amount")
                             unit_choices = ["mm", "cm", "m", "km", "in", "ft", "mi", "mg", "g", "kg", "lb", "oz", "ms", "s", "min", "h", "day", "mL", "L", "m³", "gal", "Wh", "kWh", "MJ", "GJ", "Pa", "kPa", "bar", "psi", "°C", "°F", "K", "SAR", "USD", "EUR", "GBP", "AED", "INR", "JPY"]
                             source_unit = st.selectbox("Source unit or currency", unit_choices, index=0, key="tool016_source")
@@ -405,12 +405,12 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                             exchange_rate_source_value = st.text_input("Exchange-rate source (currency conversion only)", key="tool016_rate_source")
                             run_method = st.form_submit_button("Convert value", type="primary", use_container_width=True, key="tool016_run")
                         elif selected_tool["tool_id"] == "T031":
-                            st.caption("Individuals/Moving-Range control chart. Only points outside calculated 3-sigma limits are reported; control limits are not specification limits.")
+                            st.caption("The prefilled observations are SYNTHETIC examples, not plant measurements. Individuals/Moving-Range reports points outside calculated 3-sigma limits; control limits are not specification limits.")
                             spc_measurements_text = st.text_input("Chronological measurements (comma-separated)", "10, 11, 9, 10, 12, 11", key="tool031_measurements")
                             spc_unit = st.text_input("Measurement unit", "units", key="tool031_unit")
                             run_method = st.form_submit_button("Calculate I-MR control limits", type="primary", use_container_width=True, key="tool031_run")
                         elif selected_tool["tool_id"] == "T040":
-                            st.caption("Scoped cost-of-poor-quality estimate. Scrap and rework are mutually exclusive dispositions of defective units.")
+                            st.caption("Prefilled quantities/costs are SYNTHETIC examples. Replace with a measured period and traceable costs. Scrap and rework are mutually exclusive dispositions of defective units.")
                             quality_period = st.text_input("Measurement period", "Example period — replace with actual period", key="tool040_period")
                             quality_currency = st.text_input("Cost currency code", "SAR", key="tool040_currency")
                             quality_total_units = st.number_input("Total produced units", min_value=1, value=1000, step=100, key="tool040_total")
@@ -422,12 +422,12 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                             quality_inspection_cost = st.number_input("Inspection cost for period", min_value=0.0, value=400.0, step=25.0, key="tool040_inspection_cost")
                             run_method = st.form_submit_button("Calculate quality costs", type="primary", use_container_width=True, key="tool040_run")
                         elif selected_tool["tool_id"] == "T042":
-                            st.caption("Uses complete recorded repair events only. Censored intervals and incomplete observation windows are not inferred.")
+                            st.caption("Prefilled repair durations are SYNTHETIC examples, not actual asset history. This uses complete recorded events only and does not infer censored/incomplete intervals.")
                             mtbf_operating_hours = st.number_input("Accumulated operating hours (repair downtime excluded)", min_value=0.001, value=600.0, step=50.0, key="tool042_operating_hours")
                             repair_durations_text = st.text_input("Repair durations in hours (comma-separated)", "2, 1.5, 3", key="tool042_repairs")
                             run_method = st.form_submit_button("Calculate MTBF / MTTR", type="primary", use_container_width=True, key="tool042_run")
                         elif selected_tool["tool_id"] == "T056":
-                            st.caption("ABC uses annual usage value; XYZ uses population coefficient of variation over aligned historical periods.")
+                            st.caption("The prefilled SKU JSON is SYNTHETIC sample inventory; replace it with validated history. ABC uses annual usage value and XYZ uses population coefficient of variation over aligned periods.")
                             inventory_items_json = st.text_area("SKU data (JSON list)", value='[{"sku":"A","annual_demand":100,"unit_cost":8,"period_demand":[8,10,12]},{"sku":"B","annual_demand":50,"unit_cost":3,"period_demand":[1,10,3]},{"sku":"C","annual_demand":25,"unit_cost":2,"period_demand":[1,20,0]}]', key="tool056_items")
                             inventory_currency = st.text_input("Unit-cost currency", "SAR", key="tool056_currency")
                             abc_a_threshold = st.number_input("A-class cumulative cutoff (fraction)", min_value=0.01, max_value=0.99, value=0.80, step=0.01, key="tool056_a_threshold")
