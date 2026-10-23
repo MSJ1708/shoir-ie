@@ -2,7 +2,7 @@
 
 **Source baseline:** `3a73ada0be2ea5e85903b9c8937f8a9387ee061d` (main, 2026-10-21)  
 **Implementation branch:** `audit/shoir-100-tools-20261023`  
-**Last historical revision with a completed broad green suite before the latest tranche:** `a76237f204ba2c6136c16d732c6e8fbc55367899`  
+**Last historical revision with a completed broad green suite before the current five-method tranche:** `97c8f8bbbdc7b3eacf4f4a8990e10131e43b156e`  
 **Release decision for the full 100-tool scope:** **NO-GO — incomplete scope and hosted/authenticated verification blocked**
 
 ## Summary
@@ -16,25 +16,25 @@ This is a focused first implementation phase, **not completion of the full 100-t
 - Added `shoir_tool_registry.py` with stable IDs T001–T100, workbench grouping, target minimum tier, input/output contracts, current mapped route/source, evidence status and remaining gaps. Unknown IDs fail closed through the target gate.
 - Added `docs/SHOIR_100_TOOL_IMPLEMENTATION_MATRIX.csv`, with exactly 100 tool rows and the required implementation/evidence columns, plus this audit report.
 - Added a **collapsed** searchable/filterable tool directory within the established Workbench. It reports readiness and minimum tier; foundation-only tools are not shown as operational merely because they exist in the catalog.
-- Added focused deterministic methods to the existing Workbench without adding top-level navigation clutter. The current focused set is **T021** time study, **T022** work sampling, **T023** takt/capacity, **T026** OEE, **T028** Pareto/5-Why, **T029** 5S audit, **T030** Kaizen/A3, **T032** Cp/Cpk/Pp/Ppk, **T055** classical inventory policy, **T066** one-dimensional cutting stock, **T075** forecast drift thresholds, **T078** activity-factor carbon estimation, **T081** NPV/IRR/simple payback, and **T085** independent two-sample t-test sample size. The five new methods added in this tranche are T026, T032, T055, T078 and T081; all remain validation-required and do not imply verified live plant integrations.
-- Added independent hand-calculated/boundary tests for the five latest methods, plus a Workbench AppTest that exercises their controls, dispatch, structured outputs and KPI rendering. Existing tests separately cover T021/T022/T023/T028/T029/T030/T066/T075/T085. These are automated/local tests, not a substitute for authenticated hosted browser checks.
+- Added focused deterministic methods to the existing Workbench without adding top-level navigation clutter. The current focused set is **T016** unit/currency conversion (physical factors or dated user-supplied exchange rate), **T021** time study, **T022** work sampling, **T023** takt/capacity, **T026** OEE, **T028** Pareto/5-Why, **T029** 5S audit, **T030** Kaizen/A3, **T031** Individuals/Moving-Range SPC, **T032** Cp/Cpk/Pp/Ppk, **T040** scoped quality-cost analysis, **T042** MTBF/MTTR, **T055** classical inventory policy, **T056** ABC/XYZ classification, **T066** one-dimensional cutting stock, **T075** forecast-drift thresholds, **T078** activity-factor carbon estimation, **T081** NPV/IRR/simple payback, and **T085** independent two-sample t-test sample size. The latest five added are T016, T031, T040, T042 and T056. Their engine, Workbench controls and fixture tests have been added; this new tranche remains validation-required and does not imply verified live plant integrations.
+- Added independent hand-calculated/boundary tests and Workbench AppTests for OEE, process capability, inventory policy, carbon, engineering economics, unit conversion, I-MR SPC, scoped COPQ, MTBF/MTTR and ABC/XYZ. The latest five methods have ten direct numerical/boundary tests plus a Workbench AppTest. These are automated/local tests, not a substitute for authenticated hosted browser checks.
 - Fixed the Workbench excellence-layer tier helper: Research Pack previously ranked after Enterprise Plus and therefore could inherit Enterprise Plus-only modules. The helper and its regression test now enforce the add-on rule required by the master prompt. An older contradictory assertion that expected Research Pack to grant Enterprise Plus was updated to the required policy.
 - Focused results store the inputs used with the result, call the existing per-user `workspace_persistence.py` service for non-guest users, and display distinct managed/local/session/failure/uncertain save states. An input snapshot mismatch warns that the result is stale. Workspace writes are not called fully durable unless the managed backend is configured and authenticated reload tests pass.
-- The 14 focused target actions require both an authenticated non-guest session and the target-tier permission check before calculation. The Workbench now defaults an absent tier to Starter rather than silently defaulting to Enterprise Plus. Guest-denial regression coverage remains in place.
+- The 19 focused target actions require both an authenticated non-guest session and the target-tier permission check before calculation. The Workbench now defaults an absent tier to Starter rather than silently defaulting to Enterprise Plus. Guest-denial regression coverage remains in place.
 - Updated `workspace_persistence.py` to retain DataFrame column dtypes during save/load round trips (with a recoverable warning if an unsupported dtype cannot be restored); added an isolated T021 result/input round-trip test that confirms another user cannot read that result.
 
 ## Static target status counts
 
 | Status | Count |
 |---|---:|
-| `IMPLEMENTED_NEEDS_VALIDATION` | 47 |
-| `FOUNDATION_ONLY` | 51 |
+| `IMPLEMENTED_NEEDS_VALIDATION` | 49 |
+| `FOUNDATION_ONLY` | 49 |
 | `EXTERNAL_CONFIGURATION_REQUIRED` | 2 |
 | `MISSING` | 0 |
 | `VERIFIED_WORKING` | 0 |
 | **Total** | **100** |
 
-These counts are conservative source-audit classifications. They are not a tool success rate, do not mean that every target method has been implemented, and do not mean that all 47 mapped capabilities meet their complete acceptance criteria. All 100 authenticated end-to-end browser statuses remain unverified in the matrix. The 14 focused methods listed above remain `IMPLEMENTED_NEEDS_VALIDATION`, not `VERIFIED_WORKING`, because hosted authenticated end-to-end acceptance has not been established. Local persistence/service tests do not prove managed-backend save/reload/re-login or workspace isolation across real authenticated sessions.
+These counts are conservative source-audit classifications. They are not a tool success rate, do not mean that every target method has been implemented, and do not mean that all 49 mapped capabilities meet their complete acceptance criteria. All 100 authenticated end-to-end browser statuses remain unverified in the matrix. The 19 focused methods listed above remain `IMPLEMENTED_NEEDS_VALIDATION`, not `VERIFIED_WORKING`, because hosted authenticated end-to-end acceptance has not been established. Local persistence/service tests do not prove managed-backend save/reload/re-login or workspace isolation across real authenticated sessions.
 
 ## Entitlement and routing boundaries
 
@@ -46,7 +46,7 @@ These counts are conservative source-audit classifications. They are not a tool 
 
 ## Verification evidence
 
-The latest completed broad green baseline available before the five new deterministic methods was `a76237f204ba2c6136c16d732c6e8fbc55367899`. The later candidate branch adds new calculations, UI actions and tests; its separate CI results must be reviewed before this candidate is considered green. Historical results for that baseline:
+The latest completed broad green baseline before the current five-method tranche was `97c8f8bbbdc7b3eacf4f4a8990e10131e43b156e` (687 passed, 2 skipped, 28 warnings). The five newest engines, Workbench controls and new tests were added after that baseline and must pass CI on the exact candidate before merge. Historical run links below refer to earlier tested revisions:
 
 - Full test workflow [39979010804](https://github.com/MSJ1708/shoir-ie/actions/runs/39979010804): `python -m pytest -q tests` **660 passed, 2 skipped, 28 warnings**. This includes the T021 DataFrame/input round-trip test and guest-denial Workbench AppTest.
 - Platform tests [39979011334](https://github.com/MSJ1708/shoir-ie/actions/runs/39979011334): **passed**.
@@ -72,4 +72,4 @@ No authenticated per-tier module walkthrough was run. The matrix accurately mark
 
 ## Release recommendation
 
-**NO-GO for merging this as completion of the requested 100-tool implementation or for declaring Shoir-IE fully verified/workforce-ready.** Revision `a76237f204ba2c6136c16d732c6e8fbc55367899` passed the full 660-test suite, platform, engine-regression, security/quality, compile/import, and local desktop/mobile smoke gates. The hosted public-site smoke failed at desktop and mobile because the endpoint served a sleeping-app page instead of Shoir-IE. The branch provides an auditable 100-target matrix, 14 focused Workbench methods (including five added in the latest tranche), a corrected Research Pack/Enterprise Plus boundary, authenticated execution gating and improved workspace serialization/persistence coverage. It does not deliver 100 fully implemented/verified tools or authenticated per-tier end-to-end acceptance. The remaining work above is required before the full master prompt can be marked done.
+**NO-GO for merging this as completion of the requested 100-tool implementation or for declaring Shoir-IE fully verified/workforce-ready.** Revision `a76237f204ba2c6136c16d732c6e8fbc55367899` passed the full 660-test suite, platform, engine-regression, security/quality, compile/import, and local desktop/mobile smoke gates. The hosted public-site smoke failed at desktop and mobile because the endpoint served a sleeping-app page instead of Shoir-IE. The branch provides an auditable 100-target matrix, 19 focused Workbench methods, a corrected Research Pack/Enterprise Plus boundary, authenticated execution gating and improved workspace serialization/persistence coverage. It does not deliver 100 fully implemented/verified tools or authenticated per-tier end-to-end acceptance. The remaining work above is required before the full master prompt can be marked done.
