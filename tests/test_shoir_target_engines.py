@@ -154,11 +154,11 @@ def test_takt_capacity_calculates_capacity_gap_and_exact_boundary():
 def test_takt_capacity_rejects_zero_mixed_or_noninteger_denominators():
     from shoir_target_engines import calculate_takt_capacity
 
-    with pytest.raises(ValueError, match="available production time"):
+    with pytest.raises(ValueError, match="[Aa]vailable production time"):
         calculate_takt_capacity(0, 120, 3)
     with pytest.raises(ValueError, match="whole number"):
         calculate_takt_capacity(480, 120.5, 3)
-    with pytest.raises(ValueError, match="cycle time"):
+    with pytest.raises(ValueError, match="[Cc]ycle time"):
         calculate_takt_capacity(480, 120, 0)
-    with pytest.raises(ValueError, match="time unit"):
+    with pytest.raises(ValueError, match="[Tt]ime unit"):
         calculate_takt_capacity(480, 120, 3, time_unit="")
