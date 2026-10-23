@@ -4,7 +4,7 @@
 
 This is an additive implementation tranche for the existing Shoir-IE app. It retains the current shell, established Workbench, public Explore Modules buying experience, legacy module IDs/routes, account and billing behavior. The new Engineering Tool Library is a separate, authenticated sector grouped into the ten requested workbenches; it does not replace the established navigation.
 
-No target is marked `VERIFIED_WORKING`. Authenticated browser matrix, persistence/relogin, route/action/API/export enforcement, and full specialist validation are still release gates.
+No target is marked `VERIFIED_WORKING`. The grouped library now wires 20 distinct target IDs into 21 limited-validation method paths (T066 offers both bin packing and a separate cutting-stock MILP). Authenticated browser matrix, persistence/relogin, route/action/API/export enforcement, and full specialist validation remain release gates.
 
 ## Implemented in this tranche
 
@@ -22,7 +22,7 @@ No target is marked `VERIFIED_WORKING`. Authenticated browser matrix, persistenc
   - **T076 — Process Mining:** directly-follows transition counts, activity counts, case traces, elapsed case durations and inter-event waits from a validated event log; timestamps are normalized to UTC and optional reference trace comparison is exact-sequence only. It is not full Petri-net/token-replay conformance.
   - **T078 — Carbon Emissions:** activity data multiplied by a user-supplied, sourced/versioned factor with scope and provenance disclosure; this is not an audited emissions statement.
   - **T081 — Engineering Economics:** discounted cash-flow NPV/IRR and simple payback under stated timing/currency assumptions.
-- The nine method paths show formula/method, assumptions, warnings, source state, stale-result labeling and downloadable CSV summaries. Bad inputs preserve the last successful session result. The new Tool Library's validation-mode results are session-only; durable project persistence is not claimed. Synthetic example inputs must remain labelled synthetic and are not evidence of industrial savings.
+- The 20 wired target IDs show method/assumptions/warnings, stale-result labeling and CSV summaries/tables where the method emits structured outputs. Bad inputs preserve the last successful session result. The new Tool Library's validation-mode results are session-only; durable project persistence is not claimed. Synthetic example inputs must remain labelled synthetic and are not evidence of industrial savings.
 - `tests/test_shoir_100_tool_engines.py`: hand-calculated/golden fixtures for the seven calculator paths and deterministic packing/process-mining fixtures, invalid/boundary input tests, non-mutation, timezone-aware process durations, directly-follows counts, source/factor checks and CSV parse/read-back assertions. Registry metadata now links each numerical target to its actual fixture test.
 - `shoir_copilot_orchestrator.py`: governed decision staging now fails closed if the enterprise approval/access-control module cannot be imported; `tests/test_shoir_copilot_orchestrator.py` contains a regression test for that case.
 - `tests/test_shoir_100_tool_registry.py`: 100 sequential stable IDs, required metadata, all 100 × six plan/package entitlement outcomes, fail-closed unknowns, Research Pack vs Enterprise Plus, display label identity and readiness rules.
@@ -31,7 +31,7 @@ No target is marked `VERIFIED_WORKING`. Authenticated browser matrix, persistenc
 
 ## Current status counts
 
-Generated from the matrix: 48 `IMPLEMENTED_NEEDS_VALIDATION`, 46 `FOUNDATION_ONLY`, 0 `MISSING`, 6 `EXTERNAL_CONFIGURATION_REQUIRED`, 0 `VERIFIED_WORKING` and 0 `BLOCKED`.
+Generated from the matrix after wiring the additional methods: 56 `IMPLEMENTED_NEEDS_VALIDATION`, 38 `FOUNDATION_ONLY`, 0 `MISSING`, 6 `EXTERNAL_CONFIGURATION_REQUIRED`, 0 `VERIFIED_WORKING` and 0 `BLOCKED`.
 
 T066 and T076 have explicit limited-scope specialist implementations; T021, T023, T026, T032, T055, T078 and T081 are also exposed through deterministic validation-mode calculators. All nine remain `IMPLEMENTED_NEEDS_VALIDATION`, not `VERIFIED_WORKING`, because authenticated end-to-end, persistence, route/action enforcement and export acceptance are incomplete. The other rows remain conservative source-triage statuses, and a matching legacy route is only a reuse candidate, not a verified specialist engine.
 
