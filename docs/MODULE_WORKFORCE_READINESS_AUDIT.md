@@ -6,7 +6,7 @@
 
 ## Executive status
 
-- The repository has 96 distinct catalogue labels after de-duplication. The legacy catalogue has 56 entries and the platform catalogue has 42; two labels repeat across those lists: Research AI and Production Bottleneck & Capacity Recovery Study. The actual distinct inventory is therefore 96, not 88–92.
+- The repository has 97 distinct catalogue labels after de-duplication on the current implementation branch. The legacy catalogue has 56 entries and the platform catalogue has 43; two labels repeat across those lists: Research AI and Production Bottleneck & Capacity Recovery Study. The distinct count now includes the additive Engineering Tool Library route; earlier audit counts were snapshots.
 - A confirmed shared export argument-order bug was fixed and merged in [commit eba42bb](https://github.com/MSJ1708/shoir-ie/commit/eba42bbd34d925b2b48f44fec894bae08e1d90ba). Legacy module renderers could send a tier and username into figure parameters, causing export entitlement to fall back to Starter or chart/export paths to behave incorrectly. The fix normalizes these call styles and adds regression tests.
 - Five GitHub Actions workflows for that fix were recorded as successful: engine regression, security/quality, application tests, platform tests and the repository validation workflow. Passing code/test workflows does not certify every Streamlit module's visual rendering.
 - The hosted Streamlit page could not be inspected in the available browser path during this audit. Every module in this document is therefore marked as source-reviewed, not browser-certified. Actual screenshots, interaction checks and downloaded-file validation remain required.
@@ -31,7 +31,7 @@ Priority meanings: **P0** = trust, security, persistence, import/export or navig
 
 ## Module-by-module improvement register
 
-**Distinct modules:** 96 · **P0:** 10 · **P1:** 56 · **P2:** 30
+**Distinct modules:** 97 · **P0:** 10 · **P1:** 56 · **P2:** 30
 
 ### Core Platform, Data and Facilities
 
@@ -645,7 +645,7 @@ Do not mark a module **PASS** until its record has: module ID/tier/commit/enviro
 ### Recommended implementation sequence
 
 1. Close the P0 tests for Excel Data Cleaning & Import, Industrial Workbook, Facility Layout & Warehousing, Enterprise Integration & Collaboration, Persistence, Subscription entitlements, Team Workspaces & RBAC, Executive Report Center and Enterprise Security & Governance.
-2. Run a browser smoke loop across all 96 distinct module labels and classify each **PASS / FAIL / PARTIAL / NOT TESTED**. Never infer visual success from code presence alone.
+2. Run a browser smoke loop across all 97 distinct module labels and classify each **PASS / FAIL / PARTIAL / NOT TESTED**. Never infer visual success from code presence alone.
 3. Fix each confirmed failure with a regression test and screenshot/log evidence, plus an independent calculation check where relevant.
 4. Consolidate module identity, navigation, entitlement, Copilot routing and test coverage into one registry.
 5. Deliver P1 workflow depth and P2 specialized tools only after calculation, rendering, persistence and evidence labels meet acceptance criteria.
