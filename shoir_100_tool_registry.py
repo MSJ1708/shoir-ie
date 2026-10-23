@@ -253,7 +253,7 @@ def list_target_tools(*, workbench: str | None = None, status: str | None = None
 def target_tool_access_decision(tool_id_or_name: str, current_tier: str | None) -> dict[str, Any]:
     """Fail closed for unknown tool, tier or policy; Research Pack is not Enterprise Plus."""
     token = str(tool_id_or_name or "").strip()
-    row = _BY_ID.get(token.upper()) or _BY_NAME.get(token.casefold())
+    row = _resolve_target(token)
     tier = _normalize_known_tier(current_tier)
     if row is None:
         return {"allowed": False, "reason": "UNRESOLVED_TOOL", "tool_id": None,
