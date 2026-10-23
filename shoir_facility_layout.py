@@ -1006,21 +1006,26 @@ def render_facility_layout(tier: str, username: str) -> None:
                 min_value=0.0, value=0.0, step=0.01, format="%.4f",
                 key="fl_cost_per_load_m",
             )
-            cost_result = _flow_distance_analysis(flows, unit_cost)
-            cost_left, cost_right = st.columns(2)
-            cost_left.metric(
-                "Weighted flow-distance",
-                f"{cost_result['weighted_flow_distance_load_m_per_day']:,.2f} load·m/day",
-            )
-            daily_cost = cost_result["estimated_daily_handling_cost_currency"]
-            cost_right.metric(
-                "Estimated daily handling cost",
-                f"{daily_cost:,.2f} currency/day" if daily_cost is not None else "Not estimated",
-            )
-            st.caption(
-                "Formula: Σ(loads/day × distance in metres). Cost is calculated only from the explicit rate above; "
-                "a rate of 0 means no monetary estimate is shown. This is a modelled baseline, not verified savings."
-            )
+            try:
+                cost_result = _flow_distance_analysis(flows, unit_cost)
+            except ValueError as exc:
+                st.error(f"Flow-distance calculation was blocked by invalid flow data: {exc}")
+                cost_result = None
+            if cost_result is not None:
+                cost_left, cost_right = st.columns(2)
+                cost_left.metric(
+                    "Weighted flow-distance",
+                    f"{cost_result['weighted_flow_distance_load_m_per_day']:,.2f} load·m/day",
+                )
+                daily_cost = cost_result["estimated_daily_handling_cost_currency"]
+                cost_right.metric(
+                    "Estimated daily handling cost",
+                    f"{daily_cost:,.2f} currency/day" if daily_cost is not None else "Not estimated",
+                )
+                st.caption(
+                    "Formula: Σ(loads/day × distance in metres). Cost is calculated only from the explicit rate above; "
+                    "a rate of 0 means no monetary estimate is shown. This is a modelled baseline, not verified savings."
+                )
         st.markdown("#### From-To load matrix")
         st.dataframe(
             _flow_matrix(depts, flows),
