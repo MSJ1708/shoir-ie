@@ -12,11 +12,19 @@ No target is marked `VERIFIED_WORKING`. Authenticated browser matrix, persistenc
 - `shoir_100_tool_registry.py`: fail-closed target access for unknown tools/tier labels, a separate readiness gate, stable-ID lookup, metadata audit and acceptance-state fields.
 - `shoir_tier_capabilities.py`: additive exports for target policy. Existing subscription routes, prices and legacy module contracts are not silently re-tiered.
 - `pages/Engineering_Tool_Library.py`: authenticated tool explorer, filters, detail contracts and a hand-off only to legacy Workbench routes available under the logged-in user's actual tier. The page makes clear that target status does not certify a legacy route.
-- `shoir_100_tool_engines.py`: two actual deterministic target engines exposed from the new library:
-  - **T066 — Cutting Stock and Bin Packing:** supported scope is one-dimensional First-Fit Decreasing. It validates positive finite capacities/sizes and integer quantities, returns item assignments/bin accounting/utilization, and explicitly does not claim minimum-bin optimality. Cutting-stock pattern generation and multi-dimensional packing are not implemented.
-  - **T076 — Process Mining Analyzer:** calculates directly-follows transition counts, activity counts, case traces, elapsed case durations and inter-event waits from a validated event log; timestamps are normalized to UTC and optional reference trace is an exact sequence comparison. It is not full Petri-net/token-replay conformance.
-- Both new tools show `SYNTHETIC` sample versus `IMPORTED` CSV source, reject bad inputs without overwriting the prior successful session result, indicate stale output after input changes, show tables/charts/warnings and offer CSV downloads. Results are currently session-only; durable project persistence is not claimed.
-- `tests/test_shoir_100_tool_engines.py`: deterministic packing fixtures, feasibility/capacity accounting, invalid/boundary inputs, non-mutation, timezone-aware process durations, directly-follows counts, malformed event logs and CSV parse/read-back assertions.
+- `pages/Engineering_Tool_Library.py` and `shoir_100_tool_engines.py` expose **nine limited-validation method paths** in the grouped library:
+  - **T021 — Time Study and Standard Time:** observed mean/median, rating-adjusted normal time, explicit allowance convention and standard time.
+  - **T023 — Takt Time and Capacity:** theoretical takt/capacity and capacity gap; the caller must supply compatible units and the same production period.
+  - **T026 — OEE and Loss Analysis:** availability, performance, quality, OEE and a sequential loss decomposition; plant-specific definitions still need review.
+  - **T032 — Process Capability:** Cp/Cpk/Pp/Ppk with subgroup assumptions and variation warnings.
+  - **T055 — Inventory Policy:** EOQ, safety stock and reorder point under explicit input/service assumptions.
+  - **T066 — Cutting Stock and Bin Packing:** supported scope is one-dimensional First-Fit Decreasing; it validates positive finite capacities/sizes and integer quantities, returns item assignments/bin accounting/utilization, and does not claim minimum-bin optimality. Cutting-stock pattern generation and multi-dimensional packing are not implemented.
+  - **T076 — Process Mining:** directly-follows transition counts, activity counts, case traces, elapsed case durations and inter-event waits from a validated event log; timestamps are normalized to UTC and optional reference trace comparison is exact-sequence only. It is not full Petri-net/token-replay conformance.
+  - **T078 — Carbon Emissions:** activity data multiplied by a user-supplied, sourced/versioned factor with scope and provenance disclosure; this is not an audited emissions statement.
+  - **T081 — Engineering Economics:** discounted cash-flow NPV/IRR and simple payback under stated timing/currency assumptions.
+- The nine method paths show formula/method, assumptions, warnings, source state, stale-result labeling and downloadable CSV summaries. Bad inputs preserve the last successful session result. The new Tool Library's validation-mode results are session-only; durable project persistence is not claimed. Synthetic example inputs must remain labelled synthetic and are not evidence of industrial savings.
+- `tests/test_shoir_100_tool_engines.py`: hand-calculated/golden fixtures for the seven calculator paths and deterministic packing/process-mining fixtures, invalid/boundary input tests, non-mutation, timezone-aware process durations, directly-follows counts, source/factor checks and CSV parse/read-back assertions. Registry metadata now links each numerical target to its actual fixture test.
+- `shoir_copilot_orchestrator.py`: governed decision staging now fails closed if the enterprise approval/access-control module cannot be imported; `tests/test_shoir_copilot_orchestrator.py` contains a regression test for that case.
 - `tests/test_shoir_100_tool_registry.py`: 100 sequential stable IDs, required metadata, all 100 × six plan/package entitlement outcomes, fail-closed unknowns, Research Pack vs Enterprise Plus, display label identity and readiness rules.
 - `docs/SHOIR_100_TOOL_IMPLEMENTATION_MATRIX.csv`: 100 data rows and all 19 requested fields.
 - This report documents scope and limitations without marketing foundation-only tools as complete.
@@ -25,7 +33,7 @@ No target is marked `VERIFIED_WORKING`. Authenticated browser matrix, persistenc
 
 Generated from the matrix: 48 `IMPLEMENTED_NEEDS_VALIDATION`, 46 `FOUNDATION_ONLY`, 0 `MISSING`, 6 `EXTERNAL_CONFIGURATION_REQUIRED`, 0 `VERIFIED_WORKING` and 0 `BLOCKED`.
 
-The two new methods moved from `MISSING` to `IMPLEMENTED_NEEDS_VALIDATION` because a real limited-scope engine and deterministic tests now exist. These labels do not imply that the full broader target definition is finished or that latest CI has passed. Their remaining scope is recorded explicitly in the matrix. The other rows remain conservative source-triage statuses, and a matching legacy route is only a reuse candidate, not a verified specialist engine.
+T066 and T076 have explicit limited-scope specialist implementations; T021, T023, T026, T032, T055, T078 and T081 are also exposed through deterministic validation-mode calculators. All nine remain `IMPLEMENTED_NEEDS_VALIDATION`, not `VERIFIED_WORKING`, because authenticated end-to-end, persistence, route/action enforcement and export acceptance are incomplete. The other rows remain conservative source-triage statuses, and a matching legacy route is only a reuse candidate, not a verified specialist engine.
 
 ## Entitlement and access
 
@@ -39,7 +47,7 @@ The legacy fail-open helpers were also corrected: shared tier normalization reco
 
 - Four initial CI workflows passed on an earlier registry-only revision: application tests, platform tests, engine regression, and security/quality. See links in the PR Checks tab: [PR #177](https://github.com/MSJ1708/shoir-ie/pull/177).
 - A later workflow set was queued while the branch was changing; it predates the latest engine additions. Do **not** interpret those earlier successes as proof of the newest revision.
-- Latest-revision CI for both new engine tests and page rendering must pass before claiming automated verification.
+- The previous first full-suite candidate had **1 failed, 567 passed, 2 skipped, 5 warnings**; the failure was the zero-cycle test asserting an error message the numeric-only API could not emit. The assertion now checks the actual zero-cycle validation. A new full set of CI runs was triggered after this repair and the fail-closed Copilot fix; its exact result must be checked at the latest branch head before merge.
 - The local container could not clone the repository through its network path, so no local full-repo test execution is claimed.
 - No authenticated hosted browser walkthrough has been completed. `browser_test` remains `UNVERIFIED` for all 100 targets; the hosted live-deployment smoke was skipped.
 - Export tests added for new tools cover serializing tables to CSV and reopening them with pandas. Browser download behavior, durable persistence and existing shared XLSX/PDF/PPTX round trips remain unverified here.
@@ -47,8 +55,8 @@ The legacy fail-open helpers were also corrected: shared tier normalization reco
 
 ## Release-critical work remaining
 
-1. Run latest CI at the current PR head; repair all failures before merge.
-2. Perform authenticated staging browser coverage for the new Tool Library and its two live calculation forms on the correct tiers, then add the remaining module matrix with disposable accounts.
+1. Confirm all validation, test, platform, engine-regression and security/quality workflows pass on the same final PR head; fix failures and rerun before merge.
+2. Perform authenticated staging browser coverage for the new Tool Library and its nine limited-validation method forms on the correct tiers, then add the remaining module matrix with disposable accounts.
 3. P0: verify Facility Layout/SLP department CRUD → From-To → relationship matrix/heatmap → flow-distance/handling cost → persisted alternative → parsed workbook export.
 4. Verify multi-sheet workbook import → profile/map/clean → save/version → bottleneck/capacity study → scenario comparison → chart → exported file reopening and value/lineage checks.
 5. Wire target-ID checks into actual legacy route/action/Copilot/API/export enforcement and add direct-call deny/allow tests without breaking current customer entitlements.
