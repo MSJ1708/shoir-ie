@@ -231,6 +231,9 @@ def _recognized_tier(value: str) -> Optional[str]:
         return "Enterprise"
     if "professional" in raw:
         return "Professional"
+    # The current app navigation grants its active trial the Mid-Tier Pro menu.
+    if "trial" in raw:
+        return "Mid-Tier Pro"
     if "mid-tier pro" in raw or "mid tier pro" in raw or re.search(r"\bpro\b", raw):
         return "Mid-Tier Pro"
     if "starter" in raw or raw in {"free", "free tier"}:
