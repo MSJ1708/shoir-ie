@@ -39,6 +39,9 @@ from shoir_investor_demo import render_investor_control_center
 from shoir_workspace_rbac import list_workspace_members, save_workspace_members, WORKSPACE_ROLES
 
 PLATFORM_CATALOG = [
+    {"tier":"Starter","category":"Engineering Tools","name":"Engineering Tool Library",
+     "when":"Browse 100 stable tool IDs across ten grouped industrial-engineering workbenches; execute deterministic tools available now and inspect readiness/configuration gaps.",
+     "example":"Profile an imported dataset, calculate time study/OEE/capability/inventory/economics metrics, inspect assumptions, and export a traceable CSV result."},
     {"tier":"Starter","category":"AI & Automation","name":"Excel Data Cleaning & Import",
      "when":"Turn raw Excel/CSV exports into structured, traceable and presentation-ready engineering workbooks.",
      "example":"Upload a messy multi-sheet workbook and receive CLEAN working sheets, a START HERE map, quality checks, data dictionary, cleaning audit and hidden RAW archives."},
@@ -92,7 +95,7 @@ PLATFORM_CATALOG = [
 ]
 
 TIER_FEATURES = {
-    "Starter": ["Engineering Validation Center", "Excel Data Cleaning & Import", "AI Copilot"],
+    "Starter": ["Engineering Tool Library", "Engineering Validation Center", "Excel Data Cleaning & Import", "AI Copilot"],
     "Mid-Tier Pro": [
         "Industrial Data Model & Digital Thread",
         "Engineering Validation Center",
@@ -1063,6 +1066,10 @@ def sanitize_module_session_state(st) -> None:
 
 def render_module(module: str, tier: str, username: str):
     import streamlit as st
+    if module == "Engineering Tool Library":
+        from shoir_100_tool_workbench import render_100_tool_workbench
+        render_100_tool_workbench(tier=tier, username=username)
+        return
     import plotly.express as px
     init_platform_db()
     sanitize_module_session_state(st)
