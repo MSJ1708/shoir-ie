@@ -44,6 +44,10 @@ USER = st.session_state.get("current_user","guest")
 RAW_TIER = st.session_state.get("user_tier","Enterprise Plus Tier")
 TIER = canonical_tier(RAW_TIER)
 
+# Defaults below are explicitly labelled illustrative examples, never plant evidence.
+_TOOL022_EXAMPLE_COUNTS = '{"Productive": 60, "Idle": 25, "Setup": 15}'
+_TOOL028_EXAMPLE_COUNTS = '{"Machine": 12, "Material": 7, "Method": 3}'
+
 st.markdown("""
 <style>
 .workbench-hero{padding:22px 24px;border:1px solid #dbe4f0;border-radius:18px;background:linear-gradient(135deg,#f8fbff,#ffffff 58%,#f0fdfa);box-shadow:0 10px 30px rgba(15,23,42,.06);margin-bottom:18px}
@@ -371,7 +375,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=False):
                 "Copilot action, API and export path must enforce their own server-side entitlement checks."
             )
 
-            if selected_tool["tool_id"] in {"T021", "T023", "T066", "T075", "T085"}:
+            if selected_tool["tool_id"] in {"T021", "T022", "T023", "T028", "T066", "T075", "T085"}:
                 st.markdown("---")
                 st.markdown("**Run focused specialist method**")
                 st.caption(
@@ -404,6 +408,22 @@ with st.expander("🧭 100-tool directory & readiness", expanded=False):
                                 value=10.0, step=1.0, key="tool021_allowance"
                             )
                             run_method = st.form_submit_button("Calculate standard time", type="primary", use_container_width=True, key="tool021_run")
+                        elif selected_tool["tool_id"] == "T022":
+                            st.caption("Illustrative counts are sample data only. Replace them with observations collected under a representative sampling plan.")
+                            work_sampling_counts_json = st.text_area(
+                                "Activity observation counts (JSON object)",
+                                value=_TOOL022_EXAMPLE_COUNTS,
+                                help='Example format: {"Productive": 60, "Idle": 25, "Setup": 15}. Counts must be non-negative whole observations.',
+                                key="tool022_counts_json",
+                            )
+                            confidence_option = st.selectbox(
+                                "Confidence level", ["90%", "95%", "99%"], index=1, key="tool022_confidence"
+                            )
+                            margin_pct = st.number_input(
+                                "Target margin of error (percentage points)", min_value=0.1,
+                                max_value=49.9, value=5.0, step=0.5, key="tool022_margin"
+                            )
+                            run_method = st.form_submit_button("Analyze work sampling", type="primary", use_container_width=True, key="tool022_run")
                         elif selected_tool["tool_id"] == "T023":
                             st.caption("Available time, demand and cycle time must refer to the same production period and time unit.")
                             available_time = st.number_input(
@@ -423,6 +443,26 @@ with st.expander("🧭 100-tool directory & readiness", expanded=False):
                                 ["seconds", "minutes", "hours"], index=1, key="tool023_unit"
                             )
                             run_method = st.form_submit_button("Calculate takt and capacity", type="primary", use_container_width=True, key="tool023_run")
+                        elif selected_tool["tool_id"] == "T028":
+                            st.caption("Pareto concentration is not proof of causation. A complete 5-Why record is optional; use five non-empty lines when recording one.")
+                            pareto_counts_json = st.text_area(
+                                "Cause/category counts (JSON object)",
+                                value=_TOOL028_EXAMPLE_COUNTS,
+                                help="Illustrative counts only. Replace with observed, dated counts before operational use.",
+                                key="tool028_counts_json",
+                            )
+                            problem_statement = st.text_input(
+                                "Problem statement (required for a 5-Why chain)", key="tool028_problem"
+                            )
+                            why_chain_text = st.text_area(
+                                "Optional five Whys (one statement per line)", key="tool028_whys"
+                            )
+                            countermeasure_text = st.text_input("Proposed countermeasure", key="tool028_countermeasure")
+                            action_owner = st.text_input("Action owner", key="tool028_owner")
+                            action_due_date = st.text_input(
+                                "Action due date (YYYY-MM-DD)", key="tool028_due_date"
+                            )
+                            run_method = st.form_submit_button("Analyze Pareto / record causes", type="primary", use_container_width=True, key="tool028_run")
                         elif selected_tool["tool_id"] == "T066":
                             st.caption("One-dimensional cutting stock. Kerf is charged as an allowance per produced piece.")
                             stock_len = st.number_input(
@@ -483,12 +523,27 @@ with st.expander("🧭 100-tool directory & readiness", expanded=False):
                             "allowance_pct_of_standard_time": allowance,
                             "time_unit": unit,
                         }
+                    elif selected_tool["tool_id"] == "T022":
+                        current_tool_inputs = {
+                            "activity_counts_json": work_sampling_counts_json,
+                            "confidence_level": confidence_option,
+                            "target_margin_of_error_pct": margin_pct,
+                        }
                     elif selected_tool["tool_id"] == "T023":
                         current_tool_inputs = {
                             "available_time_per_period": available_time,
                             "demand_units_per_period": demand_units,
                             "cycle_time_per_unit": cycle_time,
                             "time_unit": unit,
+                        }
+                    elif selected_tool["tool_id"] == "T028":
+                        current_tool_inputs = {
+                            "category_counts_json": pareto_counts_json,
+                            "problem_statement": problem_statement,
+                            "why_chain_text": why_chain_text,
+                            "countermeasure": countermeasure_text,
+                            "owner": action_owner,
+                            "due_date": action_due_date,
                         }
                     elif selected_tool["tool_id"] == "T066":
                         current_tool_inputs = {
@@ -516,6 +571,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=False):
                             _require_focused_tool_actor()
                             require_tool_access(RAW_TIER, selected_tool["tool_id"])
                             from shoir_target_engines import (
+                                analyze_work_sampling, analyze_pareto_root_cause,
                                 calculate_time_study, calculate_takt_capacity,
                                 solve_cutting_stock, monitor_forecast_drift,
                                 plan_two_sample_t_sample_size,
@@ -528,9 +584,53 @@ with st.expander("🧭 100-tool directory & readiness", expanded=False):
                                 result = calculate_time_study(
                                     observation_times, rating, allowance, time_unit=unit,
                                 )
+                            elif selected_tool["tool_id"] == "T022":
+                                parsed_counts = json.loads(work_sampling_counts_json)
+                                if not isinstance(parsed_counts, dict):
+                                    raise ValueError("Activity counts must be a JSON object mapping category names to counts.")
+                                result = analyze_work_sampling(
+                                    parsed_counts,
+                                    confidence_level=float(confidence_option.rstrip("%")) / 100.0,
+                                    target_margin_pct=margin_pct,
+                                )
+                                result["data_provenance"] = (
+                                    "SYNTHETIC_EXAMPLE"
+                                    if work_sampling_counts_json.strip() == _TOOL022_EXAMPLE_COUNTS
+                                    else "USER_ENTERED_UNVERIFIED"
+                                )
+                                result["provenance_warning"] = (
+                                    "The example counts are synthetic teaching data; replace them and verify the sampling frame before using the output operationally."
+                                    if result["data_provenance"] == "SYNTHETIC_EXAMPLE"
+                                    else
+                                    "Entered counts were not independently validated against a sampling log or plant system."
+                                )
                             elif selected_tool["tool_id"] == "T023":
                                 result = calculate_takt_capacity(
                                     available_time, demand_units, cycle_time, time_unit=unit,
+                                )
+                            elif selected_tool["tool_id"] == "T028":
+                                parsed_counts = json.loads(pareto_counts_json)
+                                if not isinstance(parsed_counts, dict):
+                                    raise ValueError("Pareto counts must be a JSON object mapping category names to counts.")
+                                whys = [line.strip() for line in why_chain_text.splitlines() if line.strip()]
+                                result = analyze_pareto_root_cause(
+                                    parsed_counts,
+                                    problem_statement=problem_statement,
+                                    why_chain=whys,
+                                    countermeasure=countermeasure_text,
+                                    owner=action_owner,
+                                    due_date=action_due_date,
+                                )
+                                result["data_provenance"] = (
+                                    "SYNTHETIC_EXAMPLE"
+                                    if pareto_counts_json.strip() == _TOOL028_EXAMPLE_COUNTS
+                                    else "USER_ENTERED_UNVERIFIED"
+                                )
+                                result["provenance_warning"] = (
+                                    "The example counts are synthetic teaching data; replace them and verify the source before operational use."
+                                    if result["data_provenance"] == "SYNTHETIC_EXAMPLE"
+                                    else
+                                    "Entered counts were not independently validated against a source log."
                                 )
                             elif selected_tool["tool_id"] == "T066":
                                 parsed_parts = json.loads(parts_json)
@@ -575,6 +675,35 @@ with st.expander("🧭 100-tool directory & readiness", expanded=False):
                                 markers=True, title="Observed cycle times",
                             )
                             st.plotly_chart(fig, use_container_width=True)
+                    elif selected_tool["tool_id"] == "T022":
+                        result = st.session_state.get("shoir_tool_result_T022")
+                        if result:
+                            _show_focused_tool_persistence("T022", result, current_tool_inputs)
+                            total_obs = result["total_observations"]
+                            required_obs = result["minimum_observations_for_target_margin"]
+                            confidence_pct = result["confidence_level"] * 100
+                            c1, c2, c3 = st.columns(3)
+                            c1.metric("Observed samples", f"{total_obs:,}")
+                            c2.metric("Conservative target", f"{required_obs:,}")
+                            c3.metric("Confidence", f"{confidence_pct:.0f}%")
+                            st.markdown(f"**Sampling status:** {result['status']}")
+                            st.caption(result["formula"])
+                            st.caption(result["assumptions"])
+                            st.caption(result["warning"])
+                            st.warning(result["provenance_warning"]) if result["data_provenance"] == "SYNTHETIC_EXAMPLE" else st.caption(result["provenance_warning"])
+                            df = result["activity_summary"]
+                            st.dataframe(df, use_container_width=True, hide_index=True)
+                            low_col = f"{confidence_pct:.1f}% Wilson lower (%)"
+                            high_col = f"{confidence_pct:.1f}% Wilson upper (%)"
+                            df = df.copy()
+                            df["Error above (%)"] = df[high_col] - df["Observed proportion (%)"]
+                            df["Error below (%)"] = df["Observed proportion (%)"] - df[low_col]
+                            fig = px.bar(
+                                df, x="Activity", y="Observed proportion (%)",
+                                error_y="Error above (%)", error_y_minus="Error below (%)",
+                                title="Observed activity proportions with Wilson intervals",
+                            )
+                            st.plotly_chart(fig, use_container_width=True)
                     elif selected_tool["tool_id"] == "T023":
                         result = st.session_state.get("shoir_tool_result_T023")
                         if result:
@@ -595,6 +724,31 @@ with st.expander("🧭 100-tool directory & readiness", expanded=False):
                                 px.bar(comparison, x="Measure", y="Units per period", title="Demand versus implied capacity"),
                                 use_container_width=True,
                             )
+                    elif selected_tool["tool_id"] == "T028":
+                        result = st.session_state.get("shoir_tool_result_T028")
+                        if result:
+                            _show_focused_tool_persistence("T028", result, current_tool_inputs)
+                            c1, c2, c3 = st.columns(3)
+                            c1.metric("Total recorded occurrences", f"{result['total_count']:,}")
+                            c2.metric("Recorded categories", str(result["category_count"]))
+                            c3.metric("Categories reaching 80%", str(result["categories_to_reach_80_percent"]))
+                            st.markdown(f"**Analysis status:** {result['status']}")
+                            st.caption(result["formula"])
+                            st.warning(result["provenance_warning"]) if result["data_provenance"] == "SYNTHETIC_EXAMPLE" else st.caption(result["provenance_warning"])
+                            st.warning(result["warning"])
+                            pareto = result["pareto_summary"]
+                            st.dataframe(pareto, use_container_width=True, hide_index=True)
+                            st.plotly_chart(
+                                px.bar(pareto, x="Category", y="Count", title="Pareto category counts"),
+                                use_container_width=True,
+                            )
+                            if result["why_chain"]:
+                                st.markdown("**Recorded 5-Why chain (requires evidence review)**")
+                                st.dataframe(pd.DataFrame(result["why_chain"]), use_container_width=True, hide_index=True)
+                                st.markdown(f"**Problem:** {result['problem_statement']}")
+                                st.markdown(f"**Countermeasure:** {result['countermeasure'] or 'Not yet recorded'}")
+                                st.markdown(f"**Owner:** {result['owner'] or 'Not yet assigned'}")
+                                st.markdown(f"**Due date:** {result['due_date'] or 'Not yet set'}")
                     elif selected_tool["tool_id"] == "T066":
                         result = st.session_state.get("shoir_tool_result_T066")
                         if result:
