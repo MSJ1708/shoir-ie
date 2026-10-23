@@ -231,7 +231,7 @@ def _recognized_tier(value: str) -> Optional[str]:
         return "Enterprise"
     if "professional" in raw:
         return "Professional"
-    if "mid-tier pro" in raw or "mid tier pro" in raw or re.search(r"\\bpro\\b", raw):
+    if "mid-tier pro" in raw or "mid tier pro" in raw or re.search(r"\bpro\b", raw):
         return "Mid-Tier Pro"
     if "starter" in raw or raw in {"free", "free tier"}:
         return "Starter"
