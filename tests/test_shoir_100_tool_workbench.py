@@ -35,7 +35,7 @@ from shoir_100_tool_workbench import (
     carbon_emissions,
     engineering_economics,
 )
-from shoir_tier_capabilities import available_modules, tier_allows
+from shoir_tier_capabilities import available_modules, copilot_gate, tier_allows
 
 
 ORDINARY = ("Starter", "Mid-Tier Pro", "Professional", "Enterprise", "Enterprise Plus")
@@ -99,6 +99,15 @@ def test_both_entitlement_helpers_fail_closed_for_unknown_values():
     assert not platform_tier_allows("Enterprise", "unrecognized requirement")
     assert tier_allows("Research Pack ($30 add-on)", "Enterprise")
     assert not tier_allows("Enterprise Plus Tier ($399)", "Research Pack")
+    assert not tier_allows("Researcher", "Starter")
+    assert not tier_allows("Researcher", "Research Pack")
+    assert not tier_allows("Enterprise demo environment", "Starter")
+    assert not platform_tier_allows("Researcher", "Research Pack")
+    assert not tool_access_allowed("Researcher", "T085")
+    assert copilot_gate("run OEE", "Starter") is not None
+    assert copilot_gate("run MTBF analysis", "Mid-Tier Pro") is not None
+    assert copilot_gate("calculate NPV", "Starter") is not None
+    assert copilot_gate("calculate NPV", "Mid-Tier Pro") is None
 
 
 def test_visible_tools_preserves_locked_entries_and_reports_access_separately():
