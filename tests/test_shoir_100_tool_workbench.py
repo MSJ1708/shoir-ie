@@ -328,7 +328,12 @@ def test_engineering_economics_npv_and_payback_golden_fixture():
     assert metrics["NPV"] == pytest.approx(expected_npv)
     assert metrics["simple_payback_periods"] == pytest.approx(3 - 50 / 400)
     assert metrics["discounted_payback_periods"] is not None
-    assert any("IRR is not calculated" in warning for warning in result["warnings"])
+    assert metrics["IRR_pct"] is not None
+    irr = metrics["IRR_pct"] / 100.0
+    assert sum(flow / ((1 + irr) ** period) for period, flow in enumerate(result["cash_flows"])) == pytest.approx(0.0, abs=1e-6)
+    ambiguous = engineering_economics([-100, 230, -132], 8)
+    assert ambiguous["metrics"]["IRR_pct"] is None
+    assert any("multiple IRRs" in warning for warning in ambiguous["warnings"])
     with pytest.raises(ValueError, match="at least a period-0"):
         engineering_economics([-1000], 8)
 
