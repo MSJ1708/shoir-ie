@@ -1,4 +1,4 @@
-"""Independent fixtures and boundary tests for the three new target engines."""
+"""Independent fixtures and boundary tests for the focused target engines."""
 from __future__ import annotations
 
 import math
@@ -95,3 +95,70 @@ def test_power_planner_handles_search_limit_and_invalid_inputs():
         plan_two_sample_t_sample_size(0)
     with pytest.raises(ValueError, match="strictly between"):
         plan_two_sample_t_sample_size(0.5, alpha=1)
+
+
+
+def test_time_study_uses_explicit_rating_and_allowance_convention():
+    from shoir_target_engines import calculate_time_study
+
+    result = calculate_time_study(
+        [1, 2, 3], performance_rating_pct=110, allowance_pct=10, time_unit="minutes"
+    )
+    assert result["status"] == "CALCULATED"
+    assert result["observation_count"] == 3
+    assert result["mean_observed_time"] == pytest.approx(2.0)
+    assert result["sample_standard_deviation"] == pytest.approx(1.0)
+    assert result["normal_time"] == pytest.approx(2.2)
+    # 10% allowance is defined as a share of standard time, not normal time.
+    assert result["standard_time"] == pytest.approx(2.2 / 0.9)
+    assert len(result["observations"]) == 3
+    assert "percentage of standard time" in result["method"]
+    assert "Fewer than 10 observations" in result["warning"]
+
+
+def test_time_study_rejects_empty_nonpositive_and_invalid_assumptions():
+    from shoir_target_engines import calculate_time_study
+
+    with pytest.raises(ValueError, match="at least one"):
+        calculate_time_study([])
+    with pytest.raises(ValueError, match="greater than zero"):
+        calculate_time_study([1, 0, 2])
+    with pytest.raises(ValueError, match="greater than zero"):
+        calculate_time_study([1, 2], performance_rating_pct=0)
+    with pytest.raises(ValueError, match="less than 100"):
+        calculate_time_study([1, 2], allowance_pct=100)
+    with pytest.raises(ValueError, match="finite number"):
+        calculate_time_study([1, float("nan")])
+
+
+def test_takt_capacity_calculates_capacity_gap_and_exact_boundary():
+    from shoir_target_engines import calculate_takt_capacity
+
+    result = calculate_takt_capacity(480, 120, 3, time_unit="minutes")
+    assert result["status"] == "CAPACITY_MEETS_DEMAND"
+    assert result["takt_time_per_unit"] == pytest.approx(4.0)
+    assert result["implied_capacity_units_per_period"] == pytest.approx(160.0)
+    assert result["capacity_gap_units_per_period"] == pytest.approx(40.0)
+    assert result["demand_load_pct_of_implied_capacity"] == pytest.approx(75.0)
+
+    boundary = calculate_takt_capacity(480, 120, 4, time_unit="minutes")
+    assert boundary["implied_capacity_units_per_period"] == pytest.approx(120.0)
+    assert boundary["capacity_gap_units_per_period"] == pytest.approx(0.0)
+    assert boundary["feasible_at_stated_cycle_time"] is True
+
+    shortfall = calculate_takt_capacity(480, 120, 5, time_unit="minutes")
+    assert shortfall["status"] == "CAPACITY_BELOW_DEMAND"
+    assert shortfall["capacity_gap_units_per_period"] == pytest.approx(-24.0)
+
+
+def test_takt_capacity_rejects_zero_mixed_or_noninteger_denominators():
+    from shoir_target_engines import calculate_takt_capacity
+
+    with pytest.raises(ValueError, match="available production time"):
+        calculate_takt_capacity(0, 120, 3)
+    with pytest.raises(ValueError, match="whole number"):
+        calculate_takt_capacity(480, 120.5, 3)
+    with pytest.raises(ValueError, match="cycle time"):
+        calculate_takt_capacity(480, 120, 0)
+    with pytest.raises(ValueError, match="time unit"):
+        calculate_takt_capacity(480, 120, 3, time_unit="")
