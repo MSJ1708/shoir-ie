@@ -60,3 +60,33 @@ def test_tool_library_is_connected_to_existing_shell_without_replacing_it():
     assert '"TOOL_LIBRARY": "🧰 Tool Library"' in shell
     assert 'elif surface == "tool_library":' in shell
     assert "render_tool_library(username, tier, allowed_modules)" in shell
+
+
+def test_every_catalog_entry_preserves_the_supplied_acceptance_target():
+    assert all(item.get("target_acceptance", "").strip() for item in TOOL_CATALOG)
+    assert next(item for item in TOOL_CATALOG if item["tool_id"] == "T065")["target_acceptance"].startswith(
+        "Fix and strengthen the existing facility layout workflow:"
+    )
+
+
+def test_matrix_has_required_columns_and_all_stable_ids():
+    import csv
+    from pathlib import Path
+
+    matrix_path = Path(__file__).resolve().parents[1] / "docs" / "SHOIR_100_TOOL_IMPLEMENTATION_MATRIX.csv"
+    with matrix_path.open(encoding="utf-8", newline="") as stream:
+        reader = csv.DictReader(stream)
+        required = {
+            "tool_id", "canonical_name", "workbench", "target_minimum_tier",
+            "existing_module_or_route", "source_files", "implementation_status",
+            "calculation_or_action", "input_contract", "output_contract", "persistence_scope",
+            "external_dependency", "entitlement_enforcement_points", "unit_test",
+            "integration_test", "browser_test", "evidence_link_or_artifact", "remaining_gap",
+            "owner_or_next_action",
+        }
+        assert required <= set(reader.fieldnames or [])
+        rows = list(reader)
+    assert len(rows) == 100
+    assert {row["tool_id"] for row in rows} == {f"T{i:03d}" for i in range(1, 101)}
+    catalog = {item["tool_id"]: item for item in TOOL_CATALOG}
+    assert all(row["calculation_or_action"] == catalog[row["tool_id"]]["target_acceptance"] for row in rows)
