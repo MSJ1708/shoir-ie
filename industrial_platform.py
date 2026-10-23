@@ -151,11 +151,33 @@ def normalize_tier(value: str) -> str:
     if "pro" in v: return "Mid-Tier Pro"
     return "Starter"
 
+def _recognized_tier(value: str) -> Optional[str]:
+    # Authorization must not inherit normalize_tier's legacy unknown-to-Starter fallback.
+    raw = str(value or "").strip().casefold()
+    if not raw:
+        return None
+    if "research" in raw:
+        return "Research Pack"
+    if "enterprise plus" in raw or "industrial enterprise" in raw:
+        return "Enterprise Plus"
+    if "enterprise" in raw:
+        return "Enterprise"
+    if "professional" in raw:
+        return "Professional"
+    if "mid-tier pro" in raw or "mid tier pro" in raw or raw == "pro" or "pro tier" in raw:
+        return "Mid-Tier Pro"
+    if "starter" in raw:
+        return "Starter"
+    return None
+
+
 def tier_allows(current: str, required: str) -> bool:
-    # The app's Research Pack menu is Enterprise-level functionality plus
-    # research tools. It must not imply the separate Enterprise Plus package.
-    c=normalize_tier(current)
-    r=normalize_tier(required)
+    # Fail closed for unknown values. Research Pack is Enterprise-level capability
+    # plus research tools; it is not Enterprise Plus and the reverse is also false.
+    c = _recognized_tier(current)
+    r = _recognized_tier(required)
+    if c is None or r is None:
+        return False
     if c == "Research Pack":
         return r in {"Starter", "Mid-Tier Pro", "Professional", "Enterprise", "Research Pack"}
     if r == "Research Pack":
