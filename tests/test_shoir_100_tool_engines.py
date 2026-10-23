@@ -1,4 +1,5 @@
 """Independent fixtures for the new deterministic bin-packing and process-mining engines."""
+import io
 import math
 import pandas as pd
 import pytest
@@ -81,3 +82,22 @@ def test_process_mining_rejects_missing_invalid_and_empty_fields():
         analyze_process_event_log(pd.DataFrame([{"case_id":"","activity":"Start","timestamp":"2026-10-01T00:00:00Z"}]))
     with pytest.raises(ValueError, match="event records"):
         analyze_process_event_log(pd.DataFrame(columns=["case_id","activity","timestamp"]))
+
+def test_download_ready_csv_outputs_round_trip_with_expected_content():
+    packed = first_fit_decreasing_bin_pack(
+        pd.DataFrame({"item":["A","B"],"size":[6,4],"quantity":[1,1]}), 10
+    )
+    assignments_csv = packed["assignments"].to_csv(index=False)
+    bins_csv = packed["bins"].to_csv(index=False)
+    assignments = pd.read_csv(io.StringIO(assignments_csv))
+    bins = pd.read_csv(io.StringIO(bins_csv))
+    assert len(assignments) == 2
+    assert set(assignments["Item"]) == {"A","B"}
+    assert float(bins["Used capacity"].sum()) == 10.0
+    assert float(bins["Unused capacity"].sum()) == 0.0
+
+    mined = analyze_process_event_log(_events())
+    case_csv = pd.read_csv(io.StringIO(mined["cases"].to_csv(index=False)))
+    transition_csv = pd.read_csv(io.StringIO(mined["directly_follows"].to_csv(index=False)))
+    assert case_csv["Case"].tolist() == ["C1","C2"]
+    assert int(transition_csv["transition_count"].sum()) == 4
