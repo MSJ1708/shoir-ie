@@ -102,3 +102,42 @@ def test_workbench_denies_focused_tool_execution_to_unauthenticated_guest():
     assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
     assert at.session_state.get("shoir_tool_result_T021") is None
     assert any("Sign in with an active Shoir-IE account" in str(item.value) for item in at.error)
+
+
+def test_workbench_selects_and_runs_work_sampling_and_pareto_tools():
+    from streamlit.testing.v1 import AppTest
+
+    page = ROOT / "pages" / "Industrial_Engineering_Workbench.py"
+    at = AppTest.from_file(page, default_timeout=45)
+    at.session_state["current_user"] = "sampling-checker"
+    at.session_state["authenticated"] = True
+    at.session_state["user_tier"] = "Enterprise Plus Tier"
+    at.run(timeout=45)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+
+    inspector = at.selectbox(key="shoir_100_tool_inspector")
+    inspector.select("T022 · Work Sampling Analyzer")
+    at.run(timeout=45)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    at.button(key="tool022_run").click()
+    at.run(timeout=45)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    work_sampling = at.session_state.get("shoir_tool_result_T022")
+    assert work_sampling is not None
+    assert work_sampling["total_observations"] == 100
+    assert work_sampling["minimum_observations_for_target_margin"] == 385
+    assert work_sampling["data_provenance"] == "SYNTHETIC_EXAMPLE"
+
+    inspector = at.selectbox(key="shoir_100_tool_inspector")
+    inspector.select("T028 · Root-Cause Analysis Toolkit")
+    at.run(timeout=45)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    at.button(key="tool028_run").click()
+    at.run(timeout=45)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    root_cause = at.session_state.get("shoir_tool_result_T028")
+    assert root_cause is not None
+    assert root_cause["status"] == "PARETO_ONLY"
+    assert root_cause["total_count"] == 22
+    assert root_cause["categories_to_reach_80_percent"] == 2
+    assert root_cause["data_provenance"] == "SYNTHETIC_EXAMPLE"
