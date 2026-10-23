@@ -1,8 +1,8 @@
 """Additive Engineering Tool Library for Shoir-IE.
 
 This page is status-led and checks the logged-in tier before displaying actions.
-Only VERIFIED_WORKING is a production-readiness assertion. The two limited-scope
-methods T066/T076 may be exercised as explicitly labelled validation-mode tools;
+Only VERIFIED_WORKING is a production-readiness assertion. The limited-validation
+methods are expressly labelled and remain unverified until end-to-end acceptance passes;
 they remain IMPLEMENTED_NEEDS_VALIDATION until authenticated E2E and independent
 acceptance checks pass. Existing routes and navigation are left unchanged.
 """
@@ -39,9 +39,14 @@ def _run_engine_tool(tool_id, signature, button_label, calculation):
     if st.button(button_label, key=f"{tool_id}_run_button", type="primary"):
         try:
             outcome = calculation()
+        except RuntimeError:
+            st.error(
+                "The calculation or optimization solver could not complete. "
+                "The last successful result was preserved; review solver availability, status and constraints."
+            )
         except (ValueError, TypeError, OverflowError, ZeroDivisionError) as exc:
             st.error(
-                f"Calculation was not completed: {exc}. "
+                f"Input validation or calculation was not completed: {exc}. "
                 "The last successful result was preserved."
             )
         else:
@@ -49,7 +54,7 @@ def _run_engine_tool(tool_id, signature, button_label, calculation):
             if isinstance(status, str) and status.strip() and status.upper() not in {"FAILED", "ERROR", "INVALID"}:
                 st.session_state[f"shoir_{tool_id}_result"] = {
                     "signature": signature,
-                    "source": "USER-ENTERED — not independently verified",
+                    "source": "MANUAL INPUT — not independently verified; defaults are SYNTHETIC",
                     "executed_at": datetime.now(timezone.utc).isoformat(),
                     "result": outcome,
                 }
