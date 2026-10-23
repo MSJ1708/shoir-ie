@@ -76,7 +76,7 @@ CANONICAL_TIERS = [
         "legacy": ["Research Pack", "Research & Innovation", "Research Tier"],
         "label": "Research & Innovation",
         "focus": "Experiments, reproducibility, advanced analytics and academic workflows",
-        "module_limit": "Enterprise Plus",
+        "module_limit": "Enterprise + Research-only",
     },
 ]
 
@@ -172,8 +172,17 @@ def canonical_tier(value: str) -> str:
     return "Starter"
 
 def tier_allows(current: str, required: str) -> bool:
+    """Check legacy Workbench module access without conflating the Research add-on.
+
+    Research Pack inherits ordinary modules through Enterprise plus its Research
+    capability. It is not a higher cumulative tier than Enterprise Plus.
+    """
     c = canonical_tier(current)
     r = canonical_tier(required)
+    if c == "Research":
+        return r in {"Starter", "Professional", "Operations", "Enterprise", "Research"}
+    if r == "Research":
+        return c == "Research"
     return TIER_ORDER.index(c) >= TIER_ORDER.index(r)
 
 def tier_matrix() -> pd.DataFrame:
