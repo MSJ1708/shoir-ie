@@ -56,6 +56,8 @@ def profile_dataframe(frame: pd.DataFrame) -> dict[str, Any]:
     if len(frame) > 1_000_000 or len(frame.columns) > 500:
         raise ValueError("The profiler limit is 1,000,000 rows and 500 columns.")
     source = frame.copy(deep=True)
+    if not source.columns.is_unique:
+        raise ValueError("Column names must be unique before profiling. Rename duplicate columns and retry; the source dataset was not modified.")
     rows = len(source)
     column_rows: list[dict[str, Any]] = []
     for column in source.columns:
@@ -330,6 +332,8 @@ def oee_analysis(planned_production_time: Any, downtime: Any, ideal_cycle_time: 
         raise ValueError("Downtime must be between zero and planned production time.")
     if ideal_cycle <= 0:
         raise ValueError("Ideal cycle time must be greater than zero.")
+    if not total.is_integer() or not good.is_integer():
+        raise ValueError("Total and good output counts must be whole numbers.")
     if total <= 0 or good < 0 or good > total:
         raise ValueError("Require total output > 0 and 0 ≤ good output ≤ total output.")
     operating = planned - down
