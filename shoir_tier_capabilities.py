@@ -213,15 +213,39 @@ def normalize_tier(value: str) -> str:
     return "Starter"
 
 
-def tier_allows(current: str, required: str) -> bool:
-    """Enforce the product menu: Research Pack inherits Enterprise, plus research.
+def _recognized_tier_requirement(value: str) -> Optional[str]:
+    """Resolve an explicit tier label or alias; unknown policy labels stay unresolved."""
+    raw = str(value or "").strip().lower()
+    if not raw:
+        return None
+    if "research" in raw:
+        return "Research Pack"
+    if "enterprise plus" in raw or "industrial enterprise" in raw:
+        return "Enterprise Plus"
+    if "enterprise" in raw:
+        return "Enterprise"
+    if "professional" in raw:
+        return "Professional"
+    if "mid-tier pro" in raw or "mid tier pro" in raw:
+        return "Mid-Tier Pro"
+    if raw == "pro" or raw.startswith("pro tier"):
+        return "Mid-Tier Pro"
+    if "starter" in raw or raw in {"basic", "free"}:
+        return "Starter"
+    return None
 
-    Research Pack is an add-on package in the app, not a grant of the
-    Enterprise Plus-only tier. Keep research entitlement independent from
-    the ordinary tier ladder so one package never implies another add-on.
+
+def tier_allows(current: str, required: str) -> bool:
+    """Fail closed for unknown required tiers; Research Pack is not Enterprise Plus.
+
+    Research Pack is an add-on package: it inherits ordinary access through
+    Enterprise and receives research-only features, but it never grants
+    Enterprise Plus. Enterprise Plus likewise does not imply Research Pack.
     """
     current_tier = normalize_tier(current)
-    required_tier = normalize_tier(required)
+    required_tier = _recognized_tier_requirement(required)
+    if required_tier is None:
+        return False
 
     if current_tier == "Research Pack":
         return required_tier in {
@@ -278,10 +302,16 @@ def audit_module_entitlement_coverage(modules: Iterable[str]) -> dict[str, objec
 
 
 def available_modules(tier: str, modules: Iterable[str]) -> list[str]:
+    """Return only capabilities with an explicit, recognized, permitted policy.
+
+    Unmapped names are intentionally omitted here; callers can surface them in
+    diagnostics through audit_module_entitlement_coverage(), but must not treat
+    a missing policy as free access.
+    """
     result = []
     for module in modules:
         required = module_required_tier(str(module))
-        if required is None or tier_allows(tier, required):
+        if required in TIER_ORDER and tier_allows(tier, required):
             result.append(str(module))
     return result
 
