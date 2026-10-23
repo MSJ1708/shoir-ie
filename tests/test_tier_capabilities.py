@@ -308,3 +308,8 @@ def test_every_app_module_follows_the_shared_allow_deny_matrix_for_all_tiers():
             if tier_allows(current_tier, required_tier)
         }
         assert actual == expected, f"Tier policy mismatch for {current_tier}"
+
+
+def test_unknown_module_policy_fails_closed_in_available_modules():
+    assert available_modules("Enterprise Plus", ["AI Copilot", "unmapped premium module"]) == ["AI Copilot"]
+    assert available_modules("Starter", ["unmapped premium module"]) == []
