@@ -316,3 +316,14 @@ def test_shared_tier_policy_fails_closed_for_unknown_strings_and_unmapped_module
     assert not __import__("shoir_tier_capabilities").tier_allows("Starter", "unresolved-protected-tier")
     assert available_modules("Starter", ["AI Copilot", "Unmapped route"]) == ["AI Copilot"]
     assert available_modules("unknown package", ["AI Copilot"]) == []
+
+
+
+def test_copilot_capabilities_fail_closed_for_unknown_tier_context():
+    policy = __import__("shoir_tier_capabilities")
+    result = policy.copilot_capabilities("mystery package", ["AI Copilot", "MILP Solvers"])
+    assert result["tier"] == "Unrecognized"
+    assert result["modules"] == []
+    assert not result["can_research"]
+    assert not result["can_enterprise"]
+    assert not result["can_professional"]
