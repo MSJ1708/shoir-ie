@@ -1,6 +1,7 @@
 module_name,minimum_tier,declared_in,catalog_sources,authenticated_browser_status
 "AI Copilot","Starter","app.py:tier1_features","app.py MODULE_CATALOG","UNVERIFIED"
 "Core IE Tools","Starter","app.py:tier1_features","app.py MODULE_CATALOG","UNVERIFIED"
+"Engineering Tool Library","Starter","app.py:tier1_features","industrial_platform.PLATFORM_CATALOG","UNVERIFIED"
 "Engineering Validation Center","Starter","app.py:tier1_features","industrial_platform.PLATFORM_CATALOG","UNVERIFIED"
 "Enterprise Integration & Collaboration","Starter","app.py:tier1_features","app.py MODULE_CATALOG","UNVERIFIED"
 "Excel Data Cleaning & Import","Starter","app.py:tier1_features","industrial_platform.PLATFORM_CATALOG","UNVERIFIED"
