@@ -134,6 +134,9 @@ def test_profile_dataframe_counts_missing_duplicates_and_outlier_candidates_with
     pd.testing.assert_frame_equal(frame, before)
     with pytest.raises(ValueError):
         profile_dataframe(pd.DataFrame())
+    duplicate_columns = pd.DataFrame([[1, 2], [3, 4]], columns=["same", "same"])
+    with pytest.raises(ValueError, match="Column names must be unique"):
+        profile_dataframe(duplicate_columns)
 
 
 def test_physical_unit_conversion_and_dimension_guard():
@@ -275,6 +278,8 @@ def test_oee_golden_fixture_and_invalid_time_boundaries():
         oee_analysis(100, 101, 1, 50, 49)
     with pytest.raises(ValueError, match="good output"):
         oee_analysis(100, 10, 1, 50, 51)
+    with pytest.raises(ValueError, match="whole numbers"):
+        oee_analysis(100, 10, 1, 50.5, 50)
 
 
 def test_process_capability_hand_fixture_and_signed_measurements():
