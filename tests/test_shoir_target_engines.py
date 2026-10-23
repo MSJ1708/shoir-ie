@@ -380,6 +380,7 @@ def test_kaizen_a3_requires_comparable_targets_and_evidence_for_verified_status(
         baseline_value=80,
         target_value=90,
         root_cause_hypothesis="Cause pending review",
+        baseline_evidence="baseline-quality-20",
         countermeasure="Test revised process settings",
         owner="Quality engineer",
         due_date="2026-11-15",
