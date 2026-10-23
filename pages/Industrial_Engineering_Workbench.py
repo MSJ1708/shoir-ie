@@ -66,7 +66,7 @@ with library_col:
         "pages/Engineering_Tool_Library.py",
         label="Browse the 100-tool Engineering Library",
         icon="🧭",
-        help="Grouped tool catalog with package access, readiness, input/output contracts and two limited validation-mode engines.",
+        help="Grouped 100-capability catalog with package access, readiness, input/output contracts and limited-validation specialist methods.",
     )
 
 # Header health/status strip
