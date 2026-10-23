@@ -79,7 +79,32 @@ if rows:
     decision = target_tool_execution_decision(selected_id, tier)
     if not decision["allowed"]:
         st.warning(f'This package does not grant this target capability. Required tier: {decision["required_tier"]}.')
-    elif not decision["executable"]:
-        st.warning("This target cannot be marked executable in the new library until its acceptance tests and authenticated end-to-end evidence pass. This does not change access to a legacy route that already exists.")
+    else:
+        if not decision["executable"]:
+            st.warning("This target cannot be marked executable in the new library until its acceptance tests and authenticated end-to-end evidence pass. A separately entitled existing route may still be opened below.")
+        # Offer a route hand-off only to a named legacy module already available
+        # under the user's real tier. Do not use the target label to widen access.
+        if item["implementation_status"] == "IMPLEMENTED_NEEDS_VALIDATION":
+            try:
+                from industrial_platform_excellence import module_availability
+                available = module_availability(tier)
+                available_rows = {
+                    str(row["Module"]): str(row["Category"])
+                    for _, row in available.iterrows()
+                }
+                candidates = [
+                    part.strip()
+                    for part in item["existing_module_or_route"].split("/")
+                    if part.strip()
+                ]
+                eligible = [name for name in candidates if name in available_rows]
+                if eligible:
+                    candidate = eligible[0]
+                    st.caption("Open an existing module under its current route-level entitlement; this does not certify the broader target capability.")
+                    if st.button(f"Open existing module: {candidate}", key=f"open_target_legacy_{selected_id}", type="primary"):
+                        st.session_state["workbench_module_selector"] = f'{available_rows[candidate]} · {candidate}'
+                        st.switch_page("pages/Industrial_Engineering_Workbench.py")
+            except Exception:
+                st.caption("Existing route hand-off is unavailable in this session. Use the normal Workbench navigation.")
 else:
     st.warning("No target capabilities match these filters. Change the workbench, status or search.")
