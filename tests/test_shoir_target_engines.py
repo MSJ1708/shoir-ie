@@ -391,7 +391,6 @@ def test_kaizen_a3_requires_comparable_targets_and_evidence_for_verified_status(
         build_kaizen_a3_record(**required, actual_after_value=88, implementation_status="Verified")
     verified = build_kaizen_a3_record(
         **required, actual_after_value=88, implementation_status="Verified",
-        baseline_evidence="yield-baseline-19",
         post_change_evidence="quality-review-23", review_date="2026-11-20",
     )
     assert verified["outcome_status"] == "HUMAN_REVIEW_RECORDED"
