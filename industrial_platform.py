@@ -152,21 +152,32 @@ def normalize_tier(value: str) -> str:
     return "Starter"
 
 def _recognized_tier(value: str) -> Optional[str]:
-    # Authorization must not inherit normalize_tier's legacy unknown-to-Starter fallback.
-    raw = str(value or "").strip().casefold()
+    # Authorization accepts only recognized plan labels.
+    raw = " ".join(str(value or "").strip().casefold().split())
     if not raw:
         return None
-    if "research" in raw:
+
+    def matches(*bases: str) -> bool:
+        for base in bases:
+            if raw in {base, f"{base} tier"}:
+                return True
+            if raw.startswith(f"{base} tier (") and raw.endswith(")"):
+                return True
+            if raw.startswith(f"{base} (") and raw.endswith(")"):
+                return True
+        return False
+
+    if matches("research pack"):
         return "Research Pack"
-    if "enterprise plus" in raw or "industrial enterprise" in raw:
+    if matches("enterprise plus", "industrial enterprise"):
         return "Enterprise Plus"
-    if "enterprise" in raw:
+    if matches("enterprise"):
         return "Enterprise"
-    if "professional" in raw:
+    if matches("professional"):
         return "Professional"
-    if "mid-tier pro" in raw or "mid tier pro" in raw or raw == "pro" or "pro tier" in raw:
+    if matches("mid-tier pro", "mid tier pro", "pro"):
         return "Mid-Tier Pro"
-    if "starter" in raw:
+    if matches("starter"):
         return "Starter"
     return None
 
