@@ -325,6 +325,8 @@ with st.expander("🧭 100-tool directory & readiness", expanded=False):
                             run_method = st.form_submit_button("Calculate sample size", type="primary", use_container_width=True)
 
                     if run_method:
+                        # Drop the prior output before a new run; a failed run must not appear current.
+                        st.session_state.pop("shoir_tool_result_" + selected_tool["tool_id"], None)
                         try:
                             require_tool_access(RAW_TIER, selected_tool["tool_id"])
                             from shoir_target_engines import (
