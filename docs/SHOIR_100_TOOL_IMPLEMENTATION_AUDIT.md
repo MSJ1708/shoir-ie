@@ -2,7 +2,7 @@
 
 **Source baseline:** `3a73ada0be2ea5e85903b9c8937f8a9387ee061d` (main, 2026-10-21)  
 **Implementation branch:** `audit/shoir-100-tools-20261023`  
-**Validated code-bearing revision:** `60eae90eac199752678a68f8dce3ff90c26c9709`  
+**Latest automated-test code revision:** `9a1a61c330a70bc9efa22af0c24acc3d839cd8bd`  
 **Release decision for the full 100-tool scope:** **NO-GO — incomplete scope and hosted/authenticated verification blocked**
 
 ## Summary
@@ -19,7 +19,8 @@ This is a focused first implementation phase, **not completion of the full 100-t
 - Implemented and exposed five focused deterministic methods in the existing Workbench: **T021** time-study standard time (mean, rating, and allowance defined as a share of standard time); **T023** takt/capacity calculator (consistent time units, implied capacity and capacity gap); **T066** one-dimensional cutting/bin-packing MILP (explicit per-piece kerf convention); **T075** forecast error threshold monitor (MAE/RMSE/bias, not an autonomous retraining detector); and **T085** balanced independent two-sample t-test sample-size planner (noncentral-t power, assumptions stated).
 - Added independent hand-calculated/boundary tests for all five methods and an AppTest that launches and runs T021, T023 and T066 through the existing directory, and checks that T067 opens the existing “Multi-Objective Optimization” module through the normal selector when native permission allows it.
 - Fixed the Workbench excellence-layer tier helper: Research Pack previously ranked after Enterprise Plus and therefore could inherit Enterprise Plus-only modules. The helper and its regression test now enforce the add-on rule required by the master prompt. An older contradictory assertion that expected Research Pack to grant Enterprise Plus was updated to the required policy.
-- Clear prior results before re-running a focused method so failed runs do not leave an old result presented as current.
+- Focused results store the inputs used with the result, call the existing per-user `workspace_persistence.py` service for non-guest users, and display distinct managed/local/session/failure/uncertain save states. An input snapshot mismatch warns that the result is stale. Workspace writes are not called fully durable unless the managed backend is configured and authenticated reload tests pass.
+- Updated `workspace_persistence.py` to retain DataFrame column dtypes during save/load round trips (with a recoverable warning if an unsupported dtype cannot be restored); added an isolated T021 result/input round-trip test that confirms another user cannot read that result.
 
 ## Static target status counts
 
@@ -32,7 +33,7 @@ This is a focused first implementation phase, **not completion of the full 100-t
 | `VERIFIED_WORKING` | 0 |
 | **Total** | **100** |
 
-These counts are conservative source-audit classifications. They are not a tool success rate, do not mean that every target method has been implemented, and do not mean that all 47 mapped capabilities meet their complete acceptance criteria. All 100 authenticated end-to-end browser statuses remain unverified in the matrix. The three new engines are classified `IMPLEMENTED_NEEDS_VALIDATION`, not `VERIFIED_WORKING`.
+These counts are conservative source-audit classifications. They are not a tool success rate, do not mean that every target method has been implemented, and do not mean that all 47 mapped capabilities meet their complete acceptance criteria. All 100 authenticated end-to-end browser statuses remain unverified in the matrix. The five focused methods (T021, T023, T066, T075 and T085) remain `IMPLEMENTED_NEEDS_VALIDATION`, not `VERIFIED_WORKING`. The new persistence service call path is covered by an isolated local-database test, but authenticated managed-backend save/reload/re-login and workspace-isolation acceptance remains open.
 
 ## Entitlement and routing boundaries
 
@@ -44,16 +45,17 @@ These counts are conservative source-audit classifications. They are not a tool 
 
 ## Verification evidence
 
-The previously recorded GitHub Actions evidence below applies to code-bearing revision `60eae90eac199752678a68f8dce3ff90c26c9709`, before the additional T021/T023 methods and their current Workbench/AppTest integration. A fresh CI run for the latest edits is required before using those earlier results as evidence for the current branch. The prior baseline run [39969936919](https://github.com/MSJ1708/shoir-ie/actions/runs/39969936919) reported:
+The current code-bearing revision tested by GitHub Actions is `9a1a61c330a70bc9efa22af0c24acc3d839cd8bd`. Results observed for that revision:
 
-- `python -m compileall -q .`: **passed**
-- `python -m pytest -q tests`: **652 passed, 2 skipped, 28 warnings**
-- Required module parse checks: **passed**
-- Top-level app import smoke: **passed** (54 import/compatibility statements)
-- Local Chromium startup/browser smoke at desktop (1440×1000) and mobile (390×844): **passed**
-- Workbench AppTest: T066 action and result assertions **passed**; the test added for the mapped T067 route was included in the same passing test run.
+- Full test workflow [39977967543](https://github.com/MSJ1708/shoir-ie/actions/runs/39977967543): `python -m pytest -q tests` **659 passed, 2 skipped, 28 warnings**.
+- Platform tests [39977967664](https://github.com/MSJ1708/shoir-ie/actions/runs/39977967664): **passed**.
+- Engine regression [39977967572](https://github.com/MSJ1708/shoir-ie/actions/runs/39977967572): **6 passed, 1 warning**.
+- Security/quality workflow [39977967603](https://github.com/MSJ1708/shoir-ie/actions/runs/39977967603): **passed**, including compile, regression tests, dependency audit and secret-pattern guard.
+- Validation job [39977967700](https://github.com/MSJ1708/shoir-ie/actions/runs/39977967700): compilation, regression tests, required-module parse checks, and top-level application import smoke (**54 statements**) passed. The final local Chromium desktop/mobile smoke was still in progress at the time this section was updated; do not treat it as a pass until its job and artifact are complete.
+- Hosted public-site smoke in [39977967700](https://github.com/MSJ1708/shoir-ie/actions/runs/39977967700): **failed**. The public Streamlit endpoint returned HTTP 200, but its rendered text was the Streamlit “This app has gone to sleep due to inactivity” screen; the Shoir-IE application frame could not be located. The browser recorded no uncaught JavaScript errors, but it did record a failed 404 resource. This is an availability/hosted-rendering failure, not a pass.
+- A test on the preceding revision caught a strict DataFrame round-trip dtype mismatch in the new persistence test; dtype metadata restoration was added after that failure. The current full test suite above passes the corrected test.
 
-The separate **hosted deployment smoke failed** in the same run: the public Streamlit URL returned HTTP 200 but rendered the “app has gone to sleep” page, not Shoir-IE. Consequently, public navigation/module-explorer checks could not run against the actual app. No authenticated module walkthrough was run because authorized disposable test credentials were not available to the workflow. The hosted check is **failed/blocked**, not passed.
+No authenticated per-tier module walkthrough was run, and the matrix accurately marks all 100 browser-acceptance fields unverified. Local test success does not establish hosted application availability, real connector state, managed persistence configuration or the full six-package authorization matrix.
 
 ## Remaining release blockers
 
@@ -62,8 +64,8 @@ The separate **hosted deployment smoke failed** in the same run: the public Stre
 3. Test the full six-package truth table across real module card, action, route, API, Copilot and export paths, including expired/inactive access and cross-workspace denial.
 4. Run authenticated browser walkthroughs for each advertised capability and each plan/package; validate empty state, valid/invalid data, charts, stale result behavior, save/reload/re-login, exports, mobile layout and Arabic/RTL.
 5. Execute and record the complete workbook → validated dataset → analysis → scenario → decision → real export workflow, plus the facility layout From-To/SLP persistence/export workflow, with parsed files and non-sensitive evidence.
-6. Wake/restore the hosted app through its normal owner/provider controls, rerun the deployment smoke, and run the authorized staging release gate. No production data, administrator account, billing or live deployment was changed by this branch.
+6. Wake/restore the hosted app through its normal owner/provider controls, rerun the deployment smoke, and run the authorized staging release gate. Finish/record the current local desktop/mobile browser smoke and attach its artifact if it passes. No production data, administrator account, billing or live deployment was changed by this branch.
 
 ## Release recommendation
 
-**NO-GO for merging this as completion of the requested 100-tool implementation or for declaring Shoir-IE fully verified/workforce-ready.** The branch provides a reviewable registry/gap matrix, a layout-preserving Workbench integration, five focused specialist methods with independent tests, a tier-policy correction, and previously passing automated/local smoke evidence on the earlier code-bearing revision. The new T021/T023 additions remain pending current-revision CI until that run completes. The remaining work above is required before the full master prompt can be marked done.
+**NO-GO for merging this as completion of the requested 100-tool implementation or for declaring Shoir-IE fully verified/workforce-ready.** The tested code revision has passing full, platform, engine-regression and security/quality workflows. The local desktop/mobile smoke is not yet confirmed complete, while the hosted public-site smoke failed because the deployed app was asleep. The branch provides a reviewable registry/gap matrix, five focused specialist methods, improved per-user result persistence handling and DataFrame type-preservation coverage; it does not deliver 100 verified tools or authenticated end-to-end acceptance. The remaining work above is required before the full master prompt can be marked done.
