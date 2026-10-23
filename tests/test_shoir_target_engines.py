@@ -4,6 +4,7 @@ from __future__ import annotations
 import math
 
 import pytest
+import pandas as pd
 
 from shoir_target_engines import (
     monitor_forecast_drift,
@@ -162,3 +163,37 @@ def test_takt_capacity_rejects_zero_mixed_or_noninteger_denominators():
         calculate_takt_capacity(480, 120, 0)
     with pytest.raises(ValueError, match="[Tt]ime unit"):
         calculate_takt_capacity(480, 120, 3, time_unit="")
+
+
+def test_time_study_result_and_input_snapshot_roundtrip_per_user(tmp_path):
+    from shoir_target_engines import calculate_time_study
+    from workspace_persistence import load_user_workspace, save_user_workspace
+
+    db_path = str(tmp_path / "focused-tool-workspace.db")
+    inputs = {
+        "observation_times_text": "1, 2, 3",
+        "performance_rating_pct": 110.0,
+        "allowance_pct_of_standard_time": 10.0,
+        "time_unit": "minutes",
+    }
+    result = calculate_time_study([1, 2, 3], 110, 10, time_unit="minutes")
+    result["_workspace_persistence"] = "SAVED_LOCAL_FALLBACK"
+    workspace = {
+        "shoir_tool_result_T021": result,
+        "shoir_tool_inputs_T021": inputs,
+        "shoir_tool_save_status_T021": "SAVED_LOCAL_FALLBACK",
+    }
+
+    assert save_user_workspace("Alice", workspace, db_path)
+    alice = {}
+    bob = {}
+    assert load_user_workspace("Alice", alice, db_path)
+    assert not load_user_workspace("Bob", bob, db_path)
+
+    restored = alice["shoir_tool_result_T021"]
+    assert restored["standard_time"] == pytest.approx(2.2 / 0.9)
+    assert restored["_workspace_persistence"] == "SAVED_LOCAL_FALLBACK"
+    assert isinstance(restored["observations"], pd.DataFrame)
+    pd.testing.assert_frame_equal(restored["observations"], result["observations"])
+    assert alice["shoir_tool_inputs_T021"] == inputs
+    assert "shoir_tool_result_T021" not in bob
