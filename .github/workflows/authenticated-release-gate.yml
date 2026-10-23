@@ -65,7 +65,7 @@ jobs:
             fi
           done
           python scripts/staging_e2e_guard.py
-      - name: Verify authenticated 96-module rendering matrix
+      - name: Verify authenticated inventory module rendering matrix
         run: python scripts/authenticated_module_matrix.py
       - name: Verify authenticated Edge API lifecycle and workspace isolation
         run: python scripts/authenticated_release_gate.py
