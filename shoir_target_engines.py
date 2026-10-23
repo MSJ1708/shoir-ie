@@ -600,7 +600,7 @@ def assess_5s_audit(items: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         "formula": "Pillar score = mean item score / 4 × 100; overall score = unweighted mean of the five pillar scores.",
         "rubric": "0 = absent; 1 = largely absent; 2 = inconsistent/partial; 3 = implemented with gaps; 4 = consistently sustained. Adapt and approve this rubric locally.",
         "warning": (
-            f"{len(priority_actions)} checklist item(s) scored 2 or below; {owner_gaps} need an assigned owner and ISO due date."
+            f"{len(priority_actions)} checklist item(s) scored 2 or below; {owner_gaps} need an assigned owner and ISO due date. This is a self-assessment, not a certified audit."
             if len(priority_actions) else
             "No item scored 2 or below on this self-assessed checklist. This is not a certified audit or independent verification."
         ),
