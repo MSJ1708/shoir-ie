@@ -91,7 +91,7 @@ def test_power_planner_handles_search_limit_and_invalid_inputs():
         plan_two_sample_t_sample_size(0.5, alpha=1)
 
 def test_work_sampling_wilson_intervals_match_hand_checked_counts():
-    from shoir_target_engines import analyze_work_sampling
+    from shoir_100_tool_extended_engines import analyze_work_sampling
 
     result = analyze_work_sampling(
         {"Productive": 60, "Idle": 40}, confidence_level=0.95, target_margin_pct=5.0
@@ -114,7 +114,7 @@ def test_work_sampling_wilson_intervals_match_hand_checked_counts():
     assert adequate["total_observations"] == 400
 
 def test_work_sampling_rejects_invalid_counts_and_assumptions():
-    from shoir_target_engines import analyze_work_sampling
+    from shoir_100_tool_extended_engines import analyze_work_sampling
 
     with pytest.raises(ValueError, match="at least two"):
         analyze_work_sampling({})
@@ -132,7 +132,7 @@ def test_work_sampling_rejects_invalid_counts_and_assumptions():
         analyze_work_sampling({"Productive": 1, "Idle": 1}, target_margin_pct=0)
 
 def test_pareto_root_cause_matches_hand_checked_cumulative_counts_and_records_five_whys():
-    from shoir_target_engines import analyze_pareto_root_cause
+    from shoir_100_tool_extended_engines import analyze_pareto_root_cause
 
     result = analyze_pareto_root_cause(
         {"Method": 10, "Machine": 60, "Material": 30},
@@ -160,7 +160,7 @@ def test_pareto_root_cause_matches_hand_checked_cumulative_counts_and_records_fi
     assert "do not prove causation" in result["warning"]
 
 def test_pareto_root_cause_rejects_invalid_counts_incomplete_whys_and_bad_dates():
-    from shoir_target_engines import analyze_pareto_root_cause
+    from shoir_100_tool_extended_engines import analyze_pareto_root_cause
 
     with pytest.raises(ValueError, match="non-empty"):
         analyze_pareto_root_cause({})
@@ -180,7 +180,7 @@ def test_pareto_root_cause_rejects_invalid_counts_incomplete_whys_and_bad_dates(
         analyze_pareto_root_cause({"Machine": 1}, due_date="tomorrow")
 
 def test_5s_audit_reports_equal_pillar_scores_and_action_assignment_gaps():
-    from shoir_target_engines import assess_5s_audit
+    from shoir_100_tool_extended_engines import assess_5s_audit
 
     items = [
         {"category": "Sort", "criterion": "Remove unnecessary items", "score": 1, "evidence": "photo-1", "owner": "", "due_date": ""},
@@ -207,7 +207,7 @@ def test_5s_audit_reports_equal_pillar_scores_and_action_assignment_gaps():
     assert "not a certified audit" in assigned["warning"]
 
 def test_5s_audit_rejects_missing_pillar_duplicate_criteria_bad_scores_and_dates():
-    from shoir_target_engines import assess_5s_audit
+    from shoir_100_tool_extended_engines import assess_5s_audit
 
     five = [
         {"category": category, "criterion": f"Criterion {index}", "score": 3}
@@ -229,7 +229,7 @@ def test_5s_audit_rejects_missing_pillar_duplicate_criteria_bad_scores_and_dates
         assess_5s_audit(invalid_date)
 
 def test_kaizen_a3_computes_signed_progress_without_claiming_unverified_savings():
-    from shoir_target_engines import build_kaizen_a3_record
+    from shoir_100_tool_extended_engines import build_kaizen_a3_record
 
     result = build_kaizen_a3_record(
         title="Reduce cycle time",
@@ -254,7 +254,7 @@ def test_kaizen_a3_computes_signed_progress_without_claiming_unverified_savings(
     assert "not marked verified" in result["warning"]
 
 def test_kaizen_a3_requires_comparable_targets_and_evidence_for_verified_status():
-    from shoir_target_engines import build_kaizen_a3_record
+    from shoir_100_tool_extended_engines import build_kaizen_a3_record
 
     required = dict(
         title="Improve yield",
@@ -283,7 +283,7 @@ def test_kaizen_a3_requires_comparable_targets_and_evidence_for_verified_status(
         build_kaizen_a3_record(**{**required, "due_date": "Friday"})
 
 def test_unit_converter_checks_dimensions_and_converts_temperature():
-    from shoir_target_engines import convert_units_or_currency
+    from shoir_100_tool_extended_engines import convert_units_or_currency
 
     assert convert_units_or_currency(100, "cm", "m")["converted_value"] == pytest.approx(1.0)
     assert convert_units_or_currency(0, "°C", "°F")["converted_value"] == pytest.approx(32.0)
@@ -292,7 +292,7 @@ def test_unit_converter_checks_dimensions_and_converts_temperature():
         convert_units_or_currency(1, "kg", "m")
 
 def test_currency_converter_requires_dated_sourced_rate():
-    from shoir_target_engines import convert_units_or_currency
+    from shoir_100_tool_extended_engines import convert_units_or_currency
 
     with pytest.raises(ValueError, match="positive exchange rate"):
         convert_units_or_currency(100, "SAR", "USD")
@@ -307,7 +307,7 @@ def test_currency_converter_requires_dated_sourced_rate():
                                   exchange_rate_date="not-a-date", exchange_rate_source="fixture")
 
 def test_spc_individuals_chart_matches_hand_calculated_limits():
-    from shoir_target_engines import analyze_spc_individuals
+    from shoir_100_tool_extended_engines import analyze_spc_individuals
 
     result = analyze_spc_individuals([10, 11, 9, 10, 12, 11], unit="mm")
     assert result["status"] == "NO_POINT_OUTSIDE_CALCULATED_LIMITS"
@@ -318,7 +318,7 @@ def test_spc_individuals_chart_matches_hand_calculated_limits():
     assert result["moving_range_ucl"] == pytest.approx(3.267 * 1.4)
 
 def test_spc_rejects_insufficient_or_constant_measurements():
-    from shoir_target_engines import analyze_spc_individuals
+    from shoir_100_tool_extended_engines import analyze_spc_individuals
 
     with pytest.raises(ValueError, match="at least three"):
         analyze_spc_individuals([1, 2])
@@ -326,7 +326,7 @@ def test_spc_rejects_insufficient_or_constant_measurements():
         analyze_spc_individuals([5, 5, 5])
 
 def test_quality_cost_reconciles_scrap_rework_and_inspection():
-    from shoir_target_engines import analyze_quality_cost_defects
+    from shoir_100_tool_extended_engines import analyze_quality_cost_defects
 
     result = analyze_quality_cost_defects(
         100, 10, 2, 5, 20, 6, 120, currency="SAR", period="Fixture month"
@@ -338,13 +338,13 @@ def test_quality_cost_reconciles_scrap_rework_and_inspection():
     assert result["copq_per_produced_unit"] == pytest.approx(1.9)
 
 def test_quality_cost_rejects_overlapping_dispositions():
-    from shoir_target_engines import analyze_quality_cost_defects
+    from shoir_100_tool_extended_engines import analyze_quality_cost_defects
 
     with pytest.raises(ValueError, match="cannot exceed the defective"):
         analyze_quality_cost_defects(100, 10, 7, 5, 20, 6, 120)
 
 def test_mtbf_mttr_matches_hand_calculated_reliability_measures():
-    from shoir_target_engines import analyze_mtbf_mttr
+    from shoir_100_tool_extended_engines import analyze_mtbf_mttr
 
     result = analyze_mtbf_mttr(600, [2, 1, 3])
     assert result["failure_count"] == 3
@@ -353,7 +353,7 @@ def test_mtbf_mttr_matches_hand_calculated_reliability_measures():
     assert result["steady_state_availability_estimate_pct"] == pytest.approx(200 / 202 * 100)
 
 def test_mtbf_mttr_rejects_invalid_events():
-    from shoir_target_engines import analyze_mtbf_mttr
+    from shoir_100_tool_extended_engines import analyze_mtbf_mttr
 
     with pytest.raises(ValueError, match="greater than zero"):
         analyze_mtbf_mttr(0, [1])
@@ -363,7 +363,7 @@ def test_mtbf_mttr_rejects_invalid_events():
         analyze_mtbf_mttr(10, [])
 
 def test_abc_xyz_uses_value_thresholds_and_demand_cv():
-    from shoir_target_engines import analyze_abc_xyz_inventory
+    from shoir_100_tool_extended_engines import analyze_abc_xyz_inventory
 
     result = analyze_abc_xyz_inventory([
         {"sku": "A", "annual_demand": 100, "unit_cost": 8, "period_demand": [8, 10, 12]},
@@ -378,7 +378,7 @@ def test_abc_xyz_uses_value_thresholds_and_demand_cv():
     assert df["ABC/XYZ class"].tolist() == ["A-X", "B-Y", "C-Z"]
 
 def test_abc_xyz_rejects_duplicates_and_inconsistent_history():
-    from shoir_target_engines import analyze_abc_xyz_inventory
+    from shoir_100_tool_extended_engines import analyze_abc_xyz_inventory
 
     duplicate = [
         {"sku": "A", "annual_demand": 1, "unit_cost": 1, "period_demand": [1, 2]},
