@@ -1,4 +1,4 @@
-"""Validated first-pass deterministic engines for three previously missing targets.
+"""Validated first-pass deterministic engines for five focused Shoir-IE targets.
 
 Scope:
 * T066 is a one-dimensional cutting/bin-packing MILP with a per-piece kerf allowance.
@@ -288,6 +288,123 @@ def monitor_forecast_drift(
     }
 
 
+def calculate_time_study(
+    observation_times: Sequence[float],
+    performance_rating_pct: float = 100.0,
+    allowance_pct: float = 0.0,
+    *,
+    time_unit: str = "minutes",
+) -> dict[str, Any]:
+    """Calculate normal and standard time with explicit allowance conventions.
+
+    Allowance is a percentage of standard time:
+    normal = mean observed time × rating / 100
+    standard = normal / (1 − allowance / 100).
+    Observations are not automatically removed as outliers.
+    """
+    if isinstance(observation_times, (str, bytes)):
+        raise ValueError("Observation times must be a numeric sequence, not text.")
+    try:
+        raw_values = list(observation_times)
+    except TypeError as exc:
+        raise ValueError("Observation times must be a numeric sequence.") from exc
+    if not raw_values:
+        raise ValueError("Enter at least one observed time.")
+    if any(isinstance(value, bool) for value in raw_values):
+        raise ValueError("Observation times must be numeric values, not booleans.")
+    values = [_finite_number(value, "Observation time") for value in raw_values]
+    if any(value <= 0 for value in values):
+        raise ValueError("Every observation time must be greater than zero.")
+
+    rating = _finite_number(performance_rating_pct, "Performance rating")
+    allowance = _finite_number(allowance_pct, "Allowance")
+    unit = str(time_unit or "").strip()
+    if rating <= 0:
+        raise ValueError("Performance rating must be greater than zero percent.")
+    if allowance < 0 or allowance >= 100:
+        raise ValueError("Allowance must be at least 0 and less than 100 percent.")
+    if not unit:
+        raise ValueError("Time unit must be provided explicitly.")
+
+    mean_time = sum(values) / len(values)
+    normal_time = mean_time * rating / 100.0
+    standard_time = normal_time / (1.0 - allowance / 100.0)
+    sample_sd = float(pd.Series(values, dtype=float).std(ddof=1)) if len(values) > 1 else None
+    frame = pd.DataFrame({
+        "Observation": range(1, len(values) + 1),
+        f"Observed time ({unit})": values,
+        f"Deviation from mean ({unit})": [value - mean_time for value in values],
+    })
+    return {
+        "status": "CALCULATED",
+        "method": "Time study: arithmetic mean, performance-rating adjustment, and allowance as a percentage of standard time",
+        "observation_count": len(values),
+        "time_unit": unit,
+        "mean_observed_time": mean_time,
+        "sample_standard_deviation": sample_sd,
+        "performance_rating_pct": rating,
+        "normal_time": normal_time,
+        "allowance_pct_of_standard_time": allowance,
+        "standard_time": standard_time,
+        "formula": "Normal time = mean observed time × rating / 100; standard time = normal time / (1 − allowance / 100).",
+        "warning": (
+            "Fewer than 10 observations were supplied; review representativeness before setting a production standard."
+            if len(values) < 10 else
+            "Observations are retained as entered; investigate unusual values using the process context rather than automatic deletion."
+        ),
+        "observations": frame,
+    }
+
+
+def calculate_takt_capacity(
+    available_time: float,
+    demand_units: float,
+    cycle_time: float,
+    *,
+    time_unit: str = "minutes",
+) -> dict[str, Any]:
+    """Calculate takt time and implied capacity from consistent time units.
+
+    Available time and demand refer to the same production period; cycle time
+    is time per unit in that same period's time unit. Assumes one sequential
+    resource and excludes losses not reflected in the inputs.
+    """
+    available = _finite_number(available_time, "Available production time")
+    demand_value = _finite_number(demand_units, "Demand")
+    cycle = _finite_number(cycle_time, "Cycle time")
+    unit = str(time_unit or "").strip()
+    if available <= 0:
+        raise ValueError("Available production time must be greater than zero.")
+    if demand_value <= 0 or not demand_value.is_integer():
+        raise ValueError("Demand must be a positive whole number of units per period.")
+    if cycle <= 0:
+        raise ValueError("Cycle time must be greater than zero.")
+    if not unit:
+        raise ValueError("Time unit must be provided explicitly.")
+
+    demand = int(demand_value)
+    takt = available / demand
+    capacity = available / cycle
+    gap = capacity - demand
+    utilization = (demand / capacity) * 100.0
+    meets_demand = gap >= -1e-9
+    return {
+        "status": "CAPACITY_MEETS_DEMAND" if meets_demand else "CAPACITY_BELOW_DEMAND",
+        "method": "Takt time = net available time / demand; implied capacity = net available time / observed cycle time",
+        "time_unit": unit,
+        "available_time_per_period": available,
+        "demand_units_per_period": demand,
+        "cycle_time_per_unit": cycle,
+        "takt_time_per_unit": takt,
+        "implied_capacity_units_per_period": capacity,
+        "capacity_gap_units_per_period": gap,
+        "demand_load_pct_of_implied_capacity": utilization,
+        "feasible_at_stated_cycle_time": meets_demand,
+        "assumptions": "Available time, demand and cycle time refer to the same production period; one sequential resource; cycle time is constant; no unmodeled losses or parallel resources.",
+        "formula": "Takt = available time / demand; capacity = available time / cycle time; capacity gap = capacity − demand.",
+    }
+
+
 def _two_sample_t_power(effect_size: float, n_per_group: int, alpha: float) -> float:
     df = 2 * n_per_group - 2
     noncentrality = effect_size * math.sqrt(n_per_group / 2.0)
@@ -375,7 +492,8 @@ def plan_two_sample_t_sample_size(
 
 
 __all__ = [
-    "solve_cutting_stock",
+    "calculate_time_study",
+    "calculate_takt_capacity",
     "monitor_forecast_drift",
     "plan_two_sample_t_sample_size",
 ]
