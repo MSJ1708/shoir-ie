@@ -140,12 +140,24 @@ for _target in TOOL_TARGETS:
          "shoir_100_tool_registry.target_tool_execution_decision",
          "legacy route/action/API/export must be tested separately"]
     )
-    if _target["tool_id"] == "T066":
-        _target.setdefault("unit_test_id", "tests/test_shoir_100_tool_engines.py::test_first_fit_decreasing_known_fixture_and_capacity_accounting")
-    elif _target["tool_id"] == "T076":
-        _target.setdefault("unit_test_id", "tests/test_shoir_100_tool_engines.py::test_process_mining_timezone_duration_and_transition_fixture")
-    else:
-        _target.setdefault("unit_test_id", "tests/test_shoir_100_tool_registry.py::test_six_package_tier_truth_table_for_every_target (policy coverage only)")
+    _engine_test_ids = {
+        "T021": "tests/test_shoir_100_tool_engines.py::test_standard_time_golden_fixture_and_allowance_conventions",
+        "T023": "tests/test_shoir_100_tool_engines.py::test_takt_time_and_capacity_golden_fixture",
+        "T026": "tests/test_shoir_100_tool_engines.py::test_oee_golden_fixture_and_loss_decomposition",
+        "T032": "tests/test_shoir_100_tool_engines.py::test_process_capability_golden_fixture_with_two_subgroups",
+        "T055": "tests/test_shoir_100_tool_engines.py::test_inventory_policy_golden_fixture_and_boundaries",
+        "T066": "tests/test_shoir_100_tool_engines.py::test_first_fit_decreasing_known_fixture_and_capacity_accounting",
+        "T076": "tests/test_shoir_100_tool_engines.py::test_process_mining_timezone_duration_and_transition_fixture",
+        "T078": "tests/test_shoir_100_tool_engines.py::test_carbon_emissions_requires_sourced_versioned_factor",
+        "T081": "tests/test_shoir_100_tool_engines.py::test_engineering_economics_npv_irr_and_payback_golden_fixture",
+    }
+    _target.setdefault(
+        "unit_test_id",
+        _engine_test_ids.get(
+            _target["tool_id"],
+            "tests/test_shoir_100_tool_registry.py::test_six_package_tier_truth_table_for_every_target (policy coverage only)",
+        ),
+    )
     _target.setdefault("integration_test_id", "NOT RUN — authenticated UI, persistence and export round trip outstanding")
     _target.setdefault("browser_test_id", "UNVERIFIED — authenticated browser acceptance gate outstanding")
     _target.setdefault("acceptance_gate_id", f"SHOIR-100-{_target['tool_id']}-ACCEPTANCE")
