@@ -16,8 +16,13 @@ from shoir_tier_capabilities import unique_modules
 def test_catalog_and_tiers():
     names={x["name"] for x in PLATFORM_CATALOG}
     assert "Advanced Planning & Scheduling" in names
-    assert tier_allows("Enterprise Plus Tier", "Enterprise")
-    assert tier_allows("Professional Tier", "Mid-Tier Pro")
+    assert tier_allows("Enterprise Plus Tier ($399)", "Enterprise")
+    assert tier_allows("Professional Tier ($129)", "Mid-Tier Pro")
+    assert tier_allows("Research Pack ($30 add-on)", "Enterprise")
+    assert not tier_allows("Research Pack ($30 add-on)", "Enterprise Plus")
+    assert not tier_allows("Enterprise Plus Tier ($399)", "Research Pack")
+    assert not tier_allows("Super Enterprise", "Starter")
+    assert not tier_allows("Enterprise", "Unrecognized requirement")
     assert not tier_allows("Starter Tier", "Enterprise")
 
 def test_db_migration(tmp_path):
