@@ -113,3 +113,13 @@ def test_numerical_targets_reference_their_actual_golden_fixture_tests():
         row = get_target_tool(tool_id)
         assert row is not None
         assert test_name in row["unit_test_id"]
+
+def test_aliases_resolve_to_the_same_canonical_policy_and_cannot_bypass_tier():
+    from shoir_100_tool_registry import get_target_tool, target_tool_access_decision
+    alias = get_target_tool("OEE")
+    canonical = get_target_tool("T026")
+    assert alias is not None and canonical is not None
+    assert alias["tool_id"] == canonical["tool_id"] == "T026"
+    assert target_tool_access_decision("OEE", "Starter")["allowed"] is False
+    assert target_tool_access_decision("OEE", "Mid-Tier Pro")["allowed"] is True
+    assert target_tool_access_decision("not-a-registered-alias", "Enterprise Plus")["allowed"] is False
