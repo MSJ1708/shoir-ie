@@ -23,6 +23,7 @@ SHELL_VERSION = "3.1"
 NAV_GROUPS = {
     "HOME": "⌂ Home",
     "WORKBENCH": "▦ Workbench",
+    "TOOL_LIBRARY": "🧰 Tool Library",
     "DATA": "◫ Data",
     "ANALYZE": "◈ Analyze",
     "SIMULATE": "◌ Simulate",
@@ -449,6 +450,8 @@ def _module_choices(
         low = name.lower()
         if section in {"HOME", "WORKBENCH"}:
             return True
+        if section == "TOOL_LIBRARY":
+            return False
         if section == "DATA":
             return group == "Data"
         if section == "ANALYZE":
@@ -1073,7 +1076,9 @@ def render_application_shell(
         st.caption(f"Shoir-IE shell v{SHELL_VERSION}")
 
     surface = st.session_state.pop("shoir_shell_surface", None)
-    if not choices and not explicit_module_request and surface is None:
+    if section == "TOOL_LIBRARY" and surface is None and not explicit_module_request:
+        surface = "tool_library"
+    if not choices and section != "TOOL_LIBRARY" and not explicit_module_request and surface is None:
         surface = "search_empty" if search.strip() else "navigation_empty"
 
     if surface == "edit_account":
@@ -1095,6 +1100,8 @@ def render_application_shell(
             surface = "home"
         elif section == "WORKBENCH":
             surface = "workbench"
+        elif section == "TOOL_LIBRARY":
+            surface = "tool_library"
         elif section == "DATA":
             surface = "catalog"
         elif section == "DECISIONS":
@@ -1634,6 +1641,9 @@ def render_shell_surface(surface: str, username: str, tier: str, module: str, al
             render_adoption_center(username, tier, initial_tab="Home")
         except Exception as exc:
             st.error(f"Workbench could not render safely: {exc}")
+    elif surface == "tool_library":
+        from shoir_100_tool_registry import render_tool_library
+        render_tool_library(username, tier, allowed_modules)
     elif surface == "copilot":
         try:
             from shoir_copilot_orchestrator import build_workflow_plan
