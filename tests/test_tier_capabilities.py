@@ -339,3 +339,16 @@ def test_copilot_action_gate_enforces_new_hub_tool_tiers():
     assert copilot_gate("calculate MTBF", "Mid-Tier Pro")["required_tier"] == "Professional"
     assert copilot_gate("calculate MTBF", "Professional") is None
     assert copilot_gate("what is OEE?", "Starter") is None
+
+
+
+def test_copilot_gate_respects_acceptance_quality_cost_portfolio_and_research_tiers():
+    from shoir_tier_capabilities import copilot_gate
+
+    assert copilot_gate("calculate acceptance sampling plan", "Mid-Tier Pro")["required_tier"] == "Professional"
+    assert copilot_gate("calculate acceptance sampling plan", "Professional") is None
+    assert copilot_gate("calculate quality cost", "Starter")["required_tier"] == "Mid-Tier Pro"
+    assert copilot_gate("calculate portfolio scoring", "Professional") is None
+    assert copilot_gate("calculate project portfolio", "Mid-Tier Pro")["required_tier"] == "Professional"
+    assert copilot_gate("estimate sample size", "Enterprise Plus")["required_tier"] == "Research Pack"
+    assert copilot_gate("estimate sample size", "Research Pack") is None
