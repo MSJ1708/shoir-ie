@@ -137,8 +137,10 @@ def test_takt_time_and_capacity_golden_fixture():
     assert m["capacity_gap_units"] == pytest.approx(0)
     with pytest.raises(ValueError, match="Demand must be greater than zero"):
         calculate_takt_capacity(480, 0, 1.2)
-    with pytest.raises(ValueError, match="same period"):
-        # This method has no unit-mixing switch; its explicit contract requires one common period basis.
+    # Period compatibility is a caller-supplied contract because this API accepts
+    # one numeric time basis and no separate period/unit metadata. Zero cycle time
+    # is still invalid and must be rejected with the precise validation message.
+    with pytest.raises(ValueError, match="Cycle time must be greater than zero"):
         calculate_takt_capacity(480, 400, 0)
 
 
