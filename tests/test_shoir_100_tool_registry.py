@@ -129,7 +129,8 @@ def test_focused_workbench_tools_document_direct_gates_tests_and_transient_persi
         assert tool is not None
         assert "require_tool_access" in tool["entitlement_enforcement_points"]
         assert "not yet wired" not in tool["entitlement_enforcement_points"]
-        assert "Transient Streamlit session result" in tool["persistence_scope"]
+        assert "workspace_persistence.py" in tool["persistence_scope"]
+        assert "local SQLite fallback may be ephemeral" in tool["persistence_scope"]
         assert "tests/test_shoir_target_engines.py::" in tool["unit_test"]
         assert tool["implementation_status"] == "IMPLEMENTED_NEEDS_VALIDATION"
 
