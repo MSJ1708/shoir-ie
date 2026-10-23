@@ -283,7 +283,8 @@ with top4:
 
 # Progressive-disclosure directory: keep the established shell and module routes intact.
 # This is a truthful capability directory, not permission to run a foundation-only tool.
-with st.expander("🧭 100-tool directory & readiness", expanded=False):
+_expand_target_directory = bool(st.session_state.pop("shoir_expand_target_directory", False))
+with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_directory):
     st.caption(
         "Browse the target tool set within the existing Workbench. Readiness reflects the source audit, "
         "not a promise of authenticated end-to-end verification. Tools marked Foundation or Missing are "
