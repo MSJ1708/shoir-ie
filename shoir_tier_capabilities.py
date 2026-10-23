@@ -370,11 +370,11 @@ def copilot_gate(prompt: str, tier: str) -> Optional[dict[str, str]]:
         if phrase in p and not tier_allows(tier, required):
             return {
                 "required_tier": required,
-                "current_tier": normalize_tier(tier),
+                "current_tier": _recognized_tier(tier) or "Unrecognized package",
                 "phrase": phrase,
                 "message": (
                     f"🔒 **{phrase.title()}** is outside your current package. "
-                    f"Your package is **{normalize_tier(tier)}**; this capability requires "
+                    f"Your package is **{_recognized_tier(tier) or 'Unrecognized package'}**; this capability requires "
                     f"**{required}**. I can still explain the method or help you use the "
                     f"capabilities included in your package."
                 ),
@@ -383,11 +383,19 @@ def copilot_gate(prompt: str, tier: str) -> Optional[dict[str, str]]:
 
 
 def copilot_capabilities(tier: str, allowed_modules: Iterable[str]) -> dict[str, object]:
-    normalized = normalize_tier(tier)
+    recognized = _recognized_tier(tier)
+    if recognized is None:
+        return {
+            "tier": "Unrecognized package",
+            "modules": [],
+            "can_research": False,
+            "can_enterprise": False,
+            "can_professional": False,
+        }
     return {
-        "tier": normalized,
-        "modules": available_modules(normalized, allowed_modules),
-        "can_research": tier_allows(normalized, "Research Pack"),
-        "can_enterprise": tier_allows(normalized, "Enterprise"),
-        "can_professional": tier_allows(normalized, "Professional"),
+        "tier": recognized,
+        "modules": available_modules(recognized, allowed_modules),
+        "can_research": tier_allows(recognized, "Research Pack"),
+        "can_enterprise": tier_allows(recognized, "Enterprise"),
+        "can_professional": tier_allows(recognized, "Professional"),
     }
