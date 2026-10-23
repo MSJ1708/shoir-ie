@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import csv
+import json
 import math
 import re
 from pathlib import Path
@@ -673,6 +674,33 @@ def _render_calculator(st: Any, tool_id: str) -> None:
                 vals = parse_numeric_values(raw, "Measurements")
                 _show_result(st, calculate_process_capability(vals, lsl, usl, within if within > 0 else None))
                 st.line_chart(pd.DataFrame({"Measurement": vals}, index=range(1, len(vals) + 1)))
+        elif tool_id == "T034":
+            st.subheader("Acceptance Sampling Planner — single sampling plan")
+            with st.form("shoir100_t034_form"):
+                aql = st.number_input("AQL (% defective)", min_value=0.0, max_value=99.0, value=1.0, step=0.5)
+                ltpd = st.number_input("LTPD (% defective)", min_value=0.1, max_value=99.9, value=10.0, step=0.5)
+                alpha = st.number_input("Maximum producer risk α (%)", min_value=0.1, max_value=99.0, value=5.0, step=1.0)
+                beta = st.number_input("Maximum consumer risk β (%)", min_value=0.1, max_value=99.0, value=10.0, step=1.0)
+                max_n = st.number_input("Maximum sample size to search", min_value=1, max_value=2000, value=500, step=50)
+                submitted = st.form_submit_button("Find smallest feasible plan")
+            if submitted:
+                _show_result(st, calculate_acceptance_sampling_plan(aql, ltpd, alpha, beta, int(max_n)))
+        elif tool_id == "T040":
+            st.subheader("Quality Cost and Defect Analyzer")
+            with st.form("shoir100_t040_form"):
+                produced = st.number_input("Units produced", min_value=1, value=1000, step=100)
+                defects = st.number_input("Defect units", min_value=0, value=50, step=1)
+                scrap_units = st.number_input("Scrap units (non-overlapping)", min_value=0, value=20, step=1)
+                rework_units = st.number_input("Rework units (non-overlapping)", min_value=0, value=30, step=1)
+                scrap_cost = st.number_input("Scrap cost per unit (currency)", min_value=0.0, value=10.0, step=1.0)
+                rework_cost = st.number_input("Rework cost per unit (currency)", min_value=0.0, value=5.0, step=1.0)
+                inspection_cost = st.number_input("Total inspection/appraisal cost (currency)", min_value=0.0, value=200.0, step=10.0)
+                submitted = st.form_submit_button("Reconcile quality costs")
+            if submitted:
+                _show_result(st, calculate_quality_cost(
+                    int(produced), int(defects), int(scrap_units), int(rework_units),
+                    scrap_cost, rework_cost, inspection_cost,
+                ))
         elif tool_id == "T042":
             with st.form("shoir100_t042_form"):
                 operating = st.number_input("Cumulative operating hours", min_value=0.01, value=500.0, step=10.0)
@@ -700,6 +728,29 @@ def _render_calculator(st: Any, tool_id: str) -> None:
                 submitted = st.form_submit_button("Calculate emissions")
             if submitted:
                 _show_result(st, calculate_carbon_emissions(quantity, factor, source, effective))
+        elif tool_id == "T084":
+            st.subheader("Engineering Project Portfolio Scorer")
+            st.caption("Scores are decision-support inputs; the ranked order depends on the weights you choose.")
+            default_scores = '{"Automation": {"Safety": 90, "Cost": 60, "Strategic fit": 80}, "Training": {"Safety": 70, "Cost": 90, "Strategic fit": 75}}'
+            default_weights = '{"Safety": 40, "Cost": 30, "Strategic fit": 30}'
+            with st.form("shoir100_t084_form"):
+                project_json = st.text_area("Projects and criterion scores (JSON, scores 0–100)", default_scores)
+                weights_json = st.text_area("Criterion weights (JSON, any non-negative scale)", default_weights)
+                submitted = st.form_submit_button("Score and rank projects")
+            if submitted:
+                result = calculate_portfolio_scores(json.loads(project_json), json.loads(weights_json))
+                _show_result(st, result)
+                st.dataframe(result["ranking"], use_container_width=True, hide_index=True)
+                st.dataframe(result["contributions"], use_container_width=True, hide_index=True)
+        elif tool_id == "T085":
+            st.subheader("Statistical Power and Sample-Size Planner")
+            with st.form("shoir100_t085_form"):
+                effect = st.number_input("Standardized effect size (Cohen's d)", min_value=0.01, value=0.5, step=0.05)
+                alpha = st.number_input("Two-sided alpha", min_value=0.001, max_value=0.49, value=0.05, step=0.01, format="%.3f")
+                power = st.number_input("Desired statistical power", min_value=0.51, max_value=0.99, value=0.80, step=0.05, format="%.2f")
+                submitted = st.form_submit_button("Estimate sample size")
+            if submitted:
+                _show_result(st, calculate_two_group_sample_size(effect, alpha, power))
         elif tool_id == "T081":
             with st.form("shoir100_t081_form"):
                 investment = st.number_input("Initial investment (currency)", min_value=0.01, value=250000.0, step=10000.0)
