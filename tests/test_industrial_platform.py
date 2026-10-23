@@ -17,6 +17,8 @@ def test_catalog_and_tiers():
     names={x["name"] for x in PLATFORM_CATALOG}
     assert "Advanced Planning & Scheduling" in names
     assert tier_allows("Enterprise Plus Tier ($399)", "Enterprise")
+    assert normalize_tier("Super Enterprise") == "UNRESOLVED"
+    assert normalize_tier("Research Pack ($30 add-on)") == "Research Pack"
     assert tier_allows("Professional Tier ($129)", "Mid-Tier Pro")
     assert tier_allows("Research Pack ($30 add-on)", "Enterprise")
     assert not tier_allows("Research Pack ($30 add-on)", "Enterprise Plus")
