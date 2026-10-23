@@ -155,26 +155,21 @@ def _norm(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", str(value or "").strip().lower()).strip()
 
 def canonical_tier(value: str) -> str:
-    v = _norm(value)
-    for tier in CANONICAL_TIERS:
-        if any(_norm(alias) == v for alias in tier["legacy"]):
-            return tier["key"]
-    if "enterprise plus" in v or "industrial enterprise" in v:
-        return "Enterprise Plus"
-    if "enterprise" in v:
-        return "Enterprise"
-    if "operations" in v:
-        return "Operations"
-    if "professional" in v or "mid tier pro" in v or v == "pro":
-        return "Professional"
-    if "research" in v:
-        return "Research"
-    return "Starter"
+    """Resolve against the shared product tier names; unknown labels stay unresolved."""
+    try:
+        from shoir_tier_capabilities import normalize_tier
+        return normalize_tier(value)
+    except Exception:
+        return "UNRESOLVED"
 
 def tier_allows(current: str, required: str) -> bool:
-    c = canonical_tier(current)
-    r = canonical_tier(required)
-    return TIER_ORDER.index(c) >= TIER_ORDER.index(r)
+    """Share the app's exact tier contract (Research Pack is not Enterprise Plus)."""
+    try:
+        from shoir_tier_capabilities import tier_allows as shared_tier_allows
+        return bool(shared_tier_allows(current, required))
+    except Exception:
+        # Fail closed if the central entitlement policy cannot be loaded.
+        return False
 
 def tier_matrix() -> pd.DataFrame:
     rows = []
