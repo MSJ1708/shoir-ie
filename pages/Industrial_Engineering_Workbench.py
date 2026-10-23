@@ -21,7 +21,7 @@ import streamlit as st
 import html
 
 from industrial_platform import render_module, PLATFORM_CATALOG, init_platform_db
-from shoir_tool_registry import TOOL_TARGETS, TOOL_STATUS_VALUES, tier_allows_tool, tool_status_counts
+from shoir_tool_registry import TOOL_TARGETS, TOOL_STATUS_VALUES, tier_allows_tool, tool_status_counts, require_tool_access
 from industrial_platform_excellence import (
     CANONICAL_TIERS, MODULE_MATRIX, canonical_tier, tier_allows, tier_matrix,
     module_matrix, module_availability, deep_data_quality, validate_schema,
@@ -256,6 +256,168 @@ with st.expander("🧭 100-tool directory & readiness", expanded=False):
                 "Authorization note: this directory does not execute the tool. The mapped legacy route, "
                 "Copilot action, API and export path must enforce their own server-side entitlement checks."
             )
+
+            if selected_tool["tool_id"] in {"T066", "T075", "T085"}:
+                st.markdown("---")
+                st.markdown("**Run focused specialist method**")
+                st.caption(
+                    "These first-pass engines run from explicit inputs, keep their assumptions visible, "
+                    "and do not connect to or control live plant equipment."
+                )
+                if not tier_allows_tool(RAW_TIER, selected_tool["tool_id"]):
+                    st.warning(
+                        f"This target requires {selected_tool['target_minimum_tier']}. "
+                        "The method is not executable on the current package."
+                    )
+                else:
+                    with st.form("shoir_target_method_form_" + selected_tool["tool_id"]):
+                        if selected_tool["tool_id"] == "T066":
+                            st.caption("One-dimensional cutting stock. Kerf is charged as an allowance per produced piece.")
+                            stock_len = st.number_input(
+                                "Stock length (consistent length unit)", min_value=0.001,
+                                value=12.0, step=0.5, key="tool066_stock_len"
+                            )
+                            kerf = st.number_input(
+                                "Kerf allowance per produced piece", min_value=0.0,
+                                value=0.0, step=0.1, key="tool066_kerf"
+                            )
+                            parts_json = st.text_area(
+                                "Parts as JSON", value='[{"name":"A","length":6,"quantity":4}]',
+                                help='Each item needs a unique name, positive length and positive integer quantity.',
+                                key="tool066_parts_json"
+                            )
+                            run_method = st.form_submit_button("Solve cutting plan", type="primary", use_container_width=True)
+                        elif selected_tool["tool_id"] == "T075":
+                            st.caption("Checks aligned forecast/actual observations against an absolute mean-absolute-error threshold.")
+                            predictions_text = st.text_input(
+                                "Predictions (comma-separated)", "10, 20, 30", key="tool075_predictions"
+                            )
+                            actuals_text = st.text_input(
+                                "Later actuals (same order)", "12, 18, 33", key="tool075_actuals"
+                            )
+                            max_mae = st.number_input(
+                                "Maximum acceptable MAE", min_value=0.0, value=2.0, step=0.5,
+                                key="tool075_mae_limit"
+                            )
+                            window = st.number_input(
+                                "Trailing window (0 = all observations)", min_value=0, max_value=10000,
+                                value=0, step=1, key="tool075_window"
+                            )
+                            run_method = st.form_submit_button("Check forecast drift", type="primary", use_container_width=True)
+                        else:
+                            st.caption("Balanced, independent, two-sided two-sample t-test; normal outcomes and equal-variance assumptions.")
+                            effect_size = st.number_input(
+                                "Standardized effect size (Cohen's d)", min_value=0.001,
+                                value=0.5, step=0.1, key="tool085_effect_size"
+                            )
+                            alpha = st.number_input(
+                                "Significance level (alpha)", min_value=0.001, max_value=0.5,
+                                value=0.05, step=0.01, key="tool085_alpha"
+                            )
+                            target_power = st.number_input(
+                                "Target statistical power", min_value=0.01, max_value=0.999,
+                                value=0.80, step=0.05, key="tool085_target_power"
+                            )
+                            search_limit = st.number_input(
+                                "Maximum sample size per group to search", min_value=2, max_value=100000,
+                                value=10000, step=100, key="tool085_search_limit"
+                            )
+                            run_method = st.form_submit_button("Calculate sample size", type="primary", use_container_width=True)
+
+                    if run_method:
+                        try:
+                            require_tool_access(RAW_TIER, selected_tool["tool_id"])
+                            from shoir_target_engines import (
+                                solve_cutting_stock, monitor_forecast_drift,
+                                plan_two_sample_t_sample_size,
+                            )
+                            if selected_tool["tool_id"] == "T066":
+                                parsed_parts = json.loads(parts_json)
+                                if not isinstance(parsed_parts, list):
+                                    raise ValueError("Parts input must be a JSON list of part definitions.")
+                                result = solve_cutting_stock(stock_len, parsed_parts, kerf)
+                                st.session_state["shoir_tool_result_T066"] = result
+                            elif selected_tool["tool_id"] == "T075":
+                                try:
+                                    predictions = [float(x.strip()) for x in predictions_text.split(",") if x.strip()]
+                                    actuals = [float(x.strip()) for x in actuals_text.split(",") if x.strip()]
+                                except ValueError as exc:
+                                    raise ValueError("Predictions and actuals must be comma-separated numbers.") from exc
+                                result = monitor_forecast_drift(
+                                    predictions, actuals, max_mae,
+                                    window=int(window) if int(window) > 0 else None,
+                                )
+                                st.session_state["shoir_tool_result_T075"] = result
+                            else:
+                                result = plan_two_sample_t_sample_size(
+                                    effect_size, alpha, target_power,
+                                    max_n_per_group=int(search_limit),
+                                )
+                                st.session_state["shoir_tool_result_T085"] = result
+                        except Exception as exc:
+                            st.error(f"Tool run could not be completed safely: {exc}")
+
+                    if selected_tool["tool_id"] == "T066":
+                        result = st.session_state.get("shoir_tool_result_T066")
+                        if result:
+                            st.markdown(f"**Solver status:** {result['status']}")
+                            st.caption(result.get("message", ""))
+                            if result.get("status") == "OPTIMAL":
+                                c1, c2, c3 = st.columns(3)
+                                c1.metric("Stock pieces", f"{result['stock_count']:,}")
+                                c2.metric("Physical utilization", f"{result['physical_utilization_pct']:.1f}%")
+                                c3.metric("Calculated waste", f"{result['waste_length']:,.3f}")
+                                st.dataframe(result["cut_plan"], use_container_width=True, hide_index=True)
+                                if not result["cut_plan"].empty:
+                                    fig = px.bar(
+                                        result["cut_plan"], x="Pattern", y="Stocks",
+                                        title="Optimal cutting-pattern allocation",
+                                        hover_data=["Part mix", "Pieces per stock", "Waste per stock"],
+                                    )
+                                    st.plotly_chart(fig, use_container_width=True)
+                            elif result.get("issues"):
+                                st.dataframe(pd.DataFrame(result["issues"]), use_container_width=True, hide_index=True)
+                            else:
+                                st.warning("The solver did not prove an optimal plan. Do not use this result as a production cut list.")
+                    elif selected_tool["tool_id"] == "T075":
+                        result = st.session_state.get("shoir_tool_result_T075")
+                        if result:
+                            c1, c2, c3, c4 = st.columns(4)
+                            c1.metric("Status", result["status"])
+                            c2.metric("MAE", f"{result['mae']:.4g}")
+                            c3.metric("RMSE", f"{result['rmse']:.4g}")
+                            c4.metric("Mean error", f"{result['bias_actual_minus_prediction']:.4g}")
+                            st.caption(result["warning"])
+                            st.dataframe(result["series"], use_container_width=True, hide_index=True)
+                            fig = px.line(
+                                result["series"], x="Observation", y=["Prediction", "Actual"],
+                                markers=True, title="Forecasts versus later actuals",
+                            )
+                            st.plotly_chart(fig, use_container_width=True)
+                    else:
+                        result = st.session_state.get("shoir_tool_result_T085")
+                        if result:
+                            c1, c2, c3 = st.columns(3)
+                            c1.metric("Status", result["status"])
+                            c2.metric(
+                                "Samples per group",
+                                str(result["required_n_per_group"]) if result["required_n_per_group"] is not None else "Limit reached",
+                            )
+                            c3.metric("Achieved power", f"{result['achieved_power']:.3f}")
+                            st.caption(result["assumptions"])
+                            chart_df = pd.DataFrame({
+                                "Metric": ["Target power", "Achieved power"],
+                                "Power": [result["target_power"], result["achieved_power"]],
+                            })
+                            st.plotly_chart(
+                                px.bar(chart_df, x="Metric", y="Power", range_y=[0, 1],
+                                       title="Requested versus achieved power"),
+                                use_container_width=True,
+                            )
+                            if result["status"] == "LIMIT_REACHED":
+                                st.warning(result["message"])
+                            else:
+                                st.write(result["message"])
     else:
         st.info("No target tools match these filters. Clear the search or select All workbenches / All statuses.")
 
