@@ -122,6 +122,15 @@ def _render_result_chart(df,title,key_prefix):
     st.plotly_chart(fig,use_container_width=True)
 
 
+def _require_focused_tool_actor():
+    """Require a real authenticated account before executing specialist actions."""
+    actor = str(st.session_state.get("current_user") or "").strip()
+    authenticated = st.session_state.get("authenticated") is True
+    if not authenticated or actor.casefold() in {"", "guest", "guest visitor", "anonymous"}:
+        raise PermissionError("Sign in with an active Shoir-IE account before running this tool.")
+    return actor
+
+
 def _persist_focused_tool_result(tool_id, result, inputs):
     """Save focused method inputs/results through the existing per-user workspace service."""
     result_key = "shoir_tool_result_" + tool_id
@@ -504,6 +513,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=False):
                         st.session_state.pop("shoir_tool_inputs_" + selected_tool["tool_id"], None)
                         st.session_state.pop("shoir_tool_save_status_" + selected_tool["tool_id"], None)
                         try:
+                            _require_focused_tool_actor()
                             require_tool_access(RAW_TIER, selected_tool["tool_id"])
                             from shoir_target_engines import (
                                 calculate_time_study, calculate_takt_capacity,
