@@ -25,7 +25,7 @@ from shoir_100_tool_registry import (
 )
 
 MAX_PROFILE_BYTES = 20 * 1024 * 1024
-QUICK_ENGINE_IDS = {"T013", "T016", "T019", "T021", "T022", "T023"}
+QUICK_ENGINE_IDS = {"T013", "T016", "T019", "T021", "T022", "T023", "T026", "T032", "T042", "T055", "T078", "T081"}
 
 
 class ToolEntitlementError(PermissionError):
@@ -505,6 +505,18 @@ def run_tool_calculation(tier: str, tool_id: str, inputs: Mapping[str, Any]) -> 
         result = work_sampling_interval(args.get("activity_count"), args.get("total_observations"), args.get("confidence_pct", 95.0))
     elif canonical_id == "T023":
         result = takt_time_capacity(args.get("available_time"), args.get("demand_units"), args.get("cycle_time"))
+    elif canonical_id == "T026":
+        result = oee_analysis(args.get("planned_production_time"), args.get("downtime"), args.get("ideal_cycle_time"), args.get("total_count"), args.get("good_count"))
+    elif canonical_id == "T032":
+        result = process_capability(args.get("measurements", ""), args.get("lower_spec_limit"), args.get("upper_spec_limit"), args.get("within_subgroup_sigma"))
+    elif canonical_id == "T042":
+        result = mtbf_mttr_analysis(args.get("operating_hours"), args.get("failure_count"), args.get("repair_hours", ""))
+    elif canonical_id == "T055":
+        result = inventory_policy(args.get("annual_demand"), args.get("order_cost"), args.get("annual_holding_cost_per_unit"), args.get("daily_demand_mean"), args.get("daily_demand_sigma"), args.get("lead_time_days"), args.get("service_factor_z"))
+    elif canonical_id == "T078":
+        result = carbon_emissions(args.get("activity_quantity"), args.get("emission_factor"), str(args.get("quantity_unit") or ""), str(args.get("emission_unit") or ""), str(args.get("factor_source") or ""), str(args.get("factor_date") or ""))
+    elif canonical_id == "T081":
+        result = engineering_economics(args.get("cash_flows", ""), args.get("discount_rate_pct"))
     else:
         raise ToolNotImplementedError(
             f"{canonical_id} ({spec['canonical_name']}) has no standalone deterministic engine in this workbench yet. "
@@ -554,6 +566,7 @@ def _render_quick_tools(st: Any, tier: str) -> None:
     tabs = st.tabs([
         "T013 · Data Profile", "T016 · Unit / Currency", "T019 · Synthetic Data",
         "T021 · Time Study", "T022 · Work Sampling", "T023 · Takt / Capacity",
+        "More methods",
     ])
     with tabs[0]:
         st.write("Read-only profile for a staged CSV/XLSX file. The active dataset is not replaced.")
@@ -683,6 +696,115 @@ def _render_quick_tools(st: Any, tier: str) -> None:
             st.caption(f"Both available time and cycle time are in {prior.get('metrics', {}).get('time_unit', time_unit)}.")
             _show_result(st, prior)
 
+
+
+    with tabs[6]:
+        st.caption("These methods expose formulas and limitations. Use one consistent unit system per calculation.")
+        with st.expander("T026 · OEE and core losses", expanded=True):
+            a, b, d = st.columns(3)
+            planned = a.number_input("Planned time", min_value=0.001, value=480.0, key="shoir100_oee_planned")
+            downtime = b.number_input("Downtime", min_value=0.0, value=45.0, key="shoir100_oee_downtime")
+            ideal_cycle = d.number_input("Ideal cycle time per unit", min_value=0.0001, value=0.5, key="shoir100_oee_cycle")
+            a, b = st.columns(2)
+            total_count = a.number_input("Total output", min_value=1.0, value=800.0, key="shoir100_oee_total")
+            good_count = b.number_input("Good output", min_value=0.0, value=784.0, key="shoir100_oee_good")
+            if st.button("Calculate OEE", key="shoir100_oee_button", type="primary"):
+                try:
+                    st.session_state["shoir100_last_oee"] = run_tool_calculation(tier, "T026", {
+                        "planned_production_time": planned, "downtime": downtime, "ideal_cycle_time": ideal_cycle,
+                        "total_count": total_count, "good_count": good_count,
+                    })
+                except Exception as exc:
+                    st.error(f"OEE calculation not completed: {exc}")
+            if isinstance(st.session_state.get("shoir100_last_oee"), Mapping):
+                _show_result(st, st.session_state["shoir100_last_oee"])
+
+        with st.expander("T032 · Process Capability (Cp/Cpk/Pp/Ppk)"):
+            measurements = st.text_area("Measurements, comma-separated", value="9.8, 10.0, 10.1, 9.9, 10.2, 9.7", key="shoir100_cap_measurements")
+            a, b, d = st.columns(3)
+            lsl = a.number_input("LSL", value=9.0, key="shoir100_cap_lsl")
+            usl = b.number_input("USL", value=11.0, key="shoir100_cap_usl")
+            within_sigma = d.number_input("Within-subgroup sigma (optional; 0 omits Cp/Cpk)", min_value=0.0, value=0.0, key="shoir100_cap_sigma")
+            if st.button("Calculate capability", key="shoir100_cap_button", type="primary"):
+                try:
+                    st.session_state["shoir100_last_capability"] = run_tool_calculation(tier, "T032", {
+                        "measurements": measurements, "lower_spec_limit": lsl, "upper_spec_limit": usl,
+                        "within_subgroup_sigma": within_sigma if within_sigma > 0 else None,
+                    })
+                except Exception as exc:
+                    st.error(f"Capability not calculated: {exc}")
+            if isinstance(st.session_state.get("shoir100_last_capability"), Mapping):
+                _show_result(st, st.session_state["shoir100_last_capability"])
+
+        with st.expander("T042 · MTBF / MTTR"):
+            a, b = st.columns(2)
+            operating_hours = a.number_input("Observed operating hours", min_value=0.001, value=1000.0, key="shoir100_mtbf_operating")
+            failure_count = b.number_input("Failures in that window", min_value=1, value=5, step=1, key="shoir100_mtbf_failures")
+            repairs = st.text_input("Repair durations in hours, one per failure", value="2, 1.5, 3, 2.5, 1", key="shoir100_mtbf_repairs")
+            if st.button("Calculate reliability metrics", key="shoir100_mtbf_button", type="primary"):
+                try:
+                    st.session_state["shoir100_last_mtbf"] = run_tool_calculation(tier, "T042", {
+                        "operating_hours": operating_hours, "failure_count": int(failure_count), "repair_hours": repairs,
+                    })
+                except Exception as exc:
+                    st.error(f"Reliability calculation not completed: {exc}")
+            if isinstance(st.session_state.get("shoir100_last_mtbf"), Mapping):
+                _show_result(st, st.session_state["shoir100_last_mtbf"])
+
+        with st.expander("T055 · EOQ, safety stock and reorder point"):
+            a, b, d = st.columns(3)
+            annual_demand = a.number_input("Annual demand", min_value=0.001, value=12000.0, key="shoir100_inv_annual")
+            order_cost = b.number_input("Order cost", min_value=0.001, value=50.0, key="shoir100_inv_order")
+            holding = d.number_input("Annual holding cost per unit", min_value=0.001, value=2.0, key="shoir100_inv_holding")
+            a, b, d = st.columns(3)
+            daily_mean = a.number_input("Mean daily demand", min_value=0.0, value=40.0, key="shoir100_inv_daily_mean")
+            daily_sigma = b.number_input("Daily demand standard deviation", min_value=0.0, value=5.0, key="shoir100_inv_daily_sigma")
+            lead = d.number_input("Lead time (days)", min_value=0.0, value=5.0, key="shoir100_inv_lead")
+            service = st.selectbox("One-sided normal service factor z", [1.282, 1.645, 1.960, 2.326], index=2, key="shoir100_inv_z")
+            if st.button("Calculate inventory policy", key="shoir100_inv_button", type="primary"):
+                try:
+                    st.session_state["shoir100_last_inventory"] = run_tool_calculation(tier, "T055", {
+                        "annual_demand": annual_demand, "order_cost": order_cost, "annual_holding_cost_per_unit": holding,
+                        "daily_demand_mean": daily_mean, "daily_demand_sigma": daily_sigma, "lead_time_days": lead,
+                        "service_factor_z": service,
+                    })
+                except Exception as exc:
+                    st.error(f"Inventory policy not calculated: {exc}")
+            if isinstance(st.session_state.get("shoir100_last_inventory"), Mapping):
+                _show_result(st, st.session_state["shoir100_last_inventory"])
+
+        with st.expander("T078 · Carbon emissions"):
+            a, b = st.columns(2)
+            activity = a.number_input("Activity quantity", min_value=0.0, value=1000.0, key="shoir100_carbon_qty")
+            factor = b.number_input("Emission factor per activity unit", min_value=0.0, value=0.42, key="shoir100_carbon_factor")
+            a, b = st.columns(2)
+            quantity_unit = a.text_input("Activity unit (for example, kWh)", value="kWh", key="shoir100_carbon_unit")
+            emission_unit = b.text_input("Emission unit (for example, kg CO2e)", value="kg CO2e", key="shoir100_carbon_emission_unit")
+            factor_source = st.text_input("Factor source/reference", key="shoir100_carbon_source")
+            factor_date = st.text_input("Factor date/version", key="shoir100_carbon_date")
+            if st.button("Calculate emissions", key="shoir100_carbon_button", type="primary"):
+                try:
+                    st.session_state["shoir100_last_carbon"] = run_tool_calculation(tier, "T078", {
+                        "activity_quantity": activity, "emission_factor": factor, "quantity_unit": quantity_unit,
+                        "emission_unit": emission_unit, "factor_source": factor_source, "factor_date": factor_date,
+                    })
+                except Exception as exc:
+                    st.error(f"Emission calculation not completed: {exc}")
+            if isinstance(st.session_state.get("shoir100_last_carbon"), Mapping):
+                _show_result(st, st.session_state["shoir100_last_carbon"])
+
+        with st.expander("T081 · NPV and payback"):
+            flows = st.text_area("Cash flows by equally spaced period, including period 0", value="-1000, 300, 350, 400, 450", key="shoir100_econ_flows")
+            rate = st.number_input("Discount rate per period (%)", min_value=-99.99, max_value=1000.0, value=8.0, key="shoir100_econ_rate")
+            if st.button("Calculate project economics", key="shoir100_econ_button", type="primary"):
+                try:
+                    st.session_state["shoir100_last_economics"] = run_tool_calculation(tier, "T081", {
+                        "cash_flows": flows, "discount_rate_pct": rate,
+                    })
+                except Exception as exc:
+                    st.error(f"Engineering economics not calculated: {exc}")
+            if isinstance(st.session_state.get("shoir100_last_economics"), Mapping):
+                _show_result(st, st.session_state["shoir100_last_economics"])
 
 def _render_catalog(st: Any, tier: str, allowed_modules: Sequence[str]) -> None:
     query = st.text_input("Search tool IDs, names, workbenches, or related modules", key="shoir100_catalog_search")
