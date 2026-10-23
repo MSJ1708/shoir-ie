@@ -21,6 +21,7 @@ import streamlit as st
 import html
 
 from industrial_platform import render_module, PLATFORM_CATALOG, init_platform_db
+from shoir_tool_registry import TOOL_TARGETS, TOOL_STATUS_VALUES, tier_allows_tool, tool_status_counts
 from industrial_platform_excellence import (
     CANONICAL_TIERS, MODULE_MATRIX, canonical_tier, tier_allows, tier_matrix,
     module_matrix, module_availability, deep_data_quality, validate_schema,
@@ -174,6 +175,90 @@ with top3:
 with top4:
     if st.button("📋 Decision Card", use_container_width=True):
         st.session_state["show_decision"]=True
+
+
+# Progressive-disclosure directory: keep the established shell and module routes intact.
+# This is a truthful capability directory, not permission to run a foundation-only tool.
+with st.expander("🧭 100-tool directory & readiness", expanded=False):
+    st.caption(
+        "Browse the target tool set within the existing Workbench. Readiness reflects the source audit, "
+        "not a promise of authenticated end-to-end verification. Tools marked Foundation or Missing are "
+        "not represented as operational; use the mapped existing module only for the behavior it actually supports."
+    )
+    status_counts = tool_status_counts()
+    s1, s2, s3, s4 = st.columns(4)
+    s1.metric("Target tools", len(TOOL_TARGETS))
+    s2.metric("Mapped; validation open", status_counts.get("IMPLEMENTED_NEEDS_VALIDATION", 0))
+    s3.metric("Foundation only", status_counts.get("FOUNDATION_ONLY", 0))
+    s4.metric("Verified end-to-end", status_counts.get("VERIFIED_WORKING", 0))
+    d1, d2, d3 = st.columns([2, 1, 1])
+    with d1:
+        tool_query = st.text_input("Find a tool or use case", key="shoir_100_tool_query")
+    with d2:
+        tool_workbenches = ["All workbenches"] + sorted({str(item["workbench"]) for item in TOOL_TARGETS})
+        tool_workbench_filter = st.selectbox("Workbench", tool_workbenches, key="shoir_100_tool_workbench")
+    with d3:
+        tool_status_filter = st.selectbox(
+            "Readiness status", ["All statuses", *TOOL_STATUS_VALUES], key="shoir_100_tool_status"
+        )
+
+    directory_rows = []
+    q = tool_query.strip().casefold()
+    for item in TOOL_TARGETS:
+        searchable = " ".join((
+            item["tool_id"], item["canonical_name"], item["workbench"],
+            item["existing_module_or_route"], item["calculation_or_action"],
+            item["input_contract"], item["output_contract"],
+        )).casefold()
+        if q and q not in searchable:
+            continue
+        if tool_workbench_filter != "All workbenches" and item["workbench"] != tool_workbench_filter:
+            continue
+        if tool_status_filter != "All statuses" and item["implementation_status"] != tool_status_filter:
+            continue
+        directory_rows.append({
+            "ID": item["tool_id"],
+            "Tool": item["canonical_name"],
+            "Workbench": item["workbench"],
+            "Minimum tier": item["target_minimum_tier"],
+            "Readiness": item["implementation_status"],
+            "Allowed by tier": "Yes" if tier_allows_tool(RAW_TIER, item["tool_id"]) else "No",
+            "Existing route": item["existing_module_or_route"],
+        })
+    st.caption(f"Showing {len(directory_rows)} of {len(TOOL_TARGETS)} target tools.")
+    if directory_rows:
+        st.dataframe(pd.DataFrame(directory_rows), use_container_width=True, hide_index=True)
+        choices = [
+            f'{item["tool_id"]} · {item["canonical_name"]}'
+            for item in TOOL_TARGETS
+            if any(row["ID"] == item["tool_id"] for row in directory_rows)
+        ]
+        chosen = st.selectbox("Inspect tool requirements", choices, key="shoir_100_tool_inspector")
+        chosen_id = chosen.split(" · ", 1)[0]
+        selected_tool = next((item for item in TOOL_TARGETS if item["tool_id"] == chosen_id), None)
+        if selected_tool:
+            st.markdown(f"**{selected_tool['canonical_name']}** · {selected_tool['target_minimum_tier']} minimum")
+            st.write(selected_tool["calculation_or_action"])
+            with st.expander("Inputs, outputs and remaining work", expanded=False):
+                st.markdown("**Required inputs**")
+                st.write(selected_tool["input_contract"])
+                st.markdown("**Expected outputs**")
+                st.write(selected_tool["output_contract"])
+                st.markdown("**Mapped existing route**")
+                st.write(selected_tool["existing_module_or_route"])
+                st.markdown("**Source candidates**")
+                st.write(", ".join(selected_tool["source_files"]) or "No specialist source identified in targeted search.")
+                st.markdown("**Open gap**")
+                st.write(selected_tool["remaining_gap"])
+                if selected_tool["external_dependency"]:
+                    st.markdown("**External dependency**")
+                    st.write(selected_tool["external_dependency"])
+                st.caption(
+                    "Authorization note: this directory does not execute the tool. The mapped legacy route, "
+                    "Copilot action, API and export path must enforce their own server-side entitlement checks."
+                )
+    else:
+        st.info("No target tools match these filters. Clear the search or select All workbenches / All statuses.")
 
 # Specialized upgraded surfaces
 if selected == "Engineering Validation Center":
