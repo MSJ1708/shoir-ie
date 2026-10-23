@@ -35,7 +35,17 @@ def _fingerprint(*values):
 
 
 def _run_engine_tool(tool_id, signature, button_label, calculation):
-    """Run one deterministic validation-mode method and preserve last success on bad input."""
+    """Run a deterministic validation-mode method after server-side entitlement enforcement."""
+    # Defend the action boundary independently of card visibility. T066_CUT is a
+    # second method under canonical target T066 and must inherit the same policy.
+    canonical_tool_id = str(tool_id).split("_", 1)[0]
+    decision = target_tool_access_decision(canonical_tool_id, st.session_state.get("user_tier"))
+    if not decision["allowed"]:
+        st.warning(
+            f"Execution denied for {canonical_tool_id}. Required tier: "
+            f"{decision.get('required_tier') or 'unresolved policy'}."
+        )
+        return None
     if st.button(button_label, key=f"{tool_id}_run_button", type="primary"):
         try:
             outcome = calculation()
@@ -216,6 +226,9 @@ if rows:
     decision = target_tool_execution_decision(selected_id, tier)
     if not decision["allowed"]:
         st.warning(f'This package does not grant this target capability. Required tier: {decision["required_tier"]}.')
+        # Do not render specialist inputs/actions or expose previously shown output
+        # for a denied target. Direct calls are also guarded in _run_engine_tool.
+        st.stop()
     else:
         if not decision["executable"]:
             st.warning("This target cannot be marked executable in the new library until its acceptance tests and authenticated end-to-end evidence pass. A separately entitled existing route may still be opened below.")
