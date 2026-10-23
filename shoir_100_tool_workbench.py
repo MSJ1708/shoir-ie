@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from typing import Any
 
 from shoir_100_tool_registry import TOOL_CATALOG, get_tool, tool_access_allowed, tool_is_actionable
@@ -11,6 +12,16 @@ from shoir_100_tool_runtime import (
     mtbf_mttr, oee, process_capability, profile_dataframe, read_dataset_bytes,
     result_to_csv_bytes, takt_capacity, time_study, work_sampling,
 )
+
+
+def _frame_fingerprint(frame: Any) -> str:
+    try:
+        import pandas as pd
+        signature = str(tuple((str(c), str(frame[c].dtype)) for c in frame.columns))
+        values = pd.util.hash_pandas_object(frame, index=True).values.tobytes()
+        return hashlib.sha256(signature.encode("utf-8") + values).hexdigest()
+    except Exception:
+        return hashlib.sha256(frame.to_json(orient="split", date_format="iso", default_handler=str).encode("utf-8")).hexdigest()
 
 
 def _parse_numbers(raw: str, label: str) -> list[float]:
@@ -70,6 +81,9 @@ def _read_dataset_ui(st: Any, pd: Any, tool_id: str) -> None:
                     if st.button("Use selected sheet in this session", key="shoir100_apply_sheet"):
                         st.session_state["_shoir100_previous_dataset"] = st.session_state.get("_shoir100_dataset")
                         st.session_state["_shoir100_dataset"] = candidate.copy(deep=True)
+                        st.session_state["_shoir100_clean_candidate"] = None
+                        st.session_state["_shoir100_clean_audit"] = None
+                        st.session_state["_shoir100_clean_source_fingerprint"] = None
                         st.session_state["_shoir100_dataset_name"] = f"{upload.name} · {sheet}"
                         st.session_state["_shoir100_dataset_provenance"] = "IMPORTED"
                         st.success("Sheet loaded in the current session. Cross-login persistence is not implied.")
@@ -79,6 +93,9 @@ def _read_dataset_ui(st: Any, pd: Any, tool_id: str) -> None:
                 if st.button("Use dataset in this session", key="shoir100_apply_dataset"):
                     st.session_state["_shoir100_previous_dataset"] = st.session_state.get("_shoir100_dataset")
                     st.session_state["_shoir100_dataset"] = parsed.copy(deep=True)
+                    st.session_state["_shoir100_clean_candidate"] = None
+                    st.session_state["_shoir100_clean_audit"] = None
+                    st.session_state["_shoir100_clean_source_fingerprint"] = None
                     st.session_state["_shoir100_dataset_name"] = upload.name
                     st.session_state["_shoir100_dataset_provenance"] = "IMPORTED"
                     st.success("Dataset loaded in the current session. The prior dataset remains recoverable with Undo.")
@@ -194,6 +211,7 @@ def render_100_tool_workbench(tier: str, username: str) -> None:
                 candidate, audit = clean_dataframe(current, drop_duplicates=duplicate, missing_strategy=strategy)
                 st.session_state["_shoir100_clean_candidate"] = candidate
                 st.session_state["_shoir100_clean_audit"] = audit
+                st.session_state["_shoir100_clean_source_fingerprint"] = _frame_fingerprint(current)
             except ValueError as exc:
                 st.error(str(exc))
         candidate = st.session_state.get("_shoir100_clean_candidate")
@@ -202,10 +220,18 @@ def render_100_tool_workbench(tier: str, username: str) -> None:
             st.json(audit)
             st.dataframe(candidate.head(50), use_container_width=True)
             if st.button("Apply candidate to session", key="shoir100_clean_apply"):
-                st.session_state["_shoir100_previous_dataset"] = current.copy(deep=True)
-                st.session_state["_shoir100_dataset"] = candidate.copy(deep=True)
-                st.session_state["_shoir100_dataset_provenance"] = "IMPORTED"
-                st.success("Candidate applied. The prior dataset is available through Undo in this session.")
+                expected_source = st.session_state.get("_shoir100_clean_source_fingerprint")
+                if expected_source != _frame_fingerprint(current):
+                    st.warning("This cleaning preview is stale because the source dataset changed. Preview again before applying.")
+                    st.session_state["_shoir100_clean_candidate"] = None
+                    st.session_state["_shoir100_clean_audit"] = None
+                else:
+                    st.session_state["_shoir100_previous_dataset"] = current.copy(deep=True)
+                    st.session_state["_shoir100_dataset"] = candidate.copy(deep=True)
+                    st.session_state["_shoir100_dataset_provenance"] = "IMPORTED"
+                    st.session_state["_shoir100_clean_candidate"] = None
+                    st.session_state["_shoir100_clean_audit"] = None
+                    st.success("Candidate applied. The prior dataset is available through Undo in this session.")
         if st.button("Undo last session dataset change", key="shoir100_clean_undo"):
             previous = st.session_state.get("_shoir100_previous_dataset")
             if previous is None:
