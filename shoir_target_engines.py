@@ -1,4 +1,4 @@
-"""Validated first-pass deterministic engines for five focused Shoir-IE targets.
+"""Validated first-pass deterministic engines for seven focused Shoir-IE targets.
 
 Scope:
 * T066 is a one-dimensional cutting/bin-packing MILP with a per-piece kerf allowance.
@@ -288,6 +288,200 @@ def monitor_forecast_drift(
     }
 
 
+def analyze_work_sampling(
+    activity_counts: Mapping[str, int],
+    confidence_level: float = 0.95,
+    target_margin_pct: float = 5.0,
+) -> dict[str, Any]:
+    """Estimate activity proportions with individual Wilson score intervals.
+
+    Counts must be mutually exclusive, exhaustive observations from a stated
+    random/representative sampling plan. The Wilson intervals are per activity,
+    not simultaneous multinomial intervals. The planning count uses the
+    conservative p=0.5 binomial approximation for the stated margin.
+    """
+    if not isinstance(activity_counts, Mapping) or len(activity_counts) < 2:
+        raise ValueError("Provide at least two activity categories with observation counts.")
+
+    normalized: list[tuple[str, int]] = []
+    seen: set[str] = set()
+    for raw_name, raw_count in activity_counts.items():
+        name = str(raw_name or "").strip()
+        if not name:
+            raise ValueError("Every activity category needs a non-empty name.")
+        key = name.casefold()
+        if key in seen:
+            raise ValueError(f"Activity category names must be unique after trimming/case normalization: {name}.")
+        seen.add(key)
+        if isinstance(raw_count, bool):
+            raise ValueError(f"Observation count for {name} must be a whole number.")
+        count_value = _finite_number(raw_count, f"Observation count for {name}")
+        if count_value < 0 or not count_value.is_integer():
+            raise ValueError(f"Observation count for {name} must be a non-negative whole number.")
+        normalized.append((name, int(count_value)))
+
+    total = sum(count for _, count in normalized)
+    if total <= 0:
+        raise ValueError("Total observations must be greater than zero.")
+
+    confidence = _finite_number(confidence_level, "Confidence level")
+    if not 0 < confidence < 1:
+        raise ValueError("Confidence level must be greater than 0 and less than 1.")
+    margin_pct = _finite_number(target_margin_pct, "Target margin of error")
+    if not 0 < margin_pct < 50:
+        raise ValueError("Target margin of error must be greater than 0 and less than 50 percent.")
+
+    z_value = float(norm.ppf(0.5 + confidence / 2.0))
+    z_squared = z_value * z_value
+    rows: list[dict[str, Any]] = []
+    for name, count in normalized:
+        p_hat = count / total
+        denominator = 1.0 + z_squared / total
+        center = (p_hat + z_squared / (2.0 * total)) / denominator
+        half_width = (
+            z_value
+            * math.sqrt(p_hat * (1.0 - p_hat) / total + z_squared / (4.0 * total * total))
+            / denominator
+        )
+        lower = max(0.0, center - half_width)
+        upper = min(1.0, center + half_width)
+        rows.append({
+            "Activity": name,
+            "Observations": count,
+            "Observed proportion (%)": 100.0 * p_hat,
+            f"{confidence:.1%} Wilson lower (%)": 100.0 * lower,
+            f"{confidence:.1%} Wilson upper (%)": 100.0 * upper,
+            "Interval width (percentage points)": 100.0 * (upper - lower),
+        })
+
+    # Keep the sample-size rule reproducible and conservative for any unknown p.
+    required_n = math.ceil(z_squared * 0.25 / ((margin_pct / 100.0) ** 2))
+    adequate = total >= required_n
+    frame = pd.DataFrame(rows).sort_values(
+        ["Observed proportion (%)", "Activity"], ascending=[False, True]
+    ).reset_index(drop=True)
+    return {
+        "status": "SAMPLE_TARGET_MET" if adequate else "MORE_OBSERVATIONS_RECOMMENDED",
+        "method": "Work sampling proportions with individual Wilson score confidence intervals",
+        "total_observations": total,
+        "activity_count": len(normalized),
+        "confidence_level": confidence,
+        "target_margin_of_error_pct": margin_pct,
+        "minimum_observations_for_target_margin": required_n,
+        "target_sample_size_met": adequate,
+        "activity_summary": frame,
+        "formula": (
+            "Proportion = category count / total observations. Wilson score intervals are used for each "
+            "binomial category proportion. Planning n = ceil(z^2 × 0.25 / margin^2), using the conservative p=0.5."
+        ),
+        "assumptions": (
+            "Observations are representative and approximately independent; every observation belongs to exactly "
+            "one listed category; the Wilson intervals are per-category, not simultaneous intervals; the target "
+            "margin uses a conservative normal-approximation planning rule."
+        ),
+        "warning": (
+            f"{total} observations are below the conservative planning target of {required_n} for a "
+            f"±{margin_pct:g} percentage-point margin at {confidence:.1%} confidence."
+            if not adequate else
+            "The conservative planning target is met; review sampling-frame representativeness and timing before generalizing."
+        ),
+    }
+
+
+def analyze_pareto_root_cause(
+    category_counts: Mapping[str, int],
+    *,
+    problem_statement: str = "",
+    why_chain: Sequence[str] = (),
+    countermeasure: str = "",
+    owner: str = "",
+    due_date: str = "",
+) -> dict[str, Any]:
+    """Build a reproducible Pareto table and optionally record a complete 5-Why chain.
+
+    Pareto concentration describes the observed counts and does not establish
+    causation. A 5-Why record is a hypothesis/evidence structure requiring
+    human verification, not proof of a physical root cause.
+    """
+    if not isinstance(category_counts, Mapping) or not category_counts:
+        raise ValueError("Provide a non-empty category-to-count mapping.")
+    normalized: list[tuple[str, int]] = []
+    seen: set[str] = set()
+    for raw_name, raw_count in category_counts.items():
+        name = str(raw_name or "").strip()
+        if not name:
+            raise ValueError("Every Pareto category needs a non-empty name.")
+        key = name.casefold()
+        if key in seen:
+            raise ValueError(f"Pareto category names must be unique after trimming/case normalization: {name}.")
+        seen.add(key)
+        if isinstance(raw_count, bool):
+            raise ValueError(f"Count for {name} must be a non-negative whole number.")
+        count_value = _finite_number(raw_count, f"Count for {name}")
+        if count_value < 0 or not count_value.is_integer():
+            raise ValueError(f"Count for {name} must be a non-negative whole number.")
+        normalized.append((name, int(count_value)))
+    total = sum(count for _, count in normalized)
+    if total <= 0:
+        raise ValueError("Total Pareto count must be greater than zero.")
+
+    normalized.sort(key=lambda item: (-item[1], item[0].casefold()))
+    cumulative = 0
+    rows: list[dict[str, Any]] = []
+    for name, count in normalized:
+        cumulative += count
+        rows.append({
+            "Category": name,
+            "Count": count,
+            "Share (%)": count / total * 100.0,
+            "Cumulative count": cumulative,
+            "Cumulative (%)": cumulative / total * 100.0,
+        })
+    frame = pd.DataFrame(rows)
+    top_count = 0
+    for row in rows:
+        top_count += 1
+        if row["Cumulative (%)"] >= 80.0:
+            break
+
+    raw_whys = list(why_chain) if not isinstance(why_chain, (str, bytes)) else [why_chain]
+    whys = [str(item or "").strip() for item in raw_whys if str(item or "").strip()]
+    if len(whys) not in (0, 5):
+        raise ValueError("Provide either no 5-Why chain or exactly five non-empty why statements.")
+    problem = str(problem_statement or "").strip()
+    action = str(countermeasure or "").strip()
+    action_owner = str(owner or "").strip()
+    date_value = str(due_date or "").strip()
+    if whys and not problem:
+        raise ValueError("A problem statement is required when recording a 5-Why chain.")
+
+    follow_up_complete = bool(whys and action and action_owner and date_value)
+    if whys:
+        status = "ROOT_CAUSE_REVIEW_RECORDED" if follow_up_complete else "FOLLOW_UP_INCOMPLETE"
+    else:
+        status = "PARETO_ONLY"
+    return {
+        "status": status,
+        "method": "Descending Pareto analysis plus optional structured 5-Why/action record",
+        "total_count": total,
+        "category_count": len(normalized),
+        "categories_to_reach_80_percent": top_count,
+        "pareto_summary": frame,
+        "problem_statement": problem,
+        "why_chain": [{"why": i + 1, "statement": statement} for i, statement in enumerate(whys)],
+        "countermeasure": action,
+        "owner": action_owner,
+        "due_date": date_value,
+        "follow_up_complete": follow_up_complete,
+        "formula": "Share = category count / total count; cumulative share = cumulative count / total count.",
+        "warning": (
+            "Pareto concentration and 5-Why statements do not prove causation. Validate proposed causes with process evidence."
+            if follow_up_complete else
+            "Pareto analysis only or an incomplete 5-Why follow-up record; assign and verify countermeasures before claiming corrective action."
+        ),
+    }
+
+
 def calculate_time_study(
     observation_times: Sequence[float],
     performance_rating_pct: float = 100.0,
@@ -492,6 +686,8 @@ def plan_two_sample_t_sample_size(
 
 
 __all__ = [
+    "analyze_work_sampling",
+    "analyze_pareto_root_cause",
     "calculate_time_study",
     "calculate_takt_capacity",
     "monitor_forecast_drift",
