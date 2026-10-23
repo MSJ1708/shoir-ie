@@ -341,11 +341,11 @@ def copilot_gate(prompt: str, tier: str) -> Optional[dict[str, str]]:
         if phrase in p and not tier_allows(tier, required):
             return {
                 "required_tier": required,
-                "current_tier": normalize_tier(tier),
+                "current_tier": _recognized_tier(tier) or "Unrecognized",
                 "phrase": phrase,
                 "message": (
                     f"🔒 **{phrase.title()}** is outside your current package. "
-                    f"Your package is **{normalize_tier(tier)}**; this capability requires "
+                    f"Your package is **{_recognized_tier(tier) or 'Unrecognized'}**; this capability requires "
                     f"**{required}**. I can still explain the method or help you use the "
                     f"capabilities included in your package."
                 ),
@@ -354,7 +354,16 @@ def copilot_gate(prompt: str, tier: str) -> Optional[dict[str, str]]:
 
 
 def copilot_capabilities(tier: str, allowed_modules: Iterable[str]) -> dict[str, object]:
-    normalized = normalize_tier(tier)
+    normalized = _recognized_tier(tier)
+    if normalized is None:
+        # Do not convert an invalid label into Starter permissions for Copilot.
+        return {
+            "tier": "Unrecognized",
+            "modules": [],
+            "can_research": False,
+            "can_enterprise": False,
+            "can_professional": False,
+        }
     return {
         "tier": normalized,
         "modules": available_modules(normalized, allowed_modules),
