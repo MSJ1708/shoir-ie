@@ -1,12 +1,15 @@
 """Regression tests for the canonical 100-tool library and its executable quick methods."""
 from __future__ import annotations
 
+import ast
+import csv
 import math
+from pathlib import Path
 
 import pandas as pd
 import pytest
 
-from industrial_platform import tier_allows as platform_tier_allows
+from industrial_platform import PLATFORM_CATALOG, tier_allows as platform_tier_allows
 from shoir_100_tool_registry import (
     TOOL_CATALOG,
     TOOL_BY_ID,
@@ -198,3 +201,33 @@ def test_only_declared_quick_engines_execute_and_no_catalog_stub_returns_fake_su
     assert result["tool_id"] == "T021"
     with pytest.raises(ToolNotImplementedError):
         run_tool_calculation("Enterprise", "T071", {"synthetic_kpi": 1})
+
+
+
+def test_every_declared_related_route_exists_in_the_actual_app_or_platform_catalog():
+    root = Path(__file__).resolve().parents[1]
+    app_tree = ast.parse((root / "app.py").read_text(encoding="utf-8"), filename="app.py")
+    app_catalog = None
+    for node in app_tree.body:
+        if isinstance(node, ast.Assign) and any(isinstance(target, ast.Name) and target.id == "MODULE_CATALOG" for target in node.targets):
+            app_catalog = ast.literal_eval(node.value)
+            break
+    assert isinstance(app_catalog, list), "Could not parse app.py MODULE_CATALOG."
+    route_names = {str(item.get("name", "")).strip() for item in app_catalog}
+    route_names.update(str(item.get("name", "")).strip() for item in PLATFORM_CATALOG)
+    declared = {
+        row["existing_route"] for row in TOOL_CATALOG if row["existing_route"]
+    }
+    missing = sorted(declared - route_names)
+    assert not missing, f"Tool crosswalk contains routes absent from current source catalogs: {missing}"
+
+
+def test_machine_readable_matrix_has_all_ids_and_does_not_overstate_browser_evidence():
+    path = Path(__file__).resolve().parents[1] / "docs" / "SHOIR_100_TOOL_IMPLEMENTATION_MATRIX.csv"
+    with path.open(encoding="utf-8", newline="") as stream:
+        rows = list(csv.DictReader(stream))
+    assert len(rows) == 100
+    assert {row["tool_id"] for row in rows} == {f"T{i:03d}" for i in range(1, 101)}
+    assert all(row["browser_test"] == "UNVERIFIED" for row in rows)
+    assert not any(row["implementation_status"] == "VERIFIED_WORKING" for row in rows)
+    assert all(row["remaining_gap"].strip() for row in rows)
