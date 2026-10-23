@@ -174,8 +174,50 @@ for _target in TOOL_TARGETS:
     _target.setdefault("acceptance_gate_id", f"SHOIR-100-{_target['tool_id']}-ACCEPTANCE")
     _target.setdefault("evidence_state", "SOURCE_TRIAGE_ONLY")
 
+_TARGET_ALIASES = {
+    "T016": ["unit converter", "currency converter"],
+    "T021": ["time study", "standard time"],
+    "T022": ["work sampling"],
+    "T023": ["takt", "takt time", "capacity calculator"],
+    "T026": ["oee", "overall equipment effectiveness"],
+    "T028": ["pareto", "5 whys", "root cause"],
+    "T029": ["5s audit", "workplace audit"],
+    "T030": ["kaizen", "a3"],
+    "T031": ["spc", "individuals chart", "moving range chart"],
+    "T032": ["cp", "cpk", "pp", "ppk"],
+    "T040": ["copq", "cost of poor quality"],
+    "T042": ["mtbf", "mttr"],
+    "T055": ["eoq", "reorder point", "safety stock"],
+    "T056": ["abc xyz", "inventory segmentation"],
+    "T066": ["bin packing", "cutting stock"],
+    "T075": ["forecast drift", "model drift"],
+    "T076": ["process mining", "directly-follows analysis"],
+    "T078": ["carbon calculator", "emissions factor"],
+    "T081": ["npv", "irr", "payback"],
+    "T085": ["sample size", "statistical power", "t-test power"],
+}
+for _target in TOOL_TARGETS:
+    # Aliases are controlled discovery names. They resolve to the stable ID and
+    # therefore share the identical entitlement/readiness policy; display labels
+    # and unregistered strings never create new permissions.
+    _target.setdefault("aliases", list(_TARGET_ALIASES.get(_target["tool_id"], [])))
+
 _BY_ID = {row["tool_id"]: row for row in TOOL_TARGETS}
 _BY_NAME = {row["canonical_name"].casefold(): row for row in TOOL_TARGETS}
+_alias_candidates: dict[str, list[dict[str, Any]]] = {}
+for _row in TOOL_TARGETS:
+    for _alias in _row.get("aliases", []):
+        _alias_key = str(_alias).strip().casefold()
+        if _alias_key:
+            _alias_candidates.setdefault(_alias_key, []).append(_row)
+# Ambiguous aliases are excluded rather than silently choosing a capability.
+_BY_ALIAS = {alias: rows[0] for alias, rows in _alias_candidates.items() if len(rows) == 1}
+
+
+def _resolve_target(token: str) -> dict[str, Any] | None:
+    label = str(token or "").strip()
+    key = label.casefold()
+    return _BY_ID.get(label.upper()) or _BY_NAME.get(key) or _BY_ALIAS.get(key)
 
 
 def _normalize_known_tier(value: str | None) -> str | None:
@@ -187,7 +229,7 @@ def _normalize_known_tier(value: str | None) -> str | None:
 def get_target_tool(tool_id_or_name: str) -> dict[str, Any] | None:
     """Resolve stable ID or exact canonical name; presentation aliases do not authorize."""
     token = str(tool_id_or_name or "").strip()
-    row = _BY_ID.get(token.upper()) or _BY_NAME.get(token.casefold())
+    row = _resolve_target(token)
     return deepcopy(row) if row else None
 
 
@@ -200,7 +242,7 @@ def list_target_tools(*, workbench: str | None = None, status: str | None = None
             continue
         if status and row["implementation_status"] != status:
             continue
-        fields = (row["tool_id"], row["canonical_name"], row["workbench"],
+        fields = (row["tool_id"], row["canonical_name"], *row.get("aliases", []), row["workbench"],
                   row["existing_module_or_route"], row["calculation_or_action"])
         if query and query not in " ".join(map(str, fields)).casefold():
             continue
@@ -241,7 +283,7 @@ def target_tool_execution_decision(tool_id_or_name: str, current_tier: str | Non
 
 
 def audit_target_tool_registry() -> dict[str, Any]:
-    required_fields = ("tool_id","canonical_name","workbench","target_minimum_tier",
+    required_fields = ("tool_id","canonical_name","aliases","workbench","target_minimum_tier",
                        "existing_module_or_route","implementation_status","calculation_or_action",
                        "input_contract","output_contract","source_files","remaining_gap",
                        "persistence_scope","external_dependency","entitlement_enforcement_points",
@@ -250,8 +292,13 @@ def audit_target_tool_registry() -> dict[str, Any]:
     ids = [row.get("tool_id","") for row in TOOL_TARGETS]
     missing, bad_status, bad_tier, bad_workbench = [], [], [], []
     for row in TOOL_TARGETS:
-        missing.extend({"tool_id":row.get("tool_id"),"field":field}
-                       for field in required_fields if not row.get(field))
+        for field in required_fields:
+            value = row.get(field)
+            if field == "aliases":
+                if not isinstance(value, list) or any(not isinstance(alias, str) or not alias.strip() for alias in value):
+                    missing.append({"tool_id":row.get("tool_id"),"field":field})
+            elif not value:
+                missing.append({"tool_id":row.get("tool_id"),"field":field})
         if row.get("implementation_status") not in TOOL_STATUSES: bad_status.append(row.get("tool_id"))
         if row.get("target_minimum_tier") not in TOOL_TIER_ORDER: bad_tier.append(row.get("tool_id"))
         if row.get("workbench") not in WORKBENCHES: bad_workbench.append(row.get("tool_id"))
