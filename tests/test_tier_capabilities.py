@@ -327,3 +327,15 @@ def test_copilot_capabilities_fail_closed_for_unknown_tier_context():
     assert not result["can_research"]
     assert not result["can_enterprise"]
     assert not result["can_professional"]
+
+
+
+def test_copilot_action_gate_enforces_new_hub_tool_tiers():
+    from shoir_tier_capabilities import copilot_gate
+
+    assert copilot_gate("open the 100-tool engineering hub", "Starter") is None
+    assert copilot_gate("calculate OEE", "Starter")["required_tier"] == "Mid-Tier Pro"
+    assert copilot_gate("calculate OEE", "Mid-Tier Pro") is None
+    assert copilot_gate("calculate MTBF", "Mid-Tier Pro")["required_tier"] == "Professional"
+    assert copilot_gate("calculate MTBF", "Professional") is None
+    assert copilot_gate("what is OEE?", "Starter") is None
