@@ -71,7 +71,7 @@ def test_forecast_drift_monitor_window_and_invalid_inputs():
     assert result["status"] == "WITHIN_THRESHOLD"
     with pytest.raises(ValueError, match="same number"):
         monitor_forecast_drift([1, 2], [1], max_mae=1)
-    with pytest.raises(ValueError, match="at least two"):
+    with pytest.raises(ValueError, match="[Aa]t least two"):
         monitor_forecast_drift([1], [1], max_mae=1)
     with pytest.raises(ValueError, match="negative"):
         monitor_forecast_drift([1, 2], [1, 2], max_mae=-0.5)
