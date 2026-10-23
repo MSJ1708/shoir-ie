@@ -308,3 +308,32 @@ def test_every_app_module_follows_the_shared_allow_deny_matrix_for_all_tiers():
             if tier_allows(current_tier, required_tier)
         }
         assert actual == expected, f"Tier policy mismatch for {current_tier}"
+
+
+
+def test_unmapped_module_fails_closed_in_available_modules_for_every_package():
+    unknown = "Unmapped capability that has no entitlement policy"
+    for tier in (
+        "Starter", "Mid-Tier Pro", "Professional", "Enterprise",
+        "Enterprise Plus", "Research Pack",
+    ):
+        assert available_modules(tier, [unknown]) == []
+
+
+def test_invalid_required_tier_fails_closed(monkeypatch):
+    module = "Temporary invalid policy test"
+    monkeypatch.setitem(MODULE_REQUIREMENTS, module, "Not a real subscription tier")
+    for tier in (
+        "Starter", "Mid-Tier Pro", "Professional", "Enterprise",
+        "Enterprise Plus", "Research Pack",
+    ):
+        assert available_modules(tier, [module]) == []
+    assert not tier_allows("Enterprise", "Not a real subscription tier")
+
+
+def test_known_tier_aliases_keep_the_existing_plan_contract():
+    assert tier_allows("Starter Tier", "Starter")
+    assert tier_allows("Enterprise Plus Tier ($399)", "Enterprise")
+    assert tier_allows("Research Pack ($30 add-on)", "Enterprise")
+    assert not tier_allows("Research Pack ($30 add-on)", "Enterprise Plus")
+    assert not tier_allows("Enterprise Plus Tier ($399)", "Research Pack")
