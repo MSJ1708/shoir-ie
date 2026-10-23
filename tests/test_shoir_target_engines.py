@@ -466,7 +466,7 @@ def test_inventory_policy_rejects_invalid_cost_demand_and_calendar():
 
     with pytest.raises(ValueError, match="Mean daily demand"):
         plan_inventory_policy(0, 1, 4, 50, 2)
-    with pytest.raises(ValueError, match="cost must both be greater"):
+    with pytest.raises(ValueError, match="must both be greater"):
         plan_inventory_policy(10, 1, 4, 0, 2)
     with pytest.raises(ValueError, match="Operating days"):
         plan_inventory_policy(10, 1, 4, 50, 2, operating_days_per_year=0)
@@ -483,7 +483,7 @@ def test_carbon_emissions_multiplier_requires_versioned_factor_provenance():
     assert result["status"] == "CALCULATED_FROM_USER_SUPPLIED_FACTOR"
     assert result["emissions_kg_co2e"] == pytest.approx(100.0)
     assert result["emissions_tonnes_co2e"] == pytest.approx(0.1)
-    assert "not audited" in result["warning"]
+    assert "not an audited" in result["warning"]
 
 
 def test_carbon_emissions_rejects_invalid_amount_factor_date_and_missing_boundary():
