@@ -205,7 +205,161 @@ if rows:
                     "Your data was not changed. Use the normal Workbench navigation."
                 )
 
-        if selected_id == "T066":
+        if selected_id == "T021":
+            st.warning("LIMITED VALIDATION MODE — these calculations do not replace a reviewed time-study protocol.")
+            st.markdown("### Time study and standard time")
+            st.caption("Enter observations in one consistent time unit. Demo observations are synthetic and should be replaced with approved study data.")
+            observations_text = st.text_input("Observed times (comma-separated; same unit)", "0.50, 0.60, 0.55", key="t021_observations")
+            rating = st.number_input("Performance rating (%)", min_value=0.01, max_value=300.0, value=110.0, step=1.0, key="t021_rating")
+            allowance = st.number_input("Allowance (%)", min_value=0.0, max_value=99.9, value=15.0, step=0.5, key="t021_allowance")
+            basis_label = st.selectbox("Allowance convention", ["Allowance as % of normal time", "Allowance as % of standard time"], key="t021_allowance_basis")
+            basis = "normal_time" if basis_label == "Allowance as % of normal time" else "standard_time"
+            signature = _fingerprint(observations_text, rating, allowance, basis)
+            saved = _run_engine_tool(
+                "T021", signature, "Calculate standard time",
+                lambda: calculate_standard_time(
+                    [float(part.strip()) for part in observations_text.split(",") if part.strip()],
+                    rating, allowance, allowance_basis=basis,
+                ),
+            )
+            if saved and saved["signature"] == signature:
+                m = saved["result"]["metrics"]
+                st.bar_chart(pd.DataFrame({"Time": [m["observed_mean"], m["normal_time"], m["standard_time"]]},
+                                          index=["Observed mean", "Normal time", "Standard time"]))
+
+        elif selected_id == "T023":
+            st.warning("LIMITED VALIDATION MODE — capacity is theoretical and excludes unmodelled downtime, yield loss and resource constraints.")
+            st.markdown("### Takt time and capacity")
+            st.caption("All time values are in minutes; available time, demand and cycle time must refer to the same production period.")
+            available_minutes = st.number_input("Net available time (minutes per period)", min_value=0.01, value=480.0, step=30.0, key="t023_available")
+            demand_units = st.number_input("Demand (units in that period)", min_value=0.01, value=400.0, step=10.0, key="t023_demand")
+            cycle_minutes = st.number_input("Measured cycle time (minutes per unit)", min_value=0.01, value=1.2, step=0.1, key="t023_cycle")
+            signature = _fingerprint(available_minutes, demand_units, cycle_minutes)
+            saved = _run_engine_tool(
+                "T023", signature, "Calculate takt and capacity",
+                lambda: calculate_takt_capacity(available_minutes, demand_units, cycle_minutes),
+            )
+            if saved and saved["signature"] == signature:
+                m = saved["result"]["metrics"]
+                st.bar_chart(pd.DataFrame({"Minutes": [m["takt_time_minutes_per_unit"], cycle_minutes]},
+                                          index=["Takt time", "Cycle time"]))
+                st.bar_chart(pd.DataFrame({"Units per period": [m["theoretical_capacity_units"], demand_units]},
+                                          index=["Theoretical capacity", "Demand"]))
+
+        elif selected_id == "T026":
+            st.warning("LIMITED VALIDATION MODE — OEE conventions differ by plant; confirm planned-time and ideal-cycle definitions first.")
+            st.markdown("### OEE and loss analysis")
+            st.caption("Time inputs use minutes except ideal cycle time, which uses seconds per unit. Counts must use the same production window.")
+            planned = st.number_input("Planned production time (minutes)", min_value=0.01, value=480.0, step=30.0, key="t026_planned")
+            downtime = st.number_input("Downtime inside planned time (minutes)", min_value=0.0, value=30.0, step=5.0, key="t026_downtime")
+            ideal_cycle = st.number_input("Ideal cycle time (seconds per unit)", min_value=0.01, value=30.0, step=1.0, key="t026_ideal_cycle")
+            total_count = st.number_input("Total units produced", min_value=1, value=800, step=10, key="t026_total")
+            good_count = st.number_input("Good units produced", min_value=0, value=760, step=10, key="t026_good")
+            signature = _fingerprint(planned, downtime, ideal_cycle, total_count, good_count)
+            saved = _run_engine_tool(
+                "T026", signature, "Calculate OEE and losses",
+                lambda: calculate_oee(planned, downtime, ideal_cycle, total_count, good_count),
+            )
+            if saved and saved["signature"] == signature:
+                m = saved["result"]["metrics"]
+                st.bar_chart(pd.DataFrame({"Percent": [m["availability_percent"], m["performance_percent"],
+                                                          m["quality_percent"], m["oee_percent"]]},
+                                          index=["Availability", "Performance", "Quality", "OEE"]))
+
+        elif selected_id == "T032":
+            st.warning("LIMITED VALIDATION MODE — capability indices assume rational subgroups and a representative process; normality/stability are not certified.")
+            st.markdown("### Process capability")
+            st.caption("Measurements must be in subgroup order. At least two complete subgroups are required.")
+            measurements_text = st.text_input("Measurements (comma-separated)", "9, 10, 11, 9, 10, 11", key="t032_measurements")
+            lsl = st.number_input("Lower specification limit (LSL)", value=6.0, step=0.5, key="t032_lsl")
+            usl = st.number_input("Upper specification limit (USL)", value=14.0, step=0.5, key="t032_usl")
+            subgroup_size = st.number_input("Subgroup size", min_value=2, max_value=50, value=3, step=1, key="t032_subgroup_size")
+            signature = _fingerprint(measurements_text, lsl, usl, subgroup_size)
+            saved = _run_engine_tool(
+                "T032", signature, "Calculate Cp, Cpk, Pp and Ppk",
+                lambda: calculate_process_capability(
+                    [float(part.strip()) for part in measurements_text.split(",") if part.strip()],
+                    lsl, usl, subgroup_size=int(subgroup_size),
+                ),
+            )
+            if saved and saved["signature"] == signature:
+                m = saved["result"]["metrics"]
+                st.bar_chart(pd.DataFrame({"Index": [m["Cp"], m["Cpk"], m["Pp"], m["Ppk"]]},
+                                          index=["Cp", "Cpk", "Pp", "Ppk"]))
+
+        elif selected_id == "T055":
+            st.warning("LIMITED VALIDATION MODE — inventory policy output depends on the demand, lead-time and service assumptions entered here.")
+            st.markdown("### EOQ, safety stock and reorder point")
+            annual_demand = st.number_input("Annual demand (units/year)", min_value=0.01, value=10000.0, step=500.0, key="t055_demand")
+            order_cost = st.number_input("Order cost (per order)", min_value=0.01, value=50.0, step=5.0, key="t055_order_cost")
+            holding_cost = st.number_input("Annual holding cost (per unit/year)", min_value=0.01, value=2.0, step=0.5, key="t055_holding")
+            lead_time = st.number_input("Lead time (working days)", min_value=0.0, value=5.0, step=1.0, key="t055_lead")
+            working_days = st.number_input("Working days per year", min_value=1.0, value=250.0, step=5.0, key="t055_working")
+            daily_std = st.number_input("Daily demand standard deviation (units/day)", min_value=0.0, value=3.0, step=0.5, key="t055_std")
+            z_value = st.number_input("One-sided service factor z (e.g. 1.645 ≈ 95%)", min_value=0.0, value=1.645, step=0.05, key="t055_z")
+            signature = _fingerprint(annual_demand, order_cost, holding_cost, lead_time, working_days, daily_std, z_value)
+            saved = _run_engine_tool(
+                "T055", signature, "Calculate inventory policy",
+                lambda: calculate_inventory_policy(
+                    annual_demand, order_cost, holding_cost, lead_time,
+                    working_days_per_year=working_days, daily_demand_std=daily_std, service_factor_z=z_value,
+                ),
+            )
+            if saved and saved["signature"] == signature:
+                m = saved["result"]["metrics"]
+                st.bar_chart(pd.DataFrame({"Units": [m["EOQ_units"], m["safety_stock_units"], m["reorder_point_units"]]},
+                                          index=["EOQ", "Safety stock", "Reorder point"]))
+
+        elif selected_id == "T078":
+            st.warning("LIMITED VALIDATION MODE — use a sourced, dated factor with a matching activity unit; this is not an audited carbon disclosure.")
+            st.markdown("### Carbon emissions calculator")
+            st.caption("No default emissions factor is supplied. You must provide its value, source, version, date and scope boundary.")
+            quantity = st.number_input("Activity quantity", min_value=0.0, value=0.0, step=1.0, key="t078_quantity")
+            factor = st.number_input("Factor (kg CO₂e per activity unit)", min_value=0.0, value=0.0, step=0.01, key="t078_factor")
+            unit = st.text_input("Activity unit (must match factor unit)", value="kWh", key="t078_unit")
+            factor_source = st.text_input("Factor source / citation", value="", key="t078_source")
+            factor_version = st.text_input("Factor version / dataset year", value="", key="t078_version")
+            factor_date = st.text_input("Factor date (YYYY-MM-DD)", value="", key="t078_date")
+            boundary = st.text_input("Reporting scope / boundary", value="", key="t078_boundary")
+            signature = _fingerprint(quantity, factor, unit, factor_source, factor_version, factor_date, boundary)
+            saved = _run_engine_tool(
+                "T078", signature, "Calculate supplied-factor emissions",
+                lambda: calculate_carbon_emissions(
+                    quantity, factor, activity_unit=unit, factor_source=factor_source,
+                    factor_version=factor_version, factor_date=factor_date, scope_boundary=boundary,
+                ),
+            )
+            if saved and saved["signature"] == signature:
+                m = saved["result"]["metrics"]
+                st.metric("Estimated emissions", f'{m["emissions_kg_co2e"]:,.3f} kg CO₂e')
+                st.caption(f'{m["emissions_tonnes_co2e"]:,.6f} metric tonnes CO₂e')
+
+        elif selected_id == "T081":
+            st.warning("LIMITED VALIDATION MODE — confirm cash-flow timing, currency and discount-rate convention before using the result.")
+            st.markdown("### Engineering economics")
+            st.caption("Enter cash flows in period order beginning at period 0. Demo values are synthetic.")
+            cash_flows_text = st.text_input("Cash flows (comma-separated; period 0 first)", "-1000, 500, 600", key="t081_flows")
+            discount_rate = st.number_input("Discount rate (% per period)", min_value=-99.0, max_value=10000.0, value=10.0, step=1.0, key="t081_discount")
+            currency_code = st.text_input("Three-letter currency code", value="SAR", max_chars=3, key="t081_currency")
+            period_unit = st.selectbox("Cash-flow period", ["year", "month", "quarter"], key="t081_period")
+            signature = _fingerprint(cash_flows_text, discount_rate, currency_code, period_unit)
+            saved = _run_engine_tool(
+                "T081", signature, "Calculate NPV, IRR and payback",
+                lambda: calculate_engineering_economics(
+                    [float(part.strip()) for part in cash_flows_text.split(",") if part.strip()],
+                    discount_rate, currency_code=currency_code, period_unit=period_unit,
+                ),
+            )
+            if saved and saved["signature"] == signature:
+                m = saved["result"]["metrics"]
+                if m.get("NPV") is not None:
+                    st.metric("Net present value", f'{m["NPV"]:,.2f} {saved["result"]["units"]["npv"]}')
+                if m.get("IRR_percent") is not None:
+                    st.metric("Internal rate of return", f'{m["IRR_percent"]:,.3f}%')
+                if m.get("simple_payback_periods") is not None:
+                    st.metric("Simple payback", f'{m["simple_payback_periods"]:,.3f} {period_unit}s')
+
+        elif selected_id == "T066":
             st.warning("LIMITED VALIDATION MODE — check the result against an independent reference before using it for an operational decision.")
             st.markdown("### Run bin packing")
             st.caption("Supported method: one-dimensional First-Fit Decreasing. This is a feasible heuristic, not proof of a minimum-bin optimum; cutting-stock patterns and 2-D/3-D packing are not supported.")
