@@ -1,6 +1,11 @@
-"""Validated first-pass deterministic engines for fourteen focused Shoir-IE targets.
+"""Validated first-pass deterministic engines for nineteen focused Shoir-IE targets.
 
 Scope:
+* T016 converts supported dimensional units and currencies only with a dated user-supplied rate.
+* T031 builds an Individuals/Moving-Range chart and reports points outside 3-sigma limits only.
+* T040 reconciles a scoped scrap/rework/inspection quality-cost estimate.
+* T042 calculates MTBF/MTTR from complete recorded failure/repair events.
+* T056 classifies inventory by explicit ABC cumulative-value and XYZ demand-CV thresholds.
 * T021 calculates observed, normal and allowance-adjusted standard time.
 * T022 estimates work-sampling proportions with individual Wilson confidence intervals.
 * T023 calculates takt time, implied capacity and capacity gap using one declared time basis.
@@ -1219,10 +1224,267 @@ def analyze_engineering_economics(
 
 
 
+def convert_units_or_currency(
+    amount: float, from_unit: str, to_unit: str, *,
+    exchange_rate: float | None = None, exchange_rate_date: str = "",
+    exchange_rate_source: str = "",
+) -> dict[str, Any]:
+    """Convert supported physical units or currencies using a dated user rate.
+
+    Currency rate means target-currency units per one source-currency unit.
+    The function never fetches, fabricates or implies a live exchange rate.
+    """
+    value = _finite_number(amount, "Value to convert")
+    source, target = str(from_unit or "").strip(), str(to_unit or "").strip()
+    if not source or not target:
+        raise ValueError("Source and target units or currencies are required.")
+    unit_defs = {
+        "mm": ("length", .001, "m"), "cm": ("length", .01, "m"),
+        "m": ("length", 1., "m"), "km": ("length", 1000., "m"),
+        "in": ("length", .0254, "m"), "ft": ("length", .3048, "m"),
+        "mi": ("length", 1609.344, "m"),
+        "mg": ("mass", 1e-6, "kg"), "g": ("mass", .001, "kg"),
+        "kg": ("mass", 1., "kg"), "lb": ("mass", .45359237, "kg"),
+        "oz": ("mass", .028349523125, "kg"),
+        "ms": ("time", .001, "s"), "s": ("time", 1., "s"),
+        "min": ("time", 60., "s"), "h": ("time", 3600., "s"),
+        "day": ("time", 86400., "s"),
+        "ml": ("volume", 1e-6, "m³"), "l": ("volume", .001, "m³"),
+        "m³": ("volume", 1., "m³"), "gal": ("volume", .003785411784, "m³"),
+        "wh": ("energy", 3600., "J"), "kwh": ("energy", 3.6e6, "J"),
+        "mj": ("energy", 1e6, "J"), "gj": ("energy", 1e9, "J"),
+        "pa": ("pressure", 1., "Pa"), "kpa": ("pressure", 1000., "Pa"),
+        "bar": ("pressure", 100000., "Pa"), "psi": ("pressure", 6894.757293168, "Pa"),
+    }
+    aliases = {
+        "millimeter": "mm", "millimeters": "mm", "centimeter": "cm",
+        "centimeters": "cm", "meter": "m", "meters": "m", "metre": "m",
+        "kilometer": "km", "kilometers": "km", "inch": "in", "inches": "in",
+        "foot": "ft", "feet": "ft", "mile": "mi", "miles": "mi",
+        "milligram": "mg", "gram": "g", "grams": "g", "kilogram": "kg",
+        "kilograms": "kg", "pound": "lb", "pounds": "lb", "ounce": "oz",
+        "second": "s", "seconds": "s", "minute": "min", "minutes": "min",
+        "hour": "h", "hours": "h", "days": "day", "milliliter": "ml",
+        "millilitre": "ml", "liter": "l", "litre": "l", "gallon": "gal",
+        "gallons": "gal", "cubic meter": "m³", "cubic metre": "m³",
+        "watt-hour": "wh", "kilowatt-hour": "kwh", "megajoule": "mj",
+        "gigajoule": "gj", "celsius": "°c", "fahrenheit": "°f", "kelvin": "k",
+    }
+    a = aliases.get(source.casefold(), source.casefold())
+    b = aliases.get(target.casefold(), target.casefold())
+    curr = {"sar","usd","eur","gbp","aed","inr","jpy","cny","kwd","bhd","qar","omr","egp","pkr","try","cad","aud","chf","sgd","krw"}
+    if a in curr or b in curr:
+        if a not in curr or b not in curr:
+            raise ValueError("Currency codes cannot be converted to physical units.")
+        if a == b:
+            return {"status":"CONVERTED_SAME_CURRENCY","method":"Same currency; no exchange rate required",
+                    "input_value":value,"source_unit":source.upper(),"target_unit":target.upper(),
+                    "converted_value":value,"exchange_rate_target_per_source":1.0,
+                    "exchange_rate_date":None,"exchange_rate_source":"Same currency; no external rate required",
+                    "formula":"Same source and target currency; value is unchanged.",
+                    "warning":"No currency exchange was performed."}
+        rate = _finite_number(exchange_rate, "Exchange rate") if exchange_rate is not None else math.nan
+        if not math.isfinite(rate) or rate <= 0:
+            raise ValueError("A positive exchange rate (target currency per source currency unit) is required.")
+        rate_source, date_text = str(exchange_rate_source or "").strip(), str(exchange_rate_date or "").strip()
+        if not rate_source:
+            raise ValueError("Exchange-rate source is required.")
+        try:
+            parsed = _date.fromisoformat(date_text)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Exchange-rate date must use ISO YYYY-MM-DD format.") from exc
+        if parsed.isoformat() != date_text:
+            raise ValueError("Exchange-rate date must use ISO YYYY-MM-DD format.")
+        return {"status":"CONVERTED_USING_USER_SUPPLIED_RATE","method":"Explicit user-supplied exchange rate",
+                "input_value":value,"source_unit":source.upper(),"target_unit":target.upper(),
+                "converted_value":value*rate,"exchange_rate_target_per_source":rate,
+                "exchange_rate_date":date_text,"exchange_rate_source":rate_source,
+                "formula":"Converted amount = source amount × (target currency units / source currency unit).",
+                "warning":"Rate metadata is user supplied and unverified; confirm quote direction, effective date, fees and accounting policy."}
+    temps = {"°c","°f","k","celsius","fahrenheit","kelvin"}
+    if a in temps or b in temps:
+        if a not in temps or b not in temps:
+            raise ValueError("Temperature units can only be converted to another temperature unit.")
+        if a in {"°c","celsius"}: kelvin=value+273.15
+        elif a in {"°f","fahrenheit"}: kelvin=(value-32)*(5/9)+273.15
+        else: kelvin=value
+        if kelvin < 0: raise ValueError("Absolute temperature cannot be below 0 K.")
+        if b in {"°c","celsius"}: converted=kelvin-273.15
+        elif b in {"°f","fahrenheit"}: converted=(kelvin-273.15)*(9/5)+32
+        else: converted=kelvin
+        dimension, formula = "temperature", "Convert source temperature to kelvin, then to target scale."
+    else:
+        sd, td = unit_defs.get(a), unit_defs.get(b)
+        if sd is None or td is None:
+            raise ValueError(f"Unsupported unit or currency: {source!r} or {target!r}.")
+        if sd[0] != td[0]:
+            raise ValueError(f"Incompatible dimensions: {sd[0]} cannot be converted to {td[0]}.")
+        dimension=sd[0]
+        converted=value*sd[1]/td[1]
+        formula=f"Converted value = input × {sd[1]:g} / {td[1]:g} using base unit {sd[2]}."
+    return {"status":"CONVERTED","method":"Dimension-checked fixed-factor conversion",
+            "input_value":value,"source_unit":source,"target_unit":target,
+            "converted_value":converted,"dimension":dimension,"formula":formula,
+            "warning":"Confirm significant figures, standards and rounding before regulated reporting."}
+
+
+def analyze_spc_individuals(measurements: Sequence[float], *, unit: str = "units") -> dict[str, Any]:
+    """Build Individuals/Moving-Range control limits; detect points outside limits only."""
+    if isinstance(measurements, (str, bytes)): raise ValueError("Measurements must be a numeric sequence, not text.")
+    try: raw=list(measurements)
+    except TypeError as exc: raise ValueError("Measurements must be a numeric sequence.") from exc
+    if len(raw)<3: raise ValueError("Provide at least three consecutive measurements for an Individuals chart.")
+    if any(isinstance(v,bool) for v in raw): raise ValueError("Measurements must be numeric values, not booleans.")
+    values=[_finite_number(v,"SPC measurement") for v in raw]
+    normalized_unit=str(unit or "").strip()
+    if not normalized_unit: raise ValueError("Measurement unit must be provided explicitly.")
+    mr=[None]+[abs(values[i]-values[i-1]) for i in range(1,len(values))]
+    mrbar=sum(float(v) for v in mr[1:])/(len(values)-1)
+    if mrbar<=0: raise ValueError("Moving-range average is zero; an Individuals sigma estimate cannot be established.")
+    mean=sum(values)/len(values)
+    sigma=mrbar/1.128
+    ucl, lcl=mean+3*sigma, mean-3*sigma
+    mrucl=3.267*mrbar
+    i_signals=[i+1 for i,v in enumerate(values) if v>ucl or v<lcl]
+    mr_signals=[i+1 for i,v in enumerate(mr[1:],start=1) if float(v)>mrucl]
+    chart=pd.DataFrame({
+        "Observation":range(1,len(values)+1),f"Measurement ({normalized_unit})":values,
+        f"I center ({normalized_unit})":[mean]*len(values),f"I UCL ({normalized_unit})":[ucl]*len(values),
+        f"I LCL ({normalized_unit})":[lcl]*len(values),"Moving range":mr,
+        "MR center":[mrbar]*len(values),"MR UCL":[mrucl]*len(values),"MR LCL":[0.]*len(values)})
+    return {"status":"POINTS_OUTSIDE_CONTROL_LIMITS" if i_signals or mr_signals else "NO_POINT_OUTSIDE_CALCULATED_LIMITS",
+            "method":"Individuals/Moving-Range chart: d2=1.128, D4=3.267, D3=0; 3-sigma I limits.",
+            "sample_count":len(values),"unit":normalized_unit,"mean":mean,"moving_range_average":mrbar,
+            "estimated_within_sigma":sigma,"individuals_ucl":ucl,"individuals_lcl":lcl,
+            "moving_range_ucl":mrucl,"moving_range_lcl":0.,"individuals_signal_observations":i_signals,
+            "moving_range_signal_end_observations":mr_signals,"chart_data":chart,
+            "formula":"I limits=grand mean ± 3×(average moving range/1.128); MR UCL=3.267×average moving range; MR LCL=0.",
+            "assumptions":"Chronological measurements from a consistent process and measurement system. Control limits are not specification limits.",
+            "warning":"Only points beyond the calculated 3-sigma limits are detected; no Nelson/Western Electric rules, normality check or stability certification is performed."}
+
+
+def analyze_quality_cost_defects(
+    total_units: float, defective_units: float, scrap_units: float, rework_units: float,
+    scrap_cost_per_unit: float, rework_cost_per_unit: float, inspection_cost: float, *,
+    currency: str = "SAR", period: str = "unspecified period",
+) -> dict[str, Any]:
+    """Reconcile scrap, rework and inspection costs using explicit disjoint dispositions."""
+    nums=[_finite_number(v,n) for v,n in [
+        (total_units,"Total produced units"),(defective_units,"Defective units"),(scrap_units,"Scrap units"),
+        (rework_units,"Rework units"),(scrap_cost_per_unit,"Scrap cost per unit"),
+        (rework_cost_per_unit,"Rework cost per unit"),(inspection_cost,"Inspection cost")]]
+    totalv, defectv, scrapv, reworkv, scraprate, reworkrate, inspect=nums
+    curr, period_text=str(currency or "").strip().upper(),str(period or "").strip()
+    if totalv<=0 or not totalv.is_integer(): raise ValueError("Total produced units must be a positive whole number.")
+    if any(v<0 or not v.is_integer() for v in (defectv,scrapv,reworkv)): raise ValueError("Defect, scrap and rework counts must be non-negative whole numbers.")
+    if defectv>totalv: raise ValueError("Defective units cannot exceed total produced units.")
+    if scrapv+reworkv>defectv: raise ValueError("Scrap and rework dispositions cannot exceed the defective-unit count.")
+    if any(v<0 for v in (scraprate,reworkrate,inspect)): raise ValueError("Unit costs and inspection cost cannot be negative.")
+    if not curr or not period_text: raise ValueError("Currency and period must be provided.")
+    total,defective,scrap,rework=map(int,(totalv,defectv,scrapv,reworkv))
+    sc=scrap*scraprate; rc=rework*reworkrate; copq=sc+rc+inspect
+    breakdown=pd.DataFrame([
+        {"Cost component":"Scrap",f"Cost ({curr})":sc},
+        {"Cost component":"Rework",f"Cost ({curr})":rc},
+        {"Cost component":"Inspection",f"Cost ({curr})":inspect}])
+    return {"status":"CALCULATED","method":"Scoped COPQ proxy = scrap + rework + inspection cost",
+            "period":period_text,"currency":curr,"total_units":total,"defective_units":defective,
+            "scrap_units":scrap,"rework_units":rework,"defective_rate_pct":defective/total*100,
+            "scrap_rate_pct":scrap/total*100,"rework_rate_pct":rework/total*100,
+            "scrap_cost":sc,"rework_cost":rc,"inspection_cost":inspect,"cost_of_poor_quality":copq,
+            "copq_per_produced_unit":copq/total,"cost_breakdown":breakdown,
+            "formula":"COPQ proxy=scrap units×scrap cost/unit + rework units×rework cost/unit + inspection cost.",
+            "assumptions":"Scrap and rework are mutually exclusive dispositions among defective units; costs share one currency/period.",
+            "warning":"This scoped estimate excludes warranty, returns, prevention, other appraisal and opportunity costs; it is not a complete quality-cost ledger."}
+
+
+def analyze_mtbf_mttr(operating_hours: float, repair_durations_hours: Sequence[float]) -> dict[str, Any]:
+    """Calculate MTBF and MTTR from complete recorded failures and repairs."""
+    operating=_finite_number(operating_hours,"Accumulated operating hours")
+    if operating<=0: raise ValueError("Accumulated operating hours must be greater than zero.")
+    if isinstance(repair_durations_hours,(str,bytes)): raise ValueError("Repair durations must be a numeric sequence, not text.")
+    try: raw=list(repair_durations_hours)
+    except TypeError as exc: raise ValueError("Repair durations must be a numeric sequence.") from exc
+    if not raw: raise ValueError("Provide at least one observed failure repair duration.")
+    if any(isinstance(v,bool) for v in raw): raise ValueError("Repair durations must be numeric values, not booleans.")
+    durations=[_finite_number(v,"Repair duration") for v in raw]
+    if any(v<0 for v in durations): raise ValueError("Repair durations cannot be negative.")
+    count=len(durations); mtbf=operating/count; mttr=sum(durations)/count
+    availability=mtbf/(mtbf+mttr) if mtbf+mttr>0 else None
+    frame=pd.DataFrame({"Failure event":range(1,count+1),"Repair duration (hours)":durations})
+    return {"status":"CALCULATED","method":"MTBF=operating hours/recorded failures; MTTR=mean recorded repair duration.",
+            "operating_hours":operating,"failure_count":count,"total_repair_hours":sum(durations),
+            "mtbf_hours":mtbf,"mttr_hours":mttr,
+            "steady_state_availability_estimate_pct":availability*100 if availability is not None else None,
+            "repair_summary":frame,"formula":"MTBF=operating hours/failures; MTTR=Σ repair duration/failures; availability approximation=MTBF/(MTBF+MTTR).",
+            "assumptions":"Complete recorded failures/repairs only; operating hours exclude repair downtime; censoring and incomplete windows are not modeled.",
+            "warning":"Availability is a simplified steady-state estimate. Validate failure definitions, asset boundary and observation window."}
+
+
+def analyze_abc_xyz_inventory(
+    items: Sequence[Mapping[str, Any]], *, a_threshold: float=.80, b_threshold: float=.95,
+    x_cv_max: float=.50, y_cv_max: float=1.0, currency: str="SAR",
+) -> dict[str, Any]:
+    """Classify SKUs by annual usage value (ABC) and population demand CV (XYZ)."""
+    if isinstance(items,(str,bytes)): raise ValueError("Inventory items must be structured SKU records, not text.")
+    try: raw=list(items)
+    except TypeError as exc: raise ValueError("Inventory items must be a sequence of records.") from exc
+    if not raw: raise ValueError("Provide at least one SKU record.")
+    ac,bc,xc,yc=(_finite_number(a_threshold,"A threshold"),_finite_number(b_threshold,"B threshold"),
+                   _finite_number(x_cv_max,"X CV threshold"),_finite_number(y_cv_max,"Y CV threshold"))
+    curr=str(currency or "").strip().upper()
+    if not (0<ac<bc<=1): raise ValueError("ABC thresholds must satisfy 0 < A threshold < B threshold <= 1.")
+    if xc<0 or yc<=xc: raise ValueError("Variability thresholds must satisfy 0 <= X threshold < Y threshold.")
+    if not curr: raise ValueError("Currency code is required.")
+    records=[]; seen=set(); histlen=None
+    for item in raw:
+        if not isinstance(item,Mapping): raise ValueError("Each SKU must be an object containing sku, annual_demand, unit_cost and period_demand.")
+        sku=str(item.get("sku") or "").strip()
+        if not sku: raise ValueError("Every SKU must have a non-empty identifier.")
+        if sku.casefold() in seen: raise ValueError(f"Duplicate SKU identifier: {sku}.")
+        seen.add(sku.casefold())
+        demand=_finite_number(item.get("annual_demand"),f"Annual demand for {sku}")
+        cost=_finite_number(item.get("unit_cost"),f"Unit cost for {sku}")
+        history=item.get("period_demand")
+        if not isinstance(history,Sequence) or isinstance(history,(str,bytes)) or len(history)<2:
+            raise ValueError(f"SKU {sku} needs at least two period_demand observations.")
+        if histlen is None: histlen=len(history)
+        if len(history)!=histlen: raise ValueError("All SKUs must use the same number of historical demand periods.")
+        vals=[_finite_number(v,f"Demand observation for {sku}") for v in history]
+        if demand<0 or cost<0 or any(v<0 for v in vals): raise ValueError("Demand and unit costs cannot be negative.")
+        mean=sum(vals)/len(vals)
+        cv=(math.sqrt(sum((v-mean)**2 for v in vals)/len(vals))/mean) if mean>0 else None
+        xyz="X" if cv is not None and cv<=xc else "Y" if cv is not None and cv<=yc else "Z"
+        records.append({"SKU":sku,"Annual demand (units)":demand,f"Unit cost ({curr})":cost,
+                        f"Annual usage value ({curr})":demand*cost,"Mean demand per period":mean,
+                        "Demand CV (population)":cv,"XYZ":xyz})
+    key=f"Annual usage value ({curr})"; total_value=sum(r[key] for r in records)
+    if total_value<=0: raise ValueError("Total annual usage value must be greater than zero for ABC classification.")
+    records.sort(key=lambda r:(-r[key],r["SKU"].casefold()))
+    cumulative=0.
+    for r in records:
+        prior=cumulative; share=r[key]/total_value; cumulative+=share
+        r["Annual usage share (%)"]=share*100; r["Cumulative usage value (%)"]=cumulative*100
+        r["ABC"]="A" if prior<ac else "B" if prior<bc else "C"
+        r["ABC/XYZ class"]=f"{r['ABC']}-{r['XYZ']}"
+    return {"status":"CALCULATED","method":"ABC by descending annual usage value; XYZ by population CV of aligned demand periods.",
+            "sku_count":len(records),"currency":curr,"annual_usage_value_total":total_value,
+            "a_threshold_pct":ac*100,"b_threshold_pct":bc*100,"x_cv_max":xc,"y_cv_max":yc,
+            "classification":pd.DataFrame(records),
+            "formula":"Annual usage value=annual demand×unit cost; ABC uses cumulative value; CV=population SD(period demand)/mean period demand.",
+            "assumptions":"SKU costs share a currency; annual demand is consistently defined; histories have matching period frequencies; cutoffs are explicit.",
+            "warning":"This segmentation does not determine reorder quantities or certify service levels. Review seasonality, criticality, lead time and data completeness."}
+
+
 __all__ = [
     "analyze_work_sampling",
     "analyze_pareto_root_cause",
     "assess_5s_audit",
+    "convert_units_or_currency",
+    "analyze_spc_individuals",
+    "analyze_quality_cost_defects",
+    "analyze_mtbf_mttr",
+    "analyze_abc_xyz_inventory",
     "calculate_oee",
     "analyze_process_capability",
     "plan_inventory_policy",
