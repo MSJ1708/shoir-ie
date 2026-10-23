@@ -71,5 +71,16 @@ def test_only_end_to_end_verified_targets_pass_execution_readiness():
 
 def test_registry_filters_and_copies_are_safe():
     assert any(r["tool_id"] == "T065" for r in list_target_tools(workbench="Optimization and facilities"))
-    assert {r["tool_id"] for r in list_target_tools(status="MISSING")} == {"T066","T076"}
+    assert list_target_tools(status="MISSING") == []
     assert len(list_target_tools(search="Cpk")) >= 1
+
+def test_registry_exposes_full_contract_metadata_for_every_target():
+    for row in TOOL_TARGETS:
+        for key in ("persistence_scope", "external_dependency", "entitlement_enforcement_points",
+                    "unit_test_id", "integration_test_id", "browser_test_id",
+                    "acceptance_gate_id", "evidence_state"):
+            assert row.get(key), (row["tool_id"], key)
+    assert get_target_tool("T066")["implementation_status"] == "IMPLEMENTED_NEEDS_VALIDATION"
+    assert get_target_tool("T076")["implementation_status"] == "IMPLEMENTED_NEEDS_VALIDATION"
+    assert "shoir_100_tool_engines.py" in get_target_tool("T066")["source_files"]
+    assert "shoir_100_tool_engines.py" in get_target_tool("T076")["source_files"]
