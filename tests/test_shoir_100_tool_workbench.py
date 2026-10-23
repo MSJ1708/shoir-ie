@@ -28,6 +28,12 @@ from shoir_100_tool_workbench import (
     takt_time_capacity,
     time_study_standard_time,
     work_sampling_interval,
+    oee_analysis,
+    process_capability,
+    mtbf_mttr_analysis,
+    inventory_policy,
+    carbon_emissions,
+    engineering_economics,
 )
 from shoir_tier_capabilities import available_modules, tier_allows
 
@@ -231,3 +237,105 @@ def test_machine_readable_matrix_has_all_ids_and_does_not_overstate_browser_evid
     assert all(row["browser_test"] == "UNVERIFIED" for row in rows)
     assert not any(row["implementation_status"] == "VERIFIED_WORKING" for row in rows)
     assert all(row["remaining_gap"].strip() for row in rows)
+
+
+
+def test_oee_golden_fixture_and_invalid_time_boundaries():
+    result = oee_analysis(
+        planned_production_time=480,
+        downtime=45,
+        ideal_cycle_time=0.5,
+        total_count=800,
+        good_count=784,
+    )
+    metrics = result["metrics"]
+    assert metrics["operating_time"] == pytest.approx(435)
+    assert metrics["availability_pct"] == pytest.approx(90.625)
+    assert metrics["performance_pct"] == pytest.approx((0.5 * 800 / 435) * 100)
+    assert metrics["quality_pct"] == pytest.approx(98.0)
+    assert metrics["oee_pct"] == pytest.approx(81.6908, abs=0.001)
+    with pytest.raises(ValueError, match="Downtime"):
+        oee_analysis(100, 101, 1, 50, 49)
+    with pytest.raises(ValueError, match="good output"):
+        oee_analysis(100, 10, 1, 50, 51)
+
+
+def test_process_capability_hand_fixture_and_signed_measurements():
+    values = [-1.0, 0.0, 1.0, 0.0, 0.0]
+    result = process_capability(values, -3.0, 3.0, within_subgroup_sigma=1.0)
+    metrics = result["metrics"]
+    assert metrics["mean"] == pytest.approx(0.0)
+    assert metrics["Cp"] == pytest.approx(1.0)
+    assert metrics["Cpk"] == pytest.approx(1.0)
+    assert metrics["Pp"] == pytest.approx(3 / (6 * (math.sqrt(0.5))))
+    assert metrics["Ppk"] == pytest.approx(metrics["Pp"])
+    with pytest.raises(ValueError, match="below upper"):
+        process_capability([1, 2, 3], 5, 4)
+    with pytest.raises(ValueError, match="non-zero variation"):
+        process_capability([5, 5, 5], 0, 10)
+
+
+def test_mtbf_mttr_golden_fixture_and_failure_count_reconciliation():
+    result = mtbf_mttr_analysis(1000, 5, "2, 1.5, 3, 2.5, 1")
+    metrics = result["metrics"]
+    assert metrics["MTBF_hours"] == pytest.approx(200)
+    assert metrics["MTTR_hours"] == pytest.approx(2)
+    assert metrics["inherent_availability_pct"] == pytest.approx(200 / 202 * 100)
+    with pytest.raises(ValueError, match="one positive repair-duration"):
+        mtbf_mttr_analysis(1000, 2, "1, 2, 3")
+
+
+def test_inventory_policy_golden_fixture_and_parameter_validation():
+    result = inventory_policy(12000, 50, 2, 40, 5, 5, 1.96)
+    metrics = result["metrics"]
+    assert metrics["EOQ_units"] == pytest.approx(math.sqrt(600000))
+    assert metrics["mean_lead_time_demand_units"] == pytest.approx(200)
+    assert metrics["safety_stock_units"] == pytest.approx(1.96 * 5 * math.sqrt(5))
+    assert metrics["reorder_point_units"] == pytest.approx(200 + 1.96 * 5 * math.sqrt(5))
+    with pytest.raises(ValueError, match="must all be positive"):
+        inventory_policy(0, 50, 2, 40, 5, 5, 1.96)
+
+
+def test_carbon_emissions_golden_fixture_requires_factor_provenance():
+    result = carbon_emissions(1000, 0.42, "kWh", "kg CO2e", "Test factor set", "2026-10-23")
+    assert result["metrics"]["total_emissions"] == pytest.approx(420)
+    assert result["factor_source"] == "Test factor set"
+    with pytest.raises(ValueError, match="source and date"):
+        carbon_emissions(1000, 0.42, "kWh", "kg CO2e", "", "")
+
+
+def test_engineering_economics_npv_and_payback_golden_fixture():
+    result = engineering_economics([-1000, 300, 350, 400, 450], 8)
+    metrics = result["metrics"]
+    expected_npv = -1000 + 300 / 1.08 + 350 / (1.08 ** 2) + 400 / (1.08 ** 3) + 450 / (1.08 ** 4)
+    assert metrics["NPV"] == pytest.approx(expected_npv)
+    assert metrics["simple_payback_periods"] == pytest.approx(3 - 50 / 400)
+    assert metrics["discounted_payback_periods"] is not None
+    assert any("IRR is not calculated" in warning for warning in result["warnings"])
+    with pytest.raises(ValueError, match="at least a period-0"):
+        engineering_economics([-1000], 8)
+
+
+@pytest.mark.parametrize(
+    ("tier", "tool_id", "inputs"),
+    [
+        ("Mid-Tier Pro", "T026", {"planned_production_time": 480, "downtime": 45, "ideal_cycle_time": 0.5, "total_count": 800, "good_count": 784}),
+        ("Mid-Tier Pro", "T032", {"measurements": "-1,0,1,0,0", "lower_spec_limit": -3, "upper_spec_limit": 3, "within_subgroup_sigma": 1}),
+        ("Professional", "T042", {"operating_hours": 1000, "failure_count": 5, "repair_hours": "2,1,3,2,1"}),
+        ("Mid-Tier Pro", "T055", {"annual_demand": 12000, "order_cost": 50, "annual_holding_cost_per_unit": 2, "daily_demand_mean": 40, "daily_demand_sigma": 5, "lead_time_days": 5, "service_factor_z": 1.96}),
+        ("Mid-Tier Pro", "T078", {"activity_quantity": 100, "emission_factor": 0.4, "quantity_unit": "kWh", "emission_unit": "kg CO2e", "factor_source": "fixture", "factor_date": "2026-10-23"}),
+        ("Mid-Tier Pro", "T081", {"cash_flows": "-100,50,60", "discount_rate_pct": 8}),
+    ],
+)
+def test_added_quick_engines_dispatch_through_stable_tool_ids_and_tier_gates(tier, tool_id, inputs):
+    result = run_tool_calculation(tier, tool_id, inputs)
+    assert result["tool_id"] == tool_id
+    assert result["status"] == "CALCULATED"
+    assert result["required_tier"] == TOOL_BY_ID[tool_id]["minimum_tier"]
+
+
+def test_oee_and_capability_cannot_be_run_below_declared_minimum_tier():
+    with pytest.raises(ToolEntitlementError):
+        run_tool_calculation("Starter", "T026", {"planned_production_time": 480, "downtime": 45, "ideal_cycle_time": 0.5, "total_count": 800, "good_count": 784})
+    with pytest.raises(ToolEntitlementError):
+        run_tool_calculation("Starter", "T032", {"measurements": "1,2,3", "lower_spec_limit": 0, "upper_spec_limit": 4})
