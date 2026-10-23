@@ -236,7 +236,10 @@ def target_tool_execution_decision(tool_id_or_name: str, current_tier: str | Non
 def audit_target_tool_registry() -> dict[str, Any]:
     required_fields = ("tool_id","canonical_name","workbench","target_minimum_tier",
                        "existing_module_or_route","implementation_status","calculation_or_action",
-                       "input_contract","output_contract","source_files","remaining_gap")
+                       "input_contract","output_contract","source_files","remaining_gap",
+                       "persistence_scope","external_dependency","entitlement_enforcement_points",
+                       "unit_test_id","integration_test_id","browser_test_id",
+                       "acceptance_gate_id","evidence_state")
     ids = [row.get("tool_id","") for row in TOOL_TARGETS]
     missing, bad_status, bad_tier, bad_workbench = [], [], [], []
     for row in TOOL_TARGETS:
