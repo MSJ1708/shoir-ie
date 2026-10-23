@@ -27,7 +27,7 @@ This section supersedes the earlier commit/version references below for the Edge
 | Throttle permissions | **PASS — live privilege query** | `anon` and `authenticated` lack SELECT on `shoir_login_throttle` and EXECUTE on the throttle RPC; `service_role` retains EXECUTE. No synthetic throttle rows were created during this inspection. |
 | Master administrator invariant | **PASS — live record read after deployment** | Existing record remains active, role `Enterprise Admin`, tier `Enterprise Plus Tier ($399)`, expiry `2099-01-01 UTC`. No password, identity, role or workspace mutation was performed. |
 | Authenticated sign-in/renewal/workspace isolation | **OPEN — not end-to-end verified** | Requires the manually dispatched authenticated workflow with dedicated `shoir-e2e-*` accounts and protected GitHub Actions secrets. |
-| Full 96-module browser matrix and real file round trips | **OPEN — not established by this repair** | Must be completed against the deployed app, with module-specific outputs, entitlement denials and reopened output artifacts recorded. |
+| Full 97-module browser matrix and real file round trips | **OPEN — not established by this repair** | Must be completed against the deployed app, with module-specific outputs, entitlement denials and reopened output artifacts recorded. |
 | Streamlit deployed revision | **UNVERIFIED** | The Edge Function deployment does not prove which Git revision Streamlit Cloud is serving. Confirm the live application build and run authenticated browser verification. |
 
 ## Current verification record — 2026-10-19
@@ -141,7 +141,7 @@ Evidence: [GitHub Actions run 39276620207](https://github.com/MSJ1708/shoir-ie/a
 
 This closes the previously failing **public startup/shell smoke**. The previous redacted Streamlit ImportError no longer appeared in the post-merge run. The exact internal exception from the earlier redacted runtime was not available in the public page, so the record does not claim a specific missing symbol was observed. PR #147 replaces the fragile direct multi-name import with an explicit durable-store API contract check and a fail-closed diagnostic if the module or required functions are unavailable.
 
-**Scope limitation:** these checks verify the public unauthenticated entry screen, registration form rendering and public module-explorer content only. Authenticated login/logout, subscription decisions, all 96 engineering modules, tier enforcement, real file round trips, cross-account isolation, migration rollout and disaster recovery remain open. The smoke report also recorded some nonfatal 404 requests from analytics/Streamlit endpoints; they did not trigger the fatal application-error gate, but should be reviewed separately if they affect product telemetry.
+**Scope limitation:** these checks verify the public unauthenticated entry screen, registration form rendering and public module-explorer content only. Authenticated login/logout, subscription decisions, all 97 engineering modules, tier enforcement, real file round trips, cross-account isolation, migration rollout and disaster recovery remain open. The smoke report also recorded some nonfatal 404 requests from analytics/Streamlit endpoints; they did not trigger the fatal application-error gate, but should be reviewed separately if they affect product telemetry.
 
 ## Candidate registration and atomic subscription decisions — 2026-10-19
 
@@ -201,7 +201,7 @@ Supabase project `shoir-ie-production` is `ACTIVE_HEALTHY` on PostgreSQL 17.6.1.
 
 ### Current release gate interpretation
 
-- Current source inventory: **96 unique module names**.
+- Current source inventory: **97 unique module names** (including the new grouped Engineering Tool Library; browser acceptance remains unverified).
 - Authenticated browser status for every inventory entry: **UNVERIFIED**.
 - Authenticated account lifecycle, live entitlement-denial tests, real import/export round trips, durable workspace restoration, full migration replay, production function compatibility and disaster recovery: **OPEN / BLOCKED / NOT RUN** as appropriate.
 - The main master administrator invariant: **PASS by read-only query**.
