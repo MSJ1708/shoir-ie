@@ -4,6 +4,8 @@ import math
 
 import pytest
 
+from shoir_tier_capabilities import tier_allows
+
 from shoir_100_tool_hub import (
     CALCULATOR_IDS,
     calculate_carbon_emissions,
@@ -131,3 +133,37 @@ def test_calculate_economics_golden_case_and_irr_root():
     assert independent_irr_npv == pytest.approx(0, abs=0.01)
     with pytest.raises(ValueError, match="nonnegative"):
         calculate_economics(100, [200, -10], 5)
+
+
+
+def test_100_tool_tier_truth_table_covers_all_six_packages_independently():
+    rows = load_tool_registry()
+    ordinary = {
+        "Starter": 0,
+        "Mid-Tier Pro": 1,
+        "Professional": 2,
+        "Enterprise": 3,
+        "Enterprise Plus": 4,
+    }
+    packages = ["Starter", "Mid-Tier Pro", "Professional", "Enterprise", "Enterprise Plus", "Research Pack"]
+
+    def expected_allow(current, required):
+        if required == "Research Pack":
+            return current == "Research Pack"
+        if current == "Research Pack":
+            return required in ordinary and ordinary[required] <= ordinary["Enterprise"]
+        return required in ordinary and ordinary[current] >= ordinary[required]
+
+    assert len(rows) == 100
+    for row in rows:
+        required = row["target_minimum_tier"]
+        assert required in set(ordinary) | {"Research Pack"}
+        for current in packages:
+            assert tier_allows(current, required) is expected_allow(current, required), (
+                row["tool_id"], row["canonical_name"], current, required
+            )
+
+    # Explicitly preserve the add-on boundary in both directions.
+    assert not tier_allows("Research Pack", "Enterprise Plus")
+    assert not tier_allows("Enterprise Plus", "Research Pack")
+    assert tier_allows("Research Pack", "Enterprise")
