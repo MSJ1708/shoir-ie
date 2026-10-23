@@ -221,15 +221,10 @@ def tier_allows(current: str, required: str) -> bool:
     Enterprise Plus-only tier. Keep research entitlement independent from
     the ordinary tier ladder so one package never implies another add-on.
     """
-    raw_required = str(required or "").strip().lower()
-    recognized_required = (
-        "research" in raw_required
-        or "enterprise" in raw_required
-        or "professional" in raw_required
-        or "starter" in raw_required
-        or re.search(r"\bpro\b", raw_required) is not None
-    )
-    if not recognized_required:
+    raw_required = re.sub(r"\s*\([^)]*\)\s*$", "", str(required or "").strip().lower()).strip()
+    raw_required = re.sub(r"\s+tier$", "", raw_required).strip()
+    recognized_tiers = {tier.lower() for tier in TIER_ORDER}
+    if raw_required not in recognized_tiers:
         return False
 
     current_tier = normalize_tier(current)
