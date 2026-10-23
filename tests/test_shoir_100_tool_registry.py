@@ -46,6 +46,14 @@ def test_unknown_tool_and_unknown_tier_fail_closed():
         assert target_tool_access_decision("T001", tier)["allowed"] is False
     assert target_tool_execution_decision("T101", "Enterprise")["executable"] is False
 
+def test_existing_subscription_display_labels_resolve_to_exact_tiers():
+    for tier in ("Starter Tier ($29)", "Starter Tier", "Mid-Tier Pro Tier ($79)",
+                 "Professional Tier ($129)", "Enterprise Tier ($199)",
+                 "Enterprise Plus Tier ($399)", "Research Pack (+$30)"):
+        assert target_tool_access_decision("T001", tier)["allowed"] is True
+    assert target_tool_access_decision("T074", "Research Pack (+$30)")["allowed"] is False
+    assert target_tool_access_decision("T074", "Enterprise Plus Tier ($399)")["allowed"] is True
+
 def test_display_label_customization_cannot_mutate_identity_or_policy():
     row = get_target_tool("T065")
     assert row is not None and row["canonical_name"] == "Facility Layout and SLP Studio"
