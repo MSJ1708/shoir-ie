@@ -744,7 +744,7 @@ def local_account_exists(username):
 # =====================================================================
 TERMS_VERSION = "2026-10-21-beta-v1"
 PRIVACY_POLICY_VERSION = "2026-10-21-v1"
-REFUND_POLICY_VERSION = "2026-10-21-v1"
+REFUND_POLICY_VERSION = "2026-10-23-v2"
 COOKIE_POLICY_VERSION = "2026-10-21-v1"
 
 PRIVACY_POLICY_TEXT = """
@@ -844,10 +844,12 @@ Material changes will be reflected in a new version and date. Where required by 
 """
 
 REFUND_POLICY_TEXT = """
-**Last updated:** October 21, 2026
-**Version:** 2026-10-21-v1
+**Last updated:** October 23, 2026  
+**Version:** 2026-10-23-v2
 
 Payments are reviewed manually; STC Pay QR is a separate payment step, not an integrated card checkout. Refund requests are assessed under applicable law and mandatory consumer rights. Nothing in this policy waives rights that cannot lawfully be waived.
+
+**Statutory rights are preserved.** Nothing in this policy limits mandatory cancellation, rescission, refund or other consumer rights under applicable Saudi law. Article 13 of the Saudi E-Commerce Law describes circumstances in which a consumer may rescind an electronic service contract within a statutory period, subject to conditions and exceptions (including rules relating to whether a service has been used or benefited from, and used software). Eligibility depends on the service and the specific circumstances. This policy is not a blanket denial of statutory rights or a guarantee that every request qualifies; Saudi-qualified counsel must confirm this wording before paid consumer access.
 
 Contact **shoirtheagent@gmail.com** with your username, payment reference, amount, date and a short description of the issue. Do not email passwords, card details, one-time codes or unnecessary identity documents.
 
