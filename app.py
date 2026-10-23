@@ -2113,6 +2113,13 @@ if not st.session_state.get("current_user"):
                                 key=f"explore_open_target_{_target_tool_id}",
                                 use_container_width=True,
                             ):
+                                # Clear persisted filters so the selected target is present
+                                # in the Workbench selector, and expand its readiness directory.
+                                st.session_state["shoir_100_tool_query"] = ""
+                                st.session_state["shoir_100_tool_workbench"] = "All workbenches"
+                                st.session_state["shoir_100_tool_status"] = "All statuses"
+                                st.session_state.pop("shoir_pending_tool_module", None)
+                                st.session_state["shoir_expand_target_directory"] = True
                                 st.session_state["shoir_100_tool_inspector"] = (
                                     f"{_target_tool_id} · {str(_m.get('name', '')).split(' · ', 1)[-1]}"
                                 )
