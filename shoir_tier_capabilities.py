@@ -212,38 +212,62 @@ COPILOT_TOOL_REQUIREMENTS = {
 }
 
 
-def normalize_tier(value: str) -> str:
-    v = str(value or "Starter").strip().lower()
-    if "research" in v:
-        return "Research Pack"
-    if "enterprise plus" in v or "industrial enterprise" in v:
-        return "Enterprise Plus"
-    if "enterprise" in v:
+def normalize_tier(value: str | None) -> str:
+    """Resolve recognized plan labels exactly; unknown labels remain unresolved.
+
+    This parser is used by authorization code, not just display formatting.
+    Never turn an arbitrary/invalid label into Starter or a higher paid tier.
+    """
+    raw = re.sub(r"\s+", " ", str(value or "").strip().casefold())
+    # Existing checkout/UI labels sometimes append a display-only price/add-on.
+    raw = re.sub(
+        r"\s*\(\s*(?:\+?\$\s*[\d,.]+(?:\s+add[- ]?on)?|[\d,.]+\s+add[- ]?on)\s*\)$",
+        "",
+        raw,
+    )
+    aliases = {
+        "starter": "Starter", "starter tier": "Starter",
+        "mid-tier pro": "Mid-Tier Pro", "mid tier pro": "Mid-Tier Pro",
+        "mid-tier pro tier": "Mid-Tier Pro", "mid tier pro tier": "Mid-Tier Pro",
+        "pro": "Mid-Tier Pro",
+        "professional": "Professional", "professional tier": "Professional",
+        "enterprise": "Enterprise", "enterprise tier": "Enterprise",
+        "enterprise plus": "Enterprise Plus", "enterprise plus tier": "Enterprise Plus",
+        "industrial enterprise": "Enterprise Plus", "industrial enterprise tier": "Enterprise Plus",
+        "research pack": "Research Pack", "research pack tier": "Research Pack",
+        "research pack add-on": "Research Pack", "research & innovation": "Research Pack",
+        "research tier": "Research Pack",
+    }
+    return aliases.get(raw, "UNRESOLVED")
+
+
+def _normalize_required_tier(value: str | None) -> str:
+    """Resolve legacy internal requirement labels without accepting unknown policies."""
+    raw = re.sub(r"\s+", " ", str(value or "").strip().casefold())
+    # The excellence-layer's legacy "Operations" module minimum corresponds
+    # to the Enterprise access requirement, not a sixth paid subscription tier.
+    if raw in {"operations", "industrial operations tier"}:
         return "Enterprise"
-    if "professional" in v:
-        return "Professional"
-    if "pro" in v:
-        return "Mid-Tier Pro"
-    return "Starter"
+    return normalize_tier(value)
 
 
 def tier_allows(current: str, required: str) -> bool:
-    """Enforce the product menu: Research Pack inherits Enterprise, plus research.
+    """Authorize only recognized tiers and explicit policy labels, fail-closed.
 
-    Research Pack is an add-on package in the app, not a grant of the
-    Enterprise Plus-only tier. Keep research entitlement independent from
-    the ordinary tier ladder so one package never implies another add-on.
+    Research Pack inherits the ordinary ladder through Enterprise plus its
+    own add-on features; neither Research Pack nor Enterprise Plus implies the
+    other package's exclusive capabilities.
     """
     current_tier = normalize_tier(current)
-    required_tier = normalize_tier(required)
-
+    required_tier = _normalize_required_tier(required)
+    if current_tier not in TIER_ORDER or required_tier not in TIER_ORDER:
+        return False
     if current_tier == "Research Pack":
         return required_tier in {
             "Starter", "Mid-Tier Pro", "Professional", "Enterprise", "Research Pack"
         }
     if required_tier == "Research Pack":
         return current_tier == "Research Pack"
-
     return TIER_ORDER.index(current_tier) >= TIER_ORDER.index(required_tier)
 
 
@@ -292,10 +316,14 @@ def audit_module_entitlement_coverage(modules: Iterable[str]) -> dict[str, objec
 
 
 def available_modules(tier: str, modules: Iterable[str]) -> list[str]:
+    """Return explicitly mapped modules allowed by a recognized tier only."""
+    if normalize_tier(tier) not in TIER_ORDER:
+        return []
     result = []
     for module in modules:
         required = module_required_tier(str(module))
-        if required is None or tier_allows(tier, required):
+        # Missing/invalid policy is unresolved, not a Starter/free capability.
+        if required is not None and tier_allows(tier, required):
             result.append(str(module))
     return result
 
@@ -313,6 +341,18 @@ def copilot_gate(prompt: str, tier: str) -> Optional[dict[str, str]]:
     p = re.sub(r"\s+", " ", str(prompt or "").strip().lower())
     if not _looks_like_action_request(p):
         return None
+    current_tier = normalize_tier(tier)
+    if current_tier not in TIER_ORDER:
+        return {
+            "required_tier": "recognized active subscription",
+            "current_tier": "UNRESOLVED",
+            "phrase": "unresolved subscription",
+            "message": (
+                "🔒 I cannot run this action because the current subscription tier "
+                "could not be verified. No protected action was executed. Please "
+                "refresh your account/session or contact support."
+            ),
+        }
 
     # More specific phrases are evaluated first so a broad request cannot
     # accidentally bypass a package-specific capability gate.
@@ -334,6 +374,12 @@ def copilot_gate(prompt: str, tier: str) -> Optional[dict[str, str]]:
 
 def copilot_capabilities(tier: str, allowed_modules: Iterable[str]) -> dict[str, object]:
     normalized = normalize_tier(tier)
+    if normalized not in TIER_ORDER:
+        return {
+            "tier": "UNRESOLVED", "modules": [],
+            "can_research": False, "can_enterprise": False,
+            "can_professional": False,
+        }
     return {
         "tier": normalized,
         "modules": available_modules(normalized, allowed_modules),
