@@ -237,6 +237,14 @@ def test_machine_readable_matrix_has_all_ids_and_does_not_overstate_browser_evid
     assert all(row["browser_test"] == "UNVERIFIED" for row in rows)
     assert not any(row["implementation_status"] == "VERIFIED_WORKING" for row in rows)
     assert all(row["remaining_gap"].strip() for row in rows)
+    registry_by_id = {row["tool_id"]: row for row in TOOL_CATALOG}
+    matrix_by_id = {row["tool_id"]: row for row in rows}
+    for tool_id, spec in registry_by_id.items():
+        matrix_row = matrix_by_id[tool_id]
+        assert matrix_row["canonical_name"] == spec["canonical_name"]
+        assert matrix_row["target_minimum_tier"] == spec["minimum_tier"]
+        assert matrix_row["implementation_status"] == spec["implementation_status"]
+        assert matrix_row["browser_test"] == "UNVERIFIED"
 
 
 
