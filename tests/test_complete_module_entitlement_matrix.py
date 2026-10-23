@@ -36,7 +36,7 @@ def expected_policy_decision(current: str, required: str) -> bool:
 
 def test_every_inventory_module_has_an_explicit_matching_shared_requirement():
     rows = load_inventory()
-    assert len(rows) == 96, f"Expected the audited 96-name inventory; found {len(rows)}."
+    assert len(rows) == 97, f"Expected the current 97-name inventory; found {len(rows)}."
     names = [row["module_name"].strip() for row in rows]
     assert len(names) == len(set(names)), "The source inventory must contain unique module names."
     assert set(TIER_ORDER) == set(ALL_TIERS)
@@ -87,3 +87,10 @@ def test_research_pack_is_an_add_on_not_implicit_enterprise_plus():
     for module in ("Research AI", "Statistical Hypothesis Testing", "Literature & Citation Matrix"):
         assert module in available_modules("Research Pack", [module])
         assert module not in available_modules("Enterprise Plus", [module])
+
+
+
+def test_unmapped_module_and_unknown_tier_fail_closed():
+    assert available_modules("Starter", ["Unmapped protected capability"]) == []
+    assert not tier_allows("Unrecognized subscription label", "Starter")
+    assert not tier_allows("Starter", "Unrecognized protected tier")
