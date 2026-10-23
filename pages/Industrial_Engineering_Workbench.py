@@ -239,24 +239,23 @@ with st.expander("🧭 100-tool directory & readiness", expanded=False):
         if selected_tool:
             st.markdown(f"**{selected_tool['canonical_name']}** · {selected_tool['target_minimum_tier']} minimum")
             st.write(selected_tool["calculation_or_action"])
-            with st.expander("Inputs, outputs and remaining work", expanded=False):
-                st.markdown("**Required inputs**")
-                st.write(selected_tool["input_contract"])
-                st.markdown("**Expected outputs**")
-                st.write(selected_tool["output_contract"])
-                st.markdown("**Mapped existing route**")
-                st.write(selected_tool["existing_module_or_route"])
-                st.markdown("**Source candidates**")
-                st.write(", ".join(selected_tool["source_files"]) or "No specialist source identified in targeted search.")
-                st.markdown("**Open gap**")
-                st.write(selected_tool["remaining_gap"])
-                if selected_tool["external_dependency"]:
-                    st.markdown("**External dependency**")
-                    st.write(selected_tool["external_dependency"])
-                st.caption(
-                    "Authorization note: this directory does not execute the tool. The mapped legacy route, "
-                    "Copilot action, API and export path must enforce their own server-side entitlement checks."
-                )
+            st.markdown("**Required inputs**")
+            st.write(selected_tool["input_contract"])
+            st.markdown("**Expected outputs**")
+            st.write(selected_tool["output_contract"])
+            st.markdown("**Mapped existing route**")
+            st.write(selected_tool["existing_module_or_route"])
+            st.markdown("**Source candidates**")
+            st.write(", ".join(selected_tool["source_files"]) or "No specialist source identified in targeted search.")
+            st.markdown("**Open gap**")
+            st.write(selected_tool["remaining_gap"])
+            if selected_tool["external_dependency"]:
+                st.markdown("**External dependency**")
+                st.write(selected_tool["external_dependency"])
+            st.caption(
+                "Authorization note: this directory does not execute the tool. The mapped legacy route, "
+                "Copilot action, API and export path must enforce their own server-side entitlement checks."
+            )
     else:
         st.info("No target tools match these filters. Clear the search or select All workbenches / All statuses.")
 
