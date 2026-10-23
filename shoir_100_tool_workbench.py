@@ -8,6 +8,7 @@ link to the existing route (when permitted) or remain visibly incomplete.
 from __future__ import annotations
 
 import io
+import hashlib
 import math
 from datetime import datetime, timezone
 from typing import Any, Mapping, Sequence
@@ -26,7 +27,126 @@ from shoir_100_tool_registry import (
 )
 
 MAX_PROFILE_BYTES = 20 * 1024 * 1024
-QUICK_ENGINE_IDS = {"T013", "T016", "T019", "T021", "T022", "T023", "T026", "T032", "T042", "T055", "T078", "T081"}
+QUICK_ENGINE_IDS = {"T011", "T013", "T014", "T016", "T019", "T021", "T022", "T023", "T026", "T032", "T042", "T055", "T078", "T081"}
+
+
+def _dataframe_fingerprint(frame: pd.DataFrame) -> str:
+    """Stable in-session source signature for stale-preview protection."""
+    signature = json.dumps(
+        {"columns": [str(x) for x in frame.columns], "dtypes": [str(x) for x in frame.dtypes]},
+        sort_keys=True, separators=(",", ":"),
+    ).encode("utf-8")
+    try:
+        values = pd.util.hash_pandas_object(frame, index=True).values.tobytes()
+    except (TypeError, ValueError):
+        values = frame.to_json(orient="split", date_format="iso", default_handler=str).encode("utf-8")
+    return hashlib.sha256(signature + values).hexdigest()
+
+
+def import_dataset_preview(filename: Any, payload: Any, sheet_name: Any = None) -> dict[str, Any]:
+    """Parse CSV/XLS/XLSX into a staged frame without mutating the active dataset."""
+    name = str(filename or "").strip()
+    if not isinstance(payload, (bytes, bytearray)) or not payload:
+        raise ValueError("The uploaded file is empty. The active dataset was not changed.")
+    if len(payload) > MAX_PROFILE_BYTES:
+        raise ValueError(f"The file exceeds the {MAX_PROFILE_BYTES // (1024 * 1024)} MiB import limit. The active dataset was not changed.")
+    suffix = name.lower().rsplit(".", 1)[-1] if "." in name else ""
+    try:
+        if suffix == "csv":
+            try:
+                frame = pd.read_csv(io.BytesIO(payload))
+            except UnicodeDecodeError:
+                frame = pd.read_csv(io.BytesIO(payload), encoding="utf-8-sig")
+            selected_sheet = None
+        elif suffix in {"xlsx", "xlsm", "xls"}:
+            workbook = pd.ExcelFile(io.BytesIO(payload))
+            if not workbook.sheet_names:
+                raise ValueError("The workbook has no readable sheets.")
+            selected_sheet = str(sheet_name or workbook.sheet_names[0])
+            if selected_sheet not in workbook.sheet_names:
+                raise ValueError(f"Sheet '{selected_sheet}' was not found in the uploaded workbook.")
+            frame = pd.read_excel(workbook, sheet_name=selected_sheet)
+        else:
+            raise ValueError("Unsupported file type. Upload CSV, XLSX, XLSM, or XLS.")
+    except ValueError:
+        raise
+    except Exception as exc:
+        raise ValueError("The file could not be parsed as a supported CSV/Excel workbook. The active dataset was not changed.") from exc
+    if not isinstance(frame, pd.DataFrame) or len(frame.columns) == 0:
+        raise ValueError("The selected file or sheet has no columns. The active dataset was not changed.")
+    warnings = []
+    if frame.empty:
+        warnings.append("The selected sheet has columns but no data rows.")
+    if not frame.columns.is_unique:
+        warnings.append("Duplicate column names were detected; rename them before using the profiler or cleaner.")
+    return {
+        "status": "STAGED", "tool_id": "T011", "canonical_name": "Universal Data Importer",
+        "data_status": "IMPORTED", "filename": name, "sheet_name": selected_sheet,
+        "dataframe": frame.copy(deep=True),
+        "metrics": {"row_count": int(len(frame)), "column_count": int(len(frame.columns)),
+                    "missing_cells": int(frame.isna().sum().sum())},
+        "method": "CSV or selected Excel sheet is parsed into a staged dataframe before explicit session apply.",
+        "assumptions": ["The uploaded file is untrusted input and is parsed as data, never as executable instructions.",
+                        "Applying the staged dataset is a separate user action; cross-login persistence is not implied."],
+        "warnings": warnings, "source_fingerprint": hashlib.sha256(bytes(payload)).hexdigest(),
+        "input_bytes": len(payload),
+    }
+
+
+def reversible_clean_candidate(
+    dataframe: Any, *, drop_duplicates: bool = True, missing_strategy: str = "keep",
+) -> dict[str, Any]:
+    """Create a candidate copy and audit; never mutate the user's source frame."""
+    if not isinstance(dataframe, pd.DataFrame):
+        raise ValueError("A pandas DataFrame is required before cleaning.")
+    if len(dataframe) > 1_000_000 or len(dataframe.columns) > 500:
+        raise ValueError("Cleaner limit is 1,000,000 rows and 500 columns.")
+    if not dataframe.columns.is_unique:
+        raise ValueError("Column names must be unique before cleaning; the source table was not modified.")
+    if missing_strategy not in {"keep", "drop_rows", "fill_median"}:
+        raise ValueError("Missing-value strategy must be keep, drop_rows, or fill_median.")
+    source = dataframe.copy(deep=True)
+    candidate = source.copy(deep=True)
+    source_fingerprint = _dataframe_fingerprint(source)
+    source_rows = len(source)
+    source_missing = int(source.isna().sum().sum())
+    removed_duplicates = 0
+    if drop_duplicates:
+        candidate = candidate.drop_duplicates().copy()
+        removed_duplicates = source_rows - len(candidate)
+    dropped_missing = 0
+    filled_cells = 0
+    warnings = []
+    if missing_strategy == "drop_rows":
+        before = len(candidate)
+        candidate = candidate.dropna().copy()
+        dropped_missing = before - len(candidate)
+    elif missing_strategy == "fill_median":
+        for column in candidate.select_dtypes(include="number").columns:
+            count = int(candidate[column].isna().sum())
+            if count:
+                median_value = candidate[column].median()
+                if pd.notna(median_value):
+                    candidate[column] = candidate[column].fillna(median_value)
+                    filled_cells += count
+        remaining = int(candidate.isna().sum().sum())
+        if remaining:
+            warnings.append(f"{remaining} missing cells remain, because this cleaner does not auto-fill nonnumeric columns.")
+    return {
+        "status": "PREVIEW", "tool_id": "T014", "canonical_name": "Reversible Data Cleaner",
+        "data_status": "IMPORTED",
+        "dataframe": candidate.copy(deep=True),
+        "metrics": {"source_rows": int(source_rows), "candidate_rows": int(len(candidate)),
+                    "removed_duplicate_rows": int(removed_duplicates), "dropped_missing_rows": int(dropped_missing),
+                    "source_missing_cells": int(source_missing), "imputed_numeric_cells": int(filled_cells),
+                    "candidate_missing_cells": int(candidate.isna().sum().sum())},
+        "method": "Candidate-copy cleaning: exact duplicate-row removal followed by the selected missing-value strategy.",
+        "assumptions": ["The original dataframe is not mutated by preview.", "Median imputation applies only to numeric columns.",
+                        "Undo is session-scoped and does not imply durable version history."],
+        "warnings": warnings, "source_fingerprint": source_fingerprint,
+        "candidate_fingerprint": _dataframe_fingerprint(candidate),
+        "missing_strategy": missing_strategy, "drop_duplicates": bool(drop_duplicates),
+    }
 
 
 class ToolEntitlementError(PermissionError):
@@ -532,8 +652,15 @@ def run_tool_calculation(tier: str, tool_id: str, inputs: Mapping[str, Any]) -> 
     if spec is None:
         raise ToolNotImplementedError("Unknown tool ID; no execution was performed.")
     args = dict(inputs or {})
-    if canonical_id == "T013":
+    if canonical_id == "T011":
+        result = import_dataset_preview(args.get("filename"), args.get("payload"), args.get("sheet_name"))
+    elif canonical_id == "T013":
         result = profile_dataframe(args.get("dataframe"))
+    elif canonical_id == "T014":
+        result = reversible_clean_candidate(
+            args.get("dataframe"), drop_duplicates=bool(args.get("drop_duplicates", True)),
+            missing_strategy=str(args.get("missing_strategy", "keep")),
+        )
     elif canonical_id == "T016":
         result = convert_quantity(
             args.get("value"), args.get("source_unit", ""), args.get("target_unit", ""),
