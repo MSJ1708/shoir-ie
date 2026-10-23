@@ -8,6 +8,7 @@ acceptance checks pass. Existing routes and navigation are left unchanged.
 """
 import hashlib
 import io
+from datetime import datetime, timezone
 import pandas as pd
 import streamlit as st
 
@@ -15,7 +16,94 @@ from shoir_100_tool_registry import (
     TOOL_TARGETS, TOOL_STATUSES, TOOL_TIER_ORDER, WORKBENCHES,
     target_tool_access_decision, target_tool_execution_decision,
 )
-from shoir_100_tool_engines import analyze_process_event_log, first_fit_decreasing_bin_pack
+from shoir_100_tool_engines import (
+    analyze_process_event_log, calculate_carbon_emissions,
+    calculate_engineering_economics, calculate_inventory_policy,
+    calculate_oee, calculate_process_capability, calculate_standard_time,
+    calculate_takt_capacity, first_fit_decreasing_bin_pack,
+)
+
+def _fingerprint(*values):
+    return hashlib.sha256(repr(values).encode("utf-8")).hexdigest()
+
+
+def _run_engine_tool(tool_id, signature, button_label, calculation):
+    """Run one deterministic validation-mode method and preserve last success on bad input."""
+    if st.button(button_label, key=f"{tool_id}_run_button", type="primary"):
+        try:
+            outcome = calculation()
+        except (ValueError, TypeError, OverflowError, ZeroDivisionError) as exc:
+            st.error(
+                f"Calculation was not completed: {exc}. "
+                "The last successful result was preserved."
+            )
+        else:
+            if isinstance(outcome, dict) and outcome.get("status") == "CALCULATED":
+                st.session_state[f"shoir_{tool_id}_result"] = {
+                    "signature": signature,
+                    "source": "USER-ENTERED — not independently verified",
+                    "executed_at": datetime.now(timezone.utc).isoformat(),
+                    "result": outcome,
+                }
+            else:
+                st.error("The calculation returned an unsupported result status; the prior result was preserved.")
+
+    saved = st.session_state.get(f"shoir_{tool_id}_result")
+    if not isinstance(saved, dict):
+        return None
+    if saved.get("signature") != signature:
+        st.warning("STALE — one or more inputs changed. Rerun before using this saved result.")
+    result = saved.get("result", {})
+    st.caption(
+        f"Result: {result.get('status', 'UNRESOLVED')} · {saved.get('source', 'UNVERIFIED')} · "
+        f"executed {saved.get('executed_at', 'timestamp unavailable')} · session-only result"
+    )
+    metrics = result.get("metrics", {})
+    if metrics:
+        metric_rows = [{"Metric": key, "Value": value} for key, value in metrics.items()]
+        st.dataframe(pd.DataFrame(metric_rows), use_container_width=True, hide_index=True)
+    with st.expander("Formula, assumptions and limitations", expanded=False):
+        st.markdown("**Method**")
+        st.write(result.get("method", "Method not supplied"))
+        formulas = result.get("formulas", {})
+        if formulas:
+            st.markdown("**Formulas**")
+            st.dataframe(
+                pd.DataFrame([{"Result": key, "Formula": value} for key, value in formulas.items()]),
+                use_container_width=True, hide_index=True,
+            )
+        st.markdown("**Assumptions**")
+        for statement in result.get("assumptions", []):
+            st.write(f"• {statement}")
+        if result.get("provenance"):
+            st.markdown("**Factor provenance**")
+            st.json(result["provenance"])
+    for warning in result.get("warnings", []):
+        st.warning(warning)
+
+    # Include source, method, formula and assumptions in the download, not only a rendered KPI.
+    csv_rows = [
+        {"Section": "Metadata", "Name": "tool_id", "Value": tool_id},
+        {"Section": "Metadata", "Name": "status", "Value": result.get("status", "")},
+        {"Section": "Metadata", "Name": "method", "Value": result.get("method", "")},
+        {"Section": "Metadata", "Name": "source", "Value": saved.get("source", "")},
+        {"Section": "Metadata", "Name": "executed_at_utc", "Value": saved.get("executed_at", "")},
+    ]
+    csv_rows.extend({"Section": "Metric", "Name": key, "Value": value} for key, value in metrics.items())
+    csv_rows.extend({"Section": "Formula", "Name": key, "Value": value}
+                    for key, value in result.get("formulas", {}).items())
+    csv_rows.extend({"Section": "Assumption", "Name": str(i+1), "Value": value}
+                    for i, value in enumerate(result.get("assumptions", [])))
+    csv_rows.extend({"Section": "Warning", "Name": str(i+1), "Value": value}
+                    for i, value in enumerate(result.get("warnings", [])))
+    payload = pd.DataFrame(csv_rows).to_csv(index=False).encode("utf-8")
+    st.download_button(
+        "Download calculation, assumptions and provenance (CSV)",
+        payload, f"shoir_ie_{tool_id.lower()}_result.csv", "text/csv",
+        key=f"{tool_id}_result_download",
+    )
+    return saved
+
 
 st.set_page_config(page_title="Engineering Tool Library | Shoir-IE", page_icon="🧭", layout="wide")
 # Keep internal readiness/route-gap details behind an authenticated app session.
