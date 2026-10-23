@@ -15,7 +15,7 @@
 
 > **BETA — TESTING IN PROGRESS (21 October 2026).** Shoir-IE is actively being tested and improved. Calculations, AI responses, simulations, exports, integrations and stored data may be wrong, incomplete or unavailable. Validate results independently and use synthetic or approved non-sensitive data. Do not use the beta as the sole basis for safety-critical or other high-consequence decisions. No disclaimer replaces mandatory legal rights or an independent legal/security review.
 >
-> Read the [Beta Terms & Conditions](docs/TERMS_AND_CONDITIONS.md), [Privacy Policy](docs/PRIVACY_POLICY.md), [Refund Policy](docs/REFUND_POLICY.md), [Cookie Policy](docs/COOKIE_POLICY.md), [Legal Risk Register](docs/LEGAL_RISK_REGISTER.md), and [Third-party licence review](docs/THIRD_PARTY_LICENSE_REVIEW.md).
+> Read the [Beta Terms & Conditions](docs/TERMS_AND_CONDITIONS.md), [Privacy Policy](docs/PRIVACY_POLICY.md), [Refund Policy](docs/REFUND_POLICY.md), [Cookie Policy](docs/COOKIE_POLICY.md), [Legal Risk Register](docs/LEGAL_RISK_REGISTER.md), and [Third-party licence review](docs/THIRD_PARTY_LICENSE_REVIEW.md). Use the [Pre-Commercial Launch Checklist](docs/COMMERCIAL_LAUNCH_CHECKLIST.md) to track evidence required before paid access.
 
 <img src="docs/images/shoir_ie_hero.svg" alt="Shoir-IE industrial engineering command center" width="100%">
 
