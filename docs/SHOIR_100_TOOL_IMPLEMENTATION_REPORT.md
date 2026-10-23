@@ -33,7 +33,7 @@ No target is marked `VERIFIED_WORKING`. The grouped library now wires 20 distinc
   - **T078 — Carbon Emissions:** activity data multiplied by a user-supplied, sourced/versioned factor with scope and provenance disclosure; not an audited emissions statement.
   - **T081 — Engineering Economics:** discounted cash-flow NPV/IRR and simple payback under stated timing/currency assumptions.
   - **T085 — Statistical Power and Sample-Size Planner:** noncentral-t planning for balanced, independent two-sample t-tests under stated assumptions; other designs and multiplicity/dropout adjustments are not modeled.
-- The 20 wired target IDs show method/assumptions/warnings, stale-result labeling and CSV summaries/tables where the method emits structured outputs. Bad inputs preserve the last successful session result. The new Tool Library's validation-mode results are session-only; durable project persistence is not claimed. Synthetic example inputs must remain labelled synthetic and are not evidence of industrial savings.
+- The 20 wired target IDs show method/assumptions/warnings, stale-result labeling and CSV summaries/tables where the method emits structured outputs. The current UI gate also stops restricted targets before rendering actions and rechecks entitlement inside the calculation helper; a lower-tier denial regression is part of the passing suite. Bad inputs preserve the last successful session result. The new Tool Library's validation-mode results are session-only; durable project persistence is not claimed. Synthetic example inputs must remain labelled synthetic and are not evidence of industrial savings.
 - `tests/test_shoir_100_tool_engines.py` and `tests/test_shoir_100_tool_extended_engines.py`: hand-calculated/golden fixtures for the original engines plus work-sampling intervals, Pareto cumulative shares, 5S scoring, Kaizen/A3 progress, SPC limits, quality-cost reconciliation, MTBF/MTTR, ABC/XYZ, drift statistics, sourced unit/currency conversion, two-sample t-test power and the kerf-aware cutting-stock MILP. Tests cover invalid/boundary inputs, non-mutation, timezone-aware durations, solver output and CSV parse/read-back assertions. Registry metadata links the targets to corresponding fixtures.
 - `shoir_copilot_orchestrator.py`: governed decision staging now fails closed if the enterprise approval/access-control module cannot be imported; `tests/test_shoir_copilot_orchestrator.py` contains a regression test for that case.
 - `tests/test_shoir_100_tool_registry.py`: 100 sequential stable IDs, required metadata, all 100 × six plan/package entitlement outcomes, fail-closed unknowns, Research Pack vs Enterprise Plus, alias-to-canonical authorization, display label identity and readiness rules.
@@ -57,17 +57,27 @@ The legacy fail-open helpers were also corrected: shared tier normalization reco
 
 ## Verification status
 
-- Full test suite on candidate SHA `1fe730077a06100ee4b48d7227ade808d080c5fb`: **599 passed, 2 skipped, 32 warnings in 32.80 seconds**. [Run details](https://github.com/MSJ1708/shoir-ie/actions/runs/40017728610). This run includes the alias authorization fix, specialist fixtures and Tool Library AppTests.
-- Engine Regression on the same SHA passed. [Run details](https://github.com/MSJ1708/shoir-ie/actions/runs/40017728614).
-- At the time of this report refresh, Platform Tests, full application validation/browser smoke and security/quality gates for that SHA were still running. The preceding failed alias-only run is superseded for the test suite by the 599-pass run, but pending workflows must not be described as passed.
-- The local container could not clone the repository through its network path, so no local full-repo test execution is claimed.
-- No authenticated hosted browser walkthrough has been completed. `browser_test` remains `UNVERIFIED` for all 100 targets; the hosted live-deployment smoke was skipped.
-- Export tests for engine output tables cover CSV serialization and pandas read-back; the new Tool Library also provides per-table and summary CSV download controls. Streamlit AppTest exercises visible method forms and cutting-stock action, but the hosted download behavior, durable persistence, and existing shared XLSX/PDF/PPTX round trips remain unverified.
-- Existing facility-layout source already includes department CRUD, complete From-To and SLP matrices, empty REL handling, heatmap data conversion, route alternatives and four-sheet XLSX export; focused tests exist. The full authenticated user workflow still needs to be run on staging. Enterprise Integration diagnostics, real workbook-to-decision, cross-account isolation and configured connectors also remain outstanding.
+All following checks are green on implementation/test commit `9b51a17e878f5395b9b30f255f19e25b31822edf`:
+
+- **Full test suite:** `600 passed, 2 skipped, 32 warnings in 31.91 seconds`. [GitHub Actions run](https://github.com/MSJ1708/shoir-ie/actions/runs/40018476133)
+- **Platform Tests:** passed. [Run](https://github.com/MSJ1708/shoir-ie/actions/runs/40018476072)
+- **Engine Regression:** passed. [Run](https://github.com/MSJ1708/shoir-ie/actions/runs/40018476233)
+- **Security and Quality:** passed. [Run](https://github.com/MSJ1708/shoir-ie/actions/runs/40018476140)
+- **Application validation/local browser smoke:** Python module compilation, source parsing, application top-level import smoke, local Streamlit startup, and browser smoke at desktop and mobile widths passed. The workflow uploaded the `shoir-ie-local-runtime-smoke` artifact. [Validation run and artifact](https://github.com/MSJ1708/shoir-ie/actions/runs/40018468075)
+
+The above does **not** prove live deployment health or authenticated behavior of every module:
+
+- The separate hosted `live-deployment-smoke` job was **SKIPPED**; it was not a pass.
+- A local Streamlit AppTest runs eleven newly wired method forms and the T066 cutting-stock action, and the same suite tests Starter-tier denial for Research Pack-only T085. This is not a substitute for authenticated hosted browser checks and workspace-persistence verification.
+- All 100 hosted authenticated module walkthroughs remain **UNVERIFIED**. Durable save/relogin, cross-workspace isolation, direct legacy route/action/API/plugin/export enforcement, hosted downloads and real configured connectors remain open.
+- The container could not clone the repository via its network path; test results above are GitHub Actions results, not local full-repository pytest execution.
+- CSV serialization/read-back and engine method fixtures passed; hosted browser downloads plus shared XLSX/PDF/PPTX round-trip workflows have not been verified.
+
+Existing Facility Layout source includes department CRUD, From-To/SLP matrices, REL empty-state handling, heatmap conversion, route alternatives and XLSX export, with focused import and method tests. The full authenticated department → flow → SLP → layout alternative → persist/reload → export workflow remains unverified. Enterprise Integration diagnostics and workbook-to-decision still need authenticated staging evidence.
 
 ## Release-critical work remaining
 
-1. Confirm all validation, test, platform, engine-regression and security/quality workflows pass on the same final PR head; fix failures and rerun before merge.
+1. Keep the currently green automated gates green on the final PR head; hosted live-deployment smoke was skipped and must be run only in an authorized configured environment.
 2. Perform authenticated staging browser coverage for the new Tool Library and its twenty-one method paths across twenty canonical target IDs on the correct tiers, then add the remaining module matrix with disposable accounts.
 3. P0: verify Facility Layout/SLP department CRUD → From-To → relationship matrix/heatmap → flow-distance/handling cost → persisted alternative → parsed workbook export.
 4. Verify multi-sheet workbook import → profile/map/clean → save/version → bottleneck/capacity study → scenario comparison → chart → exported file reopening and value/lineage checks.
