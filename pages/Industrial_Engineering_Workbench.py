@@ -12,6 +12,7 @@ import json
 import re
 import sqlite3
 from datetime import datetime
+from uuid import uuid4
 
 import numpy as np
 import pandas as pd
@@ -47,6 +48,7 @@ TIER = canonical_tier(RAW_TIER)
 # Defaults below are explicitly labelled illustrative examples, never plant evidence.
 _TOOL022_EXAMPLE_COUNTS = '{"Productive": 60, "Idle": 25, "Setup": 15}'
 _TOOL028_EXAMPLE_COUNTS = '{"Machine": 12, "Material": 7, "Method": 3}'
+_TOOL029_EXAMPLE_ITEMS = '[{"category":"Sort","criterion":"Remove unnecessary items","score":3,"evidence":"Illustrative example","owner":"","due_date":""},{"category":"Set in Order","criterion":"Label storage locations","score":3,"evidence":"Illustrative example","owner":"","due_date":""},{"category":"Shine","criterion":"Clean workstations","score":3,"evidence":"Illustrative example","owner":"","due_date":""},{"category":"Standardize","criterion":"Display standard work","score":3,"evidence":"Illustrative example","owner":"","due_date":""},{"category":"Sustain","criterion":"Review 5S weekly","score":3,"evidence":"Illustrative example","owner":"","due_date":""}]'
 
 st.markdown("""
 <style>
@@ -375,7 +377,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=False):
                 "Copilot action, API and export path must enforce their own server-side entitlement checks."
             )
 
-            if selected_tool["tool_id"] in {"T021", "T022", "T023", "T028", "T066", "T075", "T085"}:
+            if selected_tool["tool_id"] in {"T021", "T022", "T023", "T028", "T029", "T030", "T066", "T075", "T085"}:
                 st.markdown("---")
                 st.markdown("**Run focused specialist method**")
                 st.caption(
@@ -463,6 +465,39 @@ with st.expander("🧭 100-tool directory & readiness", expanded=False):
                                 "Action due date (YYYY-MM-DD)", key="tool028_due_date"
                             )
                             run_method = st.form_submit_button("Analyze Pareto / record causes", type="primary", use_container_width=True, key="tool028_run")
+                        elif selected_tool["tool_id"] == "T029":
+                            st.caption("Illustrative example values are self-assessment data. Replace them with an approved checklist and verifiable evidence.")
+                            audit_items_json = st.text_area(
+                                "5S checklist items (JSON list)",
+                                value=_TOOL029_EXAMPLE_ITEMS,
+                                help='Each item needs category (one per 5S pillar), criterion, score 0–4, and optional evidence/owner/due_date.',
+                                key="tool029_items_json",
+                            )
+                            run_method = st.form_submit_button("Score 5S audit", type="primary", use_container_width=True, key="tool029_run")
+                        elif selected_tool["tool_id"] == "T030":
+                            st.caption("A3 plans and measured outcomes are kept separate. A Verified/Closed status requires an actual, dated review and a post-change evidence reference.")
+                            record_id_input = st.text_input(
+                                "Existing A3 record ID to revise (leave blank to create)", key="tool030_record_id"
+                            )
+                            a3_title = st.text_input("A3 title", key="tool030_title")
+                            a3_problem = st.text_area("Problem statement", key="tool030_problem")
+                            a3_metric = st.text_input("Metric name", key="tool030_metric")
+                            a3_unit = st.text_input("Metric unit", key="tool030_unit")
+                            a3_baseline = st.text_input("Baseline value", key="tool030_baseline")
+                            a3_target = st.text_input("Target value", key="tool030_target")
+                            a3_actual = st.text_input("Actual after-change value (optional until measured)", key="tool030_actual")
+                            a3_root_cause = st.text_area("Root-cause hypothesis", key="tool030_root_cause")
+                            a3_countermeasure = st.text_area("Countermeasure", key="tool030_countermeasure")
+                            a3_owner = st.text_input("Accountable owner", key="tool030_owner")
+                            a3_due_date = st.text_input("Due date (YYYY-MM-DD)", key="tool030_due_date")
+                            a3_baseline_evidence = st.text_input("Baseline evidence reference (optional but recommended)", key="tool030_baseline_evidence")
+                            a3_post_evidence = st.text_input("Post-change evidence reference", key="tool030_post_evidence")
+                            a3_status = st.selectbox(
+                                "Implementation status", ["Planned", "In Progress", "Implemented", "Verified", "Closed"],
+                                index=0, key="tool030_status"
+                            )
+                            a3_review_date = st.text_input("Human review date (YYYY-MM-DD)", key="tool030_review_date")
+                            run_method = st.form_submit_button("Save A3 record / revision", type="primary", use_container_width=True, key="tool030_run")
                         elif selected_tool["tool_id"] == "T066":
                             st.caption("One-dimensional cutting stock. Kerf is charged as an allowance per produced piece.")
                             stock_len = st.number_input(
@@ -545,6 +580,27 @@ with st.expander("🧭 100-tool directory & readiness", expanded=False):
                             "owner": action_owner,
                             "due_date": action_due_date,
                         }
+                    elif selected_tool["tool_id"] == "T029":
+                        current_tool_inputs = {"checklist_json": audit_items_json}
+                    elif selected_tool["tool_id"] == "T030":
+                        current_tool_inputs = {
+                            "record_id": record_id_input,
+                            "title": a3_title,
+                            "problem_statement": a3_problem,
+                            "metric_name": a3_metric,
+                            "unit": a3_unit,
+                            "baseline_value": a3_baseline,
+                            "target_value": a3_target,
+                            "actual_after_value": a3_actual,
+                            "root_cause_hypothesis": a3_root_cause,
+                            "countermeasure": a3_countermeasure,
+                            "owner": a3_owner,
+                            "due_date": a3_due_date,
+                            "baseline_evidence": a3_baseline_evidence,
+                            "post_change_evidence": a3_post_evidence,
+                            "implementation_status": a3_status,
+                            "review_date": a3_review_date,
+                        }
                     elif selected_tool["tool_id"] == "T066":
                         current_tool_inputs = {
                             "stock_length": stock_len, "kerf_allowance": kerf,
@@ -572,6 +628,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=False):
                             require_tool_access(RAW_TIER, selected_tool["tool_id"])
                             from shoir_target_engines import (
                                 analyze_work_sampling, analyze_pareto_root_cause,
+                                assess_5s_audit, build_kaizen_a3_record,
                                 calculate_time_study, calculate_takt_capacity,
                                 solve_cutting_stock, monitor_forecast_drift,
                                 plan_two_sample_t_sample_size,
@@ -632,6 +689,80 @@ with st.expander("🧭 100-tool directory & readiness", expanded=False):
                                     else
                                     "Entered counts were not independently validated against a source log."
                                 )
+                            elif selected_tool["tool_id"] == "T029":
+                                parsed_items = json.loads(audit_items_json)
+                                if not isinstance(parsed_items, list):
+                                    raise ValueError("5S checklist must be a JSON list of item objects.")
+                                result = assess_5s_audit(parsed_items)
+                                result["data_provenance"] = (
+                                    "SYNTHETIC_EXAMPLE"
+                                    if audit_items_json.strip() == _TOOL029_EXAMPLE_ITEMS
+                                    else "USER_ENTERED_UNVERIFIED"
+                                )
+                                result["provenance_warning"] = (
+                                    "The displayed checklist is illustrative self-assessment data, not a completed plant audit."
+                                    if result["data_provenance"] == "SYNTHETIC_EXAMPLE"
+                                    else "Checklist evidence was not independently validated against a signed audit."
+                                )
+                            elif selected_tool["tool_id"] == "T030":
+                                result = build_kaizen_a3_record(
+                                    title=a3_title,
+                                    problem_statement=a3_problem,
+                                    metric_name=a3_metric,
+                                    unit=a3_unit,
+                                    baseline_value=a3_baseline,
+                                    target_value=a3_target,
+                                    actual_after_value=a3_actual,
+                                    root_cause_hypothesis=a3_root_cause,
+                                    countermeasure=a3_countermeasure,
+                                    owner=a3_owner,
+                                    due_date=a3_due_date,
+                                    baseline_evidence=a3_baseline_evidence,
+                                    post_change_evidence=a3_post_evidence,
+                                    implementation_status=a3_status,
+                                    review_date=a3_review_date,
+                                )
+                                result["data_provenance"] = "USER_ENTERED_UNVERIFIED"
+                                records = st.session_state.get("shoir_kaizen_a3_records", [])
+                                if not isinstance(records, list):
+                                    raise ValueError("The saved A3 register is invalid; existing workspace data was preserved.")
+                                record_id = str(record_id_input or "").strip()
+                                now = datetime.now().astimezone().isoformat(timespec="seconds")
+                                known_index = next((i for i, item in enumerate(records) if str(item.get("record_id", "")) == record_id), None) if record_id else None
+                                if record_id and known_index is None:
+                                    raise ValueError("A3 record ID was not found in this user's workspace. Leave it blank to create a new record.")
+                                if known_index is None:
+                                    if len(records) >= 500:
+                                        raise ValueError("The A3 register reached 500 records; archive records before adding more.")
+                                    record_id = "A3-" + uuid4().hex[:10].upper()
+                                    result["record_id"] = record_id
+                                    result["created_at"] = now
+                                    result["updated_at"] = now
+                                    result["revision_number"] = 1
+                                    result["revision_history"] = []
+                                    records.append(dict(result))
+                                else:
+                                    previous = dict(records[known_index])
+                                    history = list(previous.get("revision_history", []))
+                                    snapshot_keys = (
+                                        "title", "problem_statement", "metric_name", "unit",
+                                        "baseline_value", "target_value", "actual_after_value",
+                                        "root_cause_hypothesis", "countermeasure", "owner", "due_date",
+                                        "baseline_evidence", "post_change_evidence", "review_date",
+                                        "status", "outcome_status",
+                                    )
+                                    history.append({
+                                        "revision_number": int(previous.get("revision_number", 1)),
+                                        "updated_at": previous.get("updated_at", previous.get("created_at", "")),
+                                        "snapshot": {key: previous.get(key) for key in snapshot_keys},
+                                    })
+                                    result["record_id"] = record_id
+                                    result["created_at"] = previous.get("created_at", now)
+                                    result["updated_at"] = now
+                                    result["revision_number"] = int(previous.get("revision_number", 1)) + 1
+                                    result["revision_history"] = history
+                                    records[known_index] = dict(result)
+                                st.session_state["shoir_kaizen_a3_records"] = records
                             elif selected_tool["tool_id"] == "T066":
                                 parsed_parts = json.loads(parts_json)
                                 if not isinstance(parsed_parts, list):
@@ -749,6 +880,59 @@ with st.expander("🧭 100-tool directory & readiness", expanded=False):
                                 st.markdown(f"**Countermeasure:** {result['countermeasure'] or 'Not yet recorded'}")
                                 st.markdown(f"**Owner:** {result['owner'] or 'Not yet assigned'}")
                                 st.markdown(f"**Due date:** {result['due_date'] or 'Not yet set'}")
+                    elif selected_tool["tool_id"] == "T029":
+                        result = st.session_state.get("shoir_tool_result_T029")
+                        if result:
+                            _show_focused_tool_persistence("T029", result, current_tool_inputs)
+                            c1, c2, c3 = st.columns(3)
+                            c1.metric("Overall 5S score (equal pillar weight)", f"{result['overall_5s_score_pct_equal_pillar_weight']:.1f}%")
+                            c2.metric("Checklist criteria", str(result["criteria_count"]))
+                            c3.metric("Priority actions", str(result["priority_action_count"]))
+                            st.markdown(f"**Audit status:** {result['status']}")
+                            st.caption(result["rubric"])
+                            st.caption(result["formula"])
+                            st.warning(result["provenance_warning"]) if result["data_provenance"] == "SYNTHETIC_EXAMPLE" else st.caption(result["provenance_warning"])
+                            st.warning(result["warning"])
+                            st.dataframe(result["pillar_summary"], use_container_width=True, hide_index=True)
+                            st.markdown("**Checklist**")
+                            st.dataframe(result["checklist"], use_container_width=True, hide_index=True)
+                            if len(result["priority_actions"]):
+                                st.markdown("**Items requiring follow-up**")
+                                st.dataframe(result["priority_actions"], use_container_width=True, hide_index=True)
+                    elif selected_tool["tool_id"] == "T030":
+                        result = st.session_state.get("shoir_tool_result_T030")
+                        if result:
+                            _show_focused_tool_persistence("T030", result, current_tool_inputs)
+                            c1, c2, c3 = st.columns(3)
+                            c1.metric("A3 record", result.get("record_id", "Pending"))
+                            c2.metric("Revision", str(result.get("revision_number", 1)))
+                            c3.metric("Status", result["status"])
+                            st.markdown(f"**Problem:** {result['problem_statement']}")
+                            st.markdown(f"**Countermeasure:** {result['countermeasure']}")
+                            st.markdown(f"**Owner / due date:** {result['owner']} / {result['due_date']}")
+                            st.markdown(f"**Baseline → target:** {result['baseline_value']} → {result['target_value']} {result['unit']}")
+                            if result["actual_after_value"] is not None:
+                                st.markdown(f"**Actual after change:** {result['actual_after_value']} {result['unit']}")
+                                st.metric("Algebraic progress to target", f"{result['target_progress_pct']:.1f}%")
+                                st.caption(f"Signed remaining difference (target − actual): {result['remaining_difference_to_target']:,.4g} {result['unit']}")
+                            st.caption(result["assumptions"])
+                            st.warning(result["warning"])
+                            records = st.session_state.get("shoir_kaizen_a3_records", [])
+                            if records:
+                                st.markdown("**Saved A3 register (current workspace)**")
+                                overview = [{
+                                    "Record ID": item.get("record_id"),
+                                    "Title": item.get("title"),
+                                    "Status": item.get("status"),
+                                    "Owner": item.get("owner"),
+                                    "Due date": item.get("due_date"),
+                                    "Revision": item.get("revision_number", 1),
+                                    "Updated at": item.get("updated_at", item.get("created_at", "")),
+                                } for item in records]
+                                st.dataframe(pd.DataFrame(overview), use_container_width=True, hide_index=True)
+                                if result.get("revision_history"):
+                                    st.markdown("**Prior revisions**")
+                                    st.dataframe(pd.DataFrame(result["revision_history"]), use_container_width=True, hide_index=True)
                     elif selected_tool["tool_id"] == "T066":
                         result = st.session_state.get("shoir_tool_result_T066")
                         if result:
