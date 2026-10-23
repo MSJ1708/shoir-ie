@@ -320,6 +320,54 @@ def _flow_process_figure(depts: pd.DataFrame, flows: pd.DataFrame) -> go.Figure:
     )
     return fig
 
+def _flow_distance_analysis(
+    flows: pd.DataFrame,
+    cost_per_load_m: float | None = None,
+) -> dict[str, float | None | str]:
+    """Calculate flow-distance and optional user-rated handling cost.
+
+    Weighted flow-distance = sum(loads/day × travel distance in metres).
+    A daily cost is shown only when a positive, explicitly supplied
+    currency-per-load-metre rate exists; no rate or saving is invented.
+    """
+    if cost_per_load_m is not None:
+        try:
+            unit_cost = float(cost_per_load_m)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Handling cost rate must be a finite non-negative number.") from exc
+        if not math.isfinite(unit_cost) or unit_cost < 0:
+            raise ValueError("Handling cost rate must be a finite non-negative number.")
+    else:
+        unit_cost = None
+
+    weighted = 0.0
+    if not flows.empty:
+        required = {"loads_day", "distance_m"}
+        missing = required - set(flows.columns)
+        if missing:
+            raise ValueError("Flow-distance analysis is missing required field(s): " + ", ".join(sorted(missing)))
+        for row_number, row in enumerate(flows[["loads_day", "distance_m"]].itertuples(index=False, name=None), start=1):
+            try:
+                loads, distance = float(row[0]), float(row[1])
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"Flow row {row_number} requires numeric loads/day and distance (m).") from exc
+            if not math.isfinite(loads) or loads < 0:
+                raise ValueError(f"Flow row {row_number} loads/day must be finite and non-negative.")
+            if not math.isfinite(distance) or distance < 0:
+                raise ValueError(f"Flow row {row_number} distance (m) must be finite and non-negative.")
+            weighted += loads * distance
+
+    daily_cost = weighted * unit_cost if unit_cost is not None and unit_cost > 0 else None
+    return {
+        "weighted_flow_distance_load_m_per_day": weighted,
+        "cost_rate_currency_per_load_m": unit_cost,
+        "estimated_daily_handling_cost_currency": daily_cost,
+        "formula": "Weighted flow-distance = Σ(loads/day × distance in m); estimated daily handling cost = weighted flow-distance × user-entered cost rate",
+        "unit": "load·m/day; optional currency/day when rate is currency/(load·m)",
+        "status": "COST_ESTIMATED_FROM_USER_RATE" if daily_cost is not None else "FLOW_DISTANCE_ONLY",
+    }
+
+
 def _flow_matrix(depts: pd.DataFrame, flows: pd.DataFrame) -> pd.DataFrame:
     """Return a complete From-To load matrix, including zero/unconnected pairs."""
     ids = depts["id"].astype(str).tolist()
@@ -952,6 +1000,32 @@ def render_facility_layout(tier: str, username: str) -> None:
 
     with tabs[1]:
         st.markdown("### Connect departments to model the process")
+        with st.expander("Flow-distance and handling-cost evaluation", expanded=True):
+            unit_cost = st.number_input(
+                "Handling cost rate (currency per load·m; 0 = not supplied)",
+                min_value=0.0, value=0.0, step=0.01, format="%.4f",
+                key="fl_cost_per_load_m",
+            )
+            try:
+                cost_result = _flow_distance_analysis(flows, unit_cost)
+            except ValueError as exc:
+                st.error(f"Flow-distance calculation was blocked by invalid flow data: {exc}")
+                cost_result = None
+            if cost_result is not None:
+                cost_left, cost_right = st.columns(2)
+                cost_left.metric(
+                    "Weighted flow-distance",
+                    f"{cost_result['weighted_flow_distance_load_m_per_day']:,.2f} load·m/day",
+                )
+                daily_cost = cost_result["estimated_daily_handling_cost_currency"]
+                cost_right.metric(
+                    "Estimated daily handling cost",
+                    f"{daily_cost:,.2f} currency/day" if daily_cost is not None else "Not estimated",
+                )
+                st.caption(
+                    "Formula: Σ(loads/day × distance in metres). Cost is calculated only from the explicit rate above; "
+                    "a rate of 0 means no monetary estimate is shown. This is a modelled baseline, not verified savings."
+                )
         st.markdown("#### From-To load matrix")
         st.dataframe(
             _flow_matrix(depts, flows),

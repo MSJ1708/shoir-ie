@@ -37,6 +37,12 @@ from shoir_engine_studio import (
 )
 from shoir_investor_demo import render_investor_control_center
 from shoir_workspace_rbac import list_workspace_members, save_workspace_members, WORKSPACE_ROLES
+from shoir_tier_capabilities import (
+    TIER_ORDER as SHARED_TIER_ORDER,
+    module_required_tier as shared_module_required_tier,
+    normalize_tier as shared_normalize_tier,
+    tier_allows as shared_tier_allows,
+)
 
 PLATFORM_CATALOG = [
     {"tier":"Starter","category":"AI & Automation","name":"Excel Data Cleaning & Import",
@@ -89,10 +95,13 @@ PLATFORM_CATALOG = [
     {"tier":"Mid-Tier Pro","category":"Production","name":"Production Bottleneck & Capacity Recovery Study",
      "when":"Find candidate production constraints from validated line data and quantify a transparent downtime-recovery what-if without replacing your MES or ERP.",
      "example":"Import production-event CSV rows, validate planned time, downtime, ideal cycle, total output and good output, compare line OEE, then export calculated baseline metrics and clearly labeled simulated recovery estimates with input/result hashes."},
+    {"tier":"Starter","category":"Core Platform","name":"100-Tool Engineering Hub",
+     "when":"Find a capability by stable ID, workbench or use case, and see its real readiness before opening an existing tool.",
+     "example":"Use the grouped hub for standard-time, work-sampling, takt/capacity, OEE, process capability, MTBF/MTTR, inventory, carbon and economics calculators while keeping the existing navigation compact."}
 ]
 
 TIER_FEATURES = {
-    "Starter": ["Engineering Validation Center", "Excel Data Cleaning & Import", "AI Copilot"],
+    "Starter": ["Engineering Validation Center", "Excel Data Cleaning & Import", "AI Copilot", "100-Tool Engineering Hub"],
     "Mid-Tier Pro": [
         "Industrial Data Model & Digital Thread",
         "Engineering Validation Center",
@@ -143,24 +152,25 @@ TIER_FEATURES = {
 TIER_ORDER = ["Starter","Mid-Tier Pro","Professional","Enterprise","Enterprise Plus","Research Pack"]
 
 def normalize_tier(value: str) -> str:
-    v=str(value or "Starter").lower()
-    if "research" in v: return "Research Pack"
-    if "enterprise plus" in v or "industrial enterprise" in v: return "Enterprise Plus"
-    if "enterprise" in v: return "Enterprise"
-    if "professional" in v: return "Professional"
-    if "pro" in v: return "Mid-Tier Pro"
-    return "Starter"
+    """Legacy display normalization; never use this alone to authorize an action."""
+    return shared_normalize_tier(value)
+
 
 def tier_allows(current: str, required: str) -> bool:
-    # The app's Research Pack menu is Enterprise-level functionality plus
-    # research tools. It must not imply the separate Enterprise Plus package.
-    c=normalize_tier(current)
-    r=normalize_tier(required)
-    if c == "Research Pack":
-        return r in {"Starter", "Mid-Tier Pro", "Professional", "Enterprise", "Research Pack"}
-    if r == "Research Pack":
-        return c == "Research Pack"
-    return TIER_ORDER.index(c) >= TIER_ORDER.index(r)
+    """Delegate all runtime entitlement decisions to the canonical fail-closed policy."""
+    return shared_tier_allows(current, required)
+
+
+def _platform_required_tier(module: str) -> Optional[str]:
+    """Return only an exact, explicit, mutually consistent runtime module policy."""
+    entry = next((item for item in PLATFORM_CATALOG if str(item.get("name", "")).strip() == str(module).strip()), None)
+    if entry is None:
+        return None
+    catalog_tier = str(entry.get("tier", "")).strip()
+    shared_tier = shared_module_required_tier(str(module).strip())
+    if catalog_tier not in SHARED_TIER_ORDER or shared_tier != catalog_tier:
+        return None
+    return catalog_tier
 
 def init_platform_db(db_path: str="enterprise_full_workspace.db") -> bool:
     with sqlite3.connect(db_path) as conn:
@@ -1067,9 +1077,17 @@ def render_module(module: str, tier: str, username: str):
     init_platform_db()
     sanitize_module_session_state(st)
 
-    required=next((x["tier"] for x in PLATFORM_CATALOG if x["name"]==module),None)
-    if required and not tier_allows(tier,required):
+    required = _platform_required_tier(module)
+    if required is None:
+        st.error("This platform route has no explicit, matching entitlement policy. Execution is disabled until the catalog and shared tier policy are reconciled.")
+        return
+    if not tier_allows(tier, required):
         st.warning(f"🔒 {module} requires {required}. Your current tier is {tier}. Open Subscriptions to review upgrade options.")
+        return
+
+    if module == "100-Tool Engineering Hub":
+        from shoir_100_tool_hub import render_100_tool_hub
+        render_100_tool_hub(st, tier, username)
         return
 
     if module=="Excel Data Cleaning & Import":

@@ -1,6 +1,6 @@
 import pandas as pd
 
-from shoir_facility_layout import _flow_matrix, _slp_frame, _matrix, _slp_heatmap_values
+from shoir_facility_layout import _flow_matrix, _slp_frame, _matrix, _slp_heatmap_values, _flow_distance_analysis
 
 
 def _departments():
@@ -303,3 +303,31 @@ def test_blank_slp_relationship_remains_missing_not_a_fabricated_score(
     matrix = facility._matrix(departments, slp)
     assert matrix.loc["D1", "D2"] == ""
     assert pd.isna(facility._slp_heatmap_values(matrix).loc["D1", "D2"])
+
+
+
+def test_flow_distance_and_optional_handling_cost_golden_case():
+    flows = pd.DataFrame([
+        {"loads_day": 120, "distance_m": 40.0},
+        {"loads_day": 7, "distance_m": 15.0},
+    ])
+    flow_only = _flow_distance_analysis(flows)
+    assert flow_only["weighted_flow_distance_load_m_per_day"] == 4905.0
+    assert flow_only["estimated_daily_handling_cost_currency"] is None
+    assert flow_only["status"] == "FLOW_DISTANCE_ONLY"
+
+    rated = _flow_distance_analysis(flows, 0.25)
+    assert rated["weighted_flow_distance_load_m_per_day"] == 4905.0
+    assert rated["estimated_daily_handling_cost_currency"] == 1226.25
+    assert rated["status"] == "COST_ESTIMATED_FROM_USER_RATE"
+
+
+def test_flow_distance_rejects_invalid_or_missing_measurements():
+    import pytest
+
+    with pytest.raises(ValueError, match="non-negative"):
+        _flow_distance_analysis(pd.DataFrame([{"loads_day": -1, "distance_m": 10}]))
+    with pytest.raises(ValueError, match="missing required field"):
+        _flow_distance_analysis(pd.DataFrame([{"loads_day": 10}]))
+    with pytest.raises(ValueError, match="rate must be a finite non-negative number"):
+        _flow_distance_analysis(pd.DataFrame(), -0.1)

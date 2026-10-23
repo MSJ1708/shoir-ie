@@ -74,7 +74,7 @@ def test_all_subscription_modules_are_catalogued_with_the_correct_tier():
     catalogue = _catalogue_entries(assignments)
 
     # Keep the tier progression and its Research Pack add-on boundary explicit.
-    assert [len(tier_lists[label]) for label in TIER_LABELS] == [12, 30, 36, 70, 75, 91]
+    assert [len(tier_lists[label]) for label in TIER_LABELS] == [13, 31, 37, 71, 76, 92]
 
     access_names = set().union(*(set(names) for names in tier_lists.values()))
     catalogue_names = set(catalogue)
@@ -181,7 +181,7 @@ def test_every_catalogued_module_has_a_specialist_route_or_named_fallback_bluepr
     # This is the shared source-defined inventory audited by PR #135.
     # Pin the exact count so a missing or unexpectedly duplicated route cannot
     # silently pass under the former broad lower-bound assertion.
-    assert len(catalogue_names) == 96
+    assert len(catalogue_names) == 97
     uncovered = catalogue_names - specialist_names - named_fallback_names
     assert not uncovered, {
         "modules_without_specialist_route_or_named_fallback": sorted(uncovered)
