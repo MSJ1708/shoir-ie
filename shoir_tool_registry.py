@@ -145,11 +145,15 @@ def _load_targets() -> tuple[dict[str, Any], ...]:
         external_dependency = "No external configuration established by this source audit."
         if tool_id in {"T048", "T074", "T096", "T098"}:
             external_dependency = "Approved data source or provider configuration must be explicitly set up and tested; live operation is not assumed."
-        persistence_scope = (
-            "Mapped route's existing persistence; save/reload/re-login evidence still required."
-            if status == "IMPLEMENTED_NEEDS_VALIDATION"
-            else "Persistence behavior is not established for the full target capability."
-        )
+        if tool_id in {"T021", "T023", "T066", "T075", "T085"}:
+            persistence_scope = (
+                "Transient Streamlit session result for this focused method; durable save/reload/re-login "
+                "is not implemented for this target action."
+            )
+        elif status == "IMPLEMENTED_NEEDS_VALIDATION":
+            persistence_scope = "Mapped route's existing persistence; save/reload/re-login evidence still required."
+        else:
+            persistence_scope = "Persistence behavior is not established for the full target capability."
         targets.append({
             "tool_id": tool_id,
             "canonical_name": name,
