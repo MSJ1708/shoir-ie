@@ -116,6 +116,11 @@ def analyze_process_event_log(
     if ts.isna().any():
         raise ValueError(f"Event-log field '{timestamp_col}' contains invalid timestamps.")
     source["_ts_utc"] = ts
+    if source.duplicated(subset=[case_col, "_ts_utc"]).any():
+        raise ValueError(
+            "Multiple events in one case share a timestamp; resolve event ordering "
+            "or provide an unambiguous sequence before analysis."
+        )
     source["_input_order"] = range(len(source))
     source = source.sort_values([case_col, "_ts_utc", "_input_order"], kind="mergesort").reset_index(drop=True)
     source["_next_activity"] = source.groupby(case_col, sort=False)[activity_col].shift(-1)
