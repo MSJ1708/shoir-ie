@@ -123,7 +123,7 @@ def test_status_summary_counts_all_targets_and_never_infers_verified_from_presen
 
 
 def test_focused_workbench_tools_document_direct_gates_tests_and_transient_persistence():
-    focused = {"T021", "T022", "T023", "T028", "T029", "T030", "T066", "T075", "T085"}
+    focused = {"T021", "T022", "T023", "T026", "T028", "T029", "T030", "T032", "T055", "T066", "T075", "T078", "T081", "T085"}
     for tool_id in focused:
         tool = get_tool(tool_id)
         assert tool is not None
