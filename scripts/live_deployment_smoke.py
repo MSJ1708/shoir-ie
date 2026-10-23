@@ -56,11 +56,26 @@ def _visible_text_across_frames(page) -> str:
 
 
 def _wake_if_sleeping(page, *, timeout_seconds: int = 150) -> dict:
-    """Wake an idle Streamlit Community Cloud app, but never disguise a failed wake."""
-    body = _visible_text_across_frames(page)
-    folded = body.casefold()
-    if not any(marker in folded for marker in SLEEP_PAGE_MARKERS):
-        return {"sleep_screen_seen": False, "wake_clicked": False, "wake_result": "NOT_NEEDED"}
+    """Detect and wake an idle Streamlit app without masking a failed startup."""
+    # The public sleeping interstitial can load shortly after DOMContentLoaded;
+    # poll for it instead of checking only once before the host frame hydrates.
+    detection_deadline = time.monotonic() + 20
+    body = ""
+    folded = ""
+    while time.monotonic() < detection_deadline:
+        body = _visible_text_across_frames(page)
+        folded = body.casefold()
+        if any(marker in folded for marker in SLEEP_PAGE_MARKERS):
+            break
+        if any(marker.casefold() in folded for marker in APP_READY_MARKERS):
+            return {"sleep_screen_seen": False, "wake_clicked": False, "wake_result": "APP_ALREADY_READY"}
+        page.wait_for_timeout(500)
+    else:
+        return {
+            "sleep_screen_seen": False,
+            "wake_clicked": False,
+            "wake_result": "SLEEP_SCREEN_NOT_SEEN_DURING_DETECTION",
+        }
 
     clicked = False
     click_errors = []
@@ -85,14 +100,22 @@ def _wake_if_sleeping(page, *, timeout_seconds: int = 150) -> dict:
         page.wait_for_timeout(1_000)
         body = _visible_text_across_frames(page)
         folded = body.casefold()
-        if not any(marker in folded for marker in SLEEP_PAGE_MARKERS):
+        if any(marker.casefold() in folded for marker in APP_READY_MARKERS):
+            return {
+                "sleep_screen_seen": True,
+                "wake_clicked": True,
+                "wake_result": "APP_READY_AFTER_WAKE",
+            }
+        if not any(marker in folded for marker in SLEEP_PAGE_MARKERS) and body.strip():
+            # Let the regular readiness loop decide whether this is the app or
+            # a transient shell; only record that the sleep interstitial cleared.
             return {
                 "sleep_screen_seen": True,
                 "wake_clicked": True,
                 "wake_result": "SLEEP_SCREEN_CLEARED",
             }
     raise RuntimeError(
-        f"Streamlit sleep screen remained after clicking wake and waiting {timeout_seconds} seconds."
+        f"Streamlit app did not wake into an accessible page within {timeout_seconds} seconds."
     )
 FATAL_TEXT_MARKERS = (
     "application runtime could not be loaded",
