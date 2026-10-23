@@ -197,3 +197,96 @@ def test_time_study_result_and_input_snapshot_roundtrip_per_user(tmp_path):
     pd.testing.assert_frame_equal(restored["observations"], result["observations"])
     assert alice["shoir_tool_inputs_T021"] == inputs
     assert "shoir_tool_result_T021" not in bob
+
+
+def test_work_sampling_wilson_intervals_match_hand_checked_counts():
+    from shoir_target_engines import analyze_work_sampling
+
+    result = analyze_work_sampling(
+        {"Productive": 60, "Idle": 40}, confidence_level=0.95, target_margin_pct=5.0
+    )
+    assert result["status"] == "MORE_OBSERVATIONS_RECOMMENDED"
+    assert result["total_observations"] == 100
+    assert result["minimum_observations_for_target_margin"] == 385
+    assert result["target_sample_size_met"] is False
+    frame = result["activity_summary"].set_index("Activity")
+    assert frame.loc["Productive", "Observed proportion (%)"] == pytest.approx(60.0)
+    assert frame.loc["Productive", "95.0% Wilson lower (%)"] == pytest.approx(50.22, abs=0.03)
+    assert frame.loc["Productive", "95.0% Wilson upper (%)"] == pytest.approx(69.08, abs=0.03)
+    assert frame.loc["Idle", "Observed proportion (%)"] == pytest.approx(40.0)
+
+    adequate = analyze_work_sampling(
+        {"Productive": 200, "Idle": 200}, confidence_level=0.95, target_margin_pct=5.0
+    )
+    assert adequate["status"] == "SAMPLE_TARGET_MET"
+    assert adequate["target_sample_size_met"] is True
+    assert adequate["total_observations"] == 400
+
+
+def test_work_sampling_rejects_invalid_counts_and_assumptions():
+    from shoir_target_engines import analyze_work_sampling
+
+    with pytest.raises(ValueError, match="at least two"):
+        analyze_work_sampling({})
+    with pytest.raises(ValueError, match="greater than zero"):
+        analyze_work_sampling({"Productive": 0, "Idle": 0})
+    with pytest.raises(ValueError, match="whole number"):
+        analyze_work_sampling({"Productive": 2.5, "Idle": 1})
+    with pytest.raises(ValueError, match="whole number"):
+        analyze_work_sampling({"Productive": True, "Idle": 1})
+    with pytest.raises(ValueError, match="normalized"):
+        analyze_work_sampling({"Idle": 2, " idle ": 3})
+    with pytest.raises(ValueError, match="Confidence level"):
+        analyze_work_sampling({"Productive": 1, "Idle": 1}, confidence_level=1.0)
+    with pytest.raises(ValueError, match="margin of error"):
+        analyze_work_sampling({"Productive": 1, "Idle": 1}, target_margin_pct=0)
+
+
+def test_pareto_root_cause_matches_hand_checked_cumulative_counts_and_records_five_whys():
+    from shoir_target_engines import analyze_pareto_root_cause
+
+    result = analyze_pareto_root_cause(
+        {"Method": 10, "Machine": 60, "Material": 30},
+        problem_statement="Repeated stoppages",
+        why_chain=[
+            "Why 1: line stops unexpectedly",
+            "Why 2: sensor faults are recorded",
+            "Why 3: sensor mount vibrates loose",
+            "Why 4: fastener inspection is not specified",
+            "Why 5: maintenance standard omits the mount",
+        ],
+        countermeasure="Add a mount inspection to the preventive checklist",
+        owner="Maintenance lead",
+        due_date="2026-11-01",
+    )
+    frame = result["pareto_summary"]
+    assert result["status"] == "ROOT_CAUSE_REVIEW_RECORDED"
+    assert result["total_count"] == 100
+    assert result["categories_to_reach_80_percent"] == 2
+    assert frame["Category"].tolist() == ["Machine", "Material", "Method"]
+    assert frame["Share (%)"].tolist() == pytest.approx([60.0, 30.0, 10.0])
+    assert frame["Cumulative (%)"].tolist() == pytest.approx([60.0, 90.0, 100.0])
+    assert len(result["why_chain"]) == 5
+    assert result["follow_up_complete"] is True
+    assert "do not prove causation" in result["warning"]
+
+
+def test_pareto_root_cause_rejects_invalid_counts_incomplete_whys_and_bad_dates():
+    from shoir_target_engines import analyze_pareto_root_cause
+
+    with pytest.raises(ValueError, match="non-empty"):
+        analyze_pareto_root_cause({})
+    with pytest.raises(ValueError, match="greater than zero"):
+        analyze_pareto_root_cause({"Machine": 0, "Material": 0})
+    with pytest.raises(ValueError, match="non-negative whole number"):
+        analyze_pareto_root_cause({"Machine": -1, "Material": 2})
+    with pytest.raises(ValueError, match="whole number"):
+        analyze_pareto_root_cause({"Machine": 1.5, "Material": 2})
+    with pytest.raises(ValueError, match="normalized"):
+        analyze_pareto_root_cause({"Machine": 1, " machine ": 2})
+    with pytest.raises(ValueError, match="exactly five"):
+        analyze_pareto_root_cause({"Machine": 1}, why_chain=["Why one", "Why two"])
+    with pytest.raises(ValueError, match="problem statement"):
+        analyze_pareto_root_cause({"Machine": 1}, why_chain=["a", "b", "c", "d", "e"])
+    with pytest.raises(ValueError, match="ISO YYYY-MM-DD"):
+        analyze_pareto_root_cause({"Machine": 1}, due_date="tomorrow")
