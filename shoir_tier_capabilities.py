@@ -47,6 +47,7 @@ def unique_modules(modules: Iterable[str]) -> list[str]:
 
 MODULE_REQUIREMENTS = {
     "AI Copilot": "Starter",
+    "Engineering Tool Library": "Starter",
     "ShadowShift — Micro-Loss & Recovery Intelligence": "Enterprise",
     "Excel Data Cleaning & Import": "Starter",
     "Industrial Workbook": "Starter",
@@ -220,6 +221,17 @@ def tier_allows(current: str, required: str) -> bool:
     Enterprise Plus-only tier. Keep research entitlement independent from
     the ordinary tier ladder so one package never implies another add-on.
     """
+    raw_required = str(required or "").strip().lower()
+    recognized_required = (
+        "research" in raw_required
+        or "enterprise" in raw_required
+        or "professional" in raw_required
+        or "starter" in raw_required
+        or re.search(r"\bpro\b", raw_required) is not None
+    )
+    if not recognized_required:
+        return False
+
     current_tier = normalize_tier(current)
     required_tier = normalize_tier(required)
 
@@ -278,10 +290,15 @@ def audit_module_entitlement_coverage(modules: Iterable[str]) -> dict[str, objec
 
 
 def available_modules(tier: str, modules: Iterable[str]) -> list[str]:
+    """Return only explicitly mapped modules allowed by the shared tier policy.
+
+    Unknown/unmapped modules are excluded instead of being interpreted as free.
+    The coverage audit remains available to report unresolved names for repair.
+    """
     result = []
     for module in modules:
         required = module_required_tier(str(module))
-        if required is None or tier_allows(tier, required):
+        if required is not None and required in TIER_ORDER and tier_allows(tier, required):
             result.append(str(module))
     return result
 
@@ -315,6 +332,28 @@ def copilot_gate(prompt: str, tier: str) -> Optional[dict[str, str]]:
                     f"capabilities included in your package."
                 ),
             }
+    # Canonical T001-T100 names are checked along with legacy Copilot phrases.
+    # Display text does not alter the stable tool ID or its entitlement mapping.
+    try:
+        from shoir_100_tool_registry import TOOL_CATALOG
+        for tool in sorted(TOOL_CATALOG, key=lambda item: len(item["canonical_name"]), reverse=True):
+            name = str(tool.get("canonical_name", "")).casefold()
+            required_tier = tool.get("target_minimum_tier")
+            if name and name in p and not tier_allows(tier, required_tier):
+                return {
+                    "required_tier": required_tier,
+                    "current_tier": normalize_tier(tier),
+                    "phrase": name,
+                    "message": (
+                        f"🔒 **{tool['canonical_name']}** is outside your current package. "
+                        f"Your package is **{normalize_tier(tier)}**; this capability requires "
+                        f"**{required_tier}**. I can still explain the method or help with "
+                        "capabilities included in your package."
+                    ),
+                }
+    except Exception:
+        # Legacy gates remain in force if the canonical catalog cannot be loaded.
+        pass
     return None
 
 
