@@ -13,7 +13,7 @@ from typing import Any
 
 import pandas as pd
 import pulp
-from scipy.stats import nct, t
+from scipy.stats import nct, norm, t
 
 
 def _finite_number(value: Any, field: str) -> float:
@@ -294,7 +294,15 @@ def _two_sample_t_power(effect_size: float, n_per_group: int, alpha: float) -> f
     critical = float(t.ppf(1.0 - alpha / 2.0, df))
     upper = float(nct.sf(critical, df, noncentrality))
     lower = float(nct.cdf(-critical, df, noncentrality))
-    return min(1.0, max(0.0, upper + lower))
+    power = upper + lower
+    if not math.isfinite(power):
+        # SciPy's noncentral-t CDF can lose numerical stability at very large
+        # degrees of freedom. In that regime, use the documented normal-limit
+        # approximation so NaN cannot distort the sample-size search.
+        upper = float(norm.sf(critical - noncentrality))
+        lower = float(norm.cdf(-critical - noncentrality))
+        power = upper + lower
+    return min(1.0, max(0.0, power))
 
 
 def plan_two_sample_t_sample_size(
@@ -328,7 +336,7 @@ def plan_two_sample_t_sample_size(
     if maximum_power < target:
         return {
             "status": "LIMIT_REACHED",
-            "method": "Balanced independent two-sample t-test; noncentral t power",
+            "method": "Balanced independent two-sample t-test; noncentral t power with normal-limit fallback for numerical stability",
             "effect_size_cohens_d": d,
             "alpha": a,
             "target_power": target,
@@ -336,7 +344,7 @@ def plan_two_sample_t_sample_size(
             "total_sample_size": None,
             "achieved_power": maximum_power,
             "search_limit_per_group": max_n_per_group,
-            "assumptions": "Two-sided test; independent observations; normal outcomes; equal variances; balanced groups; no multiplicity/dropout adjustment.",
+            "assumptions": "Two-sided test; independent observations; normal outcomes; equal variances; balanced groups; no multiplicity/dropout adjustment. For extreme degrees of freedom only, normal-limit fallback may be used when the noncentral-t calculation is non-finite.",
             "message": "The requested power was not reached within the configured search limit.",
         }
 
