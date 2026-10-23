@@ -895,6 +895,6 @@ def render_100_tool_workbench(st: Any, tier: str, allowed_modules: Sequence[str]
             st.write("Enterprise Plus does not automatically grant Research Pack-only tools.")
             st.write("Unknown tool IDs and unknown tier labels fail closed in this library.")
             st.warning(
-                "The catalog crosswalk is not an authenticated end-to-end pass. Only T013, T016, T019, T021, T022, and T023 expose standalone engines here; "
+                "The catalog crosswalk is not an authenticated end-to-end pass. T013, T016, T019, T021, T022, T023, T026, T032, T042, T055, T078, and T081 expose standalone quick engines here; "
                 "other entries must use an allowed related workspace or remain incomplete. Production release gates are separate."
             )
