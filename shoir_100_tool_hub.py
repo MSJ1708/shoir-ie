@@ -14,7 +14,7 @@ ALLOWED_STATUSES = {
     "VERIFIED_WORKING", "IMPLEMENTED_NEEDS_VALIDATION", "FOUNDATION_ONLY",
     "MISSING", "EXTERNAL_CONFIGURATION_REQUIRED", "BLOCKED",
 }
-CALCULATOR_IDS = ("T021", "T022", "T023", "T026", "T032", "T042", "T055", "T078", "T081")
+CALCULATOR_IDS = ("T021", "T022", "T023", "T026", "T032", "T034", "T040", "T042", "T055", "T078", "T081", "T084", "T085")
 
 
 def load_tool_registry(path: str | Path = MATRIX_PATH) -> list[dict[str, str]]:
@@ -237,6 +237,229 @@ def calculate_carbon_emissions(activity_quantity: float, emission_factor_kg_per_
         "warnings": ["Not an audited GHG disclosure; validate scope, factor source and uncertainty."],
     }
 
+
+
+def binomial_acceptance_probability(sample_size: int, acceptance_number: int, defect_probability: float) -> float:
+    """Return P(X <= c) for X~Binomial(n,p), the single-sampling approximation."""
+    if isinstance(sample_size, bool) or int(sample_size) != sample_size or sample_size < 1:
+        raise ValueError("Sample size must be a positive whole number.")
+    if isinstance(acceptance_number, bool) or int(acceptance_number) != acceptance_number or acceptance_number < 0 or acceptance_number > sample_size:
+        raise ValueError("Acceptance number must be a whole number between zero and sample size.")
+    p = _number(defect_probability, "Defect probability", 0)
+    if p > 1:
+        raise ValueError("Defect probability must not exceed 1.")
+    n, c = int(sample_size), int(acceptance_number)
+    if p == 0:
+        return 1.0
+    if p == 1:
+        return 1.0 if c == n else 0.0
+    pmf = (1.0 - p) ** n
+    probabilities = [pmf]
+    for k in range(1, c + 1):
+        pmf *= (n - k + 1) / k * p / (1.0 - p)
+        probabilities.append(pmf)
+    return min(1.0, max(0.0, math.fsum(probabilities)))
+
+
+def calculate_acceptance_sampling_plan(
+    aql_percent: float,
+    ltpd_percent: float,
+    producer_risk_percent: float = 5.0,
+    consumer_risk_percent: float = 10.0,
+    max_sample_size: int = 500,
+) -> dict[str, Any]:
+    """Find the smallest single-sampling binomial-approximation plan satisfying both risks."""
+    aql = _number(aql_percent, "AQL (%)", 0)
+    ltpd = _number(ltpd_percent, "LTPD (%)", 0, True)
+    producer = _number(producer_risk_percent, "Maximum producer risk (%)", 0, True)
+    consumer = _number(consumer_risk_percent, "Maximum consumer risk (%)", 0, True)
+    if aql >= ltpd or ltpd >= 100:
+        raise ValueError("AQL must be below LTPD, and LTPD must be below 100%.")
+    if producer >= 100 or consumer >= 100:
+        raise ValueError("Producer and consumer risk limits must be below 100%.")
+    if isinstance(max_sample_size, bool) or int(max_sample_size) != max_sample_size or not 1 <= max_sample_size <= 2000:
+        raise ValueError("Maximum sample size must be a whole number from 1 to 2000.")
+    p_aql, p_ltpd = aql / 100.0, ltpd / 100.0
+    alpha_limit, beta_limit = producer / 100.0, consumer / 100.0
+    selected = None
+    for n in range(1, int(max_sample_size) + 1):
+        pa = (1 - p_aql) ** n
+        pl = (1 - p_ltpd) ** n
+        cdf_aql, cdf_ltpd = [], []
+        sum_aql, sum_ltpd = pa, pl
+        cdf_aql.append(sum_aql)
+        cdf_ltpd.append(sum_ltpd)
+        for k in range(1, n + 1):
+            pa *= (n - k + 1) / k * p_aql / (1 - p_aql) if p_aql else 0.0
+            pl *= (n - k + 1) / k * p_ltpd / (1 - p_ltpd)
+            sum_aql += pa
+            sum_ltpd += pl
+            cdf_aql.append(min(1.0, sum_aql))
+            cdf_ltpd.append(min(1.0, sum_ltpd))
+        # The first feasible c minimizes the acceptance number for this n.
+        for acceptance_number in range(n + 1):
+            alpha_actual = max(0.0, 1.0 - cdf_aql[acceptance_number])
+            beta_actual = cdf_ltpd[acceptance_number]
+            if alpha_actual <= alpha_limit + 1e-12 and beta_actual <= beta_limit + 1e-12:
+                selected = (n, acceptance_number, alpha_actual, beta_actual)
+                break
+        if selected is not None:
+            break
+    if selected is None:
+        raise ValueError("No single-sampling plan meets both risk limits within the maximum sample size. Increase the limit or review AQL/LTPD/risk requirements.")
+    n, c, alpha_actual, beta_actual = selected
+    return {
+        "status": "CALCULATED",
+        "sample_size": n,
+        "acceptance_number": c,
+        "rejection_number": c + 1,
+        "aql_percent": aql,
+        "ltpd_percent": ltpd,
+        "producer_risk_actual_percent": alpha_actual * 100,
+        "consumer_risk_actual_percent": beta_actual * 100,
+        "producer_risk_limit_percent": producer,
+        "consumer_risk_limit_percent": consumer,
+        "formula": "Producer risk α = 1 − P(X≤c | p=AQL); consumer risk β = P(X≤c | p=LTPD), X~Binomial(n,p)",
+        "unit": "items; risk and defect rates in percent",
+        "assumptions": ["Single acceptance-sampling plan with independent Bernoulli defects.", "Binomial approximation treats lot fraction as sufficiently small; finite-lot hypergeometric corrections are not included.", "This is not an ISO/ANSI table lookup unless independently matched to the applicable standard and plan."],
+        "warnings": ["Confirm the sampling standard, lot size, inspection mode and contract requirements before using this plan for product release."],
+    }
+
+
+def calculate_quality_cost(
+    units_produced: int,
+    defect_units: int,
+    scrap_units: int,
+    rework_units: int,
+    scrap_cost_per_unit: float,
+    rework_cost_per_unit: float,
+    inspection_cost_total: float = 0.0,
+) -> dict[str, Any]:
+    """Separate internal failure costs from appraisal costs using explicit, non-overlapping unit counts."""
+    counts = {
+        "units produced": units_produced,
+        "defect units": defect_units,
+        "scrap units": scrap_units,
+        "rework units": rework_units,
+    }
+    for name, value in counts.items():
+        if isinstance(value, bool) or int(value) != value or value < 0:
+            raise ValueError(f"{name.capitalize()} must be a non-negative whole number.")
+    if units_produced <= 0:
+        raise ValueError("Units produced must be greater than zero.")
+    if defect_units > units_produced:
+        raise ValueError("Defect units cannot exceed units produced.")
+    if scrap_units + rework_units > defect_units:
+        raise ValueError("Scrap and rework units cannot exceed defect units; count categories as non-overlapping.")
+    scrap_rate = _number(scrap_cost_per_unit, "Scrap cost per unit", 0)
+    rework_rate = _number(rework_cost_per_unit, "Rework cost per unit", 0)
+    appraisal_cost = _number(inspection_cost_total, "Total inspection/appraisal cost", 0)
+    scrap_cost = scrap_units * scrap_rate
+    rework_cost = rework_units * rework_rate
+    internal_failure = scrap_cost + rework_cost
+    total_copq = internal_failure + appraisal_cost
+    return {
+        "status": "CALCULATED",
+        "units_produced": int(units_produced),
+        "defect_units": int(defect_units),
+        "defect_rate_percent": defect_units / units_produced * 100,
+        "defects_per_million_opportunities": defect_units / units_produced * 1_000_000,
+        "scrap_cost": scrap_cost,
+        "rework_cost": rework_cost,
+        "internal_failure_cost": internal_failure,
+        "inspection_appraisal_cost": appraisal_cost,
+        "cost_of_poor_quality_included_costs": total_copq,
+        "copq_per_unit_produced": total_copq / units_produced,
+        "formula": "Scrap cost=scrap units×unit cost; rework cost=rework units×unit cost; reported COPQ subtotal=internal failure cost+inspection/appraisal cost",
+        "unit": "currency and currency/unit; defect rate in percent; defect count per million units",
+        "assumptions": ["Scrap and rework unit counts are non-overlapping subsets of defects.", "Only the explicitly entered cost categories are included; prevention, external failure and warranty costs are excluded unless separately added."],
+        "warnings": ["This is the included-cost subtotal, not a complete cost-of-quality ledger unless all relevant cost categories are supplied."],
+    }
+
+
+def calculate_portfolio_scores(
+    project_scores: dict[str, dict[str, float]],
+    criteria_weights_percent: dict[str, float],
+) -> dict[str, Any]:
+    """Calculate transparent weighted project scores and criterion contributions."""
+    if not isinstance(project_scores, dict) or not project_scores:
+        raise ValueError("Provide at least one project with criteria scores.")
+    if not isinstance(criteria_weights_percent, dict) or not criteria_weights_percent:
+        raise ValueError("Provide at least one criterion weight.")
+    weights = {str(k): _number(v, f"Weight for {k}", 0) for k, v in criteria_weights_percent.items()}
+    if any(not key.strip() for key in weights):
+        raise ValueError("Criterion names must not be blank.")
+    total_weight = math.fsum(weights.values())
+    if total_weight <= 0:
+        raise ValueError("At least one criterion weight must be positive.")
+    normalized = {k: v / total_weight for k, v in weights.items()}
+    records = []
+    contributions = []
+    for project, scores in project_scores.items():
+        if not str(project).strip() or not isinstance(scores, dict):
+            raise ValueError("Each project must have a non-empty name and a criteria-score object.")
+        missing = set(weights) - set(scores)
+        if missing:
+            raise ValueError(f"Project {project!r} is missing scores for: {', '.join(sorted(missing))}.")
+        components = {}
+        total = 0.0
+        for criterion, weight in normalized.items():
+            score = _number(scores[criterion], f"{project} / {criterion} score", 0)
+            if score > 100:
+                raise ValueError(f"{project} / {criterion} score must not exceed 100.")
+            contribution = score * weight
+            total += contribution
+            components[criterion] = contribution
+            contributions.append({
+                "Project": str(project), "Criterion": criterion, "Score (0-100)": score,
+                "Weight (%)": weight * 100, "Weighted contribution": contribution,
+            })
+        records.append({"Project": str(project), "Weighted score (0-100)": total})
+    ranking = sorted(records, key=lambda r: (-r["Weighted score (0-100)"], r["Project"].casefold()))
+    for rank, record in enumerate(ranking, start=1):
+        record["Rank"] = rank
+    return {
+        "status": "CALCULATED",
+        "ranking": pd.DataFrame(ranking),
+        "contributions": pd.DataFrame(contributions),
+        "normalized_weights_percent": {k: v * 100 for k, v in normalized.items()},
+        "formula": "Project score = Σ(criterion score on 0–100 × normalized criterion weight)",
+        "unit": "weighted score from 0 to 100",
+        "assumptions": ["All project scores share a comparable 0–100 scale.", "Weights are normalized to sum to 100%; rankings reflect supplied preferences, not objective truth."],
+        "warnings": ["Run sensitivity analysis on criteria weights before making high-consequence portfolio decisions."],
+    }
+
+
+def calculate_two_group_sample_size(
+    standardized_effect_size: float,
+    alpha: float = 0.05,
+    desired_power: float = 0.80,
+) -> dict[str, Any]:
+    """Normal-approximation sample size for an equal-size, two-sided two-mean study."""
+    from statistics import NormalDist
+    effect = _number(standardized_effect_size, "Standardized effect size (Cohen's d)", 0, True)
+    significance = _number(alpha, "Alpha", 0, True)
+    power = _number(desired_power, "Desired power", 0, True)
+    if significance >= 1 or power >= 1 or significance > 0.5 or power <= 0.5:
+        raise ValueError("Alpha must be below 0.5 and desired power must be between 0.5 and 1.")
+    normal = NormalDist()
+    z_alpha = normal.inv_cdf(1 - significance / 2)
+    z_power = normal.inv_cdf(power)
+    per_group = math.ceil(2 * (z_alpha + z_power) ** 2 / (effect ** 2))
+    return {
+        "status": "CALCULATED",
+        "standardized_effect_size_d": effect,
+        "alpha": significance,
+        "desired_power": power,
+        "z_alpha_two_sided": z_alpha,
+        "z_power": z_power,
+        "sample_size_per_group_approx": per_group,
+        "total_sample_size_approx": 2 * per_group,
+        "formula": "n per group ≈ 2 × (z(1−α/2)+z(power))² / Cohen's d²",
+        "unit": "participants/experimental units",
+        "assumptions": ["Two independent groups with equal allocation.", "Two-sided comparison of means using a normal approximation and standardized effect size.", "No attrition inflation or finite-sample t correction is included."],
+        "warnings": ["Normal approximation only: verify power with the intended test, outcome distribution, allocation and analysis before final study design."],
+    }
 
 def calculate_economics(initial_investment: float, annual_cash_flows: Iterable[float], discount_rate_percent: float) -> dict[str, Any]:
     """NPV, IRR and simple payback for conventional profiles with nonnegative future flows."""
