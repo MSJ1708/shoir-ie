@@ -61,6 +61,8 @@ Use the [Pre-Commercial Launch Checklist](COMMERCIAL_LAUNCH_CHECKLIST.md) to tra
 
 ## Official reference points
 
+- [Saudi E-Commerce Law (official English translation): provider identity/address/contact, commercial-register details where applicable, contract/service disclosures, total price and payment information.](https://misa.gov.sa/app/uploads/2025/07/E-Commerce-Law.pdf)
+
 - [SDAIA: PDPL Article 4 — information to data subjects before/when personal data is collected](https://dgp.sdaia.gov.sa/wps/portal/pdp/knowledgecenter/details/PDPL2/%21ut/p/z0/04_Sj9CPykssy0xPLMnMz0vMAfIjo8ziPR1dzTwMgw2MDMOcTA3MjH39TE29jY0MQsz1g1Pz9L30o_ArAppiVOTr7JuuH1WQWJKhm5mXlq8fEeAS4GOkX5DtHg4A45XaIQ%21%21/).
 - [SDAIA: data-subject rights](https://dgp.sdaia.gov.sa/wps/portal/pdp/knowledgecenter/details/PDPL/%21ut/p/z0/04_Sj9CPykssy0xPLMnMz0vMAfIjo8ziPR1dzTwMgw2MDMOcTA3MjH39TE29jY0MQsz1g1Pz9L30o_ArAppiVOTr7JuuH1WQWJKhm5mXlq8fEeAS4KNfkO0eDgDZXeBe/).
 - [SDAIA: rules for transfers of personal data outside Saudi Arabia](https://sdaia.gov.sa/ar/SDAIA/about/Documents/General%20Rules%20for%20the%20Transfer%20of%20Personal%20Data%20outside%20the%20Geographical%20Borders%20of%20the%20Kingdom.pdf).
