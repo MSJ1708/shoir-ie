@@ -47,16 +47,16 @@ The legacy fail-open helpers were also corrected: shared tier normalization reco
 
 - Four initial CI workflows passed on an earlier registry-only revision: application tests, platform tests, engine regression, and security/quality. See links in the PR Checks tab: [PR #177](https://github.com/MSJ1708/shoir-ie/pull/177).
 - A later workflow set was queued while the branch was changing; it predates the latest engine additions. Do **not** interpret those earlier successes as proof of the newest revision.
-- The previous first full-suite candidate had **1 failed, 567 passed, 2 skipped, 5 warnings**; the failure was the zero-cycle test asserting an error message the numeric-only API could not emit. The assertion now checks the actual zero-cycle validation. A new full set of CI runs was triggered after this repair and the fail-closed Copilot fix; its exact result must be checked at the latest branch head before merge.
+- A subsequent full-suite candidate recorded **1 failed, 595 passed, 2 skipped, 19 warnings**. The failure was an alias authorization path still looking up only IDs/canonical names; the resolver has now been corrected and the full matrix is rerunning on a newer SHA. Do not treat the failed run as a pass; only the latest green result can support merge.
 - The local container could not clone the repository through its network path, so no local full-repo test execution is claimed.
 - No authenticated hosted browser walkthrough has been completed. `browser_test` remains `UNVERIFIED` for all 100 targets; the hosted live-deployment smoke was skipped.
-- Export tests added for new tools cover serializing tables to CSV and reopening them with pandas. Browser download behavior, durable persistence and existing shared XLSX/PDF/PPTX round trips remain unverified here.
+- Export tests for engine output tables cover CSV serialization and pandas read-back; the new Tool Library also provides per-table and summary CSV download controls. The latest Streamlit AppTest exercises visible method forms and cutting-stock action, but the hosted download behavior, durable persistence, and existing shared XLSX/PDF/PPTX round trips remain unverified.
 - Existing facility-layout source already includes department CRUD, complete From-To and SLP matrices, empty REL handling, heatmap data conversion, route alternatives and four-sheet XLSX export; focused tests exist. The full authenticated user workflow still needs to be run on staging. Enterprise Integration diagnostics, real workbook-to-decision, cross-account isolation and configured connectors also remain outstanding.
 
 ## Release-critical work remaining
 
 1. Confirm all validation, test, platform, engine-regression and security/quality workflows pass on the same final PR head; fix failures and rerun before merge.
-2. Perform authenticated staging browser coverage for the new Tool Library and its nine limited-validation method forms on the correct tiers, then add the remaining module matrix with disposable accounts.
+2. Perform authenticated staging browser coverage for the new Tool Library and its twenty-one method paths across twenty canonical target IDs on the correct tiers, then add the remaining module matrix with disposable accounts.
 3. P0: verify Facility Layout/SLP department CRUD → From-To → relationship matrix/heatmap → flow-distance/handling cost → persisted alternative → parsed workbook export.
 4. Verify multi-sheet workbook import → profile/map/clean → save/version → bottleneck/capacity study → scenario comparison → chart → exported file reopening and value/lineage checks.
 5. Wire target-ID checks into actual legacy route/action/Copilot/API/export enforcement and add direct-call deny/allow tests without breaking current customer entitlements.
@@ -66,4 +66,4 @@ The legacy fail-open helpers were also corrected: shared tier normalization reco
 
 ## Final recommendation
 
-**NO-GO** for describing all 100 target capabilities as complete, fully working, workforce-ready or production-verified. The additive library and two limited-scope deterministic engines are a concrete implementation start, but current evidence does not satisfy the full completion gate in the master prompt.
+**NO-GO** for describing all 100 target capabilities as complete, fully working, workforce-ready or production-verified. The additive library and twenty-one focused method paths are a concrete implementation tranche, but current evidence does not satisfy the full completion gate in the master prompt.
