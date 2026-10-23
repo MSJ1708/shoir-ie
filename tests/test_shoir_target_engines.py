@@ -366,7 +366,7 @@ def test_kaizen_a3_computes_signed_progress_without_claiming_unverified_savings(
     assert result["target_progress_pct"] == pytest.approx(50.0)
     assert result["remaining_difference_to_target"] == pytest.approx(-10.0)
     assert result["baseline_evidence"] == "baseline-run-101"
-    assert "do not report realized benefit or verified savings" in result["warning"]
+    assert "not marked verified" in result["warning"]
 
 
 def test_kaizen_a3_requires_comparable_targets_and_evidence_for_verified_status():
