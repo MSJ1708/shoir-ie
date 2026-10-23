@@ -12,6 +12,9 @@ def test_workbench_renders_tool_directory_and_runs_cutting_stock_action():
 
     page = ROOT / "pages" / "Industrial_Engineering_Workbench.py"
     at = AppTest.from_file(page, default_timeout=45)
+    at.session_state["current_user"] = "workbench-checker"
+    at.session_state["authenticated"] = True
+    at.session_state["user_tier"] = "Enterprise Plus Tier"
     at.run(timeout=45)
     assert not at.exception, "\n".join(str(error.value) for error in at.exception)
 
@@ -48,6 +51,9 @@ def test_workbench_selects_and_runs_time_study_and_takt_capacity():
 
     page = ROOT / "pages" / "Industrial_Engineering_Workbench.py"
     at = AppTest.from_file(page, default_timeout=45)
+    at.session_state["current_user"] = "workbench-checker"
+    at.session_state["authenticated"] = True
+    at.session_state["user_tier"] = "Enterprise Plus Tier"
     at.run(timeout=45)
     assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
 
@@ -75,3 +81,24 @@ def test_workbench_selects_and_runs_time_study_and_takt_capacity():
     assert takt_result["takt_time_per_unit"] == pytest.approx(4.0)
     assert takt_result["implied_capacity_units_per_period"] == pytest.approx(160.0)
 
+
+
+
+def test_workbench_denies_focused_tool_execution_to_unauthenticated_guest():
+    from streamlit.testing.v1 import AppTest
+
+    page = ROOT / "pages" / "Industrial_Engineering_Workbench.py"
+    at = AppTest.from_file(page, default_timeout=45)
+    at.run(timeout=45)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+
+    inspector = at.selectbox(key="shoir_100_tool_inspector")
+    inspector.select("T021 · Time Study and Standard Time")
+    at.run(timeout=45)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+
+    at.button(key="tool021_run").click()
+    at.run(timeout=45)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    assert at.session_state.get("shoir_tool_result_T021") is None
+    assert any("Sign in with an active Shoir-IE account" in str(item.value) for item in at.error)
