@@ -94,7 +94,7 @@ PLATFORM_CATALOG = [
     {"tier":"Enterprise","category":"Local Manufacturing Capability","name":"L-SIMS — Local Capability & Dynamic Industrial Readiness Simulator","when":"Map aggregated domestic manufacturing and repair capacity for generic industrial spare-part families and localization research.","example":"Compare local capacity, lead time, qualification confidence and monthly industrial demand to find capability gaps."},
     {"tier":"Mid-Tier Pro","category":"Production","name":"Production Bottleneck & Capacity Recovery Study",
      "when":"Find candidate production constraints from validated line data and quantify a transparent downtime-recovery what-if without replacing your MES or ERP.",
-     "example":"Import production-event CSV rows, validate planned time, downtime, ideal cycle, total output and good output, compare line OEE, then export calculated baseline metrics and clearly labeled simulated recovery estimates with input/result hashes."},,
+     "example":"Import production-event CSV rows, validate planned time, downtime, ideal cycle, total output and good output, compare line OEE, then export calculated baseline metrics and clearly labeled simulated recovery estimates with input/result hashes."},
     {"tier":"Starter","category":"Core Platform","name":"100-Tool Engineering Hub",
      "when":"Find a capability by stable ID, workbench or use case, and see its real readiness before opening an existing tool.",
      "example":"Use the grouped hub for standard-time, work-sampling, takt/capacity, OEE, process capability, MTBF/MTTR, inventory, carbon and economics calculators while keeping the existing navigation compact."}
