@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PAGE = ROOT / "pages" / "Engineering_Tool_Library.py"
 
 
-def _authed_library():
+def _authed_library(tier="Research Pack"):
     from streamlit.testing.v1 import AppTest
 
     at = AppTest.from_file(PAGE, default_timeout=60)
@@ -20,7 +20,7 @@ def _authed_library():
     at.session_state["current_user"] = "disposable-tool-library-checker"
     # Research Pack inherits ordinary capabilities through Enterprise, but not
     # Enterprise Plus. This allows testing of all the targets in this tranche.
-    at.session_state["user_tier"] = "Research Pack"
+    at.session_state["user_tier"] = tier
     at.run(timeout=60)
     assert not at.exception, "\n".join(str(error.value) for error in at.exception)
     return at
@@ -127,3 +127,17 @@ def test_cutting_stock_solver_is_exposed_in_the_existing_facilities_tool():
     assert result is not None, "Cutting-stock action did not return a structured result."
     assert result["result"]["status"] == "OPTIMAL"
     assert result["result"]["stock_count"] == 2
+
+def test_lower_tier_cannot_render_or_execute_research_only_tool():
+    from streamlit.testing.v1 import AppTest
+
+    at = _authed_library(tier="Starter")
+    _open(at, "T085", "Statistical Power and Sample-Size Planner")
+    assert any(
+        "does not grant this target capability" in str(item.value).lower()
+        for item in at.warning
+    )
+    assert "shoir_T085_result" not in at.session_state
+    with pytest.raises(KeyError):
+        at.button(key="T085_run_button")
+
