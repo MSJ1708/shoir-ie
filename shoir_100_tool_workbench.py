@@ -299,6 +299,185 @@ def takt_time_capacity(
     }
 
 
+
+
+def oee_analysis(planned_production_time: Any, downtime: Any, ideal_cycle_time: Any, total_count: Any, good_count: Any) -> dict[str, Any]:
+    planned = _finite_number(planned_production_time, "Planned production time")
+    down = _finite_number(downtime, "Downtime")
+    ideal_cycle = _finite_number(ideal_cycle_time, "Ideal cycle time")
+    total = _finite_number(total_count, "Total output")
+    good = _finite_number(good_count, "Good output")
+    if planned <= 0:
+        raise ValueError("Planned production time must be greater than zero.")
+    if down < 0 or down > planned:
+        raise ValueError("Downtime must be between zero and planned production time.")
+    if ideal_cycle <= 0:
+        raise ValueError("Ideal cycle time must be greater than zero.")
+    if total <= 0 or good < 0 or good > total:
+        raise ValueError("Require total output > 0 and 0 ≤ good output ≤ total output.")
+    operating = planned - down
+    if operating <= 0:
+        raise ValueError("Operating time is zero; OEE cannot be calculated.")
+    availability, performance, quality = operating / planned, ideal_cycle * total / operating, good / total
+    warnings = []
+    if performance > 1.0:
+        warnings.append("Performance exceeds 100%; check ideal cycle time, units, and output counting.")
+    return {
+        "status": "CALCULATED", "tool_id": "T026",
+        "method": "Availability = operating time / planned time; performance = ideal cycle time × total output / operating time; quality = good output / total output; OEE = availability × performance × quality.",
+        "metrics": {
+            "planned_production_time": planned, "downtime": down, "operating_time": operating,
+            "availability_pct": 100.0 * availability, "performance_pct": 100.0 * performance,
+            "quality_pct": 100.0 * quality, "oee_pct": 100.0 * availability * performance * quality,
+            "total_output": total, "good_output": good, "defective_output": total - good,
+        },
+        "assumptions": ["Time inputs and ideal cycle time must use compatible units (for example, minutes and minutes per unit)."],
+        "warnings": warnings + ["Loss-category Pareto and six-big-loss reconciliation are not included in this base OEE calculation."],
+        "data_status": "USER_INPUT",
+    }
+
+
+def process_capability(measurements: Any, lower_spec_limit: Any, upper_spec_limit: Any, within_subgroup_sigma: Any = None) -> dict[str, Any]:
+    values = _parse_observations(measurements)
+    lsl, usl = _finite_number(lower_spec_limit, "Lower specification limit"), _finite_number(upper_spec_limit, "Upper specification limit")
+    if lsl >= usl:
+        raise ValueError("Lower specification limit must be below upper specification limit.")
+    overall_sigma = float(np.std(values, ddof=1)) if len(values) > 1 else 0.0
+    if not math.isfinite(overall_sigma) or overall_sigma <= 0:
+        raise ValueError("At least two measurements with non-zero variation are required.")
+    mean = float(np.mean(values))
+    pp = (usl - lsl) / (6.0 * overall_sigma)
+    ppk = min((usl - mean) / (3.0 * overall_sigma), (mean - lsl) / (3.0 * overall_sigma))
+    cp = cpk = None
+    warnings = ["Capability indices do not prove process stability or normality. Confirm control-chart stability, subgroup design, and distribution assumptions before acceptance decisions."]
+    if within_subgroup_sigma not in (None, ""):
+        within_sigma = _finite_number(within_subgroup_sigma, "Within-subgroup sigma")
+        if within_sigma <= 0:
+            raise ValueError("Within-subgroup sigma must be greater than zero.")
+        cp = (usl - lsl) / (6.0 * within_sigma)
+        cpk = min((usl - mean) / (3.0 * within_sigma), (mean - lsl) / (3.0 * within_sigma))
+    else:
+        warnings.append("Cp/Cpk are omitted without a supplied within-subgroup standard deviation; Pp/Ppk use overall sample standard deviation.")
+    return {
+        "status": "CALCULATED", "tool_id": "T032",
+        "method": "Pp = (USL−LSL)/(6s_overall); Ppk = min((USL−mean)/(3s_overall),(mean−LSL)/(3s_overall)); Cp/Cpk use supplied within-subgroup sigma.",
+        "metrics": {"sample_count": len(values), "mean": mean, "overall_sample_sigma": overall_sigma, "lower_spec_limit": lsl, "upper_spec_limit": usl, "Cp": cp, "Cpk": cpk, "Pp": pp, "Ppk": ppk},
+        "assumptions": ["Measurements and specification limits use the same unit.", "Within-subgroup sigma must come from an appropriate subgroup design, not an assumed constant."],
+        "warnings": warnings,
+        "data_status": "USER_INPUT",
+    }
+
+
+def mtbf_mttr_analysis(operating_hours: Any, failure_count: Any, repair_hours: Any) -> dict[str, Any]:
+    operating = _finite_number(operating_hours, "Operating hours")
+    if isinstance(failure_count, bool):
+        raise ValueError("Failure count must be a whole number.")
+    try:
+        count = int(failure_count)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Failure count must be a whole number.") from exc
+    if count <= 0 or count != failure_count:
+        raise ValueError("Failure count must be a positive whole number.")
+    if operating <= 0:
+        raise ValueError("Operating hours must be greater than zero.")
+    repairs = _parse_observations(repair_hours)
+    if len(repairs) != count:
+        raise ValueError(f"Provide one positive repair-duration value for each of the {count} failures.")
+    mtbf, mttr = operating / count, float(np.mean(repairs))
+    return {
+        "status": "CALCULATED", "tool_id": "T042",
+        "method": "MTBF = operating hours / observed failure count; MTTR = mean supplied repair duration; inherent availability = MTBF/(MTBF+MTTR).",
+        "metrics": {"operating_hours": operating, "failure_count": count, "MTBF_hours": mtbf, "MTTR_hours": mttr, "inherent_availability_pct": 100.0 * mtbf / (mtbf + mttr), "repair_observation_count": len(repairs)},
+        "assumptions": ["Repair durations use hours, and operating hours/failure counts describe the same asset population and observation window."],
+        "warnings": ["Censoring, mixed asset populations, preventive maintenance downtime and confidence intervals are not modeled."],
+        "data_status": "USER_INPUT",
+    }
+
+
+def inventory_policy(annual_demand: Any, order_cost: Any, annual_holding_cost_per_unit: Any, daily_demand_mean: Any, daily_demand_sigma: Any, lead_time_days: Any, service_factor_z: Any) -> dict[str, Any]:
+    demand = _finite_number(annual_demand, "Annual demand")
+    order = _finite_number(order_cost, "Order cost")
+    holding = _finite_number(annual_holding_cost_per_unit, "Annual holding cost per unit")
+    daily_mean = _finite_number(daily_demand_mean, "Mean daily demand")
+    daily_sigma = _finite_number(daily_demand_sigma, "Daily demand standard deviation")
+    lead = _finite_number(lead_time_days, "Lead time")
+    z = _finite_number(service_factor_z, "Service factor z")
+    if demand <= 0 or order <= 0 or holding <= 0:
+        raise ValueError("Annual demand, order cost, and annual holding cost per unit must all be positive.")
+    if daily_mean < 0 or daily_sigma < 0 or lead < 0 or z < 0:
+        raise ValueError("Daily demand, demand standard deviation, lead time, and service factor cannot be negative.")
+    eoq = math.sqrt((2.0 * demand * order) / holding)
+    mean_lead_demand = daily_mean * lead
+    sigma_lead_demand = daily_sigma * math.sqrt(lead)
+    safety_stock = z * sigma_lead_demand
+    return {
+        "status": "CALCULATED", "tool_id": "T055",
+        "method": "EOQ = sqrt(2DS/H); safety stock = z × σ_daily × sqrt(lead time); reorder point = mean daily demand × lead time + safety stock.",
+        "metrics": {"EOQ_units": eoq, "orders_per_year_at_EOQ": demand / eoq, "mean_lead_time_demand_units": mean_lead_demand, "safety_stock_units": safety_stock, "reorder_point_units": mean_lead_demand + safety_stock, "service_factor_z": z, "lead_time_days": lead},
+        "assumptions": ["Daily demand observations are independent with finite variance; lead time is deterministic in days; z is a one-sided normal service factor."],
+        "warnings": ["Check lot-size constraints, discrete units, seasonal demand, variable lead time, and empirical demand distribution before deployment."],
+        "data_status": "USER_INPUT",
+    }
+
+
+def carbon_emissions(activity_quantity: Any, emission_factor: Any, quantity_unit: str, emission_unit: str, factor_source: str, factor_date: str) -> dict[str, Any]:
+    activity = _finite_number(activity_quantity, "Activity quantity")
+    factor = _finite_number(emission_factor, "Emission factor")
+    if activity < 0 or factor < 0:
+        raise ValueError("Activity quantity and emission factor cannot be negative.")
+    if not str(quantity_unit or "").strip() or not str(emission_unit or "").strip():
+        raise ValueError("Provide the activity unit and resulting emission unit.")
+    if not str(factor_source or "").strip() or not str(factor_date or "").strip():
+        raise ValueError("Provide the emission-factor source and date.")
+    return {
+        "status": "CALCULATED", "tool_id": "T078", "data_status": "USER_INPUT",
+        "method": "Emissions = activity quantity × emission factor.",
+        "metrics": {"activity_quantity": activity, "emission_factor": factor, "total_emissions": activity * factor, "activity_unit": str(quantity_unit).strip(), "emission_unit": str(emission_unit).strip()},
+        "assumptions": ["The factor unit must match the stated activity unit and resulting emission unit; scope/boundary depend on the factor provider."],
+        "warnings": ["Factor source/date are recorded as supplied and are not independently verified; this is not an audited greenhouse-gas disclosure."],
+        "factor_source": str(factor_source).strip(), "factor_date": str(factor_date).strip(),
+    }
+
+
+def engineering_economics(cash_flows: Any, discount_rate_pct: Any) -> dict[str, Any]:
+    if isinstance(cash_flows, str):
+        raw_values = [item.strip() for item in cash_flows.replace("\n", ",").split(",") if item.strip()]
+    elif isinstance(cash_flows, Sequence):
+        raw_values = list(cash_flows)
+    else:
+        raise ValueError("Cash flows must be a comma-separated list ordered by period.")
+    if len(raw_values) < 2:
+        raise ValueError("Enter at least a period-0 cash flow and one future period.")
+    flows = [_finite_number(value, f"Cash flow for period {i}") for i, value in enumerate(raw_values)]
+    rate = _finite_number(discount_rate_pct, "Discount rate")
+    if rate <= -100 or rate > 1000:
+        raise ValueError("Discount rate must be greater than -100% and no more than 1,000%.")
+    discount = rate / 100.0
+    npv = sum(flow / ((1.0 + discount) ** period) for period, flow in enumerate(flows))
+    cumulative, cumulative_discounted = flows[0], flows[0]
+    simple_payback = discounted_payback = None
+    for period in range(1, len(flows)):
+        prior, prior_discounted = cumulative, cumulative_discounted
+        cumulative += flows[period]
+        discounted_flow = flows[period] / ((1.0 + discount) ** period)
+        cumulative_discounted += discounted_flow
+        if simple_payback is None and prior < 0 <= cumulative:
+            simple_payback = (period - 1) + (-prior / flows[period]) if flows[period] > 0 else float(period)
+        if discounted_payback is None and prior_discounted < 0 <= cumulative_discounted:
+            discounted_payback = (period - 1) + (-prior_discounted / discounted_flow) if discounted_flow > 0 else float(period)
+    warnings = ["IRR is not calculated by this method; use a separately validated IRR solver before investment decisions."]
+    if simple_payback is None:
+        warnings.append("The cash-flow series does not recover its initial cumulative investment during the supplied periods.")
+    return {
+        "status": "CALCULATED", "tool_id": "T081",
+        "method": "NPV = sum(CF_t/(1+r)^t), including period-0 cash flow. Payback is linearly interpolated in the first period where cumulative cash flow becomes non-negative.",
+        "metrics": {"period_count_including_period_zero": len(flows), "discount_rate_pct": rate, "NPV": npv, "simple_payback_periods": simple_payback, "discounted_payback_periods": discounted_payback},
+        "assumptions": ["Cash flows are equally spaced periods in one currency; period 0 occurs now; the discount rate is per period."],
+        "warnings": warnings,
+        "cash_flows": flows,
+        "data_status": "USER_INPUT",
+    }
+
 def run_tool_calculation(tier: str, tool_id: str, inputs: Mapping[str, Any]) -> dict[str, Any]:
     """Execute only the small, tested deterministic engine set; fail closed otherwise."""
     canonical_id = str(tool_id or "").strip().upper()
