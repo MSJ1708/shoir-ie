@@ -337,3 +337,11 @@ def test_known_tier_aliases_keep_the_existing_plan_contract():
     assert tier_allows("Research Pack ($30 add-on)", "Enterprise")
     assert not tier_allows("Research Pack ($30 add-on)", "Enterprise Plus")
     assert not tier_allows("Enterprise Plus Tier ($399)", "Research Pack")
+
+
+
+def test_unknown_current_plan_text_does_not_match_pro_by_substring():
+    assert normalize_tier("unapproved") == "Starter"
+    assert normalize_tier("Pro Tier ($79)") == "Mid-Tier Pro"
+    assert normalize_tier("Professional Tier ($129)") == "Professional"
+    assert normalize_tier("Enterprise Plus Tier ($399)") == "Enterprise Plus"
