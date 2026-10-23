@@ -11643,6 +11643,21 @@ if mod == "Core IE Tools":
   )
   st.markdown("---")
 
+  # Additive tool library: keep it inside the existing Core IE Tools page so the
+  # current navigation, EOQ/OEE tabs, and visual shell remain intact.
+  try:
+      from shoir_100_tool_workbench import render_100_tool_workbench
+      render_100_tool_workbench(
+          st,
+          str(tier_val),
+          tuple(allowed_modules),
+          str(st.session_state.get("current_user", "unknown")),
+      )
+  except Exception as exc:
+      st.error("The 100-tool library could not load. The existing Core IE Tools remain available.")
+      with st.expander("Tool library diagnostic", expanded=False):
+          st.code(f"{type(exc).__name__}: {exc}")
+
   ie_sub1, ie_sub2 = st.tabs([
       "📊 Economic Order Quantity (EOQ) Engine",
       "⚡ Overall Equipment Effectiveness (OEE)",
