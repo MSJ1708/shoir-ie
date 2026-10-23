@@ -1,13 +1,23 @@
-"""Validated first-pass deterministic engines for twelve focused Shoir-IE targets.
+"""Validated first-pass deterministic engines for fourteen focused Shoir-IE targets.
 
 Scope:
+* T021 calculates observed, normal and allowance-adjusted standard time.
 * T022 estimates work-sampling proportions with individual Wilson confidence intervals.
+* T023 calculates takt time, implied capacity and capacity gap using one declared time basis.
+* T026 calculates availability, performance, quality and OEE with reconciled loss-time outputs.
 * T028 builds a count-based Pareto summary and optional 5-Why/action record.
 * T029 scores an editable 5S checklist with transparent owner/due-date follow-up flags.
 * T030 validates A3 baseline/target/outcome records and calculates signed target progress.
+* T032 calculates Cp/Cpk from pooled within-subgroup sigma and Pp/Ppk from overall sample sigma.
+* T055 calculates classical EOQ, safety stock and reorder point under explicit assumptions.
 * T066 is a one-dimensional cutting/bin-packing MILP with a per-piece kerf allowance.
 * T075 is a threshold-based forecast error monitor, not an automatic retraining service.
+* T078 multiplies activity data by a dated, user-supplied emissions factor; it is not an audit.
+* T081 computes end-of-period NPV, simple payback and constrained conventional-cash-flow IRR.
 * T085 is a balanced independent two-sample t-test planner using the noncentral t distribution.
+
+These methods are first-pass deterministic engines. Catalog and unit tests do not replace authenticated
+browser, persistence, export, or live-data acceptance checks.
 """
 from __future__ import annotations
 
