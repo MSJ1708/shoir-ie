@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import io
 import hashlib
+import json
 import math
 from datetime import datetime, timezone
 from typing import Any, Mapping, Sequence
@@ -736,38 +737,170 @@ def _show_result(st: Any, result: Mapping[str, Any]) -> None:
 
 def _render_quick_tools(st: Any, tier: str) -> None:
     tabs = st.tabs([
-        "T013 · Data Profile", "T016 · Unit / Currency", "T019 · Synthetic Data",
+        "Data Tools (Import / Profile / Clean)", "T016 · Unit / Currency", "T019 · Synthetic Data",
         "T021 · Time Study", "T022 · Work Sampling", "T023 · Takt / Capacity",
         "More methods",
     ])
     with tabs[0]:
-        st.write("Read-only profile for a staged CSV/XLSX file. The active dataset is not replaced.")
-        upload = st.file_uploader("Choose CSV or Excel workbook", type=["csv", "xlsx", "xlsm", "xls"], key="shoir100_profiler_upload")
-        if upload is not None:
-            if upload.size > MAX_PROFILE_BYTES:
-                st.error("This profiler accepts files up to 20 MiB. Your active dataset was not changed.")
-            else:
-                try:
-                    raw_bytes = upload.getvalue()
-                    if upload.name.lower().endswith(".csv"):
-                        frame = pd.read_csv(io.BytesIO(raw_bytes))
-                    else:
-                        xls = pd.ExcelFile(io.BytesIO(raw_bytes))
-                        sheet = st.selectbox("Source sheet", xls.sheet_names, key="shoir100_profiler_sheet")
-                        frame = pd.read_excel(xls, sheet_name=sheet)
-                    st.caption(f"Staged: {upload.name} · {len(frame):,} rows × {len(frame.columns):,} columns. Source is preserved.")
-                    st.dataframe(frame.head(10), use_container_width=True, hide_index=True)
-                    if st.button("Profile staged data", key="shoir100_profile_button", type="primary"):
-                        result = run_tool_calculation(tier, "T013", {"dataframe": frame})
-                        st.session_state["shoir100_last_profile"] = result
-                except ToolEntitlementError as exc:
-                    st.error(str(exc))
-                except Exception as exc:
-                    st.error(f"Could not read/profile this file. The previous valid result is preserved. Details: {type(exc).__name__}: {exc}")
-        prior = st.session_state.get("shoir100_last_profile")
-        if isinstance(prior, Mapping) and prior.get("tool_id") == "T013":
-            _show_result(st, prior)
+        with st.expander("T011 · Universal Data Importer", expanded=True):
+            st.write("Preview CSV/XLS/XLSX first; nothing replaces the active session dataset until you explicitly apply a successfully parsed file.")
+            upload = st.file_uploader("Choose a CSV or Excel workbook", type=["csv", "xlsx", "xlsm", "xls"], key="shoir100_import_upload")
+            if upload is not None:
+                if upload.size > MAX_PROFILE_BYTES:
+                    st.error("The importer limit is 20 MiB. The active dataset was not changed.")
+                else:
+                    try:
+                        payload = upload.getvalue()
+                        selected_sheet = None
+                        if upload.name.lower().endswith(".csv"):
+                            preview_frame = pd.read_csv(io.BytesIO(payload))
+                        else:
+                            workbook_preview = pd.ExcelFile(io.BytesIO(payload))
+                            if not workbook_preview.sheet_names:
+                                raise ValueError("The uploaded workbook has no readable sheets.")
+                            selected_sheet = st.selectbox("Sheet to import", workbook_preview.sheet_names, key="shoir100_import_sheet")
+                            preview_frame = pd.read_excel(workbook_preview, sheet_name=selected_sheet)
+                        st.caption(f"Preview: {upload.name} · {len(preview_frame):,} rows × {len(preview_frame.columns):,} columns.")
+                        st.dataframe(preview_frame.head(20), use_container_width=True, hide_index=True)
+                        if st.button("Stage selected file (do not replace active data)", key="shoir100_import_stage", type="primary"):
+                            staged = run_tool_calculation(tier, "T011", {
+                                "filename": upload.name, "payload": payload, "sheet_name": selected_sheet,
+                            })
+                            st.session_state["_shoir100_staged_import"] = staged
+                            st.success("File parsed and staged. Review the detected schema before applying it.")
+                    except ToolEntitlementError as exc:
+                        st.error(str(exc))
+                    except Exception as exc:
+                        st.error(f"Import failed; the previous valid dataset was preserved. {type(exc).__name__}: {exc}")
+            staged_import = st.session_state.get("_shoir100_staged_import")
+            if isinstance(staged_import, Mapping) and isinstance(staged_import.get("dataframe"), pd.DataFrame):
+                st.caption(f"Staged source: {staged_import.get('filename')} · SHA-256 {str(staged_import.get('source_fingerprint', ''))[:16]}…")
+                st.json(staged_import.get("metrics", {}))
+                st.dataframe(staged_import["dataframe"].head(20), use_container_width=True, hide_index=True)
+                if st.button("Apply staged dataset to this session", key="shoir100_import_apply"):
+                    current_dataset = st.session_state.get("_shoir100_dataset")
+                    st.session_state["_shoir100_previous_dataset"] = current_dataset.copy(deep=True) if isinstance(current_dataset, pd.DataFrame) else None
+                    st.session_state["_shoir100_dataset"] = staged_import["dataframe"].copy(deep=True)
+                    st.session_state["_shoir100_dataset_name"] = (
+                        f"{staged_import.get('filename')} · {staged_import.get('sheet_name')}"
+                        if staged_import.get("sheet_name") else str(staged_import.get("filename") or "Imported dataset")
+                    )
+                    st.session_state["_shoir100_dataset_provenance"] = "IMPORTED"
+                    st.session_state["_shoir100_dataset_fingerprint"] = _dataframe_fingerprint(st.session_state["_shoir100_dataset"])
+                    st.session_state["_shoir100_clean_preview"] = None
+                    st.session_state["_shoir100_staged_import"] = None
+                    st.success("Dataset applied to this session. Durable cross-login persistence is not implied.")
 
+        with st.expander("T013 · Data Quality Profiler", expanded=False):
+            active_dataset = st.session_state.get("_shoir100_dataset")
+            if isinstance(active_dataset, pd.DataFrame):
+                st.caption(f"Active session dataset: {st.session_state.get('_shoir100_dataset_name', 'Unnamed')} · {len(active_dataset):,} rows × {len(active_dataset.columns):,} columns.")
+                if st.button("Profile active dataset", key="shoir100_profile_active", type="primary"):
+                    try:
+                        st.session_state["shoir100_last_profile"] = run_tool_calculation(tier, "T013", {"dataframe": active_dataset})
+                    except Exception as exc:
+                        st.error(f"Profiling failed: {exc}")
+            st.write("Read-only profile for an additional staged CSV/XLSX file. It does not replace the active dataset.")
+            upload = st.file_uploader("Choose a file to profile without applying it", type=["csv", "xlsx", "xlsm", "xls"], key="shoir100_profiler_upload")
+            if upload is not None:
+                if upload.size > MAX_PROFILE_BYTES:
+                    st.error("This profiler accepts files up to 20 MiB. The active dataset was not changed.")
+                else:
+                    try:
+                        raw_bytes = upload.getvalue()
+                        if upload.name.lower().endswith(".csv"):
+                            frame = pd.read_csv(io.BytesIO(raw_bytes))
+                        else:
+                            xls = pd.ExcelFile(io.BytesIO(raw_bytes))
+                            sheet = st.selectbox("Source sheet", xls.sheet_names, key="shoir100_profiler_sheet")
+                            frame = pd.read_excel(xls, sheet_name=sheet)
+                        st.caption(f"Staged: {upload.name} · {len(frame):,} rows × {len(frame.columns):,} columns. Source is preserved.")
+                        st.dataframe(frame.head(10), use_container_width=True, hide_index=True)
+                        if st.button("Profile staged data", key="shoir100_profile_button", type="primary"):
+                            result = run_tool_calculation(tier, "T013", {"dataframe": frame})
+                            st.session_state["shoir100_last_profile"] = result
+                    except ToolEntitlementError as exc:
+                        st.error(str(exc))
+                    except Exception as exc:
+                        st.error(f"Could not read/profile this file. The previous valid result is preserved. Details: {type(exc).__name__}: {exc}")
+            prior = st.session_state.get("shoir100_last_profile")
+            if isinstance(prior, Mapping) and prior.get("tool_id") == "T013":
+                _show_result(st, prior)
+
+        with st.expander("T014 · Reversible Data Cleaner", expanded=False):
+            active_dataset = st.session_state.get("_shoir100_dataset")
+            if not isinstance(active_dataset, pd.DataFrame):
+                st.info("Import and apply a CSV/XLSX dataset in T011 before previewing any cleaning changes.")
+            else:
+                st.caption("The source is left unchanged during preview. Apply only after reviewing the audit; Undo restores the previous session snapshot.")
+                drop_duplicates = st.checkbox("Remove exact duplicate rows", value=True, key="shoir100_clean_duplicates")
+                strategy = st.selectbox("Missing-value handling", ["keep", "drop_rows", "fill_median"],
+                    format_func=lambda value: {"keep": "Keep missing values", "drop_rows": "Drop rows containing missing values", "fill_median": "Fill numeric missing values with column median"}[value],
+                    key="shoir100_clean_strategy")
+                if st.button("Preview cleaning changes", key="shoir100_clean_preview_button", type="primary"):
+                    try:
+                        st.session_state["_shoir100_clean_preview"] = run_tool_calculation(tier, "T014", {
+                            "dataframe": active_dataset, "drop_duplicates": drop_duplicates, "missing_strategy": strategy,
+                        })
+                    except Exception as exc:
+                        st.error(f"Cleaning preview failed; source preserved. {type(exc).__name__}: {exc}")
+                preview = st.session_state.get("_shoir100_clean_preview")
+                if isinstance(preview, Mapping) and isinstance(preview.get("dataframe"), pd.DataFrame):
+                    if preview.get("source_fingerprint") != _dataframe_fingerprint(active_dataset):
+                        st.warning("This preview is stale because the source dataset changed. Preview again; no change was applied.")
+                        st.session_state["_shoir100_clean_preview"] = None
+                        preview = None
+                    else:
+                        st.json(preview.get("metrics", {}))
+                        st.dataframe(preview["dataframe"].head(30), use_container_width=True, hide_index=True)
+                        for warning in preview.get("warnings", []):
+                            st.warning(str(warning))
+                        if st.button("Apply reviewed candidate", key="shoir100_clean_apply"):
+                            st.session_state["_shoir100_previous_dataset"] = active_dataset.copy(deep=True)
+                            st.session_state["_shoir100_dataset"] = preview["dataframe"].copy(deep=True)
+                            st.session_state["_shoir100_dataset_name"] = str(st.session_state.get("_shoir100_dataset_name", "Dataset")) + " · cleaned"
+                            st.session_state["_shoir100_dataset_provenance"] = "IMPORTED"
+                            st.session_state["_shoir100_dataset_fingerprint"] = _dataframe_fingerprint(st.session_state["_shoir100_dataset"])
+                            st.session_state["_shoir100_clean_preview"] = None
+                            st.success("Cleaned candidate applied. The previous dataset is available through session Undo.")
+                if st.button("Undo last dataset change", key="shoir100_clean_undo"):
+                    previous = st.session_state.get("_shoir100_previous_dataset")
+                    if isinstance(previous, pd.DataFrame):
+                        st.session_state["_shoir100_dataset"] = previous.copy(deep=True)
+                        st.session_state["_shoir100_previous_dataset"] = None
+                        st.session_state["_shoir100_dataset_fingerprint"] = _dataframe_fingerprint(st.session_state["_shoir100_dataset"])
+                        st.session_state["_shoir100_clean_preview"] = None
+                        st.success("Previous session dataset restored.")
+                    else:
+                        st.info("No prior dataset snapshot is available in this session.")
+
+        with st.expander("T013 · Profile a file without loading it into the workspace", expanded=False):
+            st.write("Read-only profile for a staged CSV/XLSX file. The active dataset is not replaced.")
+            upload = st.file_uploader("Choose CSV or Excel workbook", type=["csv", "xlsx", "xlsm", "xls"], key="shoir100_profiler_upload")
+            if upload is not None:
+                if upload.size > MAX_PROFILE_BYTES:
+                    st.error("This profiler accepts files up to 20 MiB. Your active dataset was not changed.")
+                else:
+                    try:
+                        raw_bytes = upload.getvalue()
+                        if upload.name.lower().endswith(".csv"):
+                            frame = pd.read_csv(io.BytesIO(raw_bytes))
+                        else:
+                            xls = pd.ExcelFile(io.BytesIO(raw_bytes))
+                            sheet = st.selectbox("Source sheet", xls.sheet_names, key="shoir100_profiler_sheet")
+                            frame = pd.read_excel(xls, sheet_name=sheet)
+                        st.caption(f"Staged: {upload.name} · {len(frame):,} rows × {len(frame.columns):,} columns. Source is preserved.")
+                        st.dataframe(frame.head(10), use_container_width=True, hide_index=True)
+                        if st.button("Profile staged data", key="shoir100_profile_button", type="primary"):
+                            result = run_tool_calculation(tier, "T013", {"dataframe": frame})
+                            st.session_state["shoir100_last_profile"] = result
+                    except ToolEntitlementError as exc:
+                        st.error(str(exc))
+                    except Exception as exc:
+                        st.error(f"Could not read/profile this file. The previous valid result is preserved. Details: {type(exc).__name__}: {exc}")
+            prior = st.session_state.get("shoir100_last_profile")
+            if isinstance(prior, Mapping) and prior.get("tool_id") == "T013":
+                _show_result(st, prior)
     with tabs[1]:
         mode = st.radio("Conversion type", ["Physical unit", "Currency with supplied rate"], horizontal=True, key="shoir100_convert_mode")
         value = st.number_input("Value to convert", value=100.0, key="shoir100_convert_value")
