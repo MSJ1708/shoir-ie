@@ -236,3 +236,35 @@ def test_workbench_runs_oee_capability_inventory_carbon_and_economics():
         result = at.session_state.get(f"shoir_tool_result_{tool_id}")
         assert result is not None, f"{tool_id} did not produce a structured result."
         assert result[metric_key] == pytest.approx(expected, rel=1e-5)
+
+
+def test_workbench_runs_unit_spc_quality_cost_mtbf_and_abc_xyz():
+    from streamlit.testing.v1 import AppTest
+
+    page = ROOT / "pages" / "Industrial_Engineering_Workbench.py"
+    at = AppTest.from_file(page, default_timeout=60)
+    at.session_state["current_user"] = "workbench-checker"
+    at.session_state["authenticated"] = True
+    at.session_state["user_tier"] = "Enterprise Plus Tier"
+    at.run(timeout=60)
+    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+
+    cases = [
+        ("T016 · Unit and Currency Converter", "tool016_run", "T016", "converted_value", 10.0),
+        ("T031 · Statistical Process Control", "tool031_run", "T031", "mean", 10.5),
+        ("T040 · Quality Cost and Defect Analyzer", "tool040_run", "T040", "cost_of_poor_quality", 760.0),
+        ("T042 · MTBF and MTTR Analyzer", "tool042_run", "T042", "mtbf_hours", 200.0),
+        ("T056 · ABC/XYZ Inventory Analyzer", "tool056_run", "T056", "sku_count", 3),
+    ]
+    for label, button_key, tool_id, metric_key, expected in cases:
+        at.selectbox(key="shoir_100_tool_inspector").select(label)
+        at.run(timeout=60)
+        assert not at.exception, f"{tool_id} selection raised: " + "\n".join(str(error.value) for error in at.exception)
+        at.button(key=button_key).click()
+        at.run(timeout=60)
+        assert not at.exception, f"{tool_id} run raised: " + "\n".join(str(error.value) for error in at.exception)
+        result = at.session_state.get(f"shoir_tool_result_{tool_id}")
+        assert result is not None, f"{tool_id} did not produce a structured result."
+        assert result[metric_key] == pytest.approx(expected, rel=1e-5)
+        if tool_id == "T056":
+            assert result["classification"]["ABC"].tolist() == ["A", "B", "C"]
