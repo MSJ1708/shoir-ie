@@ -211,6 +211,15 @@ COPILOT_TOOL_REQUIREMENTS = {
     "industrial logistics resilience twin": "Enterprise Plus",
 }
 
+# Add the target registry to the existing Copilot action policy. This maps stable
+# capability IDs and canonical names to the same minimum tier as the target access
+# gate, rather than allowing a prompt to bypass the registry by using tool wording.
+for _target in TOOL_TARGETS:
+    _minimum = _target["target_minimum_tier"]
+    COPILOT_TOOL_REQUIREMENTS.setdefault(_target["canonical_name"].casefold(), _minimum)
+    COPILOT_TOOL_REQUIREMENTS.setdefault(_target["tool_id"].casefold(), _minimum)
+
+
 
 def normalize_tier(value: str | None) -> str:
     """Resolve recognized plan labels exactly; unknown labels remain unresolved.
