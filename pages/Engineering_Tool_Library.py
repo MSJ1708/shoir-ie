@@ -13,11 +13,18 @@ from shoir_100_tool_registry import (
 )
 
 st.set_page_config(page_title="Engineering Tool Library | Shoir-IE", page_icon="🧭", layout="wide")
+# Keep internal readiness/route-gap details behind an authenticated app session.
+# The main public Explore Modules experience remains the customer-facing entry point.
+if not st.session_state.get("authenticated") or not str(st.session_state.get("current_user", "")).strip():
+    st.title("Engineering Tool Library")
+    st.info("Sign in to Shoir-IE to view the personalized engineering tool library.")
+    st.stop()
+
+tier = str(st.session_state.get("user_tier", ""))
 st.title("Engineering Tool Library")
 st.caption("100 target capabilities · grouped by workbench · status and entitlement are separate from a catalogue name.")
 st.info("This library distinguishes reusable existing routes from validated target behavior. A target marked needs-validation, foundation-only, missing or configuration-required is not represented as end-to-end verified.")
-
-tier = st.selectbox("Check package access", TOOL_TIER_ORDER, index=0, key="tool_library_tier")
+st.caption(f"Your current package: {tier or 'Unresolved — protected tools fail closed'}")
 c1, c2, c3 = st.columns([1.5,1,1])
 with c1:
     wb = st.selectbox("Workbench", ("All workbenches", *WORKBENCHES), key="tool_library_workbench")
