@@ -310,6 +310,17 @@ def render_100_tool_hub(st: Any, tier: str, username: str = "unknown") -> None:
     st.title("100-Tool Engineering Hub")
     st.caption("Grouped capabilities inside the existing Shoir-IE workbench. A catalog entry is not a claim of production readiness.")
     counts = {s: sum(row["implementation_status"] == s for row in rows) for s in ALLOWED_STATUSES}
+    # Feed the shared live-visualization registry from the same canonical matrix.
+    st.session_state["shoir_100_tool_registry_df"] = pd.DataFrame([
+        {"Tool ID": row["tool_id"], "Tool": row["canonical_name"],
+         "Workbench": row["workbench"], "Minimum tier": row["target_minimum_tier"],
+         "Readiness": row["implementation_status"]}
+        for row in rows
+    ])
+    st.session_state["shoir_100_tool_status_summary_df"] = pd.DataFrame([
+        {"Status": status, "Count": counts[status]}
+        for status in sorted(ALLOWED_STATUSES)
+    ])
     cols = st.columns(4)
     cols[0].metric("Target tools", len(rows))
     cols[1].metric("Implementation paths", counts["IMPLEMENTED_NEEDS_VALIDATION"])
