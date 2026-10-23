@@ -207,6 +207,22 @@ def _parse_observations(observed_times: Any) -> list[float]:
     return values
 
 
+
+
+def _parse_measurements(raw_values: Any) -> list[float]:
+    """Parse measurement values without imposing a positive-only restriction."""
+    if isinstance(raw_values, str):
+        parts = [item.strip() for item in raw_values.replace("\n", ",").split(",") if item.strip()]
+    elif isinstance(raw_values, Sequence):
+        parts = list(raw_values)
+    else:
+        raise ValueError("Measurements must be a comma-separated list or a sequence of numbers.")
+    if not parts:
+        raise ValueError("Enter at least one measurement.")
+    if len(parts) > 100_000:
+        raise ValueError("At most 100,000 measurements are supported.")
+    return [_finite_number(value, f"Measurement {i + 1}") for i, value in enumerate(parts)]
+
 def time_study_standard_time(
     observed_times: Any,
     performance_rating_pct: Any = 100.0,
@@ -338,7 +354,7 @@ def oee_analysis(planned_production_time: Any, downtime: Any, ideal_cycle_time: 
 
 
 def process_capability(measurements: Any, lower_spec_limit: Any, upper_spec_limit: Any, within_subgroup_sigma: Any = None) -> dict[str, Any]:
-    values = _parse_observations(measurements)
+    values = _parse_measurements(measurements)
     lsl, usl = _finite_number(lower_spec_limit, "Lower specification limit"), _finite_number(upper_spec_limit, "Upper specification limit")
     if lsl >= usl:
         raise ValueError("Lower specification limit must be below upper specification limit.")
