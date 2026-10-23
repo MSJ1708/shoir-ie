@@ -253,7 +253,7 @@ def test_oee_golden_fixture_and_invalid_time_boundaries():
     assert metrics["availability_pct"] == pytest.approx(90.625)
     assert metrics["performance_pct"] == pytest.approx((0.5 * 800 / 435) * 100)
     assert metrics["quality_pct"] == pytest.approx(98.0)
-    assert metrics["oee_pct"] == pytest.approx(81.6908, abs=0.001)
+    assert metrics["oee_pct"] == pytest.approx(81.6666667, abs=0.001)
     with pytest.raises(ValueError, match="Downtime"):
         oee_analysis(100, 101, 1, 50, 49)
     with pytest.raises(ValueError, match="good output"):
@@ -267,7 +267,7 @@ def test_process_capability_hand_fixture_and_signed_measurements():
     assert metrics["mean"] == pytest.approx(0.0)
     assert metrics["Cp"] == pytest.approx(1.0)
     assert metrics["Cpk"] == pytest.approx(1.0)
-    assert metrics["Pp"] == pytest.approx(3 / (6 * (math.sqrt(0.5))))
+    assert metrics["Pp"] == pytest.approx(6 / (6 * math.sqrt(0.5)))
     assert metrics["Ppk"] == pytest.approx(metrics["Pp"])
     with pytest.raises(ValueError, match="below upper"):
         process_capability([1, 2, 3], 5, 4)
