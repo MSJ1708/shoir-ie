@@ -396,3 +396,128 @@ def test_kaizen_a3_requires_comparable_targets_and_evidence_for_verified_status(
     assert verified["warnings"] == []
     with pytest.raises(ValueError, match="ISO YYYY-MM-DD"):
         build_kaizen_a3_record(**{**required, "due_date": "Friday"})
+
+
+def test_oee_matches_hand_calculated_metrics_and_reconciles_loss_time():
+    from shoir_target_engines import calculate_oee
+
+    result = calculate_oee(480, 60, 2, 200, 190, time_unit="minutes")
+    assert result["status"] == "CALCULATED"
+    assert result["availability_pct"] == pytest.approx(87.5)
+    assert result["performance_pct"] == pytest.approx(400 / 420 * 100)
+    assert result["quality_pct"] == pytest.approx(95.0)
+    assert result["oee_pct"] == pytest.approx(79.1666666667)
+    assert result["losses"]["Time equivalent (minutes)"].sum() == pytest.approx(100.0)
+
+
+def test_oee_rejects_invalid_counts_and_flags_over_100_percent_performance():
+    from shoir_target_engines import calculate_oee
+
+    with pytest.raises(ValueError, match="less than planned"):
+        calculate_oee(60, 60, 1, 10, 10)
+    with pytest.raises(ValueError, match="cannot exceed"):
+        calculate_oee(60, 5, 1, 10, 11)
+    result = calculate_oee(10, 0, 2, 10, 10)
+    assert result["status"] == "REVIEW_PERFORMANCE_OR_OEE_ABOVE_100_PERCENT"
+    assert result["performance_pct"] == pytest.approx(200.0)
+    assert result["oee_pct"] == pytest.approx(200.0)
+
+
+def test_process_capability_matches_hand_calculated_subgroup_and_overall_sigma():
+    from shoir_target_engines import analyze_process_capability
+
+    result = analyze_process_capability([9, 10, 11, 9, 10, 11], 8, 12, subgroup_size=3, unit="mm")
+    assert result["status"] == "CALCULATED"
+    assert result["mean"] == pytest.approx(10.0)
+    assert result["within_sigma"] == pytest.approx(1.0)
+    assert result["overall_sigma"] == pytest.approx(math.sqrt(0.8))
+    assert result["cp"] == pytest.approx(2 / 3)
+    assert result["cpk"] == pytest.approx(2 / 3)
+    assert result["pp"] == pytest.approx(4 / (6 * math.sqrt(0.8)))
+    assert result["ppk"] == pytest.approx(4 / (6 * math.sqrt(0.8)))
+
+
+def test_process_capability_rejects_invalid_specs_subgroups_and_zero_variance():
+    from shoir_target_engines import analyze_process_capability
+
+    with pytest.raises(ValueError, match="less than upper"):
+        analyze_process_capability([1, 2, 3, 4], 5, 5, subgroup_size=2)
+    with pytest.raises(ValueError, match="divisible"):
+        analyze_process_capability([1, 2, 3, 4, 5], 0, 10, subgroup_size=2)
+    with pytest.raises(ValueError, match="variation is zero"):
+        analyze_process_capability([1, 1, 1, 1], 0, 10, subgroup_size=2)
+
+
+def test_inventory_policy_matches_hand_calculated_eoq_safety_stock_and_reorder_point():
+    from shoir_target_engines import plan_inventory_policy
+
+    result = plan_inventory_policy(
+        10, 2, 4, 50, 2, operating_days_per_year=250, service_factor_z=1.645
+    )
+    assert result["status"] == "CALCULATED"
+    assert result["annual_demand_units"] == pytest.approx(2500)
+    assert result["economic_order_quantity_units"] == pytest.approx(math.sqrt(125000))
+    assert result["safety_stock_units"] == pytest.approx(6.58)
+    assert result["reorder_point_units"] == pytest.approx(46.58)
+
+
+def test_inventory_policy_rejects_invalid_cost_demand_and_calendar():
+    from shoir_target_engines import plan_inventory_policy
+
+    with pytest.raises(ValueError, match="Mean daily demand"):
+        plan_inventory_policy(0, 1, 4, 50, 2)
+    with pytest.raises(ValueError, match="cost must both be greater"):
+        plan_inventory_policy(10, 1, 4, 0, 2)
+    with pytest.raises(ValueError, match="Operating days"):
+        plan_inventory_policy(10, 1, 4, 50, 2, operating_days_per_year=0)
+
+
+def test_carbon_emissions_multiplier_requires_versioned_factor_provenance():
+    from shoir_target_engines import calculate_carbon_emissions
+
+    result = calculate_carbon_emissions(
+        250, 0.4, activity_unit="kWh", factor_unit="kg CO2e/kWh",
+        factor_source="Test reference factor", factor_date="2026-01-01",
+        boundary="Scope 2 location-based",
+    )
+    assert result["status"] == "CALCULATED_FROM_USER_SUPPLIED_FACTOR"
+    assert result["emissions_kg_co2e"] == pytest.approx(100.0)
+    assert result["emissions_tonnes_co2e"] == pytest.approx(0.1)
+    assert "not audited" in result["warning"]
+
+
+def test_carbon_emissions_rejects_invalid_amount_factor_date_and_missing_boundary():
+    from shoir_target_engines import calculate_carbon_emissions
+
+    args = dict(activity_unit="kWh", factor_unit="kg/kWh", factor_source="source",
+                factor_date="2026-01-01", boundary="Scope 2")
+    with pytest.raises(ValueError, match="non-negative"):
+        calculate_carbon_emissions(-1, 0.4, **args)
+    with pytest.raises(ValueError, match="ISO YYYY-MM-DD"):
+        calculate_carbon_emissions(1, 0.4, **{**args, "factor_date": "tomorrow"})
+    with pytest.raises(ValueError, match="boundary are required"):
+        calculate_carbon_emissions(1, 0.4, **{**args, "boundary": ""})
+
+
+def test_engineering_economics_matches_npv_irr_and_simple_payback():
+    from shoir_target_engines import analyze_engineering_economics
+
+    result = analyze_engineering_economics([-1000, 600, 600], 10, currency="SAR")
+    assert result["status"] == "CALCULATED"
+    assert result["npv"] == pytest.approx(100 / 2.42)
+    assert result["irr_pct"] == pytest.approx(13.0662386, abs=0.001)
+    assert result["irr_status"] == "CALCULATED"
+    assert result["simple_payback_periods"] == pytest.approx(5 / 3)
+    assert len(result["cash_flow_schedule"]) == 3
+
+
+def test_engineering_economics_omits_irr_for_nonconventional_cashflows_and_validates_rate():
+    from shoir_target_engines import analyze_engineering_economics
+
+    result = analyze_engineering_economics([-100, 230, -132], 10, currency="SAR")
+    assert result["irr_pct"] is None
+    assert result["irr_status"] == "NOT_CALCULATED_NONCONVENTIONAL_CASH_FLOWS"
+    with pytest.raises(ValueError, match="greater than -100"):
+        analyze_engineering_economics([-100, 150], -100, currency="SAR")
+    with pytest.raises(ValueError, match="numeric values"):
+        analyze_engineering_economics([-100, True], 10, currency="SAR")
