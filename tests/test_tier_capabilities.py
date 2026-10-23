@@ -72,6 +72,12 @@ def test_copilot_blocks_package_gated_actions():
 
 
 
+def test_available_modules_fails_closed_for_unmapped_or_blank_names():
+    candidates = ["AI Copilot", "Module with no explicit policy", "", "  "]
+    assert available_modules("Enterprise Plus", candidates) == ["AI Copilot"]
+    assert available_modules("Starter", ["Module with no explicit policy"]) == []
+
+
 def test_module_entitlement_audit_reports_unmapped_catalog_items():
     report = audit_module_entitlement_coverage([
         "AI Copilot",
