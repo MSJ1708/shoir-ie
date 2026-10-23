@@ -2,7 +2,8 @@
 
 **Source baseline:** `3a73ada0be2ea5e85903b9c8937f8a9387ee061d` (main, 2026-10-21)  
 **Implementation branch:** `audit/shoir-100-tools-20261023`  
-**Latest automated-test code revision:** `9a1a61c330a70bc9efa22af0c24acc3d839cd8bd`  
+**Latest branch head:** `a76237f204ba2c6136c16d732c6e8fbc55367899`  
+**Last completed full-test code revision:** `9a1a61c330a70bc9efa22af0c24acc3d839cd8bd`  
 **Release decision for the full 100-tool scope:** **NO-GO — incomplete scope and hosted/authenticated verification blocked**
 
 ## Summary
@@ -20,6 +21,7 @@ This is a focused first implementation phase, **not completion of the full 100-t
 - Added independent hand-calculated/boundary tests for all five methods and an AppTest that launches and runs T021, T023 and T066 through the existing directory, and checks that T067 opens the existing “Multi-Objective Optimization” module through the normal selector when native permission allows it.
 - Fixed the Workbench excellence-layer tier helper: Research Pack previously ranked after Enterprise Plus and therefore could inherit Enterprise Plus-only modules. The helper and its regression test now enforce the add-on rule required by the master prompt. An older contradictory assertion that expected Research Pack to grant Enterprise Plus was updated to the required policy.
 - Focused results store the inputs used with the result, call the existing per-user `workspace_persistence.py` service for non-guest users, and display distinct managed/local/session/failure/uncertain save states. An input snapshot mismatch warns that the result is stale. Workspace writes are not called fully durable unless the managed backend is configured and authenticated reload tests pass.
+- The five target actions now require both an authenticated non-guest session and the target-tier permission check before calculation. A guest-denial AppTest was added; the fresh CI workflow for this last access-control change is not yet complete.
 - Updated `workspace_persistence.py` to retain DataFrame column dtypes during save/load round trips (with a recoverable warning if an unsupported dtype cannot be restored); added an isolated T021 result/input round-trip test that confirms another user cannot read that result.
 
 ## Static target status counts
@@ -45,7 +47,7 @@ These counts are conservative source-audit classifications. They are not a tool 
 
 ## Verification evidence
 
-The current code-bearing revision tested by GitHub Actions is `9a1a61c330a70bc9efa22af0c24acc3d839cd8bd`. Results observed for that revision:
+The last completed full-suite code revision tested by GitHub Actions is `9a1a61c330a70bc9efa22af0c24acc3d839cd8bd`. The subsequent authenticated-execution guard and guest-denial regression were added afterward; CI workflows for the latest branch head `a76237f204ba2c6136c16d732c6e8fbc55367899` are running, so the results below must not be represented as validation of that final access-control change. Results observed for revision `9a1a61c330a70bc9efa22af0c24acc3d839cd8bd`:
 
 - Full test workflow [39977967543](https://github.com/MSJ1708/shoir-ie/actions/runs/39977967543): `python -m pytest -q tests` **659 passed, 2 skipped, 28 warnings**.
 - Platform tests [39977967664](https://github.com/MSJ1708/shoir-ie/actions/runs/39977967664): **passed**.
@@ -68,4 +70,4 @@ No authenticated per-tier module walkthrough was run, and the matrix accurately 
 
 ## Release recommendation
 
-**NO-GO for merging this as completion of the requested 100-tool implementation or for declaring Shoir-IE fully verified/workforce-ready.** The tested code revision has passing full, platform, engine-regression and security/quality workflows. The local desktop/mobile smoke is not yet confirmed complete, while the hosted public-site smoke failed because the deployed app was asleep. The branch provides a reviewable registry/gap matrix, five focused specialist methods, improved per-user result persistence handling and DataFrame type-preservation coverage; it does not deliver 100 verified tools or authenticated end-to-end acceptance. The remaining work above is required before the full master prompt can be marked done.
+**NO-GO for merging this as completion of the requested 100-tool implementation or for declaring Shoir-IE fully verified/workforce-ready.** On revision `9a1a61c330a70bc9efa22af0c24acc3d839cd8bd`, the full, platform, engine-regression and security/quality workflows passed. The local desktop/mobile smoke for that run remains incomplete, and the hosted public-site smoke failed because the deployed app was asleep. The current branch adds an authentication check and guest-denial test after that tested revision; its workflows are pending, so that change remains unverified until CI finishes. The branch provides a reviewable registry/gap matrix, five focused specialist methods, improved per-user result persistence handling and DataFrame type-preservation coverage; it does not deliver 100 verified tools or authenticated end-to-end acceptance. The remaining work above is required before the full master prompt can be marked done.
