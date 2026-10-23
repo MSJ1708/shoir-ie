@@ -141,3 +141,69 @@ def test_workbench_selects_and_runs_work_sampling_and_pareto_tools():
     assert root_cause["total_count"] == 22
     assert root_cause["categories_to_reach_80_percent"] == 2
     assert root_cause["data_provenance"] == "SYNTHETIC_EXAMPLE"
+
+
+def test_workbench_runs_5s_and_revisioned_kaizen_a3():
+    from streamlit.testing.v1 import AppTest
+
+    page = ROOT / "pages" / "Industrial_Engineering_Workbench.py"
+    at = AppTest.from_file(page, default_timeout=45)
+    at.session_state["current_user"] = "a3-workbench-checker"
+    at.session_state["authenticated"] = True
+    at.session_state["user_tier"] = "Enterprise Plus Tier"
+    at.run(timeout=45)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+
+    inspector = at.selectbox(key="shoir_100_tool_inspector")
+    inspector.select("T029 · 5S and Workplace Audit")
+    at.run(timeout=45)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    at.button(key="tool029_run").click()
+    at.run(timeout=45)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    audit_result = at.session_state.get("shoir_tool_result_T029")
+    assert audit_result is not None
+    assert audit_result["overall_5s_score_pct_equal_pillar_weight"] == pytest.approx(75.0)
+    assert audit_result["status"] == "AUDIT_RECORDED"
+    assert audit_result["data_provenance"] == "SYNTHETIC_EXAMPLE"
+
+    inspector = at.selectbox(key="shoir_100_tool_inspector")
+    inspector.select("T030 · Kaizen and A3 Improvement Manager")
+    at.run(timeout=45)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    at.text_input(key="tool030_title").set_value("Reduce cycle time")
+    at.text_area(key="tool030_problem").set_value("Cycle time is above the target")
+    at.text_input(key="tool030_metric").set_value("Cycle time")
+    at.text_input(key="tool030_unit").set_value("minutes per unit")
+    at.text_input(key="tool030_baseline").set_value("100")
+    at.text_input(key="tool030_target").set_value("80")
+    at.text_input(key="tool030_actual").set_value("90")
+    at.text_area(key="tool030_root_cause").set_value("Setup standard is inconsistently followed")
+    at.text_area(key="tool030_countermeasure").set_value("Standardize and audit setup steps")
+    at.text_input(key="tool030_owner").set_value("Process engineer")
+    at.text_input(key="tool030_due_date").set_value("2026-11-15")
+    at.text_input(key="tool030_baseline_evidence").set_value("baseline-run-101")
+    at.selectbox(key="tool030_status").select("In Progress")
+    at.run(timeout=45)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    at.button(key="tool030_run").click()
+    at.run(timeout=45)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    a3 = at.session_state.get("shoir_tool_result_T030")
+    assert a3 is not None
+    assert a3["target_progress_pct"] == pytest.approx(50.0)
+    assert a3["revision_number"] == 1
+    record_id = a3["record_id"]
+    assert len(at.session_state["shoir_kaizen_a3_records"]) == 1
+
+    at.text_input(key="tool030_record_id").set_value(record_id)
+    at.text_input(key="tool030_actual").set_value("88")
+    at.run(timeout=45)
+    at.button(key="tool030_run").click()
+    at.run(timeout=45)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    revised = at.session_state["shoir_tool_result_T030"]
+    assert revised["record_id"] == record_id
+    assert revised["revision_number"] == 2
+    assert len(revised["revision_history"]) == 1
+    assert revised["actual_after_value"] == pytest.approx(88.0)
