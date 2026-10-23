@@ -16,8 +16,8 @@ This is a focused first implementation phase, **not completion of the full 100-t
 - Added `shoir_tool_registry.py` with stable IDs T001–T100, workbench grouping, target minimum tier, input/output contracts, current mapped route/source, evidence status and remaining gaps. Unknown IDs fail closed through the target gate.
 - Added `docs/SHOIR_100_TOOL_IMPLEMENTATION_MATRIX.csv`, with exactly 100 tool rows and the required implementation/evidence columns, plus this audit report.
 - Added a **collapsed** searchable/filterable tool directory within the established Workbench. It reports readiness and minimum tier; foundation-only tools are not shown as operational merely because they exist in the catalog.
-- Implemented and exposed three focused deterministic methods in the Workbench: **T066** one-dimensional cutting/bin-packing MILP (with explicit per-piece kerf convention); **T075** forecast error threshold monitor (MAE/RMSE/bias, explicitly not an autonomous retraining detector); and **T085** balanced independent two-sample t-test sample-size planner (noncentral-t power, with assumptions stated).
-- Added golden/boundary tests for these methods and a Streamlit AppTest that launches T066 from the directory, executes it, and checks an optimal two-stock result. Added a separate assertion that T067 opens the existing “Multi-Objective Optimization” module through the existing selector when the native legacy permission also allows it.
+- Implemented and exposed five focused deterministic methods in the existing Workbench: **T021** time-study standard time (mean, rating, and allowance defined as a share of standard time); **T023** takt/capacity calculator (consistent time units, implied capacity and capacity gap); **T066** one-dimensional cutting/bin-packing MILP (explicit per-piece kerf convention); **T075** forecast error threshold monitor (MAE/RMSE/bias, not an autonomous retraining detector); and **T085** balanced independent two-sample t-test sample-size planner (noncentral-t power, assumptions stated).
+- Added independent hand-calculated/boundary tests for all five methods and an AppTest that launches and runs T021, T023 and T066 through the existing directory, and checks that T067 opens the existing “Multi-Objective Optimization” module through the normal selector when native permission allows it.
 - Fixed the Workbench excellence-layer tier helper: Research Pack previously ranked after Enterprise Plus and therefore could inherit Enterprise Plus-only modules. The helper and its regression test now enforce the add-on rule required by the master prompt. An older contradictory assertion that expected Research Pack to grant Enterprise Plus was updated to the required policy.
 - Clear prior results before re-running a focused method so failed runs do not leave an old result presented as current.
 
@@ -44,7 +44,7 @@ These counts are conservative source-audit classifications. They are not a tool 
 
 ## Verification evidence
 
-On code-bearing revision `60eae90eac199752678a68f8dce3ff90c26c9709`, GitHub Actions run [39969936919](https://github.com/MSJ1708/shoir-ie/actions/runs/39969936919) reported:
+The previously recorded GitHub Actions evidence below applies to code-bearing revision `60eae90eac199752678a68f8dce3ff90c26c9709`, before the additional T021/T023 methods and their current Workbench/AppTest integration. A fresh CI run for the latest edits is required before using those earlier results as evidence for the current branch. The prior baseline run [39969936919](https://github.com/MSJ1708/shoir-ie/actions/runs/39969936919) reported:
 
 - `python -m compileall -q .`: **passed**
 - `python -m pytest -q tests`: **652 passed, 2 skipped, 28 warnings**
@@ -66,4 +66,4 @@ The separate **hosted deployment smoke failed** in the same run: the public Stre
 
 ## Release recommendation
 
-**NO-GO for merging this as completion of the requested 100-tool implementation or for declaring Shoir-IE fully verified/workforce-ready.** The branch provides a reviewable registry/gap matrix, a layout-preserving Workbench integration, three tested initial specialist methods, a tier-policy correction, and passing automated/local smoke evidence on the code-bearing revision. The remaining work above is required before the full master prompt can be marked done.
+**NO-GO for merging this as completion of the requested 100-tool implementation or for declaring Shoir-IE fully verified/workforce-ready.** The branch provides a reviewable registry/gap matrix, a layout-preserving Workbench integration, five focused specialist methods with independent tests, a tier-policy correction, and previously passing automated/local smoke evidence on the earlier code-bearing revision. The new T021/T023 additions remain pending current-revision CI until that run completes. The remaining work above is required before the full master prompt can be marked done.
