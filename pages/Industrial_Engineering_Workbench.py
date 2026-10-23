@@ -467,9 +467,42 @@ with st.expander("🧭 100-tool directory & readiness", expanded=False):
                             )
                             run_method = st.form_submit_button("Calculate sample size", type="primary", use_container_width=True, key="tool085_run")
 
+                    if selected_tool["tool_id"] == "T021":
+                        current_tool_inputs = {
+                            "observation_times_text": observation_text,
+                            "performance_rating_pct": rating,
+                            "allowance_pct_of_standard_time": allowance,
+                            "time_unit": unit,
+                        }
+                    elif selected_tool["tool_id"] == "T023":
+                        current_tool_inputs = {
+                            "available_time_per_period": available_time,
+                            "demand_units_per_period": demand_units,
+                            "cycle_time_per_unit": cycle_time,
+                            "time_unit": unit,
+                        }
+                    elif selected_tool["tool_id"] == "T066":
+                        current_tool_inputs = {
+                            "stock_length": stock_len, "kerf_allowance": kerf,
+                            "parts_json": parts_json,
+                        }
+                    elif selected_tool["tool_id"] == "T075":
+                        current_tool_inputs = {
+                            "predictions_text": predictions_text, "actuals_text": actuals_text,
+                            "maximum_mae": max_mae, "trailing_window": int(window),
+                        }
+                    else:
+                        current_tool_inputs = {
+                            "cohen_d": effect_size, "alpha": alpha,
+                            "target_power": target_power, "maximum_n_per_group": int(search_limit),
+                        }
+
                     if run_method:
-                        # Drop the prior output before a new run; a failed run must not appear current.
+                        # Remove only the in-session output before a new run. The last
+                        # successful saved workspace snapshot remains intact if this run fails.
                         st.session_state.pop("shoir_tool_result_" + selected_tool["tool_id"], None)
+                        st.session_state.pop("shoir_tool_inputs_" + selected_tool["tool_id"], None)
+                        st.session_state.pop("shoir_tool_save_status_" + selected_tool["tool_id"], None)
                         try:
                             require_tool_access(RAW_TIER, selected_tool["tool_id"])
                             from shoir_target_engines import (
@@ -485,18 +518,15 @@ with st.expander("🧭 100-tool directory & readiness", expanded=False):
                                 result = calculate_time_study(
                                     observation_times, rating, allowance, time_unit=unit,
                                 )
-                                st.session_state["shoir_tool_result_T021"] = result
                             elif selected_tool["tool_id"] == "T023":
                                 result = calculate_takt_capacity(
                                     available_time, demand_units, cycle_time, time_unit=unit,
                                 )
-                                st.session_state["shoir_tool_result_T023"] = result
                             elif selected_tool["tool_id"] == "T066":
                                 parsed_parts = json.loads(parts_json)
                                 if not isinstance(parsed_parts, list):
                                     raise ValueError("Parts input must be a JSON list of part definitions.")
                                 result = solve_cutting_stock(stock_len, parsed_parts, kerf)
-                                st.session_state["shoir_tool_result_T066"] = result
                             elif selected_tool["tool_id"] == "T075":
                                 try:
                                     predictions = [float(x.strip()) for x in predictions_text.split(",") if x.strip()]
@@ -507,19 +537,21 @@ with st.expander("🧭 100-tool directory & readiness", expanded=False):
                                     predictions, actuals, max_mae,
                                     window=int(window) if int(window) > 0 else None,
                                 )
-                                st.session_state["shoir_tool_result_T075"] = result
                             else:
                                 result = plan_two_sample_t_sample_size(
                                     effect_size, alpha, target_power,
                                     max_n_per_group=int(search_limit),
                                 )
-                                st.session_state["shoir_tool_result_T085"] = result
+                            _persist_focused_tool_result(
+                                selected_tool["tool_id"], result, current_tool_inputs
+                            )
                         except Exception as exc:
                             st.error(f"Tool run could not be completed safely: {exc}")
 
                     if selected_tool["tool_id"] == "T021":
                         result = st.session_state.get("shoir_tool_result_T021")
                         if result:
+                            _show_focused_tool_persistence("T021", result, current_tool_inputs)
                             c1, c2, c3 = st.columns(3)
                             c1.metric(f"Mean observed time ({result['time_unit']})", f"{result['mean_observed_time']:,.4g}")
                             c2.metric(f"Normal time ({result['time_unit']})", f"{result['normal_time']:,.4g}")
@@ -536,6 +568,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=False):
                     elif selected_tool["tool_id"] == "T023":
                         result = st.session_state.get("shoir_tool_result_T023")
                         if result:
+                            _show_focused_tool_persistence("T023", result, current_tool_inputs)
                             c1, c2, c3 = st.columns(3)
                             c1.metric(f"Takt time ({result['time_unit']}/unit)", f"{result['takt_time_per_unit']:,.4g}")
                             c2.metric("Implied capacity (units/period)", f"{result['implied_capacity_units_per_period']:,.4g}")
@@ -555,6 +588,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=False):
                     elif selected_tool["tool_id"] == "T066":
                         result = st.session_state.get("shoir_tool_result_T066")
                         if result:
+                            _show_focused_tool_persistence("T066", result, current_tool_inputs)
                             st.markdown(f"**Solver status:** {result['status']}")
                             st.caption(result.get("message", ""))
                             if result.get("status") == "OPTIMAL":
@@ -577,6 +611,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=False):
                     elif selected_tool["tool_id"] == "T075":
                         result = st.session_state.get("shoir_tool_result_T075")
                         if result:
+                            _show_focused_tool_persistence("T075", result, current_tool_inputs)
                             c1, c2, c3, c4 = st.columns(4)
                             c1.metric("Status", result["status"])
                             c2.metric("MAE", f"{result['mae']:.4g}")
@@ -592,6 +627,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=False):
                     elif selected_tool["tool_id"] == "T085":
                         result = st.session_state.get("shoir_tool_result_T085")
                         if result:
+                            _show_focused_tool_persistence("T085", result, current_tool_inputs)
                             c1, c2, c3 = st.columns(3)
                             c1.metric("Status", result["status"])
                             c2.metric(
