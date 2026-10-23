@@ -39,6 +39,6 @@ The implementation branch adds one **Tool Library** sector to the existing shell
 
 ## Evidence and interpretation
 
-The full 19-column matrix is `SHOIR_100_TOOL_IMPLEMENTATION_MATRIX.csv`. It records source review, target status, related route (if one is evidenced), policy check points, tests, and explicit `UNVERIFIED` values where integration/browser evidence does not exist. The browser column is intentionally not marked PASS from static inspection or public-shell smoke alone.
+The full 19-column matrix is `SHOIR_100_TOOL_IMPLEMENTATION_MATRIX.csv`. It carries each exact acceptance statement from the master prompt, and the authenticated Tool Library displays that statement for every target. It records source review, target status, related route (if one is evidenced), policy check points, tests, and explicit `UNVERIFIED` values where integration/browser evidence does not exist. The browser column is intentionally not marked PASS from static inspection or public-shell smoke alone.
 
 **Release decision at audit start: NO-GO for claims of full tool completion or workforce/production readiness.** This is not a claim that no usable tools exist. It is a statement that the 100 target acceptance contracts, authenticated route matrix, engineering calculation correctness, persistence, and exports have not yet all been demonstrated.
