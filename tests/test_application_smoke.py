@@ -14,6 +14,7 @@ REQUIRED_MODULES = (
     "shoir_100_tool_engines.py",
     "shoir_100_tool_extended_engines.py",
     "shoir_copilot_orchestrator.py",
+    "pages/Industrial_Engineering_Workbench.py",
     "pages/Engineering_Tool_Library.py",
 )
 
