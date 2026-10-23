@@ -59,6 +59,16 @@ st.markdown("""
 </div>
 """,unsafe_allow_html=True)
 
+# An additive entry point to the grouped target catalog; keep the main workbench layout intact.
+library_col, spacer_col = st.columns([2.2, 5.8])
+with library_col:
+    st.page_link(
+        "pages/Engineering_Tool_Library.py",
+        label="Browse the 100-tool Engineering Library",
+        icon="🧭",
+        help="Grouped tool catalog with package access, readiness, input/output contracts and two limited validation-mode engines.",
+    )
+
 # Header health/status strip
 h1,h2,h3,h4,h5 = st.columns(5)
 h1.metric("User", USER)
