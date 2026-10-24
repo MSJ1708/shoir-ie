@@ -1,15 +1,19 @@
-"""Regression tests for direct Workbench access and fail-closed tier resolution."""
+"""Regression tests for direct page access and fail-closed tier resolution."""
 
 from pathlib import Path
 
+import pytest
 from streamlit.testing.v1 import AppTest
 
 ROOT = Path(__file__).resolve().parents[1]
-PAGE = ROOT / "pages" / "Industrial_Engineering_Workbench.py"
+PROTECTED_PAGES = [
+    pytest.param(ROOT / "pages" / "Industrial_Engineering_Workbench.py", id="workbench"),
+    pytest.param(ROOT / "pages" / "Industrial_Platform_Command_Center.py", id="command-center"),
+]
 
 
-def _run_workbench(**session_values):
-    at = AppTest.from_file(PAGE, default_timeout=45)
+def _run_page(page, **session_values):
+    at = AppTest.from_file(page, default_timeout=45)
     for key, value in session_values.items():
         at.session_state[key] = value
     at.run(timeout=45)
@@ -17,42 +21,44 @@ def _run_workbench(**session_values):
     return at
 
 
-def _has_gate_only_surface(at):
+def _assert_gate_stopped_protected_surface(at):
     # Guard failures must stop before the platform database setup and module UI.
-    assert not any("Search modules" == item.label for item in at.text_input)
-    assert not any("Module" == item.label for item in at.selectbox)
-    assert not any("Import / Validate" in str(getattr(item, "label", "")) for item in at.button)
-    assert not at.metric
+    assert len(at.text_input) == 0
+    assert len(at.selectbox) == 0
+    assert len(at.metric) == 0
 
 
-def test_direct_workbench_url_requires_authenticated_user_and_explicit_tier():
-    at = _run_workbench()
-    assert any(
-        "Sign in to Shoir-IE" in str(item.value) for item in at.warning
-    )
-    _has_gate_only_surface(at)
+@pytest.mark.parametrize("page", PROTECTED_PAGES)
+def test_direct_page_url_requires_authenticated_user_and_explicit_tier(page):
+    at = _run_page(page)
+    assert any("Sign in to Shoir-IE" in str(item.value) for item in at.warning)
+    _assert_gate_stopped_protected_surface(at)
 
 
-def test_authenticated_session_with_unknown_tier_is_denied_before_module_render():
-    at = _run_workbench(
+@pytest.mark.parametrize("page", PROTECTED_PAGES)
+def test_authenticated_session_with_unknown_tier_is_denied_before_render(page):
+    at = _run_page(
+        page,
         authenticated=True,
-        current_user="disposable-workbench-test-user",
+        current_user="disposable-protected-page-test-user",
         user_tier="Super Enterprise",
     )
     assert any(
         "package could not be verified" in str(item.value).lower()
         for item in at.error
     )
-    _has_gate_only_surface(at)
+    _assert_gate_stopped_protected_surface(at)
 
 
-def test_missing_tier_does_not_fall_back_to_enterprise_plus():
-    at = _run_workbench(
+@pytest.mark.parametrize("page", PROTECTED_PAGES)
+def test_missing_tier_does_not_fall_back_to_enterprise_plus(page):
+    at = _run_page(
+        page,
         authenticated=True,
-        current_user="disposable-workbench-test-user",
+        current_user="disposable-protected-page-test-user",
     )
     assert any(
         "package could not be verified" in str(item.value).lower()
         for item in at.error
     )
-    _has_gate_only_surface(at)
+    _assert_gate_stopped_protected_surface(at)
