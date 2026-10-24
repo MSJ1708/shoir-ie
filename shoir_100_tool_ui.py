@@ -492,3 +492,20 @@ def render_weibull_tool(st: Any, tier: str, actor: str) -> None:
         result = st.session_state.get("T041_last_result")
         if result:
             _show_result(st, "T041", result)
+
+
+
+def render_mtbf_mttr_tool(st: Any, tier: str, actor: str) -> None:
+    from shoir_100_tool_methods import mtbf_mttr_analysis
+    with st.expander("T042 · MTBF and MTTR Analyzer · Professional", expanded=False):
+        st.caption("Each row represents a completed failure/repair interval; all times must use hours and the same observation scope.")
+        events = st.data_editor(pd.DataFrame([
+            {"uptime_hours": 10.0, "repair_hours": 8.0},
+            {"uptime_hours": 20.0, "repair_hours": 10.0},
+            {"uptime_hours": 15.0, "repair_hours": 7.0},
+        ]), num_rows="dynamic", use_container_width=True, key="t042_events")
+        if st.button("Calculate MTBF and MTTR", key="t042_run", type="primary"):
+            _run(st, tier, actor, "T042", lambda: mtbf_mttr_analysis(events.to_dict("records")))
+        result = st.session_state.get("T042_last_result")
+        if result:
+            _show_result(st, "T042", result)
