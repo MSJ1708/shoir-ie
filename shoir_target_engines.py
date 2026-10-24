@@ -2327,3 +2327,426 @@ def score_project_portfolio(
         "assumptions": "All project scores must be numeric and comparable within each criterion. Weights are subjective inputs. A criterion with identical scores across projects receives 100 for all projects and contributes no discrimination.",
         "warning": "This is a decision aid, not an objective or universally correct ranking. Sensitivity to weights has not been calculated in this first implementation; review weights and data quality before selecting a project.",
     }
+
+
+def merge_data_tables(
+    left_records: Sequence[Mapping[str, Any]],
+    right_records: Sequence[Mapping[str, Any]],
+    left_key: str,
+    right_key: str,
+    *,
+    join_type: str = "left",
+    duplicate_policy: str = "allow",
+    max_output_rows: int = 100_000,
+) -> dict[str, Any]:
+    """Join two supplied tables and report cardinality and unmatched records."""
+    if isinstance(left_records, (str, bytes)) or not isinstance(left_records, Sequence) or not left_records:
+        raise ValueError("Left table must contain at least one record.")
+    if isinstance(right_records, (str, bytes)) or not isinstance(right_records, Sequence) or not right_records:
+        raise ValueError("Right table must contain at least one record.")
+    if not left_key or not right_key:
+        raise ValueError("Choose a join key for each table.")
+    join_how = str(join_type or "").strip().lower()
+    if join_how not in {"left", "right", "inner", "outer"}:
+        raise ValueError("Join type must be left, right, inner or outer.")
+    duplicate_mode = str(duplicate_policy or "").strip().lower()
+    if duplicate_mode not in {"allow", "reject"}:
+        raise ValueError("Duplicate-key policy must be allow or reject.")
+    if isinstance(max_output_rows, bool) or not isinstance(max_output_rows, int) or max_output_rows < 1:
+        raise ValueError("Maximum output rows must be a positive integer.")
+    left = pd.DataFrame(list(left_records))
+    right = pd.DataFrame(list(right_records))
+    if left.empty or right.empty:
+        raise ValueError("Both tables must contain records.")
+    for label, df, key in (("Left", left, left_key), ("Right", right, right_key)):
+        if key not in df.columns:
+            raise ValueError(f"{label} table is missing join key '{key}'.")
+        if df[key].isna().any():
+            raise ValueError(f"{label} join key '{key}' contains missing values; clean or map them explicitly.")
+    left_dups = int(left[left_key].duplicated(keep=False).sum())
+    right_dups = int(right[right_key].duplicated(keep=False).sum())
+    if duplicate_mode == "reject" and (left_dups or right_dups):
+        raise ValueError(
+            f"Duplicate join keys are not allowed under the selected policy (left duplicate rows={left_dups}, right duplicate rows={right_dups})."
+        )
+    try:
+        merged = left.merge(
+            right, how=join_how, left_on=left_key, right_on=right_key,
+            suffixes=("_left", "_right"), indicator=True, sort=False,
+        )
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"Tables could not be joined safely: {exc}") from exc
+    if len(merged) > max_output_rows:
+        raise ValueError(
+            f"Join would create {len(merged):,} rows, exceeding the configured output limit of {max_output_rows:,}. "
+            "Inspect duplicate keys or choose a more selective join."
+        )
+    indicator_counts = merged["_merge"].value_counts()
+    matched = int(indicator_counts.get("both", 0))
+    left_only = int(indicator_counts.get("left_only", 0))
+    right_only = int(indicator_counts.get("right_only", 0))
+    merged = merged.drop(columns=["_merge"])
+    return {
+        "status": "JOIN_COMPLETED",
+        "join_type": join_how,
+        "left_input_rows": int(len(left)),
+        "right_input_rows": int(len(right)),
+        "output_rows": int(len(merged)),
+        "matched_output_rows": matched,
+        "left_only_output_rows": left_only,
+        "right_only_output_rows": right_only,
+        "left_duplicate_key_rows": left_dups,
+        "right_duplicate_key_rows": right_dups,
+        "duplicate_policy": duplicate_mode,
+        "joined_table": merged,
+        "assumptions": "Duplicate keys are either explicitly allowed (which can multiply rows) or rejected. Key values are compared as supplied; normalize types/case/whitespace before merging when appropriate.",
+        "warning": "Review duplicate-key diagnostics and output row-count changes. A many-to-many join can multiply records; the joined table is not proof of correct business-key mapping.",
+    }
+
+
+def process_time_series(
+    records: Sequence[Mapping[str, Any]],
+    timestamp_column: str,
+    *,
+    timezone_name: str = "UTC",
+    expected_interval: str = "",
+    resample_frequency: str = "",
+    aggregation: str = "mean",
+) -> dict[str, Any]:
+    """Normalize timestamped records, report duplicate/gap diagnostics and optionally resample."""
+    if isinstance(records, (str, bytes)) or not isinstance(records, Sequence) or not records:
+        raise ValueError("Provide at least one timestamped record.")
+    timestamp_key = str(timestamp_column or "").strip()
+    tz_name = str(timezone_name or "").strip()
+    if not timestamp_key or not tz_name:
+        raise ValueError("Timestamp-column name and timezone are required.")
+    df = pd.DataFrame(list(records))
+    if timestamp_key not in df.columns:
+        raise ValueError(f"Timestamp column '{timestamp_key}' was not found.")
+    if df[timestamp_key].isna().any():
+        raise ValueError("Timestamp column contains missing values; resolve them explicitly before processing.")
+    try:
+        parsed = pd.to_datetime(df[timestamp_key], errors="raise")
+        if isinstance(parsed.dtype, pd.DatetimeTZDtype):
+            localized = parsed.dt.tz_convert("UTC")
+        elif pd.api.types.is_datetime64_dtype(parsed.dtype):
+            localized = parsed.dt.tz_localize(tz_name, ambiguous="raise", nonexistent="raise").dt.tz_convert("UTC")
+        else:
+            # Mixed offsets/strings are normalized via UTC parse rather than silently dropped.
+            localized = pd.to_datetime(df[timestamp_key], errors="raise", utc=True)
+    except Exception as exc:
+        raise ValueError(f"Timestamps could not be parsed/localized safely: {exc}") from exc
+    df[timestamp_key] = localized
+    df = df.sort_values(timestamp_key, kind="stable").reset_index(drop=True)
+    duplicate_count = int(df[timestamp_key].duplicated(keep=False).sum())
+    gap_rows: list[dict[str, Any]] = []
+    interval = None
+    if str(expected_interval or "").strip():
+        try:
+            interval = pd.to_timedelta(str(expected_interval).strip())
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Expected interval must be a valid duration such as '15min' or '1h'.") from exc
+        if pd.isna(interval) or interval <= pd.Timedelta(0):
+            raise ValueError("Expected interval must be greater than zero.")
+        unique_stamps = df[timestamp_key].drop_duplicates().sort_values().reset_index(drop=True)
+        for i in range(1, len(unique_stamps)):
+            delta = unique_stamps.iloc[i] - unique_stamps.iloc[i - 1]
+            if delta > interval:
+                missing_n = max(0, int(delta // interval) - 1)
+                if missing_n > 0:
+                    gap_rows.append({
+                        "Previous timestamp (UTC)": unique_stamps.iloc[i - 1],
+                        "Next timestamp (UTC)": unique_stamps.iloc[i],
+                        "Observed gap": str(delta),
+                        "Expected interval": str(interval),
+                        "Expected missing observations": missing_n,
+                    })
+    output = df.copy()
+    agg = str(aggregation or "").strip().lower()
+    resample = str(resample_frequency or "").strip()
+    if resample:
+        allowed = {"mean", "sum", "min", "max", "first", "last"}
+        if agg not in allowed:
+            raise ValueError(f"Aggregation must be one of: {', '.join(sorted(allowed))}.")
+        try:
+            indexed = df.set_index(timestamp_key)
+            numeric_cols = list(indexed.select_dtypes(include="number").columns)
+            if not numeric_cols:
+                raise ValueError("Resampling requires at least one numeric measurement column.")
+            output = getattr(indexed[numeric_cols].resample(resample), agg)().reset_index()
+        except ValueError:
+            raise
+        except Exception as exc:
+            raise ValueError(f"Resampling failed: {exc}") from exc
+    return {
+        "status": "TIME_SERIES_PROCESSED",
+        "input_rows": int(len(df)),
+        "output_rows": int(len(output)),
+        "duplicate_timestamp_rows": duplicate_count,
+        "gap_count": len(gap_rows),
+        "expected_missing_observations": sum(int(g["Expected missing observations"]) for g in gap_rows),
+        "timezone_storage": "UTC",
+        "input_timezone_assumption": tz_name,
+        "resampled": bool(resample),
+        "aggregation": agg if resample else "not applied",
+        "gap_diagnostics": pd.DataFrame(gap_rows),
+        "processed_series": output,
+        "assumptions": "Naive timestamps are interpreted in the supplied timezone and normalized to UTC. Missing, invalid or ambiguous timestamps fail rather than being silently dropped. Only numeric columns are resampled.",
+        "warning": "Check daylight-saving changes, source timestamp semantics and aggregation meaning before operational use. A gap report is not proof of a sensor outage.",
+    }
+
+
+def generate_synthetic_industrial_data(
+    row_count: int = 100,
+    *,
+    seed: int = 42,
+    start_timestamp: str = "2026-01-01T00:00:00Z",
+    interval_minutes: int = 60,
+    defect_rate_pct: float = 2.0,
+    mean_downtime_minutes: float = 5.0,
+    energy_kwh_per_unit: float = 0.5,
+) -> dict[str, Any]:
+    """Generate reproducible teaching/test data that remains explicitly SYNTHETIC."""
+    if isinstance(row_count, bool) or not isinstance(row_count, int) or not 1 <= row_count <= 100_000:
+        raise ValueError("Row count must be a whole number from 1 through 100000.")
+    if isinstance(seed, bool) or not isinstance(seed, int) or seed < 0:
+        raise ValueError("Random seed must be a non-negative whole number.")
+    if isinstance(interval_minutes, bool) or not isinstance(interval_minutes, int) or interval_minutes <= 0:
+        raise ValueError("Timestamp interval must be a positive whole number of minutes.")
+    defect_rate = _finite_number(defect_rate_pct, "Defect rate percentage")
+    downtime_mean = _finite_number(mean_downtime_minutes, "Mean downtime minutes")
+    energy_factor = _finite_number(energy_kwh_per_unit, "Energy per unit")
+    if not 0 <= defect_rate <= 100:
+        raise ValueError("Defect rate percentage must be between 0 and 100.")
+    if downtime_mean < 0 or energy_factor < 0:
+        raise ValueError("Downtime and energy factor cannot be negative.")
+    try:
+        start = pd.Timestamp(start_timestamp)
+        if start.tzinfo is None:
+            start = start.tz_localize("UTC")
+        else:
+            start = start.tz_convert("UTC")
+    except Exception as exc:
+        raise ValueError("Start timestamp must be parseable ISO date/time text.") from exc
+    rng = np.random.default_rng(seed)
+    output_count = rng.poisson(lam=100.0, size=row_count)
+    defect_count = rng.binomial(n=output_count, p=defect_rate / 100.0)
+    downtime = rng.exponential(scale=max(downtime_mean, 1e-9), size=row_count) if downtime_mean > 0 else np.zeros(row_count)
+    energy = output_count * energy_factor * rng.normal(loc=1.0, scale=0.05, size=row_count)
+    energy = np.maximum(0.0, energy)
+    df = pd.DataFrame({
+        "timestamp_utc": [start + pd.Timedelta(minutes=interval_minutes * i) for i in range(row_count)],
+        "total_output_units": output_count.astype(int),
+        "defective_units": defect_count.astype(int),
+        "downtime_minutes": downtime,
+        "energy_kwh": energy,
+        "data_provenance": "SYNTHETIC",
+        "random_seed": seed,
+    })
+    return {
+        "status": "SYNTHETIC_DATA_GENERATED",
+        "data_provenance": "SYNTHETIC",
+        "row_count": row_count,
+        "seed": seed,
+        "start_timestamp_utc": start.isoformat(),
+        "interval_minutes": interval_minutes,
+        "actual_synthetic_defect_rate_pct": (
+            float(defect_count.sum() / output_count.sum() * 100.0) if output_count.sum() > 0 else None
+        ),
+        "synthetic_dataset": df,
+        "warning": "Every row is simulated, not a real plant measurement. Do not combine with live data without retaining the SYNTHETIC provenance label.",
+    }
+
+
+def plan_acceptance_sampling(
+    aql_rate: float,
+    ltpd_rate: float,
+    producer_risk: float = 0.05,
+    consumer_risk: float = 0.10,
+    *,
+    max_sample_size: int = 500,
+) -> dict[str, Any]:
+    """Search a single-sample binomial attributes plan meeting producer/consumer risks."""
+    aql = _finite_number(aql_rate, "AQL defect fraction")
+    ltpd = _finite_number(ltpd_rate, "LTPD defect fraction")
+    alpha = _finite_number(producer_risk, "Producer risk")
+    beta = _finite_number(consumer_risk, "Consumer risk")
+    if not 0 <= aql < ltpd <= 1:
+        raise ValueError("Require 0 ≤ AQL defect fraction < LTPD defect fraction ≤ 1.")
+    if not 0 < alpha < 1 or not 0 < beta < 1:
+        raise ValueError("Producer and consumer risks must each be strictly between 0 and 1.")
+    if isinstance(max_sample_size, bool) or not isinstance(max_sample_size, int) or not 1 <= max_sample_size <= 5000:
+        raise ValueError("Maximum sample size must be a whole number from 1 through 5000.")
+    from scipy.stats import binom
+
+    found = None
+    for n in range(1, max_sample_size + 1):
+        for c in range(0, n + 1):
+            p_accept_aql = float(binom.cdf(c, n, aql))
+            p_accept_ltpd = float(binom.cdf(c, n, ltpd))
+            if p_accept_aql >= 1 - alpha and p_accept_ltpd <= beta:
+                found = (n, c, p_accept_aql, p_accept_ltpd)
+                break
+        if found:
+            break
+    if found is None:
+        return {
+            "status": "NO_PLAN_WITHIN_SEARCH_LIMIT",
+            "aql_rate": aql,
+            "ltpd_rate": ltpd,
+            "producer_risk_target": alpha,
+            "consumer_risk_target": beta,
+            "max_sample_size": max_sample_size,
+            "sample_size": None,
+            "acceptance_number": None,
+            "warning": "No binomial single-sample plan was found under the supplied risk targets and search limit. Increase the limit or review the target risks; do not use a partial plan.",
+        }
+    n, c, p_aql, p_ltpd = found
+    return {
+        "status": "PLAN_FOUND",
+        "method": "Single-sample attributes plan using binomial acceptance probabilities",
+        "aql_rate": aql,
+        "ltpd_rate": ltpd,
+        "producer_risk_target": alpha,
+        "consumer_risk_target": beta,
+        "sample_size": n,
+        "acceptance_number": c,
+        "reject_if_defectives_at_least": c + 1,
+        "probability_of_acceptance_at_aql": p_aql,
+        "actual_producer_risk_at_aql": 1.0 - p_aql,
+        "probability_of_acceptance_at_ltpd": p_ltpd,
+        "actual_consumer_risk_at_ltpd": p_ltpd,
+        "max_sample_size": max_sample_size,
+        "formula": "Pa(p)=P(X≤c), X~Binomial(n,p); require Pa(AQL)≥1−producer risk and Pa(LTPD)≤consumer risk",
+        "assumptions": "Independent inspected units, constant defect probability and binomial approximation; finite-lot hypergeometric sampling, switching rules and multiple sampling are not included.",
+        "warning": "Validate the applicable contractual/standard sampling scheme and finite-lot conditions. This first-pass planner is not a standards certification.",
+    }
+
+
+def analyze_process_mining(event_records: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """Summarize event-log variants, directly-follow relations and case durations."""
+    if isinstance(event_records, (str, bytes)) or not isinstance(event_records, Sequence) or not event_records:
+        raise ValueError("Provide at least one event-log record.")
+    df = pd.DataFrame(list(event_records))
+    required = {"case_id", "activity", "timestamp"}
+    missing = sorted(required - set(df.columns))
+    if missing:
+        raise ValueError(f"Event log is missing required columns: {', '.join(missing)}.")
+    for key in ("case_id", "activity"):
+        if df[key].isna().any() or df[key].astype(str).str.strip().eq("").any():
+            raise ValueError(f"Event log column '{key}' contains missing/blank values.")
+        df[key] = df[key].astype(str).str.strip()
+    if df["timestamp"].isna().any():
+        raise ValueError("Event log timestamp contains missing values.")
+    try:
+        df["timestamp"] = pd.to_datetime(df["timestamp"], errors="raise", utc=True)
+    except Exception as exc:
+        raise ValueError(f"Event log timestamps could not be parsed: {exc}") from exc
+    df = df.sort_values(["case_id", "timestamp"], kind="stable").reset_index(drop=True)
+    variants: list[dict[str, Any]] = []
+    transitions: dict[tuple[str, str], dict[str, Any]] = {}
+    durations: list[dict[str, Any]] = []
+    variant_counts: dict[tuple[str, ...], int] = {}
+    starts: dict[str, int] = {}
+    ends: dict[str, int] = {}
+    for case_id, case_df in df.groupby("case_id", sort=False):
+        activities = list(case_df["activity"])
+        variant = tuple(activities)
+        variant_counts[variant] = variant_counts.get(variant, 0) + 1
+        starts[activities[0]] = starts.get(activities[0], 0) + 1
+        ends[activities[-1]] = ends.get(activities[-1], 0) + 1
+        durations.append({
+            "Case ID": case_id,
+            "Event count": len(case_df),
+            "Start activity": activities[0],
+            "End activity": activities[-1],
+            "Duration (seconds)": float((case_df["timestamp"].iloc[-1] - case_df["timestamp"].iloc[0]).total_seconds()),
+        })
+        for source, target in zip(activities, activities[1:]):
+            item = transitions.setdefault((source, target), {"Transition": f"{source} → {target}", "From activity": source, "To activity": target, "Occurrences": 0, "Cases": set()})
+            item["Occurrences"] += 1
+            item["Cases"].add(str(case_id))
+    for variant, count in variant_counts.items():
+        variants.append({"Variant": " → ".join(variant), "Cases": count, "Events per case": len(variant)})
+    transition_rows = [
+        {**{k: v for k, v in value.items() if k != "Cases"}, "Distinct cases": len(value["Cases"])}
+        for value in transitions.values()
+    ]
+    duration_frame = pd.DataFrame(durations).sort_values("Case ID", kind="stable").reset_index(drop=True)
+    return {
+        "status": "EVENT_LOG_ANALYZED",
+        "event_count": int(len(df)),
+        "case_count": int(df["case_id"].nunique()),
+        "activity_count": int(df["activity"].nunique()),
+        "variant_count": len(variant_counts),
+        "median_case_duration_seconds": float(duration_frame["Duration (seconds)"].median()),
+        "start_activities": pd.DataFrame([{"Activity": k, "Cases": v} for k, v in sorted(starts.items())]),
+        "end_activities": pd.DataFrame([{"Activity": k, "Cases": v} for k, v in sorted(ends.items())]),
+        "variants": pd.DataFrame(variants).sort_values(["Cases", "Variant"], ascending=[False, True], kind="stable").reset_index(drop=True),
+        "directly_follows": pd.DataFrame(transition_rows).sort_values(["Occurrences", "Transition"], ascending=[False, True], kind="stable").reset_index(drop=True) if transition_rows else pd.DataFrame(columns=["Transition", "From activity", "To activity", "Occurrences", "Distinct cases"]),
+        "case_durations": duration_frame,
+        "warning": "This is an event-log summary, not full conformance checking or causal analysis. Validate event completeness, lifecycle semantics, timestamp timezone and the case identifier.",
+    }
+
+
+def analyze_water_waste_efficiency(process_flows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """Reconcile process input, product output and waste quantities on a common unit basis."""
+    if isinstance(process_flows, (str, bytes)) or not isinstance(process_flows, Sequence) or not process_flows:
+        raise ValueError("Provide at least one process flow object.")
+    rows: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for i, item in enumerate(process_flows, start=1):
+        if not isinstance(item, Mapping):
+            raise ValueError(f"Flow row {i} must be an object.")
+        process = str(item.get("process", "")).strip()
+        unit = str(item.get("unit", "")).strip()
+        period = str(item.get("period", "")).strip()
+        if not process or not unit:
+            raise ValueError(f"Flow row {i} needs process and unit labels.")
+        if process.casefold() in seen:
+            raise ValueError(f"Process names must be unique for this analysis; duplicate: {process}.")
+        seen.add(process.casefold())
+        input_qty = _finite_number(item.get("input_quantity"), f"Input quantity for {process}")
+        output_qty = _finite_number(item.get("product_output_quantity"), f"Product output quantity for {process}")
+        waste_qty = _finite_number(item.get("waste_quantity"), f"Waste quantity for {process}")
+        if min(input_qty, output_qty, waste_qty) < 0:
+            raise ValueError(f"Flow quantities cannot be negative for {process}.")
+        if input_qty <= 0:
+            raise ValueError(f"Input quantity must be greater than zero for {process}.")
+        balance = input_qty - output_qty - waste_qty
+        rows.append({
+            "Process": process,
+            "Period": period or "UNSPECIFIED",
+            "Unit": unit,
+            "Input quantity": input_qty,
+            "Product output quantity": output_qty,
+            "Waste quantity": waste_qty,
+            "Unreconciled balance": balance,
+            "Output yield (%)": output_qty / input_qty * 100.0,
+            "Waste intensity (%)": waste_qty / input_qty * 100.0,
+            "Balance closes": math.isclose(balance, 0.0, rel_tol=1e-9, abs_tol=1e-7),
+        })
+    units = {row["Unit"] for row in rows}
+    periods = {row["Period"] for row in rows}
+    if len(units) != 1:
+        raise ValueError("All process quantities must use the same unit; convert units before combining results.")
+    frame = pd.DataFrame(rows)
+    total_in = float(frame["Input quantity"].sum())
+    total_out = float(frame["Product output quantity"].sum())
+    total_waste = float(frame["Waste quantity"].sum())
+    total_balance = total_in - total_out - total_waste
+    return {
+        "status": "FLOW_BALANCE_CALCULATED",
+        "process_count": len(frame),
+        "measurement_period": next(iter(periods)) if len(periods) == 1 else "MIXED — interpret each process separately",
+        "unit": next(iter(units)),
+        "total_input_quantity": total_in,
+        "total_product_output_quantity": total_out,
+        "total_waste_quantity": total_waste,
+        "total_unreconciled_balance": total_balance,
+        "overall_output_yield_pct": total_out / total_in * 100.0,
+        "overall_waste_intensity_pct": total_waste / total_in * 100.0,
+        "all_process_balances_close": bool(frame["Balance closes"].all()),
+        "process_balance_table": frame,
+        "warning": "This is a scoped material/water flow balance. Confirm identical measurement boundaries, density/concentration basis where relevant, measurement periods and loss streams; a non-zero balance needs investigation, not automatic allocation.",
+    }
