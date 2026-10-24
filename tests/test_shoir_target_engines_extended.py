@@ -363,3 +363,195 @@ def test_water_waste_efficiency_rejects_bad_units_columns_and_negative_flows():
             output_column="output",
         )
 
+
+def test_industrial_field_mapper_separates_exact_alias_and_ambiguous_suggestions():
+    from shoir_target_engines import map_industrial_fields
+
+    result = map_industrial_fields(
+        ["asset_id", "Output", "Energy kWh"],
+        canonical_fields=["asset_id", "production_output", "energy_kwh", "missing_field"],
+    )
+    table = result["mapping_table"].set_index("canonical_field")
+    assert table.loc["asset_id", "match_type"] == "EXACT"
+    assert table.loc["asset_id", "confidence_pct"] == pytest.approx(100.0)
+    assert table.loc["production_output", "proposed_source_column"] == "Output"
+    assert table.loc["production_output", "confirmation_required"]
+    assert table.loc["missing_field", "status"] == "UNMATCHED"
+
+    ambiguous = map_industrial_fields(
+        ["date"],
+        canonical_fields=["timestamp", "production_date"],
+        custom_aliases={"timestamp": ["date"], "production_date": ["date"]},
+    )["mapping_table"]
+    assert set(ambiguous["status"]) == {"AMBIGUOUS_COLLISION_REVIEW"}
+
+
+def test_industrial_field_mapper_rejects_duplicate_headers_and_bad_aliases():
+    from shoir_target_engines import map_industrial_fields
+
+    with pytest.raises(ValueError, match="unique"):
+        map_industrial_fields(["Asset", "asset"])
+    with pytest.raises(ValueError, match="Custom aliases"):
+        map_industrial_fields(["a"], custom_aliases={"field": "not a list"})
+
+
+def test_value_stream_map_calculates_lead_time_efficiency_and_wip():
+    from shoir_target_engines import build_value_stream_map
+
+    result = build_value_stream_map([
+        {"name": "Cut", "cycle_time": 2, "wait_time": 4, "wip": 10, "value_added": True},
+        {"name": "Inspect", "cycle_time": 3, "wait_time": 2, "wip": 5, "value_added": False},
+        {"name": "Pack", "cycle_time": 1, "wait_time": 0, "wip": 0, "value_added": True},
+    ])
+    assert result["total_cycle_time"] == pytest.approx(6.0)
+    assert result["total_wait_time"] == pytest.approx(6.0)
+    assert result["lead_time_proxy"] == pytest.approx(12.0)
+    assert result["value_added_time"] == pytest.approx(3.0)
+    assert result["process_cycle_efficiency_pct"] == pytest.approx(25.0)
+    assert result["total_recorded_wip"] == pytest.approx(15.0)
+
+
+def test_value_stream_map_rejects_negative_times_duplicate_steps_and_non_boolean_value_added():
+    from shoir_target_engines import build_value_stream_map
+
+    with pytest.raises(ValueError, match="cannot be negative"):
+        build_value_stream_map([{"name":"A","cycle_time":-1,"wait_time":0,"wip":0,"value_added":True}])
+    with pytest.raises(ValueError, match="unique"):
+        build_value_stream_map([
+            {"name":"A","cycle_time":1,"wait_time":0,"wip":0,"value_added":True},
+            {"name":"A","cycle_time":1,"wait_time":0,"wip":0,"value_added":False},
+        ])
+    with pytest.raises(ValueError, match="true or false"):
+        build_value_stream_map([{"name":"A","cycle_time":1,"wait_time":0,"wip":0,"value_added":"yes"}])
+
+
+def test_fmea_calculates_rpn_and_keeps_action_gaps_visible():
+    from shoir_target_engines import analyze_fmea_records
+
+    result = analyze_fmea_records([
+        {"failure_mode":"Motor stop","severity":10,"occurrence":2,"detection":3,"current_controls":"Thermal relay"},
+        {"failure_mode":"Label error","severity":5,"occurrence":5,"detection":5,"recommended_action":"Add vision check","owner":"Quality","due_date":"2026-12-01"},
+    ])
+    table = result["fmea_table"]
+    assert table.iloc[0]["Failure mode"] == "Label error"
+    assert table.iloc[0]["RPN"] == 125
+    assert table.iloc[1]["RPN"] == 60
+    assert "recommended action not recorded" in table.loc[table["Failure mode"] == "Motor stop", "Action gaps"].iloc[0]
+    assert "not a complete risk measure" in result["warning"]
+
+
+def test_fmea_rejects_duplicate_failure_modes_and_invalid_rating_bounds():
+    from shoir_target_engines import analyze_fmea_records
+
+    with pytest.raises(ValueError, match="unique"):
+        analyze_fmea_records([
+            {"failure_mode":"Motor","severity":1,"occurrence":1,"detection":1},
+            {"failure_mode":"motor","severity":2,"occurrence":1,"detection":1},
+        ])
+    with pytest.raises(ValueError, match="whole number from 1 to 10"):
+        analyze_fmea_records([{"failure_mode":"Motor","severity":11,"occurrence":1,"detection":1}])
+
+
+def test_sop_plan_reconciles_inventory_capacity_backlog_and_safety_stock():
+    from shoir_target_engines import reconcile_sop_plan
+
+    plan = pd.DataFrame({
+        "period": ["2026-01", "2026-02"],
+        "demand": [100, 150],
+        "supply": [120, 100],
+        "capacity": [130, 120],
+    })
+    result = reconcile_sop_plan(
+        plan, period_column="period", demand_column="demand",
+        planned_supply_column="supply", capacity_column="capacity",
+        initial_inventory=20, safety_stock=20,
+    )
+    table = result["plan_table"].set_index("Period")
+    assert table.loc["2026-01", "Projected ending inventory"] == pytest.approx(40.0)
+    assert table.loc["2026-02", "Projected ending inventory"] == pytest.approx(-10.0)
+    assert table.loc["2026-02", "Unmet demand/backlog"] == pytest.approx(10.0)
+    assert result["total_unmet_demand"] == pytest.approx(10.0)
+    assert any("exceeds the stated capacity" in warning for warning in result["warnings"]) is False
+
+
+def test_sop_plan_rejects_duplicate_periods_negative_supply_and_bad_columns():
+    from shoir_target_engines import reconcile_sop_plan
+
+    duplicated = pd.DataFrame({"period":["A","A"],"demand":[1,2],"supply":[1,2],"capacity":[3,3]})
+    with pytest.raises(ValueError, match="unique"):
+        reconcile_sop_plan(duplicated, period_column="period", demand_column="demand", planned_supply_column="supply", capacity_column="capacity")
+    negative = pd.DataFrame({"period":["A"],"demand":[1],"supply":[-1],"capacity":[3]})
+    with pytest.raises(ValueError, match="cannot be negative"):
+        reconcile_sop_plan(negative, period_column="period", demand_column="demand", planned_supply_column="supply", capacity_column="capacity")
+
+
+def test_supplier_risk_score_reverses_risk_ratings_and_discloses_coverage():
+    from shoir_target_engines import score_supplier_risk
+
+    result = score_supplier_risk(
+        suppliers=[
+            {"name":"Supplier A","cost_risk":20,"quality":90},
+            {"name":"Supplier B","cost_risk":30,"quality":80},
+            {"name":"Supplier C","cost_risk":None,"quality":70},
+        ],
+        criteria=[
+            {"criterion":"cost_risk","weight":0.6,"direction":"risk"},
+            {"criterion":"quality","weight":0.4,"direction":"benefit"},
+        ],
+    )
+    table = result["supplier_scorecard"].set_index("Supplier")
+    assert table.loc["Supplier A", "Weighted score (0–100)"] == pytest.approx(84.0)
+    assert table.loc["Supplier A", "Evidence coverage (%)"] == pytest.approx(100.0)
+    assert table.loc["Supplier C", "Evidence coverage (%)"] == pytest.approx(40.0)
+    assert table.loc["Supplier C", "Missing criteria"] == "cost_risk"
+    assert "not objective probability" in result["warning"]
+
+
+def test_supplier_score_rejects_bad_criteria_ratings_and_duplicate_names():
+    from shoir_target_engines import score_supplier_risk
+
+    with pytest.raises(ValueError, match="unique"):
+        score_supplier_risk(
+            [{"name":"A","quality":1},{"name":"a","quality":2}],
+            [{"criterion":"quality","weight":1,"direction":"benefit"}],
+        )
+    with pytest.raises(ValueError, match="between 0 and 100"):
+        score_supplier_risk(
+            [{"name":"A","quality":101},{"name":"B","quality":50}],
+            [{"criterion":"quality","weight":1,"direction":"benefit"}],
+        )
+
+
+def test_process_mining_event_log_discovers_transitions_variants_and_case_durations():
+    from shoir_target_engines import analyze_process_mining_event_log
+
+    events = pd.DataFrame({
+        "case": ["1","1","1","2","2"],
+        "activity": ["Start","Inspect","Pack","Start","Inspect"],
+        "time": [
+            "2026-01-01T00:00:00Z","2026-01-01T00:05:00Z","2026-01-01T00:10:00Z",
+            "2026-01-02T00:00:00Z","2026-01-02T00:03:00Z",
+        ],
+    })
+    result = analyze_process_mining_event_log(
+        events, case_column="case", activity_column="activity", timestamp_column="time",
+    )
+    edges = result["directly_follows"].set_index(["From activity","To activity"])
+    assert result["case_count"] == 2
+    assert result["event_count"] == 5
+    assert edges.loc[("Start","Inspect"), "Transition count"] == 2
+    assert edges.loc[("Start","Inspect"), "Median gap seconds"] == pytest.approx(240.0)
+    assert edges.loc[("Inspect","Pack"), "Transition count"] == 1
+    assert result["median_case_throughput_seconds"] == pytest.approx(390.0)
+    assert result["variants"]["Case count"].max() == 1
+
+
+def test_process_mining_rejects_missing_event_fields_and_invalid_timezone():
+    from shoir_target_engines import analyze_process_mining_event_log
+
+    frame = pd.DataFrame({"case":["1"],"activity":["A"],"time":["bad"]})
+    with pytest.raises(ValueError, match="valid IANA time zone"):
+        analyze_process_mining_event_log(frame, case_column="case", activity_column="activity", timestamp_column="time", timezone="No/Such_Zone")
+    with pytest.raises(ValueError, match="valid timestamp"):
+        analyze_process_mining_event_log(frame, case_column="case", activity_column="activity", timestamp_column="time")
+
