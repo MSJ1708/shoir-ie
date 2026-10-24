@@ -943,3 +943,329 @@ def mtbf_mttr_analysis(events: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         "warnings": ["Intervals must be complete and from the same observation scope.",
                      "Censoring, confidence intervals and failure-mode stratification are not included."],
     }
+
+
+def preview_reversible_cleaning(
+    frame: pd.DataFrame, trim_strings: bool = True,
+    duplicate_policy: str = "keep", missing_policy: str = "keep",
+    fill_value: Any = "",
+) -> dict[str, Any]:
+    """Create a reversible cleaning candidate and change log without mutating input."""
+    frame = _frame(frame)
+    if duplicate_policy not in {"keep", "drop_exact"}:
+        raise ValueError("Duplicate policy must be keep or drop_exact.")
+    if missing_policy not in {"keep", "drop_rows", "fill_value"}:
+        raise ValueError("Missing policy must be keep, drop_rows, or fill_value.")
+    original = frame.copy(deep=True)
+    candidate = frame.copy(deep=True)
+    events = []
+    if trim_strings:
+        for column in candidate.columns:
+            if pd.api.types.is_object_dtype(candidate[column]) or pd.api.types.is_string_dtype(candidate[column]):
+                old = candidate[column].copy(deep=True)
+                mask = old.map(lambda x: isinstance(x, str) and x != x.strip())
+                count = int(mask.sum())
+                if count:
+                    candidate[column] = old.map(lambda x: x.strip() if isinstance(x, str) else x)
+                    events.append({"operation": "trim_whitespace", "column": str(column), "affected_cells": count})
+    if missing_policy == "drop_rows":
+        dropped = int(candidate.isna().any(axis=1).sum())
+        candidate = candidate.dropna(axis=0, how="any").copy()
+        if dropped:
+            events.append({"operation": "drop_rows_with_missing_values", "column": "*", "affected_cells": dropped})
+    elif missing_policy == "fill_value":
+        for column in candidate.columns:
+            count = int(candidate[column].isna().sum())
+            if count:
+                candidate[column] = candidate[column].fillna(fill_value)
+                events.append({"operation": "fill_missing", "column": str(column), "affected_cells": count})
+    removed = 0
+    if duplicate_policy == "drop_exact":
+        before = len(candidate)
+        candidate = candidate.drop_duplicates(keep="first").copy()
+        removed = before-len(candidate)
+        if removed:
+            events.append({"operation": "drop_exact_duplicates", "column": "*", "affected_cells": removed})
+    if candidate.empty:
+        raise ValueError("Cleaning preview would remove every row; input remains unchanged.")
+    return {
+        "status": "PREVIEW_READY", "tool_id": "T014", "method_version": METHOD_VERSION,
+        "source": original, "candidate": candidate, "change_log": pd.DataFrame(events, columns=["operation","column","affected_cells"]),
+        "rows_before": len(original), "rows_after": len(candidate), "rows_removed": len(original)-len(candidate),
+        "missing_cells_before": int(original.isna().sum().sum()),
+        "missing_cells_after": int(candidate.isna().sum().sum()),
+        "exact_duplicate_rows_removed": removed, "apply_confirmed": False,
+        "warnings": ["This operation creates a candidate copy; source data is not changed.",
+                     "Review the change log and column values before applying. Fill values can change inferred column types."],
+    }
+
+
+def map_industrial_fields(
+    frame: pd.DataFrame, field_mapping: Mapping[str, str],
+) -> dict[str, Any]:
+    """Rename explicitly mapped source fields to unique canonical names, retaining raw input."""
+    frame = _frame(frame)
+    if not isinstance(field_mapping, Mapping) or not field_mapping:
+        raise ValueError("Provide at least one canonical-field to source-column mapping.")
+    mapping = {}
+    for canonical, source in field_mapping.items():
+        dst, src = str(canonical or "").strip(), str(source or "").strip()
+        if not dst or not src or src not in frame.columns:
+            raise ValueError(f"Mapping {canonical!r} must reference an existing source column and non-empty canonical name.")
+        if dst in mapping or src in mapping.values():
+            raise ValueError("Canonical target names and source columns must be unique within the mapping.")
+        mapping[dst] = src
+    output_names = [mapping.get(str(col), str(col)) for col in frame.columns]
+    if len(output_names) != len(set(output_names)):
+        raise ValueError("Mapping would create duplicate column names; choose unambiguous canonical targets.")
+    output = frame.copy(deep=True)
+    rename = {src: dst for dst, src in mapping.items()}
+    mapped = output.rename(columns=rename, errors="raise")
+    detail = pd.DataFrame([{
+        "canonical_field": target, "source_column": source,
+        "nonmissing_values": int(frame[source].notna().sum()),
+        "missing_values": int(frame[source].isna().sum()),
+        "source_dtype": str(frame[source].dtype),
+        "mapping_confirmation": "USER_SELECTED",
+    } for target, source in mapping.items()])
+    return {
+        "status": "MAPPED", "tool_id": "T015", "method_version": METHOD_VERSION,
+        "source": frame.copy(deep=True), "mapped": mapped,
+        "mapping": detail,
+        "warnings": ["The raw source copy is preserved in this result.",
+                     "Field names are mapped by explicit user choice; values are not semantically inferred or converted."],
+    }
+
+
+def value_stream_summary(stages: Sequence[Mapping[str, Any]], demand_units: float,
+                         available_minutes_per_period: float, period_label: str = "shift") -> dict[str, Any]:
+    """Calculate a VSM timing summary from explicitly supplied stages, WIP and demand."""
+    demand = _finite(demand_units, "Demand units per period")
+    available = _finite(available_minutes_per_period, "Available minutes per period")
+    period = str(period_label or "").strip()
+    if demand <= 0 or available <= 0 or not period:
+        raise ValueError("Demand, available production time and period label must be positive/non-empty.")
+    if not isinstance(stages, Sequence) or isinstance(stages, (str, bytes)) or not stages:
+        raise ValueError("Provide at least one VSM process stage.")
+    records, seen = [], set()
+    for i, row in enumerate(stages, 1):
+        if not isinstance(row, Mapping):
+            raise ValueError(f"Stage {i} must be a mapping.")
+        name = str(row.get("stage", "")).strip()
+        cycle = _finite(row.get("cycle_time_seconds"), f"{name or i} cycle time")
+        changeover = _finite(row.get("changeover_minutes", 0), f"{name or i} changeover")
+        wip = _finite(row.get("wip_units", 0), f"{name or i} WIP")
+        value_added = bool(row.get("value_added", True))
+        if not name or name in seen or cycle <= 0 or changeover < 0 or wip < 0:
+            raise ValueError(f"Stage {i} needs a unique name, positive cycle time, and non-negative changeover/WIP.")
+        seen.add(name)
+        records.append({"stage": name, "cycle_time_seconds": cycle, "cycle_time_minutes": cycle/60.0,
+                        "changeover_minutes": changeover, "wip_units": wip, "value_added": value_added,
+                        "estimated_wait_minutes": wip*demand*0 + wip/(demand/available)})
+    table = pd.DataFrame(records)
+    total_process = float(table["cycle_time_minutes"].sum())
+    total_value_added = float(table.loc[table["value_added"], "cycle_time_minutes"].sum())
+    total_wait = float(table["estimated_wait_minutes"].sum())
+    lead_time = total_process + total_wait
+    return {
+        "status": "SUMMARIZED", "tool_id": "T027", "method_version": METHOD_VERSION,
+        "method": "Lead-time estimate = summed process cycle time + Σ(WIP units / demand rate).",
+        "stages": table, "demand_units_per_period": demand,
+        "available_minutes_per_period": available, "period_label": period,
+        "takt_time_minutes_per_unit": available/demand,
+        "total_process_cycle_minutes": total_process,
+        "total_value_added_minutes": total_value_added,
+        "total_wip_units": float(table["wip_units"].sum()),
+        "estimated_queue_wait_minutes": total_wait, "estimated_lead_time_minutes": lead_time,
+        "value_added_time_pct_of_estimated_lead_time": total_value_added/lead_time*100.0 if lead_time > 0 else None,
+        "warnings": ["Estimated waiting time assumes steady demand at the supplied period rate; actual queue dynamics can differ.",
+                     "Batch sizes, uptime, transport time, information delays and product mix are not inferred."],
+    }
+
+
+def fmea_prioritization(records: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """Compute traditional RPN from disclosed 1–10 severity/occurrence/detection inputs."""
+    if not isinstance(records, Sequence) or isinstance(records, (str, bytes)) or not records:
+        raise ValueError("Provide at least one FMEA failure mode.")
+    output = []
+    for i, row in enumerate(records, 1):
+        if not isinstance(row, Mapping):
+            raise ValueError(f"FMEA row {i} must be a mapping.")
+        mode = str(row.get("failure_mode", "")).strip()
+        effect = str(row.get("effect", "") or "").strip()
+        cause = str(row.get("cause", "") or "").strip()
+        s = _finite(row.get("severity"), f"{mode or i} severity")
+        o = _finite(row.get("occurrence"), f"{mode or i} occurrence")
+        d = _finite(row.get("detection"), f"{mode or i} detection")
+        if not mode or any(v < 1 or v > 10 or int(v) != v for v in (s,o,d)):
+            raise ValueError(f"FMEA row {i} needs a name and integer ratings from 1 through 10.")
+        output.append({
+            "failure_mode": mode, "effect": effect, "cause": cause,
+            "severity": int(s), "occurrence": int(o), "detection": int(d),
+            "RPN": int(s*o*d), "recommended_action": str(row.get("recommended_action","") or "").strip(),
+            "action_owner": str(row.get("action_owner","") or "").strip(),
+            "due_date": str(row.get("due_date","") or "").strip(),
+        })
+    table = pd.DataFrame(output).sort_values(["severity","RPN","failure_mode"], ascending=[False,False,True], kind="stable").reset_index(drop=True)
+    table["priority_rank"] = np.arange(1,len(table)+1)
+    return {
+        "status": "PRIORITIZED", "tool_id": "T038", "method_version": METHOD_VERSION,
+        "method": "Traditional risk priority number = severity × occurrence × detection, using user-assigned ordinal ratings.",
+        "failure_modes": table,
+        "warnings": ["RPN is a prioritization aid, not a precise risk probability; severity should also be reviewed independently.",
+                     "Rating scales require a consistent team rubric and accountable engineering review."],
+    }
+
+
+def capa_completeness(records: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """Check CAPA/8D records for documented containment, cause, corrective action, and effectiveness."""
+    required = ("issue", "containment", "root_cause", "corrective_action", "owner", "due_date", "effectiveness_evidence")
+    if not isinstance(records, Sequence) or isinstance(records, (str, bytes)) or not records:
+        raise ValueError("Provide at least one CAPA/8D record.")
+    output = []
+    for i, row in enumerate(records, 1):
+        if not isinstance(row, Mapping):
+            raise ValueError(f"CAPA record {i} must be a mapping.")
+        fields = {key: str(row.get(key, "") or "").strip() for key in required}
+        if not fields["issue"]:
+            raise ValueError(f"CAPA record {i} needs a non-empty issue description.")
+        missing = [key for key in required[1:] if not fields[key]]
+        output.append({
+            **fields, "missing_fields": ", ".join(missing),
+            "readiness": "READY_FOR_REVIEW" if not missing else "INCOMPLETE",
+            "review_status": str(row.get("review_status", "Pending") or "Pending").strip(),
+        })
+    table = pd.DataFrame(output)
+    return {
+        "status": "REVIEWED", "tool_id": "T039", "method_version": METHOD_VERSION,
+        "method": "Completeness checklist; no independent certification of root cause or action effectiveness is inferred.",
+        "records": table, "ready_for_review_count": int((table["readiness"]=="READY_FOR_REVIEW").sum()),
+        "incomplete_count": int((table["readiness"]=="INCOMPLETE").sum()),
+        "warnings": ["This checklist does not replace a quality-system approval, evidence review or effectiveness verification."],
+    }
+
+
+def preventive_maintenance_plan(tasks: Sequence[Mapping[str, Any]], plan_date: str) -> dict[str, Any]:
+    """Calculate next due dates for interval-based preventive maintenance tasks."""
+    try:
+        as_of = date.fromisoformat(str(plan_date))
+    except ValueError as exc:
+        raise ValueError("Plan date must be a valid YYYY-MM-DD date.") from exc
+    if not isinstance(tasks, Sequence) or isinstance(tasks, (str, bytes)) or not tasks:
+        raise ValueError("Provide at least one preventive maintenance task.")
+    output = []
+    seen = set()
+    for i, row in enumerate(tasks, 1):
+        if not isinstance(row, Mapping):
+            raise ValueError(f"Maintenance task {i} must be a mapping.")
+        asset = str(row.get("asset_id", "")).strip()
+        task = str(row.get("task", "")).strip()
+        skill = str(row.get("required_skill", "") or "").strip()
+        interval = _finite(row.get("interval_days"), f"{task or i} interval")
+        duration = _finite(row.get("duration_hours"), f"{task or i} duration")
+        try:
+            last_done = date.fromisoformat(str(row.get("last_done_date", "")))
+        except ValueError as exc:
+            raise ValueError(f"{task or i} needs a last_done_date in YYYY-MM-DD format.") from exc
+        key = (asset, task)
+        if not asset or not task or key in seen or interval < 1 or int(interval) != interval or duration <= 0:
+            raise ValueError(f"Maintenance row {i} needs unique asset/task IDs, integer interval days and positive duration.")
+        seen.add(key)
+        due = last_done + pd.Timedelta(days=int(interval))
+        due_date = due.date() if hasattr(due, "date") else due
+        delta = (due_date-as_of).days
+        output.append({
+            "asset_id": asset, "task": task, "required_skill": skill, "interval_days": int(interval),
+            "duration_hours": duration, "last_done_date": last_done.isoformat(),
+            "next_due_date": due_date.isoformat(), "days_until_due": delta,
+            "status": "OVERDUE" if delta < 0 else "DUE" if delta == 0 else "SCHEDULED",
+            "owner": str(row.get("owner", "") or "").strip(),
+        })
+    table = pd.DataFrame(output).sort_values(["days_until_due","asset_id","task"], kind="stable").reset_index(drop=True)
+    return {
+        "status": "PLANNED", "tool_id": "T043", "method_version": METHOD_VERSION,
+        "method": "Next due date = last completed date + prescribed interval in calendar days.",
+        "as_of_date": as_of.isoformat(), "tasks": table,
+        "overdue_count": int((table["status"]=="OVERDUE").sum()),
+        "warnings": ["Calendar intervals do not account for operating-hour triggers, asset condition, holidays, permits, or available technician schedules."],
+    }
+
+
+def spare_parts_criticality(records: Sequence[Mapping[str, Any]], service_z: float = 1.645) -> dict[str, Any]:
+    """Calculate annual usage value, demand-only safety stock, reorder point and criticality."""
+    z = _finite(service_z, "Service Z")
+    if z < 0:
+        raise ValueError("Service Z cannot be negative.")
+    if not isinstance(records, Sequence) or isinstance(records, (str, bytes)) or not records:
+        raise ValueError("Provide at least one spare-part record.")
+    output = []
+    seen = set()
+    for i, row in enumerate(records, 1):
+        if not isinstance(row, Mapping):
+            raise ValueError(f"Spare-part row {i} must be a mapping.")
+        part = str(row.get("part_id", "")).strip()
+        demand = _finite(row.get("annual_demand"), f"{part or i} annual demand")
+        unit_cost = _finite(row.get("unit_cost"), f"{part or i} unit cost")
+        lead = _finite(row.get("lead_time_days"), f"{part or i} lead time")
+        daily_std = _finite(row.get("daily_demand_std"), f"{part or i} daily demand std")
+        stock = _finite(row.get("stock_on_hand"), f"{part or i} stock")
+        criticality = _finite(row.get("criticality_1_to_5"), f"{part or i} criticality")
+        if not part or part in seen or min(demand,unit_cost,lead,daily_std,stock) < 0 or criticality < 1 or criticality > 5 or int(criticality)!=criticality:
+            raise ValueError(f"Spare-part row {i} needs unique ID, non-negative quantities/costs and integer criticality 1–5.")
+        seen.add(part)
+        mean_daily = demand/365.0
+        safety = z*daily_std*math.sqrt(lead)
+        rop = mean_daily*lead+safety
+        output.append({
+            "part_id": part, "annual_demand": demand, "unit_cost": unit_cost,
+            "annual_usage_value": demand*unit_cost, "lead_time_days": lead,
+            "criticality_1_to_5": int(criticality), "stock_on_hand": stock,
+            "mean_daily_demand": mean_daily, "safety_stock": safety,
+            "reorder_point": rop, "reorder_needed": stock <= rop,
+            "recommended_order_qty_to_rop": max(0.0, math.ceil(rop-stock)),
+            "estimated_days_of_cover": stock/mean_daily if mean_daily > 0 else None,
+        })
+    table = pd.DataFrame(output).sort_values(["criticality_1_to_5","reorder_needed","annual_usage_value"], ascending=[False,False,False], kind="stable").reset_index(drop=True)
+    return {
+        "status": "PRIORITIZED", "tool_id": "T045", "method_version": METHOD_VERSION,
+        "method": "Daily mean demand = annual demand/365; safety stock = z × daily demand standard deviation × sqrt(lead days); reorder point = mean lead demand + safety stock.",
+        "parts": table, "service_z": z,
+        "warnings": ["Lead time is assumed fixed; demand variability is assumed independent by day.",
+                     "Criticality is user-rated; validate BOM, interchangeability and supplier lead time before acting."],
+    }
+
+
+def hazard_risk_register(records: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """Compute inherent and residual risk scores from disclosed severity/likelihood ratings."""
+    if not isinstance(records, Sequence) or isinstance(records, (str, bytes)) or not records:
+        raise ValueError("Provide at least one hazard record.")
+    output = []
+    for i, row in enumerate(records, 1):
+        if not isinstance(row, Mapping):
+            raise ValueError(f"Hazard row {i} must be a mapping.")
+        hazard = str(row.get("hazard", "")).strip()
+        if not hazard:
+            raise ValueError(f"Hazard row {i} needs a hazard description.")
+        scores = [_finite(row.get(key), f"{hazard} {key}") for key in (
+            "severity", "likelihood", "residual_severity", "residual_likelihood")]
+        if any(v < 1 or v > 5 or int(v) != v for v in scores):
+            raise ValueError(f"{hazard}: severity and likelihood ratings must be integers from 1 through 5.")
+        s, l, rs, rl = (int(v) for v in scores)
+        output.append({
+            "hazard": hazard, "location": str(row.get("location", "") or "").strip(),
+            "inherent_severity": s, "inherent_likelihood": l, "inherent_score": s*l,
+            "existing_controls": str(row.get("existing_controls", "") or "").strip(),
+            "residual_severity": rs, "residual_likelihood": rl, "residual_score": rs*rl,
+            "owner": str(row.get("owner", "") or "").strip(),
+            "action": str(row.get("action", "") or "").strip(),
+            "due_date": str(row.get("due_date", "") or "").strip(),
+        })
+    table = pd.DataFrame(output).sort_values(["residual_score","inherent_score","hazard"], ascending=[False,False,True], kind="stable").reset_index(drop=True)
+    table["priority_rank"] = np.arange(1,len(table)+1)
+    return {
+        "status": "RISK_SCREENED", "tool_id": "T047", "method_version": METHOD_VERSION,
+        "method": "Simple ordinal severity × likelihood scoring; residual ratings are entered assumptions after controls.",
+        "hazards": table,
+        "warnings": ["This risk register is not a certified workplace risk assessment or safety approval.",
+                     "Residual ratings must be justified by effective controls, evidence and competent safety review."],
+    }
