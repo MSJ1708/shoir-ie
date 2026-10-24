@@ -196,3 +196,40 @@ def test_lower_tier_cannot_run_mid_tier_join_preview():
     assert "shoir_T017_result" not in at.session_state
     with pytest.raises(KeyError):
         at.button(key="T017_run_button")
+
+
+def test_manufacturing_operations_tools_render_and_run_with_golden_defaults():
+    at = _authed_library()
+
+    _open(at, "T024", "Production Line Balancer")
+    line_result = _run(at, "T024")
+    assert line_result["status"] == "FEASIBLE_HEURISTIC"
+    assert line_result["metrics"]["total_work_content"] == pytest.approx(12.0)
+    assert line_result["metrics"]["station_count"] == 3
+    assert line_result["metrics"]["line_efficiency_percent"] == pytest.approx(12 / 18 * 100)
+
+    _open(at, "T025", "Bottleneck and Constraint Analyzer")
+    bottleneck = _run(at, "T025")
+    assert bottleneck["metrics"]["candidate_stage"] == "Welding"
+    assert bottleneck["metrics"]["evidence_label"] == "INFERRED_FROM_CYCLE_TIME"
+
+    _open(at, "T027", "Value Stream Mapping Studio")
+    vsm = _run(at, "T027")
+    assert vsm["metrics"]["value_added_time"] == pytest.approx(8.0)
+    assert vsm["metrics"]["explicit_lead_time"] == pytest.approx(53.0)
+    assert vsm["metrics"]["process_cycle_efficiency_percent"] == pytest.approx(8 / 53 * 100)
+
+    _open(at, "T070", "Queuing and Service-System Analyzer")
+    queue = _run(at, "T070")
+    assert queue["metrics"]["utilization_percent"] == pytest.approx(100 * 2 / 3)
+    assert queue["metrics"]["mean_time_in_system"] == pytest.approx(1.0)
+    assert queue["metrics"]["mean_queue_wait"] == pytest.approx(2 / 3)
+
+
+def test_starter_cannot_render_or_execute_mid_tier_line_balancer():
+    at = _authed_library(tier="Starter")
+    _open(at, "T024", "Production Line Balancer")
+    assert any("does not grant this target capability" in str(item.value).lower() for item in at.warning)
+    assert "shoir_T024_result" not in at.session_state
+    with pytest.raises(KeyError):
+        at.button(key="T024_run_button")
