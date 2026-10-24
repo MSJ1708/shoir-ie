@@ -123,7 +123,7 @@ def test_status_summary_counts_all_targets_and_never_infers_verified_from_presen
 
 
 def test_focused_workbench_tools_document_direct_gates_tests_and_transient_persistence():
-    focused = {"T013", "T016", "T017", "T018", "T019", "T021", "T022", "T023", "T026", "T028", "T029", "T030", "T031", "T032", "T034", "T040", "T042", "T055", "T056", "T066", "T070", "T075", "T078", "T081", "T085"}
+    focused = {"T013", "T016", "T017", "T018", "T019", "T021", "T022", "T023", "T026", "T028", "T029", "T030", "T031", "T032", "T034", "T040", "T042", "T055", "T056", "T066", "T070", "T075", "T078", "T081", "T082", "T084", "T085"}
     for tool_id in focused:
         tool = get_tool(tool_id)
         assert tool is not None
@@ -155,7 +155,7 @@ def test_workbench_tier_gate_keeps_research_pack_separate_from_enterprise_plus()
 
 def test_new_focused_methods_are_wired_to_forms_execution_gates_and_exports():
     source = (ROOT / "pages" / "Industrial_Engineering_Workbench.py").read_text(encoding="utf-8")
-    focused = {"T013", "T017", "T018", "T019", "T034", "T070"}
+    focused = {"T013", "T017", "T018", "T019", "T034", "T070", "T082", "T084"}
     assert "require_tool_access(RAW_TIER, selected_tool[\"tool_id\"])" in source
     assert "Keep the last successful result visible until a replacement run succeeds." in source
     assert "Download result CSV" in source
