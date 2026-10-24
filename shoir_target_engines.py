@@ -2003,3 +2003,327 @@ def calculate_roi_evidence(
         "formula": "Gross cost reduction = baseline cost − post-change cost; net benefit = gross reduction − implementation cost; ROI = net benefit / implementation cost × 100% when implementation cost > 0",
         "warning": "A reference or verifier name does not independently prove an outcome. Do not claim realized/verified savings until a responsible reviewer checks comparability, source evidence, measurement window and confounders.",
     }
+
+
+def plan_preventive_maintenance(
+    tasks: Sequence[Mapping[str, Any]],
+    as_of_date: str,
+) -> dict[str, Any]:
+    """Calculate interval-based due dates and overdue state from explicit task records.
+
+    This is a date/interval planner; it does not solve labor or downtime-window
+    scheduling constraints and must not be presented as an optimized schedule.
+    """
+    from datetime import date, timedelta
+
+    try:
+        as_of = date.fromisoformat(str(as_of_date or "").strip())
+    except (TypeError, ValueError) as exc:
+        raise ValueError("As-of date must be a valid ISO date (YYYY-MM-DD).") from exc
+    if isinstance(tasks, (str, bytes)) or not isinstance(tasks, Sequence) or not tasks:
+        raise ValueError("Provide at least one maintenance task object.")
+    rows: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for i, task in enumerate(tasks, start=1):
+        if not isinstance(task, Mapping):
+            raise ValueError(f"Maintenance row {i} must be an object.")
+        asset = str(task.get("asset", "")).strip()
+        name = str(task.get("task", task.get("task_name", ""))).strip()
+        skill = str(task.get("required_skill", task.get("skill", ""))).strip()
+        if not asset or not name:
+            raise ValueError(f"Maintenance row {i} needs both asset and task names.")
+        key = (asset.casefold(), name.casefold())
+        if key in seen:
+            raise ValueError(f"Duplicate maintenance task for asset {asset}: {name}.")
+        seen.add(key)
+        try:
+            last_done = date.fromisoformat(str(task.get("last_completed_date", "")).strip())
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"Last completed date for {asset} / {name} must use YYYY-MM-DD.") from exc
+        interval_value = _finite_number(task.get("interval_days"), f"Interval days for {asset} / {name}")
+        duration = _finite_number(task.get("estimated_duration_hours", 1), f"Duration hours for {asset} / {name}")
+        if not interval_value.is_integer() or interval_value <= 0:
+            raise ValueError(f"Interval days for {asset} / {name} must be a positive whole number.")
+        if duration <= 0:
+            raise ValueError(f"Estimated duration for {asset} / {name} must be greater than zero.")
+        interval = int(interval_value)
+        due = last_done + timedelta(days=interval)
+        days_until_due = (due - as_of).days
+        rows.append({
+            "Asset": asset,
+            "Maintenance task": name,
+            "Required skill": skill or "NOT SPECIFIED",
+            "Last completed": last_done.isoformat(),
+            "Interval (days)": interval,
+            "Next due date": due.isoformat(),
+            "Days until due": days_until_due,
+            "Estimated labor (hours)": duration,
+            "Status": "OVERDUE" if days_until_due < 0 else "DUE TODAY" if days_until_due == 0 else "UPCOMING",
+            "Assigned owner": str(task.get("owner", "")).strip() or "UNASSIGNED",
+        })
+    frame = pd.DataFrame(rows).sort_values(
+        by=["Days until due", "Asset", "Maintenance task"], kind="stable"
+    ).reset_index(drop=True)
+    return {
+        "status": "PLAN_CALCULATED",
+        "as_of_date": as_of.isoformat(),
+        "maintenance_task_count": len(frame),
+        "overdue_task_count": int((frame["Days until due"] < 0).sum()),
+        "due_within_7_days_count": int(((frame["Days until due"] >= 0) & (frame["Days until due"] <= 7)).sum()),
+        "total_estimated_labor_hours": float(frame["Estimated labor (hours)"].sum()),
+        "maintenance_plan": frame,
+        "assumptions": "Next due date = last completed date + interval days. Calendar days are used; no business calendar, asset criticality, skill capacity, parts availability or downtime-window optimization is applied.",
+        "warning": "This is an interval-based planning list, not a resource-feasible maintenance schedule. Review equipment manuals, site safety requirements, operating windows and qualified maintenance procedures.",
+    }
+
+
+def assess_job_hazards(hazards: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """Screen hazards using user-defined 1–5 severity and likelihood scores.
+
+    Residual score is computed only when both residual ratings are supplied.
+    The numeric scores are a screening aid, not a certified risk assessment.
+    """
+    if isinstance(hazards, (str, bytes)) or not isinstance(hazards, Sequence) or not hazards:
+        raise ValueError("Provide at least one hazard object.")
+    rows: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for i, hazard in enumerate(hazards, start=1):
+        if not isinstance(hazard, Mapping):
+            raise ValueError(f"Hazard row {i} must be an object.")
+        name = str(hazard.get("hazard", hazard.get("hazard_description", ""))).strip()
+        if not name:
+            raise ValueError(f"Hazard row {i} needs a hazard description.")
+        if name.casefold() in seen:
+            raise ValueError(f"Hazard descriptions must be unique; duplicate: {name}.")
+        seen.add(name.casefold())
+        def rating(key: str, required: bool) -> int | None:
+            raw = hazard.get(key)
+            if raw is None or str(raw).strip() == "":
+                if required:
+                    raise ValueError(f"{key.replace('_', ' ').title()} rating is required for hazard: {name}.")
+                return None
+            value = _finite_number(raw, f"{key.replace('_', ' ').title()} rating for {name}")
+            if not value.is_integer() or not 1 <= value <= 5:
+                raise ValueError(f"{key.replace('_', ' ').title()} rating for {name} must be a whole number from 1 through 5.")
+            return int(value)
+        severity = rating("severity", True)
+        likelihood = rating("likelihood", True)
+        residual_severity = rating("residual_severity", False)
+        residual_likelihood = rating("residual_likelihood", False)
+        initial_score = int(severity) * int(likelihood)
+        residual_score = (
+            residual_severity * residual_likelihood
+            if residual_severity is not None and residual_likelihood is not None else None
+        )
+        controls = str(hazard.get("existing_controls", hazard.get("controls", ""))).strip()
+        action = str(hazard.get("required_action", hazard.get("action", ""))).strip()
+        owner = str(hazard.get("owner", "")).strip()
+        review_date = str(hazard.get("review_date", "")).strip()
+        rows.append({
+            "Hazard": name,
+            "Work/activity": str(hazard.get("activity", "")).strip(),
+            "Potential consequence": str(hazard.get("consequence", "")).strip(),
+            "Initial severity (1–5)": severity,
+            "Initial likelihood (1–5)": likelihood,
+            "Initial risk score": initial_score,
+            "Existing controls": controls or "NOT DOCUMENTED",
+            "Residual severity (1–5)": residual_severity,
+            "Residual likelihood (1–5)": residual_likelihood,
+            "Residual risk score": residual_score,
+            "Additional action": action or "REVIEW REQUIRED",
+            "Owner": owner or "UNASSIGNED",
+            "Review date": review_date or "NOT SET",
+            "Control evidence recorded": bool(controls),
+            "Action owner assigned": bool(owner),
+        })
+    frame = pd.DataFrame(rows).sort_values(
+        by=["Initial risk score", "Hazard"], ascending=[False, True], kind="stable"
+    ).reset_index(drop=True)
+    return {
+        "status": "HAZARD_SCREEN_REQUIRES_QUALIFIED_REVIEW",
+        "hazard_count": len(frame),
+        "high_screen_score_count": int((frame["Initial risk score"] >= 15).sum()),
+        "missing_controls_count": int((~frame["Control evidence recorded"]).sum()),
+        "unassigned_actions_count": int((~frame["Action owner assigned"]).sum()),
+        "hazard_register": frame,
+        "method": "Screening score = severity × likelihood, using user-defined 1–5 rating scales",
+        "warning": "This is not a certified safety assessment and does not determine legal compliance. A qualified site safety professional must define the approved risk matrix, validate controls and residual ratings, and authorize any work.",
+    }
+
+
+def plan_material_requirements(
+    bom: Sequence[Mapping[str, Any]],
+    parent_demand_units: float,
+    *,
+    inventory: Mapping[str, Any] | None = None,
+    due_period: int = 0,
+) -> dict[str, Any]:
+    """Explode a validated one-level BOM and net component requirements.
+
+    This intentionally supports one-level BOM only; recursive assemblies,
+    alternate components, scrap/yield factors and pegging are not inferred.
+    """
+    demand_value = _finite_number(parent_demand_units, "Parent demand")
+    if demand_value <= 0 or not demand_value.is_integer():
+        raise ValueError("Parent demand must be a positive whole number of assemblies.")
+    if isinstance(due_period, bool) or not isinstance(due_period, int):
+        raise ValueError("Due period must be a whole number index (0 for the current period).")
+    if isinstance(bom, (str, bytes)) or not isinstance(bom, Sequence) or not bom:
+        raise ValueError("Provide at least one BOM component object.")
+    stock = inventory or {}
+    if not isinstance(stock, Mapping):
+        raise ValueError("Inventory must be a mapping keyed by component name.")
+    rows: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for i, component in enumerate(bom, start=1):
+        if not isinstance(component, Mapping):
+            raise ValueError(f"BOM row {i} must be an object.")
+        name = str(component.get("component", component.get("item", ""))).strip()
+        if not name:
+            raise ValueError(f"BOM row {i} needs a component name.")
+        if name.casefold() in seen:
+            raise ValueError(f"Duplicate BOM component: {name}.")
+        seen.add(name.casefold())
+        qty_per = _finite_number(component.get("qty_per_parent"), f"Quantity per parent for {name}")
+        if qty_per <= 0:
+            raise ValueError(f"Quantity per parent for {name} must be greater than zero.")
+        if not qty_per.is_integer():
+            raise ValueError(f"Quantity per parent for {name} must be a whole number for this planner.")
+        comp_inventory = stock.get(name, {})
+        if comp_inventory is None:
+            comp_inventory = {}
+        if not isinstance(comp_inventory, Mapping):
+            raise ValueError(f"Inventory record for {name} must be an object.")
+        on_hand = _finite_number(comp_inventory.get("on_hand", 0), f"On-hand inventory for {name}")
+        receipts = _finite_number(comp_inventory.get("scheduled_receipts", 0), f"Scheduled receipts for {name}")
+        safety = _finite_number(comp_inventory.get("safety_stock", 0), f"Safety stock for {name}")
+        lead_value = _finite_number(comp_inventory.get("lead_time_periods", component.get("lead_time_periods", 0)), f"Lead time periods for {name}")
+        lot_value = _finite_number(comp_inventory.get("lot_size_multiple", component.get("lot_size_multiple", 1)), f"Lot size multiple for {name}")
+        if min(on_hand, receipts, safety) < 0:
+            raise ValueError(f"Inventory, scheduled receipts and safety stock cannot be negative for {name}.")
+        if not lead_value.is_integer() or lead_value < 0:
+            raise ValueError(f"Lead time periods for {name} must be a non-negative whole number.")
+        if not lot_value.is_integer() or lot_value <= 0:
+            raise ValueError(f"Lot size multiple for {name} must be a positive whole number.")
+        gross = demand_value * qty_per
+        net = max(0.0, gross + safety - on_hand - receipts)
+        multiple = int(lot_value)
+        planned = int(math.ceil(net / multiple) * multiple) if net > 0 else 0
+        lead = int(lead_value)
+        rows.append({
+            "Component": name,
+            "Quantity per parent": int(qty_per),
+            "Parent demand": int(demand_value),
+            "Gross requirement": int(gross),
+            "On hand": on_hand,
+            "Scheduled receipts": receipts,
+            "Safety stock": safety,
+            "Net requirement": net,
+            "Lot size multiple": multiple,
+            "Planned order receipt": planned,
+            "Lead time (periods)": lead,
+            "Due period": due_period,
+            "Planned order release period": due_period - lead,
+            "Release before current period": due_period - lead < 0,
+        })
+    frame = pd.DataFrame(rows)
+    return {
+        "status": "ONE_LEVEL_MRP_CALCULATED",
+        "parent_demand_units": int(demand_value),
+        "due_period": due_period,
+        "component_count": len(frame),
+        "total_gross_component_requirement": float(frame["Gross requirement"].sum()),
+        "total_planned_order_receipts": float(frame["Planned order receipt"].sum()),
+        "components": frame,
+        "assumptions": "One-level BOM with integer quantity per parent; available supply = on hand + scheduled receipts; net = max(0, gross + safety stock − available); planned receipt rounds upward to the configured lot multiple.",
+        "warning": "One-level planning only. Validate BOM revisions, yield/scrap, scheduled receipt timing, unit-of-measure, lot sizing, order calendars, recursive BOM cycles and component substitutions before operational use.",
+    }
+
+
+def score_project_portfolio(
+    criteria: Sequence[Mapping[str, Any]],
+    alternatives: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Rank alternatives with explicit weights and min-max normalization."""
+    if isinstance(criteria, (str, bytes)) or not isinstance(criteria, Sequence) or not criteria:
+        raise ValueError("Provide at least one scoring criterion.")
+    if isinstance(alternatives, (str, bytes)) or not isinstance(alternatives, Sequence) or len(alternatives) < 2:
+        raise ValueError("Provide at least two project alternatives.")
+    normalized_criteria: list[dict[str, Any]] = []
+    seen_criteria: set[str] = set()
+    for i, criterion in enumerate(criteria, start=1):
+        if not isinstance(criterion, Mapping):
+            raise ValueError(f"Criterion row {i} must be an object.")
+        name = str(criterion.get("name", "")).strip()
+        if not name:
+            raise ValueError(f"Criterion row {i} needs a name.")
+        if name.casefold() in seen_criteria:
+            raise ValueError(f"Duplicate criterion: {name}.")
+        seen_criteria.add(name.casefold())
+        weight = _finite_number(criterion.get("weight"), f"Weight for {name}")
+        direction = str(criterion.get("direction", "maximize")).strip().lower()
+        if weight < 0:
+            raise ValueError(f"Weight for {name} cannot be negative.")
+        if direction not in {"maximize", "minimize"}:
+            raise ValueError(f"Direction for {name} must be 'maximize' or 'minimize'.")
+        normalized_criteria.append({"name": name, "weight": weight, "direction": direction})
+    total_weight = sum(c["weight"] for c in normalized_criteria)
+    if total_weight <= 0:
+        raise ValueError("At least one criterion weight must be greater than zero.")
+    normalized_alternatives: list[dict[str, Any]] = []
+    seen_alternatives: set[str] = set()
+    for i, alternative in enumerate(alternatives, start=1):
+        if not isinstance(alternative, Mapping):
+            raise ValueError(f"Alternative row {i} must be an object.")
+        name = str(alternative.get("name", alternative.get("project", ""))).strip()
+        scores = alternative.get("scores")
+        if not name or not isinstance(scores, Mapping):
+            raise ValueError(f"Alternative row {i} needs a name and scores object.")
+        if name.casefold() in seen_alternatives:
+            raise ValueError(f"Duplicate project alternative: {name}.")
+        seen_alternatives.add(name.casefold())
+        values = {}
+        for criterion in normalized_criteria:
+            key = criterion["name"]
+            if key not in scores:
+                raise ValueError(f"Project {name} is missing a score for criterion {key}.")
+            values[key] = _finite_number(scores[key], f"Score for {name} / {key}")
+        normalized_alternatives.append({"name": name, "scores": values})
+    ranges: dict[str, tuple[float, float]] = {}
+    for criterion in normalized_criteria:
+        vals = [a["scores"][criterion["name"]] for a in normalized_alternatives]
+        ranges[criterion["name"]] = (min(vals), max(vals))
+    rows: list[dict[str, Any]] = []
+    for alternative in normalized_alternatives:
+        row: dict[str, Any] = {"Project": alternative["name"]}
+        weighted_total = 0.0
+        for criterion in normalized_criteria:
+            key = criterion["name"]
+            low, high = ranges[key]
+            value = alternative["scores"][key]
+            if math.isclose(low, high, rel_tol=1e-12, abs_tol=1e-12):
+                normalized_score = 100.0
+            elif criterion["direction"] == "maximize":
+                normalized_score = (value - low) / (high - low) * 100.0
+            else:
+                normalized_score = (high - value) / (high - low) * 100.0
+            row[f"{key} score (0–100)"] = normalized_score
+            row[f"{key} weight"] = criterion["weight"]
+            weighted_total += normalized_score * criterion["weight"]
+        row["Weighted score (0–100)"] = weighted_total / total_weight
+        rows.append(row)
+    frame = pd.DataFrame(rows).sort_values(
+        by=["Weighted score (0–100)", "Project"], ascending=[False, True], kind="stable"
+    ).reset_index(drop=True)
+    frame.insert(0, "Rank", range(1, len(frame) + 1))
+    return {
+        "status": "SCORED — WEIGHTS ARE USER-DEFINED",
+        "method": "Criterion-level min-max normalization to 0–100, direction-aware, weighted average by user-supplied criterion weights",
+        "project_count": len(frame),
+        "criteria_count": len(normalized_criteria),
+        "total_weight": total_weight,
+        "ranking": frame,
+        "criteria": pd.DataFrame(normalized_criteria),
+        "assumptions": "All project scores must be numeric and comparable within each criterion. Weights are subjective inputs. A criterion with identical scores across projects receives 100 for all projects and contributes no discrimination.",
+        "warning": "This is a decision aid, not an objective or universally correct ranking. Sensitivity to weights has not been calculated in this first implementation; review weights and data quality before selecting a project.",
+    }
