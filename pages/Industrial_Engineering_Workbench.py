@@ -29,6 +29,9 @@ from shoir_100_tool_ui import (
     render_queueing_tool,
     render_portfolio_scoring_tool,
     render_operational_improvement_tools,
+    render_advanced_assurance_tools,
+    render_weibull_tool,
+    render_mtbf_mttr_tool,
 )
 from shoir_ie_basic_calculators import (
     calculate_standard_time, calculate_work_sampling, calculate_takt_capacity,
@@ -658,6 +661,7 @@ if selected == "Engineering Validation Center":
     # Add target methods inside the existing validation workbench, not as new top-level pages.
     render_data_intelligence_tools(st, RAW_TIER, USER, edited)
     render_operational_improvement_tools(st, RAW_TIER, USER)
+    render_advanced_assurance_tools(st, RAW_TIER, USER)
 
 elif selected == "Industrial Data Model & Digital Thread":
     st.subheader("🔗 Industrial Digital Thread")
@@ -784,6 +788,8 @@ elif selected == "Quality Engineering & Reliability":
                 st.error(f"Reliability analysis failed safely: {exc}")
 
     render_acceptance_sampling_tool(st, RAW_TIER, USER)
+    render_weibull_tool(st, RAW_TIER, USER)
+    render_mtbf_mttr_tool(st, RAW_TIER, USER)
 
 elif selected == "Industrial Simulation Lab":
     st.subheader("🧪 Industrial Simulation Lab")
