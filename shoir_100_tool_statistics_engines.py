@@ -141,7 +141,9 @@ def ordinary_least_squares(
             f"{100.0 * (1.0 - alpha):g}% CI upper": estimate + t_critical * standard_error,
         })
 
-    r_squared = 1.0 if sst <= numerical_floor and sse <= numerical_floor else (1.0 - sse / sst if sst > 0 else math.nan)
+    # R-squared is undefined when the response has no variation; do not
+    # report 1.0 merely because a constant response is fitted exactly.
+    r_squared = 1.0 - sse / sst if sst > numerical_floor else math.nan
     adjusted_r_squared = 1.0 - (1.0 - r_squared) * (n - 1) / residual_df if math.isfinite(r_squared) else math.nan
     if sse <= numerical_floor and ssr > numerical_floor:
         f_stat, f_p_value = math.inf, 0.0
