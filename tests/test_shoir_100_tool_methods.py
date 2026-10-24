@@ -282,7 +282,7 @@ def test_bin_pack_1d_is_feasible_and_reconciles_piece_kerf_and_waste():
     assert result["total_waste_length"] == 2
     assert result["overall_utilization_pct"] == pytest.approx(90)
     kerfed = bin_pack_1d([5, 4, 4], stock_length=10, kerf=1)
-    assert kerfed["stock_count"] >= 2
+    assert kerfed["stock_count"] == 2
     assert (kerfed["stocks"]["waste_length"] >= 0).all()
 
 
