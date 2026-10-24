@@ -1033,3 +1033,354 @@ def analyze_abc_xyz_inventory(
             "formula":"Annual usage value=annual demand×unit cost; ABC uses cumulative value; CV=population SD(period demand)/mean period demand.",
             "assumptions":"SKU costs share a currency; annual demand is consistently defined; histories have matching period frequencies; cutoffs are explicit.",
             "warning":"This segmentation does not determine reorder quantities or certify service levels. Review seasonality, criticality, lead time and data completeness."}
+
+
+def profile_data_quality(data: pd.DataFrame, *, iqr_multiplier: float = 1.5) -> dict[str, Any]:
+    """Non-destructively profile nulls, duplicates, types, distributions and IQR outliers."""
+    if not isinstance(data, pd.DataFrame):
+        raise ValueError("Data must be supplied as a table.")
+    if data.empty:
+        raise ValueError("Add at least one row before profiling data quality.")
+    if len(data.columns) == 0:
+        raise ValueError("The dataset must contain at least one field.")
+    if data.columns.duplicated().any():
+        raise ValueError("Column names must be unique before profiling.")
+    try:
+        multiplier = _finite_number(iqr_multiplier, "IQR multiplier")
+    except ValueError as exc:
+        raise
+    if multiplier <= 0:
+        raise ValueError("IQR multiplier must be greater than zero.")
+
+    source = data.copy(deep=True)
+    field_rows = []
+    total_missing = int(source.isna().sum().sum())
+    for column in source.columns:
+        series = source[column]
+        missing = int(series.isna().sum())
+        row: dict[str, Any] = {
+            "field": str(column),
+            "dtype": str(series.dtype),
+            "row_count": int(len(source)),
+            "non_missing": int(series.notna().sum()),
+            "missing": missing,
+            "missing_pct": round(missing / len(source) * 100.0, 4),
+            "unique_non_missing": int(series.nunique(dropna=True)),
+            "numeric_mean": None,
+            "numeric_min": None,
+            "numeric_max": None,
+            "numeric_std": None,
+            "iqr_outlier_count": 0,
+        }
+        if pd.api.types.is_numeric_dtype(series.dtype) and not pd.api.types.is_bool_dtype(series.dtype):
+            numeric = pd.to_numeric(series, errors="coerce").dropna().astype(float)
+            if not numeric.map(math.isfinite).all():
+                raise ValueError(f"Numeric field {column!r} contains an infinite value.")
+            if not numeric.empty:
+                q1 = float(numeric.quantile(0.25))
+                q3 = float(numeric.quantile(0.75))
+                spread = q3 - q1
+                lower = q1 - multiplier * spread
+                upper = q3 + multiplier * spread
+                row.update({
+                    "numeric_mean": float(numeric.mean()),
+                    "numeric_min": float(numeric.min()),
+                    "numeric_max": float(numeric.max()),
+                    "numeric_std": float(numeric.std(ddof=1)) if len(numeric) > 1 else 0.0,
+                    "iqr_outlier_count": int(((numeric < lower) | (numeric > upper)).sum()),
+                })
+        field_rows.append(row)
+
+    duplicate_rows = int(source.duplicated(keep="first").sum())
+    fields = pd.DataFrame(field_rows)
+    warnings = []
+    if total_missing:
+        warnings.append(f"{total_missing} missing cell(s) found; no values were changed or deleted.")
+    if duplicate_rows:
+        warnings.append(f"{duplicate_rows} duplicate row(s) found; no rows were removed.")
+    outlier_fields = int((fields["iqr_outlier_count"] > 0).sum())
+    if outlier_fields:
+        warnings.append(f"IQR screening flagged potential outliers in {outlier_fields} numeric field(s); review them rather than assuming they are errors.")
+    return {
+        "status": "PROFILED",
+        "method": "Non-destructive schema, missingness, duplicate-row, numeric summary and Tukey IQR screening.",
+        "metrics": {
+            "row_count": int(len(source)),
+            "column_count": int(len(source.columns)),
+            "missing_cell_count": total_missing,
+            "duplicate_row_count": duplicate_rows,
+            "numeric_fields_with_iqr_outliers": outlier_fields,
+        },
+        "field_profile": fields,
+        "source_row_count": int(len(source)),
+        "source_column_count": int(len(source.columns)),
+        "formulas": {
+            "missing_pct": "100 × missing cells in field / total rows",
+            "IQR bounds": "Q1 − k×(Q3−Q1), Q3 + k×(Q3−Q1); k is an explicit input",
+            "duplicate_rows": "Rows identical across all input columns after pandas value comparison",
+        },
+        "assumptions": [
+            f"Input preserved as {len(source)} rows × {len(source.columns)} columns; profiling is read-only.",
+            f"IQR multiplier k={multiplier:g}; an outlier flag is a screening signal, not proof of data error.",
+        ],
+        "warnings": warnings,
+    }
+
+
+def preview_data_join(
+    left: pd.DataFrame,
+    right: pd.DataFrame,
+    left_key: str,
+    right_key: str,
+    *,
+    how: str = "left",
+) -> dict[str, Any]:
+    """Preview a relational join without mutating either source and report cardinality risks."""
+    if not isinstance(left, pd.DataFrame) or not isinstance(right, pd.DataFrame):
+        raise ValueError("Both left and right inputs must be tables.")
+    if left.empty or right.empty:
+        raise ValueError("Both datasets must contain at least one row.")
+    if left.columns.duplicated().any() or right.columns.duplicated().any():
+        raise ValueError("Column names must be unique in both datasets.")
+    if not str(left_key or "").strip() or left_key not in left.columns:
+        raise ValueError("Select a valid left-side join key.")
+    if not str(right_key or "").strip() or right_key not in right.columns:
+        raise ValueError("Select a valid right-side join key.")
+    join_type = str(how or "").strip().lower()
+    if join_type not in {"left", "right", "inner", "outer"}:
+        raise ValueError("Join type must be left, right, inner or outer.")
+    for side_name, frame, key in (("left", left, left_key), ("right", right, right_key)):
+        key_values = frame[key]
+        if key_values.isna().any() or key_values.astype(str).str.strip().eq("").any():
+            raise ValueError(f"The {side_name} join key {key!r} contains missing or blank values; resolve them explicitly first.")
+
+    left_source = left.copy(deep=True)
+    right_source = right.copy(deep=True)
+    left_dupe_rows = int(left_source[left_key].duplicated(keep=False).sum())
+    right_dupe_rows = int(right_source[right_key].duplicated(keep=False).sum())
+    marker = "__shoir_join_status"
+    while marker in set(left_source.columns) | set(right_source.columns):
+        marker += "_"
+    merged = left_source.merge(
+        right_source,
+        how=join_type,
+        left_on=left_key,
+        right_on=right_key,
+        indicator=marker,
+        suffixes=("_left", "_right"),
+        sort=False,
+    )
+    states = merged[marker].value_counts()
+    matched_rows = int(states.get("both", 0))
+    left_only_rows = int(states.get("left_only", 0))
+    right_only_rows = int(states.get("right_only", 0))
+    visible = merged.drop(columns=[marker])
+    warnings = []
+    if left_dupe_rows:
+        warnings.append(f"Left key has {left_dupe_rows} row(s) whose key value is duplicated; joining may multiply rows.")
+    if right_dupe_rows:
+        warnings.append(f"Right key has {right_dupe_rows} row(s) whose key value is duplicated; joining may multiply rows.")
+    if left_only_rows:
+        warnings.append(f"{left_only_rows} output row(s) did not match a right-side key.")
+    if right_only_rows:
+        warnings.append(f"{right_only_rows} output row(s) did not match a left-side key.")
+    return {
+        "status": "PREVIEWED",
+        "method": f"Pandas {join_type} join preview; source dataframes copied before merge.",
+        "join_type": join_type,
+        "metrics": {
+            "left_input_rows": int(len(left_source)),
+            "right_input_rows": int(len(right_source)),
+            "output_rows": int(len(visible)),
+            "matched_output_rows": matched_rows,
+            "unmatched_left_output_rows": left_only_rows,
+            "unmatched_right_output_rows": right_only_rows,
+            "left_duplicate_key_rows": left_dupe_rows,
+            "right_duplicate_key_rows": right_dupe_rows,
+        },
+        "merged_preview": visible,
+        "join_audit": pd.DataFrame([
+            {"measure": "Left input rows", "count": int(len(left_source))},
+            {"measure": "Right input rows", "count": int(len(right_source))},
+            {"measure": "Output rows", "count": int(len(visible))},
+            {"measure": "Matched output rows", "count": matched_rows},
+            {"measure": "Unmatched left output rows", "count": left_only_rows},
+            {"measure": "Unmatched right output rows", "count": right_only_rows},
+            {"measure": "Left duplicated-key rows", "count": left_dupe_rows},
+            {"measure": "Right duplicated-key rows", "count": right_dupe_rows},
+        ]),
+        "formulas": {
+            "row_reconciliation": "Output rows are counted after the selected join; repeated keys can legitimately multiply rows.",
+            "match_counts": "Pandas merge indicator before it is removed from the displayed output.",
+        },
+        "assumptions": [
+            f"Left key: {left_key}; right key: {right_key}; join type: {join_type}.",
+            "No source rows were removed or overwritten; review cardinality warnings before accepting a join.",
+        ],
+        "warnings": warnings,
+    }
+
+
+def process_time_series(
+    data: pd.DataFrame,
+    timestamp_col: str,
+    value_cols: Sequence[str],
+    *,
+    source_timezone: str = "UTC",
+    frequency: str = "1h",
+    aggregation: str = "mean",
+) -> dict[str, Any]:
+    """Normalize timestamps to UTC, report duplicates/gaps, and resample with explicit aggregation."""
+    if not isinstance(data, pd.DataFrame) or data.empty:
+        raise ValueError("Add a non-empty timestamped table before processing a time series.")
+    if data.columns.duplicated().any():
+        raise ValueError("Column names must be unique before processing a time series.")
+    if timestamp_col not in data.columns:
+        raise ValueError(f"Timestamp field {timestamp_col!r} was not found.")
+    selected_values = [str(c) for c in value_cols]
+    if not selected_values or len(set(selected_values)) != len(selected_values):
+        raise ValueError("Select one or more distinct numeric value fields.")
+    missing_columns = [c for c in selected_values if c not in data.columns]
+    if missing_columns:
+        raise ValueError("Missing numeric value field(s): " + ", ".join(missing_columns))
+    agg = str(aggregation or "").strip().lower()
+    if agg not in {"mean", "sum", "min", "max", "first", "last"}:
+        raise ValueError("Aggregation must be mean, sum, min, max, first or last.")
+    freq = str(frequency or "").strip()
+    try:
+        offset = pd.tseries.frequencies.to_offset(freq)
+    except (ValueError, TypeError) as exc:
+        raise ValueError("Choose a valid resampling frequency such as 15min, 1h or 1D.") from exc
+    if getattr(offset, "n", 1) <= 0:
+        raise ValueError("Resampling frequency must be positive.")
+    zone = str(source_timezone or "").strip()
+    if not zone:
+        raise ValueError("Supply the source timezone (use UTC if timestamps are already UTC).")
+
+    source = data.copy(deep=True)
+    stamps = pd.to_datetime(source[timestamp_col], errors="coerce")
+    invalid_stamps = int(stamps.isna().sum())
+    if invalid_stamps:
+        raise ValueError(f"{invalid_stamps} timestamp(s) could not be parsed.")
+    try:
+        if stamps.dt.tz is None:
+            stamps = stamps.dt.tz_localize(zone, ambiguous="raise", nonexistent="raise")
+        stamps = stamps.dt.tz_convert("UTC")
+    except Exception as exc:
+        raise ValueError(f"Timezone localization/conversion failed for {zone!r}: check timezone and daylight-saving ambiguity.") from exc
+
+    duplicate_timestamp_rows = int(stamps.duplicated(keep=False).sum())
+    source[timestamp_col] = stamps
+    numeric_invalid = {}
+    for col in selected_values:
+        converted = pd.to_numeric(source[col], errors="coerce")
+        invalid_count = int((converted.isna() & source[col].notna()).sum())
+        if invalid_count:
+            numeric_invalid[col] = invalid_count
+        non_null_numeric = converted.dropna().astype(float)
+        if not non_null_numeric.map(math.isfinite).all():
+            raise ValueError(f"Value field {col!r} contains an infinite value.")
+        source[col] = converted
+    if numeric_invalid:
+        raise ValueError("Non-numeric values in selected field(s): " + ", ".join(f"{k} ({v})" for k, v in numeric_invalid.items()))
+
+    source = source.sort_values(timestamp_col).set_index(timestamp_col)
+    resampled = source[selected_values].resample(offset).agg(agg)
+    resampled.index.name = "timestamp_utc"
+    expected_index = pd.date_range(resampled.index.min(), resampled.index.max(), freq=offset, tz="UTC")
+    # Normalize both indexes to UTC, which also makes timezone-aware DST transitions explicit.
+    expected = len(expected_index)
+    missing_intervals = int(resampled[selected_values].isna().all(axis=1).sum())
+    output = resampled.reset_index()
+    warnings = []
+    if duplicate_timestamp_rows:
+        warnings.append(f"{duplicate_timestamp_rows} source row(s) share a timestamp; the selected {agg} aggregation combines them.")
+    if missing_intervals:
+        warnings.append(f"{missing_intervals} resampled interval(s) contain no observations; they are shown as missing, not imputed.")
+    return {
+        "status": "PROCESSED",
+        "method": f"Timestamp parsing/localization to UTC then {freq} resampling with {agg}.",
+        "metrics": {
+            "input_rows": int(len(data)),
+            "output_intervals": int(len(output)),
+            "duplicate_timestamp_rows": duplicate_timestamp_rows,
+            "expected_intervals": int(expected),
+            "missing_intervals": missing_intervals,
+        },
+        "resampled_series": output,
+        "formulas": {
+            "timestamp normalization": "Localize naive timestamps using the selected source timezone, then convert to UTC.",
+            "resampling": f"Group observations into {freq} intervals using {agg}; empty intervals remain null.",
+        },
+        "assumptions": [
+            f"Source timezone: {zone}; output timezone: UTC; frequency: {freq}; aggregation: {agg}.",
+            "No interpolation or automatic deletion is applied; duplicate and missing intervals remain visible.",
+        ],
+        "warnings": warnings,
+    }
+
+
+def generate_synthetic_industrial_data(
+    row_count: int,
+    seed: int,
+    *,
+    defect_rate: float = 0.03,
+    downtime_rate: float = 0.10,
+) -> dict[str, Any]:
+    """Generate deterministic practice data explicitly marked SYNTHETIC, never measured plant data."""
+    import random
+    from datetime import timedelta
+
+    if isinstance(row_count, bool) or not isinstance(row_count, int) or not 1 <= row_count <= 100_000:
+        raise ValueError("Row count must be a whole number between 1 and 100000.")
+    if isinstance(seed, bool) or not isinstance(seed, int) or seed < 0:
+        raise ValueError("Seed must be a non-negative whole number.")
+    defects = _finite_number(defect_rate, "Defect rate")
+    downtime = _finite_number(downtime_rate, "Downtime rate")
+    if not 0 <= defects <= 1:
+        raise ValueError("Defect rate must be between 0 and 1 inclusive.")
+    if not 0 <= downtime <= 1:
+        raise ValueError("Downtime rate must be between 0 and 1 inclusive.")
+
+    rng = random.Random(seed)
+    start = pd.Timestamp("2026-01-01T00:00:00Z")
+    rows = []
+    for idx in range(row_count):
+        produced = rng.randint(80, 120)
+        defective = sum(1 for _ in range(produced) if rng.random() < defects)
+        cycle = max(0.1, rng.gauss(32.0, 4.0))
+        downtime_minutes = 0.0 if rng.random() > downtime else rng.uniform(1.0, 30.0)
+        rows.append({
+            "timestamp_utc": start + pd.Timedelta(hours=idx),
+            "station_id": f"ST-{1 + (idx % 4):02d}",
+            "units_produced": produced,
+            "good_units": produced - defective,
+            "defect_count": defective,
+            "cycle_time_seconds": round(cycle, 4),
+            "downtime_minutes": round(downtime_minutes, 3),
+            "energy_kwh": round(produced * rng.uniform(0.35, 0.65), 4),
+            "data_status": "SYNTHETIC",
+        })
+    dataset = pd.DataFrame(rows)
+    return {
+        "status": "GENERATED_SYNTHETIC",
+        "method": "Seeded pseudorandom practice data with bounded production, binomial defect sampling, positive cycle-time draw and optional downtime.",
+        "source": "SYNTHETIC",
+        "seed": seed,
+        "metrics": {
+            "row_count": int(len(dataset)),
+            "seed": seed,
+            "synthetic_defect_rate_parameter": defects,
+            "synthetic_downtime_probability_parameter": downtime,
+        },
+        "dataset": dataset,
+        "formulas": {
+            "good_units": "units_produced − defect_count",
+            "energy_kwh": "units_produced × seeded random factor in [0.35, 0.65]",
+        },
+        "assumptions": [
+            "All rows and values are synthetic and generated for practice; they are not observations from a real plant.",
+            "The seed makes this implementation reproducible; distributions are illustrative, not calibrated to an industrial process.",
+        ],
+        "warnings": ["SYNTHETIC — do not report these data as real production, achieved savings or a calibrated benchmark."],
+    }
