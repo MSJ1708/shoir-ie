@@ -273,3 +273,35 @@ def test_starter_cannot_execute_acceptance_sampling_planner():
     assert "shoir_T034_result" not in at.session_state
     with pytest.raises(KeyError):
         at.button(key="T034_run_button")
+
+
+def test_ols_regression_tool_renders_runs_and_reports_golden_metrics():
+    at = _authed_library(tier="Professional")
+    _open(at, "T036", "Regression and ANOVA Studio")
+    result = _run(at, "T036")
+    metrics = result["metrics"]
+    coefficients = result["coefficient_table"].set_index("Term")["Coefficient"]
+    assert coefficients["Intercept"] == pytest.approx(1.0)
+    assert coefficients["Load"] == pytest.approx(2.0)
+    assert metrics["R_squared"] == pytest.approx(1.0)
+    assert len(result["prediction_residuals"]) == 6
+
+
+def test_research_hypothesis_testing_tool_runs_in_research_pack():
+    at = _authed_library(tier="Research Pack")
+    _open(at, "T037", "Hypothesis Testing Assistant")
+    result = _run(at, "T037")
+    assert result["status"] == "CALCULATED"
+    assert result["metrics"]["test_type"] == "one_sample"
+    assert result["metrics"]["n_sample_a"] == 6
+    assert 0 <= result["metrics"]["p_value"] <= 1
+    assert result["metrics"]["confidence_interval_lower"] < result["metrics"]["confidence_interval_upper"]
+
+
+def test_starter_cannot_render_or_execute_research_hypothesis_testing():
+    at = _authed_library(tier="Starter")
+    _open(at, "T037", "Hypothesis Testing Assistant")
+    assert any("does not grant this target capability" in str(item.value).lower() for item in at.warning)
+    assert "shoir_T037_result" not in at.session_state
+    with pytest.raises(KeyError):
+        at.button(key="T037_run_button")
