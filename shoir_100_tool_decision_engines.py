@@ -266,7 +266,7 @@ def compare_capacity_scenarios(
     for i, raw in enumerate(frame.to_dict(orient="records"), start=1):
         minutes = _num(raw.get("available_minutes_per_period"), f"Scenario row {i} available minutes", minimum=0)
         cycle = _num(raw.get("cycle_time_minutes_per_unit"), f"Scenario row {i} cycle time", positive=True)
-        yield_pct = _num(raw.get("yield_percent"), f"Scenario row {i} yield percent", positive=True)
+        yield_pct = _num(raw.get("yield_percent"), f"Scenario row {i} yield percent", minimum=0)
         if yield_pct > 100:
             raise ValueError(f"Scenario row {i} yield percent must not exceed 100.")
         capacity = minutes / cycle * yield_pct / 100.0
