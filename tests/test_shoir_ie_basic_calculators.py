@@ -18,7 +18,7 @@ def test_standard_time_uses_explicit_rating_and_allowance_convention():
     assert result["normal_time"] == pytest.approx(11)
     assert result["standard_time"] == pytest.approx(11 / 0.85)
     assert result["time_unit"] == "min"
-    assert "fraction of standard time" in result["assumptions"][2]
+    assert "percentage of standard time" in result["assumptions"][2]
 
 
 def test_standard_time_single_observation_discloses_variability_limit():
