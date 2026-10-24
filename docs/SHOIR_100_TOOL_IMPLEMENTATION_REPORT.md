@@ -13,8 +13,8 @@
 
 ## Initial classification counts
 
-- `IMPLEMENTED_NEEDS_VALIDATION`: 57
-- `FOUNDATION_ONLY`: 38
+- `IMPLEMENTED_NEEDS_VALIDATION`: 61
+- `FOUNDATION_ONLY`: 34
 - `EXTERNAL_CONFIGURATION_REQUIRED`: 5
 
 No entry is marked `VERIFIED_WORKING`. The CSV includes one row for each stable tool ID T001–T100 and all required matrix columns. It distinguishes candidate existing routes from a verified implementation; a candidate mapping is not proof that the target acceptance contract is met.
@@ -89,4 +89,19 @@ A second additive tranche expands the implementation with seven focused methods 
 
 The implementation is grouped in the existing Engineering Validation Center Workbench section to avoid adding a new primary navigation sector. Each target action uses the canonical target-ID tier gate. These records/results currently use session-scoped state; persistent audited 5S/A3 workflows and cross-workspace ownership are not implied.
 
-The current source matrix contains 57 IMPLEMENTED_NEEDS_VALIDATION, 38 FOUNDATION_ONLY, and 5 EXTERNAL_CONFIGURATION_REQUIRED target rows. No target is marked VERIFIED_WORKING. Full CI must pass on the final head, and authenticated browser, persistence, access-bypass and export round-trip acceptance remains required before a production go decision.
+The current source matrix contains 61 IMPLEMENTED_NEEDS_VALIDATION, 34 FOUNDATION_ONLY, and 5 EXTERNAL_CONFIGURATION_REQUIRED target rows. No target is marked VERIFIED_WORKING. Full CI must pass on the final head, and authenticated browser, persistence, access-bypass and export round-trip acceptance remains required before a production go decision.
+
+
+## Third implementation tranche — methods surfaced inside existing Workbench (24 October 2026)
+
+The latest additive tranche integrates additional specialist calculations into existing Workbench sections:
+
+- **T025 Bottleneck and Constraint Analyzer:** ranks estimated station capacity using cycle time, available hours and downtime, while explicitly naming the output a bottleneck candidate.
+- **T026 OEE and Loss Analysis:** reports availability, performance, quality and OEE using a shared production-time/count scope; an inconsistent performance result above 100% is not silently capped.
+- **T041 Weibull Reliability Analyzer:** fits a two-parameter Weibull to positive, complete, uncensored failure times and reports B10/B50/B90. Censoring is not claimed as supported.
+- **T042 MTBF and MTTR Analyzer:** uses explicit completed uptime/repair intervals in hours and records the interval availability metric.
+- **T066 Cutting Stock and Bin Packing:** uses a one-dimensional first-fit-decreasing heuristic with kerf and reconciled stock/waste metrics, not a global-optimality claim.
+- **T075 Forecast and Model Drift Monitor:** compares paired actual/prediction observations using bias, MAE, RMSE and MAPE with an explicit zero-actual handling rule.
+- **T085 Statistical Power and Sample-Size Planner:** a stated normal approximation for two independent equally allocated group means; clustered, attrition, unequal-variance and multiple-comparison corrections are not implied.
+
+Golden/boundary tests were added for these methods. Their corresponding matrix entries remain IMPLEMENTED_NEEDS_VALIDATION; browser acceptance, durable persistence and export/access path verification remain open. The implementation-count change reflects actual method additions and does not convert a registry entry into evidence of a fully verified tool.
