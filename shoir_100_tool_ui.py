@@ -384,3 +384,111 @@ def render_operational_improvement_tools(
         result = st.session_state.get("T056_last_result")
         if result:
             _show_result(st, "T056", result)
+
+
+def render_advanced_assurance_tools(st: Any, tier: str, actor: str) -> None:
+    """Render capacity, OEE, packing, drift and research planning in the existing Workbench."""
+    from shoir_100_tool_methods import (
+        bin_pack_1d, bottleneck_analysis, forecast_drift_report, oee_analysis,
+        two_sample_mean_power,
+    )
+    st.divider()
+    st.subheader("Capacity, Performance and Evidence Tools")
+
+    with st.expander("T025 · Bottleneck and Constraint Analyzer · Mid-Tier Pro", expanded=False):
+        operations = st.data_editor(pd.DataFrame([
+            {"operation": "Cut", "cycle_time_seconds": 10.0, "available_hours": 8.0, "downtime_hours": 0.5, "observed_units": 2400},
+            {"operation": "Assembly", "cycle_time_seconds": 18.0, "available_hours": 8.0, "downtime_hours": 0.5, "observed_units": 1300},
+            {"operation": "Pack", "cycle_time_seconds": 15.0, "available_hours": 8.0, "downtime_hours": 0.0, "observed_units": 1600},
+        ]), num_rows="dynamic", use_container_width=True, key="t025_operations")
+        if st.button("Screen station capacity", key="t025_run", type="primary"):
+            _run(st, tier, actor, "T025", lambda: bottleneck_analysis(operations.to_dict("records")))
+        result = st.session_state.get("T025_last_result")
+        if result:
+            _show_result(st, "T025", result)
+
+    with st.expander("T026 · OEE and Loss Analysis · Mid-Tier Pro", expanded=False):
+        c1, c2, c3 = st.columns(3)
+        planned = c1.number_input("Planned production minutes", min_value=0.1, value=480.0, key="t026_planned")
+        downtime = c2.number_input("Downtime minutes", min_value=0.0, value=30.0, key="t026_downtime")
+        ideal = c3.number_input("Ideal cycle seconds per unit", min_value=0.001, value=60.0, key="t026_ideal")
+        c4, c5 = st.columns(2)
+        total = c4.number_input("Total count", min_value=0.1, value=400.0, key="t026_total")
+        good = c5.number_input("Good count", min_value=0.0, value=380.0, key="t026_good")
+        if st.button("Calculate OEE", key="t026_run", type="primary"):
+            _run(st, tier, actor, "T026", lambda: oee_analysis(planned, downtime, ideal, total, good))
+        result = st.session_state.get("T026_last_result")
+        if result:
+            _show_result(st, "T026", result)
+
+    with st.expander("T066 · Cutting Stock and Bin Packing · Professional", expanded=False):
+        st.caption("One-dimensional first-fit-decreasing heuristic. Validate grain, trim, defect zones, tolerances and cut sequence separately.")
+        item_text = st.text_input("Item lengths (comma-separated)", "6, 4, 4, 4", key="t066_items")
+        c1, c2 = st.columns(2)
+        stock_length = c1.number_input("Stock length", min_value=0.001, value=10.0, key="t066_stock")
+        kerf = c2.number_input("Kerf per cut", min_value=0.0, value=0.0, key="t066_kerf")
+        if st.button("Pack/cut stock", key="t066_run", type="primary"):
+            def run_cutting():
+                if not item_text.strip():
+                    raise ValueError("Enter at least one item length.")
+                try:
+                    lengths = [float(x.strip()) for x in item_text.split(",") if x.strip()]
+                except ValueError as exc:
+                    raise ValueError("Use comma-separated numeric item lengths.") from exc
+                return bin_pack_1d(lengths, stock_length, kerf)
+            _run(st, tier, actor, "T066", run_cutting)
+        result = st.session_state.get("T066_last_result")
+        if result:
+            _show_result(st, "T066", result)
+
+    with st.expander("T075 · Forecast and Model Drift Monitor · Enterprise", expanded=False):
+        st.caption("Use paired out-of-time actuals and predictions. Thresholds are declared by the model owner.")
+        actual_text = st.text_input("Actual values (comma-separated)", "100,110,90,105", key="t075_actual")
+        prediction_text = st.text_input("Predictions (same order and length)", "102,100,95,99", key="t075_prediction")
+        c1, c2 = st.columns(2)
+        bias_limit = c1.number_input("Maximum absolute bias", min_value=0.0, value=5.0, key="t075_bias")
+        mape_limit = c2.number_input("Maximum MAPE (%)", min_value=0.0, value=10.0, key="t075_mape")
+        if st.button("Evaluate model drift", key="t075_run", type="primary"):
+            def run_drift():
+                try:
+                    a = [float(x.strip()) for x in actual_text.split(",") if x.strip()]
+                    p = [float(x.strip()) for x in prediction_text.split(",") if x.strip()]
+                except ValueError as exc:
+                    raise ValueError("Actual and prediction series must be comma-separated numbers.") from exc
+                return forecast_drift_report(a, p, bias_limit, mape_limit)
+            _run(st, tier, actor, "T075", run_drift)
+        result = st.session_state.get("T075_last_result")
+        if result:
+            _show_result(st, "T075", result)
+
+    with st.expander("T085 · Statistical Power and Sample-Size Planner · Research Pack", expanded=False):
+        st.caption("Normal approximation for two independent group means, equal allocation and common standard deviation.")
+        c1, c2 = st.columns(2)
+        effect = c1.number_input("Minimum detectable difference", min_value=0.001, value=2.0, key="t085_effect")
+        std = c2.number_input("Common standard deviation", min_value=0.001, value=2.0, key="t085_std")
+        c3, c4 = st.columns(2)
+        alpha = c3.selectbox("Significance level (alpha)", [0.01, 0.05, 0.10], index=1, key="t085_alpha")
+        power = c4.selectbox("Desired power", [0.70, 0.80, 0.90, 0.95], index=1, key="t085_power")
+        if st.button("Calculate sample size", key="t085_run", type="primary"):
+            _run(st, tier, actor, "T085", lambda: two_sample_mean_power(effect, std, alpha, power))
+        result = st.session_state.get("T085_last_result")
+        if result:
+            _show_result(st, "T085", result)
+
+
+def render_weibull_tool(st: Any, tier: str, actor: str) -> None:
+    from shoir_100_tool_methods import weibull_reliability
+    with st.expander("T041 · Weibull Reliability Analyzer · Professional", expanded=False):
+        st.caption("Fits a two-parameter Weibull to complete uncensored failure times; active/censored assets are not supported in this method.")
+        raw_times = st.text_input("Failure times (comma-separated)", "10,20,30,40,50,65,80", key="t041_times")
+        if st.button("Fit Weibull distribution", key="t041_run", type="primary"):
+            def run_weibull():
+                try:
+                    times = [float(x.strip()) for x in raw_times.split(",") if x.strip()]
+                except ValueError as exc:
+                    raise ValueError("Use comma-separated positive failure times.") from exc
+                return weibull_reliability(times)
+            _run(st, tier, actor, "T041", run_weibull)
+        result = st.session_state.get("T041_last_result")
+        if result:
+            _show_result(st, "T041", result)
