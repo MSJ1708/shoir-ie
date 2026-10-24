@@ -160,14 +160,17 @@ def _run_engine_tool(tool_id, signature, button_label, calculation):
 
 
 st.set_page_config(page_title="Engineering Tool Library | Shoir-IE", page_icon="🧭", layout="wide")
-# Keep internal readiness/route-gap details behind an authenticated app session.
-# The main public Explore Modules experience remains the customer-facing entry point.
-if not st.session_state.get("authenticated") or not str(st.session_state.get("current_user", "")).strip():
-    st.title("Engineering Tool Library")
-    st.info("Sign in to Shoir-IE to view the personalized engineering tool library.")
-    st.stop()
-
-tier = str(st.session_state.get("user_tier", ""))
+# The catalog is public/read-only; internal routing details and all calculation actions
+# remain behind authentication and the target-specific server-side entitlement check.
+is_authenticated = bool(st.session_state.get("authenticated")) and bool(
+    str(st.session_state.get("current_user", "")).strip()
+)
+tier = str(st.session_state.get("user_tier", "")) if is_authenticated else ""
+if not is_authenticated:
+    st.info(
+        "PUBLIC READ-ONLY PREVIEW — browse the 100 target capabilities, intended inputs/outputs, "
+        "tier and readiness. Sign in to view internal routing details or run eligible validation methods."
+    )
 st.title("Engineering Tool Library")
 st.caption("100 target capabilities · grouped by workbench · status and entitlement are separate from a catalogue name.")
 st.info("This library distinguishes reusable existing routes from validated target behavior. A target marked needs-validation, foundation-only, missing or configuration-required is not represented as end-to-end verified.")
@@ -190,14 +193,21 @@ for item in TOOL_TARGETS:
         continue
     d = target_tool_access_decision(item["tool_id"], tier)
     e = target_tool_execution_decision(item["tool_id"], tier)
-    rows.append({
-        "ID": item["tool_id"], "Capability": item["canonical_name"],
-        "Workbench": item["workbench"], "Minimum tier": item["target_minimum_tier"],
-        "Package access": "Allowed" if d["allowed"] else "Restricted",
-        "Implementation status": item["implementation_status"],
-        "Executable in target registry": "Yes" if e["executable"] else "No — acceptance pending",
-        "Existing candidate route": item["existing_module_or_route"],
-    })
+    if is_authenticated:
+        rows.append({
+            "ID": item["tool_id"], "Capability": item["canonical_name"],
+            "Workbench": item["workbench"], "Minimum tier": item["target_minimum_tier"],
+            "Package access": "Allowed" if d["allowed"] else "Restricted",
+            "Implementation status": item["implementation_status"],
+            "Executable in target registry": "Yes" if e["executable"] else "No — acceptance pending",
+            "Existing candidate route": item["existing_module_or_route"],
+        })
+    else:
+        rows.append({
+            "ID": item["tool_id"], "Capability": item["canonical_name"],
+            "Workbench": item["workbench"], "Minimum tier": item["target_minimum_tier"],
+            "Readiness status": item["implementation_status"],
+        })
 st.caption(f"{len(rows)} of {len(TOOL_TARGETS)} target capabilities match. Existing routes remain available under their current app contracts; this table does not override or assert those routes are verified.")
 if rows:
     st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
@@ -215,14 +225,24 @@ if rows:
         st.markdown("**Expected outputs**")
         st.write(item["output_contract"])
     with right:
-        st.markdown("**Candidate existing route**")
-        st.write(item["existing_module_or_route"])
-        st.markdown("**Current readiness**")
-        st.write(item["implementation_status"])
-        st.markdown("**Source candidates**")
-        st.code("\n".join(item["source_files"]), language="text")
-        st.markdown("**Outstanding gap**")
-        st.write(item["remaining_gap"])
+        if is_authenticated:
+            st.markdown("**Candidate existing route**")
+            st.write(item["existing_module_or_route"])
+            st.markdown("**Current readiness**")
+            st.write(item["implementation_status"])
+            st.markdown("**Source candidates**")
+            st.code("\n".join(item["source_files"]), language="text")
+            st.markdown("**Outstanding gap**")
+            st.write(item["remaining_gap"])
+        else:
+            st.markdown("**Minimum tier**")
+            st.write(item["target_minimum_tier"])
+            st.markdown("**Current readiness**")
+            st.write(item["implementation_status"])
+    if not is_authenticated:
+        st.info("Sign in to Shoir-IE to use eligible tools. This public preview cannot execute calculations or open protected workspace routes.")
+        st.stop()
+
     decision = target_tool_execution_decision(selected_id, tier)
     if not decision["allowed"]:
         st.warning(f'This package does not grant this target capability. Required tier: {decision["required_tier"]}.')
