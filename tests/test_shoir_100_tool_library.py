@@ -463,3 +463,22 @@ def test_starter_cannot_access_dataset_versioning():
     assert "shoir_T020_result" not in at.session_state
     with pytest.raises(KeyError):
         at.button(key="T020_run_button")
+
+
+def test_weibull_reliability_tool_runs_for_professional_and_denies_starter():
+    at = _authed_library(tier="Professional")
+    _open(at, "T041", "Weibull Reliability Analyzer")
+    result = _run(at, "T041")
+    assert result["status"] == "CALCULATED"
+    assert result["metrics"]["observed_failures"] == 12
+    assert result["metrics"]["right_censored_count"] == 0
+    assert result["parameters"]["shape"] > 0
+    assert result["parameters"]["scale"] > 0
+    assert len(result["reliability_at_horizons"]) == 4
+
+    denied = _authed_library(tier="Starter")
+    _open(denied, "T041", "Weibull Reliability Analyzer")
+    assert any("does not grant this target capability" in str(item.value).lower() for item in denied.warning)
+    assert "shoir_T041_result" not in denied.session_state
+    with pytest.raises(KeyError):
+        denied.button(key="T041_run_button")
