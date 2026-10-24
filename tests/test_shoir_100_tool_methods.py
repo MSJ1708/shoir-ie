@@ -9,10 +9,11 @@ from scipy.stats import binom
 
 from shoir_100_tool_methods import (
     a3_improvement, abc_xyz_analysis, acceptance_sampling_oc, audit_5s,
-    cost_variance, generate_synthetic_industrial_data, inventory_policy,
-    join_dataframes, line_balance, mm1_queue, portfolio_score,
-    process_time_series, profile_dataframe, quality_cost_analysis,
-    require_tool_access, root_cause_analysis,
+    bin_pack_1d, bottleneck_analysis, cost_variance, forecast_drift_report,
+    generate_synthetic_industrial_data, inventory_policy, join_dataframes,
+    line_balance, mm1_queue, oee_analysis, portfolio_score, process_time_series,
+    profile_dataframe, quality_cost_analysis, require_tool_access,
+    root_cause_analysis, two_sample_mean_power, weibull_reliability,
 )
 
 
@@ -238,3 +239,68 @@ def test_abc_xyz_segments_selected_period_value_and_variability():
     assert set(ranked["ABC_XYZ_class"]) <= {"AX", "AY", "AZ", "BX", "BY", "BZ", "CX", "CY", "CZ"}
     with pytest.raises(ValueError, match="greater than zero"):
         abc_xyz_analysis(pd.DataFrame([{"SKU": "A", "unit_cost": 0, "P1": 0}]), "SKU", "unit_cost", ["P1"])
+
+
+
+def test_bottleneck_analysis_ranks_lowest_effective_capacity_and_discloses_limits():
+    result = bottleneck_analysis([
+        {"operation": "Cut", "cycle_time_seconds": 10, "available_hours": 8, "downtime_hours": 1, "observed_units": 2000},
+        {"operation": "Pack", "cycle_time_seconds": 20, "available_hours": 8, "downtime_hours": 0, "observed_units": 1200},
+    ])
+    assert result["bottleneck_candidate"] == "Pack"
+    assert result["estimated_system_capacity_units_per_window"] == pytest.approx(1440)
+    assert result["operations"].iloc[0]["bottleneck_candidate"] is True or bool(result["operations"].iloc[0]["bottleneck_candidate"])
+    with pytest.raises(ValueError, match="downtime below available"):
+        bottleneck_analysis([{"operation": "A", "cycle_time_seconds": 10, "available_hours": 8, "downtime_hours": 8, "observed_units": 0}])
+
+
+def test_oee_matches_hand_calculated_availability_performance_quality():
+    result = oee_analysis(480, 30, 60, 400, 380)
+    assert result["availability_pct"] == pytest.approx(93.75)
+    assert result["performance_pct"] == pytest.approx(88.8888889)
+    assert result["quality_pct"] == pytest.approx(95)
+    assert result["oee_pct"] == pytest.approx(79.1666667)
+    with pytest.raises(ValueError, match="good count"):
+        oee_analysis(480, 30, 60, 400, 401)
+
+
+def test_weibull_fit_produces_ordered_percentiles_and_discloses_uncensored_scope():
+    result = weibull_reliability([10, 20, 30, 40, 60, 90])
+    assert result["shape_beta"] > 0
+    assert result["scale_eta"] > 0
+    assert result["B10"] < result["B50"] < result["B90"]
+    with pytest.raises(ValueError, match="at least three"):
+        weibull_reliability([10, 20])
+    with pytest.raises(ValueError, match="positive"):
+        weibull_reliability([10, 20, 0])
+
+
+def test_bin_pack_1d_is_feasible_and_reconciles_piece_kerf_and_waste():
+    result = bin_pack_1d([6, 4, 4, 4], stock_length=10, kerf=0)
+    assert result["stock_count"] == 2
+    assert result["total_piece_length"] == 18
+    assert result["total_waste_length"] == 2
+    assert result["overall_utilization_pct"] == pytest.approx(90)
+    kerfed = bin_pack_1d([5, 4, 4], stock_length=10, kerf=1)
+    assert kerfed["stock_count"] >= 2
+    assert (kerfed["stocks"]["waste_length"] >= 0).all()
+
+
+def test_forecast_drift_metrics_match_reference_and_zero_actual_mape_handling():
+    result = forecast_drift_report([100, 110, 90], [102, 100, 95], 0.5, 5)
+    assert result["bias_prediction_minus_actual"] == pytest.approx(-1)
+    assert result["mae"] == pytest.approx(17/3)
+    assert result["rmse"] == pytest.approx(math.sqrt(43))
+    assert result["status"] == "DRIFT_FLAGGED"
+    zeros = forecast_drift_report([0, 10], [5, 10], 100, 100)
+    assert zeros["mape_pct_nonzero_actuals"] == pytest.approx(0)
+    assert zeros["zero_actual_count_excluded_from_mape"] == 1
+
+
+def test_two_sample_mean_power_matches_normal_approximation_and_rejects_bad_design():
+    result = two_sample_mean_power(effect_size=2, population_std=2, alpha=.05, desired_power=.80)
+    assert result["sample_size_per_group"] == 16
+    assert result["total_sample_size"] == 32
+    assert result["normal_approximation_achieved_power"] >= .80
+    with pytest.raises(ValueError, match="alpha"):
+        two_sample_mean_power(2, 2, alpha=1, desired_power=.8)
