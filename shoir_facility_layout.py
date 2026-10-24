@@ -437,6 +437,16 @@ def _shortest_path(
 def _file_to_frames(upload: Any) -> dict[str, pd.DataFrame]:
     raw = upload.getvalue()
     name = str(upload.name)
+    from shoir_upgrade import MAX_UPLOAD_BYTES
+
+    if not raw:
+        raise ValueError("The uploaded facility workbook is empty.")
+    if len(raw) > MAX_UPLOAD_BYTES:
+        size_mb = len(raw) / (1024 * 1024)
+        raise ValueError(
+            f"This facility upload is {size_mb:,.1f} MB. Spreadsheet imports are limited to "
+            f"{MAX_UPLOAD_BYTES / (1024 * 1024):,.0f} MB. Split the workbook or save only the required sheets and retry."
+        )
     try:
         from shoir_excel_studio import process_uploaded_workbook
     except ModuleNotFoundError as exc:
