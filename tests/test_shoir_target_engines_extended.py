@@ -102,7 +102,7 @@ def test_time_series_resample_discloses_empty_periods():
     )
     assert result["processed_rows"] == 3
     assert result["empty_resampled_periods"] == 1
-    assert result["series"]["output"].iloc[1] != result["series"]["output"].iloc[1]
+    assert pd.isna(result["series"]["output"].iloc[1])
 
 
 def test_synthetic_generator_is_reproducible_and_explicitly_labelled():
@@ -168,3 +168,19 @@ def test_mm1_queue_marks_unstable_without_finite_steady_state_estimates():
 def test_mm1_queue_rejects_nonpositive_rates(arrival, service):
     with pytest.raises(ValueError):
         analyze_mm1_queue(arrival, service)
+
+
+def test_data_profiler_reports_missing_and_duplicate_rows_without_cleaning():
+    source = pd.DataFrame({"batch": ["A", "A", None, None], "count": [1.0, 1.0, 2.0, None]})
+    original = source.copy(deep=True)
+    result = profile_dataframe(source)
+    assert result["duplicate_row_count"] == 1
+    assert result["column_profile"].set_index("column").loc["count", "missing_count"] == 1
+    pd.testing.assert_frame_equal(source, original)
+
+
+def test_data_join_rejects_null_key_many_to_many_expansion():
+    left = pd.DataFrame({"key": [None, None], "left": [1, 2]})
+    right = pd.DataFrame({"key": [None, None], "right": [3, 4]})
+    with pytest.raises(ValueError, match="many-to-many"):
+        join_dataframes(left, right, left_key="key", right_key="key")
