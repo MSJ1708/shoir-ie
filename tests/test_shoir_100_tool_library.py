@@ -520,3 +520,28 @@ def test_maintenance_backlog_optimizer_respects_capacity_and_tier():
     assert "shoir_T049_result" not in denied.session_state
     with pytest.raises(KeyError):
         denied.button(key="T049_run_button")
+
+
+def test_reproducibility_pack_is_valid_zip_and_research_pack_gated():
+    import base64
+    import io
+    import zipfile
+
+    at = _authed_library(tier="Research Pack")
+    _open(at, "T087", "Reproducibility Pack Generator")
+    result = _run(at, "T087")
+    assert result["status"] == "PACKAGE_BUILT"
+    assert result["raw_dataset_included"] is False
+    archive_bytes = base64.b64decode(result["archive_base64"])
+    assert zipfile.is_zipfile(io.BytesIO(archive_bytes))
+    with zipfile.ZipFile(io.BytesIO(archive_bytes)) as archive:
+        assert archive.testzip() is None
+        assert "checksums.sha256" in archive.namelist()
+        assert "manifest.json" in archive.namelist()
+
+    denied = _authed_library(tier="Enterprise Plus")
+    _open(denied, "T087", "Reproducibility Pack Generator")
+    assert any("does not grant this target capability" in str(item.value).lower() for item in denied.warning)
+    assert "shoir_T087_result" not in denied.session_state
+    with pytest.raises(KeyError):
+        denied.button(key="T087_run_button")
