@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import io
 import json
+import logging
 from typing import Any
 
 import pandas as pd
@@ -26,14 +27,16 @@ from shoir_100_tool_methods import (
 
 
 def _run(st: Any, tier: str, actor: str, tool_id: str, action: Any) -> None:
+    st.session_state.pop(f"{tool_id}_last_result", None)
     try:
         require_tool_access(tier, tool_id, actor)
         result = action()
     except (ValueError, PermissionError) as exc:
         st.error(str(exc))
         return
-    except Exception as exc:
-        # Keep implementation failures visible, without printing tracebacks or secrets.
+    except Exception:
+        # Detailed diagnostics go to server logs; never show stack traces or secrets in the UI.
+        logging.exception("Shoir-IE target tool execution failed: %s", tool_id)
         st.error(f"Tool execution failed safely ({tool_id}). Check inputs and application diagnostics.")
         return
     st.session_state[f"{tool_id}_last_result"] = result
@@ -278,13 +281,13 @@ def render_operational_improvement_tools(
             {"category": "Quality rework", "count": 6},
             {"category": "Other", "count": 3},
         ]), num_rows="dynamic", use_container_width=True, key="t028_causes")
-        with st.expander("Five-why hypothesis and action", expanded=False):
-            why_answers = [
-                st.text_input(f"Why {i}", key=f"t028_why_{i}") for i in range(1, 6)
-            ]
-            action = st.text_input("Countermeasure / next experiment", key="t028_action")
-            owner = st.text_input("Action owner", key="t028_owner")
-            due = st.date_input("Action due date", key="t028_due")
+        st.markdown("**Five-why hypothesis and action**")
+        why_answers = [
+            st.text_input(f"Why {i}", key=f"t028_why_{i}") for i in range(1, 6)
+        ]
+        action = st.text_input("Countermeasure / next experiment", key="t028_action")
+        owner = st.text_input("Action owner", key="t028_owner")
+        due = st.date_input("Action due date", key="t028_due")
         if st.button("Analyze causes", key="t028_run", type="primary"):
             _run(st, tier, actor, "T028", lambda: root_cause_analysis(
                 causes.to_dict("records"), why_answers if any(why_answers) else [],
