@@ -16,7 +16,7 @@ from industrial_platform import (
     PLATFORM_CATALOG, TIER_FEATURES, tier_allows,
     init_platform_db, data_quality_report, model_health, scenario_table,
 )
-from shoir_tier_capabilities import normalize_tier, TIER_ORDER
+from shoir_tier_capabilities import normalize_tier, TIER_ORDER, tier_allows
 
 st.set_page_config(page_title="Shoir-IE Command Center", page_icon="🏭", layout="wide")
 
@@ -37,6 +37,11 @@ if _POLICY_TIER not in TIER_ORDER:
     st.title("Shoir-IE Industrial Decision Command Center")
     st.error("Your package could not be verified. Sign in again; protected platform views are unavailable until access is verified.")
     st.info("Return to the main Shoir-IE application page to sign in; this protected command center has been stopped.")
+    st.stop()
+
+if not tier_allows(_POLICY_TIER, "Enterprise"):
+    st.title("Shoir-IE Industrial Decision Command Center")
+    st.warning("The Command Center requires Enterprise-level access. This package can still use the tools available in its current Workbench.")
     st.stop()
 
 init_platform_db()
