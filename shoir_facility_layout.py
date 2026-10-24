@@ -103,6 +103,48 @@ def ensure_facility_schema() -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS facility_workspace_metadata(
+                owner TEXT NOT NULL,
+                workspace TEXT NOT NULL,
+                data_origin TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY(owner, workspace)
+            )
+            """
+        )
+        conn.commit()
+
+
+def _get_data_origin(owner: str, workspace: str) -> str:
+    ensure_facility_schema()
+    with _db() as conn:
+        row = conn.execute(
+            "SELECT data_origin FROM facility_workspace_metadata WHERE owner=? AND workspace=?",
+            (owner, workspace),
+        ).fetchone()
+    return str(row[0]) if row else "EXISTING_DATA_ORIGIN_UNVERIFIED"
+
+
+def _set_data_origin(owner: str, workspace: str, data_origin: str) -> None:
+    allowed = {
+        "SYNTHETIC_STARTER_DATA",
+        "USER_EDITED_OR_MIXED",
+        "IMPORTED_OR_UPSERTED",
+        "EXISTING_DATA_ORIGIN_UNVERIFIED",
+    }
+    if data_origin not in allowed:
+        raise ValueError("Unsupported facility data-origin status.")
+    ensure_facility_schema()
+    with _db() as conn:
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO facility_workspace_metadata(owner,workspace,data_origin,updated_at)
+            VALUES(?,?,?,?)
+            """,
+            (owner, workspace, data_origin, _now()),
+        )
         conn.commit()
 
 
@@ -161,6 +203,7 @@ def _save_departments(owner: str, workspace: str, rows: list[dict[str, Any]]) ->
 def _seed_or_migrate(owner: str, workspace: str) -> tuple[pd.DataFrame, pd.DataFrame]:
     depts = _load_departments(owner, workspace)
     flows = _load_flows(owner, workspace)
+    was_empty = depts.empty and flows.empty
     if depts.empty:
         legacy = st.session_state.get("facility_depts")
         rows = legacy if isinstance(legacy, list) and legacy else _default_departments()
@@ -186,9 +229,86 @@ def _seed_or_migrate(owner: str, workspace: str) -> tuple[pd.DataFrame, pd.DataF
                     )
                 conn.commit()
             flows = _load_flows(owner, workspace)
+    # Brand-new auto-populated examples are labelled synthetic. Existing rows
+    # predating the provenance table remain explicitly unverified.
+    with _db() as conn:
+        origin_row = conn.execute(
+            "SELECT data_origin FROM facility_workspace_metadata WHERE owner=? AND workspace=?",
+            (owner, workspace),
+        ).fetchone()
+    if origin_row is None:
+        _set_data_origin(
+            owner, workspace,
+            "SYNTHETIC_STARTER_DATA" if was_empty and not depts.empty else "EXISTING_DATA_ORIGIN_UNVERIFIED",
+        )
     st.session_state["facility_depts"] = depts.to_dict("records")
     st.session_state["facility_flows_df"] = flows.copy(deep=True)
     return depts, flows
+
+
+def _flow_distance_metrics(
+    flows: pd.DataFrame, cost_per_load_meter_sar: float | None = None
+) -> dict[str, Any]:
+    """Compute daily weighted flow-distance and optional uniform-rate cost."""
+    if flows is None or flows.empty:
+        if cost_per_load_meter_sar is not None:
+            rate = float(cost_per_load_meter_sar)
+            if not math.isfinite(rate) or rate <= 0:
+                raise ValueError("Handling cost rate must be finite and greater than zero.")
+        else:
+            rate = None
+        return {
+            "status": "NO_DATA",
+            "connection_count": 0,
+            "weighted_flow_distance_load_m_per_day": 0.0,
+            "cost_rate_sar_per_load_meter": rate,
+            "estimated_daily_handling_cost_sar": None,
+            "formula": "weighted flow-distance = sum(loads/day × distance in metres)",
+            "provenance": "No flow records are available.",
+            "warnings": ["Add validated directed flow records before interpreting flow-distance or handling cost."],
+        }
+    required = {"loads_day", "distance_m"}
+    if not required.issubset(flows.columns):
+        raise ValueError(f"Flow metrics require columns {sorted(required)}.")
+    weighted = 0.0
+    for index, row in flows.iterrows():
+        try:
+            loads = float(row["loads_day"])
+            distance = float(row["distance_m"])
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"Flow row {index!r} has a non-numeric load or distance.") from exc
+        if not math.isfinite(loads) or not math.isfinite(distance):
+            raise ValueError(f"Flow row {index!r} has a non-finite load or distance.")
+        if loads < 0 or distance < 0:
+            raise ValueError(f"Flow row {index!r} has a negative load or distance.")
+        weighted += loads * distance
+    if not math.isfinite(weighted):
+        raise ValueError("Weighted flow-distance is not finite; review input magnitudes.")
+    rate: float | None = None
+    estimated_cost: float | None = None
+    warnings = []
+    if cost_per_load_meter_sar is not None:
+        rate = float(cost_per_load_meter_sar)
+        if not math.isfinite(rate) or rate <= 0:
+            raise ValueError("Handling cost rate must be finite and greater than zero.")
+        estimated_cost = weighted * rate
+        if not math.isfinite(estimated_cost):
+            raise ValueError("Estimated handling cost is not finite; review rate and flow magnitudes.")
+        warnings.append(
+            "Cost is an estimate using one user-provided uniform SAR per load-metre rate for every flow; actual transport/handling differences are not modelled."
+        )
+    else:
+        warnings.append("Handling cost is not calculated until a positive, user-approved rate is supplied.")
+    return {
+        "status": "COMPLETED",
+        "connection_count": int(len(flows)),
+        "weighted_flow_distance_load_m_per_day": weighted,
+        "cost_rate_sar_per_load_meter": rate,
+        "estimated_daily_handling_cost_sar": estimated_cost,
+        "formula": "weighted flow-distance = Σ(loads/day × distance (m)); estimated daily cost = weighted flow-distance × user-supplied SAR per load-metre rate",
+        "provenance": "User/workspace flow records; no real-world cost rate is inferred.",
+        "warnings": warnings,
+    }
 
 
 def _distance(a: pd.Series, b: pd.Series) -> float:
