@@ -412,3 +412,36 @@ def test_workbench_runs_weibull_spares_safety_slotting_assignment_and_energy_met
             "SAVED_LOCAL_FALLBACK", "SAVED_MANAGED_WORKSPACE", "SESSION_ONLY",
             "SAVE_FAILED", "SAVE_PENDING", "SAVE_STATUS_NOT_CONFIRMED",
         }
+
+
+def test_workbench_runs_field_mapper_backlog_sop_and_supplier_methods():
+    from streamlit.testing.v1 import AppTest
+
+    page = ROOT / "pages" / "Industrial_Engineering_Workbench.py"
+    at = AppTest.from_file(page, default_timeout=90)
+    at.session_state["current_user"] = "operations-planning-checker"
+    at.session_state["authenticated"] = True
+    at.session_state["user_tier"] = "Enterprise Plus Tier"
+    at.run(timeout=90)
+    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+
+    cases = [
+        ("T015 · Industrial Field Mapper", "tool015_run", "T015", "mapped_or_suggested_count", 4),
+        ("T049 · Maintenance Backlog Optimizer", "tool049_run", "T049", "selected_count", 2),
+        ("T052 · Sales and Operations Planning", "tool052_run", "T052", "ending_inventory", 10.0),
+        ("T058 · Supplier Performance and Risk Scorecard", "tool058_run", "T058", "complete_score_count", 2),
+    ]
+    for label, button_key, tool_id, result_key, expected in cases:
+        at.selectbox(key="shoir_100_tool_inspector").select(label)
+        at.run(timeout=90)
+        assert not at.exception, f"{tool_id} selection raised: " + "\n".join(str(error.value) for error in at.exception)
+        at.button(key=button_key).click()
+        at.run(timeout=90)
+        assert not at.exception, f"{tool_id} run raised: " + "\n".join(str(error.value) for error in at.exception)
+        result = at.session_state.get(f"shoir_tool_result_{tool_id}")
+        assert result is not None, f"{tool_id} returned no result; visible errors: " + " | ".join(str(item.value) for item in at.error)
+        assert result[result_key] == pytest.approx(expected)
+        assert result.get("_workspace_persistence") in {
+            "SAVED_LOCAL_FALLBACK", "SAVED_MANAGED_WORKSPACE", "SESSION_ONLY",
+            "SAVE_FAILED", "SAVE_PENDING", "SAVE_STATUS_NOT_CONFIRMED",
+        }
