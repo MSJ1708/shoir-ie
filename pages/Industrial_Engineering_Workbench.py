@@ -380,7 +380,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                 "Copilot action, API and export path must enforce their own server-side entitlement checks."
             )
 
-            if selected_tool["tool_id"] in {"T013", "T016", "T017", "T018", "T019", "T021", "T022", "T023", "T026", "T028", "T029", "T030", "T031", "T032", "T034", "T040", "T042", "T055", "T056", "T066", "T070", "T075", "T078", "T081", "T085"}:
+            if selected_tool["tool_id"] in {"T013", "T016", "T017", "T018", "T019", "T021", "T022", "T023", "T026", "T028", "T029", "T030", "T031", "T032", "T034", "T040", "T042", "T055", "T056", "T066", "T070", "T075", "T078", "T081", "T082", "T084", "T085"}:
                 st.markdown("---")
                 st.markdown("**Run focused specialist method**")
                 st.caption(
@@ -662,6 +662,21 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                             queue_service_rate = st.number_input("Service rate (services per same time unit)", min_value=0.001, value=12.0, step=1.0, key="tool070_service")
                             queue_rate_unit = st.text_input("Rate time basis", "per minute", key="tool070_unit")
                             run_method = st.form_submit_button("Analyze M/M/1 queue", type="primary", use_container_width=True, key="tool070_run")
+                        elif selected_tool["tool_id"] == "T082":
+                            st.caption("Use consistent currency, period, volume basis and cost boundary for plan, standard and actual amounts. Positive actual-minus-plan/standard variance is treated as unfavorable.")
+                            cost_variance_csv = st.text_area("Cost detail CSV", key="tool082_csv", height=180)
+                            cost_category_column = st.text_input("Cost category column", "category", key="tool082_category")
+                            cost_plan_column = st.text_input("Plan/budget column", "plan", key="tool082_plan")
+                            cost_standard_column = st.text_input("Standard cost column", "standard", key="tool082_standard")
+                            cost_actual_column = st.text_input("Actual cost column", "actual", key="tool082_actual")
+                            cost_currency = st.text_input("Currency code", "SAR", key="tool082_currency")
+                            cost_period = st.text_input("Period / measurement window", key="tool082_period")
+                            run_method = st.form_submit_button("Reconcile cost variance", type="primary", use_container_width=True, key="tool082_run")
+                        elif selected_tool["tool_id"] == "T084":
+                            st.caption("Min-max normalized weighted scores are decision aids. Weights are subjective; adding or removing alternatives can change the scores.")
+                            portfolio_projects_json = st.text_area("Project alternatives (JSON list)", value='[{"name":"Option A","cost":100,"service":90,"risk":20},{"name":"Option B","cost":80,"service":70,"risk":25},{"name":"Option C","cost":120,"service":95,"risk":10}]', key="tool084_projects")
+                            portfolio_criteria_json = st.text_area("Criteria, positive weights and direction (JSON list)", value='[{"criterion":"cost","weight":0.4,"direction":"cost"},{"criterion":"service","weight":0.4,"direction":"benefit"},{"criterion":"risk","weight":0.2,"direction":"cost"}]', key="tool084_criteria")
+                            run_method = st.form_submit_button("Score project portfolio", type="primary", use_container_width=True, key="tool084_run")
                         else:
                             st.caption("Balanced, independent, two-sided two-sample t-test; normal outcomes and equal-variance assumptions.")
                             effect_size = st.number_input(
@@ -774,6 +789,10 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                         current_tool_inputs = {"aql_pct": sampling_aql_pct, "ltpd_pct": sampling_ltpd_pct, "producer_risk_pct": sampling_producer_risk_pct, "consumer_risk_pct": sampling_consumer_risk_pct, "max_sample_size": int(sampling_max_n), "max_acceptance_number": int(sampling_max_c)}
                     elif selected_tool["tool_id"] == "T070":
                         current_tool_inputs = {"arrival_rate": queue_arrival_rate, "service_rate": queue_service_rate, "rate_unit": queue_rate_unit}
+                    elif selected_tool["tool_id"] == "T082":
+                        current_tool_inputs = {"csv_text": cost_variance_csv, "category_column": cost_category_column, "plan_column": cost_plan_column, "standard_column": cost_standard_column, "actual_column": cost_actual_column, "currency": cost_currency, "period": cost_period}
+                    elif selected_tool["tool_id"] == "T084":
+                        current_tool_inputs = {"projects_json": portfolio_projects_json, "criteria_json": portfolio_criteria_json}
                     else:
                         current_tool_inputs = {
                             "cohen_d": effect_size, "alpha": alpha,
@@ -799,6 +818,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 analyze_abc_xyz_inventory, profile_dataframe, join_dataframes,
                                 process_time_series, generate_synthetic_industrial_data,
                                 plan_acceptance_sampling, analyze_mm1_queue,
+                                analyze_cost_variance, score_engineering_portfolio,
                             )
                             if selected_tool["tool_id"] == "T021":
                                 try:
@@ -1024,6 +1044,27 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 )
                             elif selected_tool["tool_id"] == "T070":
                                 result = analyze_mm1_queue(queue_arrival_rate, queue_service_rate, rate_unit=queue_rate_unit)
+                            elif selected_tool["tool_id"] == "T082":
+                                if not cost_variance_csv.strip():
+                                    raise ValueError("Paste a cost-detail CSV before calculating variance.")
+                                cost_frame = pd.read_csv(io.StringIO(cost_variance_csv))
+                                result = analyze_cost_variance(
+                                    cost_frame,
+                                    category_column=cost_category_column,
+                                    plan_column=cost_plan_column,
+                                    standard_column=cost_standard_column,
+                                    actual_column=cost_actual_column,
+                                    currency=cost_currency,
+                                    period=cost_period,
+                                )
+                                result["data_provenance"] = "USER_ENTERED_UNVERIFIED"
+                            elif selected_tool["tool_id"] == "T084":
+                                project_items = json.loads(portfolio_projects_json)
+                                criteria_items = json.loads(portfolio_criteria_json)
+                                if not isinstance(project_items, list) or not isinstance(criteria_items, list):
+                                    raise ValueError("Projects and criteria must each be JSON lists.")
+                                result = score_engineering_portfolio(project_items, criteria_items)
+                                result["data_provenance"] = "USER_ENTERED_UNVERIFIED"
                             else:
                                 result = plan_two_sample_t_sample_size(
                                     effect_size, alpha, target_power,
@@ -1278,7 +1319,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 markers=True, title="Forecasts versus later actuals",
                             )
                             st.plotly_chart(fig, use_container_width=True)
-                    elif selected_tool["tool_id"] in {"T013", "T017", "T018", "T019", "T034", "T070"}:
+                    elif selected_tool["tool_id"] in {"T013", "T017", "T018", "T019", "T034", "T070", "T082", "T084"}:
                         result = st.session_state.get("shoir_tool_result_" + selected_tool["tool_id"])
                         if result:
                             _show_focused_tool_persistence(selected_tool["tool_id"], result, current_tool_inputs)
@@ -1288,6 +1329,8 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 "T017": "joined_data",
                                 "T018": "series",
                                 "T019": "data",
+                                "T082": "variance_table",
+                                "T084": "ranking",
                             }.get(selected_tool["tool_id"])
                             result_frame = result.get(result_frame_key) if result_frame_key else None
                             if isinstance(result_frame, pd.DataFrame) and not result_frame.empty:
