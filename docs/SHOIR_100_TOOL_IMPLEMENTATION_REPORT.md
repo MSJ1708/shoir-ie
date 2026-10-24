@@ -18,7 +18,7 @@ These automation results do not change the release decision: **NO-GO for product
 
 This is an additive implementation tranche for the existing Shoir-IE app. It retains the current shell, established Workbench, public Explore Modules buying experience, legacy module IDs/routes, account and billing behavior. The new Engineering Tool Library is a separate sector grouped into the ten requested workbenches and linked from Workbench and public Explore Modules. Its public view is read-only; calculation actions and internal route diagnostics remain behind sign-in. It does not replace established navigation.
 
-No target is marked `VERIFIED_WORKING`. The grouped library now wires 20 distinct target IDs into 21 limited-validation method paths (T066 offers both bin packing and a separate cutting-stock MILP). Authenticated browser matrix, persistence/relogin, route/action/API/export enforcement, and full specialist validation remain release gates.
+No target is marked `VERIFIED_WORKING`. The grouped library now wires 28 distinct target IDs into 29 limited-validation method paths (T066 offers both bin packing and a separate cutting-stock MILP). Authenticated browser matrix, persistence/relogin, route/action/API/export enforcement, and full specialist validation remain release gates.
 
 ## Implemented in this tranche
 
@@ -26,7 +26,7 @@ No target is marked `VERIFIED_WORKING`. The grouped library now wires 20 distinc
 - `shoir_100_tool_registry.py`: fail-closed target access for unknown tools/tier labels, a separate readiness gate, stable-ID lookup, metadata audit and acceptance-state fields.
 - `shoir_tier_capabilities.py`: additive exports for target policy. Existing subscription routes, prices and legacy module contracts are not silently re-tiered.
 - `pages/Engineering_Tool_Library.py`: public read-only catalogue preview, tier/status filters and capability contracts; internal route diagnostics and calculation actions remain behind sign-in. Authenticated users receive the hand-off only to legacy Workbench routes available under their actual tier. Target status does not certify a legacy route.
-- `pages/Engineering_Tool_Library.py`, `shoir_100_tool_engines.py` and `shoir_100_tool_extended_engines.py` expose **25 limited-validation action paths across 24 target IDs**:
+- `pages/Engineering_Tool_Library.py`, `shoir_100_tool_engines.py` and `shoir_100_tool_extended_engines.py` expose **29 limited-validation action paths across 28 target IDs**:
   - **T013 — Data Quality Profiler:** non-destructive missingness, duplicate-row, type, numeric-summary and IQR-outlier profile; flags are review signals, not automatic repairs.
 - **T016 — Unit and Currency Converter:** documented physical-unit conversions; currency conversion requires a user-supplied sourced, dated exchange rate (not a live FX feed).
 - **T017 — Data Join and Merge Studio:** left/right/inner/outer preview with duplicate-key, cardinality, row-count and unmatched-input diagnostics; source tables remain unchanged.
@@ -35,6 +35,10 @@ No target is marked `VERIFIED_WORKING`. The grouped library now wires 20 distinc
   - **T021 — Time Study and Standard Time:** observed mean/median, rating-adjusted normal time, explicit allowance convention and standard time.
   - **T022 — Work Sampling Analyzer:** observed activity proportions with Wilson confidence intervals and conservative sample-size planning; sampling-frame representativeness remains a human responsibility.
   - **T023 — Takt Time and Capacity:** theoretical takt/capacity and capacity gap; the caller must supply compatible units and the same production period.
+  - **T024 — Production Line Balancer:** precedence-constrained Largest Eligible Task heuristic with station loads, line efficiency and station-limit warnings; not a global optimality proof.
+  - **T025 — Bottleneck and Constraint Analyzer:** compares a consistent cycle-time or measured-throughput basis, with separate inferred-vs-observed labels; low output is not causal proof.
+  - **T027 — Value Stream Mapping Studio (timing basis):** aggregates explicit cycle-time, waiting-time and WIP inputs into value-added time, lead time and process-cycle efficiency; not yet a complete material/information flow editor.
+  - **T070 — Queuing and Service-System Analyzer (M/M/1):** single-server steady-state queue metrics with stability checking; multi-server, finite-buffer and general-service models remain outside scope.
   - **T026 — OEE and Loss Analysis:** availability, performance, quality, OEE and sequential loss decomposition; plant-specific definitions still need review.
   - **T028 — Root-Cause Analysis Toolkit:** Pareto counts/cumulative share and 5-Why/action fields; frequency does not establish causation.
   - **T029 — 5S and Workplace Audit:** five-pillar scoring and owner/due-date follow-up gap flags; an editable self-assessment is not a certified audit.
@@ -51,7 +55,7 @@ No target is marked `VERIFIED_WORKING`. The grouped library now wires 20 distinc
   - **T078 — Carbon Emissions:** activity data multiplied by a user-supplied, sourced/versioned factor with scope and provenance disclosure; not an audited emissions statement.
   - **T081 — Engineering Economics:** discounted cash-flow NPV/IRR and simple payback under stated timing/currency assumptions.
   - **T085 — Statistical Power and Sample-Size Planner:** noncentral-t planning for balanced, independent two-sample t-tests under stated assumptions; other designs and multiplicity/dropout adjustments are not modeled.
-- The 24 wired target IDs show method/assumptions/warnings, stale-result labeling and CSV summaries/tables where the method emits structured outputs. The current UI gate also stops restricted targets before rendering actions and rechecks entitlement inside the calculation helper; a lower-tier denial regression is part of the passing suite. Bad inputs preserve the last successful session result. The new Tool Library's validation-mode results are session-only; durable project persistence is not claimed. Synthetic example inputs must remain labelled synthetic and are not evidence of industrial savings.
+- The 28 wired target IDs show method/assumptions/warnings, stale-result labeling and CSV summaries/tables where the method emits structured outputs. The current UI gate also stops restricted targets before rendering actions and rechecks entitlement inside the calculation helper; a lower-tier denial regression is part of the passing suite. Bad inputs preserve the last successful session result. The new Tool Library's validation-mode results are session-only; durable project persistence is not claimed. Synthetic example inputs must remain labelled synthetic and are not evidence of industrial savings.
 - `tests/test_shoir_100_tool_engines.py` and `tests/test_shoir_100_tool_extended_engines.py`: hand-calculated/golden fixtures for the original engines plus work-sampling intervals, Pareto cumulative shares, 5S scoring, Kaizen/A3 progress, SPC limits, quality-cost reconciliation, MTBF/MTTR, ABC/XYZ, drift statistics, sourced unit/currency conversion, two-sample t-test power and the kerf-aware cutting-stock MILP. Tests cover invalid/boundary inputs, non-mutation, timezone-aware durations, solver output and CSV parse/read-back assertions. Registry metadata links the targets to corresponding fixtures.
 - `shoir_copilot_orchestrator.py`: governed decision staging now fails closed if the enterprise approval/access-control module cannot be imported; `tests/test_shoir_copilot_orchestrator.py` contains a regression test for that case.
 - `tests/test_shoir_100_tool_registry.py`: 100 sequential stable IDs, required metadata, all 100 × six plan/package entitlement outcomes, fail-closed unknowns, Research Pack vs Enterprise Plus, alias-to-canonical authorization, display label identity and readiness rules.
@@ -61,7 +65,7 @@ No target is marked `VERIFIED_WORKING`. The grouped library now wires 20 distinc
 
 ## Current status counts
 
-Generated from the matrix after wiring the additional methods: 59 `IMPLEMENTED_NEEDS_VALIDATION`, 35 `FOUNDATION_ONLY`, 0 `MISSING`, 6 `EXTERNAL_CONFIGURATION_REQUIRED`, 0 `VERIFIED_WORKING` and 0 `BLOCKED`.
+Generated from the matrix after adding the bounded manufacturing and queueing methods: 61 `IMPLEMENTED_NEEDS_VALIDATION`, 33 `FOUNDATION_ONLY`, 0 `MISSING`, 6 `EXTERNAL_CONFIGURATION_REQUIRED`, 0 `VERIFIED_WORKING` and 0 `BLOCKED`.
 
 The 24 wired target IDs are `IMPLEMENTED_NEEDS_VALIDATION`, not `VERIFIED_WORKING`, because hosted authenticated end-to-end, durable persistence, full route/action enforcement and export acceptance are incomplete. Numerical fixture tests support the described method scope but do not certify all broader acceptance requirements. The other rows remain conservative source-triage statuses, and a matching legacy route is only a reuse candidate, not a verified specialist engine.
 
@@ -86,7 +90,7 @@ All following checks are green on implementation/test commit `9b51a17e878f5395b9
 The above does **not** prove live deployment health or authenticated behavior of every module:
 
 - The separate hosted `live-deployment-smoke` job was **SKIPPED**; it was not a pass.
-- A local Streamlit AppTest runs eleven newly wired method forms and the T066 cutting-stock action, and the same suite tests Starter-tier denial for Research Pack-only T085. This is not a substitute for authenticated hosted browser checks and workspace-persistence verification.
+- The follow-up adds local Streamlit AppTest coverage that runs the T024, T025, T027 and T070 forms and checks Starter-tier denial for T024, in addition to the existing target forms and T066 cutting-stock action. This is not a substitute for authenticated hosted browser checks and workspace-persistence verification.
 - All 100 hosted authenticated module walkthroughs remain **UNVERIFIED**. Durable save/relogin, cross-workspace isolation, direct legacy route/action/API/plugin/export enforcement, hosted downloads and real configured connectors remain open.
 - The container could not clone the repository via its network path; test results above are GitHub Actions results, not local full-repository pytest execution.
 - CSV serialization/read-back and engine method fixtures passed; hosted browser downloads plus shared XLSX/PDF/PPTX round-trip workflows have not been verified.
@@ -107,3 +111,15 @@ Existing Facility Layout source includes department CRUD, From-To/SLP matrices, 
 ## Final recommendation
 
 **NO-GO** for describing all 100 target capabilities as complete, fully working, workforce-ready or production-verified. The additive library and twenty-five focused method paths are a concrete implementation tranche, but current evidence does not satisfy the full completion gate in the master prompt.
+
+
+## Manufacturing methods follow-up — 2026-10-24
+
+This additive follow-up adds `shoir_100_tool_operations_engines.py` and exposes T024, T025, T027 and T070 inside the existing grouped Engineering Tool Library. It does not create four new top-level navigation items or replace the existing Workbench.
+
+- **T024:** line balancing validates task identity, duration, unknown predecessors and directed cycles before assigning tasks using a deterministic Largest Eligible Task heuristic. It reports the theoretical lower bound and explicitly warns that a station-limit overrun is not proof of infeasibility.
+- **T025:** bottleneck screening compares a single consistent cycle-time or measured-throughput basis. Inference and observation are distinguished in result status and explanation.
+- **T027:** the value-stream timing summary reports only entered cycle time, waiting time and WIP. Waiting is not silently inferred from demand/WIP; the result is not represented as a complete VSM map.
+- **T070:** an M/M/1 analytical queue model validates positive/stable rates and states Poisson/exponential/single-server assumptions. It does not claim multi-server or discrete-event simulation support.
+
+The follow-up adds hand-calculated unit fixtures, local Streamlit `AppTest` checks for the four forms, a Starter-denial regression for T024, and registry-to-matrix metadata updates. These capabilities remain `IMPLEMENTED_NEEDS_VALIDATION`; authenticated hosted-browser walkthroughs, durable persistence, full legacy route/action/export enforcement and hosted file round-trips remain unverified. The CI results for this follow-up commit are not asserted until the workflows finish.
