@@ -18,6 +18,7 @@ from shoir_100_tool_statistics_engines import ordinary_least_squares, supported_
 from shoir_100_tool_quality_engines import build_capa_8d_record, score_fmea_register
 from shoir_100_tool_asset_engines import plan_preventive_maintenance, plan_spare_part_criticality, score_supplier_performance
 from shoir_100_tool_sustainability_engines import analyze_energy_intensity, analyze_water_waste_efficiency, calculate_roi_evidence
+from shoir_100_tool_decision_engines import (build_hazard_register, reconcile_sop_scenario, solve_assignment_cost_matrix, compare_capacity_scenarios, score_project_portfolio, build_hypothesis_evidence_register, evaluate_kpi_thresholds)
 
 from shoir_100_tool_registry import (
     TOOL_TARGETS, TOOL_STATUSES, TOOL_TIER_ORDER, WORKBENCHES,
@@ -774,6 +775,23 @@ if rows:
                 }]), use_container_width=True, hide_index=True)
                 st.dataframe(pd.DataFrame(result.get("sensitivity", [])), use_container_width=True, hide_index=True)
 
+        elif selected_id == "T073":
+            st.warning("LIMITED VALIDATION MODE — deterministic capacity arithmetic, not discrete-event simulation. Results remain estimates under entered cycle time, availability and yield.")
+            st.markdown("### What-If Scenario Manager")
+            scenario_frame = st.data_editor(pd.DataFrame([
+                {"scenario_id":"Baseline","available_minutes_per_period":420.0,"cycle_time_minutes_per_unit":4.0,"yield_percent":95.0},
+                {"scenario_id":"Shorter cycle","available_minutes_per_period":420.0,"cycle_time_minutes_per_unit":3.5,"yield_percent":95.0},
+                {"scenario_id":"Added time","available_minutes_per_period":450.0,"cycle_time_minutes_per_unit":4.0,"yield_percent":95.0},
+            ]), num_rows="dynamic", use_container_width=True, key="t073_scenario_editor", hide_index=True)
+            scenario_ids = [str(v) for v in scenario_frame["scenario_id"].tolist()] if "scenario_id" in scenario_frame else []
+            c1, c2 = st.columns(2)
+            with c1:
+                baseline_id = st.selectbox("Baseline scenario", scenario_ids, key="t073_baseline") if scenario_ids else ""
+            with c2:
+                demand = st.number_input("Demand per period (good units)", min_value=0.0, value=100.0, step=10.0, key="t073_demand")
+            signature = _fingerprint(scenario_frame.to_json(orient="split", date_format="iso"), baseline_id, demand)
+            _run_engine_tool("T073", signature, "Compare capacity scenarios", lambda: compare_capacity_scenarios(scenario_frame, demand_units=demand, baseline_scenario_id=baseline_id))
+
         elif selected_id == "T075":
             st.warning("VALIDATION MODE — forecast thresholds alert on error; they do not diagnose cause or trigger retraining.")
             st.markdown("### Forecast and model drift monitor")
@@ -825,6 +843,36 @@ if rows:
             if saved and saved.get("signature") == signature:
                 st.json(saved["result"].get("evidence_ledger", {}))
                 st.info("The result's verified_savings field always remains false until a separate independent review process exists.")
+
+        elif selected_id == "T084":
+            st.warning("LIMITED VALIDATION MODE — multi-criteria scores and weights are judgment-based. Ranking is not ROI or a budget-constrained portfolio optimum.")
+            st.markdown("### Engineering Project Portfolio Scorer")
+            portfolio_frame = st.data_editor(pd.DataFrame([
+                {"project_id":"PR-01","project_name":"Line improvement","estimated_cost":1000.0,"impact_score":90.0,"strategic_fit_score":80.0,"feasibility_score":70.0,"confidence_score":60.0},
+                {"project_id":"PR-02","project_name":"Tooling upgrade","estimated_cost":500.0,"impact_score":80.0,"strategic_fit_score":90.0,"feasibility_score":90.0,"confidence_score":80.0},
+            ]), num_rows="dynamic", use_container_width=True, key="t084_portfolio_editor", hide_index=True)
+            c1, c2, c3, c4 = st.columns(4)
+            with c1:
+                w_impact = st.number_input("Impact weight", min_value=0.0, value=0.35, step=0.05, key="t084_w_impact")
+            with c2:
+                w_strategy = st.number_input("Strategic-fit weight", min_value=0.0, value=0.30, step=0.05, key="t084_w_strategy")
+            with c3:
+                w_feasible = st.number_input("Feasibility weight", min_value=0.0, value=0.20, step=0.05, key="t084_w_feasible")
+            with c4:
+                w_confidence = st.number_input("Confidence weight", min_value=0.0, value=0.15, step=0.05, key="t084_w_confidence")
+            currency = st.text_input("Cost currency code", "SAR", max_chars=3, key="t084_currency")
+            weights = {"impact_score":w_impact,"strategic_fit_score":w_strategy,"feasibility_score":w_feasible,"confidence_score":w_confidence}
+            signature = _fingerprint(portfolio_frame.to_json(orient="split", date_format="iso"), weights, currency)
+            _run_engine_tool("T084", signature, "Score project portfolio", lambda: score_project_portfolio(portfolio_frame, weights=weights, currency=currency))
+
+        elif selected_id == "T086":
+            st.warning("RESEARCH PACK · LIMITED VALIDATION MODE — this registers user-entered evidence links and review states; it does not fetch or independently authenticate cited sources.")
+            st.markdown("### Hypothesis and Evidence Register")
+            evidence_frame = st.data_editor(pd.DataFrame([
+                {"evidence_id":"E-001","claim_or_hypothesis":"Cycle time may improve after setup standardization","source_reference":"SYNTHETIC-DEMO-REF","method_or_run":"T036 / example run","review_state":"UNREVIEWED","reviewer":"","review_date":"","limitations":"Illustrative example; not plant evidence"},
+            ]), num_rows="dynamic", use_container_width=True, key="t086_evidence_editor", hide_index=True)
+            signature = _fingerprint(evidence_frame.to_json(orient="split", date_format="iso"))
+            _run_engine_tool("T086", signature, "Validate and save evidence register", lambda: build_hypothesis_evidence_register(evidence_frame))
 
         elif selected_id == "T085":
             st.warning("VALIDATION MODE — balanced independent two-sample t-test assumptions are not automatically verified.")
@@ -1063,6 +1111,16 @@ if rows:
             signature = _fingerprint(spares_frame.to_json(orient="split", date_format="iso"), operating_days, service_z)
             _run_engine_tool("T045", signature, "Calculate spare-parts reorder points", lambda: plan_spare_part_criticality(spares_frame, operating_days_per_year=operating_days, service_factor_z=service_z))
 
+        elif selected_id == "T047":
+            st.warning("LIMITED VALIDATION MODE — initial/residual ratings are human-entered screening scores. This is not a certified safety assessment or approval to accept residual risk.")
+            st.markdown("### Job Safety and Hazard Register")
+            hazard_frame = st.data_editor(pd.DataFrame([
+                {"hazard_id":"H-001","hazard":"Hot surface","potential_harm":"Burn","likelihood_1_to_5":4,"severity_1_to_5":4,"residual_likelihood_1_to_5":2,"residual_severity_1_to_5":4,"current_controls":"Guard and training","additional_controls":"Inspect guard","owner":"Safety lead","due_date":"2026-11-01","status":"Open"},
+                {"hazard_id":"H-002","hazard":"Pinch point","potential_harm":"Hand injury","likelihood_1_to_5":2,"severity_1_to_5":5,"residual_likelihood_1_to_5":3,"residual_severity_1_to_5":4,"current_controls":"Interlock","additional_controls":"Test interlock monthly","owner":"Maintenance","due_date":"2026-10-30","status":"In Progress"},
+            ]), num_rows="dynamic", use_container_width=True, key="t047_hazard_editor", hide_index=True)
+            signature = _fingerprint(hazard_frame.to_json(orient="split", date_format="iso"))
+            _run_engine_tool("T047", signature, "Score and save hazard register", lambda: build_hazard_register(hazard_frame))
+
         elif selected_id == "T051":
             st.warning("LIMITED VALIDATION MODE — compares only a naive last-value baseline and a rolling moving average; no seasonality, exogenous variables or prediction intervals are inferred.")
             st.markdown("### Demand forecasting studio")
@@ -1092,6 +1150,22 @@ if rows:
                     st.line_chart(fc.set_index("period_ahead")[["naive_last_value", "moving_average", "selected_forecast"]])
                     st.dataframe(fc, use_container_width=True, hide_index=True)
                 st.caption(f"Selected by holdout MAE: {metrics.get('selected_model_by_holdout_mae', '—')}")
+
+        elif selected_id == "T052":
+            st.warning("LIMITED VALIDATION MODE — aggregate S&OP reconciliation follows rows in the order entered. Material lead times, BOMs, detailed labor and finite-capacity constraints are not modeled.")
+            st.markdown("### Sales and Operations Planning")
+            sop_frame = st.data_editor(pd.DataFrame([
+                {"period":"P1","demand_units":100.0,"planned_production_units":90.0,"capacity_units":100.0},
+                {"period":"P2","demand_units":80.0,"planned_production_units":100.0,"capacity_units":90.0},
+                {"period":"P3","demand_units":100.0,"planned_production_units":90.0,"capacity_units":100.0},
+            ]), num_rows="dynamic", use_container_width=True, key="t052_sop_editor", hide_index=True)
+            c1, c2 = st.columns(2)
+            with c1:
+                opening_inventory = st.number_input("Starting inventory (units)", min_value=0.0, value=0.0, step=10.0, key="t052_open_inventory")
+            with c2:
+                opening_backlog = st.number_input("Starting backlog (units)", min_value=0.0, value=0.0, step=10.0, key="t052_open_backlog")
+            signature = _fingerprint(sop_frame.to_json(orient="split", date_format="iso"), opening_inventory, opening_backlog)
+            _run_engine_tool("T052", signature, "Reconcile demand, supply and capacity", lambda: reconcile_sop_scenario(sop_frame, starting_inventory_units=opening_inventory, starting_backlog_units=opening_backlog))
 
         elif selected_id == "T054":
             st.warning("LIMITED VALIDATION MODE — deterministic multilevel lot-for-lot MRP only. Pre-horizon releases are rejected; this is not a finite-capacity schedule.")
@@ -1241,6 +1315,18 @@ if rows:
                     st.metric("Internal rate of return", f'{m["IRR_percent"]:,.3f}%')
                 if m.get("simple_payback_periods") is not None:
                     st.metric("Simple payback", f'{m["simple_payback_periods"]:,.3f} {period_unit}s')
+
+        elif selected_id == "T063":
+            st.warning("LIMITED VALIDATION MODE — solves only the supplied square one-to-one cost matrix. Skills, precedence, calendars, setup times and broader schedule constraints are not included.")
+            st.markdown("### Assignment and Scheduling Optimizer")
+            assignment_frame = st.data_editor(pd.DataFrame({
+                "job":["Job A","Job B","Job C"],
+                "Machine 1":[4.0,2.0,3.0],
+                "Machine 2":[3.0,5.0,2.0],
+                "Machine 3":[6.0,4.0,1.0],
+            }), num_rows="dynamic", use_container_width=True, key="t063_assignment_matrix", hide_index=True)
+            signature = _fingerprint(assignment_frame.to_json(orient="split", date_format="iso"))
+            _run_engine_tool("T063", signature, "Solve one-to-one assignment", lambda: solve_assignment_cost_matrix(assignment_frame))
 
         elif selected_id == "T066":
             st.warning("LIMITED VALIDATION MODE — check the result against an independent reference before using it for an operational decision.")
@@ -1541,6 +1627,21 @@ if rows:
                     if isinstance(series, pd.DataFrame) and not series.empty and value_cols:
                         st.markdown("**Resampled trend**")
                         st.line_chart(series.set_index("timestamp_utc")[value_cols])
+
+        elif selected_id == "T094":
+            st.warning("LIMITED VALIDATION MODE — these are local threshold/freshness checks only. No live connector, alert delivery, cross-run deduplication or notification is implied.")
+            st.markdown("### KPI Dashboard and Alert Center")
+            kpi_frame = st.data_editor(pd.DataFrame([
+                {"metric_name":"Scrap","observed_value":8.0,"threshold":5.0,"direction":"ABOVE","unit":"%","last_updated_date":"2026-10-20","owner":"Quality"},
+                {"metric_name":"OEE","observed_value":70.0,"threshold":75.0,"direction":"BELOW","unit":"%","last_updated_date":"2026-10-01","owner":"Production"},
+            ]), num_rows="dynamic", use_container_width=True, key="t094_kpi_editor", hide_index=True)
+            c1, c2 = st.columns(2)
+            with c1:
+                as_of = st.text_input("As-of date (YYYY-MM-DD)", "2026-10-24", key="t094_as_of")
+            with c2:
+                stale_days = st.number_input("Stale after (calendar days)", min_value=0, value=7, step=1, key="t094_stale_days")
+            signature = _fingerprint(kpi_frame.to_json(orient="split", date_format="iso"), as_of, stale_days)
+            _run_engine_tool("T094", signature, "Evaluate KPI thresholds and freshness", lambda: evaluate_kpi_thresholds(kpi_frame, as_of_date=as_of, stale_after_days=int(stale_days)))
 
         elif selected_id == "T019":
             st.warning("SYNTHETIC ONLY — this generator creates practice data, not real industrial observations or verified benchmarks.")
