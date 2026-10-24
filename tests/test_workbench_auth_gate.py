@@ -62,3 +62,19 @@ def test_missing_tier_does_not_fall_back_to_enterprise_plus(page):
         for item in at.error
     )
     _assert_gate_stopped_protected_surface(at)
+
+
+
+def test_command_center_requires_enterprise_level_access():
+    page = ROOT / "pages" / "Industrial_Platform_Command_Center.py"
+    at = _run_page(
+        page,
+        authenticated=True,
+        current_user="disposable-command-center-test-user",
+        user_tier="Starter Tier",
+    )
+    assert any(
+        "requires Enterprise-level access" in str(item.value)
+        for item in at.warning
+    )
+    _assert_gate_stopped_protected_surface(at)
