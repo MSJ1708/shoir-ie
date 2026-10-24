@@ -1103,3 +1103,121 @@ def test_water_waste_processor_does_not_combine_unlike_measurement_periods():
     assert result["total_input_quantity"] is None
     assert result["overall_output_yield_pct"] is None
     assert result["process_balance_table"]["Balance closes"].all()
+
+
+def test_weibull_fit_reports_shape_scale_percentiles_and_censoring_limit():
+    from shoir_target_engines import analyze_weibull_reliability
+
+    probabilities = np.linspace(0.05, 0.95, 40)
+    observations = [1000 * (-np.log(1 - p)) ** 0.5 for p in probabilities]
+    result = analyze_weibull_reliability(observations)
+    assert result["status"] == "WEIBULL_FIT_UNCENSORED_DATA"
+    assert result["sample_size"] == 40
+    assert result["shape_beta"] > 0
+    assert result["scale_eta"] > 0
+    assert 1.3 < result["shape_beta"] < 2.7
+    assert 700 < result["scale_eta"] < 1300
+    assert result["B10_life"] == pytest.approx(result["scale_eta"] * (-np.log(0.90)) ** (1 / result["shape_beta"]))
+    assert "censored" in result["warning"].lower()
+    with pytest.raises(ValueError, match="at least five"):
+        analyze_weibull_reliability([1, 2, 3, 4])
+
+
+def test_spare_parts_criticality_reorder_screen_reconciles_stock_and_lead_time():
+    from shoir_target_engines import analyze_spare_parts_criticality
+
+    result = analyze_spare_parts_criticality([
+        {"part": "Bearing", "average_daily_demand": 2, "lead_time_days": 5,
+         "safety_stock": 10, "on_hand": 5, "scheduled_receipts": 0, "unit_cost": 20, "criticality_score": 5},
+        {"part": "Gasket", "average_daily_demand": 0.5, "lead_time_days": 2,
+         "safety_stock": 1, "on_hand": 10, "scheduled_receipts": 0, "unit_cost": 3, "criticality_score": 2},
+    ])
+    assert result["parts_below_reorder_point"] == 1
+    bearing = result["priority_table"].set_index("Part").loc["Bearing"]
+    assert bearing["Reorder point"] == pytest.approx(20)
+    assert bearing["Stock position"] == pytest.approx(5)
+    assert bearing["Suggested replenishment quantity"] == pytest.approx(15)
+    assert bearing["Replenishment value"] == pytest.approx(300)
+    assert result["estimated_replenishment_value"] == pytest.approx(300)
+    with pytest.raises(ValueError, match="criticality score"):
+        analyze_spare_parts_criticality([{"part": "Bad", "lead_time_days": 1, "criticality_score": 9}])
+
+
+def test_safety_incident_trends_calculate_rates_with_period_specific_denominators():
+    from shoir_target_engines import analyze_safety_incident_trends
+
+    result = analyze_safety_incident_trends([
+        {"period": "2026-Q1", "incidents_by_category": {"Slip": 2, "Cut": 1}, "work_hours": 20000, "lost_workdays": 4},
+        {"period": "2026-Q2", "incidents_by_category": {"Slip": 1, "Fatigue": 1}, "work_hours": 40000, "lost_workdays": 2},
+    ])
+    assert result["total_incidents"] == 5
+    assert result["total_lost_workdays"] == pytest.approx(6)
+    trend = result["period_trend"].set_index("Period")
+    assert trend.loc["2026-Q1", "Incident rate per base hours"] == pytest.approx(30)
+    assert trend.loc["2026-Q2", "Incident rate per base hours"] == pytest.approx(10)
+    assert result["category_breakdown"]["Incidents"].sum() == 5
+    with pytest.raises(ValueError, match="greater than zero"):
+        analyze_safety_incident_trends([{"period": "Q", "incidents_by_category": {"Slip": 1}, "work_hours": 0}])
+
+
+def test_warehouse_slotting_respects_compatibility_and_capacity():
+    from shoir_target_engines import optimize_warehouse_slotting
+
+    result = optimize_warehouse_slotting(
+        [
+            {"sku": "SKU-A", "picks_per_day": 10, "storage_units": 4, "compatibility_group": "food", "current_distance_m": 10},
+            {"sku": "SKU-B", "picks_per_day": 4, "storage_units": 9, "compatibility_group": "chemical", "current_distance_m": 20},
+        ],
+        [
+            {"slot_id": "near-food", "distance_m": 2, "capacity_units": 5, "compatibility_group": "food"},
+            {"slot_id": "near-chemical", "distance_m": 3, "capacity_units": 10, "compatibility_group": "chemical"},
+            {"slot_id": "far-general", "distance_m": 8, "capacity_units": 10, "compatibility_group": "*"},
+        ],
+    )
+    assert result["status"] == "SLOTTING_HEURISTIC_COMPLETE"
+    assert result["assigned_count"] == 2
+    assigned = result["assignments"].set_index("SKU")
+    assert assigned.loc["SKU-A", "Slot"] == "near-food"
+    assert assigned.loc["SKU-B", "Slot"] == "near-chemical"
+    assert (assigned["Required storage units"] <= assigned["Slot capacity units"]).all()
+    assert result["estimated_round_trip_distance_change_m_per_day"] == pytest.approx(-296)
+    with pytest.raises(ValueError, match="positive"):
+        optimize_warehouse_slotting([{"sku": "A", "picks_per_day": 1, "storage_units": 0}], [{"slot_id": "S", "distance_m": 1, "capacity_units": 2}])
+
+
+def test_linear_task_resource_assignment_finds_minimum_cost_and_reports_shortage():
+    from shoir_target_engines import optimize_task_resource_assignment
+
+    result = optimize_task_resource_assignment(
+        ["Task A", "Task B", "Task C"],
+        ["Worker 1", "Worker 2", "Worker 3"],
+        [[9, 2, 7], [6, 4, 3], [5, 8, 1]],
+    )
+    assert result["status"] == "OPTIMAL_ONE_TO_ONE_ASSIGNMENT"
+    assert result["total_assignment_cost"] == pytest.approx(9)
+    assert result["assigned_count"] == 3
+    shortage = optimize_task_resource_assignment(["A", "B"], ["R1"], [[1], [2]])
+    assert shortage["status"] == "PARTIAL_ASSIGNMENT_NEEDS_MORE_RESOURCES"
+    assert len(shortage["unassigned_tasks"]) == 1
+    with pytest.raises(ValueError, match="dimensions"):
+        optimize_task_resource_assignment(["A", "B"], ["R1"], [[1, 2]])
+
+
+def test_energy_scenario_comparison_ranks_intensity_without_claiming_live_control():
+    from shoir_target_engines import compare_energy_performance_scenarios
+
+    result = compare_energy_performance_scenarios(
+        {"name": "Baseline", "energy_kwh": 1000, "output_units": 100, "cost_per_kwh": 0.2, "emission_factor_kg_per_kwh": 0.5},
+        [
+            {"name": "Improved", "energy_kwh": 800, "output_units": 100, "cost_per_kwh": 0.2, "emission_factor_kg_per_kwh": 0.5},
+            {"name": "Lower volume", "energy_kwh": 700, "output_units": 70, "cost_per_kwh": 0.2, "emission_factor_kg_per_kwh": 0.5},
+        ],
+    )
+    assert result["status"] == "ENERGY_SCENARIOS_COMPARED"
+    assert result["baseline_energy_intensity_kwh_per_unit"] == pytest.approx(10)
+    assert result["best_intensity_scenario"] == "Improved"
+    improved = result["scenario_comparison"].set_index("Scenario").loc["Improved"]
+    assert improved["Energy intensity change vs baseline (%)"] == pytest.approx(-20)
+    assert improved["Energy cost change vs baseline (%)"] == pytest.approx(-20)
+    assert improved["Emissions change vs baseline (%)"] == pytest.approx(-20)
+    assert "does not control plant equipment" in result["warning"]
