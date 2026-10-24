@@ -620,3 +620,21 @@ def test_power_sample_size_planner_uses_noncentral_t_and_research_pack_boundary(
     assert "shoir_T085_result" not in denied.session_state
     with pytest.raises(KeyError):
         denied.button(key="T085_run_button")
+
+
+def test_research_methods_report_builds_downloadable_markdown_and_gates_tier():
+    at = _authed_library(tier="Research Pack")
+    _open(at, "T090", "Research Report and Methods Builder")
+    result = _run(at, "T090")
+    assert result["status"] == "REPORT_GENERATED"
+    assert result["report_markdown"].startswith("# ")
+    assert "Limitations" in result["report_markdown"]
+    assert result["raw_dataset_included"] is False
+    assert len(result["sha256"]) == 64
+
+    denied = _authed_library(tier="Enterprise Plus")
+    _open(denied, "T090", "Research Report and Methods Builder")
+    assert any("does not grant this target capability" in str(item.value).lower() for item in denied.warning)
+    assert "shoir_T090_result" not in denied.session_state
+    with pytest.raises(KeyError):
+        denied.button(key="T090_run_button")
