@@ -1088,3 +1088,18 @@ def test_water_waste_flow_balance_reconciles_and_refuses_mixed_units():
             {"process": "Wash", "input_quantity": 100, "product_output_quantity": 80, "waste_quantity": 20, "unit": "L"},
             {"process": "Cut", "input_quantity": 100, "product_output_quantity": 90, "waste_quantity": 10, "unit": "kg"},
         ])
+
+
+def test_water_waste_processor_does_not_combine_unlike_measurement_periods():
+    from shoir_target_engines import analyze_water_waste_efficiency
+
+    result = analyze_water_waste_efficiency([
+        {"process": "Wash", "input_quantity": 100, "product_output_quantity": 80,
+         "waste_quantity": 20, "unit": "L", "period": "2026-08"},
+        {"process": "Rinse", "input_quantity": 50, "product_output_quantity": 40,
+         "waste_quantity": 10, "unit": "L", "period": "2026-09"},
+    ])
+    assert result["status"] == "FLOW_BALANCE_CALCULATED_PER_PROCESS_ONLY"
+    assert result["total_input_quantity"] is None
+    assert result["overall_output_yield_pct"] is None
+    assert result["process_balance_table"]["Balance closes"].all()
