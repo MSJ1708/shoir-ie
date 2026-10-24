@@ -967,18 +967,51 @@ def _import_data(
                     row["reason"], row["transport"], _now(),
                 ),
             )
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO facility_workspace_metadata(owner,workspace,data_origin,updated_at)
+            VALUES(?,?,?,?)
+            """,
+            (owner, workspace, "IMPORTED_OR_UPSERTED", _now()),
+        )
         conn.commit()
 
     return len(department_rows), len(flow_rows)
 
-def _export_workbook(depts: pd.DataFrame, flows: pd.DataFrame, slp: pd.DataFrame) -> bytes:
+
+def _export_workbook(
+    depts: pd.DataFrame,
+    flows: pd.DataFrame,
+    slp: pd.DataFrame,
+    data_origin: str = "EXISTING_DATA_ORIGIN_UNVERIFIED",
+    cost_per_load_meter_sar: float | None = None,
+) -> bytes:
     out = io.BytesIO()
+    metrics = _flow_distance_metrics(flows, cost_per_load_meter_sar)
+    flow_metrics = pd.DataFrame([
+        {"Metric": "Status", "Value": metrics["status"]},
+        {"Metric": "Connection count", "Value": metrics["connection_count"]},
+        {"Metric": "Weighted flow-distance (load·m/day)", "Value": metrics["weighted_flow_distance_load_m_per_day"]},
+        {"Metric": "Handling rate (SAR/load·m)", "Value": metrics["cost_rate_sar_per_load_meter"]},
+        {"Metric": "Estimated handling cost (SAR/day)", "Value": metrics["estimated_daily_handling_cost_sar"]},
+        {"Metric": "Formula", "Value": metrics["formula"]},
+        {"Metric": "Provenance", "Value": metrics["provenance"]},
+        {"Metric": "Limitations / warnings", "Value": " ".join(metrics["warnings"])},
+    ])
+    provenance = pd.DataFrame([
+        {"Field": "Facility data-origin status", "Value": data_origin},
+        {"Field": "Export generated (UTC)", "Value": _now()},
+        {"Field": "Flow-distance definition", "Value": "Σ(Loads/day × distance in metres)"},
+        {"Field": "Handling-cost basis", "Value": "User-provided uniform rate per load-metre; omitted when no positive rate is configured."},
+        {"Field": "Interpretation", "Value": "An imported, edited, synthetic, or unverified dataset is not automatically validated plant data."},
+    ])
     with pd.ExcelWriter(out, engine="openpyxl") as writer:
         depts.to_excel(writer, index=False, sheet_name="Departments")
         flows.to_excel(writer, index=False, sheet_name="From_To_Flows")
         slp.to_excel(writer, index=False, sheet_name="SLP_Relationships")
-        matrix=_matrix(depts,slp)
-        matrix.to_excel(writer, sheet_name="SLP_Matrix")
+        _matrix(depts,slp).to_excel(writer, sheet_name="SLP_Matrix")
+        flow_metrics.to_excel(writer, index=False, sheet_name="Flow_Metrics")
+        provenance.to_excel(writer, index=False, sheet_name="Provenance")
     return out.getvalue()
 
 
