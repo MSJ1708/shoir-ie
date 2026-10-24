@@ -2615,7 +2615,7 @@ def reconcile_sop_plan(
             "Capacity overload": max(0.0, supply - cap),
             "Available to promise (before safety stock)": available,
             "Projected ending inventory": ending,
-            "Unmet demand/backlog": max(0.0, -ending),
+            "Backlog after period": max(0.0, -ending),
             "Safety-stock shortfall": max(0.0, stock_target - ending),
         })
         inventory = ending
@@ -2623,7 +2623,7 @@ def reconcile_sop_plan(
     warnings = []
     if (table["Capacity overload"] > 0).any():
         warnings.append("Planned supply exceeds the stated capacity in one or more periods.")
-    if (table["Unmet demand/backlog"] > 0).any():
+    if (table["Backlog after period"] > 0).any():
         warnings.append("Projected demand exceeds available inventory plus supply in one or more periods.")
     if (table["Safety-stock shortfall"] > 0).any():
         warnings.append("Projected ending inventory falls below the target safety stock in one or more periods.")
@@ -2634,7 +2634,8 @@ def reconcile_sop_plan(
         "total_demand": float(table["Demand"].sum()),
         "total_planned_supply": float(table["Planned supply"].sum()),
         "total_capacity_overload": float(table["Capacity overload"].sum()),
-        "total_unmet_demand": float(table["Unmet demand/backlog"].sum()),
+        "backlog_at_horizon_end": float(table["Backlog after period"].iloc[-1]),
+        "maximum_period_end_backlog": float(table["Backlog after period"].max()),
         "ending_inventory": float(table["Projected ending inventory"].iloc[-1]),
         "plan_table": table,
         "warnings": warnings or ["No overload, backlog or safety-stock shortfall was detected under the entered assumptions."],
