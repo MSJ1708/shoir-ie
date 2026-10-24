@@ -20,6 +20,7 @@ from shoir_100_tool_asset_engines import plan_preventive_maintenance, plan_spare
 from shoir_100_tool_sustainability_engines import analyze_energy_intensity, analyze_water_waste_efficiency, calculate_roi_evidence
 from shoir_100_tool_decision_engines import (build_hazard_register, reconcile_sop_scenario, solve_assignment_cost_matrix, compare_capacity_scenarios, score_project_portfolio, build_hypothesis_evidence_register, evaluate_kpi_thresholds)
 from shoir_100_tool_data_quality_engines import CANONICAL_INDUSTRIAL_FIELDS, map_industrial_fields, analyze_safety_incident_trends
+from shoir_100_tool_lineage_engines import build_dataset_lineage_record
 
 from shoir_100_tool_registry import (
     TOOL_TARGETS, TOOL_STATUSES, TOOL_TIER_ORDER, WORKBENCHES,
@@ -315,7 +316,67 @@ if rows:
                     "Your data was not changed. Use the normal Workbench navigation."
                 )
 
-        if selected_id == "T015":
+        if selected_id == "T020":
+            st.warning("LIMITED VALIDATION MODE — the hash detects changes in the supplied table and metadata. It is not a digital signature, proof of authenticity, or automatic control over all legacy downstream routes.")
+            st.markdown("### Dataset Versioning and Lineage")
+            st.caption("Record the dataset version, source metadata, transformations and any downstream runs whose dataset fingerprint you know. Raw dataset cells are not embedded in the lineage record.")
+            dataset_name = st.text_input("Dataset name", "Production Example", key="t020_dataset_name")
+            source_type = st.selectbox("Source provenance", ["IMPORTED", "LIVE", "SYNTHETIC", "USER_ENTERED"], index=2, key="t020_source_type")
+            source_reference = st.text_input("Source file / system reference", "synthetic-example.csv", key="t020_source_reference")
+            parent_version = st.text_input("Parent version ID (optional)", "", key="t020_parent_version")
+            dataset_frame = st.data_editor(pd.DataFrame({
+                "period":["P1","P2","P3"],
+                "units_produced":[100,110,95],
+                "downtime_minutes":[5.0,3.0,12.0],
+            }), num_rows="dynamic", use_container_width=True, key="t020_dataset_editor", hide_index=True)
+            transformations = st.data_editor(pd.DataFrame([
+                {"step":"01","operation":"Validate required columns","method_version":"1"},
+                {"step":"02","operation":"Review units and missing values","method_version":"1"},
+            ]), num_rows="dynamic", use_container_width=True, key="t020_transformations_editor", hide_index=True)
+            st.caption("Downstream run fingerprints are optional. Provide the exact dataset fingerprint recorded by a prior run; empty fingerprints cannot be declared current or stale.")
+            runs_frame = st.data_editor(pd.DataFrame(columns=["run_id","dataset_fingerprint"]), num_rows="dynamic",
+                                         use_container_width=True, key="t020_downstream_runs", hide_index=True)
+            signature = _fingerprint(
+                dataset_name, source_type, source_reference, parent_version,
+                dataset_frame.to_json(orient="split", date_format="iso"),
+                transformations.to_json(orient="split", date_format="iso"),
+                runs_frame.to_json(orient="split", date_format="iso"),
+            )
+            def _calculate_t020():
+                prior = list(st.session_state.get("shoir_dataset_lineage_versions", []))
+                record = build_dataset_lineage_record(
+                    dataset_frame, dataset_name=dataset_name, source_type=source_type,
+                    source_reference=source_reference, parent_version_id=parent_version,
+                    transformations=transformations.to_dict(orient="records"),
+                    downstream_runs=runs_frame,
+                    prior_versions=prior,
+                )
+                if not prior or prior[-1].get("version_id") != record["version_id"]:
+                    updated_history = [*prior, record][-100:]
+                    st.session_state["shoir_dataset_lineage_versions"] = updated_history
+                record["version_history_count"] = len(st.session_state.get("shoir_dataset_lineage_versions", []))
+                return record
+            saved = _run_engine_tool("T020", signature, "Create dataset version and check lineage", _calculate_t020)
+            if saved and saved.get("signature") == signature:
+                record = saved["result"]
+                st.metric("Dataset version", record["version_id"])
+                st.code(record["dataset_fingerprint"], language="text")
+                st.caption(
+                    f'{record["row_count"]:,} rows · {record["column_count"]:,} columns · '
+                    f'{record["metrics"]["transformation_count"]} transformations · '
+                    f'{record["metrics"]["stale_downstream_run_count"]} stale linked runs · '
+                    f'{record.get("version_history_count", 0)} versions retained in workspace state'
+                )
+                if record["metrics"]["changed_since_previous_version"]:
+                    st.warning("VERSION CHANGED — prior source/transform metadata or dataset content differs from the last recorded version.")
+                if record["stale_downstream_runs"]:
+                    st.dataframe(pd.DataFrame(record["stale_downstream_runs"]), use_container_width=True, hide_index=True)
+                if record["uncheckable_downstream_run_ids"]:
+                    st.info("Run freshness could not be evaluated for: " + ", ".join(record["uncheckable_downstream_run_ids"]))
+                st.dataframe(pd.DataFrame(record["schema"]), use_container_width=True, hide_index=True)
+                st.dataframe(pd.DataFrame(record["transformations"]), use_container_width=True, hide_index=True)
+
+        elif selected_id == "T015":
             st.warning("VALIDATION MODE — mapping suggestions are based on field names, not proven data semantics. Confirm units and business definitions before using downstream calculations.")
             st.markdown("### Industrial Field Mapper")
             st.caption("Original field names are retained. Upload an optional CSV or edit the synthetic example, then confirm each suggested canonical field.")
