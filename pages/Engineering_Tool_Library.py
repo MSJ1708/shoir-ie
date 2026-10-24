@@ -26,6 +26,14 @@ from shoir_100_tool_engines import (
 from shoir_100_tool_operations_engines import (
     analyze_bottleneck, analyze_mm1_queue, balance_production_line, build_value_stream_metrics,
 )
+from shoir_100_tool_planning_engines import (
+    evaluate_acceptance_sampling_plan, forecast_demand_series,
+    plan_material_requirements, simulate_monte_carlo_outcome,
+)
+# Existing method imports continue below.
+from shoir_100_tool_operations_engines import (
+    analyze_bottleneck, analyze_mm1_queue, balance_production_line, build_value_stream_metrics,
+)
 from shoir_100_tool_extended_engines import (
     analyze_abc_xyz_inventory, analyze_mtbf_mttr, analyze_pareto_root_cause,
     analyze_quality_cost_defects, analyze_spc_individuals, analyze_work_sampling,
@@ -378,6 +386,41 @@ if rows:
                 if isinstance(frame, pd.DataFrame) and not frame.empty and {"Observation", "Measurement"}.issubset(frame.columns):
                     st.line_chart(frame.set_index("Observation")["Measurement"])
 
+        elif selected_id == "T034":
+            st.warning("LIMITED VALIDATION MODE — this evaluates a supplied sampling plan and its operating-characteristic curve; it does not select a plan to satisfy a quality standard.")
+            st.markdown("### Acceptance sampling planner")
+            st.caption("Finite-lot, random sampling without replacement. AQL and LTPD risks depend on the supplied lot size, sample size and acceptance number.")
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                lot_size = st.number_input("Lot size (units)", min_value=1, max_value=10000000, value=1000, step=100, key="t034_lot")
+            with c2:
+                sample_size = st.number_input("Sample size (units)", min_value=1, max_value=int(lot_size), value=min(50, int(lot_size)), step=1, key="t034_sample")
+            with c3:
+                acceptance_number = st.number_input("Acceptance number c", min_value=0, max_value=max(0, int(sample_size)-1), value=min(1, max(0, int(sample_size)-1)), step=1, key="t034_accept")
+            c4, c5 = st.columns(2)
+            with c4:
+                aql = st.number_input("AQL reference (%)", min_value=0.0, max_value=99.0, value=1.0, step=0.5, key="t034_aql")
+            with c5:
+                ltpd = st.number_input("LTPD reference (%)", min_value=0.1, max_value=100.0, value=5.0, step=0.5, key="t034_ltpd")
+            signature = _fingerprint(int(lot_size), int(sample_size), int(acceptance_number), aql, ltpd)
+            saved = _run_engine_tool(
+                "T034", signature, "Evaluate single-sampling plan",
+                lambda: evaluate_acceptance_sampling_plan(int(lot_size), int(sample_size), int(acceptance_number), aql, ltpd),
+            )
+            if saved and saved["signature"] == signature:
+                result = saved["result"]
+                metrics = result.get("metrics", {})
+                st.dataframe(pd.DataFrame([{
+                    "P(accept | AQL)": metrics.get("probability_of_acceptance_at_aql"),
+                    "Producer risk α": metrics.get("producer_risk_at_aql"),
+                    "P(accept | LTPD)": metrics.get("probability_of_acceptance_at_ltpd"),
+                    "Consumer risk β": metrics.get("consumer_risk_at_ltpd"),
+                }]), use_container_width=True, hide_index=True)
+                oc = pd.DataFrame(result.get("operating_characteristic", []))
+                if not oc.empty:
+                    st.line_chart(oc.set_index("defective_percent")["probability_of_acceptance"])
+                st.caption("Percent defective is rounded to a whole defective-unit count for the finite lot; verify the required sampling standard before releasing lots.")
+
         elif selected_id == "T040":
             st.warning("VALIDATION MODE — scoped cost-of-poor-quality estimate, not a complete quality-cost ledger.")
             st.markdown("### Quality cost and defect analyzer")
@@ -439,6 +482,48 @@ if rows:
                     f"Mean queue wait: {metrics.get('mean_queue_wait', 0):.3f} h · "
                     f"Mean system time: {metrics.get('mean_time_in_system', 0):.3f} h"
                 )
+
+        elif selected_id == "T072":
+            st.warning("SYNTHETIC RISK MODEL — outcomes are simulated, not measured savings. Inputs are sampled independently; correlations are not inferred.")
+            st.markdown("### Monte Carlo risk simulator")
+            st.caption("Additive model: base outcome + sum(coefficient × sampled input). Use one outcome unit consistently.")
+            input_frame = st.data_editor(pd.DataFrame({
+                "Input": ["Demand units", "Downtime hours"],
+                "Distribution": ["uniform", "triangular"],
+                "Low": [800.0, 0.0], "Mode": [900.0, 2.0], "High": [1100.0, 6.0],
+                "Mean": [900.0, 2.0], "Std Dev": [50.0, 1.0],
+                "Coefficient": [100.0, -1500.0],
+            }), num_rows="dynamic", use_container_width=True, key="t072_inputs", hide_index=True)
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                base_outcome = st.number_input("Base outcome", value=100000.0, step=1000.0, key="t072_base")
+            with c2:
+                iterations = st.number_input("Iterations", min_value=100, max_value=200000, value=5000, step=1000, key="t072_iterations")
+            with c3:
+                seed = st.number_input("Reproducible random seed", min_value=0, max_value=4294967295, value=42, step=1, key="t072_seed")
+            inputs = [{
+                "name": row.get("Input"), "distribution": row.get("Distribution"),
+                "low": row.get("Low"), "mode": row.get("Mode"), "high": row.get("High"),
+                "mean": row.get("Mean"), "sd": row.get("Std Dev"), "coefficient": row.get("Coefficient"),
+            } for row in input_frame.to_dict(orient="records")]
+            signature = _fingerprint(input_frame.to_json(orient="split"), base_outcome, int(iterations), int(seed))
+            saved = _run_engine_tool(
+                "T072", signature, "Run seeded Monte Carlo simulation",
+                lambda: simulate_monte_carlo_outcome(inputs, base_outcome, int(iterations), int(seed)),
+            )
+            if saved and saved["signature"] == signature:
+                result = saved["result"]
+                metrics = result.get("metrics", {})
+                st.bar_chart(pd.DataFrame({
+                    "Simulation count": [row["count"] for row in result.get("histogram", [])],
+                }, index=[f"{row['bin_start']:.1f}–{row['bin_end']:.1f}" for row in result.get("histogram", [])]))
+                st.dataframe(pd.DataFrame([{
+                    "Mean": metrics.get("mean"), "Std. dev.": metrics.get("standard_deviation"),
+                    "P05": metrics.get("p05"), "Median": metrics.get("p50"), "P95": metrics.get("p95"),
+                    "P(outcome < 0)": metrics.get("probability_outcome_below_zero"),
+                    "Half-mean delta": metrics.get("half_mean_absolute_difference"),
+                }]), use_container_width=True, hide_index=True)
+                st.dataframe(pd.DataFrame(result.get("sensitivity", [])), use_container_width=True, hide_index=True)
 
         elif selected_id == "T075":
             st.warning("VALIDATION MODE — forecast thresholds alert on error; they do not diagnose cause or trigger retraining.")
@@ -662,6 +747,72 @@ if rows:
                 m = saved["result"]["metrics"]
                 st.bar_chart(pd.DataFrame({"Index": [m["Cp"], m["Cpk"], m["Pp"], m["Ppk"]]},
                                           index=["Cp", "Cpk", "Pp", "Ppk"]))
+
+        elif selected_id == "T051":
+            st.warning("LIMITED VALIDATION MODE — compares only a naive last-value baseline and a rolling moving average; no seasonality, exogenous variables or prediction intervals are inferred.")
+            st.markdown("### Demand forecasting studio")
+            st.caption("Enter chronological, equally spaced demand observations in one consistent unit. The tail holdout is evaluated walk-forward without random shuffling.")
+            observations_text = st.text_area("Demand observations (oldest to newest, comma-separated)", "10, 12, 14, 16, 18, 20", height=80, key="t051_observations")
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                horizon = st.number_input("Future periods", min_value=1, max_value=500, value=2, step=1, key="t051_horizon")
+            with c2:
+                holdout = st.number_input("Chronological holdout periods", min_value=1, max_value=1000, value=2, step=1, key="t051_holdout")
+            with c3:
+                window = st.number_input("Moving-average window", min_value=2, max_value=1000, value=2, step=1, key="t051_window")
+            signature = _fingerprint(observations_text, int(horizon), int(holdout), int(window))
+            def _calculate_t051():
+                values = [float(token.strip()) for token in observations_text.split(",") if token.strip()]
+                return forecast_demand_series(values, int(horizon), holdout_periods=int(holdout), moving_average_window=int(window))
+            saved = _run_engine_tool("T051", signature, "Compare demand forecasts", _calculate_t051)
+            if saved and saved["signature"] == signature:
+                result = saved["result"]
+                metrics = result.get("metrics", {})
+                st.dataframe(pd.DataFrame([
+                    {"Model": "Naive last value", **metrics.get("naive_last_value", {})},
+                    {"Model": f"Moving average ({metrics.get('moving_average_window')})", **metrics.get("moving_average", {})},
+                ]), use_container_width=True, hide_index=True)
+                fc = pd.DataFrame(result.get("forecast", []))
+                if not fc.empty:
+                    st.line_chart(fc.set_index("period_ahead")[["naive_last_value", "moving_average", "selected_forecast"]])
+                    st.dataframe(fc, use_container_width=True, hide_index=True)
+                st.caption(f"Selected by holdout MAE: {metrics.get('selected_model_by_holdout_mae', '—')}")
+
+        elif selected_id == "T054":
+            st.warning("LIMITED VALIDATION MODE — deterministic multilevel lot-for-lot MRP only. Pre-horizon releases are rejected; this is not a finite-capacity schedule.")
+            st.markdown("### Material requirements planner")
+            st.caption("Periods are integer buckets. BOM quantities are units per parent item. Components are required by the parent's planned-order release period.")
+            horizon = st.number_input("Planning horizon (periods)", min_value=1, max_value=520, value=6, step=1, key="t054_horizon")
+            bom_frame = st.data_editor(pd.DataFrame({
+                "Parent": ["PRODUCT", "PRODUCT", "COMP_A"],
+                "Component": ["COMP_A", "COMP_B", "RAW_X"],
+                "Quantity per parent": [2.0, 1.0, 3.0],
+            }), num_rows="dynamic", use_container_width=True, key="t054_bom", hide_index=True)
+            mps_frame = st.data_editor(pd.DataFrame({
+                "Item": ["PRODUCT", "PRODUCT"], "Period": [4, 5], "Demand": [10.0, 5.0],
+            }), num_rows="dynamic", use_container_width=True, key="t054_mps", hide_index=True)
+            c1, c2 = st.columns(2)
+            with c1:
+                inventory_json = st.text_area("On-hand inventory (JSON item: quantity)", '{"PRODUCT":0,"COMP_A":0,"COMP_B":0,"RAW_X":0}', height=90, key="t054_inventory")
+                lead_json = st.text_area("Lead times (JSON item: whole periods)", '{"PRODUCT":1,"COMP_A":1,"COMP_B":1,"RAW_X":1}', height=90, key="t054_leads")
+            with c2:
+                receipts_json = st.text_area("Scheduled receipts (JSON list)", '[]', height=90, key="t054_receipts")
+                st.info("Lot sizing is lot-for-lot. Review inventory, scheduled receipts and lead-time calendars before using planned releases.")
+            bom_rows = [{"parent": row.get("Parent"), "component": row.get("Component"), "quantity_per": row.get("Quantity per parent")} for row in bom_frame.to_dict(orient="records")]
+            mps_rows = [{"item": row.get("Item"), "period": row.get("Period"), "demand": row.get("Demand")} for row in mps_frame.to_dict(orient="records")]
+            signature = _fingerprint(bom_frame.to_json(orient="split"), mps_frame.to_json(orient="split"),
+                                     inventory_json, lead_json, receipts_json, int(horizon))
+            def _calculate_t054():
+                return plan_material_requirements(
+                    bom_rows, mps_rows, int(horizon), json.loads(inventory_json),
+                    json.loads(lead_json), json.loads(receipts_json),
+                )
+            saved = _run_engine_tool("T054", signature, "Calculate material requirements", _calculate_t054)
+            if saved and saved["signature"] == signature:
+                result = saved["result"]
+                st.dataframe(pd.DataFrame(result.get("period_plans", [])), use_container_width=True, hide_index=True)
+                st.markdown("**Planned order releases**")
+                st.dataframe(pd.DataFrame(result.get("planned_releases", [])), use_container_width=True, hide_index=True)
 
         elif selected_id == "T055":
             st.warning("LIMITED VALIDATION MODE — inventory policy output depends on the demand, lead-time and service assumptions entered here.")
