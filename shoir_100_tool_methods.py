@@ -12,7 +12,9 @@ from typing import Any, Mapping, Sequence
 
 import numpy as np
 import pandas as pd
-from scipy.stats import binom
+from scipy.stats import binom, weibull_min
+from scipy.special import gamma
+from statistics import NormalDist
 
 
 METHOD_VERSION = "1.0.0"
@@ -709,4 +711,193 @@ def abc_xyz_analysis(
         "warnings": ["Usage value covers only the selected demand periods; it is not annualized unless the source periods represent a year.",
                      "Zero-mean demand is classed Z because CV is undefined.",
                      "ABC/XYZ thresholds are editable business rules, not universal standards."],
+    }
+
+
+def bottleneck_analysis(operations: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """Compare station capacity from declared cycle time, available time, and downtime."""
+    if not isinstance(operations, Sequence) or isinstance(operations, (str, bytes)) or not operations:
+        raise ValueError("Provide at least one operation/station row.")
+    records, seen = [], set()
+    for i, op in enumerate(operations, 1):
+        if not isinstance(op, Mapping):
+            raise ValueError(f"Operation row {i} must be a mapping.")
+        name = str(op.get("operation", "")).strip()
+        cycle = _finite(op.get("cycle_time_seconds"), f"{name or i} cycle time")
+        available = _finite(op.get("available_hours"), f"{name or i} available hours")
+        downtime = _finite(op.get("downtime_hours", 0), f"{name or i} downtime")
+        observed = _finite(op.get("observed_units", 0), f"{name or i} observed units")
+        if not name or name in seen:
+            raise ValueError(f"Operation row {i} needs a unique name.")
+        if cycle <= 0 or available <= 0 or downtime < 0 or downtime >= available or observed < 0:
+            raise ValueError(f"{name} requires positive cycle/available time, downtime below available time, and non-negative observed units.")
+        seen.add(name)
+        capacity = (available - downtime) * 3600.0 / cycle
+        records.append({"operation": name, "cycle_time_seconds": cycle, "available_hours": available,
+                        "downtime_hours": downtime, "observed_units": observed,
+                        "estimated_capacity_units_per_window": capacity,
+                        "observed_vs_capacity_pct": observed/capacity*100.0})
+    frame = pd.DataFrame(records).sort_values(["estimated_capacity_units_per_window", "operation"], kind="stable").reset_index(drop=True)
+    frame["capacity_rank"] = np.arange(1, len(frame)+1)
+    frame["bottleneck_candidate"] = frame["capacity_rank"] == 1
+    return {
+        "status": "CAPACITY_SCREENED", "tool_id": "T025", "method_version": METHOD_VERSION,
+        "method": "Estimated capacity = (available hours − downtime hours) × 3600 / cycle time in seconds.",
+        "operations": frame, "bottleneck_candidate": str(frame.iloc[0]["operation"]),
+        "estimated_system_capacity_units_per_window": float(frame.iloc[0]["estimated_capacity_units_per_window"]),
+        "warnings": ["This is an input-based bottleneck candidate, not proof of the true system constraint.",
+                     "Use synchronized time windows, comparable product mix and measured queues/throughput."],
+    }
+
+
+def oee_analysis(planned_minutes: float, downtime_minutes: float, ideal_cycle_seconds: float,
+                 total_count: float, good_count: float) -> dict[str, Any]:
+    """Calculate OEE components with a warning when performance exceeds 100%."""
+    planned = _finite(planned_minutes, "Planned production minutes")
+    downtime = _finite(downtime_minutes, "Downtime minutes")
+    ideal = _finite(ideal_cycle_seconds, "Ideal cycle seconds")
+    total = _finite(total_count, "Total count")
+    good = _finite(good_count, "Good count")
+    if planned <= 0 or ideal <= 0 or downtime < 0 or downtime >= planned:
+        raise ValueError("Planned time and ideal cycle must be positive; downtime must be less than planned time.")
+    if total <= 0 or good < 0 or good > total:
+        raise ValueError("Total count must be positive and good count must be between zero and total count.")
+    operating = planned - downtime
+    availability = operating / planned
+    performance = (total * ideal / 60.0) / operating
+    quality = good / total
+    warnings = ["Time and counts must share one comparable production window; confirm the ideal-cycle standard."]
+    if performance > 1.0 + 1e-9:
+        warnings.append("Performance exceeds 100%; investigate units, standard cycle time and count boundaries. The value is not capped.")
+    return {
+        "status": "CALCULATED", "tool_id": "T026", "method_version": METHOD_VERSION,
+        "method": "Availability = operating/planned time; performance = ideal cycle × total count/operating time; quality = good/total; OEE = A×P×Q.",
+        "planned_minutes": planned, "downtime_minutes": downtime, "operating_minutes": operating,
+        "availability_pct": availability*100, "performance_pct": performance*100,
+        "quality_pct": quality*100, "oee_pct": availability*performance*quality*100,
+        "total_count": total, "good_count": good, "defect_count": total-good,
+        "warnings": warnings,
+    }
+
+
+def weibull_reliability(failure_times: Sequence[Any]) -> dict[str, Any]:
+    """Fit a 2-parameter Weibull to positive, uncensored failure-time observations."""
+    if not isinstance(failure_times, Sequence) or isinstance(failure_times, (str, bytes)) or len(failure_times) < 3:
+        raise ValueError("Provide at least three observed positive failure times.")
+    data = np.asarray([_finite(x, "Failure time") for x in failure_times], dtype=float)
+    if (data <= 0).any():
+        raise ValueError("Failure times must be positive and use a consistent time unit.")
+    beta, _, eta = weibull_min.fit(data, floc=0.0)
+    if not np.isfinite(beta) or not np.isfinite(eta) or beta <= 0 or eta <= 0:
+        raise ValueError("Weibull fitting did not return positive parameters.")
+    b = lambda p: float(eta * (-math.log(1-p))**(1/beta))
+    return {
+        "status": "FITTED", "tool_id": "T041", "method_version": METHOD_VERSION,
+        "method": "Two-parameter Weibull maximum likelihood with location fixed at zero; assumes uncensored observations.",
+        "sample_size": len(data), "shape_beta": float(beta), "scale_eta": float(eta),
+        "B10": b(0.10), "B50": b(0.50), "B90": b(0.90),
+        "theoretical_mean_life": float(eta * gamma(1.0 + 1.0/beta)),
+        "empirical_mean_failure_time": float(data.mean()),
+        "warnings": ["Censored and still-operating assets are not supported and may bias the fit if omitted.",
+                     "Percentile life estimates are distribution-based estimates, not guarantees for an individual asset."],
+    }
+
+
+def bin_pack_1d(item_lengths: Sequence[Any], stock_length: float, kerf: float = 0.0) -> dict[str, Any]:
+    """First-fit-decreasing one-dimensional bin/cutting heuristic."""
+    stock, saw = _finite(stock_length, "Stock length"), _finite(kerf, "Kerf")
+    if stock <= 0 or saw < 0:
+        raise ValueError("Stock length must be positive and kerf cannot be negative.")
+    if not isinstance(item_lengths, Sequence) or isinstance(item_lengths, (str, bytes)) or not item_lengths:
+        raise ValueError("Provide at least one item length.")
+    items = [(_finite(x, f"Item {i} length"), i) for i, x in enumerate(item_lengths, 1)]
+    if any(x <= 0 or x > stock for x, _ in items):
+        raise ValueError("Each item length must be positive and not exceed stock length.")
+    bins: list[list[tuple[float, int]]] = []
+    for length, idx in sorted(items, key=lambda x: (-x[0], x[1])):
+        placed = False
+        for bucket in bins:
+            used_eff = sum(x+saw for x, _ in bucket)
+            if used_eff + length + saw <= stock+saw+1e-9:
+                bucket.append((length, idx)); placed = True; break
+        if not placed:
+            bins.append([(length, idx)])
+    rows = []
+    for i, bucket in enumerate(bins, 1):
+        piece = sum(x for x, _ in bucket)
+        waste = stock-piece-saw*max(0, len(bucket)-1)
+        rows.append({"stock_id": i, "item_indices": ", ".join(str(idx) for _, idx in sorted(bucket, key=lambda x:x[1])),
+                     "item_count": len(bucket), "piece_length_total": piece,
+                     "kerf_total": saw*max(0,len(bucket)-1), "waste_length": waste,
+                     "utilization_pct": (piece+saw*max(0,len(bucket)-1))/stock*100})
+    total_piece = sum(x for x,_ in items)
+    total_kerf = saw*sum(max(0,len(bucket)-1) for bucket in bins)
+    total_stock = stock*len(bins)
+    return {
+        "status": "HEURISTIC_PACKED", "tool_id": "T066", "method_version": METHOD_VERSION,
+        "method": "First-fit-decreasing 1D heuristic; output is feasible for declared lengths but not guaranteed globally optimal.",
+        "stock_length": stock, "kerf": saw, "item_count": len(items), "stock_count": len(bins),
+        "total_piece_length": total_piece, "total_kerf": total_kerf,
+        "total_waste_length": total_stock-total_piece-total_kerf,
+        "overall_utilization_pct": (total_piece+total_kerf)/total_stock*100.0,
+        "stocks": pd.DataFrame(rows),
+        "warnings": ["Grain, trim, defects, clamp zones, cut sequence and dimensional tolerances are not modeled."],
+    }
+
+
+def forecast_drift_report(actuals: Sequence[Any], predictions: Sequence[Any],
+                          max_abs_bias: float, max_mape_pct: float) -> dict[str, Any]:
+    """Compare paired later actuals with predictions and flag explicit bias/MAPE limits."""
+    if not isinstance(actuals, Sequence) or isinstance(actuals, (str, bytes)) or not isinstance(predictions, Sequence) or isinstance(predictions, (str, bytes)):
+        raise ValueError("Actuals and predictions must be numeric sequences.")
+    if len(actuals) != len(predictions) or len(actuals) < 2:
+        raise ValueError("Actuals and predictions must have equal length and at least two observations.")
+    actual = np.asarray([_finite(x, "Actual value") for x in actuals], dtype=float)
+    predicted = np.asarray([_finite(x, "Prediction") for x in predictions], dtype=float)
+    bias_limit, mape_limit = _finite(max_abs_bias, "Bias threshold"), _finite(max_mape_pct, "MAPE threshold")
+    if bias_limit < 0 or mape_limit < 0:
+        raise ValueError("Drift thresholds cannot be negative.")
+    error = predicted-actual
+    abs_error = np.abs(error)
+    nonzero = actual != 0
+    mape = float(np.mean(abs_error[nonzero]/np.abs(actual[nonzero]))*100) if nonzero.any() else None
+    flagged = abs(float(error.mean())) > bias_limit or (mape is not None and mape > mape_limit)
+    return {
+        "status": "DRIFT_FLAGGED" if flagged else "WITHIN_DECLARED_THRESHOLDS",
+        "tool_id": "T075", "method_version": METHOD_VERSION,
+        "method": "Paired bias, MAE, RMSE and MAPE; MAPE excludes zero actual values.",
+        "observations": len(actual), "bias_prediction_minus_actual": float(error.mean()),
+        "mae": float(abs_error.mean()), "rmse": float(np.sqrt(np.mean(error**2))),
+        "mape_pct_nonzero_actuals": mape, "zero_actual_count_excluded_from_mape": int((~nonzero).sum()),
+        "abs_bias_threshold": bias_limit, "mape_threshold_pct": mape_limit,
+        "observations_table": pd.DataFrame({"index": np.arange(1,len(actual)+1), "actual": actual,
+                                            "prediction": predicted, "error": error, "absolute_error": abs_error}),
+        "warnings": ["Use an out-of-time evaluation window not used for fitting/tuning the model.",
+                     "Thresholds are process-specific; a drift flag is not proof of root cause."],
+    }
+
+
+def two_sample_mean_power(effect_size: float, population_std: float,
+                          alpha: float = 0.05, desired_power: float = 0.80) -> dict[str, Any]:
+    """Normal approximation for two independent means with equal allocation and variance."""
+    effect = abs(_finite(effect_size, "Minimum detectable difference"))
+    std = _finite(population_std, "Population standard deviation")
+    alpha_value = _finite(alpha, "Alpha")
+    power = _finite(desired_power, "Desired power")
+    if effect <= 0 or std <= 0 or not 0 < alpha_value < 1 or not 0.5 < power < 1:
+        raise ValueError("Effect and standard deviation must be positive; alpha in (0,1), power in (0.5,1).")
+    normal = NormalDist()
+    zcrit, zpower = normal.inv_cdf(1-alpha_value/2), normal.inv_cdf(power)
+    n = int(math.ceil(2*((zcrit+zpower)*std/effect)**2))
+    shift = effect*math.sqrt(n/(2*std**2))
+    achieved = 1-normal.cdf(zcrit-shift)+normal.cdf(-zcrit-shift)
+    return {
+        "status": "PLANNED", "tool_id": "T085", "method_version": METHOD_VERSION,
+        "method": "Two-sided normal approximation for two independent group means with equal sizes and common standard deviation.",
+        "minimum_detectable_difference": effect, "population_standard_deviation": std,
+        "alpha": alpha_value, "desired_power": power,
+        "sample_size_per_group": n, "total_sample_size": 2*n,
+        "normal_approximation_achieved_power": float(achieved),
+        "warnings": ["Assumes independent observations, equal allocation, common variance and an approximately normal estimator.",
+                     "No attrition, cluster design, unequal variance or multiple-comparison adjustment is included."],
     }
