@@ -156,3 +156,43 @@ def test_lower_tier_cannot_render_or_execute_research_only_tool():
     with pytest.raises(KeyError):
         at.button(key="T085_run_button")
 
+
+
+def test_new_data_tools_render_and_run_in_validation_mode():
+    at = _authed_library()
+
+    _open(at, "T013", "Data Quality Profiler")
+    profile = _run(at, "T013")
+    assert profile["status"] == "PROFILED"
+    assert profile["metrics"]["row_count"] == 5
+    assert profile["metrics"]["missing_cell_count"] == 1
+
+    _open(at, "T017", "Data Join and Merge Studio")
+    joined = _run(at, "T017")
+    assert joined["status"] == "PREVIEWED"
+    assert joined["metrics"]["output_rows"] == 3
+    assert joined["metrics"]["unmatched_right_input_rows"] == 1
+
+    _open(at, "T018", "Time-Series Data Processor")
+    processed = _run(at, "T018")
+    assert processed["status"] == "PROCESSED"
+    assert processed["metrics"]["duplicate_timestamp_rows"] == 2
+    assert processed["metrics"]["missing_intervals"] == 1
+
+    _open(at, "T019", "Synthetic Industrial Data Generator")
+    synthetic = _run(at, "T019")
+    assert synthetic["status"] == "GENERATED_SYNTHETIC"
+    assert synthetic["source"] == "SYNTHETIC"
+    assert len(synthetic["dataset"]) == 100
+    assert set(synthetic["dataset"]["data_status"]) == {"SYNTHETIC"}
+
+
+def test_lower_tier_cannot_run_mid_tier_join_preview():
+    from streamlit.testing.v1 import AppTest
+
+    at = _authed_library(tier="Starter")
+    _open(at, "T017", "Data Join and Merge Studio")
+    assert any("does not grant this target capability" in str(item.value).lower() for item in at.warning)
+    assert "shoir_T017_result" not in at.session_state
+    with pytest.raises(KeyError):
+        at.button(key="T017_run_button")
