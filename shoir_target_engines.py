@@ -2731,22 +2731,30 @@ def analyze_water_waste_efficiency(process_flows: Sequence[Mapping[str, Any]]) -
     if len(units) != 1:
         raise ValueError("All process quantities must use the same unit; convert units before combining results.")
     frame = pd.DataFrame(rows)
-    total_in = float(frame["Input quantity"].sum())
-    total_out = float(frame["Product output quantity"].sum())
-    total_waste = float(frame["Waste quantity"].sum())
-    total_balance = total_in - total_out - total_waste
+    common_period = len(periods) == 1
+    if common_period:
+        total_in = float(frame["Input quantity"].sum())
+        total_out = float(frame["Product output quantity"].sum())
+        total_waste = float(frame["Waste quantity"].sum())
+        total_balance = total_in - total_out - total_waste
+        overall_yield = total_out / total_in * 100.0 if total_in > 0 else 0.0
+        overall_waste_intensity = total_waste / total_in * 100.0 if total_in > 0 else 0.0
+    else:
+        # Cross-period totals/rates are not comparable without a common time basis.
+        total_in = total_out = total_waste = total_balance = None
+        overall_yield = overall_waste_intensity = None
     return {
-        "status": "FLOW_BALANCE_CALCULATED",
+        "status": "FLOW_BALANCE_CALCULATED" if common_period else "FLOW_BALANCE_CALCULATED_PER_PROCESS_ONLY",
         "process_count": len(frame),
-        "measurement_period": next(iter(periods)) if len(periods) == 1 else "MIXED — interpret each process separately",
+        "measurement_period": next(iter(periods)) if common_period else "MIXED — only per-process results are aggregated",
         "unit": next(iter(units)),
         "total_input_quantity": total_in,
         "total_product_output_quantity": total_out,
         "total_waste_quantity": total_waste,
         "total_unreconciled_balance": total_balance,
-        "overall_output_yield_pct": total_out / total_in * 100.0,
-        "overall_waste_intensity_pct": total_waste / total_in * 100.0,
+        "overall_output_yield_pct": overall_yield,
+        "overall_waste_intensity_pct": overall_waste_intensity,
         "all_process_balances_close": bool(frame["Balance closes"].all()),
         "process_balance_table": frame,
-        "warning": "This is a scoped material/water flow balance. Confirm identical measurement boundaries, density/concentration basis where relevant, measurement periods and loss streams; a non-zero balance needs investigation, not automatic allocation.",
+        "warning": "This is a scoped material/water flow balance. Confirm identical measurement boundaries, density/concentration basis where relevant, measurement periods and loss streams; cross-period totals are omitted when measurement periods differ. A non-zero balance needs investigation, not automatic allocation.",
     }
