@@ -901,3 +901,33 @@ def two_sample_mean_power(effect_size: float, population_std: float,
         "warnings": ["Assumes independent observations, equal allocation, common variance and an approximately normal estimator.",
                      "No attrition, cluster design, unequal variance or multiple-comparison adjustment is included."],
     }
+
+
+def mtbf_mttr_analysis(events: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """Calculate MTBF/MTTR from completed failure intervals with declared uptime and repair time."""
+    if not isinstance(events, Sequence) or isinstance(events, (str, bytes)) or not events:
+        raise ValueError("Provide at least one completed failure/repair interval.")
+    rows = []
+    for index, event in enumerate(events, 1):
+        if not isinstance(event, Mapping):
+            raise ValueError(f"Interval {index} must be a mapping.")
+        uptime = _finite(event.get("uptime_hours"), f"Interval {index} uptime")
+        repair = _finite(event.get("repair_hours"), f"Interval {index} repair time")
+        if uptime < 0 or repair < 0 or (uptime == 0 and repair == 0):
+            raise ValueError(f"Interval {index} needs non-negative uptime/repair time and cannot have both zero.")
+        rows.append({"interval": index, "uptime_hours": uptime, "repair_hours": repair})
+    details = pd.DataFrame(rows)
+    uptime_total = float(details["uptime_hours"].sum())
+    repair_total = float(details["repair_hours"].sum())
+    n = len(details)
+    availability = uptime_total / (uptime_total + repair_total) if uptime_total + repair_total > 0 else None
+    return {
+        "status": "CALCULATED", "tool_id": "T042", "method_version": METHOD_VERSION,
+        "method": "MTBF = summed uptime / number of completed failures; MTTR = summed repair time / completed repairs; interval availability = uptime / (uptime + repair time).",
+        "intervals": details, "failure_count": n, "total_uptime_hours": uptime_total,
+        "total_repair_hours": repair_total, "mtbf_hours": uptime_total/n if uptime_total > 0 else None,
+        "mttr_hours": repair_total/n,
+        "interval_availability_pct": None if availability is None else availability*100.0,
+        "warnings": ["Intervals must be complete and from the same observation scope.",
+                     "Censoring, confidence intervals and failure-mode stratification are not included."],
+    }
