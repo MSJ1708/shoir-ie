@@ -380,7 +380,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                 "Copilot action, API and export path must enforce their own server-side entitlement checks."
             )
 
-            if selected_tool["tool_id"] in {"T016", "T021", "T022", "T023", "T026", "T028", "T029", "T030", "T031", "T032", "T040", "T042", "T055", "T056", "T066", "T075", "T078", "T081", "T085"}:
+            if selected_tool["tool_id"] in {"T013", "T016", "T017", "T018", "T019", "T021", "T022", "T023", "T026", "T028", "T029", "T030", "T031", "T032", "T034", "T040", "T042", "T055", "T056", "T066", "T070", "T075", "T078", "T081", "T085"}:
                 st.markdown("---")
                 st.markdown("**Run focused specialist method**")
                 st.caption(
@@ -620,6 +620,48 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                             economics_currency = st.text_input("Currency code", "SAR", key="tool081_currency")
                             economics_period = st.selectbox("Cash-flow period unit", ["years", "months", "quarters", "weeks", "days"], index=0, key="tool081_period")
                             run_method = st.form_submit_button("Calculate project economics", type="primary", use_container_width=True, key="tool081_run")
+                        elif selected_tool["tool_id"] == "T013":
+                            st.caption("Paste a CSV sample to profile it. The source is not cleaned or modified; IQR flags are diagnostic only.")
+                            profile_csv = st.text_area("CSV data to profile", key="tool013_csv", height=180)
+                            run_method = st.form_submit_button("Profile data quality", type="primary", use_container_width=True, key="tool013_run")
+                        elif selected_tool["tool_id"] == "T017":
+                            st.caption("Paste two CSV tables and select their join keys. Many-to-many joins are blocked to prevent unexpected row expansion.")
+                            left_csv = st.text_area("Left table CSV", key="tool017_left_csv", height=150)
+                            right_csv = st.text_area("Right table CSV", key="tool017_right_csv", height=150)
+                            left_join_key = st.text_input("Left key column", key="tool017_left_key")
+                            right_join_key = st.text_input("Right key column", key="tool017_right_key")
+                            join_how = st.selectbox("Join type", ["left", "inner", "right", "outer"], key="tool017_how")
+                            run_method = st.form_submit_button("Preview and join tables", type="primary", use_container_width=True, key="tool017_run")
+                        elif selected_tool["tool_id"] == "T018":
+                            st.caption("Timestamps without offsets are interpreted in the selected timezone. Invalid or DST-ambiguous local times are excluded and counted.")
+                            timeseries_csv = st.text_area("Time-series CSV", key="tool018_csv", height=180)
+                            timestamp_col = st.text_input("Timestamp column", "timestamp", key="tool018_timestamp")
+                            value_cols_text = st.text_input("Numeric value columns (comma-separated)", "output_units, energy_kwh", key="tool018_values")
+                            timezone_name = st.text_input("IANA timezone", "Asia/Riyadh", key="tool018_timezone")
+                            resample_frequency = st.text_input("Optional resampling frequency (e.g. 1h, 1D; leave blank to retain observations)", key="tool018_frequency")
+                            ts_aggregation = st.selectbox("Resampling aggregation", ["mean", "sum", "min", "max", "median"], key="tool018_aggregation")
+                            duplicate_policy = st.selectbox("Duplicate timestamp policy", ["mean", "keep", "error"], key="tool018_duplicates")
+                            run_method = st.form_submit_button("Process time series", type="primary", use_container_width=True, key="tool018_run")
+                        elif selected_tool["tool_id"] == "T019":
+                            st.caption("Generated records are deterministic SYNTHETIC teaching data; they are not plant telemetry or verified benchmark data.")
+                            synthetic_rows = st.number_input("Rows to generate", min_value=1, max_value=100000, value=250, step=50, key="tool019_rows")
+                            synthetic_seed = st.number_input("Reproducibility seed", min_value=0, max_value=2147483647, value=42, step=1, key="tool019_seed")
+                            run_method = st.form_submit_button("Generate synthetic industrial data", type="primary", use_container_width=True, key="tool019_run")
+                        elif selected_tool["tool_id"] == "T034":
+                            st.caption("Large-lot binomial approximation only. This is not a claim of compliance with any specific ISO/ANSI/ASQ acceptance standard.")
+                            sampling_aql_pct = st.number_input("AQL defect fraction (%)", min_value=0.01, max_value=99.0, value=1.0, step=0.25, key="tool034_aql")
+                            sampling_ltpd_pct = st.number_input("LTPD defect fraction (%)", min_value=0.02, max_value=99.9, value=5.0, step=0.5, key="tool034_ltpd")
+                            sampling_producer_risk_pct = st.number_input("Maximum producer risk (%)", min_value=0.1, max_value=99.0, value=5.0, step=1.0, key="tool034_alpha")
+                            sampling_consumer_risk_pct = st.number_input("Maximum consumer risk (%)", min_value=0.1, max_value=99.0, value=10.0, step=1.0, key="tool034_beta")
+                            sampling_max_n = st.number_input("Maximum sample size to search", min_value=1, max_value=5000, value=1500, step=100, key="tool034_maxn")
+                            sampling_max_c = st.number_input("Maximum acceptance number to search", min_value=0, max_value=100, value=50, step=5, key="tool034_maxc")
+                            run_method = st.form_submit_button("Plan acceptance sampling", type="primary", use_container_width=True, key="tool034_run")
+                        elif selected_tool["tool_id"] == "T070":
+                            st.caption("M/M/1 is the only model implemented here: Poisson arrivals, exponential service, one FIFO server and a steady-state check.")
+                            queue_arrival_rate = st.number_input("Arrival rate (arrivals per time unit)", min_value=0.001, value=10.0, step=1.0, key="tool070_arrival")
+                            queue_service_rate = st.number_input("Service rate (services per same time unit)", min_value=0.001, value=12.0, step=1.0, key="tool070_service")
+                            queue_rate_unit = st.text_input("Rate time basis", "per minute", key="tool070_unit")
+                            run_method = st.form_submit_button("Analyze M/M/1 queue", type="primary", use_container_width=True, key="tool070_run")
                         else:
                             st.caption("Balanced, independent, two-sided two-sample t-test; normal outcomes and equal-variance assumptions.")
                             effect_size = st.number_input(
@@ -720,6 +762,18 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                         current_tool_inputs = {"operating_hours": mtbf_operating_hours, "repair_durations_hours_text": repair_durations_text}
                     elif selected_tool["tool_id"] == "T056":
                         current_tool_inputs = {"items_json": inventory_items_json, "currency": inventory_currency, "a_threshold": abc_a_threshold, "b_threshold": abc_b_threshold, "x_cv_max": xyz_x_cutoff, "y_cv_max": xyz_y_cutoff}
+                    elif selected_tool["tool_id"] == "T013":
+                        current_tool_inputs = {"csv_text": profile_csv}
+                    elif selected_tool["tool_id"] == "T017":
+                        current_tool_inputs = {"left_csv": left_csv, "right_csv": right_csv, "left_key": left_join_key, "right_key": right_join_key, "join_type": join_how}
+                    elif selected_tool["tool_id"] == "T018":
+                        current_tool_inputs = {"csv_text": timeseries_csv, "timestamp_column": timestamp_col, "value_columns": value_cols_text, "timezone": timezone_name, "frequency": resample_frequency, "aggregation": ts_aggregation, "duplicate_policy": duplicate_policy}
+                    elif selected_tool["tool_id"] == "T019":
+                        current_tool_inputs = {"row_count": int(synthetic_rows), "seed": int(synthetic_seed)}
+                    elif selected_tool["tool_id"] == "T034":
+                        current_tool_inputs = {"aql_pct": sampling_aql_pct, "ltpd_pct": sampling_ltpd_pct, "producer_risk_pct": sampling_producer_risk_pct, "consumer_risk_pct": sampling_consumer_risk_pct, "max_sample_size": int(sampling_max_n), "max_acceptance_number": int(sampling_max_c)}
+                    elif selected_tool["tool_id"] == "T070":
+                        current_tool_inputs = {"arrival_rate": queue_arrival_rate, "service_rate": queue_service_rate, "rate_unit": queue_rate_unit}
                     else:
                         current_tool_inputs = {
                             "cohen_d": effect_size, "alpha": alpha,
@@ -727,11 +781,8 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                         }
 
                     if run_method:
-                        # Remove only the in-session output before a new run. The last
-                        # successful saved workspace snapshot remains intact if this run fails.
-                        st.session_state.pop("shoir_tool_result_" + selected_tool["tool_id"], None)
-                        st.session_state.pop("shoir_tool_inputs_" + selected_tool["tool_id"], None)
-                        st.session_state.pop("shoir_tool_save_status_" + selected_tool["tool_id"], None)
+                        # Keep the last successful result visible until a replacement run succeeds.
+                        # The input fingerprint below labels it stale when inputs change or a run fails.
                         try:
                             _require_focused_tool_actor()
                             require_tool_access(RAW_TIER, selected_tool["tool_id"])
@@ -745,7 +796,9 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 calculate_carbon_emissions, analyze_engineering_economics,
                                 convert_units_or_currency, analyze_spc_individuals,
                                 analyze_quality_cost_defects, analyze_mtbf_mttr,
-                                analyze_abc_xyz_inventory,
+                                analyze_abc_xyz_inventory, profile_dataframe, join_dataframes,
+                                process_time_series, generate_synthetic_industrial_data,
+                                plan_acceptance_sampling, analyze_mm1_queue,
                             )
                             if selected_tool["tool_id"] == "T021":
                                 try:
@@ -931,6 +984,46 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 if not isinstance(inventory_items, list):
                                     raise ValueError("SKU data must be a JSON list of objects.")
                                 result = analyze_abc_xyz_inventory(inventory_items, a_threshold=abc_a_threshold, b_threshold=abc_b_threshold, x_cv_max=xyz_x_cutoff, y_cv_max=xyz_y_cutoff, currency=inventory_currency)
+                            elif selected_tool["tool_id"] == "T013":
+                                if not profile_csv.strip():
+                                    raise ValueError("Paste a CSV table before profiling.")
+                                result = profile_dataframe(pd.read_csv(io.StringIO(profile_csv)))
+                                result["data_provenance"] = "USER_ENTERED_UNVERIFIED"
+                            elif selected_tool["tool_id"] == "T017":
+                                if not left_csv.strip() or not right_csv.strip():
+                                    raise ValueError("Paste both left and right CSV tables before joining.")
+                                left_frame = pd.read_csv(io.StringIO(left_csv))
+                                right_frame = pd.read_csv(io.StringIO(right_csv))
+                                result = join_dataframes(left_frame, right_frame, left_key=left_join_key, right_key=right_join_key, how=join_how)
+                                result["data_provenance"] = "USER_ENTERED_UNVERIFIED"
+                            elif selected_tool["tool_id"] == "T018":
+                                if not timeseries_csv.strip():
+                                    raise ValueError("Paste a time-series CSV before processing.")
+                                timeseries_frame = pd.read_csv(io.StringIO(timeseries_csv))
+                                value_columns = [column.strip() for column in value_cols_text.split(",") if column.strip()]
+                                result = process_time_series(
+                                    timeseries_frame,
+                                    timestamp_column=timestamp_col,
+                                    value_columns=value_columns,
+                                    local_timezone=timezone_name,
+                                    frequency=resample_frequency or None,
+                                    aggregation=ts_aggregation,
+                                    duplicate_policy=duplicate_policy,
+                                )
+                                result["data_provenance"] = "USER_ENTERED_UNVERIFIED"
+                            elif selected_tool["tool_id"] == "T019":
+                                result = generate_synthetic_industrial_data(row_count=int(synthetic_rows), seed=int(synthetic_seed))
+                            elif selected_tool["tool_id"] == "T034":
+                                result = plan_acceptance_sampling(
+                                    aql_fraction=sampling_aql_pct / 100.0,
+                                    ltpd_fraction=sampling_ltpd_pct / 100.0,
+                                    producer_risk=sampling_producer_risk_pct / 100.0,
+                                    consumer_risk=sampling_consumer_risk_pct / 100.0,
+                                    max_sample_size=int(sampling_max_n),
+                                    max_acceptance_number=int(sampling_max_c),
+                                )
+                            elif selected_tool["tool_id"] == "T070":
+                                result = analyze_mm1_queue(queue_arrival_rate, queue_service_rate, rate_unit=queue_rate_unit)
                             else:
                                 result = plan_two_sample_t_sample_size(
                                     effect_size, alpha, target_power,
@@ -1185,6 +1278,26 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 markers=True, title="Forecasts versus later actuals",
                             )
                             st.plotly_chart(fig, use_container_width=True)
+                    elif selected_tool["tool_id"] in {"T013", "T017", "T018", "T019", "T034", "T070"}:
+                        result = st.session_state.get("shoir_tool_result_" + selected_tool["tool_id"])
+                        if result:
+                            _show_focused_tool_persistence(selected_tool["tool_id"], result, current_tool_inputs)
+                            render_engineering_result(result, selected_tool["canonical_name"], "target_" + selected_tool["tool_id"])
+                            result_frame_key = {
+                                "T013": "column_profile",
+                                "T017": "joined_data",
+                                "T018": "series",
+                                "T019": "data",
+                            }.get(selected_tool["tool_id"])
+                            result_frame = result.get(result_frame_key) if result_frame_key else None
+                            if isinstance(result_frame, pd.DataFrame) and not result_frame.empty:
+                                st.download_button(
+                                    "Download result CSV",
+                                    data=result_frame.to_csv(index=False).encode("utf-8"),
+                                    file_name=f"shoir_ie_{selected_tool['tool_id'].lower()}_result.csv",
+                                    mime="text/csv",
+                                    key="download_" + selected_tool["tool_id"],
+                                )
                     elif selected_tool["tool_id"] == "T085":
                         result = st.session_state.get("shoir_tool_result_T085")
                         if result:
