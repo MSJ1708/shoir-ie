@@ -380,7 +380,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                 "Copilot action, API and export path must enforce their own server-side entitlement checks."
             )
 
-            if selected_tool["tool_id"] in {"T016", "T021", "T022", "T023", "T026", "T028", "T029", "T030", "T031", "T032", "T040", "T042", "T055", "T056", "T066", "T075", "T078", "T081", "T085"}:
+            if selected_tool["tool_id"] in {"T016", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T038", "T040", "T042", "T055", "T056", "T066", "T070", "T075", "T078", "T081", "T082", "T083", "T085"}:
                 st.markdown("---")
                 st.markdown("**Run focused specialist method**")
                 st.caption(
@@ -620,7 +620,73 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                             economics_currency = st.text_input("Currency code", "SAR", key="tool081_currency")
                             economics_period = st.selectbox("Cash-flow period unit", ["years", "months", "quarters", "weeks", "days"], index=0, key="tool081_period")
                             run_method = st.form_submit_button("Calculate project economics", type="primary", use_container_width=True, key="tool081_run")
-                        else:
+                        elif selected_tool["tool_id"] == "T024":
+                            st.caption("Greedy precedence-feasible heuristic, not a global optimum proof. JSON task rows are illustrative only.")
+                            line_tasks_json = st.text_area(
+                                "Tasks (JSON list: task_id, duration, optional predecessors)",
+                                value='[{"task_id":"A","duration":2,"predecessors":[]},{"task_id":"B","duration":3,"predecessors":[]},{"task_id":"C","duration":2,"predecessors":["A"]},{"task_id":"D","duration":1,"predecessors":["B","C"]}]',
+                                key="tool024_tasks",
+                            )
+                            line_cycle_time = st.number_input("Station cycle-time limit", min_value=0.001, value=5.0, step=0.5, key="tool024_cycle")
+                            line_time_unit = st.selectbox("Task time unit", ["seconds", "minutes", "hours"], index=1, key="tool024_unit")
+                            run_method = st.form_submit_button("Balance production line", type="primary", use_container_width=True, key="tool024_run")
+                        elif selected_tool["tool_id"] == "T025":
+                            st.caption("Capacity comparison only; capacities must share the same period, product mix and units. Example data are synthetic.")
+                            bottleneck_processes_json = st.text_area(
+                                "Process capacity data (JSON list: process and capacity)",
+                                value='[{"process":"Cutting","capacity":110},{"process":"Welding","capacity":80},{"process":"Packing","capacity":95}]',
+                                key="tool025_processes",
+                            )
+                            bottleneck_demand = st.number_input("Required demand per period", min_value=0.001, value=90.0, step=5.0, key="tool025_demand")
+                            bottleneck_period = st.text_input("Capacity period / unit label", "units/shift", key="tool025_period")
+                            run_method = st.form_submit_button("Identify capacity constraint", type="primary", use_container_width=True, key="tool025_run")
+                        elif selected_tool["tool_id"] == "T027":
+                            st.caption("First-pass VSM estimate using WIP / required flow rate plus availability-adjusted process time. Validate the process sequence and data boundaries.")
+                            vsm_steps_json = st.text_area(
+                                "Process steps (JSON list: step, cycle_time, changeover_time, batch_size, uptime_pct, wip_units, value_added)",
+                                value='[{"step":"Machine","cycle_time":1,"changeover_time":20,"batch_size":10,"uptime_pct":95,"wip_units":25,"value_added":true},{"step":"Inspect","cycle_time":2,"changeover_time":0,"batch_size":1,"uptime_pct":98,"wip_units":10,"value_added":false}]',
+                                key="tool027_steps",
+                            )
+                            vsm_demand = st.number_input("Demand per production period (whole units)", min_value=1, value=100, step=10, key="tool027_demand")
+                            vsm_available_time = st.number_input("Available time in same period", min_value=0.001, value=480.0, step=30.0, key="tool027_available")
+                            vsm_time_unit = st.selectbox("Time unit", ["seconds", "minutes", "hours"], index=1, key="tool027_unit")
+                            run_method = st.form_submit_button("Calculate value-stream lead time", type="primary", use_container_width=True, key="tool027_run")
+                        elif selected_tool["tool_id"] == "T038":
+                            st.caption("RPN bands are screening conventions, not a universal standard. High severity is flagged separately even when RPN is low.")
+                            fmea_json = st.text_area(
+                                "Failure modes (JSON list: failure_mode, severity, occurrence, detection, effect, cause, controls, action, owner, due_date)",
+                                value='[{"failure_mode":"Bearing failure","effect":"Unplanned line stop","cause":"Lubrication loss","existing_controls":"Preventive inspection","severity":8,"occurrence":4,"detection":5,"action":"Review lubrication interval","owner":"","due_date":""}]',
+                                key="tool038_fmea",
+                            )
+                            run_method = st.form_submit_button("Rank FMEA risks", type="primary", use_container_width=True, key="tool038_run")
+                        elif selected_tool["tool_id"] == "T070":
+                            st.caption("Analytical M/M/1 model only; arrivals and service are assumed Poisson/exponential with one stable server.")
+                            queue_arrival_rate = st.number_input("Arrival rate (entities per time unit)", min_value=0.0, value=4.0, step=0.5, key="tool070_arrival")
+                            queue_service_rate = st.number_input("Service rate (entities per time unit)", min_value=0.001, value=6.0, step=0.5, key="tool070_service")
+                            queue_time_unit = st.selectbox("Rate time unit", ["hours", "minutes", "days"], index=0, key="tool070_unit")
+                            run_method = st.form_submit_button("Analyze M/M/1 queue", type="primary", use_container_width=True, key="tool070_run")
+                        elif selected_tool["tool_id"] == "T082":
+                            st.caption("Direct-material variance only. Positive variance is adverse; negative is favorable. Replace all defaults with one comparable measured period.")
+                            cost_standard_qty_per_unit = st.number_input("Standard input quantity per output unit", min_value=0.001, value=2.0, step=0.1, key="tool082_std_qty")
+                            cost_actual_output = st.number_input("Actual output quantity (whole units)", min_value=1, value=100, step=10, key="tool082_output")
+                            cost_actual_input = st.number_input("Actual input quantity", min_value=0.0, value=210.0, step=5.0, key="tool082_actual_qty")
+                            cost_standard_price = st.number_input("Standard unit cost", min_value=0.0, value=5.0, step=0.25, key="tool082_std_price")
+                            cost_actual_price = st.number_input("Actual unit cost", min_value=0.0, value=6.0, step=0.25, key="tool082_actual_price")
+                            cost_currency = st.text_input("Currency code", "SAR", key="tool082_currency")
+                            cost_period = st.text_input("Measurement period", "Example period — replace with actual period", key="tool082_period")
+                            run_method = st.form_submit_button("Reconcile cost variance", type="primary", use_container_width=True, key="tool082_run")
+                        elif selected_tool["tool_id"] == "T083":
+                            st.caption("The arithmetic is computed from user-entered costs. Evidence references and a verifier are not treated as proof that savings were realized.")
+                            roi_baseline = st.number_input("Comparable baseline cost", min_value=0.0, value=1000.0, step=50.0, key="tool083_baseline")
+                            roi_post = st.number_input("Comparable post-change cost", min_value=0.0, value=700.0, step=50.0, key="tool083_post")
+                            roi_implementation = st.number_input("Implementation cost", min_value=0.0, value=100.0, step=25.0, key="tool083_implementation")
+                            roi_currency = st.text_input("Currency code", "SAR", key="tool083_currency")
+                            roi_window = st.text_input("Measurement window", key="tool083_window")
+                            roi_baseline_evidence = st.text_input("Baseline evidence reference", key="tool083_baseline_evidence")
+                            roi_outcome_evidence = st.text_input("Post-change evidence reference", key="tool083_outcome_evidence")
+                            roi_verifier = st.text_input("Independent verifier / reviewer", key="tool083_verifier")
+                            run_method = st.form_submit_button("Calculate ROI (verification remains required)", type="primary", use_container_width=True, key="tool083_run")
+                        elif selected_tool["tool_id"] == "T085":
                             st.caption("Balanced, independent, two-sided two-sample t-test; normal outcomes and equal-variance assumptions.")
                             effect_size = st.number_input(
                                 "Standardized effect size (Cohen's d)", min_value=0.001,
@@ -710,6 +776,20 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                         current_tool_inputs = {"activity_amount": carbon_amount, "activity_unit": carbon_unit, "emission_factor": carbon_factor, "factor_unit": carbon_factor_unit, "factor_source": carbon_source, "factor_date": carbon_date, "boundary": carbon_boundary}
                     elif selected_tool["tool_id"] == "T081":
                         current_tool_inputs = {"cash_flows_text": economics_cash_flows, "discount_rate_pct": economics_rate, "currency": economics_currency, "period_unit": economics_period}
+                    elif selected_tool["tool_id"] == "T024":
+                        current_tool_inputs = {"tasks_json": line_tasks_json, "cycle_time": line_cycle_time, "time_unit": line_time_unit}
+                    elif selected_tool["tool_id"] == "T025":
+                        current_tool_inputs = {"processes_json": bottleneck_processes_json, "demand_units_per_period": bottleneck_demand, "period_label": bottleneck_period}
+                    elif selected_tool["tool_id"] == "T027":
+                        current_tool_inputs = {"steps_json": vsm_steps_json, "demand_units_per_period": vsm_demand, "available_time_per_period": vsm_available_time, "time_unit": vsm_time_unit}
+                    elif selected_tool["tool_id"] == "T038":
+                        current_tool_inputs = {"failure_modes_json": fmea_json}
+                    elif selected_tool["tool_id"] == "T070":
+                        current_tool_inputs = {"arrival_rate_per_time": queue_arrival_rate, "service_rate_per_time": queue_service_rate, "time_unit": queue_time_unit}
+                    elif selected_tool["tool_id"] == "T082":
+                        current_tool_inputs = {"standard_quantity_per_unit": cost_standard_qty_per_unit, "actual_output_units": cost_actual_output, "actual_input_quantity": cost_actual_input, "standard_unit_cost": cost_standard_price, "actual_unit_cost": cost_actual_price, "currency": cost_currency, "period": cost_period}
+                    elif selected_tool["tool_id"] == "T083":
+                        current_tool_inputs = {"baseline_cost": roi_baseline, "post_change_cost": roi_post, "implementation_cost": roi_implementation, "currency": roi_currency, "measurement_window": roi_window, "baseline_evidence": roi_baseline_evidence, "outcome_evidence": roi_outcome_evidence, "verifier": roi_verifier}
                     elif selected_tool["tool_id"] == "T016":
                         current_tool_inputs = {"amount": amount_to_convert, "source_unit": source_unit, "target_unit": target_unit, "exchange_rate": exchange_rate_value, "exchange_rate_date": exchange_rate_date_value, "exchange_rate_source": exchange_rate_source_value}
                     elif selected_tool["tool_id"] == "T031":
@@ -746,6 +826,9 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 convert_units_or_currency, analyze_spc_individuals,
                                 analyze_quality_cost_defects, analyze_mtbf_mttr,
                                 analyze_abc_xyz_inventory,
+                                balance_production_line, analyze_bottleneck_capacity,
+                                build_value_stream_map, analyze_fmea, analyze_mm1_queue,
+                                analyze_industrial_cost_variance, calculate_roi_evidence,
                             )
                             if selected_tool["tool_id"] == "T021":
                                 try:
@@ -931,7 +1014,33 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 if not isinstance(inventory_items, list):
                                     raise ValueError("SKU data must be a JSON list of objects.")
                                 result = analyze_abc_xyz_inventory(inventory_items, a_threshold=abc_a_threshold, b_threshold=abc_b_threshold, x_cv_max=xyz_x_cutoff, y_cv_max=xyz_y_cutoff, currency=inventory_currency)
-                            else:
+                            elif selected_tool["tool_id"] == "T024":
+                                parsed_tasks = json.loads(line_tasks_json)
+                                if not isinstance(parsed_tasks, list):
+                                    raise ValueError("Tasks input must be a JSON list of task objects.")
+                                result = balance_production_line(parsed_tasks, line_cycle_time, time_unit=line_time_unit)
+                            elif selected_tool["tool_id"] == "T025":
+                                parsed_processes = json.loads(bottleneck_processes_json)
+                                if not isinstance(parsed_processes, list):
+                                    raise ValueError("Process capacities must be a JSON list of process objects.")
+                                result = analyze_bottleneck_capacity(parsed_processes, bottleneck_demand, period_label=bottleneck_period)
+                            elif selected_tool["tool_id"] == "T027":
+                                parsed_steps = json.loads(vsm_steps_json)
+                                if not isinstance(parsed_steps, list):
+                                    raise ValueError("Value-stream steps must be a JSON list of step objects.")
+                                result = build_value_stream_map(parsed_steps, vsm_demand, vsm_available_time, time_unit=vsm_time_unit)
+                            elif selected_tool["tool_id"] == "T038":
+                                parsed_fmea = json.loads(fmea_json)
+                                if not isinstance(parsed_fmea, list):
+                                    raise ValueError("FMEA input must be a JSON list of failure-mode objects.")
+                                result = analyze_fmea(parsed_fmea)
+                            elif selected_tool["tool_id"] == "T070":
+                                result = analyze_mm1_queue(queue_arrival_rate, queue_service_rate, time_unit=queue_time_unit)
+                            elif selected_tool["tool_id"] == "T082":
+                                result = analyze_industrial_cost_variance(cost_standard_qty_per_unit, cost_actual_output, cost_actual_input, cost_standard_price, cost_actual_price, currency=cost_currency, period=cost_period)
+                            elif selected_tool["tool_id"] == "T083":
+                                result = calculate_roi_evidence(roi_baseline, roi_post, roi_implementation, currency=roi_currency, measurement_window=roi_window, baseline_evidence=roi_baseline_evidence, outcome_evidence=roi_outcome_evidence, verifier=roi_verifier)
+                            elif selected_tool["tool_id"] == "T085":
                                 result = plan_two_sample_t_sample_size(
                                     effect_size, alpha, target_power,
                                     max_n_per_group=int(search_limit),
@@ -942,7 +1051,16 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                         except Exception as exc:
                             st.error(f"Tool run could not be completed safely: {exc}")
 
-                    if selected_tool["tool_id"] == "T016":
+                    if selected_tool["tool_id"] in {"T024", "T025", "T027", "T038", "T070", "T082", "T083"}:
+                        result = st.session_state.get("shoir_tool_result_" + selected_tool["tool_id"])
+                        if result:
+                            _show_focused_tool_persistence(selected_tool["tool_id"], result, current_tool_inputs)
+                            render_engineering_result(
+                                result,
+                                title=selected_tool["canonical_name"],
+                                key_prefix="target_" + selected_tool["tool_id"].lower(),
+                            )
+                    elif selected_tool["tool_id"] == "T016":
                         result = st.session_state.get("shoir_tool_result_T016")
                         if result:
                             _show_focused_tool_persistence("T016", result, current_tool_inputs)
