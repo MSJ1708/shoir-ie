@@ -27,7 +27,8 @@ from shoir_100_tool_extended_engines import (
     analyze_abc_xyz_inventory, analyze_mtbf_mttr, analyze_pareto_root_cause,
     analyze_quality_cost_defects, analyze_spc_individuals, analyze_work_sampling,
     assess_5s_audit, build_kaizen_a3_record, convert_units_or_currency,
-    monitor_forecast_drift, plan_two_sample_t_sample_size, solve_cutting_stock,
+    generate_synthetic_industrial_data, monitor_forecast_drift, plan_two_sample_t_sample_size,
+    preview_data_join, process_time_series, profile_data_quality, solve_cutting_stock,
 )
 
 def _fingerprint(*values):
@@ -763,5 +764,119 @@ if rows:
                                            filename, "text/csv", key=f"t076_export_{key}")
                 for warning in saved["result"]["warnings"]:
                     st.warning(warning)
+        elif selected_id == "T013":
+            st.warning("LIMITED VALIDATION MODE — profiling is non-destructive. Review findings before changing source data.")
+            st.markdown("### Data quality profiler")
+            st.caption("The sample table is synthetic. No missing values, duplicates or outliers are removed automatically.")
+            input_frame = pd.DataFrame({
+                "asset_id": ["A-01", "A-02", "A-03", "A-04", "A-04"],
+                "cycle_time_seconds": [31.0, 32.0, 30.0, 88.0, 88.0],
+                "inspection_result": ["Pass", "Pass", None, "Review", "Review"],
+            })
+            edited_frame = st.data_editor(input_frame, num_rows="dynamic", use_container_width=True,
+                                          key="t013_data_quality_editor", hide_index=True)
+            iqr_multiplier = st.number_input("IQR outlier multiplier", min_value=0.1, value=1.5, step=0.1, key="t013_iqr_multiplier")
+            signature = _fingerprint(edited_frame.to_json(orient="split", date_format="iso"), float(iqr_multiplier))
+            _run_engine_tool(
+                "T013", signature, "Profile data quality",
+                lambda: profile_data_quality(edited_frame, iqr_multiplier=float(iqr_multiplier)),
+            )
+
+        elif selected_id == "T017":
+            st.warning("LIMITED VALIDATION MODE — inspect cardinality and unmatched-key warnings before accepting a merge.")
+            st.markdown("### Data join and merge preview")
+            st.caption("The example is synthetic. Input tables are copied and the output is a preview; source tables are not overwritten.")
+            left_default = pd.DataFrame({
+                "order_id": ["O-101", "O-102", "O-103"],
+                "planned_units": [120, 80, 45],
+            })
+            right_default = pd.DataFrame({
+                "order_ref": ["O-101", "O-102", "O-104"],
+                "actual_units": [118, 80, 22],
+            })
+            join_col_left, join_col_right = st.columns(2)
+            with join_col_left:
+                st.markdown("**Left table**")
+                left_frame = st.data_editor(left_default, num_rows="dynamic", use_container_width=True,
+                                            key="t017_join_left", hide_index=True)
+            with join_col_right:
+                st.markdown("**Right table**")
+                right_frame = st.data_editor(right_default, num_rows="dynamic", use_container_width=True,
+                                             key="t017_join_right", hide_index=True)
+            if len(left_frame.columns) and len(right_frame.columns):
+                k1, k2, k3 = st.columns(3)
+                with k1:
+                    left_key = st.selectbox("Left join key", list(left_frame.columns), key="t017_left_key")
+                with k2:
+                    right_key = st.selectbox("Right join key", list(right_frame.columns), key="t017_right_key")
+                with k3:
+                    how = st.selectbox("Join type", ["left", "inner", "outer", "right"], key="t017_join_type")
+                signature = _fingerprint(left_frame.to_json(orient="split", date_format="iso"),
+                                          right_frame.to_json(orient="split", date_format="iso"),
+                                          left_key, right_key, how)
+                _run_engine_tool(
+                    "T017", signature, "Preview table join",
+                    lambda: preview_data_join(left_frame, right_frame, left_key, right_key, how=how),
+                )
+            else:
+                st.info("Add at least one named column to each input table before defining a join.")
+
+        elif selected_id == "T018":
+            st.warning("LIMITED VALIDATION MODE — time-series processing reports gaps and duplicates but does not silently impute or delete them.")
+            st.markdown("### Time-series processor")
+            st.caption("The sample observations are synthetic and expressed in UTC. Choose the source timezone for naive timestamps.")
+            input_frame = pd.DataFrame({
+                "timestamp": ["2026-10-01T08:00:00Z", "2026-10-01T09:00:00Z",
+                              "2026-10-01T09:00:00Z", "2026-10-01T11:00:00Z"],
+                "units_produced": [28, 31, 29, 35],
+                "downtime_minutes": [5.0, 0.0, 2.0, 1.0],
+            })
+            edited_frame = st.data_editor(input_frame, num_rows="dynamic", use_container_width=True,
+                                          key="t018_timeseries_editor", hide_index=True)
+            value_options = [c for c in edited_frame.columns if c != "timestamp"]
+            if not value_options:
+                st.info("Add at least one value field beside the timestamp field.")
+            else:
+                c1, c2, c3 = st.columns(3)
+                with c1:
+                    source_timezone = st.selectbox("Timezone for naive timestamps", ["UTC", "Asia/Riyadh", "Europe/London", "America/Chicago"], key="t018_timezone")
+                with c2:
+                    frequency = st.selectbox("Resampling interval", ["15min", "1h", "1D"], index=1, key="t018_frequency")
+                with c3:
+                    aggregation = st.selectbox("Aggregation", ["mean", "sum", "min", "max", "first", "last"], key="t018_aggregation")
+                value_cols = st.multiselect("Numeric value fields", value_options, default=[value_options[0]], key="t018_value_cols")
+                signature = _fingerprint(edited_frame.to_json(orient="split", date_format="iso"),
+                                         source_timezone, frequency, aggregation, value_cols)
+                saved = _run_engine_tool(
+                    "T018", signature, "Process time series",
+                    lambda: process_time_series(edited_frame, "timestamp", value_cols,
+                                                source_timezone=source_timezone,
+                                                frequency=frequency, aggregation=aggregation),
+                )
+                if isinstance(saved, dict) and saved.get("signature") == signature:
+                    result = saved.get("result", {})
+                    series = result.get("resampled_series")
+                    if isinstance(series, pd.DataFrame) and not series.empty and value_cols:
+                        st.markdown("**Resampled trend**")
+                        st.line_chart(series.set_index("timestamp_utc")[value_cols])
+
+        elif selected_id == "T019":
+            st.warning("SYNTHETIC ONLY — this generator creates practice data, not real industrial observations or verified benchmarks.")
+            st.markdown("### Synthetic industrial data generator")
+            c1, c2 = st.columns(2)
+            with c1:
+                row_count = st.number_input("Rows to generate", min_value=1, max_value=100000, value=100, step=1, key="t019_row_count")
+                seed = st.number_input("Reproducible random seed", min_value=0, value=42, step=1, key="t019_seed")
+            with c2:
+                defect_rate = st.number_input("Synthetic defect probability", min_value=0.0, max_value=1.0, value=0.03, step=0.01, key="t019_defect_rate")
+                downtime_rate = st.number_input("Synthetic probability of downtime per period", min_value=0.0, max_value=1.0, value=0.10, step=0.01, key="t019_downtime_rate")
+            signature = _fingerprint(int(row_count), int(seed), float(defect_rate), float(downtime_rate))
+            _run_engine_tool(
+                "T019", signature, "Generate synthetic dataset",
+                lambda: generate_synthetic_industrial_data(int(row_count), int(seed),
+                                                           defect_rate=float(defect_rate),
+                                                           downtime_rate=float(downtime_rate)),
+            )
+
 else:
     st.warning("No target capabilities match these filters. Change the workbench, status or search.")
