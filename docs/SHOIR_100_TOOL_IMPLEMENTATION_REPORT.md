@@ -13,8 +13,8 @@
 
 ## Initial classification counts
 
-- `IMPLEMENTED_NEEDS_VALIDATION`: 47
-- `FOUNDATION_ONLY`: 48
+- `IMPLEMENTED_NEEDS_VALIDATION`: 57
+- `FOUNDATION_ONLY`: 38
 - `EXTERNAL_CONFIGURATION_REQUIRED`: 5
 
 No entry is marked `VERIFIED_WORKING`. The CSV includes one row for each stable tool ID T001–T100 and all required matrix columns. It distinguishes candidate existing routes from a verified implementation; a candidate mapping is not proof that the target acceptance contract is met.
@@ -72,3 +72,21 @@ New implementation paths:
 The shared target execution helper rechecks canonical T001–T100 IDs, requires a non-guest actor and recognized package label, and applies the target registry's tier requirement. This does not prove that all legacy direct routes, APIs, Copilot calls or export routes have been independently audited for every bypass.
 
 The eight targets remain IMPLEMENTED_NEEDS_VALIDATION, not VERIFIED_WORKING. Their results are session-scoped in this tranche; durable workspace persistence/re-login, cross-workspace isolation, authenticated desktop/mobile browser walkthrough, and full import/export artifact round trips remain unverified. The current matrix counts are 47 IMPLEMENTED_NEEDS_VALIDATION, 48 FOUNDATION_ONLY, 5 EXTERNAL_CONFIGURATION_REQUIRED, and 0 VERIFIED_WORKING. No claim is made that all 100 requested tools are complete.
+
+
+## Additional implementation tranche — 24 October 2026
+
+A second additive tranche expands the implementation with seven focused methods and corrects the inventory for three existing calculators:
+
+- **T021 Time Study and Standard Time**, **T022 Work Sampling Analyzer**, **T023 Takt Time and Capacity Calculator** now reflect the existing engine/UI/test implementation in their target-matrix classifications. Their browser status is still unverified.
+- **T024 Production Line Balancer:** precedence-aware largest-eligible-task heuristic with cycle-time fit, station assignments, idle time, efficiency, theoretical lower-bound stations, and a clear non-optimality caveat.
+- **T028 Root-Cause Analysis Toolkit:** aggregated Pareto ranking, cumulative shares, optional exactly-five-step why chain and a proposed action/owner/due date. Causal claims are not inferred.
+- **T029 5S and Workplace Audit:** structured 0–5 checklist scoring by area and category with evidence, owner, action and due-date fields.
+- **T030 Kaizen/A3 Improvement Manager:** baseline, target, countermeasure, owner, due date, optional post-change measurement and evidence reference. Actual-plus-evidence remains PENDING_REVIEW; the tool does not auto-verify economic benefit.
+- **T040 Quality Cost and Defect Analyzer:** scrap, rework and inspection cost decomposition under a declared currency.
+- **T055 Inventory Policy Optimizer:** EOQ and demand-only safety stock/reorder-point calculations with assumptions disclosed.
+- **T056 ABC/XYZ Inventory Analyzer:** value-based ABC segmentation and coefficient-of-variation XYZ classes across selected periods, with explicit thresholds.
+
+The implementation is grouped in the existing Engineering Validation Center Workbench section to avoid adding a new primary navigation sector. Each target action uses the canonical target-ID tier gate. These records/results currently use session-scoped state; persistent audited 5S/A3 workflows and cross-workspace ownership are not implied.
+
+The current source matrix contains 57 IMPLEMENTED_NEEDS_VALIDATION, 38 FOUNDATION_ONLY, and 5 EXTERNAL_CONFIGURATION_REQUIRED target rows. No target is marked VERIFIED_WORKING. Full CI must pass on the final head, and authenticated browser, persistence, access-bypass and export round-trip acceptance remains required before a production go decision.
