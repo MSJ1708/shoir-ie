@@ -39,7 +39,9 @@ def test_maintenance_backlog_marks_unmatched_and_capacity_tradeoff():
     result=optimize_maintenance_backlog(jobs,slots,as_of_date="2026-10-24")
     plan=result["work_plan"].set_index("work_order_id")
     assert plan.loc["WO-X","schedule_status"]=="NOT_SCHEDULED_NO_ELIGIBLE_SKILL_WINDOW"
-    assert (plan["schedule_status"]=="SCHEDULED").sum()==2
+    assert plan.loc["WO-A","schedule_status"]=="SCHEDULED"
+    assert plan.loc["WO-B","schedule_status"]=="NOT_SCHEDULED_CAPACITY_TRADEOFF"
+    assert (plan["schedule_status"]=="SCHEDULED").sum()==1
 
 
 def test_maintenance_backlog_rejects_duplicate_orders_invalid_time_and_bad_criticality():
