@@ -268,3 +268,38 @@ def test_workbench_runs_unit_spc_quality_cost_mtbf_and_abc_xyz():
         assert result[metric_key] == pytest.approx(expected, rel=1e-5)
         if tool_id == "T056":
             assert result["classification"]["ABC"].tolist() == ["A", "B", "C"]
+
+
+def test_workbench_runs_seven_additional_gated_specialist_methods():
+    """Exercise each new UI form and execution route through Streamlit AppTest."""
+    from streamlit.testing.v1 import AppTest
+
+    page = ROOT / "pages" / "Industrial_Engineering_Workbench.py"
+    at = AppTest.from_file(page, default_timeout=90)
+    at.session_state["current_user"] = "focused-method-checker"
+    at.session_state["authenticated"] = True
+    at.session_state["user_tier"] = "Enterprise Plus Tier"
+    at.run(timeout=90)
+    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+
+    cases = [
+        ("T024 · Production Line Balancer", "tool024_run", "T024", "status", "FEASIBLE_HEURISTIC"),
+        ("T025 · Bottleneck and Constraint Analyzer", "tool025_run", "T025", "bottleneck_capacity_per_period", 80.0),
+        ("T027 · Value Stream Mapping Studio", "tool027_run", "T027", "status", "CALCULATED_ESTIMATE"),
+        ("T038 · FMEA Manager", "tool038_run", "T038", "status", "CALCULATED_REQUIRES_ENGINEERING_REVIEW"),
+        ("T070 · Queuing and Service-System Analyzer", "tool070_run", "T070", "utilization_pct", 100 * 4 / 6),
+        ("T082 · Industrial Costing and Variance Analyzer", "tool082_run", "T082", "total_variance", 260.0),
+        ("T083 · Evidence-Based ROI Tracker", "tool083_run", "T083", "roi_pct", 200.0),
+    ]
+    for label, button_key, tool_id, result_key, expected in cases:
+        at.selectbox(key="shoir_100_tool_inspector").select(label)
+        at.run(timeout=90)
+        assert not at.exception, f"{tool_id} selection raised: " + "\n".join(str(error.value) for error in at.exception)
+        at.button(key=button_key).click()
+        at.run(timeout=90)
+        assert not at.exception, f"{tool_id} run raised: " + "\n".join(str(error.value) for error in at.exception)
+        result = at.session_state.get(f"shoir_tool_result_{tool_id}")
+        assert result is not None, f"{tool_id} did not produce a result; visible errors: " + " | ".join(str(item.value) for item in at.error)
+        assert result[result_key] == pytest.approx(expected) if isinstance(expected, (float, int)) else result[result_key] == expected
+        assert result.get("_workspace_persistence") in {"SAVED_LOCAL_FALLBACK", "SAVED_MANAGED_WORKSPACE", "SESSION_ONLY", "SAVE_FAILED", "SAVE_STATUS_NOT_CONFIRMED"}
+        assert result.get("status") or result.get("verification_status")
