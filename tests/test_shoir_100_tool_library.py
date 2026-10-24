@@ -441,3 +441,25 @@ def test_starter_is_denied_safety_incident_trend_action():
     assert "shoir_T050_result" not in at.session_state
     with pytest.raises(KeyError):
         at.button(key="T050_run_button")
+
+
+def test_dataset_versioning_tool_creates_repeatable_fingerprint_and_saves_lineage():
+    at = _authed_library(tier="Professional")
+    _open(at, "T020", "Dataset Versioning and Lineage")
+    record = _run(at, "T020")
+    assert record["tool_id"] == "T020"
+    assert record["status"] == "VERSIONED"
+    assert record["raw_dataset_included"] is False
+    assert record["row_count"] == 3
+    assert record["metrics"]["transformation_count"] == 2
+    assert record["version_id"].startswith("DSV-")
+    assert at.session_state["shoir_dataset_lineage_versions"][-1]["version_id"] == record["version_id"]
+
+
+def test_starter_cannot_access_dataset_versioning():
+    at = _authed_library(tier="Starter")
+    _open(at, "T020", "Dataset Versioning and Lineage")
+    assert any("does not grant this target capability" in str(item.value).lower() for item in at.warning)
+    assert "shoir_T020_result" not in at.session_state
+    with pytest.raises(KeyError):
+        at.button(key="T020_run_button")
