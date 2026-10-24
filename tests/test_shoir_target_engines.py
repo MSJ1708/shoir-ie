@@ -966,3 +966,125 @@ def test_preventive_maintenance_planner_hazard_register_mrp_and_portfolio_fixtur
     )
     assert portfolio["ranking"].iloc[0]["Project"] == "A"
     assert portfolio["ranking"].iloc[0]["Weighted score (0–100)"] == pytest.approx(200 / 3)
+
+
+def test_data_join_reports_cardinality_unmatched_rows_and_duplicate_policy():
+    from shoir_target_engines import merge_data_tables
+
+    result = merge_data_tables(
+        [{"id": 1, "part": "A"}, {"id": 2, "part": "B"}, {"id": 3, "part": "C"}],
+        [{"component_id": 1, "cost": 10}, {"component_id": 3, "cost": 30}, {"component_id": 4, "cost": 40}],
+        "id", "component_id", join_type="outer",
+    )
+    assert result["status"] == "JOIN_COMPLETED"
+    assert result["output_rows"] == 4
+    assert result["matched_output_rows"] == 2
+    assert result["left_only_output_rows"] == 1
+    assert result["right_only_output_rows"] == 1
+    assert result["joined_table"]["part"].isna().sum() == 1
+    with pytest.raises(ValueError, match="Duplicate join keys"):
+        merge_data_tables(
+            [{"id": 1}, {"id": 1}],
+            [{"id": 1, "v": 2}],
+            "id", "id", duplicate_policy="reject",
+        )
+    with pytest.raises(ValueError, match="exceeding"):
+        merge_data_tables([{"id": i} for i in range(3)], [{"id": i} for i in range(3)], "id", "id", max_output_rows=2)
+
+
+def test_time_series_processor_normalizes_timezone_and_reports_gap_and_resample():
+    from shoir_target_engines import process_time_series
+
+    result = process_time_series(
+        [
+            {"timestamp": "2026-01-01 00:00:00", "count": 1, "energy": 2.0},
+            {"timestamp": "2026-01-01 02:00:00", "count": 3, "energy": 6.0},
+        ],
+        "timestamp",
+        timezone_name="Asia/Riyadh",
+        expected_interval="1h",
+        resample_frequency="1h",
+        aggregation="mean",
+    )
+    assert result["status"] == "TIME_SERIES_PROCESSED"
+    assert result["input_rows"] == 2
+    assert result["output_rows"] == 3
+    assert result["gap_count"] == 1
+    assert result["expected_missing_observations"] == 1
+    assert str(result["processed_series"]["timestamp"].dt.tz) == "UTC"
+    assert pd.isna(result["processed_series"].iloc[1]["count"])
+    with pytest.raises(ValueError, match="missing values"):
+        process_time_series([{"timestamp": None, "count": 1}], "timestamp")
+
+
+def test_synthetic_industrial_data_is_reproducible_and_explicitly_labelled():
+    from shoir_target_engines import generate_synthetic_industrial_data
+
+    a = generate_synthetic_industrial_data(25, seed=7)
+    b = generate_synthetic_industrial_data(25, seed=7)
+    assert a["status"] == "SYNTHETIC_DATA_GENERATED"
+    assert a["data_provenance"] == "SYNTHETIC"
+    assert a["row_count"] == 25
+    assert a["synthetic_dataset"]["total_output_units"].tolist() == b["synthetic_dataset"]["total_output_units"].tolist()
+    assert set(a["synthetic_dataset"]["data_provenance"]) == {"SYNTHETIC"}
+    with pytest.raises(ValueError, match="between 0 and 100"):
+        generate_synthetic_industrial_data(5, defect_rate_pct=101)
+
+
+def test_acceptance_sampling_plan_meets_stated_binomial_producer_consumer_risks():
+    from scipy.stats import binom
+    from shoir_target_engines import plan_acceptance_sampling
+
+    result = plan_acceptance_sampling(0.01, 0.10, producer_risk=0.05, consumer_risk=0.10, max_sample_size=500)
+    assert result["status"] == "PLAN_FOUND"
+    n = result["sample_size"]
+    c = result["acceptance_number"]
+    assert n > 0 and c >= 0
+    assert binom.cdf(c, n, 0.01) >= 0.95
+    assert binom.cdf(c, n, 0.10) <= 0.10
+    assert result["probability_of_acceptance_at_aql"] == pytest.approx(binom.cdf(c, n, 0.01))
+    assert plan_acceptance_sampling(0.01, 0.10, max_sample_size=1)["status"] == "NO_PLAN_WITHIN_SEARCH_LIMIT"
+
+
+def test_process_mining_reconstructs_variants_transitions_and_case_duration():
+    from shoir_target_engines import analyze_process_mining
+
+    result = analyze_process_mining([
+        {"case_id": "1", "activity": "A", "timestamp": "2026-01-01T00:00:00Z"},
+        {"case_id": "1", "activity": "B", "timestamp": "2026-01-01T02:00:00Z"},
+        {"case_id": "2", "activity": "A", "timestamp": "2026-01-01T00:00:00Z"},
+        {"case_id": "2", "activity": "C", "timestamp": "2026-01-01T01:00:00Z"},
+        {"case_id": "2", "activity": "B", "timestamp": "2026-01-01T03:00:00Z"},
+    ])
+    assert result["status"] == "EVENT_LOG_ANALYZED"
+    assert result["case_count"] == 2
+    assert result["event_count"] == 5
+    assert result["variant_count"] == 2
+    assert result["median_case_duration_seconds"] == pytest.approx(9000)
+    transitions = result["directly_follows"].set_index("Transition")["Occurrences"].to_dict()
+    assert transitions == {"A → B": 1, "A → C": 1, "C → B": 1}
+    with pytest.raises(ValueError, match="missing required columns"):
+        analyze_process_mining([{"case_id": "1", "activity": "A"}])
+
+
+def test_water_waste_flow_balance_reconciles_and_refuses_mixed_units():
+    from shoir_target_engines import analyze_water_waste_efficiency
+
+    result = analyze_water_waste_efficiency([
+        {"process": "Wash", "input_quantity": 100, "product_output_quantity": 85,
+         "waste_quantity": 15, "unit": "L", "period": "2026-09"},
+        {"process": "Rinse", "input_quantity": 50, "product_output_quantity": 45,
+         "waste_quantity": 5, "unit": "L", "period": "2026-09"},
+    ])
+    assert result["status"] == "FLOW_BALANCE_CALCULATED"
+    assert result["total_input_quantity"] == pytest.approx(150)
+    assert result["total_product_output_quantity"] == pytest.approx(130)
+    assert result["total_waste_quantity"] == pytest.approx(20)
+    assert result["total_unreconciled_balance"] == pytest.approx(0)
+    assert result["all_process_balances_close"] is True
+    assert result["overall_output_yield_pct"] == pytest.approx(130 / 150 * 100)
+    with pytest.raises(ValueError, match="same unit"):
+        analyze_water_waste_efficiency([
+            {"process": "Wash", "input_quantity": 100, "product_output_quantity": 80, "waste_quantity": 20, "unit": "L"},
+            {"process": "Cut", "input_quantity": 100, "product_output_quantity": 90, "waste_quantity": 10, "unit": "kg"},
+        ])
