@@ -69,13 +69,13 @@ def test_shared_workbook_import_rejects_oversized_upload_before_parsing(monkeypa
 
     monkeypatch.setattr(shoir_upgrade, "MAX_UPLOAD_BYTES", 4)
     with pytest.raises(ValueError, match="limited to 0 MB"):
-        read_uploaded_workbook(b"Name,Value\\n", "oversized.csv")
+        read_uploaded_workbook(b"Name,Value\n", "oversized.csv")
 
 
 def test_shared_workbook_import_accepts_upload_at_configured_size_limit(monkeypatch):
     import shoir_upgrade
 
-    raw = b"A,B\\n1,2\\n"
+    raw = b"A,B\n1,2\n"
     monkeypatch.setattr(shoir_upgrade, "MAX_UPLOAD_BYTES", len(raw))
     sheets = read_uploaded_workbook(raw, "boundary.csv")
     assert list(sheets) == ["CSV"]
