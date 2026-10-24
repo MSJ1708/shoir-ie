@@ -13,6 +13,10 @@
 
 [**Open the live demo**](https://shoir-ie-app.streamlit.app/) · [Explore the code](https://github.com/MSJ1708/shoir-ie) · [Report an issue](https://github.com/MSJ1708/shoir-ie/issues)
 
+> **BETA — TESTING IN PROGRESS (21 October 2026).** Shoir-IE is actively being tested and improved. Calculations, AI responses, simulations, exports, integrations and stored data may be wrong, incomplete or unavailable. Validate results independently and use synthetic or approved non-sensitive data. Do not use the beta as the sole basis for safety-critical or other high-consequence decisions. No disclaimer replaces mandatory legal rights or an independent legal/security review.
+>
+> Read the [Beta Terms & Conditions](docs/TERMS_AND_CONDITIONS.md), [Privacy Policy](docs/PRIVACY_POLICY.md), [Refund Policy](docs/REFUND_POLICY.md), [Cookie Policy](docs/COOKIE_POLICY.md), [Legal Risk Register](docs/LEGAL_RISK_REGISTER.md), and [Third-party licence review](docs/THIRD_PARTY_LICENSE_REVIEW.md). Use the [Pre-Commercial Launch Checklist](docs/COMMERCIAL_LAUNCH_CHECKLIST.md) to track evidence required before paid access.
+
 <img src="docs/images/shoir_ie_hero.svg" alt="Shoir-IE industrial engineering command center" width="100%">
 
 </div>
@@ -205,7 +209,7 @@ Synthetic tests and static source checks are useful evidence, but they are not s
 
 ## Project status
 
-Shoir-IE is an actively evolving industrial-engineering product with a live demonstration and a broad set of implemented and developing workflows. The next maturity step is consistent verification: reliable module rendering, end-to-end import/export, durable state, strict role/tier boundaries and documented customer pilots with measured outcomes.
+Shoir-IE is in beta testing, with a live demonstration and a broad set of implemented and developing workflows. Beta does not mean that every module, calculation, export, integration, privacy control or account flow has been verified in production. The next maturity step is consistent verification: reliable module rendering, end-to-end import/export, durable state, strict role/tier boundaries and documented customer pilots with measured outcomes.
 
 The product is intended for industrial engineers, operations teams, manufacturing organizations, researchers and product teams validating industrial use cases. It is not a replacement for plant-specific engineering review, certified safety assessment or independent verification of high-consequence decisions.
 
