@@ -582,3 +582,23 @@ def test_equipment_anomaly_screen_flags_outlier_but_does_not_claim_live_feed():
     assert "shoir_T048_result" not in denied.session_state
     with pytest.raises(KeyError):
         denied.button(key="T048_run_button")
+
+
+def test_discrete_event_simulation_runs_replications_and_denies_starter():
+    at = _authed_library(tier="Enterprise")
+    _open(at, "T071", "Discrete-Event Simulation")
+    result = _run(at, "T071")
+    assert result["status"] == "SIMULATED"
+    assert result["metrics"]["replications"] == 5
+    assert result["metrics"]["station_count"] == 3
+    assert result["metrics"]["live_data_connected"] is False
+    assert len(result["replication_summary"]) == 5
+    assert result["metrics"]["mean_throughput_units_per_hour"] > 0
+    assert result["metrics"]["mean_flow_time_approx_95pct_t_interval"] is not None
+
+    denied = _authed_library(tier="Starter")
+    _open(denied, "T071", "Discrete-Event Simulation")
+    assert any("does not grant this target capability" in str(item.value).lower() for item in denied.warning)
+    assert "shoir_T071_result" not in denied.session_state
+    with pytest.raises(KeyError):
+        denied.button(key="T071_run_button")
