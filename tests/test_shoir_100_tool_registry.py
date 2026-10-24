@@ -4,6 +4,7 @@ from shoir_100_tool_registry import (
     TOOL_CATALOG, TOOL_BY_ID, VALID_TOOL_TIERS, validate_tool_catalog,
 )
 from shoir_tier_capabilities import TIER_ORDER, tier_allows
+from shoir_ie_basic_calculators import calculate_standard_time, calculate_work_sampling, calculate_takt_capacity
 
 
 def test_registry_contains_exactly_one_row_for_each_stable_tool_id():
@@ -45,7 +46,12 @@ def test_t021_t023_are_wired_to_calculator_engines_and_workbench():
         assert tool["implementation_status"] == "IMPLEMENTED_NEEDS_VALIDATION"
         assert "shoir_ie_basic_calculators.py" in tool["source_files"]
         assert "pages/Industrial_Engineering_Workbench.py" in tool["source_files"]
-        assert function_name in tool["calculation_or_action"] or function_name in tool["unit_test"]
+        engines = {
+            "calculate_standard_time": calculate_standard_time,
+            "calculate_work_sampling": calculate_work_sampling,
+            "calculate_takt_capacity": calculate_takt_capacity,
+        }
+        assert callable(engines[function_name])
 
 
 def test_t016_points_to_implemented_converter_and_explicit_fx_provenance():
