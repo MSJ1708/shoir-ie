@@ -23,6 +23,12 @@ import html
 from industrial_platform import render_module, PLATFORM_CATALOG, init_platform_db
 from shoir_unit_converter import UNIT_OPTIONS, convert_units, convert_currency
 from shoir_100_tool_registry import TOOL_CATALOG
+from shoir_100_tool_ui import (
+    render_data_intelligence_tools,
+    render_acceptance_sampling_tool,
+    render_queueing_tool,
+    render_portfolio_scoring_tool,
+)
 from shoir_ie_basic_calculators import (
     calculate_standard_time, calculate_work_sampling, calculate_takt_capacity,
 )
@@ -648,6 +654,9 @@ if selected == "Engineering Validation Center":
             else:
                 st.warning("The prior takt/capacity result is stale because demand, period, time, or cycle-time inputs changed. Recalculate before use.")
 
+    # Add target methods inside the existing validation workbench, not as new top-level pages.
+    render_data_intelligence_tools(st, RAW_TIER, USER, edited)
+
 elif selected == "Industrial Data Model & Digital Thread":
     st.subheader("🔗 Industrial Digital Thread")
     tab1,tab2,tab3 = st.tabs(["Entities","Relationships","Impact Analysis"])
@@ -728,6 +737,8 @@ elif selected == "Advanced Planning & Scheduling":
             fig=px.timeline(sch,x_start="Start",x_end="Finish",y="Machine",color="Product",hover_data=["Order","LateMin"])
             st.plotly_chart(fig,use_container_width=True)
 
+    render_queueing_tool(st, RAW_TIER, USER)
+
 elif selected == "Quality Engineering & Reliability":
     st.subheader("📈 Quality Engineering & Reliability")
     tab1,tab2,tab3,tab4 = st.tabs(["SPC","Capability / MSA","DOE / ANOVA","Reliability"])
@@ -769,6 +780,8 @@ elif selected == "Quality Engineering & Reliability":
                 render_engineering_result(reliability_summary(nums),"Reliability result","reliability_result")
             except Exception as exc:
                 st.error(f"Reliability analysis failed safely: {exc}")
+
+    render_acceptance_sampling_tool(st, RAW_TIER, USER)
 
 elif selected == "Industrial Simulation Lab":
     st.subheader("🧪 Industrial Simulation Lab")
@@ -859,6 +872,8 @@ elif selected == "Capital Investment & Engineering Economics":
     if "wb_econ" in st.session_state:
         st.dataframe(st.session_state["wb_econ"],use_container_width=True,hide_index=True)
         st.plotly_chart(px.density_heatmap(st.session_state["wb_econ"],x="Discount Rate",y="CAPEX Multiplier",z="NPV",text_auto=".0f"),use_container_width=True)
+
+    render_portfolio_scoring_tool(st, RAW_TIER, USER)
 
 elif selected == "Workforce Engineering":
     st.subheader("👷 Workforce Engineering")
