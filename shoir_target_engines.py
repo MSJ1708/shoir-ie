@@ -2352,3 +2352,432 @@ def analyze_water_waste_efficiency(
             "Normalized intensity does not establish compliance with an environmental reporting standard.",
         ],
     }
+
+
+def map_industrial_fields(
+    source_columns: Sequence[str],
+    *,
+    canonical_fields: Sequence[str] | None = None,
+    custom_aliases: Mapping[str, Sequence[str]] | None = None,
+) -> dict[str, Any]:
+    """Suggest transparent source-to-industrial-field mappings; fuzzy matches require confirmation."""
+    from difflib import SequenceMatcher
+
+    if isinstance(source_columns, (str, bytes)) or not isinstance(source_columns, Sequence):
+        raise ValueError("Source columns must be a sequence of header names.")
+    headers = [str(item).strip() for item in source_columns]
+    if not headers or any(not item for item in headers):
+        raise ValueError("Provide non-empty source column names.")
+    if len({item.casefold() for item in headers}) != len(headers):
+        raise ValueError("Source column names must be unique ignoring case.")
+    aliases: dict[str, tuple[str, ...]] = {
+        "timestamp": ("timestamp", "datetime", "event time", "date time", "created at", "date"),
+        "asset_id": ("asset", "asset id", "equipment id", "machine id", "machine", "equipment"),
+        "line_id": ("line", "line id", "production line", "work center", "work centre"),
+        "production_output": ("output", "units produced", "production qty", "quantity produced", "good units"),
+        "demand_units": ("demand", "demand units", "required quantity", "forecast demand"),
+        "cycle_time": ("cycle time", "cycle time seconds", "process time"),
+        "downtime": ("downtime", "downtime minutes", "stop time", "failure duration"),
+        "defect_units": ("defects", "defect units", "scrap units", "nonconforming units"),
+        "energy_kwh": ("energy", "energy kwh", "electricity kwh", "consumption kwh"),
+        "work_order_id": ("work order", "work order id", "maintenance order"),
+        "sku": ("sku id", "part number", "material number", "item code"),
+        "quantity": ("qty", "quantity", "units", "amount"),
+        "unit_cost": ("unit cost", "cost per unit", "standard cost"),
+    }
+    if custom_aliases:
+        for key, value in custom_aliases.items():
+            field = str(key).strip()
+            if not field or isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
+                raise ValueError("Custom aliases must map a non-empty canonical field to a list of aliases.")
+            aliases[field] = tuple(str(item).strip() for item in value if str(item).strip())
+    fields = list(dict.fromkeys(str(field).strip() for field in (canonical_fields or list(aliases)) if str(field).strip()))
+    if not fields:
+        raise ValueError("Provide at least one canonical industrial field.")
+    normalize = lambda value: re.sub(r"[^a-z0-9]+", "", str(value).casefold())
+    normalized_headers = {header: normalize(header) for header in headers}
+    rows = []
+    candidate_owners: dict[str, list[str]] = {}
+    for field in fields:
+        normalized_field = normalize(field)
+        candidates = aliases.get(field, ())
+        exact = [header for header in headers if normalized_headers[header] == normalized_field]
+        alias_hits = [header for header in headers if any(normalized_headers[header] == normalize(alias) for alias in candidates)]
+        if exact:
+            proposed, confidence, match_type = exact[0], 1.0, "EXACT"
+        elif alias_hits:
+            proposed, confidence, match_type = alias_hits[0], 0.95, "ALIAS"
+        else:
+            scored = sorted(
+                ((SequenceMatcher(None, normalize(field), normalized_headers[h]).ratio(), h) for h in headers),
+                key=lambda item: (-item[0], item[1].casefold()),
+            )
+            if scored and scored[0][0] >= 0.86:
+                top_score, proposed = scored[0]
+                confidence, match_type = float(top_score), "FUZZY_REVIEW"
+            else:
+                proposed, confidence, match_type = None, 0.0, "UNMATCHED"
+        if proposed is not None:
+            candidate_owners.setdefault(proposed, []).append(field)
+        rows.append({
+            "canonical_field": field,
+            "proposed_source_column": proposed,
+            "confidence_pct": round(confidence * 100, 1),
+            "match_type": match_type,
+            "confirmation_required": match_type != "EXACT",
+            "status": "PENDING_COLLISION_CHECK" if proposed is not None else "UNMATCHED",
+        })
+    for row in rows:
+        proposed = row["proposed_source_column"]
+        if proposed is not None and len(candidate_owners.get(proposed, [])) > 1:
+            row["status"] = "AMBIGUOUS_COLLISION_REVIEW"
+            row["confirmation_required"] = True
+        elif row["match_type"] == "EXACT":
+            row["status"] = "EXACT_CANDIDATE_REVIEW"
+        elif proposed is not None:
+            row["status"] = "SUGGESTION_REQUIRES_CONFIRMATION"
+    return {
+        "status": "MAPPING_SUGGESTIONS",
+        "method": "Deterministic normalized exact/alias matching with conservative fuzzy suggestions",
+        "source_column_count": len(headers),
+        "canonical_field_count": len(fields),
+        "mapping_table": pd.DataFrame(rows),
+        "warnings": [
+            "Mappings are suggestions, not applied transformations.",
+            "Alias/fuzzy suggestions require human confirmation; ambiguous collisions must be resolved manually.",
+        ],
+    }
+
+
+def build_value_stream_map(
+    process_steps: Sequence[Mapping[str, Any]],
+    *,
+    time_unit: str = "minutes",
+    wip_unit: str = "units",
+) -> dict[str, Any]:
+    """Summarize a supplied ordered value stream and calculate process-cycle efficiency."""
+    if isinstance(process_steps, (str, bytes)) or not isinstance(process_steps, Sequence) or not process_steps:
+        raise ValueError("Provide at least one ordered process step.")
+    rows = []
+    names = set()
+    for index, step in enumerate(process_steps, start=1):
+        if not isinstance(step, Mapping):
+            raise ValueError(f"Process step {index} must be an object.")
+        name = str(step.get("name", "")).strip()
+        if not name:
+            raise ValueError(f"Process step {index} requires a name.")
+        if name.casefold() in names:
+            raise ValueError(f"Process step names must be unique: {name}.")
+        names.add(name.casefold())
+        cycle = _finite_number(step.get("cycle_time"), f"Cycle time for {name}")
+        wait = _finite_number(step.get("wait_time", 0), f"Wait time for {name}")
+        wip = _finite_number(step.get("wip", 0), f"WIP for {name}")
+        value_added = step.get("value_added")
+        if not isinstance(value_added, bool):
+            raise ValueError(f"Value-added flag for {name} must be true or false.")
+        if cycle < 0 or wait < 0 or wip < 0:
+            raise ValueError(f"Cycle time, wait time and WIP cannot be negative for {name}.")
+        rows.append({
+            "Sequence": index, "Process": name, f"Cycle time ({time_unit})": cycle,
+            f"Wait time ({time_unit})": wait, f"WIP ({wip_unit})": wip,
+            "Value added": value_added,
+        })
+    table = pd.DataFrame(rows)
+    cycle_col, wait_col, wip_col = f"Cycle time ({time_unit})", f"Wait time ({time_unit})", f"WIP ({wip_unit})"
+    total_cycle = float(table[cycle_col].sum())
+    total_wait = float(table[wait_col].sum())
+    lead_time = total_cycle + total_wait
+    value_added_time = float(table.loc[table["Value added"], cycle_col].sum())
+    efficiency = value_added_time / lead_time * 100.0 if lead_time > 0 else None
+    return {
+        "status": "MAPPED",
+        "method": "Ordered process steps; lead-time proxy equals sum of entered cycle and wait times",
+        "step_count": len(table),
+        "total_cycle_time": total_cycle,
+        "total_wait_time": total_wait,
+        "lead_time_proxy": lead_time,
+        "value_added_time": value_added_time,
+        "process_cycle_efficiency_pct": efficiency,
+        "total_recorded_wip": float(table[wip_col].sum()),
+        "steps": table,
+        "assumptions": [
+            "Wait and cycle times refer to the same process boundary and time unit.",
+            "Summed WIP is descriptive and may not be equivalent to system-average WIP under differing sampling windows.",
+            "This summarizes supplied step data; it does not infer or validate the actual information/material flow."
+        ],
+        "warning": "Confirm the process map with operators and measured timestamps before using it as a plant baseline.",
+    }
+
+
+def analyze_fmea_records(records: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """Calculate classic RPNs from supplied 1–10 FMEA ratings with action/evidence gaps."""
+    if isinstance(records, (str, bytes)) or not isinstance(records, Sequence) or not records:
+        raise ValueError("Provide at least one FMEA failure-mode record.")
+    rows = []
+    seen = set()
+    for index, item in enumerate(records, start=1):
+        if not isinstance(item, Mapping):
+            raise ValueError(f"FMEA record {index} must be an object.")
+        failure_mode = str(item.get("failure_mode", "")).strip()
+        if not failure_mode:
+            raise ValueError(f"FMEA record {index} requires a failure mode.")
+        if failure_mode.casefold() in seen:
+            raise ValueError(f"Failure modes must be unique in one review; duplicate: {failure_mode}.")
+        seen.add(failure_mode.casefold())
+        scores = {}
+        for field in ("severity", "occurrence", "detection"):
+            value = _finite_number(item.get(field), f"{field.title()} score for {failure_mode}")
+            if not value.is_integer() or not 1 <= value <= 10:
+                raise ValueError(f"{field.title()} score for {failure_mode} must be a whole number from 1 to 10.")
+            scores[field] = int(value)
+        controls = str(item.get("current_controls", "")).strip()
+        action = str(item.get("recommended_action", "")).strip()
+        owner = str(item.get("owner", "")).strip()
+        due_date = str(item.get("due_date", "")).strip()
+        gaps = []
+        if not controls: gaps.append("current controls not recorded")
+        if not action: gaps.append("recommended action not recorded")
+        if not owner: gaps.append("owner not assigned")
+        if not due_date: gaps.append("due date not recorded")
+        rows.append({
+            "Failure mode": failure_mode,
+            "Effect": str(item.get("effect", "")).strip(),
+            "Cause": str(item.get("cause", "")).strip(),
+            "Severity": scores["severity"],
+            "Occurrence": scores["occurrence"],
+            "Detection": scores["detection"],
+            "RPN": scores["severity"] * scores["occurrence"] * scores["detection"],
+            "Current controls": controls,
+            "Recommended action": action,
+            "Owner": owner,
+            "Due date": due_date,
+            "Action gaps": "; ".join(gaps) if gaps else "None identified in entered fields",
+        })
+    table = pd.DataFrame(rows).sort_values(["RPN", "Severity", "Failure mode"], ascending=[False, False, True], kind="stable").reset_index(drop=True)
+    table.insert(0, "Rank by RPN", range(1, len(table) + 1))
+    return {
+        "status": "ASSESSED",
+        "method": "Classic risk priority number (RPN = severity × occurrence × detection)",
+        "failure_mode_count": len(table),
+        "maximum_rpn": int(table["RPN"].max()),
+        "mean_rpn": float(table["RPN"].mean()),
+        "fmea_table": table,
+        "warning": "RPN is a prioritization aid, not a complete risk measure. Respect severity-based escalation, applicable sector policy and expert review; a low RPN must not override a serious hazard.",
+    }
+
+
+def reconcile_sop_plan(
+    periods: pd.DataFrame,
+    *,
+    period_column: str,
+    demand_column: str,
+    planned_supply_column: str,
+    capacity_column: str,
+    initial_inventory: float = 0.0,
+    safety_stock: float = 0.0,
+) -> dict[str, Any]:
+    """Reconcile sequential demand/supply/capacity and projected ending inventory."""
+    if not isinstance(periods, pd.DataFrame) or periods.empty:
+        raise ValueError("Provide a non-empty time-phased demand/supply plan.")
+    columns = [str(x).strip() for x in (period_column, demand_column, planned_supply_column, capacity_column)]
+    if not all(columns) or len(set(columns)) != 4:
+        raise ValueError("Choose four distinct, non-empty period/demand/supply/capacity columns.")
+    missing = [x for x in columns if x not in periods.columns]
+    if missing:
+        raise ValueError("Column(s) not found: " + ", ".join(missing))
+    labels = periods[columns[0]].astype("string").str.strip()
+    if labels.isna().any() or (labels == "").any():
+        raise ValueError("Every plan row needs a period label.")
+    if labels.duplicated().any():
+        raise ValueError("Plan period labels must be unique and ordered as supplied.")
+    numeric: dict[str, pd.Series] = {}
+    for label, col in zip(("demand", "supply", "capacity"), columns[1:]):
+        vals = pd.to_numeric(periods[col], errors="coerce")
+        if vals.isna().any() or any(not math.isfinite(float(v)) for v in vals.tolist()):
+            raise ValueError(f"{label.title()} must contain finite numeric values.")
+        if (vals < 0).any():
+            raise ValueError(f"{label.title()} cannot be negative.")
+        numeric[label] = vals.astype(float)
+    inventory = _finite_number(initial_inventory, "Initial inventory")
+    stock_target = _finite_number(safety_stock, "Safety stock")
+    if inventory < 0 or stock_target < 0:
+        raise ValueError("Initial inventory and safety stock cannot be negative.")
+    rows = []
+    for i, label in enumerate(labels.tolist()):
+        demand = float(numeric["demand"].iloc[i])
+        supply = float(numeric["supply"].iloc[i])
+        cap = float(numeric["capacity"].iloc[i])
+        available = inventory + supply
+        ending = available - demand
+        rows.append({
+            "Period": str(label), "Beginning inventory": inventory,
+            "Demand": demand, "Planned supply": supply, "Available capacity": cap,
+            "Capacity overload": max(0.0, supply - cap),
+            "Available to promise (before safety stock)": available,
+            "Projected ending inventory": ending,
+            "Unmet demand/backlog": max(0.0, -ending),
+            "Safety-stock shortfall": max(0.0, stock_target - ending),
+        })
+        inventory = ending
+    table = pd.DataFrame(rows)
+    warnings = []
+    if (table["Capacity overload"] > 0).any():
+        warnings.append("Planned supply exceeds the stated capacity in one or more periods.")
+    if (table["Unmet demand/backlog"] > 0).any():
+        warnings.append("Projected demand exceeds available inventory plus supply in one or more periods.")
+    if (table["Safety-stock shortfall"] > 0).any():
+        warnings.append("Projected ending inventory falls below the target safety stock in one or more periods.")
+    return {
+        "status": "RECONCILED",
+        "method": "Sequential inventory balance: opening inventory + planned supply − demand",
+        "period_count": len(table),
+        "total_demand": float(table["Demand"].sum()),
+        "total_planned_supply": float(table["Planned supply"].sum()),
+        "total_capacity_overload": float(table["Capacity overload"].sum()),
+        "total_unmet_demand": float(table["Unmet demand/backlog"].sum()),
+        "ending_inventory": float(table["Projected ending inventory"].iloc[-1]),
+        "plan_table": table,
+        "warnings": warnings or ["No overload, backlog or safety-stock shortfall was detected under the entered assumptions."],
+        "assumptions": [
+            "Rows are processed in the supplied period order; the engine does not infer calendar gaps.",
+            "Supply is treated as available within its listed period; lead times, sourcing, lot size and workforce constraints are not modeled.",
+            "A balanced scenario is not a production schedule or a guarantee that supply will be realized.",
+        ],
+    }
+
+
+def score_supplier_risk(
+    suppliers: Sequence[Mapping[str, Any]],
+    criteria: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Score suppliers from explicit 0–100 evidence ratings and weights; missing inputs reduce coverage."""
+    if isinstance(suppliers, (str, bytes)) or not isinstance(suppliers, Sequence) or len(suppliers) < 2:
+        raise ValueError("Provide at least two supplier records.")
+    if isinstance(criteria, (str, bytes)) or not isinstance(criteria, Sequence) or not criteria:
+        raise ValueError("Provide at least one weighted risk/performance criterion.")
+    names=set()
+    supplier_list=[]
+    for index, item in enumerate(suppliers, start=1):
+        if not isinstance(item, Mapping):
+            raise ValueError(f"Supplier {index} must be an object.")
+        name=str(item.get("name","")).strip()
+        if not name: raise ValueError(f"Supplier {index} requires a name.")
+        if name.casefold() in names: raise ValueError(f"Supplier names must be unique: {name}.")
+        names.add(name.casefold()); supplier_list.append(dict(item,name=name))
+    criterion_list=[]; seen=set(); weight_sum=0.0
+    for index, item in enumerate(criteria, start=1):
+        if not isinstance(item, Mapping):
+            raise ValueError(f"Criterion {index} must be an object.")
+        key=str(item.get("criterion","")).strip()
+        if not key or key=="name": raise ValueError(f"Criterion {index} needs a criterion other than 'name'.")
+        if key.casefold() in seen: raise ValueError(f"Criterion names must be unique: {key}.")
+        seen.add(key.casefold())
+        weight=_finite_number(item.get("weight"),f"Weight for {key}")
+        direction=str(item.get("direction","")).strip().casefold()
+        if weight<=0: raise ValueError(f"Weight for {key} must be greater than zero.")
+        if direction not in {"benefit","risk"}: raise ValueError(f"Direction for {key} must be benefit or risk.")
+        criterion_list.append({"criterion":key,"weight":weight,"direction":direction}); weight_sum+=weight
+    rows=[]
+    for supplier in supplier_list:
+        available_weight=0.0; weighted=0.0; coverage=[]
+        for criterion in criterion_list:
+            key=criterion["criterion"]
+            raw=supplier.get(key)
+            if raw is None or (isinstance(raw,str) and not raw.strip()):
+                coverage.append(key); continue
+            rating=_finite_number(raw,f"{key} rating for {supplier['name']}")
+            if not 0<=rating<=100: raise ValueError(f"{key} rating for {supplier['name']} must be between 0 and 100.")
+            normalized=rating if criterion["direction"]=="benefit" else 100.0-rating
+            weighted += normalized*criterion["weight"]
+            available_weight += criterion["weight"]
+        score=(weighted/available_weight) if available_weight else None
+        coverage_pct=available_weight/weight_sum*100.0
+        rows.append({
+            "Supplier":supplier["name"],"Weighted score (0–100)":score,
+            "Evidence coverage (%)":coverage_pct,
+            "Missing criteria":"; ".join(coverage),
+        })
+    table=pd.DataFrame(rows).sort_values(
+        ["Weighted score (0–100)","Evidence coverage (%)","Supplier"],
+        ascending=[False,False,True],na_position="last",kind="stable",
+    ).reset_index(drop=True)
+    table.insert(0,"Rank",range(1,len(table)+1))
+    return {
+        "status":"SCORED",
+        "method":"Weighted 0–100 ratings; risk-direction ratings are reverse-scored; incomplete evidence is surfaced",
+        "supplier_count":len(table),
+        "criteria_count":len(criterion_list),
+        "weight_sum":weight_sum,
+        "supplier_scorecard":table,
+        "criteria":criterion_list,
+        "warning":"Ratings and weights are user-supplied judgments, not objective probability of failure. Review evidence dates, coverage and critical supplier-specific risks before award.",
+    }
+
+
+def analyze_process_mining_event_log(
+    frame: pd.DataFrame,
+    *,
+    case_column: str,
+    activity_column: str,
+    timestamp_column: str,
+    timezone: str = "UTC",
+) -> dict[str, Any]:
+    """Discover directly-follows frequencies and case durations from a validated event log."""
+    from zoneinfo import ZoneInfo
+
+    if not isinstance(frame, pd.DataFrame) or frame.empty:
+        raise ValueError("Provide a non-empty event log.")
+    columns=[str(x).strip() for x in (case_column,activity_column,timestamp_column)]
+    if not all(columns) or len(set(columns))!=3:
+        raise ValueError("Case, activity and timestamp must be three distinct, non-empty columns.")
+    missing=[x for x in columns if x not in frame.columns]
+    if missing: raise ValueError("Column(s) not found: "+", ".join(missing))
+    try: ZoneInfo(str(timezone))
+    except Exception as exc: raise ValueError("Provide a valid IANA time zone, such as UTC or Asia/Riyadh.") from exc
+    data=pd.DataFrame({
+        "case_id":frame[columns[0]].astype("string").str.strip(),
+        "activity":frame[columns[1]].astype("string").str.strip(),
+        "timestamp":pd.to_datetime(frame[columns[2]],errors="coerce",utc=True),
+    })
+    if data.isna().any().any() or (data["case_id"]=="").any() or (data["activity"]=="").any():
+        raise ValueError("Every event requires a non-empty case/activity and valid timestamp.")
+    duplicate_events=int(data.duplicated(["case_id","activity","timestamp"]).sum())
+    data=data.sort_values(["case_id","timestamp","activity"],kind="stable").reset_index(drop=True)
+    data["timestamp_local"]=data["timestamp"].dt.tz_convert(timezone)
+    case_rows=[]; edge_rows=[]; activity_rows=[]
+    for case_id, group in data.groupby("case_id",sort=True):
+        group=group.sort_values(["timestamp","activity"],kind="stable").reset_index(drop=True)
+        duration_seconds=float((group["timestamp"].iloc[-1]-group["timestamp"].iloc[0]).total_seconds())
+        case_rows.append({"Case":str(case_id),"Event count":len(group),"Start":group["timestamp_local"].iloc[0],"End":group["timestamp_local"].iloc[-1],"Throughput seconds":duration_seconds,"Variant":" → ".join(group["activity"].tolist())})
+        for idx in range(len(group)-1):
+            source,target=str(group.loc[idx,"activity"]),str(group.loc[idx+1,"activity"])
+            gap=float((group.loc[idx+1,"timestamp"]-group.loc[idx,"timestamp"]).total_seconds())
+            edge_rows.append({"From activity":source,"To activity":target,"Gap seconds":gap,"Case":str(case_id)})
+    for activity, group in data.groupby("activity",sort=True):
+        activity_rows.append({"Activity":str(activity),"Event count":int(len(group)),"Case count":int(group["case_id"].nunique()),"First seen UTC":group["timestamp"].min(),"Last seen UTC":group["timestamp"].max()})
+    edges=pd.DataFrame(edge_rows,columns=["From activity","To activity","Gap seconds","Case"])
+    if not edges.empty:
+        edges=edges.groupby(["From activity","To activity"],as_index=False).agg(
+            Transition count=("Case","count"),
+            Median gap seconds=("Gap seconds","median"),
+            Cases=("Case",lambda values: ", ".join(sorted(set(values.astype(str))))),
+        ).sort_values(["Transition count","From activity","To activity"],ascending=[False,True,True],kind="stable").reset_index(drop=True)
+    cases=pd.DataFrame(case_rows).sort_values(["Throughput seconds","Case"],ascending=[False,True],kind="stable").reset_index(drop=True)
+    activity_table=pd.DataFrame(activity_rows)
+    variants=cases.groupby("Variant",as_index=False).agg(Case count=("Case","count")).sort_values(["Case count","Variant"],ascending=[False,True],kind="stable").reset_index(drop=True)
+    return {
+        "status":"MINED",
+        "method":"Event-log directly-follows discovery; events sorted within cases by UTC timestamp",
+        "case_count":int(data["case_id"].nunique()),
+        "event_count":int(len(data)),
+        "duplicate_event_count":duplicate_events,
+        "median_case_throughput_seconds":float(cases["Throughput seconds"].median()),
+        "activities":activity_table,
+        "directly_follows":edges,
+        "case_summary":cases,
+        "variants":variants,
+        "warnings":[
+            "This discovers observed event-log sequence patterns; it does not establish conformance to a normative process model.",
+            "Same-timestamp events are ordered alphabetically by activity as a deterministic tie-break; review ties when order matters.",
+        ],
+    }
