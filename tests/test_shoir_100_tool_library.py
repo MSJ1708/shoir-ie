@@ -499,3 +499,24 @@ def test_constraint_solver_diagnostics_shows_optimal_solution_and_denies_starter
     assert "shoir_T062_result" not in denied.session_state
     with pytest.raises(KeyError):
         denied.button(key="T062_run_button")
+
+
+def test_maintenance_backlog_optimizer_respects_capacity_and_tier():
+    at = _authed_library(tier="Professional")
+    _open(at, "T049", "Maintenance Backlog Optimizer")
+    result = _run(at, "T049")
+    assert result["status"] == "OPTIMAL"
+    assert result["metrics"]["scheduled_count"] == 3
+    plan = result["work_plan"].set_index("work_order_id")
+    assert plan.loc["WO-B", "schedule_status"] == "SCHEDULED"
+    assert plan.loc["WO-C", "schedule_status"] == "SCHEDULED"
+    assert plan.loc["WO-D", "schedule_status"] == "SCHEDULED"
+    assert plan.loc["WO-A", "schedule_status"] == "NOT_SCHEDULED_CAPACITY_TRADEOFF"
+    assert result["slot_utilization"].set_index("slot_id").loc["DAY-MECH-4H", "scheduled_hours"] == pytest.approx(4)
+
+    denied = _authed_library(tier="Starter")
+    _open(denied, "T049", "Maintenance Backlog Optimizer")
+    assert any("does not grant this target capability" in str(item.value).lower() for item in denied.warning)
+    assert "shoir_T049_result" not in denied.session_state
+    with pytest.raises(KeyError):
+        denied.button(key="T049_run_button")
