@@ -131,7 +131,7 @@ def test_focused_workbench_tools_document_direct_gates_tests_and_transient_persi
         assert "not yet wired" not in tool["entitlement_enforcement_points"]
         assert "workspace_persistence.py" in tool["persistence_scope"]
         assert "local SQLite fallback may be ephemeral" in tool["persistence_scope"]
-        expected_test_file = "tests/test_shoir_target_engines_extended.py::" if tool_id in {"T013", "T017", "T018", "T019", "T034", "T070"} else "tests/test_shoir_target_engines.py::"
+        expected_test_file = "tests/test_shoir_target_engines_extended.py::" if tool_id in {"T013", "T017", "T018", "T019", "T034", "T070", "T082", "T084"} else "tests/test_shoir_target_engines.py::"
         assert expected_test_file in tool["unit_test"]
         assert tool["implementation_status"] == "IMPLEMENTED_NEEDS_VALIDATION"
 
