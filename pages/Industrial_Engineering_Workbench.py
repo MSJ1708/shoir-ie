@@ -1103,6 +1103,8 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 result = score_engineering_portfolio(project_items, criteria_items)
                                 result["data_provenance"] = "USER_ENTERED_UNVERIFIED"
                             elif selected_tool["tool_id"] == "T050":
+                                if not incidents_json.strip() or not exposure_json.strip():
+                                    raise ValueError("Paste incident event records and exposure hours by period before analyzing.")
                                 parsed_incidents = json.loads(incidents_json)
                                 parsed_exposure = json.loads(exposure_json)
                                 if not isinstance(parsed_incidents, list) or not isinstance(parsed_exposure, dict):
