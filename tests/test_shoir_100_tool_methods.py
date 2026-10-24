@@ -36,7 +36,7 @@ def test_join_reconciles_rows_and_blocks_unapproved_many_to_many_and_null_keys()
     duplicated_right = pd.DataFrame({"machine": ["M1", "M1"], "line": ["A", "B"]})
     with pytest.raises(ValueError, match="violates"):
         join_dataframes(left, duplicated_right, ["machine"], cardinality="many_to_one")
-    with pytest.raises(ValueError, match="many-to-many"):
+    with pytest.raises(ValueError, match="(?i)many-to-many"):
         join_dataframes(left, duplicated_right, ["machine"], cardinality="many_to_many")
     with pytest.raises(ValueError, match="Null join keys"):
         join_dataframes(pd.DataFrame({"k": [None]}), pd.DataFrame({"k": [1]}), ["k"])
