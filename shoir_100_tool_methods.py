@@ -577,9 +577,9 @@ def a3_improvement(
     improvement = None
     if actual_value is not None:
         improvement = base - actual_value if direction == "lower" else actual_value - base
-    verified = actual_value is not None and bool(evidence)
+    evidence_complete = actual_value is not None and bool(evidence)
     return {
-        "status": "EVIDENCE_RECORDED" if verified else "PLAN_ONLY_OR_UNVERIFIED",
+        "status": "ACTUAL_AND_EVIDENCE_RECORDED" if evidence_complete else "PLAN_ONLY_OR_UNVERIFIED",
         "tool_id": "T030", "method_version": METHOD_VERSION,
         "title": title, "problem": problem, "metric": metric, "unit": unit,
         "baseline": base, "target": target_value, "direction": direction,
@@ -587,7 +587,11 @@ def a3_improvement(
         "actual_post_change": actual_value, "absolute_improvement": improvement,
         "percent_improvement": None if actual_value is None or base == 0 else improvement / abs(base) * 100.0,
         "target_met": target_met, "implementation_cost": cost,
-        "actual_evidence": evidence, "outcome_verified": verified,
+        "actual_evidence": evidence,
+        "actual_measurement_recorded": actual_value is not None,
+        "evidence_reference_recorded": bool(evidence),
+        "verification_status": "PENDING_REVIEW" if evidence_complete else "NOT_SUBMITTED",
+        "outcome_verified": False,
         "warnings": ["A3 plan data alone is not proof of realized benefit.",
                      "Outcome is only marked evidence-recorded when an actual result and an evidence reference are supplied."],
     }
