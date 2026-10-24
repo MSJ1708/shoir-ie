@@ -303,3 +303,36 @@ def test_workbench_runs_seven_additional_gated_specialist_methods():
         assert result[result_key] == pytest.approx(expected) if isinstance(expected, (float, int)) else result[result_key] == expected
         assert result.get("_workspace_persistence") in {"SAVED_LOCAL_FALLBACK", "SAVED_MANAGED_WORKSPACE", "SESSION_ONLY", "SAVE_FAILED", "SAVE_PENDING", "SAVE_STATUS_NOT_CONFIRMED"}
         assert result.get("status") or result.get("verification_status")
+
+
+def test_workbench_runs_maintenance_hazard_mrp_and_portfolio_methods():
+    from streamlit.testing.v1 import AppTest
+
+    page = ROOT / "pages" / "Industrial_Engineering_Workbench.py"
+    at = AppTest.from_file(page, default_timeout=90)
+    at.session_state["current_user"] = "operations-method-checker"
+    at.session_state["authenticated"] = True
+    at.session_state["user_tier"] = "Enterprise Plus Tier"
+    at.run(timeout=90)
+    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+
+    cases = [
+        ("T043 · Preventive Maintenance Planner", "tool043_run", "T043", "overdue_task_count", 1),
+        ("T047 · Job Safety and Hazard Register", "tool047_run", "T047", "high_screen_score_count", 1),
+        ("T054 · Material Requirements Planner", "tool054_run", "T054", "total_planned_order_receipts", 30.0),
+        ("T084 · Engineering Project Portfolio Scorer", "tool084_run", "T084", "project_count", 2),
+    ]
+    for label, button_key, tool_id, result_key, expected in cases:
+        at.selectbox(key="shoir_100_tool_inspector").select(label)
+        at.run(timeout=90)
+        assert not at.exception, f"{tool_id} selection raised: " + "\n".join(str(error.value) for error in at.exception)
+        at.button(key=button_key).click()
+        at.run(timeout=90)
+        assert not at.exception, f"{tool_id} run raised: " + "\n".join(str(error.value) for error in at.exception)
+        result = at.session_state.get(f"shoir_tool_result_{tool_id}")
+        assert result is not None, f"{tool_id} returned no result; visible errors: " + " | ".join(str(item.value) for item in at.error)
+        assert result[result_key] == pytest.approx(expected)
+        assert result.get("_workspace_persistence") in {
+            "SAVED_LOCAL_FALLBACK", "SAVED_MANAGED_WORKSPACE", "SESSION_ONLY",
+            "SAVE_FAILED", "SAVE_PENDING", "SAVE_STATUS_NOT_CONFIRMED",
+        }
