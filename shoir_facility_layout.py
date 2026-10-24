@@ -1123,8 +1123,13 @@ def render_facility_layout(tier: str, username: str) -> None:
                     st.success(f"Imported {dep_count:,} department(s) and {flow_count:,} connection(s). They are now live in this workspace.")
                     st.rerun()
                 st.error("No recognizable department or flow table was found. Use Department columns ID, Name, X, Y, Area and flow columns From_ID, To_ID, Loads_Day, Distance_M, Relationship.")
+            except ValueError as exc:
+                # Validation errors are intentionally concise and safe to show.
+                st.error(f"Import rejected: {str(exc)[:240]}. The existing saved layout was preserved.")
             except Exception as exc:
-                st.error(f"Import failed safely: {type(exc).__name__}: {exc}")
+                # Do not echo parser/driver exception details into an ordinary user session.
+                st.error("Import failed safely while processing the workbook. The existing saved layout was preserved.")
+                st.caption(f"Diagnostic type: {type(exc).__name__}. Confirm that the file is valid and uses a supported format.")
         st.markdown("#### Export current facility model")
         export=_export_workbook(depts,flows,slp)
         st.download_button("📥 Download Facility Model Workbook",data=export,file_name="shoir_ie_facility_layout.xlsx",mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",type="primary",use_container_width=True,key="fl_export_workbook")
