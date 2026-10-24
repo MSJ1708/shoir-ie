@@ -643,3 +643,175 @@ def test_abc_xyz_rejects_duplicates_and_inconsistent_history():
     ]
     with pytest.raises(ValueError, match="same number"):
         analyze_abc_xyz_inventory(mismatch)
+
+
+# Additional golden cases for methods integrated into the 100-tool Workbench.
+
+def test_production_line_balancer_respects_precedence_and_cycle_time():
+    from shoir_target_engines import balance_production_line
+
+    result = balance_production_line(
+        [
+            {"task_id": "A", "duration": 2, "predecessors": []},
+            {"task_id": "B", "duration": 3, "predecessors": []},
+            {"task_id": "C", "duration": 2, "predecessors": ["A"]},
+            {"task_id": "D", "duration": 1, "predecessors": ["B", "C"]},
+        ],
+        5,
+        time_unit="minutes",
+    )
+    assert result["status"] == "FEASIBLE_HEURISTIC"
+    assert result["station_count"] == 2
+    assert result["theoretical_minimum_stations"] == 2
+    assert result["efficiency_pct"] == pytest.approx(80)
+    assignments = result["task_assignment"].set_index("Task")["Station"].to_dict()
+    assert assignments["A"] <= assignments["C"]
+    assert assignments["B"] <= assignments["D"]
+    assert assignments["C"] <= assignments["D"]
+    assert result["precedence_validated"] is True
+    assert result["station_summary"]["Work content (minutes)"].max() <= 5
+
+
+def test_production_line_balancer_rejects_cycles_unknown_predecessors_and_oversized_tasks():
+    from shoir_target_engines import balance_production_line
+
+    with pytest.raises(ValueError, match="cycle"):
+        balance_production_line(
+            [
+                {"task_id": "A", "duration": 1, "predecessors": ["B"]},
+                {"task_id": "B", "duration": 1, "predecessors": ["A"]},
+            ],
+            5,
+        )
+    with pytest.raises(ValueError, match="unknown predecessor"):
+        balance_production_line([{"task_id": "A", "duration": 1, "predecessors": ["X"]}], 5)
+    result = balance_production_line([{"task_id": "A", "duration": 6}], 5)
+    assert result["status"] == "INFEASIBLE"
+    assert result["station_count"] is None
+
+
+def test_bottleneck_capacity_screen_identifies_shortfall_and_reconciles_processes():
+    from shoir_target_engines import analyze_bottleneck_capacity
+
+    result = analyze_bottleneck_capacity(
+        [
+            {"process": "Cut", "capacity": 110},
+            {"process": "Weld", "capacity": 80},
+            {"process": "Pack", "capacity": 95},
+        ],
+        90,
+        period_label="units/shift",
+    )
+    assert result["status"] == "CAPACITY_SHORTFALL"
+    assert result["bottleneck_process"] == "Weld"
+    assert result["bottleneck_capacity_per_period"] == pytest.approx(80)
+    assert result["capacity_shortfall_per_period"] == pytest.approx(10)
+    assert result["minimum_recovery_capacity_required"] == pytest.approx(10)
+    assert result["process_capacity_table"]["Bottleneck"].sum() == 1
+    with pytest.raises(ValueError, match="greater than zero"):
+        analyze_bottleneck_capacity([{"process": "Cut", "capacity": 10}], 0)
+
+
+def test_vsm_first_pass_lead_time_uses_explicit_wip_flow_and_batch_assumptions():
+    from shoir_target_engines import build_value_stream_map
+
+    result = build_value_stream_map(
+        [
+            {"step": "Machine", "cycle_time": 1, "changeover_time": 20, "batch_size": 10,
+             "uptime_pct": 100, "wip_units": 25, "value_added": True},
+            {"step": "Inspect", "cycle_time": 2, "changeover_time": 0, "batch_size": 1,
+             "uptime_pct": 50, "wip_units": 0, "value_added": False},
+        ],
+        demand_units_per_period=100,
+        available_time_per_period=400,
+        time_unit="minutes",
+    )
+    assert result["status"] == "CALCULATED_ESTIMATE"
+    assert result["required_flow_rate_units_per_time"] == pytest.approx(0.25)
+    assert result["total_queue_lead_time"] == pytest.approx(100)
+    assert result["availability_adjusted_process_time"] == pytest.approx(7)
+    assert result["estimated_total_lead_time"] == pytest.approx(107)
+    assert result["value_added_time"] == pytest.approx(1)
+    assert result["value_added_share_pct"] == pytest.approx(100 / 107 * 100)
+    with pytest.raises(ValueError, match="uptime percentage"):
+        build_value_stream_map([{"step": "A", "cycle_time": 1, "uptime_pct": 0}], 10, 100)
+
+
+def test_fmea_rpn_ranking_keeps_severity_override_visible():
+    from shoir_target_engines import analyze_fmea
+
+    result = analyze_fmea([
+        {"failure_mode": "Rare catastrophic", "severity": 9, "occurrence": 1, "detection": 2},
+        {"failure_mode": "Frequent nuisance", "severity": 5, "occurrence": 5, "detection": 5},
+    ])
+    assert result["status"] == "CALCULATED_REQUIRES_ENGINEERING_REVIEW"
+    assert result["highest_rpn"] == 125
+    assert result["high_severity_count"] == 1
+    first = result["failure_modes"].iloc[0]
+    assert first["Failure mode"] == "Rare catastrophic"
+    assert first["RPN (S×O×D)"] == 18
+    assert bool(first["Severity ≥ 9 review"])
+    with pytest.raises(ValueError, match="whole number from 1 through 10"):
+        analyze_fmea([{"failure_mode": "Bad score", "severity": 11, "occurrence": 1, "detection": 1}])
+
+
+def test_mm1_queue_model_matches_analytical_values_and_rejects_instability():
+    from shoir_target_engines import analyze_mm1_queue
+
+    result = analyze_mm1_queue(4, 6, time_unit="hours")
+    assert result["status"] == "STABLE_M_M_1"
+    assert result["utilization_pct"] == pytest.approx(100 * 4 / 6)
+    assert result["mean_customers_in_system"] == pytest.approx(2)
+    assert result["mean_customers_waiting"] == pytest.approx(4 / 3)
+    assert result["mean_time_in_system"] == pytest.approx(0.5)
+    assert result["mean_waiting_time_in_queue"] == pytest.approx(1 / 3)
+    with pytest.raises(ValueError, match="unstable"):
+        analyze_mm1_queue(6, 6)
+    with pytest.raises(ValueError, match="greater than zero"):
+        analyze_mm1_queue(2, 0)
+
+
+def test_cost_variance_reconciles_price_and_usage_components_against_actual_cost():
+    from shoir_target_engines import analyze_industrial_cost_variance
+
+    result = analyze_industrial_cost_variance(
+        standard_quantity_per_unit=2,
+        actual_output_units=100,
+        actual_input_quantity=210,
+        standard_unit_cost=5,
+        actual_unit_cost=6,
+        currency="SAR",
+        period="2026-09",
+    )
+    assert result["standard_quantity_allowed"] == pytest.approx(200)
+    assert result["standard_cost_for_actual_output"] == pytest.approx(1000)
+    assert result["actual_input_cost"] == pytest.approx(1260)
+    assert result["price_variance"] == pytest.approx(210)
+    assert result["usage_variance"] == pytest.approx(50)
+    assert result["total_variance"] == pytest.approx(260)
+    assert result["price_variance"] + result["usage_variance"] == pytest.approx(result["total_variance"])
+    assert result["variance_reconciles"] is True
+    with pytest.raises(ValueError, match="cannot be negative"):
+        analyze_industrial_cost_variance(2, 100, 210, 5, -1)
+
+
+def test_roi_evidence_calculation_never_self_certifies_claimed_savings():
+    from shoir_target_engines import calculate_roi_evidence
+
+    result = calculate_roi_evidence(
+        1000, 700, 100, currency="SAR",
+        measurement_window="2026-Q3",
+        baseline_evidence="baseline.csv#row-1",
+        outcome_evidence="outcome.csv#row-1",
+        verifier="Engineering reviewer",
+    )
+    assert result["gross_cost_reduction"] == pytest.approx(300)
+    assert result["net_benefit_after_implementation"] == pytest.approx(200)
+    assert result["roi_pct"] == pytest.approx(200)
+    assert result["break_even_or_better"] is True
+    assert result["verification_status"] == "REQUIRES_HUMAN_VERIFICATION"
+    assert result["missing_verification_items"] == []
+    without_evidence = calculate_roi_evidence(100, 120, 0)
+    assert without_evidence["roi_pct"] is None
+    assert without_evidence["verification_status"] == "REQUIRES_HUMAN_VERIFICATION"
+    assert without_evidence["missing_verification_items"]
