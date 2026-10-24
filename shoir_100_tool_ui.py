@@ -337,8 +337,8 @@ def render_operational_improvement_tools(
         result = st.session_state.get("T030_last_result")
         if result:
             _show_result(st, "T030", result)
-            if result.get("outcome_verified"):
-                st.success("Actual value and evidence reference are recorded. A project owner must still verify the evidence quality.")
+            if result.get("evidence_reference_recorded"):
+                st.warning("Actual value and evidence reference are recorded, but the outcome remains PENDING_REVIEW. Do not report it as a verified benefit until an authorized reviewer validates the evidence.")
 
     with st.expander("T040 · Quality Cost and Defect Analyzer · Mid-Tier Pro", expanded=False):
         st.caption("Separate modeled scrap and rework costs from inspection costs. Use one period and avoid double counting.")
