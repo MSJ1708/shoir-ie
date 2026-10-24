@@ -50,13 +50,13 @@ _POLICY_TIER = normalize_tier(_RAW_TIER)
 if not _IS_AUTHENTICATED:
     st.title("Shoir-IE Engineering Workbench")
     st.warning("Sign in to Shoir-IE before opening the engineering workspace.")
-    st.page_link("app.py", label="Return to sign-in")
+    st.info("Return to the main Shoir-IE application page to sign in; this protected workspace has been stopped.")
     st.stop()
 
 if _POLICY_TIER not in TIER_ORDER:
     st.title("Shoir-IE Engineering Workbench")
     st.error("Your package could not be verified. Sign in again; protected tools are unavailable until access is verified.")
-    st.page_link("app.py", label="Return to sign-in")
+    st.info("Return to the main Shoir-IE application page to sign in; this protected workspace has been stopped.")
     st.stop()
 
 init_platform_db()
