@@ -123,3 +123,47 @@ def test_aliases_resolve_to_the_same_canonical_policy_and_cannot_bypass_tier():
     assert target_tool_access_decision("OEE", "Starter")["allowed"] is False
     assert target_tool_access_decision("OEE", "Mid-Tier Pro")["allowed"] is True
     assert target_tool_access_decision("not-a-registered-alias", "Enterprise Plus")["allowed"] is False
+
+
+def test_implementation_matrix_stays_in_sync_with_canonical_registry():
+    """The human-readable 100-row matrix must not silently drift from runtime policy."""
+    from pathlib import Path
+    import csv
+
+    from shoir_100_tool_registry import TOOL_TARGETS
+
+    matrix_path = Path(__file__).resolve().parents[1] / "docs" / "SHOIR_100_TOOL_IMPLEMENTATION_MATRIX.csv"
+    with matrix_path.open(encoding="utf-8", newline="") as stream:
+        matrix_rows = list(csv.DictReader(stream))
+
+    assert len(matrix_rows) == 100, f"Expected one matrix row per target; found {len(matrix_rows)}."
+    assert len({row.get("tool_id", "").strip() for row in matrix_rows}) == 100
+    assert set(matrix_rows[0]) >= {
+        "tool_id", "canonical_name", "workbench", "target_minimum_tier",
+        "existing_module_or_route", "source_files", "implementation_status",
+        "calculation_or_action", "input_contract", "output_contract",
+        "persistence_scope", "external_dependency", "entitlement_enforcement_points",
+        "remaining_gap",
+    }
+
+    registry_by_id = {row["tool_id"]: row for row in TOOL_TARGETS}
+    matrix_by_id = {row["tool_id"].strip(): row for row in matrix_rows}
+    assert set(matrix_by_id) == set(registry_by_id), "CSV target IDs must exactly match the canonical registry."
+
+    shared_fields = (
+        "canonical_name", "workbench", "target_minimum_tier", "existing_module_or_route",
+        "implementation_status", "calculation_or_action", "input_contract", "output_contract",
+        "persistence_scope", "external_dependency", "entitlement_enforcement_points", "remaining_gap",
+    )
+    differences = []
+    for tool_id, registry_row in registry_by_id.items():
+        matrix_row = matrix_by_id[tool_id]
+        for field in shared_fields:
+            if str(matrix_row.get(field, "")).strip() != str(registry_row.get(field, "")).strip():
+                differences.append((tool_id, field, matrix_row.get(field), registry_row.get(field)))
+        matrix_sources = [part.strip() for part in str(matrix_row.get("source_files", "")).split(";") if part.strip()]
+        registry_sources = [str(part).strip() for part in registry_row.get("source_files", []) if str(part).strip()]
+        if matrix_sources != registry_sources:
+            differences.append((tool_id, "source_files", matrix_sources, registry_sources))
+
+    assert not differences, "Implementation matrix drifted from runtime registry: " + repr(differences[:20])
