@@ -7,14 +7,14 @@ from shoir_100_tool_simulation_engine import simulate_serial_flow_line
 
 def test_deterministic_single_station_has_hand_calculable_flow_and_throughput():
     stations=pd.DataFrame([{"sequence":1,"station_id":"S1","servers":1,"mean_service_minutes":10.0,"service_time_cv":0.0}])
-    result=simulate_serial_flow_line(stations,entity_count=4 if False else 10,mean_interarrival_minutes=5,
+    result=simulate_serial_flow_line(stations,entity_count=10,mean_interarrival_minutes=5,
                                      arrival_pattern="fixed",warmup_entities=0,replications=1,random_seed=4)
     assert result["status"]=="SIMULATED"
     # With 10 entities, 10-minute service and 5-minute interarrival,
     # completion times are 10..100 and flow times are 10,15,...,55 for the first ten arrivals.
     assert result["entity_results"].iloc[0]["flow_time_minutes"]==pytest.approx(10)
     assert result["entity_results"].iloc[1]["flow_time_minutes"]==pytest.approx(15)
-    assert result["replication_summary"].iloc[0]["throughput_units_per_hour"]==pytest.approx(10/95*60)
+    assert result["replication_summary"].iloc[0]["throughput_units_per_hour"]==pytest.approx(10/100*60)
     assert result["metrics"]["live_data_connected"] is False
 
 
