@@ -545,3 +545,22 @@ def test_reproducibility_pack_is_valid_zip_and_research_pack_gated():
     assert "shoir_T087_result" not in denied.session_state
     with pytest.raises(KeyError):
         denied.button(key="T087_run_button")
+
+
+def test_gage_rr_analyzer_runs_crossed_design_and_denies_starter():
+    at = _authed_library(tier="Professional")
+    _open(at, "T033", "Measurement Systems Analysis")
+    result = _run(at, "T033")
+    assert result["status"] == "CALCULATED"
+    assert result["metrics"]["part_count"] == 3
+    assert result["metrics"]["appraiser_count"] == 2
+    assert result["metrics"]["replicates_per_cell"] == 3
+    assert len(result["anova_table"]) == 4
+    assert result["variance_components"]["variance_component"].ge(0).all()
+
+    denied = _authed_library(tier="Starter")
+    _open(denied, "T033", "Measurement Systems Analysis")
+    assert any("does not grant this target capability" in str(item.value).lower() for item in denied.warning)
+    assert "shoir_T033_result" not in denied.session_state
+    with pytest.raises(KeyError):
+        denied.button(key="T033_run_button")
