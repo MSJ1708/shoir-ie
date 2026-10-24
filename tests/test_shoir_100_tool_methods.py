@@ -45,7 +45,7 @@ def test_join_reconciles_rows_and_blocks_unapproved_many_to_many_and_null_keys()
 def test_time_series_normalizes_timezone_sorts_and_flags_gap():
     source = pd.DataFrame({
         "ts": ["2026-01-01T02:00:00+03:00", "bad", "2026-01-01T00:00:00+03:00",
-               "2026-01-01T05:00:00+03:00"],
+               "2026-01-01T12:00:00+03:00"],
         "value": [2, 999, 0, 5],
     })
     result = process_time_series(source, "ts", ["value"], target_timezone="UTC")
