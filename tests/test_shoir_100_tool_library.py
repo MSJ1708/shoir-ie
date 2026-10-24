@@ -305,3 +305,61 @@ def test_starter_cannot_render_or_execute_research_hypothesis_testing():
     assert "shoir_T037_result" not in at.session_state
     with pytest.raises(KeyError):
         at.button(key="T037_run_button")
+
+
+def test_quality_asset_supplier_and_sustainability_tools_run_in_validation_mode():
+    at = _authed_library(tier="Research Pack")
+
+    _open(at, "T038", "FMEA Manager")
+    fmea = _run(at, "T038")
+    assert fmea["metrics"]["failure_mode_count"] == 2
+    assert fmea["metrics"]["maximum_rpn"] == 96
+    assert len(fmea["revision_history"]) == 0
+
+    _open(at, "T039", "CAPA and 8D Manager")
+    capa = _run(at, "T039")
+    assert capa["metrics"]["closure_ready"] is False
+    assert capa["record"]["evidence_state"] == "USER_ENTERED_UNVERIFIED"
+    assert capa["record"]["revision"] == 1
+    assert len(at.session_state["shoir_capa_8d_register"]) == 1
+
+    _open(at, "T043", "Preventive Maintenance Planner")
+    maintenance = _run(at, "T043")
+    assert maintenance["metrics"]["overdue_tasks"] == 1
+    assert maintenance["metrics"]["due_within_30_days"] == 1
+
+    _open(at, "T045", "Spare Parts and Criticality Planner")
+    spares = _run(at, "T045")
+    assert spares["metrics"]["parts_count"] == 2
+    assert spares["metrics"]["parts_below_reorder_point"] >= 1
+
+    _open(at, "T058", "Supplier Performance and Risk Scorecard")
+    suppliers = _run(at, "T058")
+    supplier_rows = suppliers["scorecard"].set_index("supplier")
+    assert supplier_rows.loc["Supplier A", "weighted_score_on_available_evidence"] == pytest.approx(84)
+    assert supplier_rows.loc["Supplier B", "evidence_coverage_percent"] == pytest.approx(80)
+
+    _open(at, "T077", "Energy Performance Optimizer")
+    energy = _run(at, "T077")
+    assert energy["metrics"]["baseline_kwh_per_unit"] == pytest.approx(10)
+    assert energy["metrics"]["estimated_energy_difference_kwh"] == pytest.approx(210)
+
+    _open(at, "T079", "Water and Waste Efficiency Analyzer")
+    resources = _run(at, "T079")
+    assert resources["metrics"]["total_water_input_m3"] == pytest.approx(104)
+    assert resources["metrics"]["total_recycling_rate_percent"] == pytest.approx(17 / 44 * 100)
+
+    _open(at, "T083", "Evidence-Based ROI Tracker")
+    roi = _run(at, "T083")
+    assert roi["metrics"]["net_benefit_after_implementation_cost"] == pytest.approx(2000)
+    assert roi["metrics"]["verified_savings"] is False
+    assert roi["metrics"]["evidence_state"] == "ESTIMATE_ONLY"
+
+
+def test_starter_cannot_render_or_execute_professional_spare_parts_planner():
+    at = _authed_library(tier="Starter")
+    _open(at, "T045", "Spare Parts and Criticality Planner")
+    assert any("does not grant this target capability" in str(item.value).lower() for item in at.warning)
+    assert "shoir_T045_result" not in at.session_state
+    with pytest.raises(KeyError):
+        at.button(key="T045_run_button")
