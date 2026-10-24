@@ -33,10 +33,6 @@ from shoir_100_tool_planning_engines import (
     evaluate_acceptance_sampling_plan, forecast_demand_series,
     plan_material_requirements, simulate_monte_carlo_outcome,
 )
-# Existing method imports continue below.
-from shoir_100_tool_operations_engines import (
-    analyze_bottleneck, analyze_mm1_queue, balance_production_line, build_value_stream_metrics,
-)
 from shoir_100_tool_extended_engines import (
     analyze_abc_xyz_inventory, analyze_mtbf_mttr, analyze_pareto_root_cause,
     analyze_quality_cost_defects, analyze_spc_individuals, analyze_work_sampling,
@@ -1045,16 +1041,30 @@ if rows:
                 else:
                     try:
                         outcome = first_fit_decreasing_bin_pack(edited_items, float(capacity))
-                        st.session_state["shoir_t066_result"] = {
-                            "signature": signature, "source": source, "result": outcome,
+                        result_key = "shoir_t066_result"
+                        st.session_state[result_key] = {
+                            "signature": signature,
+                            "source": source,
+                            "result": outcome,
+                            "executed_at": datetime.now(timezone.utc).isoformat(),
+                            "persistence_status": "SAVE_PENDING",
                         }
+                        persist_tool_run_record(
+                            st.session_state.get("current_user", ""), st.session_state, result_key
+                        )
                     except ValueError as exc:
                         st.error(f"Input validation failed: {exc}. Previous successful result was preserved.")
             saved = st.session_state.get("shoir_t066_result")
             if isinstance(saved, dict):
                 if saved.get("signature") != signature:
                     st.warning("STALE — the table, capacity or provenance changed. Rerun before using the saved result.")
-                st.caption(f'Result status: {saved["result"]["status"]} · Input provenance: {saved["source"]} · current-session result (durable project save not yet implemented)')
+                persist_label = {
+                    "MANAGED_WORKSPACE_SAVED": "saved to managed workspace",
+                    "LOCAL_SQLITE_SAVED_MAY_BE_EPHEMERAL": "local development save only — may be ephemeral",
+                    "SESSION_ONLY_SAVE_FAILED": "session-only — workspace save failed",
+                    "SESSION_ONLY_PERSISTENCE_MODE_UNVERIFIED": "session-only — persistence mode unverified",
+                }.get(saved.get("persistence_status"), "persistence status unverified")
+                st.caption(f'Result status: {saved["result"]["status"]} · Input provenance: {saved["source"]} · {persist_label}')
                 metrics = saved["result"]["metrics"]
                 metric_cols = st.columns(4)
                 metric_cols[0].metric("Bins used", f'{metrics["bins_used"]:,}')
@@ -1144,16 +1154,30 @@ if rows:
                 else:
                     try:
                         outcome = analyze_process_event_log(edited_events, reference_sequence=reference or None)
-                        st.session_state["shoir_t076_result"] = {
-                            "signature": signature, "source": source, "result": outcome,
+                        result_key = "shoir_t076_result"
+                        st.session_state[result_key] = {
+                            "signature": signature,
+                            "source": source,
+                            "result": outcome,
+                            "executed_at": datetime.now(timezone.utc).isoformat(),
+                            "persistence_status": "SAVE_PENDING",
                         }
+                        persist_tool_run_record(
+                            st.session_state.get("current_user", ""), st.session_state, result_key
+                        )
                     except ValueError as exc:
                         st.error(f"Event-log validation failed: {exc}. Previous successful result was preserved.")
             saved = st.session_state.get("shoir_t076_result")
             if isinstance(saved, dict):
                 if saved.get("signature") != signature:
                     st.warning("STALE — the event log or reference sequence changed. Rerun before relying on this result.")
-                st.caption(f'Result status: {saved["result"]["status"]} · Input provenance: {saved["source"]} · current-session result (durable project save not yet implemented)')
+                persist_label = {
+                    "MANAGED_WORKSPACE_SAVED": "saved to managed workspace",
+                    "LOCAL_SQLITE_SAVED_MAY_BE_EPHEMERAL": "local development save only — may be ephemeral",
+                    "SESSION_ONLY_SAVE_FAILED": "session-only — workspace save failed",
+                    "SESSION_ONLY_PERSISTENCE_MODE_UNVERIFIED": "session-only — persistence mode unverified",
+                }.get(saved.get("persistence_status"), "persistence status unverified")
+                st.caption(f'Result status: {saved["result"]["status"]} · Input provenance: {saved["source"]} · {persist_label}')
                 metrics = saved["result"]["metrics"]
                 metric_cols = st.columns(4)
                 metric_cols[0].metric("Cases", f'{metrics["case_count"]:,}')
