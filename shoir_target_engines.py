@@ -31,6 +31,7 @@ from datetime import date as _date
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+import numpy as np
 import pandas as pd
 import pulp
 from scipy.stats import nct, norm, t
