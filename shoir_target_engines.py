@@ -1592,8 +1592,10 @@ def join_dataframes(
         raise ValueError("The selected right join key does not exist in the right table.")
     if how not in {"inner", "left", "right", "outer"}:
         raise ValueError("Join type must be inner, left, right or outer.")
-    left_duplicate_rows = int(left.loc[left[left_key].notna(), left_key].duplicated(keep=False).sum())
-    right_duplicate_rows = int(right.loc[right[right_key].notna(), right_key].duplicated(keep=False).sum())
+    # Pandas matches null join keys to one another; count null duplicates too so
+    # repeated missing keys on both sides cannot trigger a many-to-many expansion.
+    left_duplicate_rows = int(left[left_key].duplicated(keep=False).sum())
+    right_duplicate_rows = int(right[right_key].duplicated(keep=False).sum())
     if left_duplicate_rows and right_duplicate_rows:
         raise ValueError(
             "Both selected keys contain duplicates; this could create a many-to-many row explosion. "
@@ -1818,9 +1820,12 @@ def plan_acceptance_sampling(
     if isinstance(max_acceptance_number, bool) or not isinstance(max_acceptance_number, int) or not 0 <= max_acceptance_number <= 100:
         raise ValueError("Maximum acceptance number must be a whole number from 0 to 100.")
     for n in range(1, max_sample_size + 1):
-        for c in range(0, min(n, max_acceptance_number) + 1):
-            p_accept_aql = float(binom.cdf(c, n, aql))
-            p_accept_ltpd = float(binom.cdf(c, n, ltpd))
+        candidate_cs = list(range(0, min(n, max_acceptance_number) + 1))
+        probabilities_aql = binom.cdf(candidate_cs, n, aql)
+        probabilities_ltpd = binom.cdf(candidate_cs, n, ltpd)
+        for c, p_aql, p_ltpd in zip(candidate_cs, probabilities_aql, probabilities_ltpd):
+            p_accept_aql = float(p_aql)
+            p_accept_ltpd = float(p_ltpd)
             if p_accept_aql >= 1.0 - alpha and p_accept_ltpd <= beta:
                 return {
                     "status": "CALCULATED",
