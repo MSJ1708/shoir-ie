@@ -914,3 +914,55 @@ def test_project_portfolio_score_normalizes_direction_and_weights_reproducibly()
         score_project_portfolio([{"name": "C", "weight": 0}], [
             {"name": "A", "scores": {"C": 1}}, {"name": "B", "scores": {"C": 2}},
         ])
+
+
+def test_preventive_maintenance_planner_hazard_register_mrp_and_portfolio_fixtures():
+    from shoir_target_engines import (
+        plan_preventive_maintenance, assess_job_hazards,
+        plan_material_requirements, score_project_portfolio,
+    )
+
+    pm = plan_preventive_maintenance([
+        {"asset": "CNC-01", "task": "Lubrication", "last_completed_date": "2026-10-01",
+         "interval_days": 20, "estimated_duration_hours": 1.5},
+        {"asset": "CNC-01", "task": "Inspection", "last_completed_date": "2026-10-20",
+         "interval_days": 7, "estimated_duration_hours": 1},
+    ], "2026-10-24")
+    assert pm["overdue_task_count"] == 1
+    assert pm["due_within_7_days_count"] == 1
+    assert pm["maintenance_plan"].iloc[0]["Days until due"] == -3
+
+    hazards = assess_job_hazards([
+        {"hazard": "Moving conveyor", "severity": 5, "likelihood": 4,
+         "controls": "Lockout/tagout", "residual_severity": 5, "residual_likelihood": 1,
+         "owner": "Safety lead"},
+        {"hazard": "Manual handling", "severity": 3, "likelihood": 2},
+    ])
+    assert hazards["high_screen_score_count"] == 1
+    assert hazards["missing_controls_count"] == 1
+    assert hazards["hazard_register"].iloc[0]["Initial risk score"] == 20
+
+    mrp = plan_material_requirements(
+        [
+            {"component": "Screw", "qty_per_parent": 4, "lead_time_periods": 2, "lot_size_multiple": 10},
+            {"component": "Bolt", "qty_per_parent": 2, "lead_time_periods": 1},
+        ],
+        10,
+        inventory={
+            "Screw": {"on_hand": 20, "scheduled_receipts": 0, "safety_stock": 5},
+            "Bolt": {"on_hand": 30},
+        },
+    )
+    screw = mrp["components"].set_index("Component").loc["Screw"]
+    assert screw["Net requirement"] == 25
+    assert screw["Planned order receipt"] == 30
+    assert screw["Planned order release period"] == -2
+
+    portfolio = score_project_portfolio(
+        [{"name": "Cost", "weight": 2, "direction": "minimize"},
+         {"name": "Quality", "weight": 1, "direction": "maximize"}],
+        [{"name": "A", "scores": {"Cost": 100, "Quality": 70}},
+         {"name": "B", "scores": {"Cost": 200, "Quality": 90}}],
+    )
+    assert portfolio["ranking"].iloc[0]["Project"] == "A"
+    assert portfolio["ranking"].iloc[0]["Weighted score (0–100)"] == pytest.approx(200 / 3)
