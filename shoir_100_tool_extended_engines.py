@@ -1287,7 +1287,7 @@ def process_time_series(
     source = source.sort_values(timestamp_col).set_index(timestamp_col)
     resampled = source[selected_values].resample(offset).agg(agg)
     resampled.index.name = "timestamp_utc"
-    expected_index = pd.date_range(resampled.index.min(), resampled.index.max(), freq=offset, tz="UTC")
+    expected_index = pd.date_range(resampled.index.min(), resampled.index.max(), freq=offset)
     # Normalize both indexes to UTC, which also makes timezone-aware DST transitions explicit.
     expected = len(expected_index)
     missing_intervals = int(resampled[selected_values].isna().all(axis=1).sum())
