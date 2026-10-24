@@ -241,3 +241,143 @@ def render_portfolio_scoring_tool(st: Any, tier: str, actor: str) -> None:
         result = st.session_state.get("T084_last_result")
         if result:
             _show_result(st, "T084", result)
+
+
+def render_operational_improvement_tools(
+    st: Any, tier: str, actor: str,
+) -> None:
+    """Render additional scoped tools as collapsed panels in the existing Workbench."""
+    from shoir_100_tool_methods import (
+        a3_improvement, abc_xyz_analysis, audit_5s, inventory_policy,
+        line_balance, quality_cost_analysis, root_cause_analysis,
+    )
+    st.divider()
+    st.subheader("Operational Improvement Tools")
+    st.caption("Targeted add-ons to the existing Workbench. These records/results are session-scoped; they are not claimed as durable audit records.")
+
+    with st.expander("T024 · Production Line Balancer · Mid-Tier Pro", expanded=False):
+        st.caption("Precedence-aware largest-eligible-task heuristic; compare the result with a validated industrial-engineering study.")
+        task_frame = st.data_editor(pd.DataFrame([
+            {"task": "A", "duration": 4.0, "predecessors": ""},
+            {"task": "B", "duration": 3.0, "predecessors": "A"},
+            {"task": "C", "duration": 2.0, "predecessors": "A"},
+            {"task": "D", "duration": 4.0, "predecessors": "B, C"},
+        ]), num_rows="dynamic", use_container_width=True, key="t024_tasks")
+        cycle = st.number_input("Target cycle time", min_value=0.1, value=6.0, step=0.5, key="t024_cycle")
+        if st.button("Balance tasks", key="t024_run", type="primary"):
+            _run(st, tier, actor, "T024", lambda: line_balance(task_frame.to_dict("records"), cycle))
+        result = st.session_state.get("T024_last_result")
+        if result:
+            _show_result(st, "T024", result)
+
+    with st.expander("T028 · Root-Cause Analysis Toolkit · Starter", expanded=False):
+        st.caption("Pareto ranking supports prioritization; a five-why chain is recorded as a hypothesis requiring evidence, not causal proof.")
+        causes = st.data_editor(pd.DataFrame([
+            {"category": "Short stops", "count": 18},
+            {"category": "Material wait", "count": 11},
+            {"category": "Quality rework", "count": 6},
+            {"category": "Other", "count": 3},
+        ]), num_rows="dynamic", use_container_width=True, key="t028_causes")
+        with st.expander("Five-why hypothesis and action", expanded=False):
+            why_answers = [
+                st.text_input(f"Why {i}", key=f"t028_why_{i}") for i in range(1, 6)
+            ]
+            action = st.text_input("Countermeasure / next experiment", key="t028_action")
+            owner = st.text_input("Action owner", key="t028_owner")
+            due = st.date_input("Action due date", key="t028_due")
+        if st.button("Analyze causes", key="t028_run", type="primary"):
+            _run(st, tier, actor, "T028", lambda: root_cause_analysis(
+                causes.to_dict("records"), why_answers if any(why_answers) else [],
+                owner, action, due.isoformat(),
+            ))
+        result = st.session_state.get("T028_last_result")
+        if result:
+            _show_result(st, "T028", result)
+
+    with st.expander("T029 · 5S and Workplace Audit · Starter", expanded=False):
+        st.caption("Use the same documented 0–5 rubric across areas; attach evidence and an accountable action owner to gaps.")
+        audit = st.data_editor(pd.DataFrame([
+            {"area": "Workcell 1", "category": "Sort", "score": 3, "evidence": "", "owner": "", "action": "Remove obsolete tooling", "due_date": ""},
+            {"area": "Workcell 1", "category": "Set in order", "score": 4, "evidence": "", "owner": "", "action": "", "due_date": ""},
+            {"area": "Workcell 1", "category": "Shine", "score": 3, "evidence": "", "owner": "", "action": "", "due_date": ""},
+            {"area": "Workcell 1", "category": "Standardize", "score": 2, "evidence": "", "owner": "", "action": "Update visual standards", "due_date": ""},
+            {"area": "Workcell 1", "category": "Sustain", "score": 3, "evidence": "", "owner": "", "action": "", "due_date": ""},
+        ]), num_rows="dynamic", use_container_width=True, key="t029_audit")
+        if st.button("Score 5S audit", key="t029_run", type="primary"):
+            _run(st, tier, actor, "T029", lambda: audit_5s(audit.to_dict("records")))
+        result = st.session_state.get("T029_last_result")
+        if result:
+            _show_result(st, "T029", result)
+
+    with st.expander("T030 · Kaizen and A3 Improvement Manager · Mid-Tier Pro", expanded=False):
+        c1, c2 = st.columns(2)
+        title = c1.text_input("A3 title", "Reduce changeover time", key="t030_title")
+        metric = c2.text_input("Metric name", "Changeover time", key="t030_metric")
+        problem = st.text_area("Problem statement", key="t030_problem")
+        c3, c4, c5 = st.columns(3)
+        unit = c3.text_input("Unit", "min", key="t030_unit")
+        baseline = c4.number_input("Baseline", value=45.0, key="t030_baseline")
+        target = c5.number_input("Target", value=30.0, key="t030_target")
+        direction = st.selectbox("Desired direction", ["lower", "higher"], key="t030_direction")
+        countermeasure = st.text_area("Countermeasure / experiment", key="t030_countermeasure")
+        owner = st.text_input("Owner", key="t030_owner")
+        due = st.date_input("Due date", key="t030_due")
+        cost = st.number_input("Implementation cost (declared currency)", min_value=0.0, value=0.0, key="t030_cost")
+        has_actual = st.checkbox("Enter an actual post-change measurement", key="t030_has_actual")
+        actual = st.number_input("Actual result", value=32.0, key="t030_actual") if has_actual else None
+        evidence = st.text_input("Evidence reference (required to mark outcome evidence-recorded)", key="t030_evidence")
+        if st.button("Build / update A3 record", key="t030_run", type="primary"):
+            _run(st, tier, actor, "T030", lambda: a3_improvement(
+                title, problem, metric, unit, baseline, target, direction,
+                countermeasure, owner, due.isoformat(), actual, evidence, cost,
+            ))
+        result = st.session_state.get("T030_last_result")
+        if result:
+            _show_result(st, "T030", result)
+            if result.get("outcome_verified"):
+                st.success("Actual value and evidence reference are recorded. A project owner must still verify the evidence quality.")
+
+    with st.expander("T040 · Quality Cost and Defect Analyzer · Mid-Tier Pro", expanded=False):
+        st.caption("Separate modeled scrap and rework costs from inspection costs. Use one period and avoid double counting.")
+        currency = st.selectbox("Cost currency", ["SAR", "USD", "EUR", "GBP", "AED"], key="t040_currency")
+        defects = st.data_editor(pd.DataFrame([
+            {"defect_type": "Scrap", "scrap_qty": 12.0, "scrap_unit_cost": 20.0, "rework_hours": 0.0, "rework_cost_per_hour": 35.0, "inspection_cost": 100.0},
+            {"defect_type": "Rework", "scrap_qty": 0.0, "scrap_unit_cost": 20.0, "rework_hours": 6.0, "rework_cost_per_hour": 35.0, "inspection_cost": 40.0},
+        ]), num_rows="dynamic", use_container_width=True, key="t040_defects")
+        if st.button("Calculate cost of poor quality", key="t040_run", type="primary"):
+            _run(st, tier, actor, "T040", lambda: quality_cost_analysis(defects.to_dict("records"), currency))
+        result = st.session_state.get("T040_last_result")
+        if result:
+            _show_result(st, "T040", result)
+
+    with st.expander("T055 · Inventory Policy Optimizer · Mid-Tier Pro", expanded=False):
+        st.caption("Simple EOQ and demand-only safety stock; validate service-level convention and lead-time assumptions before operational use.")
+        c1, c2, c3 = st.columns(3)
+        annual_demand = c1.number_input("Annual demand (units)", min_value=0.1, value=10000.0, key="t055_demand")
+        order_cost = c2.number_input("Cost per order", min_value=0.1, value=25.0, key="t055_order_cost")
+        holding = c3.number_input("Annual holding cost per unit", min_value=0.1, value=4.0, key="t055_holding")
+        c4, c5, c6 = st.columns(3)
+        mean = c4.number_input("Mean demand per lead period", min_value=0.0, value=100.0, key="t055_mean")
+        std = c5.number_input("Demand standard deviation per period", min_value=0.0, value=20.0, key="t055_std")
+        lead = c6.number_input("Lead time (same demand periods)", min_value=0.0, value=4.0, key="t055_lead")
+        z = st.selectbox("Service Z", [1.282, 1.645, 1.96, 2.326], index=1, key="t055_z",
+                         help="Approximate normal quantiles, commonly associated with 90%, 95%, 97.5%, and 99% one-sided service targets.")
+        if st.button("Calculate EOQ and reorder point", key="t055_run", type="primary"):
+            _run(st, tier, actor, "T055", lambda: inventory_policy(annual_demand, order_cost, holding, mean, std, lead, z))
+        result = st.session_state.get("T055_last_result")
+        if result:
+            _show_result(st, "T055", result)
+
+    with st.expander("T056 · ABC/XYZ Inventory Analyzer · Mid-Tier Pro", expanded=False):
+        st.caption("ABC classes use the value of the selected periods; XYZ classes use demand coefficient of variation. Period totals are not annualized automatically.")
+        sku = st.data_editor(pd.DataFrame([
+            {"SKU": "SKU-A", "unit_cost": 5.0, "P1": 40, "P2": 42, "P3": 41, "P4": 40, "P5": 43, "P6": 42},
+            {"SKU": "SKU-B", "unit_cost": 30.0, "P1": 8, "P2": 2, "P3": 12, "P4": 0, "P5": 9, "P6": 1},
+            {"SKU": "SKU-C", "unit_cost": 2.0, "P1": 60, "P2": 62, "P3": 61, "P4": 59, "P5": 62, "P6": 60},
+        ]), num_rows="dynamic", use_container_width=True, key="t056_inventory")
+        periods = [c for c in sku.columns if str(c).startswith("P")]
+        if st.button("Segment inventory", key="t056_run", type="primary"):
+            _run(st, tier, actor, "T056", lambda: abc_xyz_analysis(sku, "SKU", "unit_cost", periods))
+        result = st.session_state.get("T056_last_result")
+        if result:
+            _show_result(st, "T056", result)
