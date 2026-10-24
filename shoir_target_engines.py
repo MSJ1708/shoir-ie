@@ -2757,14 +2757,14 @@ def analyze_process_mining_event_log(
         activity_rows.append({"Activity":str(activity),"Event count":int(len(group)),"Case count":int(group["case_id"].nunique()),"First seen UTC":group["timestamp"].min(),"Last seen UTC":group["timestamp"].max()})
     edges=pd.DataFrame(edge_rows,columns=["From activity","To activity","Gap seconds","Case"])
     if not edges.empty:
-        edges=edges.groupby(["From activity","To activity"],as_index=False).agg(
-            Transition count=("Case","count"),
-            Median gap seconds=("Gap seconds","median"),
-            Cases=("Case",lambda values: ", ".join(sorted(set(values.astype(str))))),
-        ).sort_values(["Transition count","From activity","To activity"],ascending=[False,True,True],kind="stable").reset_index(drop=True)
+        edges=edges.groupby(["From activity","To activity"],as_index=False).agg(**{
+            "Transition count": ("Case", "count"),
+            "Median gap seconds": ("Gap seconds", "median"),
+            "Cases": ("Case", lambda values: ", ".join(sorted(set(values.astype(str))))),
+        }).sort_values(["Transition count","From activity","To activity"],ascending=[False,True,True],kind="stable").reset_index(drop=True)
     cases=pd.DataFrame(case_rows).sort_values(["Throughput seconds","Case"],ascending=[False,True],kind="stable").reset_index(drop=True)
     activity_table=pd.DataFrame(activity_rows)
-    variants=cases.groupby("Variant",as_index=False).agg(Case count=("Case","count")).sort_values(["Case count","Variant"],ascending=[False,True],kind="stable").reset_index(drop=True)
+    variants=cases.groupby("Variant",as_index=False).agg(**{"Case count": ("Case", "count")}).sort_values(["Case count","Variant"],ascending=[False,True],kind="stable").reset_index(drop=True)
     return {
         "status":"MINED",
         "method":"Event-log directly-follows discovery; events sorted within cases by UTC timestamp",
