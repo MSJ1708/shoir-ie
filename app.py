@@ -1798,6 +1798,16 @@ if not st.session_state.get("current_user"):
             "available at that level, open an example, and use it to picture how the workflow fits your situation."
         )
 
+        # Add one grouped library entry instead of flooding the public page with
+        # 100 new cards. The library itself exposes a read-only catalog publicly;
+        # calculation actions and internal route diagnostics remain authenticated.
+        st.page_link(
+            "pages/Engineering_Tool_Library.py",
+            label="Browse the 100-tool Engineering Library",
+            icon="🧭",
+            help="Search the ten grouped workbenches, minimum plan tiers and honest readiness statuses.",
+        )
+
         _goal_options = [
             "Any industrial problem",
             "Reduce cost, time, or waste",
