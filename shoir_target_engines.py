@@ -1496,3 +1496,510 @@ __all__ = [
     "monitor_forecast_drift",
     "plan_two_sample_t_sample_size",
 ]
+
+
+# --- Additional user-facing specialist methods wired into the 100-tool Workbench ---
+
+def balance_production_line(
+    tasks: Sequence[Mapping[str, Any]],
+    cycle_time: float,
+    *,
+    time_unit: str = "seconds",
+) -> dict[str, Any]:
+    """Build a precedence-feasible greedy line balance (not a global optimizer).
+
+    Tasks are emitted in a stable topological order, then packed sequentially
+    into stations without exceeding the declared cycle time. The method is
+    intentionally described as a heuristic so its result is not mistaken for
+    a proof of globally optimal station count.
+    """
+    cycle = _finite_number(cycle_time, "Cycle time")
+    unit = str(time_unit or "").strip()
+    if cycle <= 0:
+        raise ValueError("Cycle time must be greater than zero.")
+    if not unit:
+        raise ValueError("Time unit is required.")
+    if isinstance(tasks, (str, bytes)) or not isinstance(tasks, Sequence) or not tasks:
+        raise ValueError("Provide at least one task object.")
+    normalized: list[dict[str, Any]] = []
+    ids: set[str] = set()
+    for i, task in enumerate(tasks, start=1):
+        if not isinstance(task, Mapping):
+            raise ValueError(f"Task row {i} must be an object.")
+        task_id = str(task.get("task_id", task.get("id", ""))).strip()
+        if not task_id:
+            raise ValueError(f"Task row {i} needs a task_id.")
+        if task_id in ids:
+            raise ValueError(f"Task IDs must be unique. Duplicate: {task_id}.")
+        ids.add(task_id)
+        duration = _finite_number(task.get("duration"), f"Duration for task {task_id}")
+        if duration <= 0:
+            raise ValueError(f"Duration for task {task_id} must be greater than zero.")
+        raw_predecessors = task.get("predecessors", [])
+        if raw_predecessors is None or raw_predecessors == "":
+            predecessors = []
+        elif isinstance(raw_predecessors, str):
+            predecessors = [p.strip() for p in raw_predecessors.split(",") if p.strip()]
+        elif isinstance(raw_predecessors, Sequence) and not isinstance(raw_predecessors, (str, bytes)):
+            predecessors = [str(p).strip() for p in raw_predecessors if str(p).strip()]
+        else:
+            raise ValueError(f"Predecessors for task {task_id} must be a list or comma-separated text.")
+        if task_id in predecessors:
+            raise ValueError(f"Task {task_id} cannot depend on itself.")
+        if len(predecessors) != len(set(predecessors)):
+            raise ValueError(f"Task {task_id} contains duplicate predecessors.")
+        normalized.append({"task_id": task_id, "duration": duration, "predecessors": predecessors})
+
+    for task in normalized:
+        unknown = sorted(set(task["predecessors"]) - ids)
+        if unknown:
+            raise ValueError(f"Task {task['task_id']} references unknown predecessor(s): {', '.join(unknown)}.")
+    oversized = [
+        {"task_id": task["task_id"], "duration": task["duration"]}
+        for task in normalized if task["duration"] > cycle + 1e-9
+    ]
+    if oversized:
+        return {
+            "status": "INFEASIBLE",
+            "method": "Stable topological order plus sequential greedy station packing",
+            "cycle_time": cycle,
+            "time_unit": unit,
+            "station_count": None,
+            "theoretical_minimum_stations": math.ceil(sum(t["duration"] for t in normalized) / cycle),
+            "efficiency_pct": None,
+            "balance_delay_pct": None,
+            "issues": oversized,
+            "station_summary": pd.DataFrame(),
+            "task_assignment": pd.DataFrame(),
+            "warning": "At least one task exceeds the cycle-time limit; split or redesign that task before balancing.",
+        }
+
+    remaining = list(normalized)
+    scheduled: set[str] = set()
+    ordered: list[dict[str, Any]] = []
+    while remaining:
+        ready_index = next(
+            (i for i, task in enumerate(remaining) if set(task["predecessors"]).issubset(scheduled)),
+            None,
+        )
+        if ready_index is None:
+            raise ValueError("Task precedence graph contains a cycle; no valid topological order exists.")
+        task = remaining.pop(ready_index)
+        ordered.append(task)
+        scheduled.add(task["task_id"])
+
+    stations: list[list[dict[str, Any]]] = []
+    current_station: list[dict[str, Any]] = []
+    current_load = 0.0
+    for task in ordered:
+        if current_station and current_load + task["duration"] > cycle + 1e-9:
+            stations.append(current_station)
+            current_station = []
+            current_load = 0.0
+        current_station.append(task)
+        current_load += task["duration"]
+    if current_station:
+        stations.append(current_station)
+
+    assignment_rows: list[dict[str, Any]] = []
+    summary_rows: list[dict[str, Any]] = []
+    task_station: dict[str, int] = {}
+    for station_number, station_tasks in enumerate(stations, start=1):
+        load = sum(task["duration"] for task in station_tasks)
+        for order, task in enumerate(station_tasks, start=1):
+            task_station[task["task_id"]] = station_number
+            assignment_rows.append({
+                "Task": task["task_id"],
+                "Duration": task["duration"],
+                "Predecessors": ", ".join(task["predecessors"]) or "—",
+                "Station": station_number,
+                "Sequence in station": order,
+            })
+        summary_rows.append({
+            "Station": station_number,
+            "Tasks": ", ".join(task["task_id"] for task in station_tasks),
+            f"Work content ({unit})": load,
+            f"Idle time ({unit})": max(0.0, cycle - load),
+            "Station utilization (%)": load / cycle * 100.0,
+        })
+    # Topological ordering and sequential station packing must never put a task
+    # before any of its predecessors; validate the invariant before returning.
+    violations = [
+        (task["task_id"], pred)
+        for task in normalized for pred in task["predecessors"]
+        if task_station[pred] > task_station[task["task_id"]]
+    ]
+    if violations:
+        raise RuntimeError("Internal line-balance invariant failed: a predecessor is assigned after its task.")
+    total_work = sum(task["duration"] for task in normalized)
+    denominator = len(stations) * cycle
+    efficiency = total_work / denominator * 100.0 if denominator else 0.0
+    return {
+        "status": "FEASIBLE_HEURISTIC",
+        "method": "Stable topological order plus sequential greedy station packing; not a global optimum proof",
+        "cycle_time": cycle,
+        "time_unit": unit,
+        "task_count": len(normalized),
+        "total_work_content": total_work,
+        "station_count": len(stations),
+        "theoretical_minimum_stations": math.ceil(total_work / cycle),
+        "efficiency_pct": efficiency,
+        "balance_delay_pct": 100.0 - efficiency,
+        "precedence_validated": True,
+        "issues": [],
+        "station_summary": pd.DataFrame(summary_rows),
+        "task_assignment": pd.DataFrame(assignment_rows),
+        "warning": "Heuristic assignment only. Review task precedence, physical layout, skill constraints and observed cycle times before use.",
+    }
+
+
+def analyze_bottleneck_capacity(
+    processes: Sequence[Mapping[str, Any]],
+    demand_units_per_period: float,
+    *,
+    period_label: str = "period",
+) -> dict[str, Any]:
+    """Identify the lowest-capacity process and compare it with stated demand."""
+    demand = _finite_number(demand_units_per_period, "Demand per period")
+    period = str(period_label or "").strip()
+    if demand <= 0:
+        raise ValueError("Demand per period must be greater than zero.")
+    if not period:
+        raise ValueError("Period label is required (for example, shift or day).")
+    if isinstance(processes, (str, bytes)) or not isinstance(processes, Sequence) or not processes:
+        raise ValueError("Provide at least one process capacity object.")
+    rows: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for i, process in enumerate(processes, start=1):
+        if not isinstance(process, Mapping):
+            raise ValueError(f"Process row {i} must be an object.")
+        name = str(process.get("process", process.get("name", ""))).strip()
+        if not name:
+            raise ValueError(f"Process row {i} needs a name.")
+        if name.casefold() in seen:
+            raise ValueError(f"Process names must be unique; duplicate: {name}.")
+        seen.add(name.casefold())
+        capacity = _finite_number(process.get("capacity"), f"Capacity for {name}")
+        if capacity < 0:
+            raise ValueError(f"Capacity for {name} cannot be negative.")
+        utilization = demand / capacity * 100.0 if capacity > 0 else None
+        rows.append({
+            "Process": name,
+            f"Capacity ({period})": capacity,
+            "Demand ({period})": demand,
+            "Demand utilization (%)": utilization,
+            f"Capacity gap ({period})": capacity - demand,
+            "Bottleneck": False,
+        })
+    bottleneck_index = min(range(len(rows)), key=lambda i: rows[i][f"Capacity ({period})"])
+    rows[bottleneck_index]["Bottleneck"] = True
+    bottleneck_capacity = rows[bottleneck_index][f"Capacity ({period})"]
+    shortfall = max(0.0, demand - bottleneck_capacity)
+    status = "CAPACITY_SHORTFALL" if shortfall > 1e-9 else "CAPACITY_MEETS_DEMAND"
+    frame = pd.DataFrame(rows).sort_values(
+        by=[f"Capacity ({period})", "Process"], kind="stable"
+    ).reset_index(drop=True)
+    return {
+        "status": status,
+        "method": "Capacity comparison using user-entered, same-period process capacities",
+        "demand_units_per_period": demand,
+        "bottleneck_process": rows[bottleneck_index]["Process"],
+        "bottleneck_capacity_per_period": bottleneck_capacity,
+        "capacity_shortfall_per_period": shortfall,
+        "capacity_headroom_per_period": max(0.0, bottleneck_capacity - demand),
+        "minimum_recovery_capacity_required": shortfall,
+        "process_capacity_table": frame,
+        "assumptions": "Capacities and demand refer to the same product mix, time period and unit basis. This is a capacity screen, not causal proof that the lowest-capacity process alone explains observed losses.",
+    }
+
+
+def build_value_stream_map(
+    steps: Sequence[Mapping[str, Any]],
+    demand_units_per_period: float,
+    available_time_per_period: float,
+    *,
+    time_unit: str = "minutes",
+) -> dict[str, Any]:
+    """Compute a first-pass VSM lead-time view from cycle, uptime, batch and WIP inputs."""
+    demand = _finite_number(demand_units_per_period, "Demand per period")
+    available = _finite_number(available_time_per_period, "Available time per period")
+    unit = str(time_unit or "").strip()
+    if demand <= 0 or not demand.is_integer():
+        raise ValueError("Demand per period must be a positive whole number.")
+    if available <= 0:
+        raise ValueError("Available time per period must be greater than zero.")
+    if not unit:
+        raise ValueError("Time unit is required.")
+    if isinstance(steps, (str, bytes)) or not isinstance(steps, Sequence) or not steps:
+        raise ValueError("Provide at least one process-step object.")
+    flow_rate = demand / available
+    seen: set[str] = set()
+    rows: list[dict[str, Any]] = []
+    for i, step in enumerate(steps, start=1):
+        if not isinstance(step, Mapping):
+            raise ValueError(f"Step row {i} must be an object.")
+        name = str(step.get("step", step.get("name", ""))).strip()
+        if not name:
+            raise ValueError(f"Step row {i} needs a name.")
+        if name.casefold() in seen:
+            raise ValueError(f"Process-step names must be unique; duplicate: {name}.")
+        seen.add(name.casefold())
+        cycle = _finite_number(step.get("cycle_time"), f"Cycle time for {name}")
+        changeover = _finite_number(step.get("changeover_time", 0), f"Changeover time for {name}")
+        uptime_pct = _finite_number(step.get("uptime_pct", 100), f"Uptime percentage for {name}")
+        wip = _finite_number(step.get("wip_units", 0), f"WIP units for {name}")
+        batch = _finite_number(step.get("batch_size", 1), f"Batch size for {name}")
+        if cycle <= 0:
+            raise ValueError(f"Cycle time for {name} must be greater than zero.")
+        if changeover < 0 or wip < 0:
+            raise ValueError(f"Changeover and WIP cannot be negative for {name}.")
+        if not 0 < uptime_pct <= 100:
+            raise ValueError(f"Uptime percentage for {name} must be greater than 0 and at most 100.")
+        if batch <= 0 or not batch.is_integer():
+            raise ValueError(f"Batch size for {name} must be a positive whole number.")
+        value_added = bool(step.get("value_added", False))
+        queue_time = wip / flow_rate
+        effective_cycle = cycle / (uptime_pct / 100.0)
+        changeover_per_unit = changeover / batch
+        effective_process_time = effective_cycle + changeover_per_unit
+        rows.append({
+            "Process step": name,
+            f"Cycle time ({unit})": cycle,
+            f"Changeover time ({unit}/batch)": changeover,
+            "Batch size (units)": int(batch),
+            "Uptime (%)": uptime_pct,
+            "WIP before step (units)": wip,
+            f"Queue lead time ({unit})": queue_time,
+            f"Availability-adjusted process time ({unit}/unit)": effective_process_time,
+            "Value added": value_added,
+        })
+    frame = pd.DataFrame(rows)
+    va_time = sum(
+        float(row[f"Cycle time ({unit})"])
+        for row in rows if row["Value added"]
+    )
+    queue_time_total = sum(float(row[f"Queue lead time ({unit})"]) for row in rows)
+    adjusted_process_time = sum(float(row[f"Availability-adjusted process time ({unit}/unit)"]) for row in rows)
+    lead_time = queue_time_total + adjusted_process_time
+    return {
+        "status": "CALCULATED_ESTIMATE",
+        "method": "First-pass VSM: queue time = WIP / required flow rate; process time adjusts cycle time for stated uptime and adds changeover/batch",
+        "time_unit": unit,
+        "demand_units_per_period": demand,
+        "available_time_per_period": available,
+        "required_flow_rate_units_per_time": flow_rate,
+        "value_added_time": va_time,
+        "total_queue_lead_time": queue_time_total,
+        "availability_adjusted_process_time": adjusted_process_time,
+        "estimated_total_lead_time": lead_time,
+        "value_added_share_pct": (va_time / lead_time * 100.0) if lead_time > 0 else 0.0,
+        "process_steps": frame,
+        "assumptions": "Steady throughput, same time basis, WIP recorded before each step, no rework/transport delays unless represented in WIP, and user-entered uptime. This is a screening map, not a calibrated discrete-event simulation.",
+        "warning": "Validate the process sequence, WIP boundaries, batch convention, uptime period and observed timestamps before operational use.",
+    }
+
+
+def analyze_fmea(failure_modes: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """Rank user-entered FMEA rows using classic S×O×D RPN plus severity override."""
+    if isinstance(failure_modes, (str, bytes)) or not isinstance(failure_modes, Sequence) or not failure_modes:
+        raise ValueError("Provide at least one failure-mode object.")
+    rows: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for i, item in enumerate(failure_modes, start=1):
+        if not isinstance(item, Mapping):
+            raise ValueError(f"Failure-mode row {i} must be an object.")
+        mode = str(item.get("failure_mode", item.get("mode", ""))).strip()
+        if not mode:
+            raise ValueError(f"Failure-mode row {i} needs a failure_mode description.")
+        if mode.casefold() in seen:
+            raise ValueError(f"Failure-mode descriptions must be unique; duplicate: {mode}.")
+        seen.add(mode.casefold())
+        scores: dict[str, int] = {}
+        for key in ("severity", "occurrence", "detection"):
+            value = _finite_number(item.get(key), f"{key.title()} score for {mode}")
+            if not value.is_integer() or not 1 <= value <= 10:
+                raise ValueError(f"{key.title()} score for {mode} must be a whole number from 1 through 10.")
+            scores[key] = int(value)
+        rpn = scores["severity"] * scores["occurrence"] * scores["detection"]
+        severe = scores["severity"] >= 9
+        # Bands are a configurable convention, not a universal FMEA standard.
+        risk_band = "HIGH — review" if severe or rpn >= 200 else "MEDIUM — review" if rpn >= 100 else "LOWER — review"
+        rows.append({
+            "Failure mode": mode,
+            "Effect": str(item.get("effect", "")).strip(),
+            "Cause": str(item.get("cause", "")).strip(),
+            "Existing controls": str(item.get("existing_controls", "")).strip(),
+            "Severity": scores["severity"],
+            "Occurrence": scores["occurrence"],
+            "Detection": scores["detection"],
+            "RPN (S×O×D)": rpn,
+            "Severity ≥ 9 review": severe,
+            "Review priority band": risk_band,
+            "Recommended action": str(item.get("action", "")).strip(),
+            "Owner": str(item.get("owner", "")).strip(),
+            "Due date": str(item.get("due_date", "")).strip(),
+        })
+    frame = pd.DataFrame(rows).sort_values(
+        by=["Severity ≥ 9 review", "RPN (S×O×D)", "Severity"],
+        ascending=[False, False, False], kind="stable",
+    ).reset_index(drop=True)
+    return {
+        "status": "CALCULATED_REQUIRES_ENGINEERING_REVIEW",
+        "method": "Classic Risk Priority Number = Severity × Occurrence × Detection; severity ≥ 9 is surfaced separately",
+        "failure_mode_count": len(frame),
+        "highest_rpn": int(frame["RPN (S×O×D)"].max()),
+        "high_severity_count": int(frame["Severity ≥ 9 review"].sum()),
+        "failure_modes": frame,
+        "assumptions": "Score anchors, risk-band thresholds and detection meaning must be defined by the organization's approved FMEA procedure.",
+        "warning": "RPN and score bands are prioritization aids, not objective risk truth. High-severity hazards require review even when RPN is lower; assign actions and approve controls through the site's safety/quality process.",
+    }
+
+
+def analyze_mm1_queue(arrival_rate_per_period: float, service_rate_per_period: float, *, time_unit: str = "hours") -> dict[str, Any]:
+    """Analyze a stable M/M/1 queue with exponential arrivals/service and one server."""
+    arrival = _finite_number(arrival_rate_per_period, "Arrival rate")
+    service = _finite_number(service_rate_per_period, "Service rate")
+    unit = str(time_unit or "").strip()
+    if arrival < 0:
+        raise ValueError("Arrival rate cannot be negative.")
+    if service <= 0:
+        raise ValueError("Service rate must be greater than zero.")
+    if not unit:
+        raise ValueError("Time unit for rates is required.")
+    utilization = arrival / service
+    if utilization >= 1.0:
+        raise ValueError("M/M/1 system is unstable: arrival rate must be strictly below service rate.")
+    mean_number_system = arrival / (service - arrival)
+    mean_number_queue = (arrival * arrival) / (service * (service - arrival)) if arrival else 0.0
+    mean_time_system = 1.0 / (service - arrival)
+    mean_time_queue = mean_number_queue / arrival if arrival else 0.0
+    return {
+        "status": "STABLE_M_M_1",
+        "model": "M/M/1 steady-state queue",
+        "arrival_rate_per_time": arrival,
+        "service_rate_per_time": service,
+        "utilization_pct": utilization * 100.0,
+        "mean_customers_in_system": mean_number_system,
+        "mean_customers_waiting": mean_number_queue,
+        "mean_time_in_system": mean_time_system,
+        "mean_waiting_time_in_queue": mean_time_queue,
+        "time_unit": unit,
+        "formula": "rho=lambda/mu; L=lambda/(mu-lambda); Lq=lambda^2/(mu*(mu-lambda)); W=1/(mu-lambda); Wq=Lq/lambda for lambda>0",
+        "assumptions": "Single server, stationary Poisson arrivals, exponential service times, first-in-first-out, infinite buffer and population, stable utilization below 100%.",
+        "warning": "This is an analytical M/M/1 model; validate arrival/service distributions and resource count before applying it to an actual service system.",
+    }
+
+
+def analyze_industrial_cost_variance(
+    standard_quantity_per_unit: float,
+    actual_output_units: float,
+    actual_input_quantity: float,
+    standard_unit_cost: float,
+    actual_unit_cost: float,
+    *,
+    currency: str = "SAR",
+    period: str = "",
+) -> dict[str, Any]:
+    """Reconcile material price, usage and total variance against actual output."""
+    std_qty_per_unit = _finite_number(standard_quantity_per_unit, "Standard input quantity per output unit")
+    output_qty = _finite_number(actual_output_units, "Actual output units")
+    actual_qty = _finite_number(actual_input_quantity, "Actual input quantity")
+    std_price = _finite_number(standard_unit_cost, "Standard unit cost")
+    actual_price = _finite_number(actual_unit_cost, "Actual unit cost")
+    curr = str(currency or "").strip().upper()
+    period_text = str(period or "").strip()
+    if std_qty_per_unit <= 0:
+        raise ValueError("Standard input quantity per output unit must be greater than zero.")
+    if output_qty <= 0:
+        raise ValueError("Actual output units must be greater than zero.")
+    if actual_qty < 0 or std_price < 0 or actual_price < 0:
+        raise ValueError("Actual input and unit costs cannot be negative.")
+    if not curr:
+        raise ValueError("Currency code is required.")
+    allowed_standard_qty = std_qty_per_unit * output_qty
+    standard_cost = allowed_standard_qty * std_price
+    actual_cost = actual_qty * actual_price
+    price_variance = actual_qty * (actual_price - std_price)
+    usage_variance = (actual_qty - allowed_standard_qty) * std_price
+    total_variance = actual_cost - standard_cost
+    reconciled_variance = price_variance + usage_variance
+    if not math.isclose(total_variance, reconciled_variance, rel_tol=1e-9, abs_tol=1e-7):
+        raise RuntimeError("Internal cost-variance reconciliation failed.")
+    breakdown = pd.DataFrame([
+        {"Variance component": "Price variance", f"Amount ({curr})": price_variance, "Interpretation": "Positive is adverse; negative is favorable"},
+        {"Variance component": "Usage variance", f"Amount ({curr})": usage_variance, "Interpretation": "Positive is adverse; negative is favorable"},
+        {"Variance component": "Total variance", f"Amount ({curr})": total_variance, "Interpretation": "Actual cost minus standard allowed cost for actual output"},
+    ])
+    return {
+        "status": "RECONCILED",
+        "currency": curr,
+        "period": period_text or "UNSPECIFIED — add the measured period",
+        "standard_quantity_allowed": allowed_standard_qty,
+        "actual_input_quantity": actual_qty,
+        "standard_cost_for_actual_output": standard_cost,
+        "actual_input_cost": actual_cost,
+        "price_variance": price_variance,
+        "usage_variance": usage_variance,
+        "total_variance": total_variance,
+        "variance_reconciles": True,
+        "variance_breakdown": breakdown,
+        "formula": "SQ=standard quantity per unit×actual output; price variance=AQ×(AP−SP); usage variance=(AQ−SQ)×SP; total variance=actual cost−standard cost",
+        "warning": "This is a scoped direct-material variance. Include labor, overhead, scrap/rework, yield, exchange-rate and accounting-policy effects separately when relevant.",
+    }
+
+
+def calculate_roi_evidence(
+    baseline_cost: float,
+    post_change_cost: float,
+    implementation_cost: float,
+    *,
+    currency: str = "SAR",
+    measurement_window: str = "",
+    baseline_evidence: str = "",
+    outcome_evidence: str = "",
+    verifier: str = "",
+) -> dict[str, Any]:
+    """Calculate ROI from comparable user-provided costs without self-certifying evidence."""
+    baseline = _finite_number(baseline_cost, "Baseline cost")
+    post = _finite_number(post_change_cost, "Post-change cost")
+    implementation = _finite_number(implementation_cost, "Implementation cost")
+    curr = str(currency or "").strip().upper()
+    window = str(measurement_window or "").strip()
+    baseline_ref = str(baseline_evidence or "").strip()
+    outcome_ref = str(outcome_evidence or "").strip()
+    reviewer = str(verifier or "").strip()
+    if baseline < 0 or post < 0 or implementation < 0:
+        raise ValueError("Baseline, post-change and implementation costs cannot be negative.")
+    if not curr:
+        raise ValueError("Currency code is required.")
+    gross = baseline - post
+    net = gross - implementation
+    roi_pct = net / implementation * 100.0 if implementation > 0 else None
+    missing = []
+    if not window:
+        missing.append("measurement window")
+    if not baseline_ref:
+        missing.append("baseline evidence reference")
+    if not outcome_ref:
+        missing.append("post-change evidence reference")
+    if not reviewer:
+        missing.append("independent verifier")
+    return {
+        "status": "CALCULATED — HUMAN VERIFICATION REQUIRED",
+        "currency": curr,
+        "measurement_window": window or "UNSPECIFIED",
+        "baseline_cost": baseline,
+        "post_change_cost": post,
+        "implementation_cost": implementation,
+        "gross_cost_reduction": gross,
+        "net_benefit_after_implementation": net,
+        "roi_pct": roi_pct,
+        "break_even_or_better": net >= 0,
+        "baseline_evidence_reference": baseline_ref or "NOT PROVIDED",
+        "outcome_evidence_reference": outcome_ref or "NOT PROVIDED",
+        "verifier": reviewer or "NOT ASSIGNED",
+        "verification_status": "REQUIRES_HUMAN_VERIFICATION",
+        "missing_verification_items": missing,
+        "formula": "Gross cost reduction = baseline cost − post-change cost; net benefit = gross reduction − implementation cost; ROI = net benefit / implementation cost × 100% when implementation cost > 0",
+        "warning": "A reference or verifier name does not independently prove an outcome. Do not claim realized/verified savings until a responsible reviewer checks comparability, source evidence, measurement window and confounders.",
+    }
