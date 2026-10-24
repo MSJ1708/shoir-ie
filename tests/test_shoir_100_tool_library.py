@@ -363,3 +363,53 @@ def test_starter_cannot_render_or_execute_professional_spare_parts_planner():
     assert "shoir_T045_result" not in at.session_state
     with pytest.raises(KeyError):
         at.button(key="T045_run_button")
+
+
+def test_hazard_sop_assignment_scenario_portfolio_evidence_and_kpi_tools_run():
+    at = _authed_library(tier="Research Pack")
+
+    _open(at, "T047", "Job Safety and Hazard Register")
+    hazards = _run(at, "T047")
+    assert hazards["metrics"]["hazard_count"] == 2
+    assert hazards["metrics"]["maximum_residual_score"] == 12
+
+    _open(at, "T052", "Sales and Operations Planning")
+    sop = _run(at, "T052")
+    assert sop["metrics"]["capacity_exceeded_periods"] == 1
+    assert sop["metrics"]["ending_backlog_units"] == pytest.approx(0)
+    assert sop["metrics"]["ending_inventory_units"] == pytest.approx(0)
+
+    _open(at, "T063", "Assignment and Scheduling Optimizer")
+    assignment = _run(at, "T063")
+    assert assignment["metrics"]["total_assignment_cost"] == pytest.approx(6)
+    assert assignment["metrics"]["assignment_complete"] is True
+
+    _open(at, "T073", "What-If Scenario Manager")
+    scenarios = _run(at, "T073")
+    assert scenarios["metrics"]["baseline_capacity_units"] == pytest.approx(99.75)
+    assert scenarios["metrics"]["scenarios_meeting_entered_demand"] == 2
+
+    _open(at, "T084", "Engineering Project Portfolio Scorer")
+    portfolio = _run(at, "T084")
+    assert portfolio["metrics"]["top_ranked_project_id"] == "PR-02"
+    assert portfolio["metrics"]["top_weighted_score"] == pytest.approx(85)
+
+    _open(at, "T086", "Hypothesis and Evidence Register")
+    evidence = _run(at, "T086")
+    assert evidence["metrics"]["evidence_record_count"] == 1
+    assert evidence["metrics"]["independently_verified_count"] == 0
+
+    _open(at, "T094", "KPI Dashboard and Alert Center")
+    kpis = _run(at, "T094")
+    assert kpis["metrics"]["alert_count"] == 2
+    assert kpis["metrics"]["stale_metric_count"] == 1
+    assert kpis["metrics"]["alert_and_stale_count"] == 1
+
+
+def test_starter_cannot_execute_enterprise_kpi_alert_center():
+    at = _authed_library(tier="Starter")
+    _open(at, "T094", "KPI Dashboard and Alert Center")
+    assert any("does not grant this target capability" in str(item.value).lower() for item in at.warning)
+    assert "shoir_T094_result" not in at.session_state
+    with pytest.raises(KeyError):
+        at.button(key="T094_run_button")
