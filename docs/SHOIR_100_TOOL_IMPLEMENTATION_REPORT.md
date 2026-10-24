@@ -13,13 +13,15 @@
 
 ## Initial classification counts
 
-- `IMPLEMENTED_NEEDS_VALIDATION`: 39
-- `FOUNDATION_ONLY`: 56
+- `IMPLEMENTED_NEEDS_VALIDATION`: 40
+- `FOUNDATION_ONLY`: 55
 - `EXTERNAL_CONFIGURATION_REQUIRED`: 5
 
 No entry is marked `VERIFIED_WORKING`. The CSV includes one row for each stable tool ID T001–T100 and all required matrix columns. It distinguishes candidate existing routes from a verified implementation; a candidate mapping is not proof that the target acceptance contract is met.
 
 ## Important scope and evidence limitations
+
+The compact **Capability Status Center** is now reachable inside the existing Engineering Validation Center in the Workbench; it exposes filters across all T001–T100 entries without adding a new top-level navigation item. Its UI itself is classified as `IMPLEMENTED_NEEDS_VALIDATION` until authenticated UI checks validate the counts and filters.
 
 This is the first target-to-source crosswalk, not the final acceptance matrix specified in the prompt. The repository is being inspected through the GitHub connector because a complete local checkout is not available in this execution environment. The code-level CI checks are available, but there are no disposable authenticated browser credentials in this task context, so all target browser rows remain `UNVERIFIED`. Several route mappings are explicitly labelled as candidates, and the remaining-gap column calls out the missing specialist validation instead of treating a broad module catalog or a generic playbook as a complete engine.
 
