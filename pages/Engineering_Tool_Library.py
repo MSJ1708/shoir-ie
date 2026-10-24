@@ -23,6 +23,9 @@ from shoir_100_tool_engines import (
     calculate_oee, calculate_process_capability, calculate_standard_time,
     calculate_takt_capacity, first_fit_decreasing_bin_pack,
 )
+from shoir_100_tool_operations_engines import (
+    analyze_bottleneck, analyze_mm1_queue, balance_production_line, build_value_stream_metrics,
+)
 from shoir_100_tool_extended_engines import (
     analyze_abc_xyz_inventory, analyze_mtbf_mttr, analyze_pareto_root_cause,
     analyze_quality_cost_defects, analyze_spc_individuals, analyze_work_sampling,
@@ -410,6 +413,33 @@ if rows:
                 if isinstance(frame, pd.DataFrame) and not frame.empty and {"SKU", "Annual usage value"}.issubset(frame.columns):
                     st.bar_chart(frame.set_index("SKU")["Annual usage value"])
 
+        elif selected_id == "T070":
+            st.warning("LIMITED VALIDATION MODE — M/M/1 is a single-server steady-state model; do not apply it when rates or distribution assumptions do not fit the process.")
+            st.markdown("### Queuing and service-system analyzer")
+            st.caption("Arrival and service rates must use the same rate unit. Times are returned in the reciprocal time unit.")
+            arrival_rate = st.number_input("Arrival rate (jobs/hour)", min_value=0.001, value=2.0, step=0.25, key="t070_arrival_rate")
+            service_rate = st.number_input("Service rate (jobs/hour)", min_value=0.001, value=3.0, step=0.25, key="t070_service_rate")
+            signature = _fingerprint(arrival_rate, service_rate)
+            saved = _run_engine_tool(
+                "T070", signature, "Calculate M/M/1 queue metrics",
+                lambda: analyze_mm1_queue(arrival_rate, service_rate),
+            )
+            if saved and saved["signature"] == signature:
+                metrics = saved["result"].get("metrics", {})
+                st.bar_chart(pd.DataFrame({
+                    "Mean count (jobs)": [metrics.get("mean_number_in_system", 0),
+                                          metrics.get("mean_number_in_queue", 0)],
+                }, index=["In system", "In queue"]))
+                st.bar_chart(pd.DataFrame({
+                    "Mean time (hours)": [metrics.get("mean_time_in_system", 0),
+                                          metrics.get("mean_queue_wait", 0)],
+                }, index=["In system", "Waiting in queue"]))
+                st.caption(
+                    f"Utilization: {metrics.get('utilization_percent', 0):.2f}% · "
+                    f"Mean queue wait: {metrics.get('mean_queue_wait', 0):.3f} h · "
+                    f"Mean system time: {metrics.get('mean_time_in_system', 0):.3f} h"
+                )
+
         elif selected_id == "T075":
             st.warning("VALIDATION MODE — forecast thresholds alert on error; they do not diagnose cause or trigger retraining.")
             st.markdown("### Forecast and model drift monitor")
@@ -475,6 +505,89 @@ if rows:
                 st.bar_chart(pd.DataFrame({"Units per period": [m["theoretical_capacity_units"], demand_units]},
                                           index=["Theoretical capacity", "Demand"]))
 
+        elif selected_id == "T024":
+            st.warning("LIMITED VALIDATION MODE — this is a deterministic precedence-constrained heuristic, not a proof of a globally minimum station count.")
+            st.markdown("### Production line balancer")
+            st.caption("Task durations and cycle time must use the same time unit. Predecessors are comma-separated task IDs and must appear earlier in the station sequence.")
+            task_defaults = pd.DataFrame({
+                "Task": ["A", "B", "C", "D", "E"],
+                "Duration": [3.0, 2.0, 4.0, 2.0, 1.0],
+                "Predecessors": ["", "A", "A", "B,C", "D"],
+            })
+            task_frame = st.data_editor(task_defaults, num_rows="dynamic", use_container_width=True,
+                                        key="t024_tasks", hide_index=True)
+            cycle = st.number_input("Target cycle time (same unit as task durations)", min_value=0.01, value=6.0, step=0.5, key="t024_cycle")
+            station_limit = st.number_input("Optional station limit (0 = no limit)", min_value=0, max_value=100, value=0, step=1, key="t024_station_limit")
+            task_records = []
+            for row in task_frame.to_dict(orient="records"):
+                task_name = "" if pd.isna(row.get("Task")) else str(row.get("Task")).strip()
+                duration = row.get("Duration")
+                predecessors = "" if pd.isna(row.get("Predecessors")) else str(row.get("Predecessors"))
+                if not task_name and (duration is None or pd.isna(duration)) and not predecessors.strip():
+                    continue
+                task_records.append({
+                    "name": task_name, "duration": duration,
+                    "predecessors": [part.strip() for part in predecessors.split(",") if part.strip()],
+                })
+            signature = _fingerprint(task_records, cycle, int(station_limit))
+            saved = _run_engine_tool(
+                "T024", signature, "Balance production line",
+                lambda: balance_production_line(task_records, cycle, max_stations=int(station_limit) if station_limit else None),
+            )
+            if saved and saved["signature"] == signature:
+                metrics = saved["result"].get("metrics", {})
+                stations = saved["result"].get("station_summary", [])
+                if stations:
+                    st.bar_chart(pd.DataFrame({"Load": [row["load"] for row in stations],
+                                               "Idle time": [row["idle_time"] for row in stations]},
+                                              index=[f"Station {row['station']}" for row in stations]))
+                    st.dataframe(pd.DataFrame(stations), use_container_width=True, hide_index=True)
+                st.caption(
+                    f"Line efficiency: {metrics.get('line_efficiency_percent', 0):.2f}% · "
+                    f"Balance delay: {metrics.get('balance_delay_percent', 0):.2f}% · "
+                    f"theoretical minimum stations: {metrics.get('theoretical_minimum_stations', '—')}"
+                )
+
+        elif selected_id == "T025":
+            st.warning("LIMITED VALIDATION MODE — cycle-time data indicates a potential constraint; observed output identifies a low-throughput signal, not proven causality.")
+            st.markdown("### Bottleneck and constraint screening")
+            basis = st.selectbox(
+                "Evidence basis", ["cycle_time", "measured_throughput"],
+                format_func=lambda value: "Cycle time (inferred)" if value == "cycle_time" else "Measured throughput (observed signal)",
+                key="t025_basis",
+            )
+            if basis == "cycle_time":
+                st.caption("Enter positive cycle times in the same time-per-unit unit across stages.")
+                stage_frame = st.data_editor(pd.DataFrame({
+                    "Stage": ["Cutting", "Welding", "Inspection"],
+                    "Cycle time (minutes/unit)": [2.0, 4.0, 1.5],
+                }), num_rows="dynamic", use_container_width=True, key="t025_cycle_stages", hide_index=True)
+                stage_records = [{"name": row.get("Stage"), "cycle_time": row.get("Cycle time (minutes/unit)")}
+                                 for row in stage_frame.to_dict(orient="records")]
+            else:
+                st.caption("Enter measured rates from the same observation window and in the same units.")
+                stage_frame = st.data_editor(pd.DataFrame({
+                    "Stage": ["Cutting", "Welding", "Inspection"],
+                    "Measured throughput (units/hour)": [28.0, 22.0, 25.0],
+                }), num_rows="dynamic", use_container_width=True, key="t025_throughput_stages", hide_index=True)
+                stage_records = [{"name": row.get("Stage"), "measured_throughput": row.get("Measured throughput (units/hour)")}
+                                 for row in stage_frame.to_dict(orient="records")]
+            signature = _fingerprint(stage_records, basis)
+            saved = _run_engine_tool(
+                "T025", signature, "Screen candidate constraint",
+                lambda: analyze_bottleneck(stage_records, basis=basis),
+            )
+            if saved and saved["signature"] == signature:
+                result = saved["result"]
+                st.caption(result["metrics"]["evidence_label"].replace("_", " "))
+                st.dataframe(pd.DataFrame(result.get("stage_summary", [])), use_container_width=True, hide_index=True)
+                st.bar_chart(pd.DataFrame(
+                    {"Metric value": [row["metric_value"] for row in result.get("stage_summary", [])]},
+                    index=[row["stage"] for row in result.get("stage_summary", [])],
+                ))
+                for warning in result.get("warnings", []):
+                    st.info(warning)
+
         elif selected_id == "T026":
             st.warning("LIMITED VALIDATION MODE — OEE conventions differ by plant; confirm planned-time and ideal-cycle definitions first.")
             st.markdown("### OEE and loss analysis")
@@ -494,6 +607,40 @@ if rows:
                 st.bar_chart(pd.DataFrame({"Percent": [m["availability_percent"], m["performance_percent"],
                                                           m["quality_percent"], m["oee_percent"]]},
                                           index=["Availability", "Performance", "Quality", "OEE"]))
+
+        elif selected_id == "T027":
+            st.warning("LIMITED VALIDATION MODE — this is an editable timing/WIP summary, not a complete material and information flow map.")
+            st.markdown("### Value stream timing summary")
+            st.caption("Cycle and wait times use the same time unit. Waiting is entered explicitly and is not inferred from WIP or demand.")
+            vsm_frame = st.data_editor(pd.DataFrame({
+                "Process": ["Cutting", "Welding", "Inspection"],
+                "Cycle time (minutes)": [2.0, 5.0, 1.0],
+                "Waiting time (minutes)": [10.0, 30.0, 5.0],
+                "WIP (units)": [4.0, 12.0, 3.0],
+            }), num_rows="dynamic", use_container_width=True, key="t027_vsm_processes", hide_index=True)
+            processes = [{
+                "name": row.get("Process"),
+                "cycle_time": row.get("Cycle time (minutes)"),
+                "wait_time": row.get("Waiting time (minutes)"),
+                "wip": row.get("WIP (units)"),
+            } for row in vsm_frame.to_dict(orient="records")]
+            signature = _fingerprint(vsm_frame.to_json(orient="split", date_format="iso"))
+            saved = _run_engine_tool(
+                "T027", signature, "Calculate value-stream timing",
+                lambda: build_value_stream_metrics(processes),
+            )
+            if saved and saved["signature"] == signature:
+                metrics = saved["result"].get("metrics", {})
+                st.bar_chart(pd.DataFrame({
+                    "Time": [metrics.get("value_added_time", 0), metrics.get("waiting_time", 0)],
+                }, index=["Value-added time", "Waiting time"]))
+                st.dataframe(pd.DataFrame(saved["result"].get("process_summary", [])),
+                             use_container_width=True, hide_index=True)
+                st.caption(
+                    f"Explicit lead time: {metrics.get('explicit_lead_time', 0):.2f} · "
+                    f"Process cycle efficiency: {metrics.get('process_cycle_efficiency_percent', 0):.2f}% · "
+                    f"Total WIP: {metrics.get('total_wip', 0):.2f}"
+                )
 
         elif selected_id == "T032":
             st.warning("LIMITED VALIDATION MODE — capability indices assume rational subgroups and a representative process; normality/stability are not certified.")
