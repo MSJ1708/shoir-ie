@@ -1,14 +1,14 @@
 # Shoir-IE 100-tool integration report
 
 **Work branch:** \`audit/shoir-100-tools-20261023\`  
-**Scope:** the first implementation tranche for the 100-tool target catalog  
+**Scope:** two focused implementation tranches within the 100-tool target catalog  
 **Status:** implementation extended; mandatory full verification remains open
 
 ## What this branch now contains
 
 The existing application shell and Workbench layout are retained. The 100-tool directory remains a progressive-disclosure expander inside the existing Workbench rather than becoming 100 top-level navigation items. The target matrix remains the source of truth for target IDs, minimum target tiers, mapped legacy routes, evidence and known gaps.
 
-Seven additional calculation-backed methods are now wired to the existing Workbench's focused-method runner, stable target IDs, account gate, tier gate, result rendering and existing workspace-save path:
+Eleven additional calculation-backed methods are now wired to the existing Workbench's focused-method runner, stable target IDs, account gate, tier gate, result rendering and existing workspace-save path:
 
 | Tool ID | Workbench method | Method boundary |
 |---|---|---|
@@ -19,8 +19,12 @@ Seven additional calculation-backed methods are now wired to the existing Workbe
 | T070 | Queuing and Service-System Analyzer | Stable single-server M/M/1 analytical model only |
 | T082 | Industrial Costing and Variance Analyzer | Direct-material price, usage and total variance with reconciliation |
 | T083 | Evidence-Based ROI Tracker | Baseline/post-change cost arithmetic; always requires human evidence verification |
+| T043 | Preventive Maintenance Planner | Interval-based due dates and overdue flags; not a resource/downtime optimizer |
+| T047 | Job Safety and Hazard Register | Severity × likelihood screen with distinct residual scores; requires qualified safety review |
+| T054 | Material Requirements Planner | One-level BOM netting and lot multiple; no recursive BOM explosion |
+| T084 | Engineering Project Portfolio Scorer | Explicit weighted, direction-aware normalization; weight sensitivity not yet included |
 
-The specialist calculation functions are in \`shoir_target_engines.py\`. The Workbench form/execution path is in \`pages/Industrial_Engineering_Workbench.py\`. Independent golden/boundary tests are in \`tests/test_shoir_target_engines.py\`. The central target registry and its execution/persistence metadata are in \`shoir_tool_registry.py\`.
+The eleven new focused methods have deterministic input validation and structured outputs. The specialist calculation functions are in \`shoir_target_engines.py\`. The Workbench form/execution path is in \`pages/Industrial_Engineering_Workbench.py\`. Independent golden/boundary tests are in \`tests/test_shoir_target_engines.py\`. The central target registry and its execution/persistence metadata are in \`shoir_tool_registry.py\`.
 
 ## Numerical and safety contracts
 
@@ -52,9 +56,9 @@ A \`FOUNDATION_ONLY\` item is not a completed tool. Zero \`MISSING\` rows means 
 ## Required verification before calling this tranche done
 
 1. Run the repository's complete validation workflow against the final branch head; resolve every test, import, compile, or security-quality regression.
-2. Run the focused engine tests added for the seven methods, together with existing engine and registry tests.
+2. Run the focused engine tests added for the eleven methods, together with existing engine and registry tests.
 3. Complete authenticated browser tests for entitled and denied tiers, valid/invalid inputs, result refresh/staleness and persistence after reload/re-login.
-4. Confirm all seven methods are accessible from the target directory and cannot be run as a guest or through an unauthorized target ID.
+4. Confirm all eleven methods are accessible from the target directory and cannot be run as a guest or through an unauthorized target ID.
 5. Validate actual export outputs and downstream workflow compatibility where the UI exposes exports.
 6. Run the workbook-to-decision, facility-layout and persistence/isolation end-to-end workflows using synthetic fixtures and dedicated disposable test accounts.
 7. Continue implementation of the remaining foundation-only capabilities rather than treating this tranche as proof that all 100 targets are complete.
