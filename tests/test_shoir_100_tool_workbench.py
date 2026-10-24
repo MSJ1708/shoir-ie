@@ -336,3 +336,41 @@ def test_workbench_runs_maintenance_hazard_mrp_and_portfolio_methods():
             "SAVED_LOCAL_FALLBACK", "SAVED_MANAGED_WORKSPACE", "SESSION_ONLY",
             "SAVE_FAILED", "SAVE_PENDING", "SAVE_STATUS_NOT_CONFIRMED",
         }
+
+
+def test_workbench_runs_data_join_time_series_synthetic_sampling_process_mining_and_flow_balance():
+    from streamlit.testing.v1 import AppTest
+
+    page = ROOT / "pages" / "Industrial_Engineering_Workbench.py"
+    at = AppTest.from_file(page, default_timeout=90)
+    at.session_state["current_user"] = "data-method-checker"
+    at.session_state["authenticated"] = True
+    at.session_state["user_tier"] = "Enterprise Plus Tier"
+    at.run(timeout=90)
+    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+
+    cases = [
+        ("T017 · Data Join and Merge Studio", "tool017_run", "T017", "output_rows", 4),
+        ("T018 · Time-Series Data Processor", "tool018_run", "T018", "output_rows", 3),
+        ("T019 · Synthetic Industrial Data Generator", "tool019_run", "T019", "row_count", 100),
+        ("T034 · Acceptance Sampling Planner", "tool034_run", "T034", "status", "PLAN_FOUND"),
+        ("T076 · Process Mining Analyzer", "tool076_run", "T076", "event_count", 4),
+        ("T079 · Water and Waste Efficiency Analyzer", "tool079_run", "T079", "all_process_balances_close", True),
+    ]
+    for label, button_key, tool_id, result_key, expected in cases:
+        at.selectbox(key="shoir_100_tool_inspector").select(label)
+        at.run(timeout=90)
+        assert not at.exception, f"{tool_id} selection raised: " + "\n".join(str(error.value) for error in at.exception)
+        at.button(key=button_key).click()
+        at.run(timeout=90)
+        assert not at.exception, f"{tool_id} run raised: " + "\n".join(str(error.value) for error in at.exception)
+        result = at.session_state.get(f"shoir_tool_result_{tool_id}")
+        assert result is not None, f"{tool_id} returned no result; visible errors: " + " | ".join(str(item.value) for item in at.error)
+        if isinstance(expected, (int, float)) and not isinstance(expected, bool):
+            assert result[result_key] == pytest.approx(expected)
+        else:
+            assert result[result_key] == expected
+        assert result.get("_workspace_persistence") in {
+            "SAVED_LOCAL_FALLBACK", "SAVED_MANAGED_WORKSPACE", "SESSION_ONLY",
+            "SAVE_FAILED", "SAVE_PENDING", "SAVE_STATUS_NOT_CONFIRMED",
+        }
