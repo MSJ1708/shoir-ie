@@ -184,3 +184,76 @@ def test_data_join_rejects_null_key_many_to_many_expansion():
     right = pd.DataFrame({"key": [None, None], "right": [3, 4]})
     with pytest.raises(ValueError, match="many-to-many"):
         join_dataframes(left, right, left_key="key", right_key="key")
+
+
+def test_cost_variance_reconciles_totals_and_marks_positive_variance_unfavorable():
+    from shoir_target_engines import analyze_cost_variance
+
+    frame = pd.DataFrame({
+        "category": ["Labor", "Material"],
+        "plan": [100.0, 200.0],
+        "standard": [90.0, 220.0],
+        "actual": [110.0, 190.0],
+    })
+    result = analyze_cost_variance(
+        frame, category_column="category", plan_column="plan",
+        standard_column="standard", actual_column="actual",
+        currency="SAR", period="2026-Q1",
+    )
+    assert result["actual_cost_total"] == pytest.approx(300.0)
+    assert result["actual_minus_plan"] == pytest.approx(0.0)
+    assert result["actual_minus_standard"] == pytest.approx(-10.0)
+    assert result["plan_variance_pct"] == pytest.approx(0.0)
+    assert result["currency"] == "SAR"
+    assert result["variance_table"]["Actual − Plan"].tolist() == [10.0, -10.0]
+
+
+def test_cost_variance_rejects_missing_categories_negative_and_invalid_costs():
+    from shoir_target_engines import analyze_cost_variance
+
+    frame = pd.DataFrame({"category": ["Labor", "Labor"], "plan": [1, 2], "standard": [1, 2], "actual": [1, 2]})
+    with pytest.raises(ValueError, match="unique"):
+        analyze_cost_variance(frame, category_column="category", plan_column="plan", standard_column="standard", actual_column="actual")
+    frame = pd.DataFrame({"category": ["Labor"], "plan": [1], "standard": [1], "actual": [-2]})
+    with pytest.raises(ValueError, match="negative"):
+        analyze_cost_variance(frame, category_column="category", plan_column="plan", standard_column="standard", actual_column="actual")
+    frame = pd.DataFrame({"category": ["Labor"], "plan": [0], "standard": [0], "actual": [2]})
+    result = analyze_cost_variance(frame, category_column="category", plan_column="plan", standard_column="standard", actual_column="actual")
+    assert result["plan_variance_pct"] is None
+    assert result["standard_variance_pct"] is None
+
+
+def test_portfolio_score_respects_benefit_cost_directions_and_exposes_weights():
+    from shoir_target_engines import score_engineering_portfolio
+
+    result = score_engineering_portfolio(
+        projects=[
+            {"name": "A", "cost": 100, "service": 90},
+            {"name": "B", "cost": 80, "service": 70},
+            {"name": "C", "cost": 120, "service": 95},
+        ],
+        criteria=[
+            {"criterion": "cost", "weight": 0.6, "direction": "cost"},
+            {"criterion": "service", "weight": 0.4, "direction": "benefit"},
+        ],
+    )
+    ranking = result["ranking"].set_index("Project")
+    assert ranking.loc["B", "cost weighted contribution"] == pytest.approx(60.0)
+    assert ranking.loc["C", "service weighted contribution"] == pytest.approx(40.0)
+    assert ranking.iloc[0]["Weighted score (0–100)"] >= ranking.iloc[-1]["Weighted score (0–100)"]
+    assert result["weight_sum"] == pytest.approx(1.0)
+    assert len(result["criteria"]) == 2
+
+
+def test_portfolio_score_rejects_duplicate_projects_bad_weights_and_missing_values():
+    from shoir_target_engines import score_engineering_portfolio
+
+    with pytest.raises(ValueError, match="at least two"):
+        score_engineering_portfolio([{"name": "A", "cost": 1}], [{"criterion": "cost", "weight": 1, "direction": "cost"}])
+    with pytest.raises(ValueError, match="unique"):
+        score_engineering_portfolio([{"name": "A", "x": 1}, {"name": "A", "x": 2}], [{"criterion": "x", "weight": 1, "direction": "benefit"}])
+    with pytest.raises(ValueError, match="greater than zero"):
+        score_engineering_portfolio([{"name": "A", "x": 1}, {"name": "B", "x": 2}], [{"criterion": "x", "weight": 0, "direction": "benefit"}])
+    with pytest.raises(ValueError, match="must supply"):
+        score_engineering_portfolio([{"name": "A", "x": 1}, {"name": "B"}], [{"criterion": "x", "weight": 1, "direction": "benefit"}])
+
