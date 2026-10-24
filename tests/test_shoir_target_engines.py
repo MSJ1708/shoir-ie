@@ -1221,3 +1221,97 @@ def test_energy_scenario_comparison_ranks_intensity_without_claiming_live_contro
     assert improved["Energy cost change vs baseline (%)"] == pytest.approx(-20)
     assert improved["Emissions change vs baseline (%)"] == pytest.approx(-20)
     assert "does not control plant equipment" in result["warning"]
+
+
+def test_industrial_field_mapper_suggests_aliases_and_never_auto_confirms_fuzzy_fields():
+    from shoir_target_engines import map_industrial_fields
+
+    result = map_industrial_fields(["Timestamp", "Qty", "Defects", "mystery_label"])
+    mapped = result["mapping_table"].set_index("Source column")
+    assert result["status"] == "FIELD_MAPPING_SUGGESTIONS_READY"
+    assert mapped.loc["Timestamp", "Suggested canonical field"] == "timestamp"
+    assert mapped.loc["Qty", "Suggested canonical field"] == "quantity"
+    assert mapped.loc["Qty", "Mapping status"] == "EXACT_ALIAS — CONFIRM"
+    assert mapped.loc["Defects", "Suggested canonical field"] == "defect_count"
+    assert mapped.loc["mystery_label", "Mapping status"] == "UNMAPPED — MANUAL REVIEW"
+    assert result["warning"].lower().find("confirm each mapping") >= 0
+    with pytest.raises(ValueError, match="unknown canonical field"):
+        map_industrial_fields(["Qty"], manual_mapping={"Qty": "not-a-field"})
+
+
+def test_maintenance_backlog_prioritization_respects_skill_and_labor_limits():
+    from shoir_target_engines import prioritize_maintenance_backlog
+
+    result = prioritize_maintenance_backlog(
+        [
+            {"work_order_id": "WO-1", "task": "Critical bearing", "criticality_score": 5,
+             "days_until_due": -2, "estimated_hours": 4, "required_skill": "Mechanical"},
+            {"work_order_id": "WO-2", "task": "Calibration", "criticality_score": 4,
+             "days_until_due": 0, "estimated_hours": 3, "required_skill": "Mechanical"},
+            {"work_order_id": "WO-3", "task": "Paint repair", "criticality_score": 2,
+             "days_until_due": 5, "estimated_hours": 2, "required_skill": "Electrical"},
+        ],
+        7,
+        available_skills=["Mechanical"],
+    )
+    assert result["status"] == "BACKLOG_PRIORITIZED"
+    assert result["selected_count"] == 2
+    assert result["deferred_count"] == 1
+    assert result["selected_labor_hours"] == pytest.approx(7)
+    selected = set(result["selected_work_orders"]["Work order ID"])
+    assert selected == {"WO-1", "WO-2"}
+    deferred = result["deferred_work_orders"].set_index("Work order ID")
+    assert deferred.loc["WO-3", "Deferral reason"] == "Required skill not in available-skill list"
+    with pytest.raises(ValueError, match="whole number from 1 through 5"):
+        prioritize_maintenance_backlog([{"work_order_id": "X", "task": "Bad", "criticality_score": 6, "days_until_due": 0, "estimated_hours": 1}], 2)
+
+
+def test_sop_plan_applies_capacity_limits_and_carries_backlog_forward():
+    from shoir_target_engines import reconcile_sop_plan
+
+    result = reconcile_sop_plan(
+        [
+            {"period": "Jan", "demand": 30, "planned_production": 35, "production_capacity": 30, "scheduled_receipts": 0, "target_safety_stock": 15},
+            {"period": "Feb", "demand": 60, "planned_production": 40, "production_capacity": 50, "scheduled_receipts": 0, "target_safety_stock": 20},
+        ],
+        starting_inventory=20,
+    )
+    assert result["status"] == "SOP_RECONCILED"
+    assert result["total_demand"] == pytest.approx(90)
+    assert result["total_production_above_capacity"] == pytest.approx(5)
+    periods = result["period_plan"].set_index("Period")
+    assert periods.loc["Jan", "Capacity-constrained production"] == pytest.approx(30)
+    assert periods.loc["Jan", "Ending inventory"] == pytest.approx(20)
+    assert periods.loc["Feb", "Ending inventory"] == pytest.approx(10)
+    assert periods.loc["Feb", "Safety stock gap"] == pytest.approx(10)
+
+    deficit = reconcile_sop_plan([
+        {"period": "P1", "demand": 40, "planned_production": 10},
+        {"period": "P2", "demand": 20, "planned_production": 10},
+    ])
+    assert deficit["period_plan"].iloc[0]["Ending backlog"] == pytest.approx(30)
+    assert deficit["period_plan"].iloc[1]["Opening backlog"] == pytest.approx(30)
+    assert deficit["ending_backlog"] == pytest.approx(40)
+
+
+def test_supplier_scorecard_keeps_incomplete_supplier_unranked():
+    from shoir_target_engines import score_supplier_performance
+
+    result = score_supplier_performance(
+        [
+            {"supplier": "Acme", "scores": {"Delivery": 90, "Quality": 80}, "data_as_of": "2026-Q3", "evidence_reference": "audit-1"},
+            {"supplier": "Beta", "scores": {"Delivery": 75}, "data_as_of": "2026-Q3"},
+            {"supplier": "Gamma", "scores": {"Delivery": 70, "Quality": 100}, "data_as_of": "2026-Q3", "evidence_reference": "audit-3"},
+        ],
+        {"Delivery": 0.4, "Quality": 0.6},
+    )
+    assert result["status"] == "SUPPLIER_SCORECARD_CALCULATED"
+    assert result["complete_score_count"] == 2
+    assert result["incomplete_score_count"] == 1
+    table = result["scorecard"].set_index("Supplier")
+    assert table.loc["Acme", "Composite score (0–100)"] == pytest.approx(84)
+    assert table.loc["Gamma", "Composite score (0–100)"] == pytest.approx(88)
+    assert pd.isna(table.loc["Beta", "Composite score (0–100)"])
+    assert pd.isna(table.loc["Beta", "Rank among complete scores"])
+    with pytest.raises(ValueError, match="between 0 and 100"):
+        score_supplier_performance([{"supplier": "Bad", "scores": {"Quality": 105}}], {"Quality": 1})
