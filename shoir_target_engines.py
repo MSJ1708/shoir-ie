@@ -1915,3 +1915,198 @@ def analyze_mm1_queue(
         "assumptions": assumptions,
         "warning": "Analytical estimate under M/M/1 assumptions; validate the arrival/service distributions and actual queue discipline.",
     }
+
+
+def analyze_cost_variance(
+    frame: pd.DataFrame,
+    *,
+    category_column: str,
+    plan_column: str,
+    standard_column: str,
+    actual_column: str,
+    currency: str = "SAR",
+    period: str = "unspecified",
+) -> dict[str, Any]:
+    """Reconcile plan/standard/actual cost with positive variance defined as unfavorable."""
+    if not isinstance(frame, pd.DataFrame) or frame.empty:
+        raise ValueError("Provide at least one cost-category row.")
+    fields = {
+        "category": str(category_column).strip(),
+        "plan": str(plan_column).strip(),
+        "standard": str(standard_column).strip(),
+        "actual": str(actual_column).strip(),
+    }
+    if any(not name for name in fields.values()):
+        raise ValueError("Choose non-empty column names for category, plan, standard and actual cost.")
+    if len(set(fields.values())) != 4:
+        raise ValueError("Category, plan, standard and actual must use distinct source columns.")
+    missing = [name for name in fields.values() if name not in frame.columns]
+    if missing:
+        raise ValueError("Column(s) not found: " + ", ".join(missing))
+    working = pd.DataFrame({
+        "Cost category": frame[fields["category"]].astype("string").str.strip(),
+    })
+    if working["Cost category"].isna().any() or (working["Cost category"] == "").any():
+        raise ValueError("Every cost row needs a category.")
+    if working["Cost category"].duplicated().any():
+        raise ValueError("Cost categories must be unique; aggregate repeated categories first to avoid double counting.")
+    for label in ("plan", "standard", "actual"):
+        original = frame[fields[label]]
+        values = pd.to_numeric(original, errors="coerce")
+        if values.isna().any() or not all(math.isfinite(float(v)) for v in values.tolist()):
+            raise ValueError(f"{label.title()} cost values must all be finite numeric values.")
+        if (values < 0).any():
+            raise ValueError(f"{label.title()} cost values cannot be negative.")
+        working[label.title() + " cost"] = values.astype(float).to_numpy()
+    working["Actual − Plan"] = working["Actual cost"] - working["Plan cost"]
+    working["Actual − Standard"] = working["Actual cost"] - working["Standard cost"]
+    working["Plan variance (%)"] = [
+        (variance / baseline * 100.0) if baseline != 0 else None
+        for variance, baseline in zip(working["Actual − Plan"], working["Plan cost"])
+    ]
+    working["Standard variance (%)"] = [
+        (variance / baseline * 100.0) if baseline != 0 else None
+        for variance, baseline in zip(working["Actual − Standard"], working["Standard cost"])
+    ]
+    totals = {
+        "plan_cost_total": float(working["Plan cost"].sum()),
+        "standard_cost_total": float(working["Standard cost"].sum()),
+        "actual_cost_total": float(working["Actual cost"].sum()),
+        "actual_minus_plan": float(working["Actual − Plan"].sum()),
+        "actual_minus_standard": float(working["Actual − Standard"].sum()),
+    }
+    totals["plan_variance_pct"] = (
+        totals["actual_minus_plan"] / totals["plan_cost_total"] * 100.0
+        if totals["plan_cost_total"] else None
+    )
+    totals["standard_variance_pct"] = (
+        totals["actual_minus_standard"] / totals["standard_cost_total"] * 100.0
+        if totals["standard_cost_total"] else None
+    )
+    return {
+        "status": "CALCULATED",
+        "method": "Cost reconciliation; positive actual-minus-plan/standard variance is unfavorable",
+        "currency": str(currency).strip().upper() or "UNSPECIFIED",
+        "period": str(period).strip() or "UNSPECIFIED",
+        "cost_categories": int(len(working)),
+        **totals,
+        "variance_table": working,
+        "assumptions": [
+            "Plan, standard and actual costs cover the same currency, period, units and cost boundary.",
+            "Variances are arithmetic differences; their business interpretation depends on the organization's costing policy.",
+            "A zero plan/standard denominator yields no percentage, not an infinite or zero variance percentage.",
+        ],
+        "warning": "Verify cost-center allocations, production volume and source period before making financial decisions.",
+    }
+
+
+def score_engineering_portfolio(
+    projects: Sequence[Mapping[str, Any]],
+    criteria: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Create a transparent min-max weighted portfolio score with sensitivity caveat."""
+    if isinstance(projects, (str, bytes)) or not isinstance(projects, Sequence) or len(projects) < 2:
+        raise ValueError("Provide at least two project alternatives.")
+    if isinstance(criteria, (str, bytes)) or not isinstance(criteria, Sequence) or not criteria:
+        raise ValueError("Provide at least one weighted criterion.")
+    normalized_projects: list[dict[str, Any]] = []
+    project_names: set[str] = set()
+    for index, project in enumerate(projects, start=1):
+        if not isinstance(project, Mapping):
+            raise ValueError(f"Project row {index} must be an object.")
+        name = str(project.get("name", "")).strip()
+        if not name:
+            raise ValueError(f"Project row {index} needs a non-empty name.")
+        if name.casefold() in project_names:
+            raise ValueError(f"Project names must be unique: {name}.")
+        project_names.add(name.casefold())
+        normalized_projects.append(dict(project, name=name))
+
+    normalized_criteria: list[dict[str, Any]] = []
+    seen_criteria: set[str] = set()
+    weight_sum = 0.0
+    for index, raw in enumerate(criteria, start=1):
+        if not isinstance(raw, Mapping):
+            raise ValueError(f"Criterion row {index} must be an object.")
+        key = str(raw.get("criterion", "")).strip()
+        if not key or key == "name":
+            raise ValueError(f"Criterion row {index} needs a criterion field other than 'name'.")
+        folded = key.casefold()
+        if folded in seen_criteria:
+            raise ValueError(f"Criterion names must be unique: {key}.")
+        seen_criteria.add(folded)
+        weight = _finite_number(raw.get("weight"), f"Weight for {key}")
+        direction = str(raw.get("direction", "")).strip().casefold()
+        if weight <= 0:
+            raise ValueError(f"Weight for {key} must be greater than zero.")
+        if direction not in {"benefit", "cost"}:
+            raise ValueError(f"Direction for {key} must be 'benefit' or 'cost'.")
+        if any(key not in project for project in normalized_projects):
+            raise ValueError(f"Every project must supply criterion '{key}'.")
+        values = [_finite_number(project[key], f"{key} value for {project['name']}") for project in normalized_projects]
+        normalized_criteria.append({
+            "criterion": key, "weight": weight, "direction": direction,
+            "values": values,
+        })
+        weight_sum += weight
+
+    if not math.isfinite(weight_sum) or weight_sum <= 0:
+        raise ValueError("The sum of criterion weights must be finite and greater than zero.")
+    for criterion in normalized_criteria:
+        values = criterion.pop("values")
+        low, high = min(values), max(values)
+        normalized: list[float] = []
+        for value in values:
+            if math.isclose(high, low, rel_tol=1e-12, abs_tol=1e-12):
+                score = 1.0  # No separation on this criterion; neutral equal score.
+            elif criterion["direction"] == "benefit":
+                score = (value - low) / (high - low)
+            else:
+                score = (high - value) / (high - low)
+            normalized.append(float(score))
+        criterion["minimum_observed"] = low
+        criterion["maximum_observed"] = high
+        criterion["normalized_scores"] = normalized
+
+    rows = []
+    for i, project in enumerate(normalized_projects):
+        weighted = {
+            criterion["criterion"]: criterion["normalized_scores"][i] * criterion["weight"]
+            for criterion in normalized_criteria
+        }
+        score = sum(weighted.values()) / weight_sum * 100.0
+        rows.append({
+            "Rank": 0,
+            "Project": project["name"],
+            "Weighted score (0–100)": score,
+            **{f"{key} weighted contribution": value / weight_sum * 100.0 for key, value in weighted.items()},
+        })
+    table = pd.DataFrame(rows).sort_values(
+        ["Weighted score (0–100)", "Project"], ascending=[False, True], kind="stable"
+    ).reset_index(drop=True)
+    table["Rank"] = range(1, len(table) + 1)
+    return {
+        "status": "SCORED",
+        "method": "Min-max criterion normalization with normalized positive weighted sum",
+        "project_count": len(normalized_projects),
+        "criteria_count": len(normalized_criteria),
+        "weight_sum": weight_sum,
+        "ranking": table,
+        "criteria": [
+            {
+                "criterion": criterion["criterion"],
+                "weight": criterion["weight"],
+                "normalized_weight_pct": criterion["weight"] / weight_sum * 100.0,
+                "direction": criterion["direction"],
+                "observed_minimum": criterion["minimum_observed"],
+                "observed_maximum": criterion["maximum_observed"],
+            }
+            for criterion in normalized_criteria
+        ],
+        "assumptions": [
+            "Criterion weights reflect human judgment and must be reviewed with stakeholders.",
+            "Min-max normalization depends on the alternatives in this run; adding/removing an alternative can change the scores.",
+            "The result is a decision aid, not proof of causal impact or a universally optimal choice.",
+        ],
+        "warning": "Review weights, scales, data quality and score sensitivity before approving a project portfolio.",
+    }
