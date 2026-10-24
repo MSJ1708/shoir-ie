@@ -408,3 +408,301 @@ def portfolio_score(
         "warnings": ["Criteria, ratings and weights are subjective decision inputs, not objective truth.",
                      "Sensitivity is a limited ±10% one-weight-at-a-time rank screen, not a probabilistic uncertainty model."],
     }
+
+
+def line_balance(tasks: Sequence[Mapping[str, Any]], cycle_time: float) -> dict[str, Any]:
+    """Assign precedence-constrained tasks by a largest-eligible-task heuristic."""
+    cycle = _finite(cycle_time, "Cycle time")
+    if cycle <= 0:
+        raise ValueError("Cycle time must be greater than zero.")
+    if not isinstance(tasks, Sequence) or isinstance(tasks, (str, bytes)) or not tasks:
+        raise ValueError("Provide a task list with duration and predecessor definitions.")
+    rows, by_name = [], {}
+    for i, item in enumerate(tasks, 1):
+        if not isinstance(item, Mapping):
+            raise ValueError(f"Task row {i} must be a mapping.")
+        name = str(item.get("task", "")).strip()
+        duration = _finite(item.get("duration"), f"{name or i} duration")
+        pred_raw = item.get("predecessors", "")
+        predecessors = [p.strip() for p in str(pred_raw or "").split(",") if p.strip()]
+        if not name or name in by_name:
+            raise ValueError(f"Task row {i} needs a unique non-empty task name.")
+        if duration <= 0 or duration > cycle:
+            raise ValueError(f"Task {name} duration must be > 0 and <= cycle time.")
+        by_name[name] = {"task": name, "duration": duration, "predecessors": predecessors}
+        rows.append(by_name[name])
+    for item in rows:
+        unknown = set(item["predecessors"]) - set(by_name)
+        if unknown or item["task"] in item["predecessors"]:
+            raise ValueError(f"Task {item['task']} has unknown or self predecessors: {sorted(unknown)}.")
+    remaining = set(by_name)
+    completed: set[str] = set()
+    assignments = []
+    station_loads = []
+    station = 0
+    while remaining:
+        eligible = [name for name in remaining if set(by_name[name]["predecessors"]).issubset(completed)]
+        if not eligible:
+            raise ValueError("Task precedence contains a cycle or unresolved dependency.")
+        station += 1
+        load = 0.0
+        while True:
+            eligible = [name for name in remaining if set(by_name[name]["predecessors"]).issubset(completed)]
+            fitting = [name for name in eligible if load + by_name[name]["duration"] <= cycle + 1e-9]
+            if not fitting:
+                break
+            chosen = sorted(fitting, key=lambda name: (-by_name[name]["duration"], name))[0]
+            task = by_name[chosen]
+            assignments.append({"task": chosen, "duration": task["duration"], "predecessors": ", ".join(task["predecessors"]), "station": station, "station_sequence": sum(a["station"] == station for a in assignments) + 1})
+            load += task["duration"]
+            completed.add(chosen)
+            remaining.remove(chosen)
+        station_loads.append({"station": station, "work_content": load, "cycle_time": cycle, "idle_time": cycle-load, "utilization_pct": load/cycle*100.0})
+    total = sum(row["duration"] for row in rows)
+    minimum = math.ceil(total / cycle)
+    efficiency = total / (station * cycle)
+    smoothness = math.sqrt(sum((cycle - row["work_content"]) ** 2 for row in station_loads))
+    return {
+        "status": "HEURISTIC_BALANCED", "tool_id": "T024", "method_version": METHOD_VERSION,
+        "method": "Largest eligible task heuristic with precedence constraints; this is not a proof of global optimality.",
+        "tasks": pd.DataFrame(assignments), "stations": pd.DataFrame(station_loads),
+        "total_work_content": total, "cycle_time": cycle, "station_count": station,
+        "theoretical_minimum_stations": minimum, "efficiency_pct": efficiency*100.0,
+        "balance_delay_pct": (1-efficiency)*100.0, "smoothness_index": smoothness,
+        "warnings": ["Task durations and precedence relationships are user inputs and should be validated against observed work.",
+                     "A feasible heuristic assignment is not necessarily the optimal line balance."],
+    }
+
+
+def root_cause_analysis(
+    items: Sequence[Mapping[str, Any]], five_whys: Sequence[str] | None = None,
+    action_owner: str = "", action: str = "", due_date: str = "",
+) -> dict[str, Any]:
+    """Build a Pareto table and optionally record a reviewed five-why hypothesis."""
+    if not isinstance(items, Sequence) or isinstance(items, (str, bytes)) or not items:
+        raise ValueError("Provide at least one category and count.")
+    totals: dict[str, float] = {}
+    for i, row in enumerate(items, 1):
+        if not isinstance(row, Mapping):
+            raise ValueError(f"Cause row {i} must be a mapping.")
+        category = str(row.get("category", "")).strip()
+        count = _finite(row.get("count"), f"{category or i} count")
+        if not category or count < 0:
+            raise ValueError(f"Cause row {i} needs a name and a non-negative count.")
+        totals[category] = totals.get(category, 0.0) + count
+    total = sum(totals.values())
+    if total <= 0:
+        raise ValueError("At least one cause count must be greater than zero.")
+    pareto = pd.DataFrame([{"category": key, "count": count} for key, count in totals.items()])
+    pareto = pareto.sort_values(["count", "category"], ascending=[False, True], kind="stable").reset_index(drop=True)
+    pareto["share_pct"] = pareto["count"] / total * 100.0
+    pareto["cumulative_share_pct"] = pareto["share_pct"].cumsum()
+    whys = [str(x).strip() for x in (five_whys or [])]
+    if whys and (len(whys) != 5 or any(not x for x in whys)):
+        raise ValueError("Provide either no five-why answers or exactly five non-empty answers.")
+    action_text, owner_text, due_text = str(action or "").strip(), str(action_owner or "").strip(), str(due_date or "").strip()
+    action_record = {"owner": owner_text, "action": action_text, "due_date": due_text, "status": "ACTION_RECORDED" if action_text and owner_text else "ACTION_INCOMPLETE"}
+    return {
+        "status": "ANALYZED", "tool_id": "T028", "method_version": METHOD_VERSION,
+        "method": "Frequency/cost Pareto ranking; the five-why chain is a hypothesis for review, not proven causation.",
+        "pareto": pareto, "total_count": total, "five_whys": pd.DataFrame([{"why_level": i+1, "statement": w} for i, w in enumerate(whys)]),
+        "action": action_record,
+        "warnings": ["Pareto ranking does not establish causation.",
+                     "Five-why responses and countermeasures should be checked against evidence and reviewed with process owners."],
+    }
+
+
+def audit_5s(records: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """Score documented 5S checklist observations while preserving action/evidence fields."""
+    categories = {"Sort", "Set in order", "Shine", "Standardize", "Sustain"}
+    if not isinstance(records, Sequence) or isinstance(records, (str, bytes)) or not records:
+        raise ValueError("Provide at least one 5S audit checklist row.")
+    clean, seen = [], set()
+    for i, row in enumerate(records, 1):
+        if not isinstance(row, Mapping):
+            raise ValueError(f"Audit row {i} must be a mapping.")
+        area, category = str(row.get("area", "")).strip(), str(row.get("category", "")).strip()
+        score = _finite(row.get("score"), f"{area or i} score")
+        if not area or category not in categories:
+            raise ValueError(f"Audit row {i} must include an area and one of the five 5S categories.")
+        key = (area, category)
+        if key in seen:
+            raise ValueError(f"Duplicate 5S category {category} for area {area}.")
+        seen.add(key)
+        if score < 0 or score > 5:
+            raise ValueError("5S score must be between 0 and 5.")
+        clean.append({
+            "area": area, "category": category, "score": score, "score_pct": score/5*100.0,
+            "evidence": str(row.get("evidence", "") or "").strip(),
+            "owner": str(row.get("owner", "") or "").strip(),
+            "action": str(row.get("action", "") or "").strip(),
+            "due_date": str(row.get("due_date", "") or "").strip(),
+        })
+    details = pd.DataFrame(clean)
+    by_area = details.groupby("area", as_index=False).agg(
+        average_score=("score", "mean"), score_pct=("score_pct", "mean"),
+        checklist_items=("category", "count"),
+    ).sort_values(["score_pct", "area"], ascending=[True, True], kind="stable")
+    by_category = details.groupby("category", as_index=False).agg(
+        average_score=("score", "mean"), score_pct=("score_pct", "mean"),
+        checklist_items=("area", "count"),
+    ).sort_values(["score_pct", "category"], ascending=[True, True], kind="stable")
+    return {
+        "status": "AUDIT_SCORED", "tool_id": "T029", "method_version": METHOD_VERSION,
+        "method": "User-rated 0–5 checklist score; score percent = rating / 5 × 100.",
+        "details": details, "area_summary": by_area, "category_summary": by_category,
+        "overall_score_pct": float(details["score_pct"].mean()),
+        "actions_open": int(((details["action"] != "") & (details["owner"] == "")).sum()),
+        "warnings": ["This is a structured workplace audit record, not a certified safety or regulatory inspection.",
+                     "Scores depend on defined rubric, evidence quality and reviewer consistency."],
+    }
+
+
+def a3_improvement(
+    title: str, problem: str, metric: str, unit: str, baseline: float, target: float,
+    direction: str, countermeasure: str, owner: str, due_date: str,
+    actual: float | None = None, actual_evidence: str = "", implementation_cost: float = 0.0,
+) -> dict[str, Any]:
+    """Structure an A3 improvement plan and keep estimated vs evidenced outcomes separate."""
+    title, problem, metric, unit = (str(x or "").strip() for x in (title, problem, metric, unit))
+    countermeasure, owner, due_date, evidence = (str(x or "").strip() for x in (countermeasure, owner, due_date, actual_evidence))
+    if not all((title, problem, metric, unit, countermeasure, owner, due_date)):
+        raise ValueError("Provide title, problem, metric/unit, countermeasure, owner and due date.")
+    base, target_value = _finite(baseline, "Baseline"), _finite(target, "Target")
+    cost = _finite(implementation_cost, "Implementation cost")
+    if cost < 0 or direction not in {"lower", "higher"}:
+        raise ValueError("Implementation cost cannot be negative; direction must be lower or higher.")
+    actual_value = None if actual is None else _finite(actual, "Actual post-change result")
+    target_met = None if actual_value is None else (actual_value <= target_value if direction == "lower" else actual_value >= target_value)
+    improvement = None
+    if actual_value is not None:
+        improvement = base - actual_value if direction == "lower" else actual_value - base
+    verified = actual_value is not None and bool(evidence)
+    return {
+        "status": "EVIDENCE_RECORDED" if verified else "PLAN_ONLY_OR_UNVERIFIED",
+        "tool_id": "T030", "method_version": METHOD_VERSION,
+        "title": title, "problem": problem, "metric": metric, "unit": unit,
+        "baseline": base, "target": target_value, "direction": direction,
+        "countermeasure": countermeasure, "owner": owner, "due_date": due_date,
+        "actual_post_change": actual_value, "absolute_improvement": improvement,
+        "percent_improvement": None if actual_value is None or base == 0 else improvement / abs(base) * 100.0,
+        "target_met": target_met, "implementation_cost": cost,
+        "actual_evidence": evidence, "outcome_verified": verified,
+        "warnings": ["A3 plan data alone is not proof of realized benefit.",
+                     "Outcome is only marked evidence-recorded when an actual result and an evidence reference are supplied."],
+    }
+
+
+def quality_cost_analysis(records: Sequence[Mapping[str, Any]], currency: str) -> dict[str, Any]:
+    """Calculate defect-related scrap, rework and inspection cost from supplied records."""
+    unit = str(currency or "").strip().upper()
+    if not re.fullmatch(r"[A-Z]{3}", unit):
+        raise ValueError("Provide a three-letter currency code such as SAR, USD, or EUR.")
+    if not isinstance(records, Sequence) or isinstance(records, (str, bytes)) or not records:
+        raise ValueError("Provide at least one defect/cost record.")
+    out = []
+    for i, row in enumerate(records, 1):
+        if not isinstance(row, Mapping):
+            raise ValueError(f"Defect row {i} must be a mapping.")
+        name = str(row.get("defect_type", "")).strip()
+        if not name:
+            raise ValueError(f"Defect row {i} needs a defect type.")
+        scrap_qty = _finite(row.get("scrap_qty", 0), f"{name} scrap quantity")
+        scrap_unit_cost = _finite(row.get("scrap_unit_cost", 0), f"{name} scrap unit cost")
+        rework_hours = _finite(row.get("rework_hours", 0), f"{name} rework hours")
+        rework_rate = _finite(row.get("rework_cost_per_hour", 0), f"{name} rework rate")
+        inspection = _finite(row.get("inspection_cost", 0), f"{name} inspection cost")
+        if min(scrap_qty, scrap_unit_cost, rework_hours, rework_rate, inspection) < 0:
+            raise ValueError(f"{name} cost quantities and rates cannot be negative.")
+        scrap_cost, rework_cost = scrap_qty * scrap_unit_cost, rework_hours * rework_rate
+        out.append({
+            "defect_type": name, "scrap_qty": scrap_qty, "scrap_cost": scrap_cost,
+            "rework_hours": rework_hours, "rework_cost": rework_cost,
+            "inspection_cost": inspection, "cost_of_poor_quality": scrap_cost+rework_cost+inspection,
+        })
+    details = pd.DataFrame(out)
+    totals = {column: float(details[column].sum()) for column in ("scrap_cost", "rework_cost", "inspection_cost", "cost_of_poor_quality")}
+    return {
+        "status": "COSTED", "tool_id": "T040", "method_version": METHOD_VERSION,
+        "currency": unit, "details": details, "totals": totals,
+        "method": "Cost of poor quality = modeled scrap cost + modeled rework cost + supplied inspection cost.",
+        "warnings": ["Use one period and scope across all records; avoid counting the same cost in multiple categories.",
+                     "Only the entered categories are included; source ledgers and realized savings are not independently verified."],
+    }
+
+
+def inventory_policy(
+    annual_demand: float, order_cost: float, annual_holding_cost_per_unit: float,
+    mean_demand_per_period: float, std_demand_per_period: float, lead_time_periods: float,
+    service_z: float = 1.645,
+) -> dict[str, Any]:
+    """Calculate EOQ and a simple demand-only safety stock/reorder point."""
+    d, s, h = (_finite(annual_demand, "Annual demand"), _finite(order_cost, "Order cost"),
+               _finite(annual_holding_cost_per_unit, "Annual holding cost per unit"))
+    mean, std = _finite(mean_demand_per_period, "Mean demand"), _finite(std_demand_per_period, "Demand standard deviation")
+    lead, z = _finite(lead_time_periods, "Lead time"), _finite(service_z, "Service Z")
+    if min(d, s, h) <= 0 or mean < 0 or std < 0 or lead < 0 or z < 0:
+        raise ValueError("Demand, order cost and holding cost must be positive; other demand/lead parameters cannot be negative.")
+    eoq = math.sqrt(2*d*s/h)
+    safety = z * std * math.sqrt(lead)
+    lead_demand = mean * lead
+    return {
+        "status": "CALCULATED", "tool_id": "T055", "method_version": METHOD_VERSION,
+        "method": "EOQ = sqrt(2DS/H); safety stock = z × demand standard deviation × sqrt(lead periods); reorder point = mean lead-time demand + safety stock.",
+        "eoq_units": eoq, "expected_orders_per_year": d/eoq,
+        "annual_ordering_cost_at_eoq": d/eoq*s, "annual_holding_cost_at_eoq": eoq/2*h,
+        "expected_lead_time_demand_units": lead_demand, "safety_stock_units": safety,
+        "reorder_point_units": lead_demand+safety, "service_z": z,
+        "warnings": ["Assumes lead time is deterministic and demand variation is independent across periods.",
+                     "The selected Z value must be consistent with the service-level convention used by your organization."],
+    }
+
+
+def abc_xyz_analysis(
+    frame: pd.DataFrame, sku_column: str, unit_cost_column: str,
+    demand_columns: Sequence[str], abc_a_pct: float = 80.0,
+    abc_b_pct: float = 95.0, xyz_x_cv: float = 0.5, xyz_y_cv: float = 1.0,
+) -> dict[str, Any]:
+    """Segment SKU value (ABC) and demand variability (XYZ) using declared thresholds."""
+    frame = _frame(frame, "Inventory table")
+    demand_cols = [str(c) for c in demand_columns]
+    if sku_column not in frame.columns or unit_cost_column not in frame.columns or not demand_cols or any(c not in frame.columns for c in demand_cols):
+        raise ValueError("Select an SKU, unit-cost column and one or more demand-period columns.")
+    a, b = _finite(abc_a_pct, "ABC A cutoff"), _finite(abc_b_pct, "ABC B cutoff")
+    x, y = _finite(xyz_x_cv, "XYZ X CV threshold"), _finite(xyz_y_cv, "XYZ Y CV threshold")
+    if not 0 < a < b <= 100 or x < 0 or y < x:
+        raise ValueError("Require 0 < ABC A cutoff < B cutoff <= 100 and non-negative ordered CV thresholds.")
+    data = frame.copy(deep=True)
+    data[sku_column] = data[sku_column].astype(str).str.strip()
+    if data[sku_column].eq("").any() or data[sku_column].duplicated().any():
+        raise ValueError("SKU identifiers must be non-empty and unique.")
+    cost = pd.to_numeric(data[unit_cost_column], errors="coerce")
+    demand = data[demand_cols].apply(pd.to_numeric, errors="coerce")
+    if cost.isna().any() or demand.isna().any().any() or (cost < 0).any() or (demand < 0).any().any():
+        raise ValueError("Unit costs and demand observations must be numeric, complete and non-negative.")
+    usage = demand.sum(axis=1)
+    value = usage * cost
+    total_value = float(value.sum())
+    if total_value <= 0:
+        raise ValueError("Total inventory usage value must be greater than zero to calculate ABC classes.")
+    variability = demand.std(axis=1, ddof=1).div(demand.mean(axis=1).replace(0, np.nan))
+    ranked = pd.DataFrame({
+        "sku": data[sku_column], "unit_cost": cost, "period_demand_total": usage,
+        "usage_value_over_selected_periods": value, "demand_cv": variability,
+    }).sort_values(["usage_value_over_selected_periods", "sku"], ascending=[False, True], kind="stable").reset_index(drop=True)
+    ranked["value_share_pct"] = ranked["usage_value_over_selected_periods"] / total_value * 100.0
+    ranked["cumulative_value_pct_before_item"] = ranked["value_share_pct"].cumsum().shift(fill_value=0.0)
+    ranked["ABC_class"] = np.where(ranked["cumulative_value_pct_before_item"] < a, "A",
+                            np.where(ranked["cumulative_value_pct_before_item"] < b, "B", "C"))
+    ranked["XYZ_class"] = np.where(ranked["demand_cv"].isna() | (ranked["demand_cv"] > y), "Z",
+                            np.where(ranked["demand_cv"] <= x, "X", "Y"))
+    ranked["ABC_XYZ_class"] = ranked["ABC_class"] + ranked["XYZ_class"]
+    return {
+        "status": "SEGMENTED", "tool_id": "T056", "method_version": METHOD_VERSION,
+        "method": "ABC by cumulative usage value; XYZ by coefficient of variation across the selected demand columns.",
+        "items": ranked, "abc_a_cutoff_pct": a, "abc_b_cutoff_pct": b,
+        "xyz_x_cv_cutoff": x, "xyz_y_cv_cutoff": y,
+        "warnings": ["Usage value covers only the selected demand periods; it is not annualized unless the source periods represent a year.",
+                     "Zero-mean demand is classed Z because CV is undefined.",
+                     "ABC/XYZ thresholds are editable business rules, not universal standards."],
+    }
