@@ -233,3 +233,43 @@ def test_starter_cannot_render_or_execute_mid_tier_line_balancer():
     assert "shoir_T024_result" not in at.session_state
     with pytest.raises(KeyError):
         at.button(key="T024_run_button")
+
+
+def test_quality_planning_and_risk_tools_render_and_run_with_golden_defaults():
+    at = _authed_library()
+
+    _open(at, "T034", "Acceptance Sampling Planner")
+    sampling = _run(at, "T034")
+    assert sampling["status"] == "CALCULATED"
+    assert 0 <= sampling["metrics"]["producer_risk_at_aql"] <= 1
+    assert 0 <= sampling["metrics"]["consumer_risk_at_ltpd"] <= 1
+    assert len(sampling["operating_characteristic"]) == 21
+
+    _open(at, "T051", "Demand Forecasting Studio")
+    forecast = _run(at, "T051")
+    assert forecast["status"] == "FORECASTED"
+    assert forecast["metrics"]["selected_model_by_holdout_mae"] == "naive_last_value"
+    assert len(forecast["backtest"]) == 2
+    assert len(forecast["forecast"]) == 2
+
+    _open(at, "T054", "Material Requirements Planner")
+    mrp = _run(at, "T054")
+    assert mrp["status"] == "PLANNED"
+    assert mrp["metrics"]["planned_order_count"] == 8
+    assert {row["item"] for row in mrp["planned_releases"]} == {"PRODUCT", "COMP_A", "COMP_B", "RAW_X"}
+
+    _open(at, "T072", "Monte Carlo Risk Simulator")
+    simulation = _run(at, "T072")
+    assert simulation["status"] == "SIMULATED"
+    assert simulation["metrics"]["iterations"] == 5000
+    assert simulation["metrics"]["p05"] <= simulation["metrics"]["p50"] <= simulation["metrics"]["p95"]
+    assert sum(row["count"] for row in simulation["histogram"]) == 5000
+
+
+def test_starter_cannot_execute_acceptance_sampling_planner():
+    at = _authed_library(tier="Starter")
+    _open(at, "T034", "Acceptance Sampling Planner")
+    assert any("does not grant this target capability" in str(item.value).lower() for item in at.warning)
+    assert "shoir_T034_result" not in at.session_state
+    with pytest.raises(KeyError):
+        at.button(key="T034_run_button")
