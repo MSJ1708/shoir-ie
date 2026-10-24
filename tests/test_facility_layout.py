@@ -402,3 +402,21 @@ def test_flow_distance_cost_summary_handles_empty_flows_and_rejects_invalid_meas
         _flow_distance_cost_summary(pd.DataFrame({"loads_day": [1], "distance_m": ["unknown"]}))
     with pytest.raises(ValueError, match="cost_per_load_meter must be a finite non-negative number"):
         _flow_distance_cost_summary(pd.DataFrame({"loads_day": [1], "distance_m": [1]}), -0.5)
+
+
+
+def test_facility_import_rejects_oversized_upload_before_workbook_parser(monkeypatch):
+    import pytest
+    import shoir_upgrade
+    from shoir_facility_layout import _file_to_frames
+
+    class UploadedFile:
+        name = "oversized.xlsx"
+
+        @staticmethod
+        def getvalue():
+            return b"12345"
+
+    monkeypatch.setattr(shoir_upgrade, "MAX_UPLOAD_BYTES", 4)
+    with pytest.raises(ValueError, match="Spreadsheet imports are limited to 0 MB"):
+        _file_to_frames(UploadedFile())
