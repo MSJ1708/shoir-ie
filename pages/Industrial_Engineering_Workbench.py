@@ -100,8 +100,17 @@ def render_engineering_result(value, title="Analysis result", key_prefix="result
             with st.expander("🔎 Detailed diagnostics",expanded=False):
                 for k,v in nested.items():
                     st.markdown(f"**{str(k).replace('_',' ').title()}**")
-                    if isinstance(v,(dict,list)):
-                        st.dataframe(pd.json_normalize(v) if isinstance(v,list) else pd.DataFrame([v]),use_container_width=True,hide_index=True)
+                    if isinstance(v, list):
+                        if not v:
+                            st.caption("No items.")
+                        elif all(isinstance(item, dict) for item in v):
+                            st.dataframe(pd.json_normalize(v),use_container_width=True,hide_index=True)
+                        else:
+                            # Lists of strings/numbers (for example missing evidence items)
+                            # are valid diagnostic output, not records for json_normalize.
+                            st.write(v)
+                    elif isinstance(v, dict):
+                        st.dataframe(pd.DataFrame([v]),use_container_width=True,hide_index=True)
         return
     if isinstance(value,pd.DataFrame):
         st.dataframe(value,use_container_width=True,hide_index=True)
