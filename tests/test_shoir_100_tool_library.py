@@ -602,3 +602,21 @@ def test_discrete_event_simulation_runs_replications_and_denies_starter():
     assert "shoir_T071_result" not in denied.session_state
     with pytest.raises(KeyError):
         denied.button(key="T071_run_button")
+
+
+def test_power_sample_size_planner_uses_noncentral_t_and_research_pack_boundary():
+    at = _authed_library(tier="Research Pack")
+    _open(at, "T085", "Statistical Power and Sample-Size Planner")
+    result = _run(at, "T085")
+    metrics = result["metrics"]
+    assert metrics["minimum_sample_size_per_unit"] > 0
+    assert metrics["minimum_total_sample_size"] == metrics["minimum_sample_size_per_unit"]
+    assert metrics["achieved_power_at_required_sample_size"] >= 0.80
+    assert result["parameters"]["design"] == "one_sample"
+
+    denied = _authed_library(tier="Enterprise Plus")
+    _open(denied, "T085", "Statistical Power and Sample-Size Planner")
+    assert any("does not grant this target capability" in str(item.value).lower() for item in denied.warning)
+    assert "shoir_T085_result" not in denied.session_state
+    with pytest.raises(KeyError):
+        denied.button(key="T085_run_button")
