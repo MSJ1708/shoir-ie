@@ -36,12 +36,35 @@ from industrial_platform_excellence import (
 )
 
 st.set_page_config(page_title="Shoir-IE | Unified Engineering Workbench", page_icon="🏭", layout="wide")
+
+# A direct page URL must not inherit a privileged default tier. The main app's
+# explicit free-mode session remains supported, but only when it has set a real
+# authenticated session, user identity and recognized tier.
+from shoir_tier_capabilities import normalize_tier, TIER_ORDER
+
+_CURRENT_USER = str(st.session_state.get("current_user") or "").strip()
+_IS_AUTHENTICATED = bool(st.session_state.get("authenticated")) and bool(_CURRENT_USER)
+_RAW_TIER = st.session_state.get("user_tier")
+_POLICY_TIER = normalize_tier(_RAW_TIER)
+
+if not _IS_AUTHENTICATED:
+    st.title("Shoir-IE Engineering Workbench")
+    st.warning("Sign in to Shoir-IE before opening the engineering workspace.")
+    st.page_link("app.py", label="Return to sign-in")
+    st.stop()
+
+if _POLICY_TIER not in TIER_ORDER:
+    st.title("Shoir-IE Engineering Workbench")
+    st.error("Your package could not be verified. Sign in again; protected tools are unavailable until access is verified.")
+    st.page_link("app.py", label="Return to sign-in")
+    st.stop()
+
 init_platform_db()
 ensure_excellence_db()
 
-USER = st.session_state.get("current_user","guest")
-RAW_TIER = st.session_state.get("user_tier","Enterprise Plus Tier")
-TIER = canonical_tier(RAW_TIER)
+USER = _CURRENT_USER
+RAW_TIER = str(_RAW_TIER)
+TIER = _POLICY_TIER
 
 st.markdown("""
 <style>
