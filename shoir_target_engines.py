@@ -3143,3 +3143,395 @@ def compare_energy_performance_scenarios(
         "method": "Compare measured/specified energy, output, price and emissions factors per scenario; rank by energy intensity.",
         "warning": "Scenario comparison only; this does not control plant equipment or prove achievable savings. Use comparable measurement boundaries and factor sources/dates, and clearly distinguish modeled scenarios from measured operations.",
     }
+
+
+def map_industrial_fields(
+    source_columns: Sequence[str],
+    *,
+    canonical_fields: Mapping[str, Sequence[str]] | None = None,
+    manual_mapping: Mapping[str, str] | None = None,
+    minimum_confidence: float = 0.65,
+) -> dict[str, Any]:
+    """Suggest source-to-canonical industrial field mappings; never auto-confirms fuzzy matches."""
+    import re
+    from difflib import SequenceMatcher
+
+    if isinstance(source_columns, (str, bytes)) or not isinstance(source_columns, Sequence) or not source_columns:
+        raise ValueError("Provide at least one source column name.")
+    threshold = _finite_number(minimum_confidence, "Minimum mapping confidence")
+    if not 0 <= threshold <= 1:
+        raise ValueError("Minimum mapping confidence must be between 0 and 1.")
+    defaults: dict[str, tuple[str, ...]] = {
+        "timestamp": ("timestamp", "time stamp", "datetime", "date time", "event time", "recorded at", "date"),
+        "asset_id": ("asset id", "asset", "equipment id", "machine id", "tag id"),
+        "process": ("process", "operation", "work center", "workstation", "station"),
+        "product_id": ("product id", "product", "sku", "item", "part number", "material"),
+        "order_id": ("order id", "order", "work order", "production order", "job id"),
+        "quantity": ("quantity", "qty", "units", "output", "production quantity", "produced units"),
+        "defect_count": ("defect count", "defects", "rejects", "rejected units", "defective units"),
+        "scrap_quantity": ("scrap", "scrap quantity", "scrap units", "waste quantity"),
+        "cycle_time": ("cycle time", "ct", "processing time", "operation time"),
+        "planned_time": ("planned time", "scheduled time", "planned production time"),
+        "run_time": ("run time", "runtime", "operating time", "operating minutes"),
+        "downtime": ("downtime", "down time", "stoppage time", "idle time", "lost time"),
+        "good_count": ("good count", "good units", "accepted units", "conforming units"),
+        "total_count": ("total count", "total units", "inspected units", "produced quantity"),
+        "energy_kwh": ("energy kwh", "energy consumption", "electricity kwh", "kwh"),
+        "work_hours": ("work hours", "labor hours", "labour hours", "hours worked"),
+        "incident_count": ("incidents", "incident count", "injuries", "safety incidents"),
+        "cost": ("cost", "amount", "unit cost", "total cost", "expense"),
+        "currency": ("currency", "currency code", "cost currency"),
+        "unit": ("unit", "uom", "unit of measure", "measurement unit"),
+        "batch_size": ("batch size", "lot size", "batch quantity"),
+        "wip_units": ("wip", "wip units", "work in process", "queue units"),
+        "demand": ("demand", "forecast demand", "customer demand", "required quantity"),
+        "inventory": ("inventory", "on hand", "on hand quantity", "stock"),
+        "lead_time": ("lead time", "lead time days", "supplier lead time"),
+    }
+    canonical: dict[str, tuple[str, ...]] = {}
+    raw_fields = canonical_fields or defaults
+    for key, aliases in raw_fields.items():
+        target = str(key).strip()
+        if not target:
+            raise ValueError("Canonical field identifiers cannot be blank.")
+        if isinstance(aliases, (str, bytes)) or not isinstance(aliases, Sequence):
+            raise ValueError(f"Aliases for canonical field '{target}' must be a list of strings.")
+        canonical[target] = tuple([target, *(str(alias).strip() for alias in aliases if str(alias).strip())])
+
+    def normalize(value: str) -> str:
+        return re.sub(r"[^a-z0-9]+", " ", str(value).strip().lower()).strip()
+
+    normalized_aliases: dict[str, set[str]] = {
+        target: {normalize(alias) for alias in aliases}
+        for target, aliases in canonical.items()
+    }
+    columns = [str(col).strip() for col in source_columns]
+    if any(not col for col in columns):
+        raise ValueError("Source column names cannot be blank.")
+    if len({col.casefold() for col in columns}) != len(columns):
+        raise ValueError("Source column names must be unique, ignoring case.")
+    manual = dict(manual_mapping or {})
+    unknown_manual_sources = sorted(set(manual) - set(columns))
+    if unknown_manual_sources:
+        raise ValueError(f"Manual mapping includes unknown source column(s): {', '.join(unknown_manual_sources)}.")
+    for source, target in manual.items():
+        if target not in canonical:
+            raise ValueError(f"Manual mapping for '{source}' refers to unknown canonical field '{target}'.")
+    used_canonical: dict[str, str] = {}
+    results: list[dict[str, Any]] = []
+    for source in columns:
+        source_norm = normalize(source)
+        if source in manual:
+            target = manual[source]
+            prior = used_canonical.get(target)
+            if prior is not None:
+                raise ValueError(f"Canonical field '{target}' is manually mapped by both '{prior}' and '{source}'.")
+            used_canonical[target] = source
+            results.append({
+                "Source column": source, "Suggested canonical field": target,
+                "Confidence": 1.0, "Mapping status": "MANUALLY_CONFIRMED",
+                "Candidate alternatives": "", "Original name preserved": True,
+            })
+            continue
+        candidate_scores: list[tuple[float, str]] = []
+        for target, aliases in normalized_aliases.items():
+            score = max(
+                [1.0 if source_norm == alias else SequenceMatcher(None, source_norm, alias).ratio() for alias in aliases]
+                or [0.0]
+            )
+            candidate_scores.append((score, target))
+        candidate_scores.sort(key=lambda item: (-item[0], item[1]))
+        best_score, best_target = candidate_scores[0]
+        alternatives = "; ".join(f"{target} ({score:.2f})" for score, target in candidate_scores[1:4])
+        prior_source = used_canonical.get(best_target)
+        if best_score >= 0.999 and prior_source is None:
+            status = "EXACT_ALIAS — CONFIRM"
+            used_canonical[best_target] = source
+            proposed = best_target
+        elif best_score >= threshold and prior_source is None:
+            status = "SUGGESTED — CONFIRM REQUIRED"
+            proposed = best_target
+            used_canonical[best_target] = source
+        elif prior_source is not None and best_score >= threshold:
+            status = "AMBIGUOUS_DUPLICATE_TARGET"
+            proposed = ""
+            alternatives = f"{best_target} already suggested for {prior_source}; " + alternatives
+        else:
+            status = "UNMAPPED — MANUAL REVIEW"
+            proposed = ""
+        results.append({
+            "Source column": source, "Suggested canonical field": proposed,
+            "Confidence": round(float(best_score), 4), "Mapping status": status,
+            "Candidate alternatives": alternatives, "Original name preserved": True,
+        })
+    frame = pd.DataFrame(results)
+    return {
+        "status": "FIELD_MAPPING_SUGGESTIONS_READY",
+        "source_column_count": len(columns),
+        "mapped_or_suggested_count": int(frame["Suggested canonical field"].astype(str).str.strip().ne("").sum()),
+        "needs_manual_review_count": int(frame["Mapping status"].str.contains("REVIEW|AMBIGUOUS|CONFIRM REQUIRED", regex=True).sum()),
+        "canonical_field_count": len(canonical),
+        "mapping_table": frame,
+        "canonical_field_ids": list(canonical),
+        "warning": "Fuzzy suggestions are never proof of semantic equivalence. Confirm each mapping against the source data dictionary and keep the original source column names.",
+    }
+
+
+def prioritize_maintenance_backlog(
+    work_orders: Sequence[Mapping[str, Any]],
+    available_hours: float,
+    *,
+    available_skills: Sequence[str] | None = None,
+    overdue_weight_per_day: float = 2.0,
+    due_soon_days: int = 3,
+    due_soon_bonus: float = 8.0,
+) -> dict[str, Any]:
+    """Greedy work-order prioritization under a supplied labor-hour budget."""
+    hours = _finite_number(available_hours, "Available maintenance labor hours")
+    overdue_weight = _finite_number(overdue_weight_per_day, "Overdue priority weight")
+    due_bonus = _finite_number(due_soon_bonus, "Due-soon priority bonus")
+    if hours < 0:
+        raise ValueError("Available maintenance labor hours cannot be negative.")
+    if overdue_weight < 0 or due_bonus < 0:
+        raise ValueError("Priority weights cannot be negative.")
+    if isinstance(due_soon_days, bool) or not isinstance(due_soon_days, int) or due_soon_days < 0:
+        raise ValueError("Due-soon threshold must be a non-negative whole number of days.")
+    if isinstance(work_orders, (str, bytes)) or not isinstance(work_orders, Sequence) or not work_orders:
+        raise ValueError("Provide at least one maintenance work order.")
+    skills = {str(s).strip().casefold() for s in (available_skills or []) if str(s).strip()}
+    restrict_skills = available_skills is not None
+    normalized: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for i, order in enumerate(work_orders, start=1):
+        if not isinstance(order, Mapping):
+            raise ValueError(f"Work order row {i} must be an object.")
+        order_id = str(order.get("work_order_id", order.get("id", ""))).strip()
+        description = str(order.get("task", order.get("description", ""))).strip()
+        if not order_id or not description:
+            raise ValueError(f"Work order row {i} needs a work_order_id and task description.")
+        if order_id.casefold() in seen:
+            raise ValueError(f"Work order IDs must be unique; duplicate: {order_id}.")
+        seen.add(order_id.casefold())
+        criticality = _finite_number(order.get("criticality_score"), f"Criticality score for {order_id}")
+        days_due = _finite_number(order.get("days_until_due"), f"Days until due for {order_id}")
+        duration = _finite_number(order.get("estimated_hours"), f"Estimated hours for {order_id}")
+        if not criticality.is_integer() or not 1 <= criticality <= 5:
+            raise ValueError(f"Criticality score for {order_id} must be a whole number from 1 through 5.")
+        if duration <= 0:
+            raise ValueError(f"Estimated hours for {order_id} must be greater than zero.")
+        if not days_due.is_integer():
+            raise ValueError(f"Days until due for {order_id} must be a whole number.")
+        skill = str(order.get("required_skill", "")).strip()
+        skill_available = not restrict_skills or not skill or skill.casefold() in skills
+        days_int = int(days_due)
+        score = int(criticality) * 10.0 + max(0, -days_int) * overdue_weight
+        if 0 <= days_int <= due_soon_days:
+            score += due_bonus
+        normalized.append({
+            "Work order ID": order_id,
+            "Task": description,
+            "Asset": str(order.get("asset", "")).strip() or "UNSPECIFIED",
+            "Criticality (1–5)": int(criticality),
+            "Days until due": days_int,
+            "Estimated hours": duration,
+            "Required skill": skill or "NOT SPECIFIED",
+            "Skill available": skill_available,
+            "Priority score": score,
+        })
+    ordered = sorted(normalized, key=lambda x: (-x["Priority score"], x["Days until due"], x["Work order ID"]))
+    selected: list[dict[str, Any]] = []
+    deferred: list[dict[str, Any]] = []
+    used_hours = 0.0
+    for order in ordered:
+        if not order["Skill available"]:
+            deferred.append({**order, "Deferral reason": "Required skill not in available-skill list"})
+        elif used_hours + order["Estimated hours"] <= hours + 1e-9:
+            selected.append(order)
+            used_hours += order["Estimated hours"]
+        else:
+            deferred.append({**order, "Deferral reason": "Insufficient remaining labor hours"})
+    return {
+        "status": "BACKLOG_PRIORITIZED",
+        "work_order_count": len(normalized),
+        "selected_count": len(selected),
+        "deferred_count": len(deferred),
+        "available_labor_hours": hours,
+        "selected_labor_hours": used_hours,
+        "remaining_labor_hours": max(0.0, hours - used_hours),
+        "selected_work_orders": pd.DataFrame(selected),
+        "deferred_work_orders": pd.DataFrame(deferred),
+        "method": "Greedy sort by user-defined criticality/due-date score, then fit eligible tasks within the labor-hour limit",
+        "priority_formula": "priority = criticality×10 + max(0, overdue days)×overdue_weight + due_soon_bonus when due within the configured window",
+        "warning": "This is a transparent prioritization heuristic, not an optimized maintenance schedule. Check asset risk, permits, parts, shift calendars, task dependencies and safety-critical requirements before dispatch.",
+    }
+
+
+def reconcile_sop_plan(
+    periods: Sequence[Mapping[str, Any]],
+    *,
+    starting_inventory: float = 0.0,
+) -> dict[str, Any]:
+    """Reconcile time-phased demand, planned production, supply constraints and inventory/backlog."""
+    inventory = _finite_number(starting_inventory, "Starting inventory")
+    if inventory < 0:
+        raise ValueError("Starting inventory cannot be negative.")
+    if isinstance(periods, (str, bytes)) or not isinstance(periods, Sequence) or not periods:
+        raise ValueError("Provide at least one S&OP period object.")
+    rows: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    opening_backlog = 0.0
+    for i, period in enumerate(periods, start=1):
+        if not isinstance(period, Mapping):
+            raise ValueError(f"S&OP period row {i} must be an object.")
+        label = str(period.get("period", "")).strip()
+        if not label:
+            raise ValueError(f"S&OP period row {i} needs a label.")
+        if label.casefold() in seen:
+            raise ValueError(f"S&OP period labels must be unique; duplicate: {label}.")
+        seen.add(label.casefold())
+        demand = _finite_number(period.get("demand"), f"Demand for {label}")
+        planned = _finite_number(period.get("planned_production"), f"Planned production for {label}")
+        receipts = _finite_number(period.get("scheduled_receipts", 0), f"Scheduled receipts for {label}")
+        capacity_raw = period.get("production_capacity")
+        capacity = None if capacity_raw is None or str(capacity_raw).strip() == "" else _finite_number(capacity_raw, f"Production capacity for {label}")
+        safety = _finite_number(period.get("target_safety_stock", 0), f"Target safety stock for {label}")
+        if min(demand, planned, receipts, safety) < 0 or (capacity is not None and capacity < 0):
+            raise ValueError(f"Demand, planned production, receipts, capacity and safety stock cannot be negative for {label}.")
+        if capacity is not None and planned > capacity:
+            effective_production = capacity
+            capacity_reduction = planned - capacity
+        else:
+            effective_production = planned
+            capacity_reduction = 0.0
+        opening_inventory = inventory
+        supply = opening_inventory + effective_production + receipts
+        required = demand + opening_backlog + safety
+        raw_balance = supply - demand - opening_backlog
+        if raw_balance >= 0:
+            ending_inventory = raw_balance
+            ending_backlog = 0.0
+        else:
+            ending_inventory = 0.0
+            ending_backlog = -raw_balance
+        demand_available_for_current_period = max(0.0, supply - opening_backlog)
+        demand_fulfilled = min(demand, demand_available_for_current_period)
+        service_level = demand_fulfilled / demand * 100.0 if demand > 0 else 100.0
+        safety_stock_gap = max(0.0, safety - ending_inventory)
+        rows.append({
+            "Period": label,
+            "Opening inventory": opening_inventory,
+            "Demand": demand,
+            "Planned production": planned,
+            "Production capacity": capacity,
+            "Capacity-constrained production": effective_production,
+            "Production above capacity": capacity_reduction,
+            "Scheduled receipts": receipts,
+            "Opening backlog": opening_backlog,
+            "Available supply": supply,
+            "Demand fulfilled from current supply": demand_fulfilled,
+            "Demand service level (%)": service_level,
+            "Ending inventory": ending_inventory,
+            "Ending backlog": ending_backlog,
+            "Target safety stock": safety,
+            "Safety stock gap": safety_stock_gap,
+        })
+        inventory = ending_inventory
+        opening_backlog = ending_backlog
+    frame = pd.DataFrame(rows)
+    return {
+        "status": "SOP_RECONCILED",
+        "period_count": len(frame),
+        "total_demand": float(frame["Demand"].sum()),
+        "total_capacity_constrained_production": float(frame["Capacity-constrained production"].sum()),
+        "total_production_above_capacity": float(frame["Production above capacity"].sum()),
+        "ending_inventory": float(frame.iloc[-1]["Ending inventory"]),
+        "ending_backlog": float(frame.iloc[-1]["Ending backlog"]),
+        "periods_below_full_service": int((frame["Demand service level (%)"] < 99.999).sum()),
+        "period_plan": frame,
+        "assumptions": "Single aggregate product family; demand is served from opening inventory, capacity-constrained production and scheduled receipts. Unmet demand is carried forward as backlog; safety stock is reported as a target rather than double-counted in total demand.",
+        "warning": "This is a deterministic aggregate balance, not a full finite-capacity S&OP optimizer. Use compatible units and periods; validate product mix, production calendars, lead times, workforce and inventory policies before commitment.",
+    }
+
+
+def score_supplier_performance(
+    suppliers: Sequence[Mapping[str, Any]],
+    criteria_weights: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Calculate weighted supplier scorecards on user-entered 0–100 criterion scores."""
+    if isinstance(suppliers, (str, bytes)) or not isinstance(suppliers, Sequence) or not suppliers:
+        raise ValueError("Provide at least one supplier record.")
+    if not isinstance(criteria_weights, Mapping) or not criteria_weights:
+        raise ValueError("Provide one or more criterion weights.")
+    weights: dict[str, float] = {}
+    for key, raw_weight in criteria_weights.items():
+        name = str(key).strip()
+        weight = _finite_number(raw_weight, f"Weight for supplier criterion {name}")
+        if not name:
+            raise ValueError("Supplier criterion names cannot be blank.")
+        if weight < 0:
+            raise ValueError(f"Weight for supplier criterion '{name}' cannot be negative.")
+        weights[name] = weight
+    total_weight = sum(weights.values())
+    if total_weight <= 0:
+        raise ValueError("At least one supplier criterion weight must be greater than zero.")
+    rows: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for i, supplier in enumerate(suppliers, start=1):
+        if not isinstance(supplier, Mapping):
+            raise ValueError(f"Supplier row {i} must be an object.")
+        name = str(supplier.get("supplier", supplier.get("name", ""))).strip()
+        if not name:
+            raise ValueError(f"Supplier row {i} needs a name.")
+        if name.casefold() in seen:
+            raise ValueError(f"Supplier names must be unique; duplicate: {name}.")
+        seen.add(name.casefold())
+        scores = supplier.get("scores")
+        if not isinstance(scores, Mapping):
+            raise ValueError(f"Supplier '{name}' needs a scores object.")
+        normalized_scores: dict[str, float] = {}
+        missing: list[str] = []
+        weighted_sum = 0.0
+        supplied_weight = 0.0
+        for criterion, weight in weights.items():
+            if criterion not in scores or scores[criterion] is None or str(scores[criterion]).strip() == "":
+                missing.append(criterion)
+                continue
+            value = _finite_number(scores[criterion], f"Score for supplier {name} / {criterion}")
+            if not 0 <= value <= 100:
+                raise ValueError(f"Score for supplier '{name}' / '{criterion}' must be between 0 and 100.")
+            normalized_scores[criterion] = value
+            weighted_sum += value * weight
+            supplied_weight += weight
+        complete = not missing
+        composite = weighted_sum / total_weight if complete else None
+        row: dict[str, Any] = {
+            "Supplier": name,
+            "Composite score (0–100)": composite,
+            "Score status": "COMPLETE" if complete else "INCOMPLETE — DO NOT RANK",
+            "Missing criteria": ", ".join(missing),
+            "Data as of": str(supplier.get("data_as_of", "")).strip() or "NOT PROVIDED",
+            "Evidence reference": str(supplier.get("evidence_reference", "")).strip() or "NOT PROVIDED",
+            "Risk/mitigation notes": str(supplier.get("risk_mitigation", "")).strip() or "NOT PROVIDED",
+        }
+        for criterion in weights:
+            row[f"{criterion} score"] = normalized_scores.get(criterion)
+        rows.append(row)
+    frame = pd.DataFrame(rows)
+    complete_frame = frame[frame["Score status"] == "COMPLETE"].sort_values(
+        by=["Composite score (0–100)", "Supplier"], ascending=[False, True], kind="stable"
+    )
+    ranked_names = {name: rank for rank, name in enumerate(complete_frame["Supplier"].tolist(), start=1)}
+    frame["Rank among complete scores"] = frame["Supplier"].map(ranked_names).astype("Int64")
+    return {
+        "status": "SUPPLIER_SCORECARD_CALCULATED",
+        "supplier_count": len(frame),
+        "complete_score_count": int((frame["Score status"] == "COMPLETE").sum()),
+        "incomplete_score_count": int((frame["Score status"] != "COMPLETE").sum()),
+        "criteria_weights": dict(weights),
+        "total_weight": total_weight,
+        "scorecard": frame.sort_values(
+            by=["Score status", "Rank among complete scores", "Supplier"],
+            ascending=[True, True, True], na_position="last", kind="stable"
+        ).reset_index(drop=True),
+        "warning": "Weights and 0–100 scores are user-defined. Incomplete suppliers are not ranked. Verify evidence recency, score rubric and conflict-of-interest controls before procurement decisions.",
+    }
