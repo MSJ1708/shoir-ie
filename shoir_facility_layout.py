@@ -851,6 +851,56 @@ def _import_data(
 
     return len(department_rows), len(flow_rows)
 
+def _flow_distance_cost_summary(
+    flows: pd.DataFrame,
+    cost_per_load_meter: float | None = None,
+) -> dict[str, float | None]:
+    """Summarize measured From-To movement without inventing a handling-cost rate.
+
+    Total load-distance is Σ(loads/day × one-way travel distance in meters).
+    Estimated cost is only returned when the caller supplies a rate in
+    currency/(load·meter), so the unit cost is never fabricated.
+    """
+    required = {"loads_day", "distance_m"}
+    missing = sorted(required - set(flows.columns))
+    if missing:
+        raise ValueError("Flow-distance summary is missing required columns: " + ", ".join(missing))
+
+    rate = None
+    if cost_per_load_meter is not None:
+        try:
+            rate = float(cost_per_load_meter)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError("cost_per_load_meter must be a finite non-negative number.") from exc
+        if not math.isfinite(rate) or rate < 0:
+            raise ValueError("cost_per_load_meter must be a finite non-negative number.")
+
+    if flows.empty:
+        return {
+            "total_load_distance_per_day": 0.0,
+            "estimated_handling_cost_per_day": 0.0 if rate is not None else None,
+            "cost_per_load_meter": rate,
+        }
+
+    checked: dict[str, pd.Series] = {}
+    for column in ("loads_day", "distance_m"):
+        values = pd.to_numeric(flows[column], errors="coerce")
+        if values.isna().any() or not all(math.isfinite(float(value)) for value in values):
+            raise ValueError(f"{column} must contain finite numeric values.")
+        if (values < 0).any():
+            raise ValueError(f"{column} must be greater than or equal to 0.")
+        checked[column] = values.astype(float)
+
+    total = float((checked["loads_day"] * checked["distance_m"]).sum())
+    if not math.isfinite(total):
+        raise ValueError("Total load-distance overflowed; check the flow measurements.")
+    return {
+        "total_load_distance_per_day": total,
+        "estimated_handling_cost_per_day": total * rate if rate is not None else None,
+        "cost_per_load_meter": rate,
+    }
+
+
 def _export_workbook(depts: pd.DataFrame, flows: pd.DataFrame, slp: pd.DataFrame) -> bytes:
     out = io.BytesIO()
     with pd.ExcelWriter(out, engine="openpyxl") as writer:
@@ -956,6 +1006,35 @@ def render_facility_layout(tier: str, username: str) -> None:
         st.dataframe(
             _flow_matrix(depts, flows),
             use_container_width=True,
+        )
+        calculate_handling_cost = st.checkbox(
+            "Calculate estimated handling cost using a rate I provide",
+            value=False,
+            key="fl_calc_handling_cost",
+        )
+        unit_rate = None
+        if calculate_handling_cost:
+            unit_rate = st.number_input(
+                "Handling cost rate (SAR per load·meter)",
+                min_value=0.0,
+                value=1.0,
+                step=0.1,
+                key="fl_handling_cost_rate",
+            )
+        flow_cost = _flow_distance_cost_summary(flows, unit_rate)
+        cost_col1, cost_col2 = st.columns(2)
+        cost_col1.metric(
+            "Daily flow × distance",
+            f"{flow_cost['total_load_distance_per_day']:,.2f} load·m/day",
+        )
+        cost_value = flow_cost["estimated_handling_cost_per_day"]
+        cost_col2.metric(
+            "Estimated daily handling cost",
+            f"SAR {cost_value:,.2f}/day" if cost_value is not None else "Rate not supplied",
+        )
+        st.caption(
+            "Formula: Σ(loads/day × measured distance in meters). Cost is displayed only when you supply "
+            "a rate in SAR per load·meter; it is a model estimate, not an observed or audited cost."
         )
         st.caption("Every connection below feeds the From-To table, process map, SLP relationship matrix, and what-if routing. Direction matters; the route model also uses the connection as a navigable edge.")
         a,b=st.columns([1.1,1.4])
