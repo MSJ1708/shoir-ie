@@ -23,6 +23,7 @@ from shoir_100_tool_data_quality_engines import CANONICAL_INDUSTRIAL_FIELDS, map
 from shoir_100_tool_lineage_engines import build_dataset_lineage_record
 from shoir_100_tool_reliability_engines import fit_weibull_reliability
 from shoir_100_tool_solver_diagnostics import solve_and_diagnose_linear_program
+from shoir_100_tool_maintenance_engine import optimize_maintenance_backlog
 
 from shoir_100_tool_registry import (
     TOOL_TARGETS, TOOL_STATUSES, TOOL_TIER_ORDER, WORKBENCHES,
@@ -1297,6 +1298,43 @@ if rows:
             ]), num_rows="dynamic", use_container_width=True, key="t047_hazard_editor", hide_index=True)
             signature = _fingerprint(hazard_frame.to_json(orient="split", date_format="iso"))
             _run_engine_tool("T047", signature, "Score and save hazard register", lambda: build_hazard_register(hazard_frame))
+
+        elif selected_id == "T049":
+            st.warning("LIMITED VALIDATION MODE — MILP assigns whole work orders to the supplied skill/window slots. Review all high-criticality unscheduled work; this is not a certified maintenance schedule.")
+            st.markdown("### Maintenance Backlog Optimizer")
+            st.caption("Select work under per-slot labor-hour capacity, required skill and downtime window. Priority score is criticality × 1000 plus a capped due-date urgency component; this prioritization rule is explicit and editable in source, not an industry standard.")
+            work_orders = st.data_editor(pd.DataFrame([
+                {"work_order_id":"WO-A","asset_id":"PUMP-01","description":"Critical seal repair","estimated_hours":3.0,"criticality_1_to_5":5,"required_skill":"Mechanical","required_window":"Day","due_date":"2026-10-25"},
+                {"work_order_id":"WO-B","asset_id":"CONV-01","description":"Conveyor inspection","estimated_hours":2.0,"criticality_1_to_5":4,"required_skill":"Mechanical","required_window":"Day","due_date":"2026-11-05"},
+                {"work_order_id":"WO-C","asset_id":"PUMP-02","description":"Lubrication and checks","estimated_hours":2.0,"criticality_1_to_5":3,"required_skill":"Mechanical","required_window":"Day","due_date":"2026-10-29"},
+                {"work_order_id":"WO-D","asset_id":"PANEL-01","description":"Electrical repair","estimated_hours":2.0,"criticality_1_to_5":5,"required_skill":"Electrical","required_window":"Night","due_date":"2026-10-25"},
+            ]), num_rows="dynamic", use_container_width=True, key="t049_work_orders", hide_index=True)
+            slots = st.data_editor(pd.DataFrame([
+                {"slot_id":"DAY-MECH-4H","skill":"Mechanical","downtime_window":"Day","available_hours":4.0},
+                {"slot_id":"NIGHT-ELEC-3H","skill":"Electrical","downtime_window":"Night","available_hours":3.0},
+            ]), num_rows="dynamic", use_container_width=True, key="t049_capacity_slots", hide_index=True)
+            as_of = st.text_input("Planning as-of date (YYYY-MM-DD)", "2026-10-24", key="t049_as_of")
+            signature = _fingerprint(work_orders.to_json(orient="split",date_format="iso"),slots.to_json(orient="split",date_format="iso"),as_of)
+            saved = _run_engine_tool(
+                "T049", signature, "Optimize maintenance backlog",
+                lambda: optimize_maintenance_backlog(work_orders,slots,as_of_date=as_of),
+            )
+            if saved and saved.get("signature")==signature:
+                result=saved["result"]
+                st.caption(f'Solver status: {result.get("solver_status",result.get("status"))}')
+                plan=result.get("work_plan")
+                if isinstance(plan,pd.DataFrame) and not plan.empty:
+                    st.dataframe(plan,use_container_width=True,hide_index=True)
+                utilization=result.get("slot_utilization")
+                if isinstance(utilization,pd.DataFrame) and not utilization.empty:
+                    st.markdown("**Slot utilization**")
+                    st.dataframe(utilization,use_container_width=True,hide_index=True)
+                metrics=result.get("metrics",{})
+                if metrics.get("optimal"):
+                    c1,c2,c3=st.columns(3)
+                    c1.metric("Scheduled orders",metrics.get("scheduled_count",0))
+                    c2.metric("Unscheduled orders",metrics.get("unscheduled_count",0))
+                    c3.metric("Scheduled labor hours",f'{metrics.get("scheduled_hours",0):.2f}')
 
         elif selected_id == "T050":
             st.warning("LIMITED VALIDATION MODE — rate trends depend on complete exposure-hour denominators and consistent reporting rules. Trends are not causal findings or a certified safety audit.")
