@@ -11,7 +11,7 @@ from shoir_100_tool_methods import (
     a3_improvement, abc_xyz_analysis, acceptance_sampling_oc, audit_5s,
     bin_pack_1d, bottleneck_analysis, cost_variance, forecast_drift_report,
     generate_synthetic_industrial_data, inventory_policy, join_dataframes,
-    line_balance, mm1_queue, oee_analysis, portfolio_score, process_time_series,
+    line_balance, mm1_queue, mtbf_mttr_analysis, oee_analysis, portfolio_score, process_time_series,
     profile_dataframe, quality_cost_analysis, require_tool_access,
     root_cause_analysis, two_sample_mean_power, weibull_reliability,
 )
@@ -304,3 +304,17 @@ def test_two_sample_mean_power_matches_normal_approximation_and_rejects_bad_desi
     assert result["normal_approximation_achieved_power"] >= .80
     with pytest.raises(ValueError, match="alpha"):
         two_sample_mean_power(2, 2, alpha=1, desired_power=.8)
+
+
+
+def test_mtbf_mttr_aggregates_completed_intervals_and_uses_explicit_time_units():
+    result = mtbf_mttr_analysis([
+        {"uptime_hours": 10, "repair_hours": 8},
+        {"uptime_hours": 20, "repair_hours": 10},
+        {"uptime_hours": 15, "repair_hours": 7},
+    ])
+    assert result["mtbf_hours"] == pytest.approx(15)
+    assert result["mttr_hours"] == pytest.approx(25/3)
+    assert result["interval_availability_pct"] == pytest.approx(45/70*100)
+    with pytest.raises(ValueError, match="cannot have both zero"):
+        mtbf_mttr_analysis([{"uptime_hours": 0, "repair_hours": 0}])
