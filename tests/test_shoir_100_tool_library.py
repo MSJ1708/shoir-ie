@@ -482,3 +482,20 @@ def test_weibull_reliability_tool_runs_for_professional_and_denies_starter():
     assert "shoir_T041_result" not in denied.session_state
     with pytest.raises(KeyError):
         denied.button(key="T041_run_button")
+
+
+def test_constraint_solver_diagnostics_shows_optimal_solution_and_denies_starter():
+    at = _authed_library(tier="Professional")
+    _open(at, "T062", "Constraint and Solver Diagnostics")
+    result = _run(at, "T062")
+    assert result["status"] == "OPTIMAL"
+    assert result["objective_value"] == pytest.approx(10)
+    assert result["metrics"]["constraints_satisfied"] is True
+    assert set(result["constraint_diagnostics"]["status"]) == {"SATISFIED"}
+
+    denied = _authed_library(tier="Starter")
+    _open(denied, "T062", "Constraint and Solver Diagnostics")
+    assert any("does not grant this target capability" in str(item.value).lower() for item in denied.warning)
+    assert "shoir_T062_result" not in denied.session_state
+    with pytest.raises(KeyError):
+        denied.button(key="T062_run_button")
