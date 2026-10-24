@@ -2758,3 +2758,387 @@ def analyze_water_waste_efficiency(process_flows: Sequence[Mapping[str, Any]]) -
         "process_balance_table": frame,
         "warning": "This is a scoped material/water flow balance. Confirm identical measurement boundaries, density/concentration basis where relevant, measurement periods and loss streams; cross-period totals are omitted when measurement periods differ. A non-zero balance needs investigation, not automatic allocation.",
     }
+
+
+def analyze_weibull_reliability(failure_times: Sequence[float]) -> dict[str, Any]:
+    """Fit a two-parameter Weibull model to uncensored positive failure times."""
+    if isinstance(failure_times, (str, bytes)) or not isinstance(failure_times, Sequence) or len(failure_times) < 5:
+        raise ValueError("Provide at least five uncensored failure-time observations.")
+    values = [_finite_number(v, f"Failure time observation {i}") for i, v in enumerate(failure_times, start=1)]
+    if any(v <= 0 for v in values):
+        raise ValueError("Failure times must be strictly greater than zero.")
+    if len(set(values)) < 3:
+        raise ValueError("At least three distinct failure times are required for a meaningful fit.")
+    from scipy.stats import weibull_min
+    data = np.asarray(values, dtype=float)
+    try:
+        shape, location, scale = weibull_min.fit(data, floc=0)
+    except Exception as exc:
+        raise ValueError(f"Weibull fit did not converge: {exc}") from exc
+    if not math.isfinite(shape) or not math.isfinite(scale) or shape <= 0 or scale <= 0:
+        raise ValueError("Weibull fit returned invalid shape or scale parameters.")
+    log_likelihood = float(np.sum(weibull_min.logpdf(data, shape, loc=0, scale=scale)))
+    parameter_count = 2
+    aic = 2 * parameter_count - 2 * log_likelihood
+    b10 = float(scale * (-math.log(0.90)) ** (1.0 / shape))
+    b50 = float(scale * (-math.log(0.50)) ** (1.0 / shape))
+    mean_ttf = float(scale * math.gamma(1.0 + 1.0 / shape))
+    percentiles = sorted(set([0.10, 0.25, 0.50, 0.75, 0.90]))
+    curve = pd.DataFrame([
+        {
+            "Failure probability (%)": probability * 100.0,
+            "Time at percentile": float(scale * (-math.log(1.0 - probability)) ** (1.0 / shape)),
+            "Reliability (%)": (1.0 - probability) * 100.0,
+        }
+        for probability in percentiles
+    ])
+    return {
+        "status": "WEIBULL_FIT_UNCENSORED_DATA",
+        "method": "Two-parameter Weibull maximum-likelihood fit with location fixed at zero",
+        "sample_size": int(len(data)),
+        "shape_beta": float(shape),
+        "scale_eta": float(scale),
+        "location": 0.0,
+        "mean_time_to_failure": mean_ttf,
+        "B10_life": b10,
+        "B50_median_life": b50,
+        "log_likelihood": log_likelihood,
+        "AIC": float(aic),
+        "minimum_observed_time": float(np.min(data)),
+        "maximum_observed_time": float(np.max(data)),
+        "reliability_percentiles": curve,
+        "assumptions": "Positive independent uncensored failure times, two-parameter Weibull distribution, fixed zero location, consistent unit of time.",
+        "warning": "Right-censored/interval-censored data and confidence intervals are not handled in this first implementation. The fit is not a maintenance guarantee; inspect sample quality, failure mode consistency and fit adequacy with a reliability engineer.",
+    }
+
+
+def analyze_spare_parts_criticality(parts: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """Prioritize spare parts from demand, lead time, safety stock, criticality and on-hand supply."""
+    if isinstance(parts, (str, bytes)) or not isinstance(parts, Sequence) or not parts:
+        raise ValueError("Provide at least one spare-part record.")
+    rows: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for i, part in enumerate(parts, start=1):
+        if not isinstance(part, Mapping):
+            raise ValueError(f"Spare-part row {i} must be an object.")
+        name = str(part.get("part", part.get("sku", ""))).strip()
+        if not name:
+            raise ValueError(f"Spare-part row {i} needs a part/SKU name.")
+        if name.casefold() in seen:
+            raise ValueError(f"Duplicate spare-part name: {name}.")
+        seen.add(name.casefold())
+        demand = _finite_number(part.get("average_daily_demand", 0), f"Daily demand for {name}")
+        lead = _finite_number(part.get("lead_time_days"), f"Lead time for {name}")
+        safety = _finite_number(part.get("safety_stock", 0), f"Safety stock for {name}")
+        on_hand = _finite_number(part.get("on_hand", 0), f"On-hand stock for {name}")
+        receipts = _finite_number(part.get("scheduled_receipts", 0), f"Scheduled receipts for {name}")
+        cost = _finite_number(part.get("unit_cost", 0), f"Unit cost for {name}")
+        criticality = _finite_number(part.get("criticality_score"), f"Criticality score for {name}")
+        if demand < 0 or lead < 0 or min(safety, on_hand, receipts, cost) < 0:
+            raise ValueError(f"Demand, lead time, inventory and cost values cannot be negative for {name}.")
+        if not criticality.is_integer() or not 1 <= criticality <= 5:
+            raise ValueError(f"Criticality score for {name} must be a whole number from 1 through 5.")
+        reorder_point = demand * lead + safety
+        stock_position = on_hand + receipts
+        order_qty = max(0.0, reorder_point - stock_position)
+        coverage_days = stock_position / demand if demand > 0 else None
+        lead_gap_days = max(0.0, lead - coverage_days) if coverage_days is not None else (lead if reorder_point > stock_position else 0.0)
+        shortage = order_qty > 1e-9
+        rows.append({
+            "Part": name,
+            "Criticality (1–5)": int(criticality),
+            "Average daily demand": demand,
+            "Lead time (days)": lead,
+            "Safety stock": safety,
+            "On-hand": on_hand,
+            "Scheduled receipts": receipts,
+            "Stock position": stock_position,
+            "Reorder point": reorder_point,
+            "Suggested replenishment quantity": order_qty,
+            "Stock coverage (days)": coverage_days,
+            "Lead-time coverage gap (days)": lead_gap_days,
+            "Unit cost": cost,
+            "Replenishment value": order_qty * cost,
+            "Below reorder point": shortage,
+        })
+    frame = pd.DataFrame(rows).sort_values(
+        by=["Below reorder point", "Criticality (1–5)", "Lead-time coverage gap (days)", "Part"],
+        ascending=[False, False, False, True], kind="stable",
+    ).reset_index(drop=True)
+    return {
+        "status": "SPARE_PARTS_SCREEN_CALCULATED",
+        "part_count": len(frame),
+        "parts_below_reorder_point": int(frame["Below reorder point"].sum()),
+        "estimated_replenishment_value": float(frame["Replenishment value"].sum()),
+        "priority_table": frame,
+        "method": "Reorder point = average daily demand × lead time days + safety stock; stock position = on-hand + scheduled receipts",
+        "warning": "Demand and lead time are assumed stable and expressed in compatible units. This screening model does not optimize multi-echelon inventory, supplier risk, shelf life, service levels or purchase-order constraints.",
+    }
+
+
+def analyze_safety_incident_trends(periods: Sequence[Mapping[str, Any]], *, rate_base_hours: float = 200_000.0) -> dict[str, Any]:
+    """Compute period-level incident and lost-workday rates with category breakdowns."""
+    if isinstance(periods, (str, bytes)) or not isinstance(periods, Sequence) or not periods:
+        raise ValueError("Provide at least one period-level safety record.")
+    base_hours = _finite_number(rate_base_hours, "Incident rate base hours")
+    if base_hours <= 0:
+        raise ValueError("Rate base hours must be greater than zero.")
+    period_rows: list[dict[str, Any]] = []
+    category_rows: list[dict[str, Any]] = []
+    seen_periods: set[str] = set()
+    for i, record in enumerate(periods, start=1):
+        if not isinstance(record, Mapping):
+            raise ValueError(f"Safety period row {i} must be an object.")
+        period = str(record.get("period", "")).strip()
+        categories = record.get("incidents_by_category")
+        hours = _finite_number(record.get("work_hours"), f"Work hours for period {period or i}")
+        lost_days = _finite_number(record.get("lost_workdays", 0), f"Lost workdays for period {period or i}")
+        if not period:
+            raise ValueError(f"Safety period row {i} needs a period label.")
+        if period in seen_periods:
+            raise ValueError(f"Duplicate safety reporting period: {period}.")
+        seen_periods.add(period)
+        if hours <= 0:
+            raise ValueError(f"Work hours must be greater than zero for period {period}.")
+        if lost_days < 0:
+            raise ValueError(f"Lost workdays cannot be negative for period {period}.")
+        if not isinstance(categories, Mapping) or not categories:
+            raise ValueError(f"Period {period} needs an incidents_by_category object.")
+        count_total = 0
+        for category, raw_count in categories.items():
+            label = str(category).strip()
+            if not label:
+                raise ValueError(f"Incident category names cannot be blank in period {period}.")
+            count_value = _finite_number(raw_count, f"Incident count for {label} / {period}")
+            if not count_value.is_integer() or count_value < 0:
+                raise ValueError(f"Incident count for {label} / {period} must be a non-negative whole number.")
+            count = int(count_value)
+            count_total += count
+            category_rows.append({"Period": period, "Category": label, "Incidents": count, "Work hours": hours})
+        period_rows.append({
+            "Period": period,
+            "Total incidents": count_total,
+            "Work hours": hours,
+            "Lost workdays": lost_days,
+            "Incident rate per base hours": count_total / hours * base_hours,
+            "Lost-workday rate per base hours": lost_days / hours * base_hours,
+        })
+    trend = pd.DataFrame(period_rows)
+    category = pd.DataFrame(category_rows)
+    return {
+        "status": "SAFETY_TREND_CALCULATED",
+        "period_count": len(trend),
+        "total_incidents": int(trend["Total incidents"].sum()),
+        "total_lost_workdays": float(trend["Lost workdays"].sum()),
+        "rate_base_hours": base_hours,
+        "period_trend": trend,
+        "category_breakdown": category,
+        "warning": "Rates depend on accurate comparable work-hour denominators and reporting coverage. Trends and category counts do not prove causation or replace incident investigation and required reporting.",
+    }
+
+
+def optimize_warehouse_slotting(
+    items: Sequence[Mapping[str, Any]],
+    slots: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Greedy slotting heuristic: high-pick SKUs receive nearest compatible slots that fit."""
+    if isinstance(items, (str, bytes)) or not isinstance(items, Sequence) or not items:
+        raise ValueError("Provide at least one SKU/item.")
+    if isinstance(slots, (str, bytes)) or not isinstance(slots, Sequence) or not slots:
+        raise ValueError("Provide at least one warehouse slot.")
+    normalized_items: list[dict[str, Any]] = []
+    seen_items: set[str] = set()
+    for i, item in enumerate(items, start=1):
+        if not isinstance(item, Mapping):
+            raise ValueError(f"Item row {i} must be an object.")
+        sku = str(item.get("sku", "")).strip()
+        group = str(item.get("compatibility_group", "*")).strip() or "*"
+        if not sku:
+            raise ValueError(f"Item row {i} needs an SKU.")
+        if sku.casefold() in seen_items:
+            raise ValueError(f"Duplicate SKU: {sku}.")
+        seen_items.add(sku.casefold())
+        picks = _finite_number(item.get("picks_per_day"), f"Daily picks for {sku}")
+        storage = _finite_number(item.get("storage_units"), f"Storage units for {sku}")
+        current_distance = _finite_number(item.get("current_distance_m", 0), f"Current distance for {sku}")
+        if picks < 0 or storage <= 0 or current_distance < 0:
+            raise ValueError(f"Pick rate/current distance must be non-negative and storage capacity positive for {sku}.")
+        normalized_items.append({"sku": sku, "picks_per_day": picks, "storage_units": storage, "compatibility_group": group, "current_distance_m": current_distance})
+    normalized_slots: list[dict[str, Any]] = []
+    seen_slots: set[str] = set()
+    for i, slot in enumerate(slots, start=1):
+        if not isinstance(slot, Mapping):
+            raise ValueError(f"Slot row {i} must be an object.")
+        slot_id = str(slot.get("slot_id", "")).strip()
+        group = str(slot.get("compatibility_group", "*")).strip() or "*"
+        if not slot_id:
+            raise ValueError(f"Slot row {i} needs a slot_id.")
+        if slot_id.casefold() in seen_slots:
+            raise ValueError(f"Duplicate slot ID: {slot_id}.")
+        seen_slots.add(slot_id.casefold())
+        distance = _finite_number(slot.get("distance_m"), f"Distance for slot {slot_id}")
+        capacity = _finite_number(slot.get("capacity_units"), f"Capacity for slot {slot_id}")
+        if distance < 0 or capacity <= 0:
+            raise ValueError(f"Distance must be non-negative and slot capacity positive for {slot_id}.")
+        normalized_slots.append({"slot_id": slot_id, "distance_m": distance, "capacity_units": capacity, "compatibility_group": group})
+    available_slots = list(normalized_slots)
+    assignments: list[dict[str, Any]] = []
+    unassigned: list[dict[str, Any]] = []
+    for item in sorted(normalized_items, key=lambda x: (-x["picks_per_day"], -x["storage_units"], x["sku"])):
+        candidates = [
+            s for s in available_slots
+            if s["capacity_units"] >= item["storage_units"]
+            and (item["compatibility_group"] == "*" or s["compatibility_group"] == "*" or s["compatibility_group"] == item["compatibility_group"])
+        ]
+        if not candidates:
+            unassigned.append({
+                "SKU": item["sku"],
+                "Picks per day": item["picks_per_day"],
+                "Required storage units": item["storage_units"],
+                "Compatibility group": item["compatibility_group"],
+                "Reason": "No available slot meets capacity and compatibility constraints",
+            })
+            continue
+        slot = min(candidates, key=lambda s: (s["distance_m"], s["slot_id"]))
+        available_slots.remove(slot)
+        improvement = item["current_distance_m"] - slot["distance_m"]
+        assignments.append({
+            "SKU": item["sku"],
+            "Slot": slot["slot_id"],
+            "Picks per day": item["picks_per_day"],
+            "Required storage units": item["storage_units"],
+            "Slot capacity units": slot["capacity_units"],
+            "Distance to slot (m)": slot["distance_m"],
+            "Current distance (m)": item["current_distance_m"],
+            "One-way distance improvement (m)": improvement,
+            "Estimated round-trip distance change (m/day)": -2.0 * improvement * item["picks_per_day"],
+        })
+    assigned_frame = pd.DataFrame(assignments)
+    unassigned_frame = pd.DataFrame(unassigned)
+    total_daily_change = float(assigned_frame["Estimated round-trip distance change (m/day)"].sum()) if not assigned_frame.empty else 0.0
+    return {
+        "status": "SLOTTING_HEURISTIC_COMPLETE" if not unassigned else "SLOTTING_PARTIAL_UNASSIGNED_ITEMS",
+        "item_count": len(normalized_items),
+        "assigned_count": len(assignments),
+        "unassigned_count": len(unassigned),
+        "remaining_slot_count": len(available_slots),
+        "estimated_round_trip_distance_change_m_per_day": total_daily_change,
+        "assignments": assigned_frame,
+        "unassigned_items": unassigned_frame,
+        "method": "Sort by picks/day then assign the nearest available compatible slot that meets storage capacity; greedy heuristic, not globally optimal.",
+        "warning": "Distance change uses the entered current and proposed one-way distances and assumes a round trip per pick. Validate dimensions, access/safety, zoning, co-picking, replenishment and actual travel paths before implementing a slot change.",
+    }
+
+
+def optimize_task_resource_assignment(
+    task_names: Sequence[str],
+    resource_names: Sequence[str],
+    cost_matrix: Sequence[Sequence[float]],
+) -> dict[str, Any]:
+    """Solve a rectangular one-to-one task/resource assignment using linear assignment."""
+    if isinstance(task_names, (str, bytes)) or not isinstance(task_names, Sequence) or not task_names:
+        raise ValueError("Provide task names.")
+    if isinstance(resource_names, (str, bytes)) or not isinstance(resource_names, Sequence) or not resource_names:
+        raise ValueError("Provide resource names.")
+    tasks = [str(x).strip() for x in task_names]
+    resources = [str(x).strip() for x in resource_names]
+    if any(not x for x in tasks) or len(set(x.casefold() for x in tasks)) != len(tasks):
+        raise ValueError("Task names must be non-blank and unique.")
+    if any(not x for x in resources) or len(set(x.casefold() for x in resources)) != len(resources):
+        raise ValueError("Resource names must be non-blank and unique.")
+    if isinstance(cost_matrix, (str, bytes)) or not isinstance(cost_matrix, Sequence):
+        raise ValueError("Cost matrix must be a numeric list of lists.")
+    try:
+        costs = np.asarray(cost_matrix, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Cost matrix must contain only finite numeric costs.") from exc
+    if costs.shape != (len(tasks), len(resources)):
+        raise ValueError(f"Cost matrix dimensions must be {len(tasks)} tasks × {len(resources)} resources.")
+    if not np.isfinite(costs).all():
+        raise ValueError("Cost matrix values must be finite; represent unavailable pairs using a separate supported constraint model.")
+    from scipy.optimize import linear_sum_assignment
+    row_idx, col_idx = linear_sum_assignment(costs)
+    assignments = [
+        {"Task": tasks[int(i)], "Resource": resources[int(j)], "Assignment cost": float(costs[i, j])}
+        for i, j in zip(row_idx, col_idx)
+    ]
+    assigned_tasks = {row["Task"] for row in assignments}
+    unassigned = [task for task in tasks if task not in assigned_tasks]
+    return {
+        "status": "OPTIMAL_ONE_TO_ONE_ASSIGNMENT" if not unassigned else "PARTIAL_ASSIGNMENT_NEEDS_MORE_RESOURCES",
+        "task_count": len(tasks),
+        "resource_count": len(resources),
+        "assigned_count": len(assignments),
+        "unassigned_tasks": unassigned,
+        "total_assignment_cost": float(sum(row["Assignment cost"] for row in assignments)),
+        "assignments": pd.DataFrame(assignments),
+        "method": "Minimum-cost rectangular linear assignment via the Hungarian algorithm",
+        "warning": "This solver supports one-to-one assignment cost only. It does not implement multi-period schedules, calendars, skill constraints, precedence, resource capacity or overtime/labor rules.",
+    }
+
+
+def compare_energy_performance_scenarios(
+    baseline: Mapping[str, Any],
+    alternatives: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Compare energy intensity, energy cost and emissions for user-defined scenarios."""
+    if not isinstance(baseline, Mapping):
+        raise ValueError("Provide a baseline object.")
+    if isinstance(alternatives, (str, bytes)) or not isinstance(alternatives, Sequence) or not alternatives:
+        raise ValueError("Provide at least one alternative energy scenario.")
+    def read_metrics(item: Mapping[str, Any], label: str) -> tuple[float, float, float, float]:
+        energy = _finite_number(item.get("energy_kwh"), f"Energy (kWh) for {label}")
+        output = _finite_number(item.get("output_units"), f"Output units for {label}")
+        rate = _finite_number(item.get("cost_per_kwh"), f"Energy cost/kWh for {label}")
+        factor = _finite_number(item.get("emission_factor_kg_per_kwh"), f"Emission factor for {label}")
+        if energy < 0 or output <= 0 or rate < 0 or factor < 0:
+            raise ValueError(f"Energy and factors cannot be negative and output must be positive for {label}.")
+        return energy, output, rate, factor
+    base_name = str(baseline.get("name", "Baseline")).strip() or "Baseline"
+    base_energy, base_output, base_rate, base_factor = read_metrics(baseline, base_name)
+    if base_energy <= 0:
+        raise ValueError("Baseline energy must be greater than zero to compare intensity savings.")
+    base_intensity = base_energy / base_output
+    base_cost = base_energy * base_rate
+    base_emissions = base_energy * base_factor
+    rows: list[dict[str, Any]] = []
+    seen: set[str] = {base_name.casefold()}
+    for i, alternative in enumerate(alternatives, start=1):
+        if not isinstance(alternative, Mapping):
+            raise ValueError(f"Energy scenario {i} must be an object.")
+        name = str(alternative.get("name", "")).strip()
+        if not name:
+            raise ValueError(f"Energy scenario {i} needs a name.")
+        if name.casefold() in seen:
+            raise ValueError(f"Scenario names must be unique, including the baseline: {name}.")
+        seen.add(name.casefold())
+        energy, output, rate, factor = read_metrics(alternative, name)
+        intensity = energy / output
+        cost = energy * rate
+        emissions = energy * factor
+        rows.append({
+            "Scenario": name,
+            "Energy (kWh)": energy,
+            "Output units": output,
+            "Energy intensity (kWh/unit)": intensity,
+            "Energy cost": cost,
+            "Emissions (kg CO₂e)": emissions,
+            "Energy intensity change vs baseline (%)": (intensity / base_intensity - 1.0) * 100.0,
+            "Energy cost change vs baseline (%)": ((cost / base_cost - 1.0) * 100.0) if base_cost > 0 else None,
+            "Emissions change vs baseline (%)": ((emissions / base_emissions - 1.0) * 100.0) if base_emissions > 0 else None,
+        })
+    frame = pd.DataFrame(rows).sort_values(
+        by=["Energy intensity (kWh/unit)", "Scenario"], ascending=[True, True], kind="stable"
+    ).reset_index(drop=True)
+    return {
+        "status": "ENERGY_SCENARIOS_COMPARED",
+        "baseline": base_name,
+        "baseline_energy_intensity_kwh_per_unit": base_intensity,
+        "baseline_energy_cost": base_cost,
+        "baseline_emissions_kg_co2e": base_emissions,
+        "best_intensity_scenario": str(frame.iloc[0]["Scenario"]),
+        "scenario_count": len(frame),
+        "scenario_comparison": frame,
+        "method": "Compare measured/specified energy, output, price and emissions factors per scenario; rank by energy intensity.",
+        "warning": "Scenario comparison only; this does not control plant equipment or prove achievable savings. Use comparable measurement boundaries and factor sources/dates, and clearly distinguish modeled scenarios from measured operations.",
+    }
