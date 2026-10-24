@@ -733,7 +733,7 @@ def test_vsm_first_pass_lead_time_uses_explicit_wip_flow_and_batch_assumptions()
     assert result["estimated_total_lead_time"] == pytest.approx(107)
     assert result["value_added_time"] == pytest.approx(1)
     assert result["value_added_share_pct"] == pytest.approx(1 / 107 * 100)
-    with pytest.raises(ValueError, match="uptime percentage"):
+    with pytest.raises(ValueError, match="Uptime percentage"):
         build_value_stream_map([{"step": "A", "cycle_time": 1, "uptime_pct": 0}], 10, 100)
 
 
@@ -835,7 +835,7 @@ def test_preventive_maintenance_planner_orders_overdue_tasks_and_validates_dates
     assert result["total_estimated_labor_hours"] == pytest.approx(2.5)
     assert result["maintenance_plan"].iloc[0]["Maintenance task"] == "Lubrication"
     assert result["maintenance_plan"].iloc[0]["Days until due"] == -3
-    with pytest.raises(ValueError, match="ISO date"):
+    with pytest.raises(ValueError, match="YYYY-MM-DD"):
         plan_preventive_maintenance([{"asset": "A", "task": "PM", "last_completed_date": "bad", "interval_days": 10}], "2026-10-24")
 
 
@@ -1139,7 +1139,7 @@ def test_spare_parts_criticality_reorder_screen_reconciles_stock_and_lead_time()
     assert bearing["Suggested replenishment quantity"] == pytest.approx(15)
     assert bearing["Replenishment value"] == pytest.approx(300)
     assert result["estimated_replenishment_value"] == pytest.approx(300)
-    with pytest.raises(ValueError, match="criticality score"):
+    with pytest.raises(ValueError, match="Criticality score"):
         analyze_spare_parts_criticality([{"part": "Bad", "lead_time_days": 1, "criticality_score": 9}])
 
 
