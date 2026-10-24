@@ -318,3 +318,20 @@ def test_mtbf_mttr_aggregates_completed_intervals_and_uses_explicit_time_units()
     assert result["interval_availability_pct"] == pytest.approx(45/70*100)
     with pytest.raises(ValueError, match="cannot have both zero"):
         mtbf_mttr_analysis([{"uptime_hours": 0, "repair_hours": 0}])
+
+
+@pytest.mark.parametrize("tier,tool_id,allowed", [
+    ("Starter Tier ($29)", "T013", True),
+    ("Mid-Tier Pro ($79)", "T017", True),
+    ("Professional Tier ($129)", "T034", True),
+    ("Enterprise Tier ($199)", "T048", True),
+    ("Enterprise Plus Tier ($399)", "T098", True),
+    ("Research Pack ($30 add-on)", "T085", True),
+    ("Research Pack ($30 add-on)", "T098", False),
+])
+def test_price_bearing_app_tier_labels_are_mapped_without_cross_package_access(tier, tool_id, allowed):
+    if allowed:
+        assert require_tool_access(tier, tool_id, "disposable-test-user")["tool_id"] == tool_id
+    else:
+        with pytest.raises(PermissionError):
+            require_tool_access(tier, tool_id, "disposable-test-user")
