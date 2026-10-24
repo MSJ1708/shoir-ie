@@ -244,7 +244,7 @@ def plan_material_requirements(
         period = _integer(row.get("period"), f"Period for {item}", 1, horizon)
         demand = _number(row.get("demand"), f"Demand for {item} in period {period}")
         if demand < 0:
-            raise ValueError("Master-schedule demand cannot be negative.")
+            raise ValueError("Demand cannot be negative in the master schedule.")
         items.add(item)
         normalized_mps.append({"item": item, "period": period, "demand": demand})
 
