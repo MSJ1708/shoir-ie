@@ -374,3 +374,41 @@ def test_workbench_runs_data_join_time_series_synthetic_sampling_process_mining_
             "SAVED_LOCAL_FALLBACK", "SAVED_MANAGED_WORKSPACE", "SESSION_ONLY",
             "SAVE_FAILED", "SAVE_PENDING", "SAVE_STATUS_NOT_CONFIRMED",
         }
+
+
+def test_workbench_runs_weibull_spares_safety_slotting_assignment_and_energy_methods():
+    from streamlit.testing.v1 import AppTest
+
+    page = ROOT / "pages" / "Industrial_Engineering_Workbench.py"
+    at = AppTest.from_file(page, default_timeout=90)
+    at.session_state["current_user"] = "reliability-method-checker"
+    at.session_state["authenticated"] = True
+    at.session_state["user_tier"] = "Enterprise Plus Tier"
+    at.run(timeout=90)
+    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+
+    cases = [
+        ("T041 · Weibull Reliability Analyzer", "tool041_run", "T041", "status", "WEIBULL_FIT_UNCENSORED_DATA"),
+        ("T045 · Spare Parts and Criticality Planner", "tool045_run", "T045", "parts_below_reorder_point", 1),
+        ("T050 · Safety Incident Trend Analyzer", "tool050_run", "T050", "total_incidents", 5),
+        ("T059 · Warehouse Slotting and Picking Optimizer", "tool059_run", "T059", "assigned_count", 2),
+        ("T063 · Assignment and Scheduling Optimizer", "tool063_run", "T063", "total_assignment_cost", 9.0),
+        ("T077 · Energy Performance Optimizer", "tool077_run", "T077", "best_intensity_scenario", "Improved"),
+    ]
+    for label, button_key, tool_id, result_key, expected in cases:
+        at.selectbox(key="shoir_100_tool_inspector").select(label)
+        at.run(timeout=90)
+        assert not at.exception, f"{tool_id} selection raised: " + "\n".join(str(error.value) for error in at.exception)
+        at.button(key=button_key).click()
+        at.run(timeout=90)
+        assert not at.exception, f"{tool_id} run raised: " + "\n".join(str(error.value) for error in at.exception)
+        result = at.session_state.get(f"shoir_tool_result_{tool_id}")
+        assert result is not None, f"{tool_id} returned no result; visible errors: " + " | ".join(str(item.value) for item in at.error)
+        if isinstance(expected, (int, float)) and not isinstance(expected, bool):
+            assert result[result_key] == pytest.approx(expected)
+        else:
+            assert result[result_key] == expected
+        assert result.get("_workspace_persistence") in {
+            "SAVED_LOCAL_FALLBACK", "SAVED_MANAGED_WORKSPACE", "SESSION_ONLY",
+            "SAVE_FAILED", "SAVE_PENDING", "SAVE_STATUS_NOT_CONFIRMED",
+        }
