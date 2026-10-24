@@ -22,6 +22,7 @@ from shoir_100_tool_decision_engines import (build_hazard_register, reconcile_so
 from shoir_100_tool_data_quality_engines import CANONICAL_INDUSTRIAL_FIELDS, map_industrial_fields, analyze_safety_incident_trends
 from shoir_100_tool_lineage_engines import build_dataset_lineage_record
 from shoir_100_tool_reliability_engines import fit_weibull_reliability
+from shoir_100_tool_solver_diagnostics import solve_and_diagnose_linear_program
 
 from shoir_100_tool_registry import (
     TOOL_TARGETS, TOOL_STATUSES, TOOL_TIER_ORDER, WORKBENCHES,
@@ -1520,6 +1521,49 @@ if rows:
                     st.metric("Internal rate of return", f'{m["IRR_percent"]:,.3f}%')
                 if m.get("simple_payback_periods") is not None:
                     st.metric("Simple payback", f'{m["simple_payback_periods"]:,.3f} {period_unit}s')
+
+        elif selected_id == "T062":
+            st.warning("LIMITED VALIDATION MODE — this diagnostic tool solves continuous linear programs only. Mixed-integer scheduling is not included; unsupported IIS/conflict reports are never fabricated.")
+            st.markdown("### Constraint and Solver Diagnostics")
+            st.caption("Edit objective coefficients and bounds, then define constraints using the same variable names. The result shows actual HiGHS status and recomputed constraint residuals.")
+            variables_frame = st.data_editor(pd.DataFrame([
+                {"variable":"x","objective_coefficient":3.0,"lower_bound":0.0,"upper_bound":None},
+                {"variable":"y","objective_coefficient":2.0,"lower_bound":0.0,"upper_bound":None},
+            ]), num_rows="fixed", use_container_width=True, key="t062_variables_editor", hide_index=True, disabled=["variable"])
+            variable_names = [str(v) for v in variables_frame["variable"].tolist()]
+            constraints_default = pd.DataFrame([
+                {"constraint_id":"C1","sense":"<=","rhs":4.0,"x":1.0,"y":1.0},
+                {"constraint_id":"C2","sense":"<=","rhs":2.0,"x":1.0,"y":0.0},
+                {"constraint_id":"C3","sense":"<=","rhs":3.0,"x":0.0,"y":1.0},
+            ])
+            if variable_names != ["x","y"]:
+                constraints_default = pd.DataFrame(columns=["constraint_id","sense","rhs",*variable_names])
+            constraint_frame = st.data_editor(constraints_default, num_rows="dynamic", use_container_width=True, key="t062_constraints_editor", hide_index=True)
+            objective_sense = st.selectbox("Objective", ["maximize","minimize"], index=0, key="t062_objective_sense")
+            signature = _fingerprint(
+                variables_frame.to_json(orient="split",date_format="iso"),
+                constraint_frame.to_json(orient="split",date_format="iso"),
+                objective_sense,
+            )
+            saved = _run_engine_tool(
+                "T062", signature, "Solve LP and diagnose constraints",
+                lambda: solve_and_diagnose_linear_program(variables_frame,constraint_frame,objective_sense=objective_sense),
+            )
+            if saved and saved.get("signature")==signature:
+                result=saved["result"]
+                st.caption(f'Solver: {result.get("solver_name","not run")} · code {result.get("solver_status_code","not available")} · {result.get("solver_message","")}')
+                if result.get("status")=="OPTIMAL":
+                    st.metric("Objective value",f'{result.get("objective_value",float("nan")):.5g}')
+                    st.dataframe(result.get("variables",pd.DataFrame()),use_container_width=True,hide_index=True)
+                diagnostics=result.get("constraint_diagnostics")
+                if isinstance(diagnostics,pd.DataFrame):
+                    st.dataframe(diagnostics,use_container_width=True,hide_index=True)
+                if result.get("status")=="INFEASIBLE":
+                    st.error("The current model is infeasible. Review bounds and constraints; no unsupported conflict set is provided.")
+                elif result.get("status")=="UNBOUNDED":
+                    st.error("The current objective is unbounded under the supplied bounds/constraints.")
+                elif result.get("status")=="LIMIT_REACHED":
+                    st.warning("Solver stopped at a limit; no optimal solution is claimed.")
 
         elif selected_id == "T063":
             st.warning("LIMITED VALIDATION MODE — solves only the supplied square one-to-one cost matrix. Skills, precedence, calendars, setup times and broader schedule constraints are not included.")
