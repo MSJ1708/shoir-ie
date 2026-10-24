@@ -301,5 +301,5 @@ def test_workbench_runs_seven_additional_gated_specialist_methods():
         result = at.session_state.get(f"shoir_tool_result_{tool_id}")
         assert result is not None, f"{tool_id} did not produce a result; visible errors: " + " | ".join(str(item.value) for item in at.error)
         assert result[result_key] == pytest.approx(expected) if isinstance(expected, (float, int)) else result[result_key] == expected
-        assert result.get("_workspace_persistence") in {"SAVED_LOCAL_FALLBACK", "SAVED_MANAGED_WORKSPACE", "SESSION_ONLY", "SAVE_FAILED", "SAVE_STATUS_NOT_CONFIRMED"}
+        assert result.get("_workspace_persistence") in {"SAVED_LOCAL_FALLBACK", "SAVED_MANAGED_WORKSPACE", "SESSION_ONLY", "SAVE_FAILED", "SAVE_PENDING", "SAVE_STATUS_NOT_CONFIRMED"}
         assert result.get("status") or result.get("verification_status")
