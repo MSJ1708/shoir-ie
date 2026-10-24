@@ -469,8 +469,9 @@ def test_sop_plan_reconciles_inventory_capacity_backlog_and_safety_stock():
     table = result["plan_table"].set_index("Period")
     assert table.loc["2026-01", "Projected ending inventory"] == pytest.approx(40.0)
     assert table.loc["2026-02", "Projected ending inventory"] == pytest.approx(-10.0)
-    assert table.loc["2026-02", "Unmet demand/backlog"] == pytest.approx(10.0)
-    assert result["total_unmet_demand"] == pytest.approx(10.0)
+    assert table.loc["2026-02", "Backlog after period"] == pytest.approx(10.0)
+    assert result["backlog_at_horizon_end"] == pytest.approx(10.0)
+    assert result["maximum_period_end_backlog"] == pytest.approx(10.0)
     assert any("exceeds the stated capacity" in warning for warning in result["warnings"]) is False
 
 
