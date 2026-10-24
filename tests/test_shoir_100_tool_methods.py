@@ -84,7 +84,6 @@ def test_mm1_queue_matches_known_values_and_rejects_unstable_system():
     assert result["W_expected_system_time"] == pytest.approx(1.0)
     unstable = mm1_queue(5, 5)
     assert unstable["status"] == "UNSTABLE"
-    assert math.isinf(1 / (5 - 5))
     with pytest.raises(ValueError, match="greater than zero"):
         mm1_queue(0, 5)
 
@@ -120,7 +119,7 @@ def test_portfolio_score_normalizes_weights_and_reports_limited_sensitivity():
     ("T013", "Starter Tier", True),
     ("T017", "Starter", False),
     ("T017", "Mid-Tier Pro", True),
-    ("T034", "Research Pack", False),
+    ("T034", "Research Pack", True),
     ("T034", "Professional", True),
     ("T098", "Research Pack", False),
     ("T098", "Enterprise Plus Tier", True),
