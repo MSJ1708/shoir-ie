@@ -1038,6 +1038,16 @@ def render_facility_layout(tier: str, username: str) -> None:
         unsafe_allow_html=True,
     )
 
+    data_origin = _get_data_origin(owner, workspace)
+    if data_origin == "SYNTHETIC_STARTER_DATA":
+        st.warning("SYNTHETIC starter example · The initial departments and flows are illustrative only. Replace them with verified plant measurements before making operational decisions.")
+    elif data_origin == "IMPORTED_OR_UPSERTED":
+        st.info("IMPORTED data · Source rows are preserved through this facility model, but import success does not independently validate plant measurements.")
+    elif data_origin == "USER_EDITED_OR_MIXED":
+        st.info("USER-EDITED / MIXED data · This workspace contains edited or combined values. Verify source measurements and assumptions before relying on results.")
+    else:
+        st.warning("DATA ORIGIN UNVERIFIED · This facility data predates origin tracking or its source is unknown. Validate it before operational use.")
+
     if depts.empty:
         st.warning("No departments are registered. Add the first department in Block Layout & CRUD.")
     slp = _slp_frame(depts, flows)
@@ -1073,7 +1083,8 @@ def render_facility_layout(tier: str, username: str) -> None:
                     elif did in set(depts["id"].astype(str)): st.error(f"Department ID {did} already exists.")
                     else:
                         _save_departments(owner,workspace,[{"id":did,"name":name,"x":x,"y":y,"area_sqm":area}])
-                        st.success(f"{name} ({did}) is now part of the live department registry. It will appear in From-To and SLP immediately.")
+                        _set_data_origin(owner, workspace, "USER_EDITED_OR_MIXED")
+                        st.success(f"{name} ({did}) is now part of the persistent department registry. It will appear in From-To and SLP immediately.")
                         st.rerun()
             elif action=="Edit":
                 ids=depts["id"].astype(str).tolist()
@@ -1088,6 +1099,7 @@ def render_facility_layout(tier: str, username: str) -> None:
                         save=st.form_submit_button("💾 Save department",type="primary",use_container_width=True)
                     if save:
                         _save_departments(owner,workspace,[{"id":selected,"name":name,"x":x,"y":y,"area_sqm":area}])
+                        _set_data_origin(owner, workspace, "USER_EDITED_OR_MIXED")
                         st.success("Department updated. Connected flows and SLP read the same persistent registry.")
                         st.rerun()
                 else: st.info("Add a department first.")
@@ -1100,6 +1112,7 @@ def render_facility_layout(tier: str, username: str) -> None:
                         conn.execute("UPDATE facility_departments SET active=0,updated_at=? WHERE owner=? AND workspace=? AND dept_id=?",( _now(),owner,workspace,target))
                         conn.execute("DELETE FROM facility_flows WHERE owner=? AND workspace=? AND (from_id=? OR to_id=?)",(owner,workspace,target,target))
                         conn.commit()
+                    _set_data_origin(owner, workspace, "USER_EDITED_OR_MIXED")
                     st.success("Department and dependent connections removed from the active process model.")
                     st.rerun()
 
@@ -1111,6 +1124,34 @@ def render_facility_layout(tier: str, username: str) -> None:
             use_container_width=True,
         )
         st.caption("Every connection below feeds the From-To table, process map, SLP relationship matrix, and what-if routing. Direction matters; the route model also uses the connection as a navigable edge.")
+        flow_rate = st.number_input(
+            "Uniform handling cost rate (SAR per load-metre; enter 0 until a rate is approved)",
+            min_value=0.0, value=0.0, step=0.001, format="%.6f",
+            key="fl_handling_cost_rate",
+            help="This rate is applied uniformly to all flows. Use only a plant-approved rate; the app does not invent transport costs.",
+        )
+        try:
+            flow_metrics = _flow_distance_metrics(
+                flows, float(flow_rate) if float(flow_rate) > 0 else None
+            )
+        except ValueError as exc:
+            st.error(f"Flow-distance calculation is unavailable until the flow data are corrected: {exc}")
+        else:
+            mc1, mc2 = st.columns(2)
+            mc1.metric(
+                "Weighted flow-distance",
+                f"{flow_metrics['weighted_flow_distance_load_m_per_day']:,.2f} load·m/day",
+            )
+            if flow_metrics["estimated_daily_handling_cost_sar"] is None:
+                mc2.metric("Estimated handling cost", "Rate not configured")
+            else:
+                mc2.metric(
+                    "Estimated daily handling cost",
+                    f"SAR {flow_metrics['estimated_daily_handling_cost_sar']:,.2f}",
+                )
+            st.caption(flow_metrics["formula"])
+            for warning in flow_metrics["warnings"]:
+                st.caption("Assumption / limitation: " + warning)
         a,b=st.columns([1.1,1.4])
         ids=depts["id"].astype(str).tolist()
         with a:
@@ -1138,7 +1179,8 @@ def render_facility_layout(tier: str, username: str) -> None:
                             (owner,workspace,flow_id,frm,to,loads,distance,rel,reason,transport,_now()),
                         )
                         conn.commit()
-                    st.success(f"Connected {frm} → {to}. The live From-To and SLP surfaces are updated.")
+                    _set_data_origin(owner, workspace, "USER_EDITED_OR_MIXED")
+                    st.success(f"Connected {frm} → {to}. The From-To and SLP surfaces are updated.")
                     st.rerun()
         with b:
             st.plotly_chart(_flow_process_figure(depts,flows),use_container_width=True,config={"displayModeBar":False})
@@ -1191,12 +1233,14 @@ def render_facility_layout(tier: str, username: str) -> None:
                                 (frm2,to2,loads2,dist2,rel2,reason2,mode2,_now(),owner,workspace,fid),
                             )
                             conn.commit()
+                        _set_data_origin(owner, workspace, "USER_EDITED_OR_MIXED")
                         st.success("Connection updated; all dependent views use the new edge.")
                         st.rerun()
             if st.button("🗑️ Remove connection",use_container_width=True,key="fl_delete_flow"):
                 with _db() as conn:
                     conn.execute("DELETE FROM facility_flows WHERE owner=? AND workspace=? AND flow_id=?",(owner,workspace,fid))
                     conn.commit()
+                _set_data_origin(owner, workspace, "USER_EDITED_OR_MIXED")
                 st.success("Connection removed.")
                 st.rerun()
             flow_view=flows.copy()
@@ -1279,10 +1323,14 @@ def render_facility_layout(tier: str, username: str) -> None:
             except Exception as exc:
                 st.error(f"Import failed safely: {type(exc).__name__}: {exc}")
         st.markdown("#### Export current facility model")
-        export=_export_workbook(depts,flows,slp)
+        export_rate = st.session_state.get("fl_handling_cost_rate", 0.0)
+        export=_export_workbook(
+            depts, flows, slp, data_origin,
+            float(export_rate) if float(export_rate) > 0 else None,
+        )
         st.download_button("📥 Download Facility Model Workbook",data=export,file_name="shoir_ie_facility_layout.xlsx",mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",type="primary",use_container_width=True,key="fl_export_workbook")
         st.download_button("📄 Download From-To CSV",data=flows.to_csv(index=False).encode("utf-8"),file_name="facility_from_to.csv",mime="text/csv",use_container_width=True,key="fl_export_fromto")
-        st.caption("The workbook contains Departments, From_To_Flows, SLP_Relationships and SLP_Matrix sheets.")
+        st.caption("The workbook contains Departments, From_To_Flows, SLP_Relationships, SLP_Matrix, Flow_Metrics and Provenance sheets.")
 
     # Keep the legacy state contract synchronized for older modules that read it.
     st.session_state["facility_depts"]=depts.to_dict("records")
