@@ -10,6 +10,8 @@ from shoir_100_tool_extended_engines import (
     build_kaizen_a3_record, monitor_forecast_drift, convert_units_or_currency,
     analyze_spc_individuals, analyze_quality_cost_defects, analyze_mtbf_mttr,
     analyze_abc_xyz_inventory, plan_two_sample_t_sample_size, solve_cutting_stock,
+    generate_synthetic_industrial_data, preview_data_join, process_time_series,
+    profile_data_quality,
 )
 
 def test_cutting_stock_known_case_and_material_reconciliation():
@@ -392,3 +394,110 @@ def test_abc_xyz_rejects_duplicates_and_inconsistent_history():
     ]
     with pytest.raises(ValueError, match="same number"):
         analyze_abc_xyz_inventory(mismatch)
+
+
+def test_data_quality_profile_has_hand_checked_missing_duplicate_and_iqr_results():
+    source = pd.DataFrame({
+        "cycle_seconds": [1.0, 2.0, 3.0, 100.0],
+        "station": ["A", "B", None, "D"],
+    })
+    before = source.copy(deep=True)
+    result = profile_data_quality(source)
+    fields = result["field_profile"].set_index("field")
+    assert result["status"] == "PROFILED"
+    assert result["metrics"]["row_count"] == 4
+    assert result["metrics"]["column_count"] == 2
+    assert result["metrics"]["missing_cell_count"] == 1
+    assert result["metrics"]["duplicate_row_count"] == 0
+    assert fields.loc["cycle_seconds", "numeric_mean"] == pytest.approx(26.5)
+    assert fields.loc["cycle_seconds", "iqr_outlier_count"] == 1
+    pd.testing.assert_frame_equal(source, before)
+
+
+def test_data_quality_profile_counts_duplicates_and_rejects_invalid_inputs():
+    duplicated = pd.DataFrame({"asset": ["A", "A"], "value": [5.0, 5.0]})
+    result = profile_data_quality(duplicated)
+    assert result["metrics"]["duplicate_row_count"] == 1
+    with pytest.raises(ValueError, match="at least one row"):
+        profile_data_quality(pd.DataFrame())
+    with pytest.raises(ValueError, match="greater than zero"):
+        profile_data_quality(duplicated, iqr_multiplier=0)
+
+
+def test_join_preview_reconciles_duplicate_and_unmatched_keys_without_mutation():
+    left = pd.DataFrame({"order_id": [1, 2, 2], "planned_units": [10, 20, 21]})
+    right = pd.DataFrame({"order_ref": [1, 2, 3], "actual_units": [9, 20, 30]})
+    left_before, right_before = left.copy(deep=True), right.copy(deep=True)
+    result = preview_data_join(left, right, "order_id", "order_ref", how="left")
+    assert result["status"] == "PREVIEWED"
+    assert result["metrics"]["left_input_rows"] == 3
+    assert result["metrics"]["right_input_rows"] == 3
+    assert result["metrics"]["output_rows"] == 3
+    assert result["metrics"]["left_duplicate_key_rows"] == 2
+    assert result["metrics"]["unmatched_left_input_rows"] == 0
+    assert result["metrics"]["unmatched_right_input_rows"] == 1
+    assert result["merged_preview"]["actual_units"].tolist() == [9, 20, 20]
+    pd.testing.assert_frame_equal(left, left_before)
+    pd.testing.assert_frame_equal(right, right_before)
+
+
+def test_join_preview_rejects_missing_keys_and_unknown_join_types():
+    left = pd.DataFrame({"key": [1, None]})
+    right = pd.DataFrame({"key2": [1, 2]})
+    with pytest.raises(ValueError, match="missing or blank"):
+        preview_data_join(left, right, "key", "key2")
+    with pytest.raises(ValueError, match="Join type"):
+        preview_data_join(pd.DataFrame({"key": [1]}), right, "key", "key2", how="cross")
+
+
+def test_time_series_processor_normalizes_timezone_reports_duplicate_and_gap():
+    data = pd.DataFrame({
+        "time": ["2026-01-01 08:00:00", "2026-01-01 09:00:00",
+                 "2026-01-01 09:00:00", "2026-01-01 11:00:00"],
+        "units": [10, 20, 30, 40],
+    })
+    before = data.copy(deep=True)
+    result = process_time_series(data, "time", ["units"], source_timezone="Asia/Riyadh",
+                                 frequency="1h", aggregation="mean")
+    series = result["resampled_series"]
+    assert result["status"] == "PROCESSED"
+    assert result["metrics"]["input_rows"] == 4
+    assert result["metrics"]["output_intervals"] == 4
+    assert result["metrics"]["duplicate_timestamp_rows"] == 2
+    assert result["metrics"]["missing_intervals"] == 1
+    assert series.loc[1, "units"] == pytest.approx(25.0)
+    assert pd.isna(series.loc[2, "units"])
+    assert str(series.loc[0, "timestamp_utc"].tz) == "UTC"
+    assert series.loc[0, "timestamp_utc"].hour == 5
+    pd.testing.assert_frame_equal(data, before)
+
+
+def test_time_series_processor_rejects_bad_timestamp_values_and_aggregation():
+    data = pd.DataFrame({"time": ["bad-time"], "value": [1]})
+    with pytest.raises(ValueError, match="timestamp"):
+        process_time_series(data, "time", ["value"])
+    data = pd.DataFrame({"time": ["2026-01-01 00:00:00"], "value": [1]})
+    with pytest.raises(ValueError, match="Aggregation"):
+        process_time_series(data, "time", ["value"], aggregation="median")
+
+
+def test_synthetic_industrial_generator_is_reproducible_and_never_claims_live_data():
+    a = generate_synthetic_industrial_data(10, 42, defect_rate=0, downtime_rate=0)
+    b = generate_synthetic_industrial_data(10, 42, defect_rate=0, downtime_rate=0)
+    assert a["status"] == "GENERATED_SYNTHETIC"
+    assert a["source"] == "SYNTHETIC"
+    assert len(a["dataset"]) == 10
+    assert set(a["dataset"]["data_status"]) == {"SYNTHETIC"}
+    assert (a["dataset"]["defect_count"] == 0).all()
+    assert (a["dataset"]["downtime_minutes"] == 0).all()
+    assert (a["dataset"]["good_units"] == a["dataset"]["units_produced"]).all()
+    pd.testing.assert_frame_equal(a["dataset"], b["dataset"])
+
+
+def test_synthetic_industrial_generator_rejects_invalid_bounds():
+    with pytest.raises(ValueError, match="between 1 and 100000"):
+        generate_synthetic_industrial_data(0, 42)
+    with pytest.raises(ValueError, match="non-negative"):
+        generate_synthetic_industrial_data(10, -1)
+    with pytest.raises(ValueError, match="between 0 and 1"):
+        generate_synthetic_industrial_data(10, 42, defect_rate=1.1)
