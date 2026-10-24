@@ -13,6 +13,8 @@ from datetime import datetime, timezone
 import pandas as pd
 import streamlit as st
 
+from shoir_tool_run_persistence import persist_tool_run_record
+
 from shoir_100_tool_registry import (
     TOOL_TARGETS, TOOL_STATUSES, TOOL_TIER_ORDER, WORKBENCHES,
     target_tool_access_decision, target_tool_execution_decision,
@@ -74,12 +76,21 @@ def _run_engine_tool(tool_id, signature, button_label, calculation):
         else:
             status = outcome.get("status") if isinstance(outcome, dict) else None
             if isinstance(status, str) and status.strip() and status.upper() not in {"FAILED", "ERROR", "INVALID"}:
-                st.session_state[f"shoir_{tool_id}_result"] = {
+                result_key = f"shoir_{tool_id}_result"
+                st.session_state[result_key] = {
                     "signature": signature,
                     "source": "MANUAL INPUT — not independently verified; defaults are SYNTHETIC",
                     "executed_at": datetime.now(timezone.utc).isoformat(),
                     "result": outcome,
+                    "persistence_status": "SAVE_PENDING",
                 }
+                # Save through the existing owner-scoped workspace backend. A
+                # failed save never discards the calculated in-session result.
+                persist_tool_run_record(
+                    st.session_state.get("current_user", ""),
+                    st.session_state,
+                    result_key,
+                )
             else:
                 st.error("The method returned no usable result status; the prior result was preserved.")
 
@@ -89,9 +100,17 @@ def _run_engine_tool(tool_id, signature, button_label, calculation):
     if saved.get("signature") != signature:
         st.warning("STALE — one or more inputs changed. Rerun before using this saved result.")
     result = saved.get("result", {})
+    persistence_status = saved.get("persistence_status", "SESSION_ONLY_SAVE_FAILED")
+    persistence_labels = {
+        "MANAGED_WORKSPACE_SAVED": "saved to managed workspace",
+        "LOCAL_SQLITE_SAVED_MAY_BE_EPHEMERAL": "local development save only — may be ephemeral",
+        "SESSION_ONLY_SAVE_FAILED": "session-only — workspace save failed",
+        "SESSION_ONLY_PERSISTENCE_MODE_UNVERIFIED": "session-only — persistence mode unverified",
+    }
     st.caption(
         f"Result: {result.get('status', 'UNRESOLVED')} · {saved.get('source', 'UNVERIFIED')} · "
-        f"executed {saved.get('executed_at', 'timestamp unavailable')} · session-only result"
+        f"executed {saved.get('executed_at', 'timestamp unavailable')} · "
+        f"{persistence_labels.get(persistence_status, 'persistence status unverified')}"
     )
     metrics = result.get("metrics", {})
     if not isinstance(metrics, dict):
