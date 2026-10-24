@@ -413,3 +413,31 @@ def test_starter_cannot_execute_enterprise_kpi_alert_center():
     assert "shoir_T094_result" not in at.session_state
     with pytest.raises(KeyError):
         at.button(key="T094_run_button")
+
+
+def test_field_mapper_and_safety_incident_trends_run_in_streamlit():
+    at = _authed_library(tier="Starter")
+    _open(at, "T015", "Industrial Field Mapper")
+    mapped = _run(at, "T015")
+    table = mapped["mapping_table"].set_index("source_column")
+    assert table.loc["Asset ID", "canonical_field"] == "asset_id"
+    assert table.loc["Produced Units", "canonical_field"] == "units_produced"
+    assert table.loc["custom_field", "mapping_status"] == "UNMAPPED"
+
+    # Safety trend analysis belongs to Mid-Tier Pro and above, not Starter.
+    restricted = _authed_library(tier="Mid-Tier Pro")
+    _open(restricted, "T050", "Safety Incident Trend Analyzer")
+    incidents = _run(restricted, "T050")
+    assert incidents["metrics"]["incident_count"] == 4
+    assert incidents["metrics"]["exposure_hours"] == pytest.approx(22000)
+    assert incidents["metrics"]["overall_incident_rate"] == pytest.approx(4 / 22000 * 200000)
+    assert incidents["metrics"]["incident_categories"] == 2
+
+
+def test_starter_is_denied_safety_incident_trend_action():
+    at = _authed_library(tier="Starter")
+    _open(at, "T050", "Safety Incident Trend Analyzer")
+    assert any("does not grant this target capability" in str(item.value).lower() for item in at.warning)
+    assert "shoir_T050_result" not in at.session_state
+    with pytest.raises(KeyError):
+        at.button(key="T050_run_button")
