@@ -564,3 +564,21 @@ def test_gage_rr_analyzer_runs_crossed_design_and_denies_starter():
     assert "shoir_T033_result" not in denied.session_state
     with pytest.raises(KeyError):
         denied.button(key="T033_run_button")
+
+
+def test_equipment_anomaly_screen_flags_outlier_but_does_not_claim_live_feed():
+    at = _authed_library(tier="Enterprise")
+    _open(at, "T048", "Equipment Anomaly Monitor")
+    result = _run(at, "T048")
+    assert result["status"] == "CALCULATED_OFFLINE_DATA"
+    assert result["metrics"]["external_connector_live"] is False
+    assert result["metrics"]["flagged_observation_count"] == 1
+    flagged = result["anomaly_table"].query("anomaly_flag == True")
+    assert flagged.iloc[0]["value"] == pytest.approx(40.0)
+
+    denied = _authed_library(tier="Starter")
+    _open(denied, "T048", "Equipment Anomaly Monitor")
+    assert any("does not grant this target capability" in str(item.value).lower() for item in denied.warning)
+    assert "shoir_T048_result" not in denied.session_state
+    with pytest.raises(KeyError):
+        denied.button(key="T048_run_button")
