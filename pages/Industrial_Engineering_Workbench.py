@@ -380,7 +380,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                 "Copilot action, API and export path must enforce their own server-side entitlement checks."
             )
 
-            if selected_tool["tool_id"] in {"T013", "T016", "T017", "T018", "T019", "T021", "T022", "T023", "T026", "T028", "T029", "T030", "T031", "T032", "T034", "T040", "T042", "T055", "T056", "T066", "T070", "T075", "T078", "T081", "T082", "T084", "T085"}:
+            if selected_tool["tool_id"] in {"T013", "T016", "T017", "T018", "T019", "T021", "T022", "T023", "T026", "T028", "T029", "T030", "T031", "T032", "T034", "T040", "T042", "T050", "T055", "T056", "T066", "T070", "T075", "T077", "T078", "T079", "T081", "T082", "T084", "T085"}:
                 st.markdown("---")
                 st.markdown("**Run focused specialist method**")
                 st.caption(
@@ -677,6 +677,35 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                             portfolio_projects_json = st.text_area("Project alternatives (JSON list)", value='[{"name":"Option A","cost":100,"service":90,"risk":20},{"name":"Option B","cost":80,"service":70,"risk":25},{"name":"Option C","cost":120,"service":95,"risk":10}]', key="tool084_projects")
                             portfolio_criteria_json = st.text_area("Criteria, positive weights and direction (JSON list)", value='[{"criterion":"cost","weight":0.4,"direction":"cost"},{"criterion":"service","weight":0.4,"direction":"benefit"},{"criterion":"risk","weight":0.2,"direction":"cost"}]', key="tool084_criteria")
                             run_method = st.form_submit_button("Score project portfolio", type="primary", use_container_width=True, key="tool084_run")
+                        elif selected_tool["tool_id"] == "T050":
+                            st.caption("Incident records and exposure-hour denominators are separate. Use the same site/population/scope and reporting period for both; rates are descriptive, not proof of causation.")
+                            incidents_json = st.text_area("Incident events (JSON list)", key="tool050_incidents", height=170)
+                            exposure_json = st.text_area("Exposure hours by period (JSON mapping)", help='For monthly summaries use keys like {"2026-01": 12500, "2026-02": 13200}. Enter each period once.', key="tool050_exposure")
+                            incident_period_type = st.selectbox("Reporting period", ["month", "quarter", "year"], key="tool050_period")
+                            run_method = st.form_submit_button("Analyze incident trends", type="primary", use_container_width=True, key="tool050_run")
+                        elif selected_tool["tool_id"] == "T077":
+                            st.caption("Energy intensity is calculated as period energy divided by period production. Add a baseline period to compare intensity; no saving is claimed without verified data.")
+                            energy_csv = st.text_area("Energy/output CSV", key="tool077_csv", height=180)
+                            energy_period_column = st.text_input("Period column", "period", key="tool077_period_col")
+                            energy_measure_column = st.text_input("Energy quantity column", "energy", key="tool077_energy_col")
+                            energy_output_column = st.text_input("Output quantity column", "output", key="tool077_output_col")
+                            energy_unit_input = st.text_input("Energy unit", "kWh", key="tool077_energy_unit")
+                            energy_output_unit = st.text_input("Output unit", "units", key="tool077_output_unit")
+                            energy_baseline = st.text_input("Optional baseline period label", key="tool077_baseline")
+                            run_method = st.form_submit_button("Analyze energy efficiency", type="primary", use_container_width=True, key="tool077_run")
+                        elif selected_tool["tool_id"] == "T079":
+                            st.caption("Water input, discharge and reported reuse must share compatible units and system boundaries. A positive residual may reflect consumption, evaporation or unmeasured flows.")
+                            water_csv = st.text_area("Water/waste/output CSV", key="tool079_csv", height=180)
+                            water_period_column = st.text_input("Period column", "period", key="tool079_period_col")
+                            water_input_column = st.text_input("Water input column", "water_in", key="tool079_input_col")
+                            water_discharge_column = st.text_input("Discharge column", "discharge", key="tool079_discharge_col")
+                            water_reuse_column = st.text_input("Reported reuse column", "reuse", key="tool079_reuse_col")
+                            water_waste_column = st.text_input("Waste quantity column", "waste", key="tool079_waste_col")
+                            water_output_column = st.text_input("Production/output column", "output", key="tool079_output_col")
+                            water_unit_input = st.text_input("Water unit", "m3", key="tool079_water_unit")
+                            waste_unit_input = st.text_input("Waste unit", "kg", key="tool079_waste_unit")
+                            water_output_unit = st.text_input("Output unit", "units", key="tool079_output_unit")
+                            run_method = st.form_submit_button("Analyze water and waste efficiency", type="primary", use_container_width=True, key="tool079_run")
                         else:
                             st.caption("Balanced, independent, two-sided two-sample t-test; normal outcomes and equal-variance assumptions.")
                             effect_size = st.number_input(
@@ -793,6 +822,12 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                         current_tool_inputs = {"csv_text": cost_variance_csv, "category_column": cost_category_column, "plan_column": cost_plan_column, "standard_column": cost_standard_column, "actual_column": cost_actual_column, "currency": cost_currency, "period": cost_period}
                     elif selected_tool["tool_id"] == "T084":
                         current_tool_inputs = {"projects_json": portfolio_projects_json, "criteria_json": portfolio_criteria_json}
+                    elif selected_tool["tool_id"] == "T050":
+                        current_tool_inputs = {"incidents_json": incidents_json, "exposure_json": exposure_json, "period_type": incident_period_type}
+                    elif selected_tool["tool_id"] == "T077":
+                        current_tool_inputs = {"csv_text": energy_csv, "period_column": energy_period_column, "energy_column": energy_measure_column, "output_column": energy_output_column, "energy_unit": energy_unit_input, "output_unit": energy_output_unit, "baseline_period": energy_baseline}
+                    elif selected_tool["tool_id"] == "T079":
+                        current_tool_inputs = {"csv_text": water_csv, "period_column": water_period_column, "water_input_column": water_input_column, "discharge_column": water_discharge_column, "reuse_column": water_reuse_column, "waste_column": water_waste_column, "output_column": water_output_column, "water_unit": water_unit_input, "waste_unit": waste_unit_input, "output_unit": water_output_unit}
                     else:
                         current_tool_inputs = {
                             "cohen_d": effect_size, "alpha": alpha,
@@ -819,6 +854,8 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 process_time_series, generate_synthetic_industrial_data,
                                 plan_acceptance_sampling, analyze_mm1_queue,
                                 analyze_cost_variance, score_engineering_portfolio,
+                                analyze_safety_incident_trends, analyze_energy_efficiency,
+                                analyze_water_waste_efficiency,
                             )
                             if selected_tool["tool_id"] == "T021":
                                 try:
@@ -1064,6 +1101,41 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 if not isinstance(project_items, list) or not isinstance(criteria_items, list):
                                     raise ValueError("Projects and criteria must each be JSON lists.")
                                 result = score_engineering_portfolio(project_items, criteria_items)
+                                result["data_provenance"] = "USER_ENTERED_UNVERIFIED"
+                            elif selected_tool["tool_id"] == "T050":
+                                parsed_incidents = json.loads(incidents_json)
+                                parsed_exposure = json.loads(exposure_json)
+                                if not isinstance(parsed_incidents, list) or not isinstance(parsed_exposure, dict):
+                                    raise ValueError("Incidents must be a JSON list and exposure hours must be a JSON object.")
+                                result = analyze_safety_incident_trends(
+                                    parsed_incidents, exposure_hours_by_period=parsed_exposure,
+                                    period=incident_period_type,
+                                )
+                            elif selected_tool["tool_id"] == "T077":
+                                if not energy_csv.strip():
+                                    raise ValueError("Paste an energy/output CSV before analysis.")
+                                energy_frame = pd.read_csv(io.StringIO(energy_csv))
+                                result = analyze_energy_efficiency(
+                                    energy_frame, period_column=energy_period_column,
+                                    energy_column=energy_measure_column, output_column=energy_output_column,
+                                    energy_unit=energy_unit_input, output_unit=energy_output_unit,
+                                    baseline_period=energy_baseline or None,
+                                )
+                                result["data_provenance"] = "USER_ENTERED_UNVERIFIED"
+                            elif selected_tool["tool_id"] == "T079":
+                                if not water_csv.strip():
+                                    raise ValueError("Paste a water/waste/output CSV before analysis.")
+                                water_frame = pd.read_csv(io.StringIO(water_csv))
+                                result = analyze_water_waste_efficiency(
+                                    water_frame, period_column=water_period_column,
+                                    water_input_column=water_input_column,
+                                    discharge_column=water_discharge_column,
+                                    reuse_column=water_reuse_column,
+                                    waste_column=water_waste_column,
+                                    output_column=water_output_column,
+                                    water_unit=water_unit_input, waste_unit=waste_unit_input,
+                                    output_unit=water_output_unit,
+                                )
                                 result["data_provenance"] = "USER_ENTERED_UNVERIFIED"
                             else:
                                 result = plan_two_sample_t_sample_size(
@@ -1319,7 +1391,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 markers=True, title="Forecasts versus later actuals",
                             )
                             st.plotly_chart(fig, use_container_width=True)
-                    elif selected_tool["tool_id"] in {"T013", "T017", "T018", "T019", "T034", "T070", "T082", "T084"}:
+                    elif selected_tool["tool_id"] in {"T013", "T017", "T018", "T019", "T034", "T050", "T070", "T077", "T079", "T082", "T084"}:
                         result = st.session_state.get("shoir_tool_result_" + selected_tool["tool_id"])
                         if result:
                             _show_focused_tool_persistence(selected_tool["tool_id"], result, current_tool_inputs)
@@ -1331,6 +1403,9 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 "T019": "data",
                                 "T082": "variance_table",
                                 "T084": "ranking",
+                                "T050": "period_summary",
+                                "T077": "energy_intensity_table",
+                                "T079": "efficiency_table",
                             }.get(selected_tool["tool_id"])
                             result_frame = result.get(result_frame_key) if result_frame_key else None
                             if isinstance(result_frame, pd.DataFrame) and not result_frame.empty:
