@@ -21,6 +21,7 @@ from shoir_100_tool_sustainability_engines import analyze_energy_intensity, anal
 from shoir_100_tool_decision_engines import (build_hazard_register, reconcile_sop_scenario, solve_assignment_cost_matrix, compare_capacity_scenarios, score_project_portfolio, build_hypothesis_evidence_register, evaluate_kpi_thresholds)
 from shoir_100_tool_data_quality_engines import CANONICAL_INDUSTRIAL_FIELDS, map_industrial_fields, analyze_safety_incident_trends
 from shoir_100_tool_lineage_engines import build_dataset_lineage_record
+from shoir_100_tool_reliability_engines import fit_weibull_reliability
 
 from shoir_100_tool_registry import (
     TOOL_TARGETS, TOOL_STATUSES, TOOL_TIER_ORDER, WORKBENCHES,
@@ -796,6 +797,49 @@ if rows:
             period = st.text_input("Period label", "Example month", key="t040_period")
             signature = _fingerprint(total_units, defective, scrap, rework, scrap_cost, rework_cost, inspect_cost, currency, period)
             _run_engine_tool("T040", signature, "Calculate scoped quality cost", lambda: analyze_quality_cost_defects(total_units, defective, scrap, rework, scrap_cost, rework_cost, inspect_cost, currency=currency, period=period))
+
+        elif selected_id == "T041":
+            st.warning("LIMITED VALIDATION MODE — two-parameter Weibull maximum likelihood assumes independent comparable lifetimes and non-informative right-censoring. Confidence intervals, model selection and formal fit tests are not included.")
+            st.markdown("### Weibull Reliability Analyzer")
+            st.caption("Enter time-to-failure/exposure in one consistent unit. Set event_observed = 1 for a recorded failure and 0 for a right-censored observation (e.g. still operating at last inspection).")
+            reliability_frame = st.data_editor(pd.DataFrame({
+                "time_to_event":[12.0,18.0,21.0,27.0,32.0,38.0,41.0,48.0,57.0,63.0,71.0,80.0],
+                "event_observed":[1,1,1,1,1,1,1,1,1,1,1,1],
+            }), num_rows="dynamic", use_container_width=True, key="t041_weibull_editor", hide_index=True)
+            c1,c2=st.columns(2)
+            with c1:
+                time_col=st.selectbox("Time-to-event column",list(reliability_frame.columns),index=0,key="t041_time_col")
+            with c2:
+                event_col=st.selectbox("Event/censor indicator",list(reliability_frame.columns),index=1 if len(reliability_frame.columns)>1 else 0,key="t041_event_col")
+            horizons_text=st.text_input("Reliability horizons (comma-separated, same time unit)","20, 40, 60, 80",key="t041_horizons")
+            try:
+                horizons=[float(v.strip()) for v in horizons_text.split(",") if v.strip()]
+            except ValueError:
+                horizons=[]
+            signature=_fingerprint(reliability_frame.to_json(orient="split",date_format="iso"),time_col,event_col,horizons_text)
+            saved=_run_engine_tool(
+                "T041",signature,"Fit Weibull reliability model",
+                lambda: fit_weibull_reliability(reliability_frame,time_col=time_col,event_col=event_col,horizons=horizons),
+            )
+            if saved and saved.get("signature")==signature:
+                result=saved["result"]
+                metrics=result.get("metrics",{})
+                c1,c2,c3=st.columns(3)
+                c1.metric("Weibull shape β",f'{metrics.get("weibull_shape",float("nan")):.4g}')
+                c2.metric("Weibull scale η",f'{metrics.get("weibull_scale",float("nan")):.4g}')
+                c3.metric("B10 life",f'{metrics.get("B10_life",float("nan")):.4g}')
+                st.caption(
+                    f'Observed failures: {metrics.get("observed_failures",0)} · '
+                    f'Right-censored: {metrics.get("right_censored_count",0)} · '
+                    f'Hazard: {metrics.get("hazard_interpretation","not available")}'
+                )
+                curve=result.get("fitted_curve")
+                if isinstance(curve,pd.DataFrame) and not curve.empty:
+                    st.markdown("**Fitted reliability curve**")
+                    st.line_chart(curve.set_index("time")["fitted_reliability"])
+                table=result.get("reliability_at_horizons")
+                if isinstance(table,pd.DataFrame):
+                    st.dataframe(table,use_container_width=True,hide_index=True)
 
         elif selected_id == "T042":
             st.warning("VALIDATION MODE — assumes complete failure/repair records; censoring and incomplete observation windows are not modeled.")
