@@ -8437,9 +8437,11 @@ if selected_module in ["Facility Layout & Warehousing", "Facility Layout, Materi
             str(st.session_state.get("current_user", "unknown")),
         )
     except Exception as exc:
-        st.error("Facility Layout encountered a recoverable rendering issue.")
+        st.error("Facility Layout could not complete this render. No changes were made to the saved layout.")
         with st.expander("Facility Layout diagnostic", expanded=False):
-            st.code(f"{type(exc).__name__}: {exc}")
+            st.write("Internal exception details are hidden to protect workspace data.")
+            st.caption(f"Diagnostic type: {type(exc).__name__}")
+            st.write("Check the department and flow inputs, then retry. If the issue repeats, share the diagnostic type with support.")
     _shoir_module_stop()
 
 # ==============================================================================
