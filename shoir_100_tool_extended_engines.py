@@ -1172,18 +1172,20 @@ def preview_data_join(
     )
     states = merged[marker].value_counts()
     matched_rows = int(states.get("both", 0))
-    left_only_rows = int(states.get("left_only", 0))
-    right_only_rows = int(states.get("right_only", 0))
+    left_only_output_rows = int(states.get("left_only", 0))
+    right_only_output_rows = int(states.get("right_only", 0))
+    unmatched_left_input_rows = int((~left_source[left_key].isin(right_source[right_key])).sum())
+    unmatched_right_input_rows = int((~right_source[right_key].isin(left_source[left_key])).sum())
     visible = merged.drop(columns=[marker])
     warnings = []
     if left_dupe_rows:
         warnings.append(f"Left key has {left_dupe_rows} row(s) whose key value is duplicated; joining may multiply rows.")
     if right_dupe_rows:
         warnings.append(f"Right key has {right_dupe_rows} row(s) whose key value is duplicated; joining may multiply rows.")
-    if left_only_rows:
-        warnings.append(f"{left_only_rows} output row(s) did not match a right-side key.")
-    if right_only_rows:
-        warnings.append(f"{right_only_rows} output row(s) did not match a left-side key.")
+    if unmatched_left_input_rows:
+        warnings.append(f"{unmatched_left_input_rows} left input row(s) did not match a right-side key.")
+    if unmatched_right_input_rows:
+        warnings.append(f"{unmatched_right_input_rows} right input row(s) did not match a left-side key.")
     return {
         "status": "PREVIEWED",
         "method": f"Pandas {join_type} join preview; source dataframes copied before merge.",
@@ -1193,8 +1195,10 @@ def preview_data_join(
             "right_input_rows": int(len(right_source)),
             "output_rows": int(len(visible)),
             "matched_output_rows": matched_rows,
-            "unmatched_left_output_rows": left_only_rows,
-            "unmatched_right_output_rows": right_only_rows,
+            "unmatched_left_input_rows": unmatched_left_input_rows,
+            "unmatched_right_input_rows": unmatched_right_input_rows,
+            "left_only_output_rows": left_only_output_rows,
+            "right_only_output_rows": right_only_output_rows,
             "left_duplicate_key_rows": left_dupe_rows,
             "right_duplicate_key_rows": right_dupe_rows,
         },
@@ -1204,8 +1208,10 @@ def preview_data_join(
             {"measure": "Right input rows", "count": int(len(right_source))},
             {"measure": "Output rows", "count": int(len(visible))},
             {"measure": "Matched output rows", "count": matched_rows},
-            {"measure": "Unmatched left output rows", "count": left_only_rows},
-            {"measure": "Unmatched right output rows", "count": right_only_rows},
+            {"measure": "Unmatched left input rows", "count": unmatched_left_input_rows},
+            {"measure": "Unmatched right input rows", "count": unmatched_right_input_rows},
+            {"measure": "Left-only output rows", "count": left_only_output_rows},
+            {"measure": "Right-only output rows", "count": right_only_output_rows},
             {"measure": "Left duplicated-key rows", "count": left_dupe_rows},
             {"measure": "Right duplicated-key rows", "count": right_dupe_rows},
         ]),
