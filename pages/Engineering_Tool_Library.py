@@ -15,6 +15,9 @@ import streamlit as st
 
 from shoir_tool_run_persistence import persist_tool_run_record
 from shoir_100_tool_statistics_engines import ordinary_least_squares, supported_t_test
+from shoir_100_tool_quality_engines import build_capa_8d_record, score_fmea_register
+from shoir_100_tool_asset_engines import plan_preventive_maintenance, plan_spare_part_criticality, score_supplier_performance
+from shoir_100_tool_sustainability_engines import analyze_energy_intensity, analyze_water_waste_efficiency, calculate_roi_evidence
 
 from shoir_100_tool_registry import (
     TOOL_TARGETS, TOOL_STATUSES, TOOL_TIER_ORDER, WORKBENCHES,
@@ -539,6 +542,113 @@ if rows:
                     "Alternative": metrics.get("alternative"),
                 }]), use_container_width=True, hide_index=True)
 
+        elif selected_id == "T038":
+            st.warning("LIMITED VALIDATION MODE — FMEA ratings are subjective screening scores. Review high-severity hazards separately; an RPN is not a probability or safety acceptance decision.")
+            st.markdown("### FMEA Manager")
+            st.caption("Edit one row per failure mode. Score severity, occurrence and detection from 1 (lower) to 10 (higher); action status and dates are retained in the saved run.")
+            fmea_default = pd.DataFrame([
+                {"failure_mode":"Seal leak","effect":"Fluid loss","cause":"Wear","current_controls":"Routine inspection","severity":8,"occurrence":3,"detection":4,"recommended_action":"Review seal interval","owner":"Maintenance lead","due_date":"2026-11-01","action_status":"Open"},
+                {"failure_mode":"Guard missing","effect":"Exposure to moving parts","cause":"Guard bypass","current_controls":"Shift check","severity":10,"occurrence":2,"detection":2,"recommended_action":"Restore guard and inspect interlock","owner":"Safety lead","due_date":"2026-10-30","action_status":"In Progress"},
+            ])
+            fmea_frame = st.data_editor(fmea_default, num_rows="dynamic", use_container_width=True, key="t038_fmea_editor", hide_index=True)
+            signature = _fingerprint(fmea_frame.to_json(orient="split", date_format="iso"))
+            def _calculate_t038():
+                result = score_fmea_register(fmea_frame)
+                history = list(st.session_state.get("shoir_fmea_revision_history", []))
+                previous = st.session_state.get("shoir_T038_result")
+                if isinstance(previous, dict) and previous.get("signature") and previous.get("signature") != signature:
+                    prior_result = previous.get("result", {})
+                    prior_register = prior_result.get("register")
+                    if isinstance(prior_register, pd.DataFrame):
+                        history.append({
+                            "signature": previous["signature"],
+                            "saved_at": previous.get("executed_at", ""),
+                            "row_count": int(len(prior_register)),
+                            "prior_register_json": prior_register.to_json(orient="records", date_format="iso"),
+                        })
+                result["revision_history"] = history[-50:]
+                st.session_state["shoir_fmea_revision_history"] = history[-50:]
+                return result
+            saved = _run_engine_tool("T038", signature, "Score FMEA register", _calculate_t038)
+            if saved and saved.get("signature") == signature:
+                st.caption(f'Revision snapshots available: {len(saved["result"].get("revision_history", []))}')
+                st.info("These rankings must be reviewed using your approved FMEA scoring criteria. No automatic risk acceptance is inferred.")
+
+        elif selected_id == "T039":
+            st.warning("LIMITED VALIDATION MODE — the tool organizes CAPA/8D records but does not independently establish root cause, approval or action effectiveness.")
+            st.markdown("### CAPA and 8D Manager")
+            prior_records = st.session_state.get("shoir_capa_8d_register", [])
+            if prior_records:
+                st.caption("Saved CAPA/8D register (revision history is retained by record ID).")
+                st.dataframe(pd.DataFrame([{
+                    "Record ID": record.get("record_id"),
+                    "Revision": record.get("revision", 1),
+                    "Problem": record.get("problem_statement"),
+                    "Owner": record.get("owner"),
+                    "Status": record.get("status"),
+                    "Due date": record.get("due_date"),
+                    "Evidence state": record.get("evidence_state"),
+                } for record in prior_records]), use_container_width=True, hide_index=True)
+            c1, c2 = st.columns(2)
+            with c1:
+                record_id = st.text_input("Record ID", "CAPA-001", key="t039_record_id")
+                problem = st.text_input("Problem statement", "Repeat defect on assembly line", key="t039_problem")
+                owner = st.text_input("Accountable owner", "Quality lead", key="t039_owner")
+                team = st.text_input("Cross-functional team", "Quality, production, maintenance", key="t039_team")
+                opened = st.text_input("Opened date (YYYY-MM-DD)", "2026-10-24", key="t039_opened")
+                due = st.text_input("Due date (YYYY-MM-DD)", "2026-11-20", key="t039_due")
+                status = st.selectbox("Lifecycle status", ["Open", "Containment", "Root Cause Analysis", "Corrective Action", "Verification", "Closed"], key="t039_status")
+            with c2:
+                containment = st.text_area("Containment / immediate correction", "Segregate affected stock and inspect the current lot.", key="t039_containment")
+                root_cause = st.text_area("Root-cause finding (state evidence)", "", key="t039_root_cause")
+                corrective = st.text_area("Corrective action", "", key="t039_corrective")
+                verification = st.text_input("Effectiveness evidence reference", "", key="t039_verification")
+                prevention = st.text_area("Prevent recurrence / update standard", "", key="t039_prevention")
+                lessons = st.text_area("Lessons learned / related processes", "", key="t039_lessons")
+                verifier = st.text_input("Verifier name (user-entered, not authenticated)", "", key="t039_verifier")
+                verification_date = st.text_input("Verification date (YYYY-MM-DD)", "", key="t039_verification_date")
+            signature = _fingerprint(record_id, problem, owner, team, opened, due, status, containment, root_cause, corrective, verification, prevention, lessons, verifier, verification_date)
+            def _calculate_t039():
+                result = build_capa_8d_record(
+                    record_id=record_id, problem_statement=problem, owner=owner,
+                    opened_date=opened, due_date=due, status=status, team=team,
+                    containment=containment, root_cause=root_cause,
+                    corrective_actions=corrective, verification_evidence=verification,
+                    preventive_action=prevention, lessons_learned=lessons,
+                    verified_by=verifier, verification_date=verification_date,
+                )
+                record = dict(result["record"])
+                register = list(st.session_state.get("shoir_capa_8d_register", []))
+                existing_index = next((i for i, item in enumerate(register) if item.get("record_id") == record_id.strip()), None)
+                if existing_index is None:
+                    record["revision"] = 1
+                    record["revision_history"] = []
+                    register.append(record)
+                else:
+                    prior = register[existing_index]
+                    history = list(prior.get("revision_history", []))
+                    prior_snapshot = {k: v for k, v in prior.items() if k != "revision_history"}
+                    history.append(prior_snapshot)
+                    record["revision"] = int(prior.get("revision", 1)) + 1
+                    record["revision_history"] = history[-50:]
+                    register[existing_index] = record
+                st.session_state["shoir_capa_8d_register"] = register
+                result["record"] = record
+                result["register"] = pd.DataFrame([{
+                    "record_id": item.get("record_id"),
+                    "revision": item.get("revision", 1),
+                    "problem_statement": item.get("problem_statement"),
+                    "owner": item.get("owner"),
+                    "status": item.get("status"),
+                    "due_date": item.get("due_date"),
+                    "evidence_state": item.get("evidence_state"),
+                } for item in register])
+                return result
+            saved = _run_engine_tool("T039", signature, "Save CAPA/8D record", _calculate_t039)
+            if saved and saved.get("signature") == signature:
+                st.json(saved["result"].get("record", {}))
+                st.caption("User-entered evidence and reviewer names remain unverified by Shoir-IE.")
+
         elif selected_id == "T040":
             st.warning("VALIDATION MODE — scoped cost-of-poor-quality estimate, not a complete quality-cost ledger.")
             st.markdown("### Quality cost and defect analyzer")
@@ -601,6 +711,27 @@ if rows:
                     f"Mean system time: {metrics.get('mean_time_in_system', 0):.3f} h"
                 )
 
+        elif selected_id == "T058":
+            st.warning("LIMITED VALIDATION MODE — scores and weights are user-defined; missing criteria remain visible as evidence coverage, not as zero scores.")
+            st.markdown("### Supplier Performance and Risk Scorecard")
+            supplier_frame = st.data_editor(pd.DataFrame([
+                {"supplier":"Supplier A","quality_score":90.0,"delivery_score":80.0,"cost_score":70.0,"responsiveness_score":100.0,"evidence_date":"2026-10-01"},
+                {"supplier":"Supplier B","quality_score":70.0,"delivery_score":70.0,"cost_score":None,"responsiveness_score":60.0,"evidence_date":""},
+            ]), num_rows="dynamic", use_container_width=True, key="t058_supplier_editor", hide_index=True)
+            c1, c2, c3, c4 = st.columns(4)
+            with c1:
+                quality_weight = st.number_input("Quality weight", min_value=0.0, value=0.40, step=0.05, key="t058_quality_weight")
+            with c2:
+                delivery_weight = st.number_input("Delivery weight", min_value=0.0, value=0.30, step=0.05, key="t058_delivery_weight")
+            with c3:
+                cost_weight = st.number_input("Cost weight", min_value=0.0, value=0.20, step=0.05, key="t058_cost_weight")
+            with c4:
+                response_weight = st.number_input("Responsiveness weight", min_value=0.0, value=0.10, step=0.05, key="t058_response_weight")
+            threshold = st.number_input("Minimum acceptable score (0–100)", min_value=0.0, max_value=100.0, value=70.0, step=5.0, key="t058_threshold")
+            weights = {"quality_score":quality_weight,"delivery_score":delivery_weight,"cost_score":cost_weight,"responsiveness_score":response_weight}
+            signature = _fingerprint(supplier_frame.to_json(orient="split", date_format="iso"), weights, threshold)
+            _run_engine_tool("T058", signature, "Score supplier evidence", lambda: score_supplier_performance(supplier_frame, weights=weights, minimum_acceptable_score=threshold))
+
         elif selected_id == "T072":
             st.warning("SYNTHETIC RISK MODEL — outcomes are simulated, not measured savings. Inputs are sampled independently; correlations are not inferred.")
             st.markdown("### Monte Carlo risk simulator")
@@ -656,6 +787,44 @@ if rows:
                 frame = saved["result"].get("series")
                 if isinstance(frame, pd.DataFrame) and not frame.empty and {"Prediction", "Actual"}.issubset(frame.columns):
                     st.line_chart(frame[["Prediction", "Actual"]])
+
+        elif selected_id == "T083":
+            st.warning("LIMITED VALIDATION MODE — cost deltas and ROI are calculated from user-entered inputs. Even reviewed evidence is not independently verified here and must not be marketed as proven savings.")
+            st.markdown("### Evidence-Based ROI Tracker")
+            st.caption("Enter a comparable baseline and post-intervention cost, implementation cost, period, and source references. Outputs are estimates until independently reviewed.")
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                baseline_cost = st.number_input("Baseline cost (currency units)", min_value=0.0, value=10000.0, step=100.0, key="t083_baseline_cost")
+            with c2:
+                post_cost = st.number_input("Post-intervention cost", min_value=0.0, value=7000.0, step=100.0, key="t083_post_cost")
+            with c3:
+                implementation_cost = st.number_input("Implementation cost", min_value=0.0, value=1000.0, step=100.0, key="t083_implementation_cost")
+            c1, c2 = st.columns(2)
+            with c1:
+                currency = st.text_input("Currency code", "SAR", max_chars=3, key="t083_currency")
+                measurement_start = st.text_input("Measurement start (YYYY-MM-DD)", "2026-01-01", key="t083_measure_start")
+                baseline_ref = st.text_input("Baseline evidence reference", "BASELINE-REF", key="t083_baseline_ref")
+                cost_ref = st.text_input("Implementation cost evidence reference", "COST-REF", key="t083_cost_ref")
+            with c2:
+                measurement_end = st.text_input("Measurement end (YYYY-MM-DD)", "2026-03-31", key="t083_measure_end")
+                post_ref = st.text_input("Post-intervention evidence reference", "POST-REF", key="t083_post_ref")
+                verifier = st.text_input("Reviewer name (user-entered)", "", key="t083_verifier")
+                evidence_reviewed = st.checkbox("I have reviewed the source references for comparability", value=False, key="t083_reviewed")
+            signature = _fingerprint(baseline_cost, post_cost, implementation_cost, currency, measurement_start, measurement_end, baseline_ref, post_ref, cost_ref, verifier, evidence_reviewed)
+            saved = _run_engine_tool(
+                "T083", signature, "Calculate conditional ROI and evidence status",
+                lambda: calculate_roi_evidence(
+                    baseline_cost=baseline_cost, post_intervention_cost=post_cost,
+                    implementation_cost=implementation_cost, currency=currency,
+                    measurement_start=measurement_start, measurement_end=measurement_end,
+                    baseline_evidence_reference=baseline_ref, post_evidence_reference=post_ref,
+                    implementation_cost_reference=cost_ref, verifier_name=verifier,
+                    evidence_reviewed=evidence_reviewed,
+                ),
+            )
+            if saved and saved.get("signature") == signature:
+                st.json(saved["result"].get("evidence_ledger", {}))
+                st.info("The result's verified_savings field always remains false until a separate independent review process exists.")
 
         elif selected_id == "T085":
             st.warning("VALIDATION MODE — balanced independent two-sample t-test assumptions are not automatically verified.")
@@ -866,6 +1035,34 @@ if rows:
                 st.bar_chart(pd.DataFrame({"Index": [m["Cp"], m["Cpk"], m["Pp"], m["Ppk"]]},
                                           index=["Cp", "Cpk", "Pp", "Ppk"]))
 
+        elif selected_id == "T043":
+            st.warning("LIMITED VALIDATION MODE — due dates use calendar-day intervals. No labor, skill, runtime-hour or downtime-window optimization is performed.")
+            st.markdown("### Preventive Maintenance Planner")
+            st.caption("Enter the last completed date and interval; the next due date is calculated deterministically.")
+            maintenance_frame = st.data_editor(pd.DataFrame([
+                {"task_id":"PM-001","asset_id":"PUMP-01","task":"Inspect seal and coupling","interval_days":30,"last_completed_date":"2026-09-01","estimated_duration_hours":2.0,"required_skill":"Mechanical","downtime_window":"Night shift"},
+                {"task_id":"PM-002","asset_id":"COMP-02","task":"Check vibration","interval_days":30,"last_completed_date":"2026-10-10","estimated_duration_hours":1.5,"required_skill":"Reliability","downtime_window":"Weekend"},
+                {"task_id":"PM-003","asset_id":"CONV-01","task":"Inspect belt","interval_days":90,"last_completed_date":"2026-10-20","estimated_duration_hours":1.0,"required_skill":"Mechanical","downtime_window":"Planned stop"},
+            ]), num_rows="dynamic", use_container_width=True, key="t043_maintenance_editor", hide_index=True)
+            as_of = st.text_input("As-of date (YYYY-MM-DD)", "2026-10-24", key="t043_as_of")
+            signature = _fingerprint(maintenance_frame.to_json(orient="split", date_format="iso"), as_of)
+            _run_engine_tool("T043", signature, "Calculate maintenance due dates", lambda: plan_preventive_maintenance(maintenance_frame, as_of))
+
+        elif selected_id == "T045":
+            st.warning("LIMITED VALIDATION MODE — reorder points use a normal approximation to lead-time demand; intermittent spares and supplier constraints are not modeled.")
+            st.markdown("### Spare Parts and Criticality Planner")
+            spares_frame = st.data_editor(pd.DataFrame([
+                {"part_id":"SP-001","asset_id":"PUMP-01","annual_demand":1000,"daily_demand_stddev":2.0,"lead_time_days":5,"unit_cost":20.0,"current_stock":10,"on_order":5,"criticality_score":5},
+                {"part_id":"SP-002","asset_id":"COMP-02","annual_demand":120,"daily_demand_stddev":0.5,"lead_time_days":20,"unit_cost":180.0,"current_stock":1,"on_order":0,"criticality_score":4},
+            ]), num_rows="dynamic", use_container_width=True, key="t045_spares_editor", hide_index=True)
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                operating_days = st.number_input("Operating days per year", min_value=1.0, value=250.0, step=5.0, key="t045_operating_days")
+            with c2:
+                service_z = st.number_input("Safety-stock service factor z", min_value=0.0, value=1.645, step=0.05, key="t045_service_z")
+            signature = _fingerprint(spares_frame.to_json(orient="split", date_format="iso"), operating_days, service_z)
+            _run_engine_tool("T045", signature, "Calculate spare-parts reorder points", lambda: plan_spare_part_criticality(spares_frame, operating_days_per_year=operating_days, service_factor_z=service_z))
+
         elif selected_id == "T051":
             st.warning("LIMITED VALIDATION MODE — compares only a naive last-value baseline and a rolling moving average; no seasonality, exogenous variables or prediction intervals are inferred.")
             st.markdown("### Demand forecasting studio")
@@ -954,6 +1151,47 @@ if rows:
                 m = saved["result"]["metrics"]
                 st.bar_chart(pd.DataFrame({"Units": [m["EOQ_units"], m["safety_stock_units"], m["reorder_point_units"]]},
                                           index=["EOQ", "Safety stock", "Reorder point"]))
+
+        elif selected_id == "T077":
+            st.warning("LIMITED VALIDATION MODE — compares measured consumption against a selected measured baseline; projected differences are not verified savings and no live equipment control is performed.")
+            st.markdown("### Energy Performance Optimizer — Baseline Analysis")
+            energy_frame = st.data_editor(pd.DataFrame([
+                {"period":"Baseline","production_units":100.0,"energy_kwh":1000.0},
+                {"period":"Comparison 1","production_units":120.0,"energy_kwh":900.0},
+                {"period":"Comparison 2","production_units":90.0,"energy_kwh":990.0},
+            ]), num_rows="dynamic", use_container_width=True, key="t077_energy_editor", hide_index=True)
+            periods = [str(v) for v in energy_frame["period"].tolist()] if "period" in energy_frame else []
+            baseline_period = st.selectbox("Measured baseline period", periods, key="t077_baseline_period") if periods else ""
+            tariff = st.number_input("Optional energy tariff per kWh (0 = not supplied)", min_value=0.0, value=0.0, step=0.01, key="t077_tariff")
+            include_factor = st.checkbox("Calculate emissions using a sourced factor", value=False, key="t077_include_factor")
+            c1, c2 = st.columns(2)
+            with c1:
+                factor = st.number_input("Emission factor (kg CO₂e/kWh)", min_value=0.0, value=0.4, step=0.01, disabled=not include_factor, key="t077_factor")
+                factor_source = st.text_input("Factor source/reference", "", disabled=not include_factor, key="t077_factor_source")
+            with c2:
+                factor_date = st.text_input("Factor date (YYYY-MM-DD)", "", disabled=not include_factor, key="t077_factor_date")
+                st.caption("Energy factors and tariff are user supplied, not fetched live.")
+            signature = _fingerprint(energy_frame.to_json(orient="split", date_format="iso"), baseline_period, tariff, include_factor, factor, factor_source, factor_date)
+            _run_engine_tool(
+                "T077", signature, "Compare energy intensity",
+                lambda: analyze_energy_intensity(
+                    energy_frame, baseline_period,
+                    tariff_per_kwh=tariff if tariff > 0 else None,
+                    emission_factor_kg_per_kwh=factor if include_factor else None,
+                    factor_source=factor_source if include_factor else "",
+                    factor_date=factor_date if include_factor else "",
+                ),
+            )
+
+        elif selected_id == "T079":
+            st.warning("LIMITED VALIDATION MODE — normalized resource metrics are not an audited environmental disclosure. Input minus wastewater is only an apparent difference without a complete process boundary.")
+            st.markdown("### Water and Waste Efficiency Analyzer")
+            resource_frame = st.data_editor(pd.DataFrame([
+                {"period":"P1","production_units":100.0,"water_input_m3":50.0,"wastewater_m3":32.0,"waste_generated_kg":20.0,"waste_recycled_kg":5.0},
+                {"period":"P2","production_units":120.0,"water_input_m3":54.0,"wastewater_m3":35.0,"waste_generated_kg":24.0,"waste_recycled_kg":12.0},
+            ]), num_rows="dynamic", use_container_width=True, key="t079_resource_editor", hide_index=True)
+            signature = _fingerprint(resource_frame.to_json(orient="split", date_format="iso"))
+            _run_engine_tool("T079", signature, "Analyze water and waste efficiency", lambda: analyze_water_waste_efficiency(resource_frame))
 
         elif selected_id == "T078":
             st.warning("LIMITED VALIDATION MODE — use a sourced, dated factor with a matching activity unit; this is not an audited carbon disclosure.")
