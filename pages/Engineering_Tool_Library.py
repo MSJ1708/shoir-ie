@@ -14,6 +14,7 @@ import pandas as pd
 import streamlit as st
 
 from shoir_tool_run_persistence import persist_tool_run_record
+from shoir_100_tool_statistics_engines import ordinary_least_squares, supported_t_test
 
 from shoir_100_tool_registry import (
     TOOL_TARGETS, TOOL_STATUSES, TOOL_TIER_ORDER, WORKBENCHES,
@@ -439,6 +440,108 @@ if rows:
                 if not oc.empty:
                     st.line_chart(oc.set_index("defective_percent")["probability_of_acceptance"])
                 st.caption("Percent defective is rounded to a whole defective-unit count for the finite lot; verify the required sampling standard before releasing lots.")
+
+        elif selected_id == "T036":
+            st.warning("LIMITED VALIDATION MODE — numeric-only OLS with classical standard errors. Review residuals, linearity, independence and constant-variance assumptions; association is not causation.")
+            st.markdown("### Regression and ANOVA Studio — OLS")
+            st.caption("All rows must be complete finite numeric values. Categorical encoding, imputation, robust standard errors and automatic predictor selection are not implemented.")
+            regression_frame = st.data_editor(
+                pd.DataFrame({"Load": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0], "Output": [3.0, 5.0, 7.0, 9.0, 11.0, 13.0]}),
+                num_rows="dynamic", use_container_width=True, key="t036_regression_data", hide_index=True,
+            )
+            regression_cols = list(regression_frame.columns)
+            if len(regression_cols) >= 2:
+                c1, c2 = st.columns(2)
+                with c1:
+                    response_col = st.selectbox("Response variable", regression_cols, index=1, key="t036_response")
+                with c2:
+                    predictor_cols = st.multiselect(
+                        "Predictor variables", [col for col in regression_cols if col != response_col],
+                        default=[regression_cols[0]], key="t036_predictors",
+                    )
+                alpha = st.selectbox("Significance level α", [0.01, 0.05, 0.10], index=1, key="t036_alpha")
+                signature = _fingerprint(
+                    regression_frame.to_json(orient="split", date_format="iso"),
+                    response_col, predictor_cols, alpha,
+                )
+                saved = _run_engine_tool(
+                    "T036", signature, "Fit OLS model",
+                    lambda: ordinary_least_squares(regression_frame, response_col, predictor_cols, alpha=alpha),
+                )
+                if saved and saved["signature"] == signature:
+                    result = saved["result"]
+                    metrics = result.get("metrics", {})
+                    st.dataframe(result.get("coefficient_table", pd.DataFrame()), use_container_width=True, hide_index=True)
+                    st.caption(
+                        f"R²: {metrics.get('R_squared', float('nan')):.4f} · "
+                        f"Adjusted R²: {metrics.get('adjusted_R_squared', float('nan')):.4f} · "
+                        f"Observations: {metrics.get('observations', 0)} · "
+                        f"Residual df: {metrics.get('residual_degrees_of_freedom', 0)}"
+                    )
+                    residual_table = result.get("prediction_residuals", pd.DataFrame())
+                    if isinstance(residual_table, pd.DataFrame) and not residual_table.empty:
+                        st.scatter_chart(residual_table, x="Fitted", y="Residual")
+                        st.dataframe(residual_table, use_container_width=True, hide_index=True)
+
+        elif selected_id == "T037":
+            st.warning("RESEARCH PACK · LIMITED VALIDATION MODE — supported t-tests only. A p-value does not prove practical importance or causation; review the study design and assumptions.")
+            st.markdown("### Hypothesis Testing Assistant")
+            test_type = st.selectbox(
+                "Supported test", ["one_sample", "independent_welch", "paired"],
+                format_func=lambda value: {
+                    "one_sample": "One-sample Student t-test",
+                    "independent_welch": "Independent Welch two-sample t-test",
+                    "paired": "Paired t-test (A − B)",
+                }[value], key="t037_test_type",
+            )
+            sample_a_text = st.text_area(
+                "Sample A values (comma-separated; use measured observations)",
+                "2, 4, 6, 5, 7, 8", height=80, key="t037_sample_a",
+            )
+            sample_b_text = ""
+            sample_b = None
+            if test_type != "one_sample":
+                sample_b_text = st.text_area(
+                    "Sample B values (comma-separated; paired order must match for paired tests)",
+                    "1, 3, 4, 5, 5, 7", height=80, key="t037_sample_b",
+                )
+                try:
+                    sample_b = [float(token.strip()) for token in sample_b_text.split(",") if token.strip()]
+                except ValueError:
+                    sample_b = []
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                null_difference = st.number_input("Null mean difference", value=0.0, step=0.5, key="t037_null")
+            with c2:
+                alpha = st.selectbox("Alpha", [0.01, 0.05, 0.10], index=1, key="t037_alpha")
+            with c3:
+                alternative = st.selectbox("Alternative", ["two-sided", "greater", "less"], key="t037_alternative")
+            try:
+                sample_a = [float(token.strip()) for token in sample_a_text.split(",") if token.strip()]
+            except ValueError:
+                sample_a = []
+            signature = _fingerprint(test_type, sample_a_text, sample_b_text, null_difference, alpha, alternative)
+            def _calculate_t037():
+                return supported_t_test(
+                    sample_a, test_type=test_type, sample_b=sample_b,
+                    null_difference=null_difference, alpha=alpha, alternative=alternative,
+                )
+            saved = _run_engine_tool("T037", signature, "Run supported hypothesis test", _calculate_t037)
+            if saved and saved["signature"] == signature:
+                metrics = saved["result"].get("metrics", {})
+                c1, c2, c3 = st.columns(3)
+                c1.metric("t statistic", f'{metrics.get("t_statistic", float("nan")):.4g}')
+                c2.metric("p-value", f'{metrics.get("p_value", float("nan")):.4g}')
+                c3.metric("Degrees of freedom", f'{metrics.get("degrees_of_freedom", float("nan")):.3g}')
+                st.dataframe(pd.DataFrame([{
+                    "Estimated mean difference": metrics.get("estimated_mean_difference"),
+                    "Null difference": metrics.get("null_difference"),
+                    "Confidence interval lower": metrics.get("confidence_interval_lower"),
+                    "Confidence interval upper": metrics.get("confidence_interval_upper"),
+                    "Cohen's d": metrics.get("cohens_d"),
+                    "Alpha": metrics.get("alpha"),
+                    "Alternative": metrics.get("alternative"),
+                }]), use_container_width=True, hide_index=True)
 
         elif selected_id == "T040":
             st.warning("VALIDATION MODE — scoped cost-of-poor-quality estimate, not a complete quality-cost ledger.")
