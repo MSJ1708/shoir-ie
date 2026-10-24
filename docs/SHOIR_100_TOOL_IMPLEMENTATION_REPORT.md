@@ -123,3 +123,9 @@ This additive follow-up adds `shoir_100_tool_operations_engines.py` and exposes 
 - **T070:** an M/M/1 analytical queue model validates positive/stable rates and states Poisson/exponential/single-server assumptions. It does not claim multi-server or discrete-event simulation support.
 
 The follow-up adds hand-calculated unit fixtures, local Streamlit `AppTest` checks for the four forms, a Starter-denial regression for T024, and registry-to-matrix metadata updates. These capabilities remain `IMPLEMENTED_NEEDS_VALIDATION`; authenticated hosted-browser walkthroughs, durable persistence, full legacy route/action/export enforcement and hosted file round-trips remain unverified. The CI results for this follow-up commit are not asserted until the workflows finish.
+
+## Workspace persistence integration — 2026-10-24
+
+The Engineering Tool Library now attempts to save successful target-run records through the existing owner-scoped `workspace_persistence.save_user_workspace` service. Each run's source signature, result payload, assumptions, warnings and execution timestamp remain attached to the tool result record. The UI displays an honest status for managed workspace save, local SQLite fallback (may be ephemeral in hosted environments), and failed/unverified persistence. A failed workspace write keeps the current session result available for export but never reports it as saved.
+
+Added `shoir_tool_run_persistence.py` and isolated tests for save/reload of a structured result (including a nested dataframe), failed-write behavior and guest denial. These are local store tests. They do **not** prove the deployed managed backend accepts this record format, that the record reloads after hosted re-login, or that all cross-workspace operations are isolated; those remain authenticated staging gates. No capability status is upgraded based on this change, and no tool is marked `VERIFIED_WORKING`.
