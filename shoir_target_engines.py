@@ -2110,3 +2110,245 @@ def score_engineering_portfolio(
         ],
         "warning": "Review weights, scales, data quality and score sensitivity before approving a project portfolio.",
     }
+
+
+def analyze_safety_incident_trends(
+    incidents: Sequence[Mapping[str, Any]],
+    *,
+    exposure_hours_by_period: Mapping[str, Any],
+    period: str = "month",
+    rate_base_hours: float = 200_000.0,
+) -> dict[str, Any]:
+    """Summarize supplied incident events and exposure-normalized rates.
+
+    This supports month, quarter or year summaries. Incident records and exposure
+    denominators are separate inputs so exposure is never summed once per incident.
+    """
+    if isinstance(incidents, (str, bytes)) or not isinstance(incidents, Sequence) or not incidents:
+        raise ValueError("Provide at least one incident record.")
+    if not isinstance(exposure_hours_by_period, Mapping) or not exposure_hours_by_period:
+        raise ValueError("Provide exposure hours for each reporting period.")
+    if period not in {"month", "quarter", "year"}:
+        raise ValueError("Period must be month, quarter or year.")
+    rate_base = _finite_number(rate_base_hours, "Rate base hours")
+    if rate_base <= 0:
+        raise ValueError("Rate base hours must be greater than zero.")
+    df = pd.DataFrame(incidents)
+    for field in ("date", "category"):
+        if field not in df.columns:
+            raise ValueError(f"Incident records require a '{field}' field.")
+    df["date"] = pd.to_datetime(df["date"], errors="coerce", utc=True)
+    if df["date"].isna().any():
+        raise ValueError("Each incident needs a valid date.")
+    df["category"] = df["category"].astype("string").str.strip()
+    if df["category"].isna().any() or (df["category"] == "").any():
+        raise ValueError("Each incident needs a non-empty category.")
+    if "severity" not in df.columns:
+        df["severity"] = "Unspecified"
+    df["severity"] = df["severity"].fillna("Unspecified").astype(str).str.strip().replace("", "Unspecified")
+    local_dates = df["date"].dt.tz_convert("UTC").dt.tz_localize(None)
+    if period == "month":
+        df["period"] = local_dates.dt.strftime("%Y-%m")
+    elif period == "quarter":
+        df["period"] = local_dates.dt.year.astype(str) + "-Q" + (((local_dates.dt.month - 1) // 3) + 1).astype(str)
+    else:
+        df["period"] = local_dates.dt.year.astype(str)
+
+    exposure: dict[str, float] = {}
+    for key, value in exposure_hours_by_period.items():
+        label = str(key).strip()
+        if not label:
+            raise ValueError("Exposure period labels cannot be blank.")
+        hours = _finite_number(value, f"Exposure hours for {label}")
+        if hours <= 0:
+            raise ValueError(f"Exposure hours for {label} must be greater than zero.")
+        if label in exposure:
+            raise ValueError(f"Exposure period labels must be unique: {label}.")
+        exposure[label] = hours
+
+    period_counts = df.groupby("period", sort=True).size().rename("Incident count")
+    categories = df.groupby(["period", "category"], sort=True).size().reset_index(name="Incident count")
+    all_periods = sorted(set(period_counts.index.astype(str)) | set(exposure))
+    summary_rows = []
+    warnings: list[str] = []
+    for label in all_periods:
+        count = int(period_counts.get(label, 0))
+        hours = exposure.get(label)
+        rate = (count / hours * rate_base) if hours is not None else None
+        if hours is None and count:
+            warnings.append(f"No exposure-hour denominator was supplied for period {label}; its rate is unavailable.")
+        summary_rows.append({
+            "Period": label,
+            "Incident count": count,
+            "Exposure hours": hours,
+            f"Rate per {rate_base:g} exposure hours": rate,
+        })
+    category_summary = categories.sort_values(["period", "Incident count", "category"], ascending=[True, False, True]).reset_index(drop=True)
+    if not warnings:
+        warnings.append("Rates are descriptive period-normalized measures, not proof of causation or regulatory certification.")
+    return {
+        "status": "SUMMARIZED",
+        "method": "Incident event counts and exposure-hour rates; period exposure is entered separately from event rows",
+        "period_type": period,
+        "rate_base_hours": rate_base,
+        "incident_count_total": int(len(df)),
+        "period_count": len(all_periods),
+        "period_summary": pd.DataFrame(summary_rows),
+        "category_summary": category_summary,
+        "severity_summary": df.groupby(["period", "severity"], sort=True).size().reset_index(name="Incident count"),
+        "warnings": warnings,
+        "data_provenance": "USER_ENTERED_UNVERIFIED",
+        "assumptions": [
+            "Incident event dates and classification rules are supplied by the user and not independently verified.",
+            "Exposure hours are reported once per period and must cover the matching scope/population.",
+            "A rate per 200,000 hours is a normalization choice here, not by itself a legal determination of reportability.",
+        ],
+    }
+
+
+def analyze_energy_efficiency(
+    frame: pd.DataFrame,
+    *,
+    period_column: str,
+    energy_column: str,
+    output_column: str,
+    energy_unit: str = "kWh",
+    output_unit: str = "units",
+    baseline_period: str | None = None,
+) -> dict[str, Any]:
+    """Aggregate period energy/output and calculate energy intensity against an optional baseline."""
+    if not isinstance(frame, pd.DataFrame) or frame.empty:
+        raise ValueError("Provide a non-empty energy/output table.")
+    period_column, energy_column, output_column = (
+        str(period_column).strip(), str(energy_column).strip(), str(output_column).strip()
+    )
+    if len({period_column, energy_column, output_column}) != 3 or not all((period_column, energy_column, output_column)):
+        raise ValueError("Period, energy and output must be three distinct, non-empty column names.")
+    missing = [col for col in (period_column, energy_column, output_column) if col not in frame.columns]
+    if missing:
+        raise ValueError("Column(s) not found: " + ", ".join(missing))
+    period_values = frame[period_column].astype("string").str.strip()
+    if period_values.isna().any() or (period_values == "").any():
+        raise ValueError("Every row needs a period label.")
+    energy = pd.to_numeric(frame[energy_column], errors="coerce")
+    output = pd.to_numeric(frame[output_column], errors="coerce")
+    if energy.isna().any() or output.isna().any():
+        raise ValueError("Energy and output values must all be numeric and non-missing.")
+    if any(not math.isfinite(float(v)) for v in energy.tolist() + output.tolist()):
+        raise ValueError("Energy and output values must be finite.")
+    if (energy < 0).any() or (output <= 0).any():
+        raise ValueError("Energy cannot be negative and output must be greater than zero.")
+    data = pd.DataFrame({"Period": period_values, "Energy": energy, "Output": output})
+    grouped = data.groupby("Period", sort=True, as_index=False)[["Energy", "Output"]].sum()
+    grouped[f"Energy intensity ({energy_unit}/{output_unit})"] = grouped["Energy"] / grouped["Output"]
+    baseline = str(baseline_period or "").strip()
+    warnings = []
+    if baseline:
+        selected = grouped[grouped["Period"] == baseline]
+        if selected.empty:
+            raise ValueError(f"Baseline period '{baseline}' does not exist in the summarized data.")
+        baseline_intensity = float(selected.iloc[0][f"Energy intensity ({energy_unit}/{output_unit})"])
+        if baseline_intensity <= 0:
+            warnings.append("Baseline energy intensity is zero; percentage comparisons are unavailable.")
+            grouped["Change from baseline (%)"] = None
+        else:
+            grouped["Change from baseline (%)"] = (grouped[f"Energy intensity ({energy_unit}/{output_unit})"] / baseline_intensity - 1.0) * 100.0
+    else:
+        warnings.append("No baseline period was selected; energy intensity is shown without a savings claim.")
+        grouped["Change from baseline (%)"] = None
+    return {
+        "status": "ANALYZED",
+        "method": "Period energy divided by period output; periods are aggregated before intensity calculation",
+        "energy_unit": str(energy_unit).strip(),
+        "output_unit": str(output_unit).strip(),
+        "baseline_period": baseline or None,
+        "period_count": len(grouped),
+        "total_energy": float(grouped["Energy"].sum()),
+        "total_output": float(grouped["Output"].sum()),
+        "energy_intensity_table": grouped,
+        "warnings": warnings,
+        "assumptions": [
+            "Energy and output must cover matching periods, production boundaries and allocation rules.",
+            "Intensity changes are descriptive comparisons; they are not verified savings or proof of causation.",
+        ],
+    }
+
+
+def analyze_water_waste_efficiency(
+    frame: pd.DataFrame,
+    *,
+    period_column: str,
+    water_input_column: str,
+    discharge_column: str,
+    reuse_column: str,
+    waste_column: str,
+    output_column: str,
+    water_unit: str = "m3",
+    waste_unit: str = "kg",
+    output_unit: str = "units",
+) -> dict[str, Any]:
+    """Calculate period-normalized water/waste indicators with transparent balance residuals."""
+    if not isinstance(frame, pd.DataFrame) or frame.empty:
+        raise ValueError("Provide a non-empty water/waste table.")
+    names = {
+        "period": str(period_column).strip(),
+        "water_input": str(water_input_column).strip(),
+        "discharge": str(discharge_column).strip(),
+        "reuse": str(reuse_column).strip(),
+        "waste": str(waste_column).strip(),
+        "output": str(output_column).strip(),
+    }
+    if any(not value for value in names.values()) or len(set(names.values())) != len(names):
+        raise ValueError("Choose six distinct, non-empty source columns for period, water input, discharge, reuse, waste and output.")
+    missing = [column for column in names.values() if column not in frame.columns]
+    if missing:
+        raise ValueError("Column(s) not found: " + ", ".join(missing))
+    periods = frame[names["period"]].astype("string").str.strip()
+    if periods.isna().any() or (periods == "").any():
+        raise ValueError("Every row needs a period label.")
+    data = pd.DataFrame({"Period": periods})
+    for key in ("water_input", "discharge", "reuse", "waste", "output"):
+        original = frame[names[key]]
+        values = pd.to_numeric(original, errors="coerce")
+        if values.isna().any() or any(not math.isfinite(float(v)) for v in values.tolist()):
+            raise ValueError(f"{key.replace('_', ' ').title()} values must be finite numeric values.")
+        if (values < 0).any():
+            raise ValueError(f"{key.replace('_', ' ').title()} values cannot be negative.")
+        data[key] = values.astype(float).to_numpy()
+    if (data["output"] <= 0).any():
+        raise ValueError("Output must be greater than zero in every source row.")
+    grouped = data.groupby("Period", sort=True, as_index=False).sum(numeric_only=True)
+    grouped["Water balance residual"] = grouped["water_input"] - grouped["discharge"] - grouped["reuse"]
+    grouped[f"Water input intensity ({water_unit}/{output_unit})"] = grouped["water_input"] / grouped["output"]
+    grouped[f"Waste intensity ({waste_unit}/{output_unit})"] = grouped["waste"] / grouped["output"]
+    warnings = []
+    if (grouped["Water balance residual"] < -1e-9).any():
+        warnings.append("Discharge plus reported reuse exceeds reported water input in at least one period; inspect boundaries and meters.")
+    if (grouped["Water balance residual"] > 1e-9).any():
+        warnings.append("Positive water balance residual remains; it may include consumption, evaporation, unmeasured flows or accounting differences.")
+    return {
+        "status": "ANALYZED",
+        "method": "Period aggregation with water-input balance residual and output-normalized water/waste intensities",
+        "water_unit": str(water_unit).strip(),
+        "waste_unit": str(waste_unit).strip(),
+        "output_unit": str(output_unit).strip(),
+        "period_count": int(len(grouped)),
+        "water_input_total": float(grouped["water_input"].sum()),
+        "discharge_total": float(grouped["discharge"].sum()),
+        "reuse_total": float(grouped["reuse"].sum()),
+        "waste_total": float(grouped["waste"].sum()),
+        "output_total": float(grouped["output"].sum()),
+        "efficiency_table": grouped.rename(columns={
+            "water_input": "Water input",
+            "discharge": "Discharge",
+            "reuse": "Reported reuse",
+            "waste": "Waste",
+            "output": "Output",
+        }),
+        "warnings": warnings or ["Water/waste boundaries and measurements were not independently verified."],
+        "assumptions": [
+            "Water input, discharge and reuse share one compatible physical unit and aligned boundary.",
+            "Positive residual is not automatically classified as consumption; other flows may be missing.",
+            "Normalized intensity does not establish compliance with an environmental reporting standard.",
+        ],
+    }
