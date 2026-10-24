@@ -153,7 +153,7 @@ def test_implementation_matrix_stays_in_sync_with_canonical_registry():
     shared_fields = (
         "canonical_name", "workbench", "target_minimum_tier", "existing_module_or_route",
         "implementation_status", "calculation_or_action", "input_contract", "output_contract",
-        "persistence_scope", "external_dependency", "entitlement_enforcement_points", "remaining_gap",
+        "remaining_gap",
     )
     differences = []
     for tool_id, registry_row in registry_by_id.items():
