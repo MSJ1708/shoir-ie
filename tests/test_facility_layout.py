@@ -1,3 +1,5 @@
+from io import BytesIO
+
 import pandas as pd
 
 from shoir_facility_layout import _flow_matrix, _slp_frame, _matrix, _slp_heatmap_values
@@ -303,3 +305,62 @@ def test_blank_slp_relationship_remains_missing_not_a_fabricated_score(
     matrix = facility._matrix(departments, slp)
     assert matrix.loc["D1", "D2"] == ""
     assert pd.isna(facility._slp_heatmap_values(matrix).loc["D1", "D2"])
+
+
+
+def test_facility_workbook_export_reopens_and_preserves_model_tables():
+    from shoir_facility_layout import _export_workbook
+
+    depts = _departments()
+    flows = _flows()
+    slp = _slp_frame(depts, flows)
+
+    payload = _export_workbook(depts, flows, slp)
+    assert isinstance(payload, bytes) and payload.startswith(b"PK")
+    assert len(payload) > 1000
+
+    with pd.ExcelFile(BytesIO(payload), engine="openpyxl") as workbook:
+        assert workbook.sheet_names == [
+            "Departments",
+            "From_To_Flows",
+            "SLP_Relationships",
+            "SLP_Matrix",
+        ]
+        exported_depts = pd.read_excel(workbook, sheet_name="Departments")
+        exported_flows = pd.read_excel(workbook, sheet_name="From_To_Flows")
+        exported_slp = pd.read_excel(workbook, sheet_name="SLP_Relationships")
+        exported_matrix = pd.read_excel(workbook, sheet_name="SLP_Matrix")
+
+    assert exported_depts["id"].astype(str).tolist() == ["D1", "D2", "D3"]
+    assert exported_flows.loc[0, "from_id"] == "D1"
+    assert exported_flows.loc[0, "to_id"] == "D2"
+    assert float(exported_flows.loc[0, "loads_day"]) == 120.0
+    assert len(exported_slp) == len(slp)
+    assert exported_matrix.iloc[:, 0].astype(str).tolist() == ["D1", "D2", "D3"]
+    assert list(exported_matrix.columns[1:]) == ["D1", "D2", "D3"]
+
+
+def test_facility_department_persistence_is_isolated_by_owner_and_workspace(
+    tmp_path, monkeypatch
+):
+    facility = _use_temporary_facility_database(tmp_path, monkeypatch)
+
+    facility._save_departments("alpha", "workspace-a", [
+        {"id": "D1", "name": "Alpha Receiving", "x": 10, "y": 10, "area_sqm": 100},
+    ])
+    facility._save_departments("alpha", "workspace-b", [
+        {"id": "D1", "name": "Alpha Workspace B", "x": 20, "y": 20, "area_sqm": 200},
+    ])
+    facility._save_departments("beta", "workspace-a", [
+        {"id": "D1", "name": "Beta Receiving", "x": 30, "y": 30, "area_sqm": 300},
+    ])
+
+    a = facility._load_departments("alpha", "workspace-a")
+    b = facility._load_departments("alpha", "workspace-b")
+    other_user = facility._load_departments("beta", "workspace-a")
+
+    assert a["name"].tolist() == ["Alpha Receiving"]
+    assert b["name"].tolist() == ["Alpha Workspace B"]
+    assert other_user["name"].tolist() == ["Beta Receiving"]
+    assert set(a["name"]).isdisjoint(set(b["name"]))
+    assert set(a["name"]).isdisjoint(set(other_user["name"]))
