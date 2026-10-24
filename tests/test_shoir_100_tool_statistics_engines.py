@@ -79,3 +79,11 @@ def test_t_test_rejects_unknown_mode_alpha_and_non_finite_samples():
         supported_t_test([1, 2], alpha=1.0)
     with pytest.raises(ValueError, match="non-finite"):
         supported_t_test([1, np.inf, 3])
+
+
+def test_ols_constant_response_reports_undefined_r_squared_not_perfect_fit():
+    frame = pd.DataFrame({"x": [1, 2, 3, 4, 5], "y": [5, 5, 5, 5, 5]})
+    result = ordinary_least_squares(frame, "y", ["x"])
+    assert math.isnan(result["metrics"]["R_squared"])
+    assert math.isnan(result["metrics"]["adjusted_R_squared"])
+    assert any("no material variation" in warning.lower() for warning in result["warnings"])
