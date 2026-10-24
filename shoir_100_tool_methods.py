@@ -56,8 +56,18 @@ def require_tool_access(tier: str, tool_id: str, actor: str) -> dict[str, Any]:
         canonical[name.casefold()] = name
         canonical[(name + " tier").casefold()] = name
         canonical[(name + " plan").casefold()] = name
-    canonical["research pack add-on"] = "Research Pack"
-    canonical["enterprise plus tier ($399)"] = "Enterprise Plus"
+    # Real app registration/renewal flows store price-bearing tier labels.
+    # Normalize only explicit supported labels; unknown labels remain denied.
+    explicit_aliases = {
+        "starter tier ($29)": "Starter",
+        "mid-tier pro ($79)": "Mid-Tier Pro",
+        "professional tier ($129)": "Professional",
+        "enterprise tier ($199)": "Enterprise",
+        "enterprise plus tier ($399)": "Enterprise Plus",
+        "research pack ($30 add-on)": "Research Pack",
+        "research pack add-on": "Research Pack",
+    }
+    canonical.update(explicit_aliases)
     current = canonical.get(raw)
     if current is None:
         raise PermissionError("Unrecognized subscription tier; access is denied by default.")
