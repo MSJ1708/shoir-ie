@@ -1997,9 +1997,27 @@ detect_header_row = _enhanced_detect_header_row
 # Final ingestion hardening: locale-safe CSV, duration-safe typing and
 # multi-table provenance review. These overrides keep the public API stable.
 
-def _enhanced_read_raw_workbook(raw: bytes, filename: str) -> dict[str, pd.DataFrame]:
+def _validate_workbook_upload_size(raw: bytes, filename: str) -> None:
+    """Enforce the shared 75 MB upload contract before any parser or enrich step."""
+    from shoir_upgrade import MAX_UPLOAD_BYTES
+
     if not raw:
         raise ValueError("The uploaded file is empty.")
+    try:
+        upload_size = len(raw)
+    except (TypeError, OverflowError) as exc:
+        raise ValueError("The uploaded file must be readable bytes.") from exc
+    if upload_size > MAX_UPLOAD_BYTES:
+        size_mb = upload_size / (1024 * 1024)
+        raise ValueError(
+            f"This upload is {size_mb:,.1f} MB. Spreadsheet imports are limited to "
+            f"{MAX_UPLOAD_BYTES / (1024 * 1024):,.0f} MB to keep the application responsive. "
+            "Split the workbook into smaller logical workbooks or save only the required sheets and retry."
+        )
+
+
+def _enhanced_read_raw_workbook(raw: bytes, filename: str) -> dict[str, pd.DataFrame]:
+    _validate_workbook_upload_size(raw, filename)
     lower = str(filename).lower()
     if lower.endswith(".csv"):
         import csv
@@ -4642,6 +4660,8 @@ if _excel_foundation_enrich_result is not None:
         return _EXCEL_FOUNDATION_BASE_READER(raw, filename)
 
     def process_uploaded_workbook(raw: bytes, filename: str) -> dict[str, Any]:
+        # Guard before the foundation's scalable text reader or workbook parser.
+        _validate_workbook_upload_size(raw, filename)
         result = _EXCEL_FOUNDATION_BASE_PROCESS(raw, filename)
         result = _excel_foundation_enrich_result(result, raw, filename)
         if _excel_foundation_augment_evidence_bundle is not None:
