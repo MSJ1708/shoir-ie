@@ -380,7 +380,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                 "Copilot action, API and export path must enforce their own server-side entitlement checks."
             )
 
-            if selected_tool["tool_id"] in {"T013", "T016", "T017", "T018", "T019", "T021", "T022", "T023", "T026", "T028", "T029", "T030", "T031", "T032", "T034", "T040", "T042", "T050", "T055", "T056", "T066", "T070", "T075", "T077", "T078", "T079", "T081", "T082", "T084", "T085"}:
+            if selected_tool["tool_id"] in {"T013", "T015", "T016", "T017", "T018", "T019", "T021", "T022", "T023", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T034", "T038", "T040", "T042", "T050", "T052", "T055", "T056", "T058", "T066", "T070", "T075", "T076", "T077", "T078", "T079", "T081", "T082", "T084", "T085"}:
                 st.markdown("---")
                 st.markdown("**Run focused specialist method**")
                 st.caption(
@@ -706,6 +706,44 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                             waste_unit_input = st.text_input("Waste unit", "kg", key="tool079_waste_unit")
                             water_output_unit = st.text_input("Output unit", "units", key="tool079_output_unit")
                             run_method = st.form_submit_button("Analyze water and waste efficiency", type="primary", use_container_width=True, key="tool079_run")
+                        elif selected_tool["tool_id"] == "T015":
+                            st.caption("Only suggests column mappings. Exact matches are still reviewable; aliases/fuzzy matches and collisions require confirmation before transforming source data.")
+                            source_columns_text = st.text_input("Source column headers (comma-separated)", key="tool015_source_headers")
+                            canonical_fields_text = st.text_input("Canonical fields to map (comma-separated)", "timestamp, asset_id, line_id, production_output, demand_units, cycle_time, downtime, defect_units, energy_kwh, work_order_id, sku, quantity, unit_cost", key="tool015_fields")
+                            run_method = st.form_submit_button("Suggest industrial field mappings", type="primary", use_container_width=True, key="tool015_run")
+                        elif selected_tool["tool_id"] == "T027":
+                            st.caption("Step order is the order in the JSON list. Lead-time proxy is summed cycle plus waiting time; validate the map with operators before using it as a baseline.")
+                            vsm_steps_json = st.text_area("Ordered process steps (JSON list)", key="tool027_steps", height=200)
+                            vsm_time_unit = st.text_input("Time unit", "minutes", key="tool027_time_unit")
+                            vsm_wip_unit = st.text_input("WIP unit", "units", key="tool027_wip_unit")
+                            run_method = st.form_submit_button("Build value stream summary", type="primary", use_container_width=True, key="tool027_run")
+                        elif selected_tool["tool_id"] == "T038":
+                            st.caption("Classic RPN is severity × occurrence × detection (each 1–10). RPN is not a complete risk measure; serious hazards must still be escalated.")
+                            fmea_records_json = st.text_area("FMEA records (JSON list)", key="tool038_records", height=200)
+                            run_method = st.form_submit_button("Calculate FMEA RPNs", type="primary", use_container_width=True, key="tool038_run")
+                        elif selected_tool["tool_id"] == "T052":
+                            st.caption("Sequential planning balance only; rows are used in the order supplied. Lead times, BOMs, supplier constraints and labor schedules are not modeled.")
+                            sop_csv = st.text_area("Time-phased S&OP CSV", key="tool052_csv", height=180)
+                            sop_period_column = st.text_input("Period column", "period", key="tool052_period_col")
+                            sop_demand_column = st.text_input("Demand column", "demand", key="tool052_demand_col")
+                            sop_supply_column = st.text_input("Planned supply column", "planned_supply", key="tool052_supply_col")
+                            sop_capacity_column = st.text_input("Available capacity column", "capacity", key="tool052_capacity_col")
+                            sop_initial_inventory = st.number_input("Initial inventory", min_value=0.0, value=0.0, step=10.0, key="tool052_initial_inventory")
+                            sop_safety_stock = st.number_input("Target safety stock", min_value=0.0, value=0.0, step=5.0, key="tool052_safety_stock")
+                            run_method = st.form_submit_button("Reconcile demand and supply", type="primary", use_container_width=True, key="tool052_run")
+                        elif selected_tool["tool_id"] == "T058":
+                            st.caption("Scores are weighted user judgments, not predicted failure probabilities. Missing criteria reduce evidence coverage instead of being silently treated as zero.")
+                            supplier_records_json = st.text_area("Supplier records (JSON list)", key="tool058_suppliers", height=170)
+                            supplier_criteria_json = st.text_area("Weighted criteria (JSON list; direction benefit or risk)", key="tool058_criteria", height=140)
+                            run_method = st.form_submit_button("Score suppliers and evidence coverage", type="primary", use_container_width=True, key="tool058_run")
+                        elif selected_tool["tool_id"] == "T076":
+                            st.caption("Event-log discovery reconstructs observed directly-follows patterns and throughput; it does not establish conformance to a normative process model.")
+                            event_log_csv = st.text_area("Event log CSV", key="tool076_csv", height=180)
+                            event_case_column = st.text_input("Case ID column", "case_id", key="tool076_case")
+                            event_activity_column = st.text_input("Activity column", "activity", key="tool076_activity")
+                            event_timestamp_column = st.text_input("Timestamp column", "timestamp", key="tool076_timestamp")
+                            event_timezone = st.text_input("Display timezone", "UTC", key="tool076_timezone")
+                            run_method = st.form_submit_button("Discover process flows", type="primary", use_container_width=True, key="tool076_run")
                         else:
                             st.caption("Balanced, independent, two-sided two-sample t-test; normal outcomes and equal-variance assumptions.")
                             effect_size = st.number_input(
@@ -828,6 +866,18 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                         current_tool_inputs = {"csv_text": energy_csv, "period_column": energy_period_column, "energy_column": energy_measure_column, "output_column": energy_output_column, "energy_unit": energy_unit_input, "output_unit": energy_output_unit, "baseline_period": energy_baseline}
                     elif selected_tool["tool_id"] == "T079":
                         current_tool_inputs = {"csv_text": water_csv, "period_column": water_period_column, "water_input_column": water_input_column, "discharge_column": water_discharge_column, "reuse_column": water_reuse_column, "waste_column": water_waste_column, "output_column": water_output_column, "water_unit": water_unit_input, "waste_unit": waste_unit_input, "output_unit": water_output_unit}
+                    elif selected_tool["tool_id"] == "T015":
+                        current_tool_inputs = {"source_columns_text": source_columns_text, "canonical_fields_text": canonical_fields_text}
+                    elif selected_tool["tool_id"] == "T027":
+                        current_tool_inputs = {"steps_json": vsm_steps_json, "time_unit": vsm_time_unit, "wip_unit": vsm_wip_unit}
+                    elif selected_tool["tool_id"] == "T038":
+                        current_tool_inputs = {"records_json": fmea_records_json}
+                    elif selected_tool["tool_id"] == "T052":
+                        current_tool_inputs = {"csv_text": sop_csv, "period_column": sop_period_column, "demand_column": sop_demand_column, "supply_column": sop_supply_column, "capacity_column": sop_capacity_column, "initial_inventory": sop_initial_inventory, "safety_stock": sop_safety_stock}
+                    elif selected_tool["tool_id"] == "T058":
+                        current_tool_inputs = {"suppliers_json": supplier_records_json, "criteria_json": supplier_criteria_json}
+                    elif selected_tool["tool_id"] == "T076":
+                        current_tool_inputs = {"csv_text": event_log_csv, "case_column": event_case_column, "activity_column": event_activity_column, "timestamp_column": event_timestamp_column, "timezone": event_timezone}
                     else:
                         current_tool_inputs = {
                             "cohen_d": effect_size, "alpha": alpha,
@@ -855,7 +905,9 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 plan_acceptance_sampling, analyze_mm1_queue,
                                 analyze_cost_variance, score_engineering_portfolio,
                                 analyze_safety_incident_trends, analyze_energy_efficiency,
-                                analyze_water_waste_efficiency,
+                                analyze_water_waste_efficiency, map_industrial_fields,
+                                build_value_stream_map, analyze_fmea_records, reconcile_sop_plan,
+                                score_supplier_risk, analyze_process_mining_event_log,
                             )
                             if selected_tool["tool_id"] == "T021":
                                 try:
@@ -1139,6 +1191,60 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                     output_unit=water_output_unit,
                                 )
                                 result["data_provenance"] = "USER_ENTERED_UNVERIFIED"
+                            elif selected_tool["tool_id"] == "T015":
+                                source_columns = [item.strip() for item in source_columns_text.split(",") if item.strip()]
+                                canonical_fields = [item.strip() for item in canonical_fields_text.split(",") if item.strip()]
+                                result = map_industrial_fields(source_columns, canonical_fields=canonical_fields)
+                                result["data_provenance"] = "USER_ENTERED_UNVERIFIED"
+                            elif selected_tool["tool_id"] == "T027":
+                                if not vsm_steps_json.strip():
+                                    raise ValueError("Paste ordered process-step JSON before building a value stream summary.")
+                                steps = json.loads(vsm_steps_json)
+                                if not isinstance(steps, list):
+                                    raise ValueError("Process steps must be a JSON list.")
+                                result = build_value_stream_map(steps, time_unit=vsm_time_unit, wip_unit=vsm_wip_unit)
+                                result["data_provenance"] = "USER_ENTERED_UNVERIFIED"
+                            elif selected_tool["tool_id"] == "T038":
+                                if not fmea_records_json.strip():
+                                    raise ValueError("Paste FMEA failure-mode JSON records before calculating RPNs.")
+                                fmea_records = json.loads(fmea_records_json)
+                                if not isinstance(fmea_records, list):
+                                    raise ValueError("FMEA records must be a JSON list.")
+                                result = analyze_fmea_records(fmea_records)
+                                result["data_provenance"] = "USER_ENTERED_UNVERIFIED"
+                            elif selected_tool["tool_id"] == "T052":
+                                if not sop_csv.strip():
+                                    raise ValueError("Paste a time-phased S&OP CSV before reconciling demand and supply.")
+                                sop_frame = pd.read_csv(io.StringIO(sop_csv))
+                                result = reconcile_sop_plan(
+                                    sop_frame,
+                                    period_column=sop_period_column,
+                                    demand_column=sop_demand_column,
+                                    planned_supply_column=sop_supply_column,
+                                    capacity_column=sop_capacity_column,
+                                    initial_inventory=sop_initial_inventory,
+                                    safety_stock=sop_safety_stock,
+                                )
+                                result["data_provenance"] = "USER_ENTERED_UNVERIFIED"
+                            elif selected_tool["tool_id"] == "T058":
+                                if not supplier_records_json.strip() or not supplier_criteria_json.strip():
+                                    raise ValueError("Paste supplier records and weighted criteria before scoring.")
+                                suppliers = json.loads(supplier_records_json)
+                                supplier_criteria = json.loads(supplier_criteria_json)
+                                if not isinstance(suppliers, list) or not isinstance(supplier_criteria, list):
+                                    raise ValueError("Supplier records and criteria must each be JSON lists.")
+                                result = score_supplier_risk(suppliers, supplier_criteria)
+                                result["data_provenance"] = "USER_ENTERED_UNVERIFIED"
+                            elif selected_tool["tool_id"] == "T076":
+                                if not event_log_csv.strip():
+                                    raise ValueError("Paste an event-log CSV before discovering process flows.")
+                                event_frame = pd.read_csv(io.StringIO(event_log_csv))
+                                result = analyze_process_mining_event_log(
+                                    event_frame, case_column=event_case_column,
+                                    activity_column=event_activity_column, timestamp_column=event_timestamp_column,
+                                    timezone=event_timezone,
+                                )
+                                result["data_provenance"] = "USER_ENTERED_UNVERIFIED"
                             else:
                                 result = plan_two_sample_t_sample_size(
                                     effect_size, alpha, target_power,
@@ -1393,7 +1499,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 markers=True, title="Forecasts versus later actuals",
                             )
                             st.plotly_chart(fig, use_container_width=True)
-                    elif selected_tool["tool_id"] in {"T013", "T017", "T018", "T019", "T034", "T050", "T070", "T077", "T079", "T082", "T084"}:
+                    elif selected_tool["tool_id"] in {"T013", "T015", "T017", "T018", "T019", "T027", "T034", "T038", "T050", "T052", "T058", "T070", "T076", "T077", "T079", "T082", "T084"}:
                         result = st.session_state.get("shoir_tool_result_" + selected_tool["tool_id"])
                         if result:
                             _show_focused_tool_persistence(selected_tool["tool_id"], result, current_tool_inputs)
@@ -1408,6 +1514,12 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 "T050": "period_summary",
                                 "T077": "energy_intensity_table",
                                 "T079": "efficiency_table",
+                                "T015": "mapping_table",
+                                "T027": "steps",
+                                "T038": "fmea_table",
+                                "T052": "plan_table",
+                                "T058": "supplier_scorecard",
+                                "T076": "directly_follows",
                             }.get(selected_tool["tool_id"])
                             result_frame = result.get(result_frame_key) if result_frame_key else None
                             if isinstance(result_frame, pd.DataFrame) and not result_frame.empty:
