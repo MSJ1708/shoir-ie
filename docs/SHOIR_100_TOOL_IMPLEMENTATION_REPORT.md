@@ -13,13 +13,15 @@
 
 ## Initial classification counts
 
-- `IMPLEMENTED_NEEDS_VALIDATION`: 40
-- `FOUNDATION_ONLY`: 55
+- `IMPLEMENTED_NEEDS_VALIDATION`: 43
+- `FOUNDATION_ONLY`: 52
 - `EXTERNAL_CONFIGURATION_REQUIRED`: 5
 
 No entry is marked `VERIFIED_WORKING`. The CSV includes one row for each stable tool ID T001–T100 and all required matrix columns. It distinguishes candidate existing routes from a verified implementation; a candidate mapping is not proof that the target acceptance contract is met.
 
 ## Important scope and evidence limitations
+
+The Workbench also now contains embedded Starter-level implementations for T021 Time Study and Standard Time, T022 Work Sampling Analyzer, and T023 Takt Time and Capacity Calculator. These use explicit formulas, unit assumptions, warnings and invalid-input checks, with independent golden/boundary cases in `tests/test_shoir_ie_basic_calculators.py`; authenticated browser validation remains open.
 
 The compact **Capability Status Center** is now reachable inside the existing Engineering Validation Center in the Workbench; it exposes filters across all T001–T100 entries without adding a new top-level navigation item. Its UI itself is classified as `IMPLEMENTED_NEEDS_VALIDATION` until authenticated UI checks validate the counts and filters.
 
