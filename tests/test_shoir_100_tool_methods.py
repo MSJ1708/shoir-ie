@@ -8,9 +8,11 @@ import pytest
 from scipy.stats import binom
 
 from shoir_100_tool_methods import (
-    acceptance_sampling_oc, cost_variance, generate_synthetic_industrial_data,
-    join_dataframes, mm1_queue, portfolio_score, process_time_series,
-    profile_dataframe, require_tool_access,
+    a3_improvement, abc_xyz_analysis, acceptance_sampling_oc, audit_5s,
+    cost_variance, generate_synthetic_industrial_data, inventory_policy,
+    join_dataframes, line_balance, mm1_queue, portfolio_score,
+    process_time_series, profile_dataframe, quality_cost_analysis,
+    require_tool_access, root_cause_analysis,
 )
 
 
@@ -140,3 +142,99 @@ def test_tool_access_matches_six_package_contract(tool_id, tier, allowed):
 def test_tool_access_fails_closed_for_guest_unknown_tier_or_id(tier, tool_id, actor):
     with pytest.raises(PermissionError):
         require_tool_access(tier, tool_id, actor)
+
+
+
+def test_line_balance_respects_precedence_and_reports_heuristic_limits():
+    result = line_balance([
+        {"task": "A", "duration": 4, "predecessors": ""},
+        {"task": "B", "duration": 3, "predecessors": "A"},
+        {"task": "C", "duration": 2, "predecessors": "A"},
+        {"task": "D", "duration": 4, "predecessors": "B, C"},
+    ], cycle_time=6)
+    assert result["status"] == "HEURISTIC_BALANCED"
+    assert result["station_count"] == 3
+    assert result["efficiency_pct"] == pytest.approx(13 / 18 * 100)
+    station = result["tasks"].set_index("task")["station"].to_dict()
+    assert station["A"] <= station["B"] <= station["D"]
+    assert station["A"] <= station["C"] <= station["D"]
+    with pytest.raises(ValueError, match="cycle"):
+        line_balance([
+            {"task": "A", "duration": 1, "predecessors": "B"},
+            {"task": "B", "duration": 1, "predecessors": "A"},
+        ], 2)
+
+
+def test_root_cause_pareto_and_five_whys_are_hypotheses_not_causal_proof():
+    result = root_cause_analysis(
+        [{"category": "Stops", "count": 8}, {"category": "Material", "count": 2}, {"category": "Stops", "count": 2}],
+        ["Why 1", "Why 2", "Why 3", "Why 4", "Why 5"], "Owner A", "Run observation", "2026-11-01",
+    )
+    assert result["total_count"] == 12
+    assert result["pareto"].iloc[0]["category"] == "Stops"
+    assert result["pareto"].iloc[-1]["cumulative_share_pct"] == pytest.approx(100)
+    assert result["action"]["status"] == "ACTION_RECORDED"
+    with pytest.raises(ValueError, match="exactly five"):
+        root_cause_analysis([{"category": "Stops", "count": 1}], ["one why"])
+
+
+def test_5s_audit_computes_score_and_rejects_duplicate_area_category():
+    result = audit_5s([
+        {"area": "Cell A", "category": category, "score": score, "evidence": "photo-1", "owner": "Lead", "action": "", "due_date": ""}
+        for category, score in zip(["Sort", "Set in order", "Shine", "Standardize", "Sustain"], [1, 2, 3, 4, 5])
+    ])
+    assert result["overall_score_pct"] == pytest.approx(60)
+    assert len(result["category_summary"]) == 5
+    with pytest.raises(ValueError, match="Duplicate 5S"):
+        audit_5s([
+            {"area": "Cell A", "category": "Sort", "score": 1},
+            {"area": "Cell A", "category": "Sort", "score": 3},
+        ])
+
+
+def test_a3_records_actual_measurement_and_evidence_without_auto_verifying_it():
+    result = a3_improvement(
+        "Reduce setup", "Setup varies", "Setup time", "min", 45, 30, "lower",
+        "Standardize tool staging", "Owner A", "2026-11-01", 32, "run-123", 100,
+    )
+    assert result["absolute_improvement"] == 13
+    assert result["target_met"] is False
+    assert result["evidence_reference_recorded"] is True
+    assert result["verification_status"] == "PENDING_REVIEW"
+    assert result["outcome_verified"] is False
+
+
+def test_quality_cost_analysis_reconciles_scrap_rework_and_inspection():
+    result = quality_cost_analysis([
+        {"defect_type": "Cracked", "scrap_qty": 2, "scrap_unit_cost": 20, "rework_hours": 2, "rework_cost_per_hour": 10, "inspection_cost": 5},
+        {"defect_type": "Mislabel", "scrap_qty": 0, "scrap_unit_cost": 20, "rework_hours": 1, "rework_cost_per_hour": 10, "inspection_cost": 3},
+    ], "SAR")
+    assert result["totals"]["scrap_cost"] == 40
+    assert result["totals"]["rework_cost"] == 30
+    assert result["totals"]["inspection_cost"] == 8
+    assert result["totals"]["cost_of_poor_quality"] == 78
+
+
+def test_inventory_policy_matches_golden_eoq_and_reorder_point():
+    result = inventory_policy(10000, 25, 4, 100, 20, 4, 1.645)
+    assert result["eoq_units"] == pytest.approx(math.sqrt(125000))
+    assert result["safety_stock_units"] == pytest.approx(65.8)
+    assert result["expected_lead_time_demand_units"] == pytest.approx(400)
+    assert result["reorder_point_units"] == pytest.approx(465.8)
+    with pytest.raises(ValueError, match="must be positive"):
+        inventory_policy(0, 25, 4, 100, 20, 4, 1.645)
+
+
+def test_abc_xyz_segments_selected_period_value_and_variability():
+    data = pd.DataFrame([
+        {"SKU": "B", "unit_cost": 100, "P1": 2, "P2": 4, "P3": 1},
+        {"SKU": "A", "unit_cost": 10, "P1": 10, "P2": 11, "P3": 9},
+        {"SKU": "C", "unit_cost": 1, "P1": 50, "P2": 50, "P3": 50},
+    ])
+    result = abc_xyz_analysis(data, "SKU", "unit_cost", ["P1", "P2", "P3"])
+    ranked = result["items"].set_index("sku")
+    assert ranked.loc["B", "ABC_class"] == "A"
+    assert ranked.loc["C", "XYZ_class"] == "X"
+    assert set(ranked["ABC_XYZ_class"]) <= {"AX", "AY", "AZ", "BX", "BY", "BZ", "CX", "CY", "CZ"}
+    with pytest.raises(ValueError, match="greater than zero"):
+        abc_xyz_analysis(pd.DataFrame([{"SKU": "A", "unit_cost": 0, "P1": 0}]), "SKU", "unit_cost", ["P1"])
