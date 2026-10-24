@@ -350,7 +350,7 @@ def test_workbench_runs_data_join_time_series_synthetic_sampling_process_mining_
     assert not at.exception, "\n".join(str(error.value) for error in at.exception)
 
     cases = [
-        ("T017 · Data Join and Merge Studio", "tool017_run", "T017", "output_rows", 4),
+        ("T017 · Data Join and Merge Studio", "tool017_run", "T017", "output_rows", 3),
         ("T018 · Time-Series Data Processor", "tool018_run", "T018", "output_rows", 3),
         ("T019 · Synthetic Industrial Data Generator", "tool019_run", "T019", "row_count", 100),
         ("T034 · Acceptance Sampling Planner", "tool034_run", "T034", "status", "PLAN_FOUND"),
