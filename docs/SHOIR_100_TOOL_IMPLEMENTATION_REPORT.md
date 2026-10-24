@@ -13,8 +13,8 @@
 
 ## Initial classification counts
 
-- `IMPLEMENTED_NEEDS_VALIDATION`: 43
-- `FOUNDATION_ONLY`: 52
+- `IMPLEMENTED_NEEDS_VALIDATION`: 47
+- `FOUNDATION_ONLY`: 48
 - `EXTERNAL_CONFIGURATION_REQUIRED`: 5
 
 No entry is marked `VERIFIED_WORKING`. The CSV includes one row for each stable tool ID T001–T100 and all required matrix columns. It distinguishes candidate existing routes from a verified implementation; a candidate mapping is not proof that the target acceptance contract is met.
@@ -47,3 +47,28 @@ The T016 Unit and Currency Converter is newly implemented in this branch as a de
 5. Update `implementation_status` only after evidence exists, attach redacted artifacts, and rerun all CI jobs before a release decision.
 
 **Release decision: NO-GO for workforce/paid production at this checkpoint.** The focused branch changes are under test/review. The full 100-tool acceptance matrix, authenticated route/action/export matrix, live integrations and production rollout checks are not complete.
+
+
+## Continuation tranche — 24 October 2026
+
+The additive continuation branch feat/shoir-100-tool-methods-wave-2026-10-24 adds eight deterministic methods and places them inside the existing Workbench areas. It does not add eight top-level navigation links or redesign the shell.
+
+- **T013 Data Quality Profiler (Starter):** missingness, duplicate rows, types, numeric summaries and IQR review flags; read-only behavior.
+- **T017 Data Join and Merge Studio (Mid-Tier Pro):** staged CSV right-hand table, explicit keys/join type/cardinality, null-key rejection, row reconciliation, and blocked many-to-many joins unless explicitly confirmed.
+- **T018 Time-Series Data Processor (Mid-Tier Pro):** timestamp parsing/UTC normalization, chosen output timezone, stable sorting, invalid/duplicate timestamps, gap screening and optional declared resampling.
+- **T019 Synthetic Industrial Data Generator (Starter):** seeded, reproducible synthetic operational rows; data is visibly labelled SYNTHETIC and replacing the active session dataset requires explicit confirmation.
+- **T034 Acceptance Sampling Planner (Professional):** operating-characteristic probabilities for a user-specified large-lot single-sample binomial approximation, with producer/consumer risk labels. It does not claim standards certification or finite-lot correction.
+- **T070 Queueing and Service-System Analyzer (Professional):** analytical steady-state M/M/1 metrics and stability guard; it is not a discrete-event simulator.
+- **T082 Industrial Costing and Variance Analyzer (Mid-Tier Pro):** actual versus standard/plan component reconciliation in a declared currency, with favorable/unfavorable variance labeling.
+- **T084 Engineering Project Portfolio Scorer (Professional):** visible criteria, normalized weights, min-max normalized ratings, rankings and limited one-weight-at-a-time sensitivity.
+
+New implementation paths:
+- shoir_100_tool_methods.py
+- shoir_100_tool_ui.py
+- tests/test_shoir_100_tool_methods.py
+- Additive call sites in pages/Industrial_Engineering_Workbench.py
+- Updated target records in shoir_100_tool_registry.py and docs/SHOIR_100_TOOL_IMPLEMENTATION_MATRIX.csv
+
+The shared target execution helper rechecks canonical T001–T100 IDs, requires a non-guest actor and recognized package label, and applies the target registry's tier requirement. This does not prove that all legacy direct routes, APIs, Copilot calls or export routes have been independently audited for every bypass.
+
+The eight targets remain IMPLEMENTED_NEEDS_VALIDATION, not VERIFIED_WORKING. Their results are session-scoped in this tranche; durable workspace persistence/re-login, cross-workspace isolation, authenticated desktop/mobile browser walkthrough, and full import/export artifact round trips remain unverified. The current matrix counts are 47 IMPLEMENTED_NEEDS_VALIDATION, 48 FOUNDATION_ONLY, 5 EXTERNAL_CONFIGURATION_REQUIRED, and 0 VERIFIED_WORKING. No claim is made that all 100 requested tools are complete.
