@@ -1798,6 +1798,16 @@ if not st.session_state.get("current_user"):
             "available at that level, open an example, and use it to picture how the workflow fits your situation."
         )
 
+        # Add one grouped library entry instead of flooding the public page with
+        # 100 new cards. The library itself exposes a read-only catalog publicly;
+        # calculation actions and internal route diagnostics remain authenticated.
+        st.page_link(
+            "pages/Engineering_Tool_Library.py",
+            label="Browse the 100-tool Engineering Library",
+            icon="🧭",
+            help="Search the ten grouped workbenches, minimum plan tiers and honest readiness statuses.",
+        )
+
         _goal_options = [
             "Any industrial problem",
             "Reduce cost, time, or waste",
@@ -8427,9 +8437,11 @@ if selected_module in ["Facility Layout & Warehousing", "Facility Layout, Materi
             str(st.session_state.get("current_user", "unknown")),
         )
     except Exception as exc:
-        st.error("Facility Layout encountered a recoverable rendering issue.")
+        st.error("Facility Layout could not complete this render. No changes were made to the saved layout.")
         with st.expander("Facility Layout diagnostic", expanded=False):
-            st.code(f"{type(exc).__name__}: {exc}")
+            st.write("Internal exception details are hidden to protect workspace data.")
+            st.caption(f"Diagnostic type: {type(exc).__name__}")
+            st.write("Check the department and flow inputs, then retry. If the issue repeats, share the diagnostic type with support.")
     _shoir_module_stop()
 
 # ==============================================================================

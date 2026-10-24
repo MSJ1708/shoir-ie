@@ -1,3 +1,5 @@
+from io import BytesIO
+
 import pandas as pd
 
 from shoir_facility_layout import _flow_matrix, _slp_frame, _matrix, _slp_heatmap_values
@@ -303,3 +305,144 @@ def test_blank_slp_relationship_remains_missing_not_a_fabricated_score(
     matrix = facility._matrix(departments, slp)
     assert matrix.loc["D1", "D2"] == ""
     assert pd.isna(facility._slp_heatmap_values(matrix).loc["D1", "D2"])
+
+
+
+def test_facility_workbook_export_reopens_and_preserves_model_tables():
+    from shoir_facility_layout import _export_workbook
+
+    depts = _departments()
+    flows = _flows()
+    slp = _slp_frame(depts, flows)
+
+    payload = _export_workbook(depts, flows, slp)
+    assert isinstance(payload, bytes) and payload.startswith(b"PK")
+    assert len(payload) > 1000
+
+    with pd.ExcelFile(BytesIO(payload), engine="openpyxl") as workbook:
+        assert workbook.sheet_names == [
+            "Departments",
+            "From_To_Flows",
+            "SLP_Relationships",
+            "SLP_Matrix",
+        ]
+        exported_depts = pd.read_excel(workbook, sheet_name="Departments")
+        exported_flows = pd.read_excel(workbook, sheet_name="From_To_Flows")
+        exported_slp = pd.read_excel(workbook, sheet_name="SLP_Relationships")
+        exported_matrix = pd.read_excel(workbook, sheet_name="SLP_Matrix")
+
+    assert exported_depts["id"].astype(str).tolist() == ["D1", "D2", "D3"]
+    assert exported_flows.loc[0, "from_id"] == "D1"
+    assert exported_flows.loc[0, "to_id"] == "D2"
+    assert float(exported_flows.loc[0, "loads_day"]) == 120.0
+    assert len(exported_slp) == len(slp)
+    assert exported_matrix.iloc[:, 0].astype(str).tolist() == ["D1", "D2", "D3"]
+    assert list(exported_matrix.columns[1:]) == ["D1", "D2", "D3"]
+
+
+def test_facility_department_persistence_is_isolated_by_owner_and_workspace(
+    tmp_path, monkeypatch
+):
+    facility = _use_temporary_facility_database(tmp_path, monkeypatch)
+
+    facility._save_departments("alpha", "workspace-a", [
+        {"id": "D1", "name": "Alpha Receiving", "x": 10, "y": 10, "area_sqm": 100},
+    ])
+    facility._save_departments("alpha", "workspace-b", [
+        {"id": "D1", "name": "Alpha Workspace B", "x": 20, "y": 20, "area_sqm": 200},
+    ])
+    facility._save_departments("beta", "workspace-a", [
+        {"id": "D1", "name": "Beta Receiving", "x": 30, "y": 30, "area_sqm": 300},
+    ])
+
+    a = facility._load_departments("alpha", "workspace-a")
+    b = facility._load_departments("alpha", "workspace-b")
+    other_user = facility._load_departments("beta", "workspace-a")
+
+    assert a["name"].tolist() == ["Alpha Receiving"]
+    assert b["name"].tolist() == ["Alpha Workspace B"]
+    assert other_user["name"].tolist() == ["Beta Receiving"]
+    assert set(a["name"]).isdisjoint(set(b["name"]))
+    assert set(a["name"]).isdisjoint(set(other_user["name"]))
+
+
+
+def test_flow_distance_cost_summary_matches_hand_checked_load_distance_and_rate():
+    from shoir_facility_layout import _flow_distance_cost_summary
+
+    flows = pd.DataFrame({
+        "loads_day": [10, 5, 0],
+        "distance_m": [2, 4, 100],
+    })
+    summary = _flow_distance_cost_summary(flows, cost_per_load_meter=0.25)
+
+    # 10×2 + 5×4 + 0×100 = 40 load·meters/day; 40×0.25 = SAR 10/day.
+    assert summary["total_load_distance_per_day"] == 40.0
+    assert summary["estimated_handling_cost_per_day"] == 10.0
+    assert summary["cost_per_load_meter"] == 0.25
+
+    no_rate = _flow_distance_cost_summary(flows)
+    assert no_rate["total_load_distance_per_day"] == 40.0
+    assert no_rate["estimated_handling_cost_per_day"] is None
+    assert no_rate["cost_per_load_meter"] is None
+
+
+def test_flow_distance_cost_summary_handles_empty_flows_and_rejects_invalid_measurements():
+    import pytest
+    from shoir_facility_layout import _flow_distance_cost_summary
+
+    empty = pd.DataFrame(columns=["loads_day", "distance_m"])
+    assert _flow_distance_cost_summary(empty)["total_load_distance_per_day"] == 0.0
+    assert _flow_distance_cost_summary(empty)["estimated_handling_cost_per_day"] is None
+    assert _flow_distance_cost_summary(empty, cost_per_load_meter=0.0)["estimated_handling_cost_per_day"] == 0.0
+
+    with pytest.raises(ValueError, match="loads_day must be greater than or equal to 0"):
+        _flow_distance_cost_summary(pd.DataFrame({"loads_day": [-1], "distance_m": [5]}))
+    with pytest.raises(ValueError, match="distance_m must contain finite numeric values"):
+        _flow_distance_cost_summary(pd.DataFrame({"loads_day": [1], "distance_m": ["unknown"]}))
+    with pytest.raises(ValueError, match="cost_per_load_meter must be a finite non-negative number"):
+        _flow_distance_cost_summary(pd.DataFrame({"loads_day": [1], "distance_m": [1]}), -0.5)
+
+
+
+def test_facility_import_rejects_oversized_upload_before_workbook_parser(monkeypatch):
+    import pytest
+    import shoir_upgrade
+    from shoir_facility_layout import _file_to_frames
+
+    class UploadedFile:
+        name = "oversized.xlsx"
+
+        @staticmethod
+        def getvalue():
+            return b"12345"
+
+    monkeypatch.setattr(shoir_upgrade, "MAX_UPLOAD_BYTES", 4)
+    with pytest.raises(ValueError, match="Spreadsheet imports are limited to 0 MB"):
+        _file_to_frames(UploadedFile())
+
+
+
+def test_facility_layout_ui_renders_in_isolated_disposable_workspace(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    import shoir_facility_layout as facility
+    from streamlit.testing.v1 import AppTest
+
+    monkeypatch.setattr(facility, "DB_PATH", str(tmp_path / "facility-ui-smoke.db"))
+    smoke_page = tmp_path / "facility_layout_smoke.py"
+    smoke_page.write_text(
+        "from shoir_facility_layout import render_facility_layout\n"
+        "render_facility_layout('Starter Tier', 'disposable-facility-ui-smoke')\n",
+        encoding="utf-8",
+    )
+
+    at = AppTest.from_file(smoke_page, default_timeout=45)
+    at.run(timeout=45)
+    assert not at.exception, "\n".join(str(exc.value) for exc in at.exception)
+
+    rendered_markdown = "\n".join(item.value for item in at.markdown)
+    assert "Facility Layout & Warehousing Studio" in rendered_markdown
+    assert "From-To load matrix" in rendered_markdown
+    assert "Systematic Layout Planning" in rendered_markdown
+    assert "Export current facility model" in rendered_markdown

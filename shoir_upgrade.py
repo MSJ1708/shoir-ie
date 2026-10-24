@@ -11,6 +11,9 @@ from typing import Iterable, Optional, Tuple, Sequence
 import pandas as pd
 import numpy as np
 
+# Keep all shared spreadsheet entry points on the same resource cap.
+MAX_UPLOAD_BYTES = 75 * 1024 * 1024
+
 EXCEL_FUNCTIONS = [
     ("TRIM", "Remove leading/trailing spaces and collapse repeated spaces."),
     ("CLEAN", "Remove non-printing control characters."),
@@ -206,6 +209,17 @@ def read_uploaded_workbook(raw: bytes, filename: str) -> dict[str,pd.DataFrame]:
     """
     if not raw:
         raise ValueError("The uploaded file is empty.")
+    try:
+        upload_size = len(raw)
+    except (TypeError, OverflowError) as exc:
+        raise ValueError("The uploaded file must be readable bytes.") from exc
+    if upload_size > MAX_UPLOAD_BYTES:
+        size_mb = upload_size / (1024 * 1024)
+        raise ValueError(
+            f"This upload is {size_mb:,.1f} MB. Spreadsheet imports are limited to "
+            f"{MAX_UPLOAD_BYTES / (1024 * 1024):,.0f} MB to keep the application responsive. "
+            "Split the workbook into smaller logical workbooks or save only the required sheets and retry."
+        )
 
     name = str(filename or "").strip()
     lower = name.lower()

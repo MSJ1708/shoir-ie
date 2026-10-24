@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 
 from industrial_platform_excellence import (
-    canonical_tier, tier_allows, deep_data_quality, validate_schema, validate_units,
+    canonical_tier, tier_allows, tier_matrix, module_availability, deep_data_quality, validate_schema, validate_units,
     referential_integrity, constrained_schedule, control_chart, proportion_chart,
     capability_extended, gage_rr_extended, doe_2level_effects, reliability_summary,
     simulation_statistics, warmup_diagnostic, bbox_collision_check, flow_distance,
@@ -13,11 +13,28 @@ from industrial_platform_excellence import (
 
 def test_tiers_and_matrix():
     assert canonical_tier("Starter Tier") == "Starter"
+    assert canonical_tier("Mid-Tier Pro Tier ($79)") == "Mid-Tier Pro"
     assert canonical_tier("Professional Tier ($129)") == "Professional"
     assert canonical_tier("Enterprise Plus Tier ($399)") == "Enterprise Plus"
+    assert canonical_tier("Research Pack ($30 add-on)") == "Research Pack"
+    assert canonical_tier("Super Enterprise") == "UNRESOLVED"
     assert tier_allows("Enterprise Plus Tier", "Enterprise")
-    assert tier_allows("Research Pack", "Enterprise Plus")
+    assert tier_allows("Research Pack", "Enterprise")
+    assert tier_allows("Research Pack", "Research Pack")
+    assert not tier_allows("Research Pack", "Enterprise Plus")
+    assert not tier_allows("Enterprise Plus", "Research Pack")
+    assert not tier_allows("Super Enterprise", "Starter")
+    assert not tier_allows("Enterprise", "Unrecognized requirement")
     assert not tier_allows("Starter", "Enterprise")
+    matrix = tier_matrix()
+    assert matrix["Tier"].tolist() == [
+        "Starter", "Mid-Tier Pro", "Professional", "Enterprise",
+        "Enterprise Plus", "Research Pack (add-on)",
+    ]
+    research_row = matrix[matrix["Tier"] == "Research Pack (add-on)"].iloc[0]
+    assert "not Enterprise Plus" in research_row["Module Limit"]
+    unresolved = module_availability("Super Enterprise")
+    assert not bool(unresolved["Available"].any())
 
 def test_validation():
     df=pd.DataFrame({"ID":["A","B","B"],"Value":[1,2,np.nan]})

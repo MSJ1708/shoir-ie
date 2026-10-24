@@ -22,7 +22,7 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
-MAX_UPLOAD_BYTES = 75 * 1024 * 1024
+from shoir_upgrade import MAX_UPLOAD_BYTES  # canonical limit shared with other import routes
 
 
 def _load_primitives():

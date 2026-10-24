@@ -2,7 +2,7 @@ import ast
 import csv
 from pathlib import Path
 
-from shoir_tier_capabilities import (MODULE_REQUIREMENTS, TIER_ORDER, audit_module_entitlement_coverage, available_modules, copilot_gate, module_required_tier, normalize_tier, tier_allows)
+from shoir_tier_capabilities import (COPILOT_TOOL_REQUIREMENTS, MODULE_REQUIREMENTS, TIER_ORDER, audit_module_entitlement_coverage, available_modules, copilot_gate, module_required_tier, normalize_tier, tier_allows)
 from industrial_platform import PLATFORM_CATALOG, TIER_FEATURES, tier_allows as platform_tier_allows
 
 
@@ -15,6 +15,41 @@ def test_tier_order_and_research_are_distinct():
     assert tier_allows("Research Pack", "Research Pack")
     assert not tier_allows("Research Pack", "Enterprise Plus")
     assert not tier_allows("Enterprise Plus", "Research Pack")
+
+def test_unknown_tiers_and_unknown_required_levels_fail_closed():
+    assert normalize_tier("Super Enterprise") == "UNRESOLVED"
+    assert normalize_tier("premium-but-unrecognized") == "UNRESOLVED"
+    assert not tier_allows("Super Enterprise", "Starter")
+    assert not tier_allows("Enterprise", "unrecognized protected tier")
+    assert not tier_allows("", "Starter")
+
+
+def test_unmapped_module_names_are_not_assumed_to_be_free():
+    candidates = ["AI Copilot", "Module with no explicit policy"]
+    assert available_modules("Enterprise", candidates) == ["AI Copilot"]
+    assert available_modules("unknown package", candidates) == []
+    assert available_modules("Research Pack ($30 add-on)", candidates) == ["AI Copilot"]
+
+
+def test_copilot_protected_actions_fail_closed_for_unresolved_tier():
+    gate = copilot_gate("execute MILP optimization", "Super Enterprise")
+    assert gate is not None
+    assert gate["current_tier"] == "UNRESOLVED"
+    assert "could not be verified" in gate["message"]
+
+def test_all_target_ids_and_names_are_enforced_by_copilot_policy():
+    from shoir_100_tool_registry import TOOL_TARGETS
+    for target in TOOL_TARGETS:
+        canonical = target["canonical_name"].casefold()
+        identifier = target["tool_id"].casefold()
+        assert COPILOT_TOOL_REQUIREMENTS[canonical] == target["target_minimum_tier"]
+        assert COPILOT_TOOL_REQUIREMENTS[identifier] == target["target_minimum_tier"]
+    gate = copilot_gate("run T066 bin packing", "Starter Tier")
+    assert gate is not None
+    assert gate["required_tier"] == "Professional"
+    gate = copilot_gate("run Cutting Stock and Bin Packing", "Mid-Tier Pro")
+    assert gate is not None
+    assert gate["required_tier"] == "Professional"
 
 
 def test_platform_tier_gate_matches_shared_research_add_on_policy():

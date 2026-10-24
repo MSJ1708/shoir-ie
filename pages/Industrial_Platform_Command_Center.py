@@ -13,11 +13,37 @@ import html
 
 from industrial_experience import ensure_experience_db, feature_stats, feature_catalog
 from industrial_platform import (
-    PLATFORM_CATALOG, TIER_FEATURES, normalize_tier, tier_allows,
+    PLATFORM_CATALOG, TIER_FEATURES, tier_allows,
     init_platform_db, data_quality_report, model_health, scenario_table,
 )
+from shoir_tier_capabilities import normalize_tier, TIER_ORDER, tier_allows
 
 st.set_page_config(page_title="Shoir-IE Command Center", page_icon="🏭", layout="wide")
+
+# The command center exposes workspace and platform health data. Direct page URLs
+# must not receive a privileged default package or initialize protected views.
+_CURRENT_USER = str(st.session_state.get("current_user") or "").strip()
+_IS_AUTHENTICATED = bool(st.session_state.get("authenticated")) and bool(_CURRENT_USER)
+_RAW_TIER = st.session_state.get("user_tier")
+_POLICY_TIER = normalize_tier(_RAW_TIER)
+
+if not _IS_AUTHENTICATED:
+    st.title("Shoir-IE Industrial Decision Command Center")
+    st.warning("Sign in to Shoir-IE before opening the command center.")
+    st.info("Return to the main Shoir-IE application page to sign in; this protected command center has been stopped.")
+    st.stop()
+
+if _POLICY_TIER not in TIER_ORDER:
+    st.title("Shoir-IE Industrial Decision Command Center")
+    st.error("Your package could not be verified. Sign in again; protected platform views are unavailable until access is verified.")
+    st.info("Return to the main Shoir-IE application page to sign in; this protected command center has been stopped.")
+    st.stop()
+
+if not tier_allows(_POLICY_TIER, "Enterprise"):
+    st.title("Shoir-IE Industrial Decision Command Center")
+    st.warning("The Command Center requires Enterprise-level access. This package can still use the tools available in its current Workbench.")
+    st.stop()
+
 init_platform_db()
 ensure_experience_db()
 
@@ -30,8 +56,8 @@ st.markdown("""
 <div class="cc-hero"><div class="cc-kicker">Industrial Decision Platform</div><div class="cc-title">🏭 Industrial Decision Command Center</div><div style="color:#64748b">One operational view for digital thread, models, scenarios, decisions, MES, telemetry and governance.</div></div>
 """,unsafe_allow_html=True)
 
-tier = st.session_state.get("user_tier", "Enterprise Plus Tier")
-user = st.session_state.get("current_user", "unknown")
+tier = _POLICY_TIER
+user = _CURRENT_USER
 
 # Shared platform health
 with sqlite3.connect("enterprise_full_workspace.db") as c:
