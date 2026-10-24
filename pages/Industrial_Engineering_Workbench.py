@@ -380,7 +380,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                 "Copilot action, API and export path must enforce their own server-side entitlement checks."
             )
 
-            if selected_tool["tool_id"] in {"T016", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T038", "T040", "T042", "T055", "T056", "T066", "T070", "T075", "T078", "T081", "T082", "T083", "T085"}:
+            if selected_tool["tool_id"] in {"T016", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T038", "T040", "T042", "T043", "T047", "T054", "T055", "T056", "T066", "T070", "T075", "T078", "T081", "T082", "T083", "T084", "T085"}:
                 st.markdown("---")
                 st.markdown("**Run focused specialist method**")
                 st.caption(
@@ -686,6 +686,51 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                             roi_outcome_evidence = st.text_input("Post-change evidence reference", key="tool083_outcome_evidence")
                             roi_verifier = st.text_input("Independent verifier / reviewer", key="tool083_verifier")
                             run_method = st.form_submit_button("Calculate ROI (verification remains required)", type="primary", use_container_width=True, key="tool083_run")
+                        elif selected_tool["tool_id"] == "T043":
+                            st.caption("Interval-based due-date planner. It does not optimize labor, parts or downtime windows.")
+                            pm_tasks_json = st.text_area(
+                                "Maintenance tasks (JSON list: asset, task, last_completed_date, interval_days, estimated_duration_hours, required_skill, owner)",
+                                value='[{"asset":"CNC-01","task":"Lubrication","last_completed_date":"2026-10-01","interval_days":20,"estimated_duration_hours":1.5,"required_skill":"Mechanical","owner":""},{"asset":"CNC-01","task":"Inspection","last_completed_date":"2026-10-20","interval_days":7,"estimated_duration_hours":1,"required_skill":"Technician","owner":""}]',
+                                key="tool043_tasks",
+                            )
+                            pm_as_of_date = st.text_input("Plan as-of date (YYYY-MM-DD)", "2026-10-24", key="tool043_as_of")
+                            run_method = st.form_submit_button("Calculate maintenance due list", type="primary", use_container_width=True, key="tool043_run")
+                        elif selected_tool["tool_id"] == "T047":
+                            st.caption("Screening register only, not a certified or legally sufficient site safety assessment.")
+                            hazard_json = st.text_area(
+                                "Hazards (JSON list with hazard, severity 1–5, likelihood 1–5 and optional controls/action/residual ratings)",
+                                value='[{"hazard":"Moving conveyor","activity":"Clearing jam","consequence":"Entanglement injury","severity":5,"likelihood":3,"controls":"Lockout/tagout procedure; verify isolation","residual_severity":5,"residual_likelihood":1,"required_action":"Confirm isolation procedure and training","owner":"Safety lead","review_date":"2026-11-01"}]',
+                                key="tool047_hazards",
+                            )
+                            run_method = st.form_submit_button("Screen and review hazards", type="primary", use_container_width=True, key="tool047_run")
+                        elif selected_tool["tool_id"] == "T054":
+                            st.caption("One-level BOM explosion only. Provide the current validated BOM; this does not recursively explode subassemblies.")
+                            mrp_bom_json = st.text_area(
+                                "Bill of materials (JSON list: component, qty_per_parent, lead_time_periods, lot_size_multiple)",
+                                value='[{"component":"Screw","qty_per_parent":4,"lead_time_periods":2,"lot_size_multiple":10},{"component":"Bolt","qty_per_parent":2,"lead_time_periods":1,"lot_size_multiple":1}]',
+                                key="tool054_bom",
+                            )
+                            mrp_inventory_json = st.text_area(
+                                "Component inventory (JSON object keyed by component)",
+                                value='{"Screw":{"on_hand":20,"scheduled_receipts":0,"safety_stock":5},"Bolt":{"on_hand":30,"scheduled_receipts":0,"safety_stock":0}}',
+                                key="tool054_inventory",
+                            )
+                            mrp_parent_demand = st.number_input("Parent-assembly demand (whole units)", min_value=1, value=10, step=1, key="tool054_demand")
+                            mrp_due_period = st.number_input("Demand due period index (0 = current period)", min_value=-120, max_value=120, value=0, step=1, key="tool054_due")
+                            run_method = st.form_submit_button("Calculate component requirements", type="primary", use_container_width=True, key="tool054_run")
+                        elif selected_tool["tool_id"] == "T084":
+                            st.caption("Criterion weights are subjective inputs. Scores are normalized direction-aware; sensitivity analysis is not yet included.")
+                            portfolio_criteria_json = st.text_area(
+                                "Criteria (JSON list: name, weight, direction maximize/minimize)",
+                                value='[{"name":"Cost","weight":2,"direction":"minimize"},{"name":"Quality","weight":1,"direction":"maximize"}]',
+                                key="tool084_criteria",
+                            )
+                            portfolio_alternatives_json = st.text_area(
+                                "Project alternatives (JSON list: name and scores object keyed by criterion)",
+                                value='[{"name":"Project A","scores":{"Cost":100,"Quality":70}},{"name":"Project B","scores":{"Cost":200,"Quality":90}}]',
+                                key="tool084_alternatives",
+                            )
+                            run_method = st.form_submit_button("Score project portfolio", type="primary", use_container_width=True, key="tool084_run")
                         elif selected_tool["tool_id"] == "T085":
                             st.caption("Balanced, independent, two-sided two-sample t-test; normal outcomes and equal-variance assumptions.")
                             effect_size = st.number_input(
@@ -790,6 +835,14 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                         current_tool_inputs = {"standard_quantity_per_unit": cost_standard_qty_per_unit, "actual_output_units": cost_actual_output, "actual_input_quantity": cost_actual_input, "standard_unit_cost": cost_standard_price, "actual_unit_cost": cost_actual_price, "currency": cost_currency, "period": cost_period}
                     elif selected_tool["tool_id"] == "T083":
                         current_tool_inputs = {"baseline_cost": roi_baseline, "post_change_cost": roi_post, "implementation_cost": roi_implementation, "currency": roi_currency, "measurement_window": roi_window, "baseline_evidence": roi_baseline_evidence, "outcome_evidence": roi_outcome_evidence, "verifier": roi_verifier}
+                    elif selected_tool["tool_id"] == "T043":
+                        current_tool_inputs = {"tasks_json": pm_tasks_json, "as_of_date": pm_as_of_date}
+                    elif selected_tool["tool_id"] == "T047":
+                        current_tool_inputs = {"hazards_json": hazard_json}
+                    elif selected_tool["tool_id"] == "T054":
+                        current_tool_inputs = {"bom_json": mrp_bom_json, "inventory_json": mrp_inventory_json, "parent_demand_units": mrp_parent_demand, "due_period": int(mrp_due_period)}
+                    elif selected_tool["tool_id"] == "T084":
+                        current_tool_inputs = {"criteria_json": portfolio_criteria_json, "alternatives_json": portfolio_alternatives_json}
                     elif selected_tool["tool_id"] == "T016":
                         current_tool_inputs = {"amount": amount_to_convert, "source_unit": source_unit, "target_unit": target_unit, "exchange_rate": exchange_rate_value, "exchange_rate_date": exchange_rate_date_value, "exchange_rate_source": exchange_rate_source_value}
                     elif selected_tool["tool_id"] == "T031":
@@ -829,6 +882,8 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 balance_production_line, analyze_bottleneck_capacity,
                                 build_value_stream_map, analyze_fmea, analyze_mm1_queue,
                                 analyze_industrial_cost_variance, calculate_roi_evidence,
+                                plan_preventive_maintenance, assess_job_hazards,
+                                plan_material_requirements, score_project_portfolio,
                             )
                             if selected_tool["tool_id"] == "T021":
                                 try:
@@ -1040,6 +1095,30 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 result = analyze_industrial_cost_variance(cost_standard_qty_per_unit, cost_actual_output, cost_actual_input, cost_standard_price, cost_actual_price, currency=cost_currency, period=cost_period)
                             elif selected_tool["tool_id"] == "T083":
                                 result = calculate_roi_evidence(roi_baseline, roi_post, roi_implementation, currency=roi_currency, measurement_window=roi_window, baseline_evidence=roi_baseline_evidence, outcome_evidence=roi_outcome_evidence, verifier=roi_verifier)
+                            elif selected_tool["tool_id"] == "T043":
+                                parsed_pm_tasks = json.loads(pm_tasks_json)
+                                if not isinstance(parsed_pm_tasks, list):
+                                    raise ValueError("Maintenance tasks must be a JSON list of task objects.")
+                                result = plan_preventive_maintenance(parsed_pm_tasks, pm_as_of_date)
+                            elif selected_tool["tool_id"] == "T047":
+                                parsed_hazards = json.loads(hazard_json)
+                                if not isinstance(parsed_hazards, list):
+                                    raise ValueError("Hazards must be a JSON list of hazard objects.")
+                                result = assess_job_hazards(parsed_hazards)
+                            elif selected_tool["tool_id"] == "T054":
+                                parsed_bom = json.loads(mrp_bom_json)
+                                parsed_inventory = json.loads(mrp_inventory_json)
+                                if not isinstance(parsed_bom, list):
+                                    raise ValueError("BOM must be a JSON list of component objects.")
+                                if not isinstance(parsed_inventory, dict):
+                                    raise ValueError("Inventory must be a JSON object keyed by component.")
+                                result = plan_material_requirements(parsed_bom, mrp_parent_demand, inventory=parsed_inventory, due_period=int(mrp_due_period))
+                            elif selected_tool["tool_id"] == "T084":
+                                parsed_criteria = json.loads(portfolio_criteria_json)
+                                parsed_alternatives = json.loads(portfolio_alternatives_json)
+                                if not isinstance(parsed_criteria, list) or not isinstance(parsed_alternatives, list):
+                                    raise ValueError("Portfolio criteria and alternatives must each be JSON lists.")
+                                result = score_project_portfolio(parsed_criteria, parsed_alternatives)
                             elif selected_tool["tool_id"] == "T085":
                                 result = plan_two_sample_t_sample_size(
                                     effect_size, alpha, target_power,
@@ -1051,7 +1130,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                         except Exception as exc:
                             st.error(f"Tool run could not be completed safely: {exc}")
 
-                    if selected_tool["tool_id"] in {"T024", "T025", "T027", "T038", "T070", "T082", "T083"}:
+                    if selected_tool["tool_id"] in {"T024", "T025", "T027", "T038", "T043", "T047", "T054", "T070", "T082", "T083", "T084"}:
                         result = st.session_state.get("shoir_tool_result_" + selected_tool["tool_id"])
                         if result:
                             _show_focused_tool_persistence(selected_tool["tool_id"], result, current_tool_inputs)
