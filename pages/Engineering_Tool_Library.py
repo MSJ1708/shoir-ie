@@ -19,6 +19,7 @@ from shoir_100_tool_quality_engines import build_capa_8d_record, score_fmea_regi
 from shoir_100_tool_asset_engines import plan_preventive_maintenance, plan_spare_part_criticality, score_supplier_performance
 from shoir_100_tool_sustainability_engines import analyze_energy_intensity, analyze_water_waste_efficiency, calculate_roi_evidence
 from shoir_100_tool_decision_engines import (build_hazard_register, reconcile_sop_scenario, solve_assignment_cost_matrix, compare_capacity_scenarios, score_project_portfolio, build_hypothesis_evidence_register, evaluate_kpi_thresholds)
+from shoir_100_tool_data_quality_engines import CANONICAL_INDUSTRIAL_FIELDS, map_industrial_fields, analyze_safety_incident_trends
 
 from shoir_100_tool_registry import (
     TOOL_TARGETS, TOOL_STATUSES, TOOL_TIER_ORDER, WORKBENCHES,
@@ -314,7 +315,77 @@ if rows:
                     "Your data was not changed. Use the normal Workbench navigation."
                 )
 
-        if selected_id == "T016":
+        if selected_id == "T015":
+            st.warning("VALIDATION MODE — mapping suggestions are based on field names, not proven data semantics. Confirm units and business definitions before using downstream calculations.")
+            st.markdown("### Industrial Field Mapper")
+            st.caption("Original field names are retained. Upload an optional CSV or edit the synthetic example, then confirm each suggested canonical field.")
+            upload = st.file_uploader("Optional industrial source CSV", type=["csv"], key="t015_field_upload")
+            source = "SYNTHETIC"
+            sample = pd.DataFrame({
+                "Asset ID":["A-01","A-02","A-03"],
+                "Produced Units":[120,95,110],
+                "downtime_minutes":[5.0,12.0,4.0],
+                "kWh":[28.0,24.0,27.0],
+                "custom_field":["example","example","example"],
+            })
+            editor_key = "t015_field_synthetic_editor"
+            upload_error = None
+            if upload is not None:
+                try:
+                    raw = upload.getvalue()
+                    if len(raw) > 10 * 1024 * 1024:
+                        raise ValueError("CSV exceeds the 10 MiB limit")
+                    sample = pd.read_csv(io.BytesIO(raw))
+                    if sample.empty:
+                        raise ValueError("CSV has no data rows")
+                    if sample.shape[1] > 200:
+                        raise ValueError("CSV has more than 200 columns")
+                    source = "IMPORTED"
+                    editor_key = "t015_field_import_" + hashlib.sha256(raw).hexdigest()[:12]
+                except Exception as exc:
+                    upload_error = f"Source CSV rejected ({type(exc).__name__}). Previous source/result is unchanged."
+            if upload_error:
+                st.error(upload_error)
+            if sample.shape[1] == 0:
+                st.info("Provide at least one source column.")
+            else:
+                source_frame = st.data_editor(sample, num_rows="dynamic", use_container_width=True, key=editor_key, hide_index=True)
+                field_ids = list(CANONICAL_INDUSTRIAL_FIELDS)
+                manual_mapping = {}
+                if source_frame.columns.tolist():
+                    st.markdown("**Column mapping review**")
+                    for column in source_frame.columns:
+                        suggested = map_industrial_fields([str(column)])["mapping_table"].iloc[0]["canonical_field"]
+                        options = ["Auto-suggest (review)", "Leave unmapped", *field_ids]
+                        default_option = "Auto-suggest (review)" if suggested else "Leave unmapped"
+                        selected = st.selectbox(
+                            f"{column} → canonical field",
+                            options,
+                            index=options.index(default_option),
+                            format_func=lambda value, suggestion=suggested: (
+                                f"Auto-suggest: {CANONICAL_INDUSTRIAL_FIELDS[suggestion]['label']}" if value == "Auto-suggest (review)" and suggestion
+                                else ("Auto-suggest (no match)" if value == "Auto-suggest (review)" else ("Leave unmapped" if value == "Leave unmapped" else CANONICAL_INDUSTRIAL_FIELDS[value]["label"]))
+                            ),
+                            key="t015_map_" + hashlib.sha1(str(column).encode("utf-8")).hexdigest()[:12],
+                        )
+                        if selected == "Auto-suggest (review)":
+                            continue
+                        manual_mapping[str(column)] = "" if selected == "Leave unmapped" else selected
+                signature = _fingerprint(source_frame.to_json(orient="split", date_format="iso"), manual_mapping, source)
+                saved = None if upload_error else _run_engine_tool(
+                    "T015", signature, "Preview canonical field mapping",
+                    lambda: map_industrial_fields([str(col) for col in source_frame.columns], manual_mapping),
+                )
+                if saved and saved.get("signature") == signature:
+                    table = saved["result"].get("mapping_table")
+                    if isinstance(table, pd.DataFrame):
+                        st.dataframe(table, use_container_width=True, hide_index=True)
+                    st.caption(
+                        f"Source: {source} · original columns preserved · "
+                        f"canonical dictionary: {saved['result'].get('metrics', {}).get('canonical_dictionary_version')}"
+                    )
+
+        elif selected_id == "T016":
             st.warning("VALIDATION MODE — currency rates are user-supplied and dated; this is not a live FX feed.")
             st.markdown("### Unit and currency converter")
             amount = st.number_input("Amount", value=100.0, step=1.0, key="t016_amount")
@@ -1120,6 +1191,35 @@ if rows:
             ]), num_rows="dynamic", use_container_width=True, key="t047_hazard_editor", hide_index=True)
             signature = _fingerprint(hazard_frame.to_json(orient="split", date_format="iso"))
             _run_engine_tool("T047", signature, "Score and save hazard register", lambda: build_hazard_register(hazard_frame))
+
+        elif selected_id == "T050":
+            st.warning("LIMITED VALIDATION MODE — rate trends depend on complete exposure-hour denominators and consistent reporting rules. Trends are not causal findings or a certified safety audit.")
+            st.markdown("### Safety Incident Trend Analyzer")
+            st.caption("Enter one row per period and incident category. Exposure hours must be repeated consistently across categories within the same period; they are counted once in the denominator.")
+            incidents = st.data_editor(pd.DataFrame([
+                {"period":"2026-Q1","incident_category":"Slip / trip","incident_count":2,"exposure_hours":10000.0},
+                {"period":"2026-Q1","incident_category":"Pinch point","incident_count":1,"exposure_hours":10000.0},
+                {"period":"2026-Q2","incident_category":"Slip / trip","incident_count":1,"exposure_hours":12000.0},
+                {"period":"2026-Q2","incident_category":"Pinch point","incident_count":0,"exposure_hours":12000.0},
+            ]), num_rows="dynamic", use_container_width=True, key="t050_incident_editor", hide_index=True)
+            rate_denominator = st.selectbox("Rate denominator (exposure hours)", [1000.0, 10000.0, 200000.0], index=2, key="t050_rate_denominator")
+            signature = _fingerprint(incidents.to_json(orient="split", date_format="iso"), rate_denominator)
+            saved = _run_engine_tool(
+                "T050", signature, "Analyze incident counts and rates",
+                lambda: analyze_safety_incident_trends(incidents, rate_denominator_hours=rate_denominator),
+            )
+            if saved and saved.get("signature") == signature:
+                result = saved["result"]
+                period_table = result.get("period_summary")
+                category_table = result.get("category_summary")
+                if isinstance(period_table, pd.DataFrame) and not period_table.empty:
+                    st.markdown("**Rate by period**")
+                    st.line_chart(period_table.set_index("period")["incidents_per_rate_denominator_hours"])
+                    st.dataframe(period_table, use_container_width=True, hide_index=True)
+                if isinstance(category_table, pd.DataFrame) and not category_table.empty:
+                    st.markdown("**Reported incident categories**")
+                    st.bar_chart(category_table.set_index("incident_category")["incident_count"])
+                    st.dataframe(category_table, use_container_width=True, hide_index=True)
 
         elif selected_id == "T051":
             st.warning("LIMITED VALIDATION MODE — compares only a naive last-value baseline and a rolling moving average; no seasonality, exogenous variables or prediction intervals are inferred.")
