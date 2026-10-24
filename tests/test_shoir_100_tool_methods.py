@@ -9,6 +9,9 @@ from scipy.stats import binom
 
 from shoir_100_tool_methods import (
     a3_improvement, abc_xyz_analysis, acceptance_sampling_oc, audit_5s,
+    capa_completeness, fmea_prioritization, hazard_risk_register, map_industrial_fields,
+    preventive_maintenance_plan, preview_reversible_cleaning, spare_parts_criticality,
+    value_stream_summary,
     bin_pack_1d, bottleneck_analysis, cost_variance, forecast_drift_report,
     generate_synthetic_industrial_data, inventory_policy, join_dataframes,
     line_balance, mm1_queue, mtbf_mttr_analysis, oee_analysis, portfolio_score, process_time_series,
@@ -335,3 +338,100 @@ def test_price_bearing_app_tier_labels_are_mapped_without_cross_package_access(t
     else:
         with pytest.raises(PermissionError):
             require_tool_access(tier, tool_id, "disposable-test-user")
+
+
+
+def test_reversible_cleaner_returns_candidate_and_change_log_without_mutating_source():
+    source = pd.DataFrame({"part": [" A ", "B", "B"], "qty": [1, None, None]})
+    before = source.copy(deep=True)
+    result = preview_reversible_cleaning(source, trim_strings=True, duplicate_policy="drop_exact", missing_policy="fill_value", fill_value=0)
+    pd.testing.assert_frame_equal(source, before)
+    assert result["apply_confirmed"] is False
+    assert result["candidate"]["part"].tolist() == ["A", "B"]
+    assert result["missing_cells_after"] == 0
+    assert result["exact_duplicate_rows_removed"] == 1
+    with pytest.raises(ValueError, match="remove every row"):
+        preview_reversible_cleaning(pd.DataFrame({"a": [None, None]}), missing_policy="drop_rows")
+
+
+def test_industrial_field_mapper_preserves_source_and_blocks_duplicate_targets():
+    source = pd.DataFrame({"Equipment Tag": ["M1", "M2"], "Cycles": [1, 2]})
+    result = map_industrial_fields(source, {"asset_id": "Equipment Tag", "cycle_count": "Cycles"})
+    assert list(result["mapped"].columns) == ["asset_id", "cycle_count"]
+    pd.testing.assert_frame_equal(result["source"], source)
+    with pytest.raises(ValueError, match="duplicate column names"):
+        map_industrial_fields(pd.DataFrame({"A": [1], "asset_id": [2]}), {"asset_id": "A"})
+
+
+def test_value_stream_summary_reconciles_takt_process_queue_and_va_ratio():
+    result = value_stream_summary([
+        {"stage": "Cut", "cycle_time_seconds": 60, "changeover_minutes": 5, "wip_units": 10, "value_added": True},
+        {"stage": "Pack", "cycle_time_seconds": 30, "changeover_minutes": 2, "wip_units": 20, "value_added": False},
+    ], demand_units=60, available_minutes_per_period=480, period_label="shift")
+    assert result["takt_time_minutes_per_unit"] == pytest.approx(8)
+    assert result["total_process_cycle_minutes"] == pytest.approx(1.5)
+    assert result["total_value_added_minutes"] == pytest.approx(1)
+    assert result["estimated_queue_wait_minutes"] == pytest.approx(240)
+    with pytest.raises(ValueError, match="positive"):
+        value_stream_summary([{"stage": "Cut", "cycle_time_seconds": 60}], 0, 480)
+
+
+def test_fmea_computes_rpn_and_keeps_rating_rationale_inputs():
+    result = fmea_prioritization([
+        {"failure_mode": "Jam", "severity": 8, "occurrence": 4, "detection": 6, "recommended_action": "Inspect guide"},
+        {"failure_mode": "Label", "severity": 3, "occurrence": 6, "detection": 3},
+    ])
+    assert result["failure_modes"].iloc[0]["failure_mode"] == "Jam"
+    assert result["failure_modes"].iloc[0]["RPN"] == 192
+    with pytest.raises(ValueError, match="1 through 10"):
+        fmea_prioritization([{"failure_mode": "X", "severity": 0, "occurrence": 1, "detection": 1}])
+
+
+def test_capa_completeness_separates_complete_records_from_incomplete_actions():
+    result = capa_completeness([
+        {"issue": "Repeat defect", "containment": "Hold lot", "root_cause": "Seal worn",
+         "corrective_action": "Replace seal", "owner": "Lead", "due_date": "2026-11-05",
+         "effectiveness_evidence": "quality-run-17"},
+        {"issue": "Late delivery"},
+    ])
+    assert result["ready_for_review_count"] == 1
+    assert result["incomplete_count"] == 1
+    assert result["records"].iloc[0]["readiness"] == "READY_FOR_REVIEW"
+
+
+def test_pm_planner_calculates_next_due_dates_and_overdue_status():
+    result = preventive_maintenance_plan([
+        {"asset_id": "M1", "task": "Lubricate", "interval_days": 30, "last_done_date": "2026-09-01", "duration_hours": 1.5, "required_skill": "Mechanical"},
+        {"asset_id": "M2", "task": "Inspect", "interval_days": 7, "last_done_date": "2026-10-23", "duration_hours": 0.5, "required_skill": "Electrical"},
+    ], "2026-10-24")
+    table = result["tasks"].set_index("task")
+    assert table.loc["Lubricate", "next_due_date"] == "2026-10-01"
+    assert table.loc["Lubricate", "status"] == "OVERDUE"
+    assert table.loc["Inspect", "status"] == "DUE"
+    with pytest.raises(ValueError, match="last_done_date"):
+        preventive_maintenance_plan([{"asset_id": "M1", "task": "x", "interval_days": 30, "last_done_date": "bad", "duration_hours": 1}], "2026-10-24")
+
+
+def test_spare_parts_criticality_computes_reorder_point_and_criticality_priority():
+    result = spare_parts_criticality([
+        {"part_id": "P1", "annual_demand": 365, "unit_cost": 10, "lead_time_days": 4, "daily_demand_std": 2, "stock_on_hand": 2, "criticality_1_to_5": 5},
+        {"part_id": "P2", "annual_demand": 365, "unit_cost": 1, "lead_time_days": 1, "daily_demand_std": 0, "stock_on_hand": 50, "criticality_1_to_5": 2},
+    ], service_z=1)
+    parts = result["parts"].set_index("part_id")
+    assert parts.loc["P1", "reorder_point"] == pytest.approx(8)
+    assert bool(parts.loc["P1", "reorder_needed"]) is True
+    assert parts.index[0] == "P1"
+    with pytest.raises(ValueError, match="integer criticality"):
+        spare_parts_criticality([{"part_id": "P1", "annual_demand": 1, "unit_cost": 1, "lead_time_days": 1, "daily_demand_std": 1, "stock_on_hand": 0, "criticality_1_to_5": 5.5}])
+
+
+def test_hazard_register_distinguishes_inherent_and_residual_risk():
+    result = hazard_risk_register([
+        {"hazard": "Pinch point", "location": "Press 1", "severity": 5, "likelihood": 4,
+         "existing_controls": "Guard", "residual_severity": 5, "residual_likelihood": 2,
+         "owner": "Safety lead", "action": "Verify interlock"},
+    ])
+    row = result["hazards"].iloc[0]
+    assert row["inherent_score"] == 20
+    assert row["residual_score"] == 10
+    assert "not a certified workplace risk assessment" in " ".join(result["warnings"])
