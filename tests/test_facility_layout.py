@@ -364,3 +364,41 @@ def test_facility_department_persistence_is_isolated_by_owner_and_workspace(
     assert other_user["name"].tolist() == ["Beta Receiving"]
     assert set(a["name"]).isdisjoint(set(b["name"]))
     assert set(a["name"]).isdisjoint(set(other_user["name"]))
+
+
+
+def test_flow_distance_cost_summary_matches_hand_checked_load_distance_and_rate():
+    from shoir_facility_layout import _flow_distance_cost_summary
+
+    flows = pd.DataFrame({
+        "loads_day": [10, 5, 0],
+        "distance_m": [2, 4, 100],
+    })
+    summary = _flow_distance_cost_summary(flows, cost_per_load_meter=0.25)
+
+    # 10×2 + 5×4 + 0×100 = 40 load·meters/day; 40×0.25 = SAR 10/day.
+    assert summary["total_load_distance_per_day"] == 40.0
+    assert summary["estimated_handling_cost_per_day"] == 10.0
+    assert summary["cost_per_load_meter"] == 0.25
+
+    no_rate = _flow_distance_cost_summary(flows)
+    assert no_rate["total_load_distance_per_day"] == 40.0
+    assert no_rate["estimated_handling_cost_per_day"] is None
+    assert no_rate["cost_per_load_meter"] is None
+
+
+def test_flow_distance_cost_summary_handles_empty_flows_and_rejects_invalid_measurements():
+    import pytest
+    from shoir_facility_layout import _flow_distance_cost_summary
+
+    empty = pd.DataFrame(columns=["loads_day", "distance_m"])
+    assert _flow_distance_cost_summary(empty)["total_load_distance_per_day"] == 0.0
+    assert _flow_distance_cost_summary(empty)["estimated_handling_cost_per_day"] is None
+    assert _flow_distance_cost_summary(empty, cost_per_load_meter=0.0)["estimated_handling_cost_per_day"] == 0.0
+
+    with pytest.raises(ValueError, match="loads_day must be greater than or equal to 0"):
+        _flow_distance_cost_summary(pd.DataFrame({"loads_day": [-1], "distance_m": [5]}))
+    with pytest.raises(ValueError, match="distance_m must contain finite numeric values"):
+        _flow_distance_cost_summary(pd.DataFrame({"loads_day": [1], "distance_m": ["unknown"]}))
+    with pytest.raises(ValueError, match="cost_per_load_meter must be a finite non-negative number"):
+        _flow_distance_cost_summary(pd.DataFrame({"loads_day": [1], "distance_m": [1]}), -0.5)
