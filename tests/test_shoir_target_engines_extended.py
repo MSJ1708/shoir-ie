@@ -257,3 +257,109 @@ def test_portfolio_score_rejects_duplicate_projects_bad_weights_and_missing_valu
     with pytest.raises(ValueError, match="must supply"):
         score_engineering_portfolio([{"name": "A", "x": 1}, {"name": "B"}], [{"criterion": "x", "weight": 1, "direction": "benefit"}])
 
+
+def test_safety_incident_rates_use_period_exposure_once_and_include_categories():
+    from shoir_target_engines import analyze_safety_incident_trends
+
+    incidents = [
+        {"date": "2026-01-02", "category": "Near miss", "severity": "Low"},
+        {"date": "2026-01-11", "category": "Injury", "severity": "Moderate"},
+        {"date": "2026-02-03", "category": "Near miss", "severity": "Low"},
+    ]
+    result = analyze_safety_incident_trends(
+        incidents,
+        exposure_hours_by_period={"2026-01": 10_000, "2026-02": 20_000},
+    )
+    summary = result["period_summary"].set_index("Period")
+    assert summary.loc["2026-01", "Incident count"] == 2
+    assert summary.loc["2026-01", "Rate per 200000 exposure hours"] == pytest.approx(40.0)
+    assert summary.loc["2026-02", "Rate per 200000 exposure hours"] == pytest.approx(10.0)
+    assert result["incident_count_total"] == 3
+    assert set(result["category_summary"]["category"]) == {"Near miss", "Injury"}
+
+
+def test_safety_incident_trends_reject_bad_records_and_report_missing_denominators():
+    from shoir_target_engines import analyze_safety_incident_trends
+
+    with pytest.raises(ValueError, match="valid date"):
+        analyze_safety_incident_trends([{"date": "not-date", "category": "Injury"}], exposure_hours_by_period={"2026-01": 100})
+    with pytest.raises(ValueError, match="greater than zero"):
+        analyze_safety_incident_trends([{"date": "2026-01-01", "category": "Injury"}], exposure_hours_by_period={"2026-01": 0})
+    result = analyze_safety_incident_trends(
+        [{"date": "2026-01-01", "category": "Injury"}], exposure_hours_by_period={"2026-02": 100}
+    )
+    january = result["period_summary"].set_index("Period").loc["2026-01"]
+    assert pd.isna(january["Rate per 200000 exposure hours"])
+    assert any("No exposure-hour denominator" in message for message in result["warnings"])
+
+
+def test_energy_efficiency_aggregates_periods_and_compares_to_explicit_baseline():
+    from shoir_target_engines import analyze_energy_efficiency
+
+    frame = pd.DataFrame({
+        "period": ["2026-01", "2026-01", "2026-02"],
+        "energy": [100.0, 50.0, 120.0],
+        "output": [50.0, 25.0, 100.0],
+    })
+    result = analyze_energy_efficiency(
+        frame, period_column="period", energy_column="energy", output_column="output",
+        energy_unit="kWh", output_unit="units", baseline_period="2026-01",
+    )
+    table = result["energy_intensity_table"].set_index("Period")
+    assert result["total_energy"] == pytest.approx(270.0)
+    assert table.loc["2026-01", "Energy intensity (kWh/units)"] == pytest.approx(2.0)
+    assert table.loc["2026-02", "Energy intensity (kWh/units)"] == pytest.approx(1.2)
+    assert table.loc["2026-02", "Change from baseline (%)"] == pytest.approx(-40.0)
+
+
+def test_energy_efficiency_requires_valid_columns_values_and_baseline():
+    from shoir_target_engines import analyze_energy_efficiency
+
+    frame = pd.DataFrame({"period": ["A"], "energy": [1], "output": [0]})
+    with pytest.raises(ValueError, match="greater than zero"):
+        analyze_energy_efficiency(frame, period_column="period", energy_column="energy", output_column="output")
+    frame["output"] = [1]
+    with pytest.raises(ValueError, match="does not exist"):
+        analyze_energy_efficiency(frame, period_column="period", energy_column="energy", output_column="output", baseline_period="Z")
+    frame["energy"] = [-1]
+    with pytest.raises(ValueError, match="negative"):
+        analyze_energy_efficiency(frame, period_column="period", energy_column="energy", output_column="output")
+
+
+def test_water_waste_efficiency_reports_intensities_and_balance_warning():
+    from shoir_target_engines import analyze_water_waste_efficiency
+
+    frame = pd.DataFrame({
+        "period": ["2026-01", "2026-02"],
+        "water_in": [100.0, 100.0],
+        "discharge": [30.0, 70.0],
+        "reuse": [20.0, 40.0],
+        "waste": [10.0, 5.0],
+        "output": [50.0, 100.0],
+    })
+    result = analyze_water_waste_efficiency(
+        frame, period_column="period", water_input_column="water_in",
+        discharge_column="discharge", reuse_column="reuse", waste_column="waste",
+        output_column="output", water_unit="m3", waste_unit="kg", output_unit="units",
+    )
+    table = result["efficiency_table"].set_index("Period")
+    assert result["water_input_total"] == pytest.approx(200.0)
+    assert table.loc["2026-01", "Water balance residual"] == pytest.approx(50.0)
+    assert table.loc["2026-01", "Water input intensity (m3/units)"] == pytest.approx(2.0)
+    assert table.loc["2026-02", "Waste intensity (kg/units)"] == pytest.approx(0.05)
+    assert any("Positive water balance residual" in warning for warning in result["warnings"])
+
+
+def test_water_waste_efficiency_rejects_bad_units_columns_and_negative_flows():
+    from shoir_target_engines import analyze_water_waste_efficiency
+
+    frame = pd.DataFrame({
+        "period": ["A"], "water_in": [1], "discharge": [0], "reuse": [0], "waste": [-1], "output": [1],
+    })
+    with pytest.raises(ValueError, match="cannot be negative"):
+        analyze_water_waste_efficiency(
+            frame, period_column="period", water_input_column="water_in",
+            discharge_column="discharge", reuse_column="reuse", waste_column="waste",
+            output_column="output",
+        )
+
