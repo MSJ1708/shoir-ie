@@ -432,16 +432,16 @@ def test_facility_layout_ui_renders_in_isolated_disposable_workspace(tmp_path, m
     monkeypatch.setattr(facility, "DB_PATH", str(tmp_path / "facility-ui-smoke.db"))
     smoke_page = tmp_path / "facility_layout_smoke.py"
     smoke_page.write_text(
-        "from shoir_facility_layout import render_facility_layout\\n"
-        "render_facility_layout('Starter Tier', 'disposable-facility-ui-smoke')\\n",
+        "from shoir_facility_layout import render_facility_layout\n"
+        "render_facility_layout('Starter Tier', 'disposable-facility-ui-smoke')\n",
         encoding="utf-8",
     )
 
     at = AppTest.from_file(smoke_page, default_timeout=45)
     at.run(timeout=45)
-    assert not at.exception, "\\n".join(str(exc.value) for exc in at.exception)
+    assert not at.exception, "\n".join(str(exc.value) for exc in at.exception)
 
-    rendered_markdown = "\\n".join(item.value for item in at.markdown)
+    rendered_markdown = "\n".join(item.value for item in at.markdown)
     assert "Facility Layout & Warehousing Studio" in rendered_markdown
     assert "From-To load matrix" in rendered_markdown
     assert "Systematic Layout Planning" in rendered_markdown
