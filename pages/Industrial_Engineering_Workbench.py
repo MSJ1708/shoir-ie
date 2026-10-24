@@ -21,6 +21,7 @@ import streamlit as st
 import html
 
 from industrial_platform import render_module, PLATFORM_CATALOG, init_platform_db
+from shoir_unit_converter import UNIT_OPTIONS, convert_units, convert_currency
 from industrial_platform_excellence import (
     CANONICAL_TIERS, MODULE_MATRIX, canonical_tier, tier_allows, tier_matrix,
     module_matrix, module_availability, deep_data_quality, validate_schema,
@@ -205,6 +206,144 @@ if selected == "Engineering Validation Center":
         m3.metric("Rows", len(edited))
         render_engineering_result(res,"Validation result","validation_result")
     st.dataframe(edited,use_container_width=True)
+
+    # Add a compact utility to the existing Starter validation module instead
+    # of creating another top-level navigation item or changing the app shell.
+    with st.expander("↔ Unit & Currency Converter · Starter", expanded=False):
+        st.caption(
+            "Physical conversions use deterministic built-in definitions. Currency conversion "
+            "uses a rate you provide with its date and source; this tool does not fetch or guess live FX rates."
+        )
+        conversion_kind = st.radio(
+            "Conversion type",
+            ["Physical units", "Currency"],
+            horizontal=True,
+            key="wb_unit_currency_kind",
+        )
+
+        if conversion_kind == "Physical units":
+            dimensions = list(UNIT_OPTIONS)
+            dimension = st.selectbox("Dimension", dimensions, key="wb_unit_dimension")
+            units = list(UNIT_OPTIONS[dimension])
+            c1, c2, c3 = st.columns([1.1, 1, 1])
+            with c1:
+                unit_value = st.number_input(
+                    "Value", value=1.0, step=1.0, key="wb_unit_value"
+                )
+            with c2:
+                unit_from = st.selectbox(
+                    "From unit", units, index=0, key="wb_unit_from"
+                )
+            with c3:
+                unit_to = st.selectbox(
+                    "To unit", units, index=min(1, len(units) - 1), key="wb_unit_to"
+                )
+            unit_inputs = {
+                "kind": "unit",
+                "value": float(unit_value),
+                "from_unit": unit_from,
+                "to_unit": unit_to,
+            }
+            if st.button("Convert units", key="wb_run_unit_conversion", type="primary"):
+                try:
+                    calculated = convert_units(unit_value, unit_from, unit_to)
+                except ValueError as exc:
+                    st.error(str(exc))
+                else:
+                    st.session_state["wb_unit_currency_result"] = {
+                        "kind": "unit",
+                        "inputs": unit_inputs,
+                        "result": calculated,
+                    }
+            saved = st.session_state.get("wb_unit_currency_result")
+            if saved and saved.get("kind") == "unit":
+                if saved.get("inputs") == unit_inputs:
+                    converted = saved["result"]
+                    st.metric(
+                        "Converted value",
+                        f"{converted['output_value']:,.10g} {converted['to_unit']}",
+                    )
+                    st.caption(
+                        f"Method: {converted['method']} Formula: {converted['formula']} "
+                        f"Status: {converted['status']}."
+                    )
+                    st.caption(converted["provenance"])
+                else:
+                    st.warning("The previous conversion is stale because one or more inputs changed. Run the conversion again.")
+
+        else:
+            currencies = ["SAR", "USD", "EUR", "GBP", "AED", "INR", "JPY", "CNY"]
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                currency_amount = st.number_input(
+                    "Amount", value=100.0, step=10.0, key="wb_currency_amount"
+                )
+                currency_from = st.selectbox(
+                    "Source currency", currencies, index=1, key="wb_currency_from"
+                )
+            with c2:
+                currency_to = st.selectbox(
+                    "Target currency", currencies, index=0, key="wb_currency_to"
+                )
+                fx_rate = st.number_input(
+                    "Target units per 1 source unit",
+                    min_value=0.0,
+                    value=1.0,
+                    step=0.0001,
+                    format="%.8f",
+                    key="wb_currency_rate",
+                    help="Enter the rate from your approved source. No live rate is fetched.",
+                )
+            with c3:
+                fx_date = st.date_input(
+                    "Rate effective date", value=datetime.now().date(), key="wb_currency_date"
+                )
+                fx_source = st.text_input(
+                    "Rate source / reference", value="", key="wb_currency_source",
+                    placeholder="Approved rate sheet, provider, or reference",
+                )
+            currency_inputs = {
+                "kind": "currency",
+                "amount": float(currency_amount),
+                "from_currency": currency_from,
+                "to_currency": currency_to,
+                "rate": float(fx_rate),
+                "rate_date": fx_date.isoformat(),
+                "rate_source": fx_source.strip(),
+            }
+            if st.button("Convert currency", key="wb_run_currency_conversion", type="primary"):
+                try:
+                    calculated = convert_currency(
+                        currency_amount, currency_from, currency_to, fx_rate,
+                        fx_date.isoformat(), fx_source,
+                    )
+                except ValueError as exc:
+                    st.error(str(exc))
+                else:
+                    st.session_state["wb_unit_currency_result"] = {
+                        "kind": "currency",
+                        "inputs": currency_inputs,
+                        "result": calculated,
+                    }
+            saved = st.session_state.get("wb_unit_currency_result")
+            if saved and saved.get("kind") == "currency":
+                if saved.get("inputs") == currency_inputs:
+                    converted = saved["result"]
+                    st.metric(
+                        "Converted amount",
+                        f"{converted['output_value']:,.6g} {converted['to_currency']}",
+                    )
+                    st.caption(
+                        f"Rate: {converted['rate']} {converted['to_currency']} per "
+                        f"1 {converted['from_currency']} · Rate date: "
+                        f"{converted['rate_date'] or 'Not required'} · "
+                        f"Source: {converted['rate_source']}"
+                    )
+                    st.warning(converted["provenance"])
+                    for warning in converted.get("warnings", []):
+                        st.caption(warning)
+                else:
+                    st.warning("The previous currency result is stale because one or more rate/input details changed. Run the conversion again.")
 
 elif selected == "Industrial Data Model & Digital Thread":
     st.subheader("🔗 Industrial Digital Thread")
