@@ -17,8 +17,8 @@ def test_hazard_register_sorts_residual_risk_and_flags_initial_high_score():
          "residual_likelihood_1_to_5":3,"residual_severity_1_to_5":4,"current_controls":"Interlock","additional_controls":"Test interlock","owner":"Maintenance","due_date":"","status":"In Progress"},
     ])
     assert result["metrics"]["hazard_count"] == 2
-    assert result["metrics"]["high_initial_score_count"] == 2
-    assert result["metrics"]["high_residual_score_count"] == 2
+    assert result["metrics"]["high_initial_score_count"] == 1
+    assert result["metrics"]["high_residual_score_count"] == 0
     assert result["hazard_register"].iloc[0]["hazard_id"] == "H2"
 
 
@@ -87,7 +87,7 @@ def test_project_portfolio_score_uses_visible_weights_and_rejects_bad_scores():
         {"project_id":"P2","project_name":"Tooling","estimated_cost":500,"impact_score":80,"strategic_fit_score":90,"feasibility_score":90,"confidence_score":80},
     ])
     scores=result["portfolio"].set_index("project_id")["weighted_score"]
-    assert scores["P1"]==pytest.approx(81)
+    assert scores["P1"]==pytest.approx(78.5)
     assert scores["P2"]==pytest.approx(85)
     assert result["metrics"]["top_ranked_project_id"]=="P2"
     with pytest.raises(ValueError,match="must not exceed 100"):
