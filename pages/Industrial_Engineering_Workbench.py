@@ -22,6 +22,7 @@ import html
 
 from industrial_platform import render_module, PLATFORM_CATALOG, init_platform_db
 from shoir_unit_converter import UNIT_OPTIONS, convert_units, convert_currency
+from shoir_100_tool_registry import TOOL_CATALOG
 from industrial_platform_excellence import (
     CANONICAL_TIERS, MODULE_MATRIX, canonical_tier, tier_allows, tier_matrix,
     module_matrix, module_availability, deep_data_quality, validate_schema,
@@ -344,6 +345,84 @@ if selected == "Engineering Validation Center":
                         st.caption(warning)
                 else:
                     st.warning("The previous currency result is stale because one or more rate/input details changed. Run the conversion again.")
+
+    with st.expander("🧭 Capability Status Center · T009", expanded=False):
+        st.caption(
+            "This is a source/readiness inventory for the 100 target capabilities. "
+            "It does not mean a route has passed authenticated acceptance or that a connector is live."
+        )
+        status_counts = {}
+        for item in TOOL_CATALOG:
+            status_counts[item["implementation_status"]] = status_counts.get(item["implementation_status"], 0) + 1
+        r1, r2, r3, r4 = st.columns(4)
+        r1.metric("Targets inventoried", len(TOOL_CATALOG))
+        r2.metric("Needs validation", status_counts.get("IMPLEMENTED_NEEDS_VALIDATION", 0))
+        r3.metric("Foundation only", status_counts.get("FOUNDATION_ONLY", 0))
+        r4.metric("External config", status_counts.get("EXTERNAL_CONFIGURATION_REQUIRED", 0))
+        st.info(
+            f"Authenticated browser verification: {sum(1 for item in TOOL_CATALOG if str(item.get('browser_test','')).startswith('UNVERIFIED'))} / {len(TOOL_CATALOG)} targets are still unverified. "
+            "No entry in this initial matrix is certified as VERIFIED_WORKING."
+        )
+        available_workbenches = list(dict.fromkeys(item["workbench"] for item in TOOL_CATALOG))
+        readiness_options = [
+            "All statuses",
+            "IMPLEMENTED_NEEDS_VALIDATION",
+            "FOUNDATION_ONLY",
+            "MISSING",
+            "EXTERNAL_CONFIGURATION_REQUIRED",
+            "BLOCKED",
+            "VERIFIED_WORKING",
+        ]
+        fl1, fl2, fl3 = st.columns([1.2, 1.2, 1.8])
+        with fl1:
+            readiness_filter = st.selectbox(
+                "Readiness status",
+                readiness_options,
+                key="wb_capability_status_filter",
+            )
+        with fl2:
+            workbench_filter = st.selectbox(
+                "Workbench",
+                ["All workbenches", *available_workbenches],
+                key="wb_capability_workbench_filter",
+            )
+        with fl3:
+            capability_search = st.text_input(
+                "Search target capabilities",
+                value="",
+                key="wb_capability_status_search",
+                placeholder="Search tool name, ID, route, or remaining gap",
+            )
+        readiness_rows = []
+        for item in TOOL_CATALOG:
+            if readiness_filter != "All statuses" and item["implementation_status"] != readiness_filter:
+                continue
+            if workbench_filter != "All workbenches" and item["workbench"] != workbench_filter:
+                continue
+            haystack = " ".join(
+                str(item.get(field, ""))
+                for field in ("tool_id", "canonical_name", "existing_module_or_route", "remaining_gap")
+            ).lower()
+            if capability_search.strip().lower() not in haystack:
+                continue
+            readiness_rows.append({
+                "ID": item["tool_id"],
+                "Capability": item["canonical_name"],
+                "Workbench": item["workbench"],
+                "Target minimum tier": item["target_minimum_tier"],
+                "Readiness": item["implementation_status"],
+                "Current route / source candidate": item["existing_module_or_route"],
+                "Browser evidence": item["browser_test"],
+                "Remaining gap": item["remaining_gap"],
+            })
+        st.dataframe(
+            pd.DataFrame(readiness_rows),
+            use_container_width=True,
+            hide_index=True,
+        )
+        st.caption(
+            "Target-tier labels describe the requested target catalog. They do not override the existing subscription contract or authorize a route by themselves."
+        )
 
 elif selected == "Industrial Data Model & Digital Thread":
     st.subheader("🔗 Industrial Digital Thread")
