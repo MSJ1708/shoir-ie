@@ -815,3 +815,102 @@ def test_roi_evidence_calculation_never_self_certifies_claimed_savings():
     assert without_evidence["roi_pct"] is None
     assert without_evidence["verification_status"] == "REQUIRES_HUMAN_VERIFICATION"
     assert without_evidence["missing_verification_items"]
+
+
+def test_preventive_maintenance_planner_orders_overdue_tasks_and_validates_dates():
+    from shoir_target_engines import plan_preventive_maintenance
+
+    result = plan_preventive_maintenance(
+        [
+            {"asset": "CNC-01", "task": "Lubrication", "last_completed_date": "2026-10-01",
+             "interval_days": 20, "estimated_duration_hours": 1.5, "required_skill": "Mechanical"},
+            {"asset": "CNC-01", "task": "Inspection", "last_completed_date": "2026-10-20",
+             "interval_days": 7, "estimated_duration_hours": 1, "required_skill": "Technician"},
+        ],
+        "2026-10-24",
+    )
+    assert result["status"] == "PLAN_CALCULATED"
+    assert result["overdue_task_count"] == 1
+    assert result["due_within_7_days_count"] == 1
+    assert result["total_estimated_labor_hours"] == pytest.approx(2.5)
+    assert result["maintenance_plan"].iloc[0]["Maintenance task"] == "Lubrication"
+    assert result["maintenance_plan"].iloc[0]["Days until due"] == -3
+    with pytest.raises(ValueError, match="ISO date"):
+        plan_preventive_maintenance([{"asset": "A", "task": "PM", "last_completed_date": "bad", "interval_days": 10}], "2026-10-24")
+
+
+def test_hazard_screen_scores_and_separates_residual_risk_and_missing_controls():
+    from shoir_target_engines import assess_job_hazards
+
+    result = assess_job_hazards([
+        {"hazard": "Moving conveyor", "activity": "Clearing jam", "severity": 5, "likelihood": 4,
+         "controls": "Isolate and lock out", "residual_severity": 5, "residual_likelihood": 1,
+         "owner": "Shift supervisor"},
+        {"hazard": "Manual handling", "severity": 3, "likelihood": 2},
+    ])
+    assert result["status"] == "HAZARD_SCREEN_REQUIRES_QUALIFIED_REVIEW"
+    assert result["high_screen_score_count"] == 1
+    assert result["missing_controls_count"] == 1
+    assert result["unassigned_actions_count"] == 1
+    first = result["hazard_register"].iloc[0]
+    assert first["Hazard"] == "Moving conveyor"
+    assert first["Initial risk score"] == 20
+    assert first["Residual risk score"] == 5
+    assert result["hazard_register"].iloc[1]["Residual risk score"] is None or pd.isna(result["hazard_register"].iloc[1]["Residual risk score"])
+    with pytest.raises(ValueError, match="whole number from 1 through 5"):
+        assess_job_hazards([{"hazard": "Bad rating", "severity": 6, "likelihood": 1}])
+
+
+def test_one_level_mrp_calculates_net_requirements_lot_multiple_and_release_period():
+    from shoir_target_engines import plan_material_requirements
+
+    result = plan_material_requirements(
+        [
+            {"component": "Screw", "qty_per_parent": 4, "lead_time_periods": 2, "lot_size_multiple": 10},
+            {"component": "Bolt", "qty_per_parent": 2, "lead_time_periods": 1},
+        ],
+        10,
+        inventory={
+            "Screw": {"on_hand": 20, "scheduled_receipts": 0, "safety_stock": 5},
+            "Bolt": {"on_hand": 30, "scheduled_receipts": 0, "safety_stock": 0},
+        },
+        due_period=0,
+    )
+    assert result["status"] == "ONE_LEVEL_MRP_CALCULATED"
+    assert result["total_gross_component_requirement"] == pytest.approx(60)
+    assert result["total_planned_order_receipts"] == pytest.approx(30)
+    screw = result["components"].set_index("Component").loc["Screw"]
+    assert screw["Gross requirement"] == 40
+    assert screw["Net requirement"] == 25
+    assert screw["Planned order receipt"] == 30
+    assert screw["Planned order release period"] == -2
+    assert bool(screw["Release before current period"])
+    with pytest.raises(ValueError, match="Duplicate BOM component"):
+        plan_material_requirements([{"component": "A", "qty_per_parent": 1}, {"component": "A", "qty_per_parent": 2}], 10)
+
+
+def test_project_portfolio_score_normalizes_direction_and_weights_reproducibly():
+    from shoir_target_engines import score_project_portfolio
+
+    result = score_project_portfolio(
+        [
+            {"name": "Cost", "weight": 2, "direction": "minimize"},
+            {"name": "Quality", "weight": 1, "direction": "maximize"},
+        ],
+        [
+            {"name": "Project A", "scores": {"Cost": 100, "Quality": 70}},
+            {"name": "Project B", "scores": {"Cost": 200, "Quality": 90}},
+        ],
+    )
+    assert result["status"] == "SCORED — WEIGHTS ARE USER-DEFINED"
+    ranked = result["ranking"]
+    assert ranked.iloc[0]["Project"] == "Project A"
+    assert ranked.iloc[0]["Weighted score (0–100)"] == pytest.approx(200 / 3)
+    assert ranked.iloc[1]["Weighted score (0–100)"] == pytest.approx(100 / 3)
+    assert ranked.iloc[0]["Cost score (0–100)"] == pytest.approx(100)
+    assert ranked.iloc[0]["Quality score (0–100)"] == pytest.approx(0)
+    assert "Sensitivity" in result["warning"]
+    with pytest.raises(ValueError, match="greater than zero"):
+        score_project_portfolio([{"name": "C", "weight": 0}], [
+            {"name": "A", "scores": {"C": 1}}, {"name": "B", "scores": {"C": 2}},
+        ])
