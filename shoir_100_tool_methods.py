@@ -827,8 +827,10 @@ def bin_pack_1d(item_lengths: Sequence[Any], stock_length: float, kerf: float = 
     for length, idx in sorted(items, key=lambda x: (-x[0], x[1])):
         placed = False
         for bucket in bins:
-            used_eff = sum(x+saw for x, _ in bucket)
-            if used_eff + length + saw <= stock+saw+1e-9:
+            used_piece_length = sum(x for x, _ in bucket)
+            used_kerf = saw * max(0, len(bucket) - 1)
+            additional_kerf = saw if bucket else 0.0
+            if used_piece_length + used_kerf + length + additional_kerf <= stock + 1e-9:
                 bucket.append((length, idx)); placed = True; break
         if not placed:
             bins.append([(length, idx)])
