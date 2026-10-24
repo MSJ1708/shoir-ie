@@ -100,10 +100,10 @@ def build_hazard_register(rows: Any) -> dict[str, Any]:
     return {
         "tool_id": "T047", "status": "CALCULATED",
         "method": "Initial and residual hazard screening using likelihood × severity",
-        "formula": "Risk score = user-rated likelihood (1–5) × user-rated severity (1–5)",
+        "formula": "Risk score = user-rated likelihood (1–5) × user-rated severity (1–5); score ≥ 15 is an illustrative screening flag only",
         "assumptions": [
             "Ratings are ordinal, user-entered screening scores; an equal product does not mean equal consequences.",
-            "Initial and residual ratings must use the organization's approved scale and review process.",
+            "Initial and residual ratings must use the organization's approved scale and review process; the score ≥ 15 count is illustrative and not a universal risk band.",
         ],
         "warnings": [
             "This register is not a certified safety assessment, legal compliance check or substitute for a competent safety professional.",
@@ -148,7 +148,7 @@ def reconcile_sop_scenario(
         required_units = demand + open_backlog
         end_inventory = max(0.0, available - required_units)
         end_backlog = max(0.0, required_units - available)
-        utilization = production / capacity * 100.0 if capacity > 0 else (0.0 if production == 0 else math.inf)
+        utilization = production / capacity * 100.0 if capacity > 0 else (0.0 if production == 0 else None)
         output.append({
             "period": _txt(raw.get("period")),
             "opening_inventory_units": open_inventory,
