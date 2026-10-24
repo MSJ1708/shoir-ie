@@ -1496,3 +1496,417 @@ __all__ = [
     "monitor_forecast_drift",
     "plan_two_sample_t_sample_size",
 ]
+
+
+def profile_dataframe(frame: pd.DataFrame, *, max_rows: int = 250_000, max_columns: int = 500) -> dict[str, Any]:
+    """Profile an imported table without mutating or deleting source rows.
+
+    Numeric outliers use the descriptive 1.5-IQR flag only; they are not
+    automatically removed and are not proof of erroneous observations.
+    """
+    if not isinstance(frame, pd.DataFrame):
+        raise ValueError("Data quality profiling requires a pandas DataFrame.")
+    if frame.empty or len(frame.columns) == 0:
+        raise ValueError("Provide a non-empty table with at least one column.")
+    if len(frame) > max_rows or len(frame.columns) > max_columns or len(frame) * len(frame.columns) > 2_000_000:
+        raise ValueError("The profiling limit is 250,000 rows, 500 columns and 2,000,000 cells per run.")
+    rows: list[dict[str, Any]] = []
+    for name in frame.columns:
+        series = frame[name]
+        non_missing = series.dropna()
+        row: dict[str, Any] = {
+            "column": str(name),
+            "dtype": str(series.dtype),
+            "row_count": int(len(series)),
+            "missing_count": int(series.isna().sum()),
+            "missing_pct": float(series.isna().mean() * 100),
+            "distinct_non_null": int(non_missing.nunique(dropna=True)),
+            "constant_non_null": bool(len(non_missing) > 0 and non_missing.nunique(dropna=True) <= 1),
+            "numeric_min": None,
+            "numeric_max": None,
+            "numeric_mean": None,
+            "numeric_std_sample": None,
+            "iqr_outlier_count": None,
+            "example_values": [str(value)[:120] for value in non_missing.drop_duplicates().head(3).tolist()],
+        }
+        if pd.api.types.is_numeric_dtype(series.dtype) and len(non_missing):
+            numeric = pd.to_numeric(non_missing, errors="coerce").dropna()
+            if len(numeric):
+                q1 = float(numeric.quantile(0.25))
+                q3 = float(numeric.quantile(0.75))
+                iqr = q3 - q1
+                row.update({
+                    "numeric_min": float(numeric.min()),
+                    "numeric_max": float(numeric.max()),
+                    "numeric_mean": float(numeric.mean()),
+                    "numeric_std_sample": float(numeric.std(ddof=1)) if len(numeric) > 1 else None,
+                    "iqr_outlier_count": int(((numeric < q1 - 1.5 * iqr) | (numeric > q3 + 1.5 * iqr)).sum()) if iqr > 0 else 0,
+                })
+        rows.append(row)
+    duplicate_rows = int(frame.duplicated(keep="first").sum())
+    warnings: list[str] = []
+    if duplicate_rows:
+        warnings.append(f"{duplicate_rows} duplicate row(s) were found; none were removed.")
+    missing_columns = [str(name) for name in frame.columns if frame[name].isna().any()]
+    if missing_columns:
+        warnings.append(f"Missing values appear in {len(missing_columns)} column(s); source data was not changed.")
+    if any(bool(row["constant_non_null"]) for row in rows):
+        warnings.append("One or more columns are constant among non-missing values.")
+    return {
+        "status": "PROFILED",
+        "method": "Non-destructive profile: missingness, distinct values, numeric summary and descriptive 1.5-IQR flags",
+        "row_count": int(len(frame)),
+        "column_count": int(len(frame.columns)),
+        "duplicate_row_count": duplicate_rows,
+        "duplicate_row_pct": float(duplicate_rows / len(frame) * 100),
+        "column_profile": pd.DataFrame(rows),
+        "warnings": warnings,
+        "source_unchanged": True,
+    }
+
+
+def join_dataframes(
+    left: pd.DataFrame,
+    right: pd.DataFrame,
+    *,
+    left_key: str,
+    right_key: str,
+    how: str = "left",
+    max_rows: int = 250_000,
+) -> dict[str, Any]:
+    """Join tables with key/cardinality checks and an explicit row limit.
+
+    A many-to-many join is rejected rather than risking an unexpected row
+    explosion. Source frames are never mutated.
+    """
+    if not isinstance(left, pd.DataFrame) or not isinstance(right, pd.DataFrame):
+        raise ValueError("Both inputs must be tabular DataFrames.")
+    if left.empty or right.empty:
+        raise ValueError("Both left and right tables must contain at least one row.")
+    if len(left) > max_rows or len(right) > max_rows:
+        raise ValueError(f"Each input table is limited to {max_rows:,} rows.")
+    left_key, right_key = str(left_key).strip(), str(right_key).strip()
+    if not left_key or left_key not in left.columns:
+        raise ValueError("The selected left join key does not exist in the left table.")
+    if not right_key or right_key not in right.columns:
+        raise ValueError("The selected right join key does not exist in the right table.")
+    if how not in {"inner", "left", "right", "outer"}:
+        raise ValueError("Join type must be inner, left, right or outer.")
+    left_duplicate_rows = int(left.loc[left[left_key].notna(), left_key].duplicated(keep=False).sum())
+    right_duplicate_rows = int(right.loc[right[right_key].notna(), right_key].duplicated(keep=False).sum())
+    if left_duplicate_rows and right_duplicate_rows:
+        raise ValueError(
+            "Both selected keys contain duplicates; this could create a many-to-many row explosion. "
+            "Resolve duplicates or choose validated unique keys before joining."
+        )
+    if how == "outer" and len(left) + len(right) > max_rows:
+        raise ValueError(f"An outer join is limited to {max_rows:,} potential output rows.")
+    indicator_name = "_shoir_join_source"
+    while indicator_name in left.columns or indicator_name in right.columns:
+        indicator_name = "_" + indicator_name
+    result = left.merge(
+        right,
+        left_on=left_key,
+        right_on=right_key,
+        how=how,
+        indicator=indicator_name,
+        suffixes=("_left", "_right"),
+        sort=False,
+    )
+    if len(result) > max_rows:
+        raise ValueError(f"The join would exceed the {max_rows:,}-row output limit.")
+    left_key_values = set(left.loc[left[left_key].notna(), left_key].tolist())
+    right_key_values = set(right.loc[right[right_key].notna(), right_key].tolist())
+    left_unmatched = int((left[left_key].isna() | ~left[left_key].isin(right_key_values)).sum())
+    right_unmatched = int((right[right_key].isna() | ~right[right_key].isin(left_key_values)).sum())
+    warnings: list[str] = []
+    if left_duplicate_rows or right_duplicate_rows:
+        warnings.append("A one-to-many relationship exists. Output row count may exceed one source table.")
+    if left_unmatched or right_unmatched:
+        warnings.append("Some input keys do not match; unmatched-row counts are reported separately.")
+    return {
+        "status": "JOINED",
+        "method": f"{how.upper()} join with duplicate-key profiling and source-row reconciliation",
+        "join_type": how,
+        "left_rows": int(len(left)),
+        "right_rows": int(len(right)),
+        "result_rows": int(len(result)),
+        "left_duplicate_key_rows": left_duplicate_rows,
+        "right_duplicate_key_rows": right_duplicate_rows,
+        "left_unmatched_rows": left_unmatched,
+        "right_unmatched_rows": right_unmatched,
+        "source_rows_preserved": True,
+        "warnings": warnings,
+        "joined_data": result,
+    }
+
+
+def process_time_series(
+    frame: pd.DataFrame,
+    *,
+    timestamp_column: str,
+    value_columns: Sequence[str],
+    local_timezone: str = "UTC",
+    frequency: str | None = None,
+    aggregation: str = "mean",
+    duplicate_policy: str = "mean",
+    max_rows: int = 250_000,
+) -> dict[str, Any]:
+    """Parse, sort and optionally resample a time series with explicit policies."""
+    from zoneinfo import ZoneInfo
+
+    if not isinstance(frame, pd.DataFrame) or frame.empty:
+        raise ValueError("Provide a non-empty DataFrame for time-series processing.")
+    if len(frame) > max_rows:
+        raise ValueError(f"Time-series processing is limited to {max_rows:,} rows.")
+    if timestamp_column not in frame.columns:
+        raise ValueError(f"Timestamp column '{timestamp_column}' was not found.")
+    if isinstance(value_columns, (str, bytes)):
+        raise ValueError("Value columns must be supplied as a sequence of column names.")
+    columns = list(dict.fromkeys(str(name).strip() for name in value_columns if str(name).strip()))
+    if not columns:
+        raise ValueError("Select at least one numeric value column.")
+    missing = [name for name in columns if name not in frame.columns]
+    if missing:
+        raise ValueError(f"Value column(s) not found: {', '.join(missing)}.")
+    try:
+        ZoneInfo(str(local_timezone))
+    except Exception as exc:
+        raise ValueError("Enter a valid IANA time zone, such as UTC or Asia/Riyadh.") from exc
+    if aggregation not in {"mean", "sum", "min", "max", "median"}:
+        raise ValueError("Aggregation must be mean, sum, min, max or median.")
+    if duplicate_policy not in {"mean", "keep", "error"}:
+        raise ValueError("Duplicate policy must be mean, keep or error.")
+
+    warnings: list[str] = []
+    try:
+        parsed = pd.to_datetime(frame[timestamp_column], errors="coerce")
+        if parsed.dt.tz is None:
+            parsed = parsed.dt.tz_localize(local_timezone, ambiguous="NaT", nonexistent="NaT")
+        else:
+            parsed = parsed.dt.tz_convert(local_timezone)
+    except (AttributeError, TypeError, ValueError):
+        # Mixed aware offsets can produce object dtype. Normalize those timestamps
+        # through UTC before converting to the requested display/analysis zone.
+        parsed = pd.to_datetime(frame[timestamp_column], errors="coerce", utc=True).dt.tz_convert(local_timezone)
+        warnings.append("Mixed timestamp offsets were normalized through UTC before local-time conversion.")
+    invalid_timestamps = int(parsed.isna().sum())
+    if invalid_timestamps:
+        warnings.append(f"{invalid_timestamps} row(s) had invalid, ambiguous or nonexistent local timestamps and were excluded.")
+    cleaned = pd.DataFrame({"_timestamp": parsed})
+    numeric_conversion_failures = 0
+    for column in columns:
+        original = frame[column]
+        numeric = pd.to_numeric(original, errors="coerce")
+        numeric_conversion_failures += int((original.notna() & numeric.isna()).sum())
+        cleaned[column] = numeric
+    cleaned = cleaned.loc[cleaned["_timestamp"].notna()].sort_values("_timestamp", kind="stable")
+    duplicate_count = int(cleaned["_timestamp"].duplicated(keep="first").sum())
+    if duplicate_count and duplicate_policy == "error":
+        raise ValueError(f"{duplicate_count} duplicate timestamp row(s) found; resolve them or choose a different policy.")
+    if duplicate_count and duplicate_policy == "mean":
+        cleaned = cleaned.groupby("_timestamp", as_index=False)[columns].mean()
+    cleaned = cleaned.rename(columns={"_timestamp": "timestamp"})
+    empty_period_count = 0
+    if frequency and str(frequency).strip():
+        try:
+            indexed = cleaned.set_index("timestamp")
+            observed_counts = indexed[columns].notna().any(axis=1).resample(str(frequency).strip()).sum()
+            cleaned = indexed[columns].resample(str(frequency).strip()).agg(aggregation).reset_index()
+            empty_period_count = int((observed_counts == 0).sum())
+        except Exception as exc:
+            raise ValueError(f"Resampling frequency or aggregation is invalid: {exc}") from exc
+        if empty_period_count:
+            warnings.append(f"{empty_period_count} resampled period(s) contain no valid source values.")
+    if numeric_conversion_failures:
+        warnings.append(f"{numeric_conversion_failures} non-numeric value(s) were converted to missing values.")
+    if cleaned.empty:
+        raise ValueError("No valid timestamped observations remain after parsing.")
+    return {
+        "status": "PROCESSED",
+        "method": "Timestamp parsing, explicit timezone conversion, stable sort and optional resampling",
+        "timestamp_column": str(timestamp_column),
+        "timezone": str(local_timezone),
+        "frequency": str(frequency).strip() if frequency and str(frequency).strip() else None,
+        "aggregation": aggregation if frequency and str(frequency).strip() else None,
+        "duplicate_policy": duplicate_policy,
+        "source_rows": int(len(frame)),
+        "processed_rows": int(len(cleaned)),
+        "invalid_timestamp_rows": invalid_timestamps,
+        "duplicate_timestamp_rows": duplicate_count,
+        "numeric_conversion_failures": numeric_conversion_failures,
+        "empty_resampled_periods": empty_period_count,
+        "warnings": warnings,
+        "series": cleaned,
+    }
+
+
+def generate_synthetic_industrial_data(*, row_count: int = 250, seed: int = 42) -> dict[str, Any]:
+    """Generate repeatable hourly synthetic production data; never plant telemetry."""
+    import numpy as np
+
+    if isinstance(row_count, bool) or not isinstance(row_count, int) or not 1 <= row_count <= 100_000:
+        raise ValueError("Synthetic row count must be a whole number from 1 to 100,000.")
+    if isinstance(seed, bool) or not isinstance(seed, int) or not 0 <= seed <= 2_147_483_647:
+        raise ValueError("Random seed must be a whole number from 0 to 2,147,483,647.")
+    rng = np.random.default_rng(seed)
+    timestamp = pd.date_range("2026-01-01 00:00:00", periods=row_count, freq="h", tz="UTC")
+    line_id = rng.choice(["LINE-A", "LINE-B", "LINE-C"], size=row_count, p=[0.45, 0.35, 0.20])
+    demand = rng.poisson(lam=72, size=row_count)
+    cycle_seconds = np.clip(rng.normal(loc=42.0, scale=5.0, size=row_count), 20.0, 75.0)
+    downtime_minutes = np.clip(rng.gamma(shape=1.7, scale=2.5, size=row_count), 0.0, 50.0)
+    theoretical_capacity = np.floor(np.maximum(0.0, 3600.0 - downtime_minutes * 60.0) / cycle_seconds).astype(int)
+    output = np.minimum(demand, theoretical_capacity)
+    defect_rate = np.where(line_id == "LINE-C", 0.035, 0.02)
+    defects = rng.binomial(n=output, p=defect_rate)
+    energy_kwh = np.maximum(0.0, output * rng.normal(loc=0.42, scale=0.035, size=row_count))
+    data = pd.DataFrame({
+        "timestamp_utc": timestamp,
+        "line_id": line_id,
+        "demand_units": demand.astype(int),
+        "cycle_time_seconds": cycle_seconds.round(3),
+        "downtime_minutes": downtime_minutes.round(3),
+        "output_units": output.astype(int),
+        "defect_units": defects.astype(int),
+        "good_units": (output - defects).astype(int),
+        "energy_kwh": energy_kwh.round(4),
+    })
+    return {
+        "status": "SYNTHETIC",
+        "method": "Seeded hourly factory-line generator; values are artificial and not sampled from a real plant",
+        "provenance": "SYNTHETIC",
+        "row_count": int(row_count),
+        "seed": int(seed),
+        "parameters": {
+            "start_timestamp_utc": "2026-01-01T00:00:00+00:00",
+            "line_ids": ["LINE-A", "LINE-B", "LINE-C"],
+            "demand_distribution": "Poisson(lambda=72 units/hour)",
+            "cycle_time_distribution": "Normal(mean=42 seconds, sd=5 seconds), clipped to 20–75 seconds",
+            "downtime_distribution": "Gamma(shape=1.7, scale=2.5 minutes), clipped to 0–50 minutes",
+        },
+        "warning": "Synthetic teaching/test records only; never treat these values as live or measured plant performance.",
+        "data": data,
+    }
+
+
+def plan_acceptance_sampling(
+    *,
+    aql_fraction: float = 0.01,
+    ltpd_fraction: float = 0.05,
+    producer_risk: float = 0.05,
+    consumer_risk: float = 0.10,
+    max_sample_size: int = 1500,
+    max_acceptance_number: int = 50,
+) -> dict[str, Any]:
+    """Find the smallest single-sample plan satisfying binomial AQL/LTPD risks.
+
+    This is a large-lot binomial approximation, not a substitute for a contractually
+    required ISO/ANSI/ASQ sampling standard or a finite-lot hypergeometric plan.
+    """
+    from scipy.stats import binom
+
+    aql = _finite_number(aql_fraction, "AQL defect fraction")
+    ltpd = _finite_number(ltpd_fraction, "LTPD defect fraction")
+    alpha = _finite_number(producer_risk, "Producer risk")
+    beta = _finite_number(consumer_risk, "Consumer risk")
+    if not 0 < aql < ltpd < 1:
+        raise ValueError("AQL and LTPD must be fractions with 0 < AQL < LTPD < 1.")
+    if not 0 < alpha < 1 or not 0 < beta < 1:
+        raise ValueError("Producer and consumer risks must be strictly between zero and one.")
+    if isinstance(max_sample_size, bool) or not isinstance(max_sample_size, int) or not 1 <= max_sample_size <= 5000:
+        raise ValueError("Maximum sample size must be a whole number from 1 to 5,000.")
+    if isinstance(max_acceptance_number, bool) or not isinstance(max_acceptance_number, int) or not 0 <= max_acceptance_number <= 100:
+        raise ValueError("Maximum acceptance number must be a whole number from 0 to 100.")
+    for n in range(1, max_sample_size + 1):
+        for c in range(0, min(n, max_acceptance_number) + 1):
+            p_accept_aql = float(binom.cdf(c, n, aql))
+            p_accept_ltpd = float(binom.cdf(c, n, ltpd))
+            if p_accept_aql >= 1.0 - alpha and p_accept_ltpd <= beta:
+                return {
+                    "status": "CALCULATED",
+                    "method": "Smallest-n single-sample binomial operating-characteristic search",
+                    "assumption": "Large lot; independent inspection outcomes; constant defect probability; no finite-lot correction.",
+                    "aql_fraction": aql,
+                    "ltpd_fraction": ltpd,
+                    "producer_risk_target": alpha,
+                    "consumer_risk_target": beta,
+                    "sample_size_n": n,
+                    "acceptance_number_c": c,
+                    "rejection_number": c + 1,
+                    "probability_accept_at_aql": p_accept_aql,
+                    "probability_accept_at_ltpd": p_accept_ltpd,
+                    "producer_risk_at_aql": 1.0 - p_accept_aql,
+                    "consumer_risk_at_ltpd": p_accept_ltpd,
+                    "max_sample_size_searched": max_sample_size,
+                    "warning": "Plan is an analytical binomial approximation. Confirm the governing standard, lot size and contractual sampling rule before release inspection.",
+                }
+    return {
+        "status": "LIMIT_REACHED",
+        "method": "Smallest-n single-sample binomial operating-characteristic search",
+        "assumption": "Large lot; independent inspection outcomes; constant defect probability; no finite-lot correction.",
+        "sample_size_n": None,
+        "acceptance_number_c": None,
+        "probability_accept_at_aql": None,
+        "probability_accept_at_ltpd": None,
+        "message": "No plan satisfying both risks was found within the configured sample/acceptance limits. Increase search limits or review risk requirements.",
+    }
+
+
+def analyze_mm1_queue(
+    arrival_rate: float,
+    service_rate: float,
+    *,
+    rate_unit: str = "per minute",
+) -> dict[str, Any]:
+    """Calculate stable M/M/1 metrics under Poisson/exponential and FIFO assumptions."""
+    lam = _finite_number(arrival_rate, "Arrival rate")
+    mu = _finite_number(service_rate, "Service rate")
+    unit = str(rate_unit).strip()
+    if lam <= 0:
+        raise ValueError("Arrival rate must be greater than zero.")
+    if mu <= 0:
+        raise ValueError("Service rate must be greater than zero.")
+    if not unit:
+        raise ValueError("State the time basis for the rates, such as per minute.")
+    utilization = lam / mu
+    assumptions = [
+        "Single server, FIFO discipline, steady-state M/M/1 queue.",
+        "Poisson arrivals and independent exponentially distributed service times.",
+        "Arrival and service rates must use the same unit and population definition.",
+    ]
+    if utilization >= 1.0:
+        return {
+            "status": "UNSTABLE",
+            "method": "M/M/1 analytical queue",
+            "arrival_rate": lam,
+            "service_rate": mu,
+            "rate_unit": unit,
+            "utilization_fraction": utilization,
+            "utilization_pct": utilization * 100.0,
+            "mean_customers_in_system": None,
+            "mean_customers_in_queue": None,
+            "mean_time_in_system": None,
+            "mean_waiting_time_in_queue": None,
+            "assumptions": assumptions,
+            "warning": "Arrival rate is at least the service rate; no finite steady-state queue/wait estimates are reported.",
+        }
+    mean_system = utilization / (1.0 - utilization)
+    mean_queue = utilization * utilization / (1.0 - utilization)
+    mean_system_time = 1.0 / (mu - lam)
+    mean_queue_time = utilization / (mu - lam)
+    return {
+        "status": "STABLE",
+        "method": "M/M/1 analytical queue",
+        "arrival_rate": lam,
+        "service_rate": mu,
+        "rate_unit": unit,
+        "utilization_fraction": utilization,
+        "utilization_pct": utilization * 100.0,
+        "mean_customers_in_system": mean_system,
+        "mean_customers_in_queue": mean_queue,
+        "mean_time_in_system": mean_system_time,
+        "mean_waiting_time_in_queue": mean_queue_time,
+        "time_unit": f"time units implied by rates ({unit})",
+        "assumptions": assumptions,
+        "warning": "Analytical estimate under M/M/1 assumptions; validate the arrival/service distributions and actual queue discipline.",
+    }
