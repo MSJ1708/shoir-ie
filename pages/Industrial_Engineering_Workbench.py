@@ -389,7 +389,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                 "Copilot action, API and export path must enforce their own server-side entitlement checks."
             )
 
-            if selected_tool["tool_id"] in {"T016", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T038", "T040", "T042", "T043", "T047", "T054", "T055", "T056", "T066", "T070", "T075", "T078", "T081", "T082", "T083", "T084", "T085"}:
+            if selected_tool["tool_id"] in {"T016", "T017", "T018", "T019", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T034", "T038", "T040", "T042", "T043", "T047", "T054", "T055", "T056", "T066", "T070", "T075", "T076", "T078", "T079", "T081", "T082", "T083", "T084", "T085"}:
                 st.markdown("---")
                 st.markdown("**Run focused specialist method**")
                 st.caption(
@@ -695,6 +695,54 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                             roi_outcome_evidence = st.text_input("Post-change evidence reference", key="tool083_outcome_evidence")
                             roi_verifier = st.text_input("Independent verifier / reviewer", key="tool083_verifier")
                             run_method = st.form_submit_button("Calculate ROI (verification remains required)", type="primary", use_container_width=True, key="tool083_run")
+                        elif selected_tool["tool_id"] == "T017":
+                            st.caption("Join keys must be validated. Many-to-many matches may multiply rows; use duplicate rejection for keys expected to be unique.")
+                            join_left_json = st.text_area(
+                                "Left table (JSON list of records)",
+                                value='[{"id":1,"part":"A"},{"id":2,"part":"B"},{"id":3,"part":"C"}]',
+                                key="tool017_left",
+                            )
+                            join_right_json = st.text_area(
+                                "Right table (JSON list of records)",
+                                value='[{"component_id":1,"cost":10},{"component_id":3,"cost":30},{"component_id":4,"cost":40}]',
+                                key="tool017_right",
+                            )
+                            join_left_key = st.text_input("Left join key", "id", key="tool017_left_key")
+                            join_right_key = st.text_input("Right join key", "component_id", key="tool017_right_key")
+                            join_type = st.selectbox("Join type", ["left", "inner", "outer", "right"], key="tool017_type")
+                            duplicate_policy = st.selectbox("Duplicate key handling", ["allow", "reject"], key="tool017_duplicates")
+                            run_method = st.form_submit_button("Preview and reconcile join", type="primary", use_container_width=True, key="tool017_run")
+                        elif selected_tool["tool_id"] == "T018":
+                            st.caption("Timestamps are normalized to UTC. Gaps and duplicates are reported; invalid timestamps are rejected rather than silently dropped.")
+                            time_series_json = st.text_area(
+                                "Timestamped records (JSON list)",
+                                value='[{"timestamp":"2026-01-01 00:00:00","count":1,"energy":2.0},{"timestamp":"2026-01-01 02:00:00","count":3,"energy":6.0}]',
+                                key="tool018_records",
+                            )
+                            ts_column = st.text_input("Timestamp column", "timestamp", key="tool018_ts_column")
+                            ts_timezone = st.selectbox("Timezone for naive timestamps", ["UTC", "Asia/Riyadh", "Europe/London", "America/New_York"], index=1, key="tool018_timezone")
+                            ts_expected_interval = st.text_input("Expected sample interval (optional)", "1h", key="tool018_expected_interval")
+                            ts_resample_frequency = st.text_input("Resample frequency (optional, e.g. 15min)", "1h", key="tool018_resample")
+                            ts_aggregation = st.selectbox("Resampling aggregation", ["mean", "sum", "min", "max", "first", "last"], key="tool018_agg")
+                            run_method = st.form_submit_button("Process timestamps and gaps", type="primary", use_container_width=True, key="tool018_run")
+                        elif selected_tool["tool_id"] == "T019":
+                            st.caption("Generated rows are explicitly labelled SYNTHETIC and are intended for teaching/testing, not claims about a live plant.")
+                            synthetic_rows = st.number_input("Rows to generate", min_value=1, max_value=100000, value=100, step=25, key="tool019_rows")
+                            synthetic_seed = st.number_input("Random seed", min_value=0, value=42, step=1, key="tool019_seed")
+                            synthetic_start = st.text_input("Start timestamp (ISO datetime)", "2026-01-01T00:00:00Z", key="tool019_start")
+                            synthetic_interval = st.number_input("Interval (minutes)", min_value=1, value=60, step=15, key="tool019_interval")
+                            synthetic_defect_rate = st.number_input("Defect rate (%)", min_value=0.0, max_value=100.0, value=2.0, step=0.5, key="tool019_defect")
+                            synthetic_downtime = st.number_input("Mean downtime per record (minutes)", min_value=0.0, value=5.0, step=1.0, key="tool019_downtime")
+                            synthetic_energy = st.number_input("Energy per good-scale output unit (kWh)", min_value=0.0, value=0.5, step=0.1, key="tool019_energy")
+                            run_method = st.form_submit_button("Generate synthetic dataset", type="primary", use_container_width=True, key="tool019_run")
+                        elif selected_tool["tool_id"] == "T034":
+                            st.caption("Single-sample binomial plan. Confirm any contractual sampling standard and finite-lot conditions before use.")
+                            sampling_aql = st.number_input("AQL defect fraction (%)", min_value=0.0, max_value=99.0, value=1.0, step=0.5, key="tool034_aql")
+                            sampling_ltpd = st.number_input("LTPD defect fraction (%)", min_value=0.1, max_value=100.0, value=10.0, step=0.5, key="tool034_ltpd")
+                            sampling_alpha = st.number_input("Producer risk (%)", min_value=0.1, max_value=99.0, value=5.0, step=1.0, key="tool034_alpha")
+                            sampling_beta = st.number_input("Consumer risk (%)", min_value=0.1, max_value=99.0, value=10.0, step=1.0, key="tool034_beta")
+                            sampling_max_n = st.number_input("Maximum sample size to search", min_value=1, max_value=5000, value=500, step=50, key="tool034_max_n")
+                            run_method = st.form_submit_button("Find attributes sampling plan", type="primary", use_container_width=True, key="tool034_run")
                         elif selected_tool["tool_id"] == "T043":
                             st.caption("Interval-based due-date planner. It does not optimize labor, parts or downtime windows.")
                             pm_tasks_json = st.text_area(
@@ -727,6 +775,22 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                             mrp_parent_demand = st.number_input("Parent-assembly demand (whole units)", min_value=1, value=10, step=1, key="tool054_demand")
                             mrp_due_period = st.number_input("Demand due period index (0 = current period)", min_value=-120, max_value=120, value=0, step=1, key="tool054_due")
                             run_method = st.form_submit_button("Calculate component requirements", type="primary", use_container_width=True, key="tool054_run")
+                        elif selected_tool["tool_id"] == "T076":
+                            st.caption("This reconstructs event-log variants and directly-follows transitions. It is not full conformance checking or causal analysis.")
+                            process_event_log_json = st.text_area(
+                                "Event log (JSON list: case_id, activity, timestamp)",
+                                value='[{"case_id":"1","activity":"Receive","timestamp":"2026-01-01T00:00:00Z"},{"case_id":"1","activity":"Inspect","timestamp":"2026-01-01T01:00:00Z"},{"case_id":"2","activity":"Receive","timestamp":"2026-01-01T00:00:00Z"},{"case_id":"2","activity":"Pack","timestamp":"2026-01-01T02:00:00Z"}]',
+                                key="tool076_event_log",
+                            )
+                            run_method = st.form_submit_button("Analyze event-log flow", type="primary", use_container_width=True, key="tool076_run")
+                        elif selected_tool["tool_id"] == "T079":
+                            st.caption("Flow balance requires same-unit quantities and comparable measurement boundaries. Unreconciled balance is reported, not silently allocated.")
+                            water_flows_json = st.text_area(
+                                "Process flows (JSON list: process, input_quantity, product_output_quantity, waste_quantity, unit, period)",
+                                value='[{"process":"Wash","input_quantity":100,"product_output_quantity":85,"waste_quantity":15,"unit":"L","period":"2026-09"},{"process":"Rinse","input_quantity":50,"product_output_quantity":45,"waste_quantity":5,"unit":"L","period":"2026-09"}]',
+                                key="tool079_flows",
+                            )
+                            run_method = st.form_submit_button("Balance water and waste flows", type="primary", use_container_width=True, key="tool079_run")
                         elif selected_tool["tool_id"] == "T084":
                             st.caption("Criterion weights are subjective inputs. Scores are normalized direction-aware; sensitivity analysis is not yet included.")
                             portfolio_criteria_json = st.text_area(
@@ -844,6 +908,14 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                         current_tool_inputs = {"standard_quantity_per_unit": cost_standard_qty_per_unit, "actual_output_units": cost_actual_output, "actual_input_quantity": cost_actual_input, "standard_unit_cost": cost_standard_price, "actual_unit_cost": cost_actual_price, "currency": cost_currency, "period": cost_period}
                     elif selected_tool["tool_id"] == "T083":
                         current_tool_inputs = {"baseline_cost": roi_baseline, "post_change_cost": roi_post, "implementation_cost": roi_implementation, "currency": roi_currency, "measurement_window": roi_window, "baseline_evidence": roi_baseline_evidence, "outcome_evidence": roi_outcome_evidence, "verifier": roi_verifier}
+                    elif selected_tool["tool_id"] == "T017":
+                        current_tool_inputs = {"left_records_json": join_left_json, "right_records_json": join_right_json, "left_key": join_left_key, "right_key": join_right_key, "join_type": join_type, "duplicate_policy": duplicate_policy}
+                    elif selected_tool["tool_id"] == "T018":
+                        current_tool_inputs = {"records_json": time_series_json, "timestamp_column": ts_column, "timezone_name": ts_timezone, "expected_interval": ts_expected_interval, "resample_frequency": ts_resample_frequency, "aggregation": ts_aggregation}
+                    elif selected_tool["tool_id"] == "T019":
+                        current_tool_inputs = {"row_count": int(synthetic_rows), "seed": int(synthetic_seed), "start_timestamp": synthetic_start, "interval_minutes": int(synthetic_interval), "defect_rate_pct": synthetic_defect_rate, "mean_downtime_minutes": synthetic_downtime, "energy_kwh_per_unit": synthetic_energy}
+                    elif selected_tool["tool_id"] == "T034":
+                        current_tool_inputs = {"aql_pct": sampling_aql, "ltpd_pct": sampling_ltpd, "producer_risk_pct": sampling_alpha, "consumer_risk_pct": sampling_beta, "max_sample_size": int(sampling_max_n)}
                     elif selected_tool["tool_id"] == "T043":
                         current_tool_inputs = {"tasks_json": pm_tasks_json, "as_of_date": pm_as_of_date}
                     elif selected_tool["tool_id"] == "T047":
@@ -852,6 +924,10 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                         current_tool_inputs = {"bom_json": mrp_bom_json, "inventory_json": mrp_inventory_json, "parent_demand_units": mrp_parent_demand, "due_period": int(mrp_due_period)}
                     elif selected_tool["tool_id"] == "T084":
                         current_tool_inputs = {"criteria_json": portfolio_criteria_json, "alternatives_json": portfolio_alternatives_json}
+                    elif selected_tool["tool_id"] == "T076":
+                        current_tool_inputs = {"event_log_json": process_event_log_json}
+                    elif selected_tool["tool_id"] == "T079":
+                        current_tool_inputs = {"flows_json": water_flows_json}
                     elif selected_tool["tool_id"] == "T016":
                         current_tool_inputs = {"amount": amount_to_convert, "source_unit": source_unit, "target_unit": target_unit, "exchange_rate": exchange_rate_value, "exchange_rate_date": exchange_rate_date_value, "exchange_rate_source": exchange_rate_source_value}
                     elif selected_tool["tool_id"] == "T031":
@@ -893,6 +969,9 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 analyze_industrial_cost_variance, calculate_roi_evidence,
                                 plan_preventive_maintenance, assess_job_hazards,
                                 plan_material_requirements, score_project_portfolio,
+                                merge_data_tables, process_time_series,
+                                generate_synthetic_industrial_data, plan_acceptance_sampling,
+                                analyze_process_mining, analyze_water_waste_efficiency,
                             )
                             if selected_tool["tool_id"] == "T021":
                                 try:
@@ -1104,6 +1183,21 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 result = analyze_industrial_cost_variance(cost_standard_qty_per_unit, cost_actual_output, cost_actual_input, cost_standard_price, cost_actual_price, currency=cost_currency, period=cost_period)
                             elif selected_tool["tool_id"] == "T083":
                                 result = calculate_roi_evidence(roi_baseline, roi_post, roi_implementation, currency=roi_currency, measurement_window=roi_window, baseline_evidence=roi_baseline_evidence, outcome_evidence=roi_outcome_evidence, verifier=roi_verifier)
+                            elif selected_tool["tool_id"] == "T017":
+                                parsed_left = json.loads(join_left_json)
+                                parsed_right = json.loads(join_right_json)
+                                if not isinstance(parsed_left, list) or not isinstance(parsed_right, list):
+                                    raise ValueError("Both join inputs must be JSON lists of records.")
+                                result = merge_data_tables(parsed_left, parsed_right, join_left_key, join_right_key, join_type=join_type, duplicate_policy=duplicate_policy)
+                            elif selected_tool["tool_id"] == "T018":
+                                parsed_series = json.loads(time_series_json)
+                                if not isinstance(parsed_series, list):
+                                    raise ValueError("Time-series input must be a JSON list of records.")
+                                result = process_time_series(parsed_series, ts_column, timezone_name=ts_timezone, expected_interval=ts_expected_interval, resample_frequency=ts_resample_frequency, aggregation=ts_aggregation)
+                            elif selected_tool["tool_id"] == "T019":
+                                result = generate_synthetic_industrial_data(int(synthetic_rows), seed=int(synthetic_seed), start_timestamp=synthetic_start, interval_minutes=int(synthetic_interval), defect_rate_pct=synthetic_defect_rate, mean_downtime_minutes=synthetic_downtime, energy_kwh_per_unit=synthetic_energy)
+                            elif selected_tool["tool_id"] == "T034":
+                                result = plan_acceptance_sampling(sampling_aql / 100.0, sampling_ltpd / 100.0, producer_risk=sampling_alpha / 100.0, consumer_risk=sampling_beta / 100.0, max_sample_size=int(sampling_max_n))
                             elif selected_tool["tool_id"] == "T043":
                                 parsed_pm_tasks = json.loads(pm_tasks_json)
                                 if not isinstance(parsed_pm_tasks, list):
@@ -1122,6 +1216,16 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 if not isinstance(parsed_inventory, dict):
                                     raise ValueError("Inventory must be a JSON object keyed by component.")
                                 result = plan_material_requirements(parsed_bom, mrp_parent_demand, inventory=parsed_inventory, due_period=int(mrp_due_period))
+                            elif selected_tool["tool_id"] == "T076":
+                                parsed_events = json.loads(process_event_log_json)
+                                if not isinstance(parsed_events, list):
+                                    raise ValueError("Event log must be a JSON list of event records.")
+                                result = analyze_process_mining(parsed_events)
+                            elif selected_tool["tool_id"] == "T079":
+                                parsed_flows = json.loads(water_flows_json)
+                                if not isinstance(parsed_flows, list):
+                                    raise ValueError("Process flows must be a JSON list of flow records.")
+                                result = analyze_water_waste_efficiency(parsed_flows)
                             elif selected_tool["tool_id"] == "T084":
                                 parsed_criteria = json.loads(portfolio_criteria_json)
                                 parsed_alternatives = json.loads(portfolio_alternatives_json)
@@ -1139,7 +1243,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                         except Exception as exc:
                             st.error(f"Tool run could not be completed safely: {exc}")
 
-                    if selected_tool["tool_id"] in {"T024", "T025", "T027", "T038", "T043", "T047", "T054", "T070", "T082", "T083", "T084"}:
+                    if selected_tool["tool_id"] in {"T017", "T018", "T019", "T024", "T025", "T027", "T034", "T038", "T043", "T047", "T054", "T070", "T076", "T079", "T082", "T083", "T084"}:
                         result = st.session_state.get("shoir_tool_result_" + selected_tool["tool_id"])
                         if result:
                             _show_focused_tool_persistence(selected_tool["tool_id"], result, current_tool_inputs)
