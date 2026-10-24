@@ -1061,7 +1061,7 @@ def value_stream_summary(stages: Sequence[Mapping[str, Any]], demand_units: floa
         seen.add(name)
         records.append({"stage": name, "cycle_time_seconds": cycle, "cycle_time_minutes": cycle/60.0,
                         "changeover_minutes": changeover, "wip_units": wip, "value_added": value_added,
-                        "estimated_wait_minutes": wip*demand*0 + wip/(demand/available)})
+                        "estimated_wait_minutes": wip/(demand/available)})
     table = pd.DataFrame(records)
     total_process = float(table["cycle_time_minutes"].sum())
     total_value_added = float(table.loc[table["value_added"], "cycle_time_minutes"].sum())
