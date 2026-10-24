@@ -732,7 +732,7 @@ def test_vsm_first_pass_lead_time_uses_explicit_wip_flow_and_batch_assumptions()
     assert result["availability_adjusted_process_time"] == pytest.approx(7)
     assert result["estimated_total_lead_time"] == pytest.approx(107)
     assert result["value_added_time"] == pytest.approx(1)
-    assert result["value_added_share_pct"] == pytest.approx(100 / 107 * 100)
+    assert result["value_added_share_pct"] == pytest.approx(1 / 107 * 100)
     with pytest.raises(ValueError, match="uptime percentage"):
         build_value_stream_map([{"step": "A", "cycle_time": 1, "uptime_pct": 0}], 10, 100)
 
