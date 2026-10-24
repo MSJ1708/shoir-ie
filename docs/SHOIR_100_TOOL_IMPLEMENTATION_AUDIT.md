@@ -16,25 +16,25 @@ This is a focused first implementation phase, **not completion of the full 100-t
 - Added `shoir_tool_registry.py` with stable IDs T001–T100, workbench grouping, target minimum tier, input/output contracts, current mapped route/source, evidence status and remaining gaps. Unknown IDs fail closed through the target gate.
 - Added `docs/SHOIR_100_TOOL_IMPLEMENTATION_MATRIX.csv`, with exactly 100 tool rows and the required implementation/evidence columns, plus this audit report.
 - Added a **collapsed** searchable/filterable tool directory within the established Workbench. It reports readiness and minimum tier; foundation-only tools are not shown as operational merely because they exist in the catalog.
-- Added focused deterministic methods to the existing Workbench without adding top-level navigation clutter. The current focused Workbench set contains **27 deterministic methods**: **T013** data quality profiling; **T016** unit/currency conversion (fixed physical factors or dated user-supplied exchange rate); **T017** safe table joins; **T018** timestamp-aware time-series processing; **T019** reproducible synthetic data generation; **T021** time study; **T022** work sampling; **T023** takt/capacity; **T026** OEE; **T028** Pareto/5-Why; **T029** 5S audit; **T030** Kaizen/A3; **T031** Individuals/Moving-Range SPC; **T032** Cp/Cpk/Pp/Ppk; **T034** binomial acceptance-sampling planning; **T040** scoped quality-cost analysis; **T042** MTBF/MTTR; **T055** classical inventory policy; **T056** ABC/XYZ classification; **T066** one-dimensional cutting stock; **T070** M/M/1 queue analysis; **T075** forecast-drift thresholds; **T078** activity-factor carbon estimation; **T081** NPV/IRR/simple payback; **T082** cost variance reconciliation; **T084** weighted project portfolio scoring; and **T085** independent two-sample t-test sample size. Eight of these methods were newly integrated or made executable in the current tranche. All remain validation-required; none imply verified live plant integrations.
+- Added focused deterministic methods to the existing Workbench without adding top-level navigation clutter. The current focused Workbench set contains **30 deterministic methods**: **T013** data quality profiling; **T016** unit/currency conversion (fixed physical factors or dated user-supplied exchange rate); **T017** safe table joins; **T018** timestamp-aware time-series processing; **T019** reproducible synthetic data generation; **T021** time study; **T022** work sampling; **T023** takt/capacity; **T026** OEE; **T028** Pareto/5-Why; **T029** 5S audit; **T030** Kaizen/A3; **T031** Individuals/Moving-Range SPC; **T032** Cp/Cpk/Pp/Ppk; **T034** binomial acceptance-sampling planning; **T040** scoped quality-cost analysis; **T042** MTBF/MTTR; **T050** safety incident trends; **T055** classical inventory policy; **T056** ABC/XYZ classification; **T066** one-dimensional cutting stock; **T070** M/M/1 queue analysis; **T075** forecast-drift thresholds; **T077** energy intensity analysis; **T078** activity-factor carbon estimation; **T079** water/waste efficiency; **T081** NPV/IRR/simple payback; **T082** cost variance reconciliation; **T084** weighted project portfolio scoring; and **T085** independent two-sample t-test sample size. Eleven of these methods were newly integrated or made executable in the current tranche. All remain validation-required; none imply verified live plant integrations.
 - Added independent hand-calculated/boundary tests for focused engineering methods, including source-preservation and cardinality checks for data profiling/joins, timezone/resampling cases, reproducible synthetic data, sampling operating characteristics, M/M/1 queue boundaries, costing reconciliation and weighted portfolio ranking. These numerical fixtures are separate from static registry tests and do not substitute for authenticated hosted browser checks.
 - Fixed the Workbench excellence-layer tier helper: Research Pack previously ranked after Enterprise Plus and therefore could inherit Enterprise Plus-only modules. The helper and its regression test now enforce the add-on rule required by the master prompt. An older contradictory assertion that expected Research Pack to grant Enterprise Plus was updated to the required policy.
 - Focused results store the inputs used with the result, call the existing per-user `workspace_persistence.py` service for non-guest users, and display distinct managed/local/session/failure/uncertain save states. An input snapshot mismatch warns that the result is stale. Workspace writes are not called fully durable unless the managed backend is configured and authenticated reload tests pass.
-- The 27 focused target actions require both an authenticated non-guest session and the target-tier permission check before calculation. The Workbench now defaults an absent tier to Starter rather than silently defaulting to Enterprise Plus. Guest-denial regression coverage remains in place.
+- The 30 focused target actions require both an authenticated non-guest session and the target-tier permission check before calculation. The Workbench now defaults an absent tier to Starter rather than silently defaulting to Enterprise Plus. Guest-denial regression coverage remains in place.
 - Updated `workspace_persistence.py` to retain DataFrame column dtypes during save/load round trips (with a recoverable warning if an unsupported dtype cannot be restored); added an isolated T021 result/input round-trip test that confirms another user cannot read that result.
 
 ## Static target status counts
 
 | Status | Count |
 |---|---:|
-| `IMPLEMENTED_NEEDS_VALIDATION` | 60 |
-| `FOUNDATION_ONLY` | 38 |
+| `IMPLEMENTED_NEEDS_VALIDATION` | 63 |
+| `FOUNDATION_ONLY` | 35 |
 | `EXTERNAL_CONFIGURATION_REQUIRED` | 2 |
 | `MISSING` | 0 |
 | `VERIFIED_WORKING` | 0 |
 | **Total** | **100** |
 
-These counts are conservative source-audit classifications. They are not a tool success rate, do not mean that every target method has been implemented, and do not mean that all 49 mapped capabilities meet their complete acceptance criteria. All 100 authenticated end-to-end browser statuses remain unverified in the matrix. The 27 focused methods listed above remain `IMPLEMENTED_NEEDS_VALIDATION`, not `VERIFIED_WORKING`, because hosted authenticated end-to-end acceptance has not been established. Local persistence/service tests do not prove managed-backend save/reload/re-login or workspace isolation across real authenticated sessions.
+These counts are conservative source-audit classifications. They are not a tool success rate, do not mean that every target method has been implemented, and do not mean that all 49 mapped capabilities meet their complete acceptance criteria. All 100 authenticated end-to-end browser statuses remain unverified in the matrix. The 30 focused methods listed above remain `IMPLEMENTED_NEEDS_VALIDATION`, not `VERIFIED_WORKING`, because hosted authenticated end-to-end acceptance has not been established. Local persistence/service tests do not prove managed-backend save/reload/re-login or workspace isolation across real authenticated sessions.
 
 ## Entitlement and routing boundaries
 
@@ -46,7 +46,7 @@ These counts are conservative source-audit classifications. They are not a tool 
 
 ## Verification evidence
 
-The latest historical broad green baseline before the current eight-method tranche was `97c8f8bbbdc7b3eacf4f4a8990e10131e43b156e` (687 passed, 2 skipped, 28 warnings). The current branch has added further engines, Workbench controls, tests and matrix updates after that baseline. CI runs for the latest PR revision have been created, but their state must be checked before merge; a prior green run is not proof for this candidate. Historical run links below refer to earlier tested revisions:
+The latest historical broad green baseline before the current eleven-method tranche was `97c8f8bbbdc7b3eacf4f4a8990e10131e43b156e` (687 passed, 2 skipped, 28 warnings). The current branch has added further engines, Workbench controls, tests and matrix updates after that baseline. CI runs for the latest PR revision have been created, but their state must be checked before merge; a prior green run is not proof for this candidate. Historical run links below refer to earlier tested revisions:
 
 - Full test workflow [39979010804](https://github.com/MSJ1708/shoir-ie/actions/runs/39979010804): `python -m pytest -q tests` **660 passed, 2 skipped, 28 warnings**. This includes the T021 DataFrame/input round-trip test and guest-denial Workbench AppTest.
 - Platform tests [39979011334](https://github.com/MSJ1708/shoir-ie/actions/runs/39979011334): **passed**.
@@ -76,15 +76,18 @@ No authenticated per-tier module walkthrough was run. The matrix accurately mark
 
 ## Current feature branch delta — 24 October 2026
 
-This section records the additional focused implementation present on branch `feature/shoir-100-completion-20261024`, with draft PR [#180](https://github.com/MSJ1708/shoir-ie/pull/180). The updated matrix has 100 unique target rows and current static statuses of 60 `IMPLEMENTED_NEEDS_VALIDATION`, 38 `FOUNDATION_ONLY`, 2 `EXTERNAL_CONFIGURATION_REQUIRED`, 0 `MISSING`, and 0 `VERIFIED_WORKING`.
+This section records the additional focused implementation present on branch `feature/shoir-100-completion-20261024`, with draft PR [#180](https://github.com/MSJ1708/shoir-ie/pull/180). The updated matrix has 100 unique target rows and current static statuses of 63 `IMPLEMENTED_NEEDS_VALIDATION`, 35 `FOUNDATION_ONLY`, 2 `EXTERNAL_CONFIGURATION_REQUIRED`, 0 `MISSING`, and 0 `VERIFIED_WORKING`.
 
-The eight new or newly executable focused methods are:
+The eleven new or newly executable focused methods are:
 - **T013** — non-destructive Data Quality Profiler.
 - **T017** — safe table join/merge preview with key and unmatched-row diagnostics; many-to-many joins caused by duplicated null keys are rejected.
 - **T018** — time-series parsing/local-timezone handling, sort, duplicate policy and optional resampling.
 - **T019** — deterministic seed-based synthetic production data, labeled `SYNTHETIC`.
 - **T034** — single-sample binomial AQL/LTPD risk planner; not a substitute for a required standard-specific sampling plan.
+- **T050** — exposure-normalized safety incident counts and trends, with missing denominators surfaced.
 - **T070** — stable/unstable M/M/1 analytical queue metrics under explicit assumptions.
+- **T077** — period energy-intensity analysis and optional baseline comparison; not automatic control or verified savings.
+- **T079** — water balance residual and normalized water/waste intensity analysis.
 - **T082** — plan/standard/actual cost variance reconciliation.
 - **T084** — transparent min-max weighted portfolio scoring with benefit/cost directions and subjective-weight warnings.
 
