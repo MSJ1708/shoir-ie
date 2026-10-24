@@ -1,5 +1,19 @@
 # Shoir-IE 100-Tool Implementation Report
 
+## Latest follow-up verification — 2026-10-24
+
+**Revision tested:** `c0ad8ab913a18022951ec48ef417998947c258ee` on `feat/shoir-100-tool-implementation-2026-10-23` (draft PR #178). These results supersede the older full-suite commit listed below for the follow-up changes that were present on this revision.
+
+- Full regression suite: **602 passed, 2 skipped, 32 warnings** in 35.58 seconds. [Shoir-IE tests run](https://github.com/MSJ1708/shoir-ie/actions/runs/40086694303)
+- Compile, source parsing, top-level import smoke, local Streamlit start, and desktop/mobile local-browser smoke: **passed**. [Validation run and local-runtime artifact](https://github.com/MSJ1708/shoir-ie/actions/runs/40086694159)
+- Platform tests: **passed**. [Platform run](https://github.com/MSJ1708/shoir-ie/actions/runs/40086694115)
+- Security and quality gates: **passed**. [Security/quality run](https://github.com/MSJ1708/shoir-ie/actions/runs/40086694119)
+- Engine regression: **passed**. [Engine regression run](https://github.com/MSJ1708/shoir-ie/actions/runs/40086694205)
+- Hosted live-deployment smoke: **SKIPPED** on this draft PR; it is not reported as a pass. The separate authenticated hosted 100-target browser matrix, workspace persistence/relogin and isolation, live adapter configuration, and full XLSX/PDF/PPTX/ZIP export round trips remain unverified.
+
+These automation results do not change the release decision: **NO-GO for production claims that all 100 targets are operational**. Keep the PR in draft until the blocked authenticated acceptance checks are executed with disposable staging accounts.
+
+
 ## Release decision: NO-GO for claiming all 100 targets operational
 
 This is an additive implementation tranche for the existing Shoir-IE app. It retains the current shell, established Workbench, public Explore Modules buying experience, legacy module IDs/routes, account and billing behavior. The new Engineering Tool Library is a separate, authenticated sector grouped into the ten requested workbenches; it does not replace the established navigation.
