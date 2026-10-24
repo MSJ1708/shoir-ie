@@ -51,15 +51,30 @@ def _run(at, tool_id):
     return result["result"]
 
 
-def test_tool_library_requires_authentication():
+def test_tool_library_public_preview_is_read_only_without_authentication():
     from streamlit.testing.v1 import AppTest
 
     at = AppTest.from_file(PAGE, default_timeout=60)
     at.run(timeout=60)
-    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
     assert any("Engineering Tool Library" in item.value for item in at.title)
+    assert any("PUBLIC READ-ONLY PREVIEW" in item.value for item in at.info)
+
+    # Public visitors can inspect a capability contract, but cannot execute it.
+    at.selectbox(key="tool_library_detail").select("T016 · Unit and Currency Converter")
+    at.run(timeout=60)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    assert any("cannot execute calculations" in item.value.lower() for item in at.info)
+    assert not any(getattr(button, "key", None) == "T016_run_button" for button in at.button)
 
 
+def test_public_explore_modules_links_to_the_grouped_library():
+    source = (ROOT / "app.py").read_text(encoding="utf-8")
+    start = source.index("with auth_tab3:")
+    section = source[start:start + 30000]
+    assert "st.page_link(" in section
+    assert '"pages/Engineering_Tool_Library.py"' in section
+    assert "Browse the 100-tool Engineering Library" in section
 def test_extended_specialist_forms_render_and_run_with_golden_defaults():
     at = _authed_library()
 
