@@ -55,6 +55,69 @@ def _visible_text_across_frames(page) -> str:
     return "\n".join(chunks)
 
 
+def _tab_bar_layout(app_frame) -> dict:
+    """Capture tab-list and tab-label geometry so clipped mobile labels fail smoke."""
+    tab_list = app_frame.locator('div[data-testid="stTabs"] [data-baseweb="tab-list"]').first
+    if tab_list.count() == 0:
+        raise AssertionError("Streamlit public tab list was not found.")
+    return tab_list.evaluate(
+        """element => {
+            const listRect = element.getBoundingClientRect();
+            const tabs = Array.from(element.querySelectorAll('button[role="tab"]')).map(button => {
+                const rect = button.getBoundingClientRect();
+                const label = button.querySelector('[data-testid="stMarkdownContainer"]') || button;
+                const labelRect = label.getBoundingClientRect();
+                return {
+                    label: (button.innerText || button.textContent || '').trim(),
+                    left: rect.left,
+                    right: rect.right,
+                    top: rect.top,
+                    bottom: rect.bottom,
+                    clientWidth: button.clientWidth,
+                    scrollWidth: button.scrollWidth,
+                    clientHeight: button.clientHeight,
+                    scrollHeight: button.scrollHeight,
+                    labelLeft: labelRect.left,
+                    labelRight: labelRect.right,
+                    labelClientWidth: label.clientWidth,
+                    labelScrollWidth: label.scrollWidth,
+                    whiteSpace: getComputedStyle(button).whiteSpace
+                };
+            });
+            return {
+                viewportWidth: window.innerWidth,
+                listLeft: listRect.left,
+                listRight: listRect.right,
+                listWidth: listRect.width,
+                clientWidth: element.clientWidth,
+                scrollWidth: element.scrollWidth,
+                scrollLeft: element.scrollLeft,
+                tabCount: tabs.length,
+                tabs
+            };
+        }"""
+    )
+
+
+def _validate_tab_bar_layout(layout: dict, viewport_width: int) -> None:
+    """Fail on a horizontally scrollable tab strip or clipped/overflowing labels."""
+    if layout.get("tabCount", 0) < 3:
+        raise AssertionError(f"Expected all three public tabs to render: {layout}")
+    if layout["scrollWidth"] > layout["clientWidth"] + 2:
+        raise AssertionError(f"Public tab list requires horizontal scrolling: {layout}")
+    for tab in layout["tabs"]:
+        if tab["left"] < layout["listLeft"] - 2 or tab["right"] > layout["listRight"] + 2:
+            raise AssertionError(f"Public tab falls outside its tab-list bounds: {tab}")
+        if tab["scrollWidth"] > tab["clientWidth"] + 2:
+            raise AssertionError(f"Public tab label is horizontally clipped: {tab}")
+        if tab["scrollHeight"] > tab["clientHeight"] + 2:
+            raise AssertionError(f"Public tab label is vertically clipped: {tab}")
+        if tab["labelRight"] > layout["listRight"] + 2:
+            raise AssertionError(f"Public tab label extends beyond the visible tab-list: {tab}")
+    if viewport_width <= 600 and any(tab["whiteSpace"] == "nowrap" for tab in layout["tabs"]):
+        raise AssertionError(f"Mobile tab labels are configured not to wrap: {layout}")
+
+
 def _wake_if_sleeping(page, *, timeout_seconds: int = 150) -> dict:
     """Detect and wake an idle Streamlit app without masking a failed startup."""
     # The public sleeping interstitial can load shortly after DOMContentLoaded;
@@ -314,6 +377,9 @@ def main() -> int:
                                 try:
                                     app_frame.get_by_role("tab", name=scenario["tab"]).click(timeout=8_000)
                                     app_frame.get_by_text(scenario["marker"]).wait_for(timeout=10_000)
+                                    tab_layout = _tab_bar_layout(app_frame)
+                                    check["tab_bar_layout"] = tab_layout
+                                    _validate_tab_bar_layout(tab_layout, viewport["width"])
                                     # Tab clicks trigger a Streamlit websocket rerun. Wait for
                                     # the expected form controls/content to attach before asserting;
                                     # immediate locator.count() calls can race that rerun on mobile.
