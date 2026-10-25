@@ -326,7 +326,7 @@ if rows:
         st.stop()
     else:
         if not decision["executable"]:
-            st.warning("This target cannot be marked executable in the new library until its acceptance tests and authenticated end-to-end evidence pass. A separately entitled existing route may still be opened below.")
+            st.warning(f"{selected_id}: a dedicated runnable method is not wired or has not passed acceptance tests and authenticated end-to-end checks. A separately entitled existing route may still be opened below.")
         # Offer a route hand-off only to a named legacy module already available
         # under the user's real tier. Do not use the target label to widen access.
         if item["implementation_status"] in {
