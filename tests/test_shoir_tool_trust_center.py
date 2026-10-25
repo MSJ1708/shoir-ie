@@ -115,7 +115,7 @@ def test_help_search_returns_real_registry_contracts_and_keeps_known_gaps_visibl
     assert tool["required_inputs"]
     assert tool["expected_outputs"]
     assert "status" in tool
-    assert "does not replace tool-specific validation" in result["interpretation"]
+    assert "does not certify the calculation method" in result["interpretation"]
 
 
 def test_support_bundle_is_redacted_not_sent_and_has_a_reference():
