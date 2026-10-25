@@ -18,7 +18,7 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-SHELL_VERSION = "3.1"
+SHELL_VERSION = "3.2"
 
 NAV_GROUPS = {
     "HOME": "⌂ Home",
@@ -585,6 +585,11 @@ def render_application_header(username: str, tier: str, module: str) -> None:
     username_safe = html.escape(str(username))
     run_safe = html.escape(str(run_id))
     tier_safe = html.escape(str(tier))
+    module_safe = html.escape(str(module))
+    st.markdown(
+        f'<div class="shoir-shell-muted" data-testid="shoir-active-module">Active module: {module_safe}</div>',
+        unsafe_allow_html=True,
+    )
     st.markdown(
         f"""
 <div class="shoir-shell-top">
