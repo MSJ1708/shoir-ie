@@ -50,6 +50,7 @@ _TOOL022_EXAMPLE_COUNTS = '{"Productive": 60, "Idle": 25, "Setup": 15}'
 _TOOL028_EXAMPLE_COUNTS = '{"Machine": 12, "Material": 7, "Method": 3}'
 _TOOL029_EXAMPLE_ITEMS = '[{"category":"Sort","criterion":"Remove unnecessary items","score":3,"evidence":"Illustrative example","owner":"","due_date":""},{"category":"Set in Order","criterion":"Label storage locations","score":3,"evidence":"Illustrative example","owner":"","due_date":""},{"category":"Shine","criterion":"Clean workstations","score":3,"evidence":"Illustrative example","owner":"","due_date":""},{"category":"Standardize","criterion":"Display standard work","score":3,"evidence":"Illustrative example","owner":"","due_date":""},{"category":"Sustain","criterion":"Review 5S weekly","score":3,"evidence":"Illustrative example","owner":"","due_date":""}]'
 _TOOL039_EXAMPLE_RECORDS = '[{"capa_id":"DEMO-CAPA-001","title":"Repeated seal failure","status":"IN_PROGRESS","team":"Maintenance and quality","problem_statement":"Recurring seal failures on pump family","containment_action":"Inspect affected units and quarantine suspect lot","root_cause":"Supplier batch variation; validation still required","corrective_action":"Replace suspect seal batch and verify installation","implementation_evidence":"DEMO-WO-104","preventive_action":"Add supplier lot verification at receipt","closure_review":"Pending review after effectiveness period","effectiveness_evidence":"","owner":"Quality lead (illustrative)","reviewer":"","approval_reference":"","evidence_reference":"DEMO-EVIDENCE-001","opened_date":"2026-10-01","due_date":"2026-11-01"}]'
+_TOOL044_EXAMPLE_MODES = "[{\"asset\":\"Conveyor-01\",\"function\":\"Move product to packing line\",\"failure_mode\":\"Drive belt slips\",\"failure_effect\":\"Output flow is interrupted\",\"consequence_category\":\"operational\",\"consequence_rationale\":\"SYNTHETIC example only; replace with site-reviewed consequence analysis\",\"proposed_task\":\"Inspect belt condition against an approved limit\",\"task_strategy\":\"condition_directed\",\"condition_indicator\":\"Belt wear or slip exceeds an approved limit\",\"evidence_reference\":\"SYNTHETIC example only; replace with CMMS and inspection records\",\"owner\":\"Maintenance planner\"}]"
 _TOOL048_EXAMPLE_OBSERVATIONS = '[{"timestamp":"2026-10-25T00:00:00Z","value":10},{"timestamp":"2026-10-25T01:00:00Z","value":10},{"timestamp":"2026-10-25T02:00:00Z","value":10},{"timestamp":"2026-10-25T03:00:00Z","value":10},{"timestamp":"2026-10-25T04:00:00Z","value":10},{"timestamp":"2026-10-25T05:00:00Z","value":10},{"timestamp":"2026-10-25T06:00:00Z","value":10},{"timestamp":"2026-10-25T07:00:00Z","value":100}]'
 _TOOL089_PRACTICE_TOPICS = {
     "takt_time": {"label": "Takt time", "question": "A line has 420 production minutes available in a shift and must produce 210 units. What is takt time?", "unit": "minutes per unit"},
@@ -962,7 +963,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                             st.caption("Review-first worksheet: checks decision completeness and flags limited consequence/task mismatches; it does not make or certify RCM decisions.")
                             rcm_modes_json = st.text_area(
                                 "Failure modes (JSON list: asset, function, failure_mode, failure_effect, consequence_category, consequence_rationale, proposed_task, task_strategy, evidence_reference; interval/condition fields as required)",
-                                value='[{"asset":"Conveyor-01","function":"Move product to packing line","failure_mode":"Drive belt slips","failure_effect":"Output flow is interrupted","consequence_category":"operational","consequence_rationale":"SYNTHETIC example only; replace with site-reviewed consequence analysis","proposed_task":"Inspect belt condition against an approved limit","task_strategy":"condition_directed","condition_indicator":"Belt wear or slip exceeds an approved limit","evidence_reference":"SYNTHETIC example only; replace with CMMS and inspection records","owner":"Maintenance planner"}]',
+                                value=_TOOL044_EXAMPLE_MODES,
                                 key="tool044_modes",
                             )
                             st.caption("Strategies: condition_directed, scheduled_restoration, scheduled_discard, failure_finding, run_to_failure, redesign, undecided. Every row remains pending human review.")
@@ -1638,6 +1639,18 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 if not isinstance(parsed_rcm_modes, list):
                                     raise ValueError("RCM failure modes must be a JSON list of decision objects.")
                                 result = build_rcm_decision_register(parsed_rcm_modes)
+                                if parsed_rcm_modes == json.loads(_TOOL044_EXAMPLE_MODES):
+                                    result["data_provenance"] = "SYNTHETIC_EXAMPLE"
+                                    result["provenance_warning"] = (
+                                        "The displayed failure-mode record is synthetic teaching data. "
+                                        "Replace it with site-reviewed evidence before operational use."
+                                    )
+                                else:
+                                    result["data_provenance"] = "USER_ENTERED_UNVERIFIED"
+                                    result["provenance_warning"] = (
+                                        "User-entered failure descriptions, consequences, task strategies and evidence references "
+                                        "have not been independently verified."
+                                    )
                             elif selected_tool["tool_id"] == "T045":
                                 parsed_parts = json.loads(spare_parts_json)
                                 if not isinstance(parsed_parts, list):
@@ -1900,6 +1913,14 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                     )
                                 )
                                 st.caption(result.get("method", "Structured RCM worksheet"))
+                                st.caption("Data provenance: " + str(result.get("data_provenance", "USER_ENTERED_UNVERIFIED")))
+                                provenance_warning = result.get("provenance_warning")
+                                if provenance_warning:
+                                    if result.get("data_provenance") == "SYNTHETIC_EXAMPLE":
+                                        st.info(provenance_warning)
+                                    else:
+                                        st.warning(provenance_warning)
+                                st.caption("Method / scope: " + str(result.get("formula", "Validation and review flags only; no numeric risk score is computed.")))
                                 register = result.get("review_register")
                                 if isinstance(register, pd.DataFrame):
                                     st.markdown("**RCM review register**")

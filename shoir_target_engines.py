@@ -6187,6 +6187,8 @@ def build_rcm_decision_register(
         ).sum()),
         "rule_flag_count": int((flags != "No rule-based flags; human review still required").sum()),
         "human_review_required": True,
+        "data_provenance": "USER_ENTERED_UNVERIFIED",
+        "provenance_warning": "Failure descriptions, consequence categories, task strategies and evidence references are user-supplied and have not been independently verified.",
         "review_register": register,
         "formula": "No numeric risk score or task recommendation is computed; the tool validates required fields and emits explicit rule-based review flags.",
         "assumptions": "Failure descriptions, consequence categories, selected strategies and evidence references are user supplied. The tool does not validate the source evidence, determine task applicability, estimate failure probabilities or approve maintenance policy.",

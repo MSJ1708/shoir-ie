@@ -365,10 +365,15 @@ def test_workbench_runs_maintenance_hazard_mrp_and_portfolio_methods():
                 "not a complete or certified rcm analysis" in str(item.value).lower()
                 for item in at.warning
             )
+            assert result["data_provenance"] == "SYNTHETIC_EXAMPLE"
+            assert "synthetic teaching data" in result["provenance_warning"].lower()
+            assert result["human_review_required"] is True
+            assert "no numeric risk score" in result["formula"].lower()
             assert any(
                 "Human review status" in getattr(frame.value, "columns", [])
                 for frame in at.dataframe
             )
+            assert any("Data provenance: SYNTHETIC_EXAMPLE" in str(item.value) for item in at.caption)
             assert not any(
                 getattr(widget, "key", "").startswith("target_t044_review_register_")
                 for widget in at.selectbox
@@ -828,3 +833,42 @@ def test_workbench_capa_8d_register_reports_completeness_and_overdue_state():
     assert result["record_count"] == 1
     assert result["data_provenance"] == "SYNTHETIC_EXAMPLE"
     assert result["records"].iloc[0]["Workflow state"] == "IN_PROGRESS"
+
+def test_workbench_rcm_marks_edited_failure_modes_as_user_entered_unverified():
+    from streamlit.testing.v1 import AppTest
+
+    page = ROOT / "pages" / "Industrial_Engineering_Workbench.py"
+    at = AppTest.from_file(page, default_timeout=90)
+    at.session_state["current_user"] = "rcm-provenance-checker"
+    at.session_state["authenticated"] = True
+    at.session_state["user_tier"] = "Professional"
+    at.run(timeout=90)
+    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+
+    at.selectbox(key="shoir_100_tool_inspector").select(
+        "T044 · Reliability-Centered Maintenance Assistant"
+    )
+    at.run(timeout=90)
+    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+    edited = [{
+        "asset": "Line-02",
+        "function": "Transfer material to packing",
+        "failure_mode": "Drive failure",
+        "failure_effect": "Line stops",
+        "consequence_category": "operational",
+        "consequence_rationale": "User-entered example requiring site review.",
+        "proposed_task": "Review vibration history",
+        "task_strategy": "condition_directed",
+        "condition_indicator": "Vibration exceeds the site-approved threshold",
+        "evidence_reference": "USER-ENTERED-REFERENCE",
+    }]
+    at.text_area(key="tool044_modes").set_value(json.dumps(edited))
+    at.button(key="tool044_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+    result = at.session_state.get("shoir_tool_result_T044")
+    assert result is not None
+    assert result["data_provenance"] == "USER_ENTERED_UNVERIFIED"
+    assert "not been independently verified" in result["provenance_warning"].lower()
+    assert all(status == "PENDING" for status in result["review_register"]["Human review status"])
+
