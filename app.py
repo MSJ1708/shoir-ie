@@ -704,7 +704,7 @@ def local_account_exists(username):
 # =====================================================================
 TERMS_VERSION = "2026-10-21-beta-v1"
 PRIVACY_POLICY_VERSION = "2026-10-21-v1"
-REFUND_POLICY_VERSION = "2026-10-21-v1"
+REFUND_POLICY_VERSION = "2026-10-23-v2"
 COOKIE_POLICY_VERSION = "2026-10-21-v1"
 
 PRIVACY_POLICY_TEXT = """
