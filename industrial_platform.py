@@ -151,11 +151,44 @@ def normalize_tier(value: str) -> str:
     if "pro" in v: return "Mid-Tier Pro"
     return "Starter"
 
+def _recognized_tier(value: str) -> Optional[str]:
+    # Authorization accepts only recognized plan labels.
+    raw = " ".join(str(value or "").strip().casefold().split())
+    if not raw:
+        return None
+
+    def matches(*bases: str) -> bool:
+        for base in bases:
+            if raw in {base, f"{base} tier"}:
+                return True
+            if raw.startswith(f"{base} tier (") and raw.endswith(")"):
+                return True
+            if raw.startswith(f"{base} (") and raw.endswith(")"):
+                return True
+        return False
+
+    if matches("research pack"):
+        return "Research Pack"
+    if matches("enterprise plus", "industrial enterprise"):
+        return "Enterprise Plus"
+    if matches("enterprise"):
+        return "Enterprise"
+    if matches("professional"):
+        return "Professional"
+    if matches("mid-tier pro", "mid tier pro", "pro"):
+        return "Mid-Tier Pro"
+    if matches("starter"):
+        return "Starter"
+    return None
+
+
 def tier_allows(current: str, required: str) -> bool:
-    # The app's Research Pack menu is Enterprise-level functionality plus
-    # research tools. It must not imply the separate Enterprise Plus package.
-    c=normalize_tier(current)
-    r=normalize_tier(required)
+    # Fail closed for unknown values. Research Pack is Enterprise-level capability
+    # plus research tools; it is not Enterprise Plus and the reverse is also false.
+    c = _recognized_tier(current)
+    r = _recognized_tier(required)
+    if c is None or r is None:
+        return False
     if c == "Research Pack":
         return r in {"Starter", "Mid-Tier Pro", "Professional", "Enterprise", "Research Pack"}
     if r == "Research Pack":
