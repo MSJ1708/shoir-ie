@@ -57,11 +57,9 @@ def test_foundation_only_target_shows_gap_instead_of_blank_or_fake_run():
     _open(at, "T002", "Guided Study Wizard")
     assert any("Guided Study Wizard" in item.value for item in at.subheader)
     assert any(
-        "cannot be marked executable" in str(item.value).lower()
+        "dedicated runnable method is not wired" in str(item.value).lower()
         for item in at.warning
     )
-    # The dispatch fallback itself must explicitly explain that no calculation ran.
-    assert "dedicated runnable method is not wired" in PAGE.read_text(encoding="utf-8").lower()
     assert "shoir_T002_result" not in at.session_state
     assert not any(getattr(button, "key", None) == "T002_run_button" for button in at.button)
 
