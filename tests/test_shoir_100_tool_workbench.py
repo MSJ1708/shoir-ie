@@ -318,6 +318,7 @@ def test_workbench_runs_maintenance_hazard_mrp_and_portfolio_methods():
 
     cases = [
         ("T043 · Preventive Maintenance Planner", "tool043_run", "T043", "overdue_task_count", 1),
+        ("T044 · Reliability-Centered Maintenance Assistant", "tool044_run", "T044", "failure_mode_count", 1),
         ("T047 · Job Safety and Hazard Register", "tool047_run", "T047", "high_screen_score_count", 1),
         ("T054 · Material Requirements Planner", "tool054_run", "T054", "total_planned_order_receipts", 30.0),
         ("T084 · Engineering Project Portfolio Scorer", "tool084_run", "T084", "project_count", 2),
