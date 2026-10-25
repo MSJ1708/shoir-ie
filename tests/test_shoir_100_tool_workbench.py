@@ -762,3 +762,28 @@ def test_workbench_runs_equipment_anomaly_monitor_and_labels_example_data():
     assert result["status"] == "ANOMALIES_DETECTED"
     assert result["anomaly_count"] == 1
     assert result["data_provenance"] == "SYNTHETIC_EXAMPLE"
+
+
+def test_workbench_capa_8d_register_reports_completeness_and_overdue_state():
+    from streamlit.testing.v1 import AppTest
+
+    page = ROOT / "pages" / "Industrial_Engineering_Workbench.py"
+    at = AppTest.from_file(page, default_timeout=90)
+    at.session_state["current_user"] = "capa-register-checker"
+    at.session_state["authenticated"] = True
+    at.session_state["user_tier"] = "Mid-Tier Pro"
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+
+    at.selectbox(key="shoir_100_tool_inspector").select("T039")
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    at.button(key="tool039_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    result = at.session_state.get("shoir_tool_result_T039")
+    assert result is not None
+    assert result["status"] == "CAPA_REGISTER_REVIEWED"
+    assert result["record_count"] == 1
+    assert result["data_provenance"] == "SYNTHETIC_EXAMPLE"
+    assert result["records"].iloc[0]["Workflow state"] == "IN_PROGRESS"
