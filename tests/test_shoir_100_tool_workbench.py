@@ -121,15 +121,14 @@ def test_workbench_denies_rcm_run_below_professional_tier():
     )
     at.run(timeout=60)
     assert not at.exception, "\n".join(str(error.value) for error in at.exception)
-    at.button(key="tool044_run").click()
-    at.run(timeout=60)
-
-    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
-    assert at.session_state.get("shoir_tool_result_T044") is None
+    # Restricted methods are intentionally not rendered; the catalogue still
+    # explains the minimum tier and the runtime does not produce a result.
+    assert not any(button.key == "tool044_run" for button in at.button)
     assert any(
-        "T044 requires the Professional package." in str(item.value)
-        for item in at.error
+        "not executable on the current package" in str(item.value).lower()
+        for item in at.warning
     )
+    assert at.session_state.get("shoir_tool_result_T044") is None
 
 
 def test_workbench_selects_and_runs_work_sampling_and_pareto_tools():
@@ -687,7 +686,7 @@ def test_workbench_builds_downloadable_reproducibility_pack():
         assert "SHA256SUMS.txt" in archive.namelist()
         assert "input_snapshot_redacted.json" in archive.namelist()
     assert result["bundle_sha256"]
-    assert any(button.key == "tool087_download" for button in at.button)
+    assert any(button.key == "tool087_download" for button in at.get("download_button"))
 
 
 def test_workbench_runs_facility_location_flow():
