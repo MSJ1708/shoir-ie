@@ -5654,3 +5654,144 @@ def evaluate_student_practice_answer(topic_id: str, submitted_answer: Any) -> di
         "data_provenance": "SYNTHETIC_EXERCISE",
         "limitations": ["These are fixed practice examples, not a diagnosis of any real plant or process."],
     }
+
+
+def build_guided_study_plan(
+    goal: str,
+    *,
+    available_data_fields: Sequence[str] | str = (),
+    completed_tool_ids: Sequence[str] = (),
+    tier: str = "Starter",
+) -> dict[str, Any]:
+    """Build an explainable next-step plan without inventing analysis results."""
+    from shoir_tool_registry import get_tool, tier_allows_tool
+
+    workflows = {
+        "capacity_bottleneck": {
+            "label": "Production capacity and bottleneck",
+            "steps": ["T011", "T013", "T025", "T073", "T083", "T095"],
+        },
+        "facility_layout": {
+            "label": "Facility layout and material flow",
+            "steps": ["T065", "T069", "T095"],
+        },
+        "quality_capability": {
+            "label": "Quality and process capability",
+            "steps": ["T013", "T031", "T032", "T038", "T095"],
+        },
+        "inventory_planning": {
+            "label": "Inventory and replenishment",
+            "steps": ["T054", "T055", "T056", "T095"],
+        },
+        "maintenance_reliability": {
+            "label": "Maintenance and reliability",
+            "steps": ["T042", "T041", "T043", "T049", "T095"],
+        },
+        "energy_sustainability": {
+            "label": "Energy and sustainability",
+            "steps": ["T077", "T078", "T079", "T095"],
+        },
+    }
+    input_contracts = {
+        "T011": ["source_file"],
+        "T013": ["validated_dataset"],
+        "T025": ["process_table", "demand", "time_unit"],
+        "T073": ["baseline_kpis", "scenario_changes"],
+        "T083": ["baseline_cost", "post_change_cost", "measurement_window", "evidence_reference"],
+        "T095": ["result_set", "assumptions", "source_provenance"],
+        "T065": ["departments", "from_to_flows", "distances"],
+        "T069": ["facility_table", "customer_demands", "routes", "unit_costs", "capacities"],
+        "T031": ["measurements", "sample_order", "process_phase"],
+        "T032": ["measurements", "lsl", "usl", "subgroup_size"],
+        "T038": ["failure_modes"],
+        "T054": ["bill_of_materials", "parent_demand", "on_hand_inventory", "lead_times"],
+        "T055": ["mean_daily_demand", "demand_sd", "lead_time", "order_cost", "holding_cost"],
+        "T056": ["annual_demand", "unit_cost", "period_demand"],
+        "T042": ["operating_hours", "complete_failure_repair_events"],
+        "T041": ["failure_times"],
+        "T043": ["asset_schedule", "maintenance_intervals", "due_dates"],
+        "T049": ["work_orders", "available_hours", "skills"],
+        "T077": ["baseline_energy", "alternative_scenarios", "output_units", "energy_cost"],
+        "T078": ["activity_amount", "emission_factor", "factor_source", "factor_date"],
+        "T079": ["water_inputs", "product_outputs", "waste_flows", "units", "period"],
+    }
+    goal_key = str(goal or "").strip().lower()
+    if goal_key not in workflows:
+        raise ValueError("Choose one of the supported guided-study goals.")
+    if isinstance(available_data_fields, str):
+        field_values = [x.strip() for x in available_data_fields.replace(";", ",").split(",") if x.strip()]
+    else:
+        field_values = list(available_data_fields or ())
+    normalized_fields = {str(x).strip().lower().replace(" ", "_") for x in field_values if str(x).strip()}
+    completed = {str(x).strip().upper() for x in (completed_tool_ids or ())}
+    if any(not isinstance(x, str) or len(x) != 4 or not x.startswith("T") or not x[1:].isdigit() for x in completed):
+        raise ValueError("Completed tool references must be canonical IDs such as T025.")
+
+    rows = []
+    restricted_count = 0
+    missing_count = 0
+    foundation_count = 0
+    completed_count = 0
+    for position, tool_id in enumerate(workflows[goal_key]["steps"], start=1):
+        tool = get_tool(tool_id)
+        if not isinstance(tool, Mapping):
+            raise ValueError(f"Guided workflow refers to unknown canonical tool {tool_id}.")
+        allowed = bool(tier_allows_tool(tier, tool_id))
+        readiness = str(tool.get("implementation_status", "UNRESOLVED"))
+        required = input_contracts.get(tool_id, [])
+        missing = [field for field in required if field not in normalized_fields]
+        if not allowed:
+            status = "TIER_RESTRICTED"
+            next_action = f"Requires {tool.get('target_minimum_tier', 'a higher package')}; the wizard does not bypass access controls."
+            restricted_count += 1
+        elif tool_id in completed:
+            status = "COMPLETED_IN_SESSION"
+            next_action = "Review the saved result and confirm its input assumptions."
+            completed_count += 1
+        elif readiness == "FOUNDATION_ONLY":
+            status = "FOUNDATION_ONLY"
+            next_action = "This capability is not complete yet; use only a separately supported workflow."
+            foundation_count += 1
+        elif missing:
+            status = "INPUTS_MISSING"
+            next_action = "Provide: " + ", ".join(missing)
+            missing_count += 1
+        else:
+            status = "READY"
+            next_action = "Open this tool and validate the inputs before running it."
+        rows.append({
+            "Step": position,
+            "Tool ID": tool_id,
+            "Tool": tool.get("canonical_name", tool_id),
+            "Minimum tier": tool.get("target_minimum_tier", "UNRESOLVED"),
+            "Catalog readiness": readiness,
+            "Step status": status,
+            "Required input fields": ", ".join(required) if required else "Confirm requirements in tool",
+            "Missing input fields": ", ".join(missing),
+            "Next action": next_action,
+        })
+    steps = pd.DataFrame(rows)
+    ready_steps = steps[steps["Step status"] == "READY"]
+    next_step = None if ready_steps.empty else {
+        "tool_id": str(ready_steps.iloc[0]["Tool ID"]),
+        "canonical_name": str(ready_steps.iloc[0]["Tool"]),
+        "step": int(ready_steps.iloc[0]["Step"]),
+    }
+    return {
+        "status": "GUIDED_PLAN_CREATED",
+        "goal": workflows[goal_key]["label"],
+        "goal_id": goal_key,
+        "tier": str(tier),
+        "steps": steps,
+        "step_count": len(steps),
+        "ready_step_count": int((steps["Step status"] == "READY").sum()),
+        "missing_input_step_count": missing_count,
+        "tier_restricted_step_count": restricted_count,
+        "foundation_only_step_count": foundation_count,
+        "completed_step_count": completed_count,
+        "next_recommended_step": next_step,
+        "available_data_fields": sorted(normalized_fields),
+        "method": "Rule-based guided workflow using the canonical target registry; no analysis is run by the wizard.",
+        "warning": "This is a study plan, not an engineering result. Run each tool separately, validate its data and assumptions, and do not treat estimates as realized outcomes.",
+        "data_provenance": "USER-PROVIDED INPUT INVENTORY AND CANONICAL TOOL REGISTRY",
+    }
