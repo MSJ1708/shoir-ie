@@ -31,6 +31,10 @@ from shoir_100_tool_simulation_engine import simulate_serial_flow_line
 from shoir_100_tool_reproducibility import build_reproducibility_pack
 from shoir_100_tool_research_report import build_research_methods_report
 from shoir_100_tool_power_engine import plan_t_test_power
+from shoir_100_tool_learning_engines import (
+    build_guided_study_plan, guided_study_problem_types, guided_study_required_inputs,
+    search_contextual_help, get_practice_question, check_practice_answer,
+)
 
 from shoir_100_tool_registry import (
     TOOL_TARGETS, TOOL_STATUSES, TOOL_TIER_ORDER, WORKBENCHES,
@@ -59,6 +63,19 @@ from shoir_100_tool_extended_engines import (
 
 def _fingerprint(*values):
     return hashlib.sha256(repr(values).encode("utf-8")).hexdigest()
+
+
+def _jump_to_target(tool_id):
+    # The callback runs before the next page render, so the selectbox state can be
+    # cleared safely and the requested canonical target can become the new default.
+    st.query_params["tool"] = str(tool_id).upper()
+    st.session_state.pop("tool_library_detail", None)
+
+
+def _sync_selected_target_query():
+    selected = st.session_state.get("tool_library_detail")
+    if isinstance(selected, str) and " · " in selected:
+        st.query_params["tool"] = selected.split(" · ", 1)[0].strip().upper()
 
 
 def _run_engine_tool(tool_id, signature, button_label, calculation):
@@ -262,7 +279,15 @@ st.caption(f"{len(rows)} of {len(TOOL_TARGETS)} target capabilities match. Exist
 if rows:
     st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
     choices = [r["ID"] + " · " + r["Capability"] for r in rows]
-    selected = st.selectbox("Inspect capability contract", choices, key="tool_library_detail")
+    requested_tool = str(st.query_params.get("tool", "") or "").strip().upper()
+    requested_choice = next(
+        (choice for choice in choices if requested_tool and choice.startswith(requested_tool + " · ")),
+        choices[0],
+    )
+    selected = st.selectbox(
+        "Inspect capability contract", choices, index=choices.index(requested_choice),
+        key="tool_library_detail", on_change=_sync_selected_target_query,
+    )
     selected_id = selected.split(" · ",1)[0]
     item = next(x for x in TOOL_TARGETS if x["tool_id"] == selected_id)
     st.subheader(f'{item["tool_id"]} · {item["canonical_name"]}')
@@ -334,7 +359,180 @@ if rows:
                     "Your data was not changed. Use the normal Workbench navigation."
                 )
 
-        if selected_id == "T020":
+        if selected_id == "T002":
+            st.warning("GUIDED PLAN ONLY — this wizard generates a checklist and recommended tool sequence. It does not run the recommended analysis or produce plant results.")
+            st.markdown("### Guided Study Wizard")
+            problem_type = st.selectbox("What are you trying to improve?", guided_study_problem_types(), key="t002_problem_type")
+            objective = st.text_input("Decision question / objective", "", max_chars=1000, key="t002_objective")
+            data_state = st.selectbox(
+                "Current data readiness",
+                ["No validated dataset", "Imported but not validated", "Validated dataset", "Measured baseline reviewed"],
+                key="t002_data_state",
+            )
+            required_inputs = guided_study_required_inputs(problem_type)
+            available_fields = st.multiselect(
+                "Which required inputs do you currently have?",
+                required_inputs,
+                default=[],
+                key="t002_available_inputs",
+            )
+            constraints = st.text_area("Known constraints (optional)", "", max_chars=2000, key="t002_constraints")
+            signature = _fingerprint(problem_type, objective, data_state, sorted(available_fields), constraints)
+            saved = _run_engine_tool(
+                "T002", signature, "Build guided study plan",
+                lambda: build_guided_study_plan(
+                    problem_type=problem_type, objective=objective, data_state=data_state,
+                    key_constraints=constraints, available_fields=available_fields,
+                ),
+            )
+            if saved and saved.get("signature") == signature:
+                plan = saved.get("result", {})
+                missing_inputs = plan.get("missing_inputs", [])
+                if missing_inputs:
+                    st.warning("Inputs or validation steps still required before analysis:")
+                    for field in missing_inputs:
+                        st.write(f"• {field}")
+                else:
+                    st.success("The stated checklist is complete. Validate the actual data and assumptions before running downstream tools.")
+                steps = plan.get("steps", [])
+                if steps:
+                    st.dataframe(pd.DataFrame(steps), use_container_width=True, hide_index=True)
+                st.markdown("**Recommended target tools**")
+                targets = plan.get("recommended_tool_ids", [])
+                st.write(", ".join(targets) if targets else "No target recommendation available.")
+                for tool_id in targets:
+                    target = next((row for row in TOOL_TARGETS if row["tool_id"] == tool_id), None)
+                    if target:
+                        st.button(
+                            f"Open {tool_id} · {target['canonical_name']}",
+                            key=f"t002_open_{tool_id}", on_click=_jump_to_target, args=(tool_id,),
+                        )
+
+        elif selected_id == "T008":
+            st.markdown("### Formula and Assumption Inspector")
+            st.caption("Inspect structured results already loaded in this session. This does not fabricate a result or reconstruct raw inputs that were not saved.")
+            loaded_results = []
+            for state_key, state_value in list(st.session_state.items()):
+                if (
+                    isinstance(state_key, str) and state_key.startswith("shoir_T")
+                    and state_key.endswith("_result") and isinstance(state_value, dict)
+                    and isinstance(state_value.get("result"), dict)
+                ):
+                    raw_tool = state_key[len("shoir_"):-len("_result")]
+                    result_payload = state_value["result"]
+                    method_name = str(result_payload.get("method", result_payload.get("message", "Method not supplied")))
+                    executed_at = str(state_value.get("executed_at", "timestamp unavailable"))
+                    loaded_results.append({
+                        "key":state_key,"tool_id":raw_tool,"method":method_name,
+                        "executed_at":executed_at,"state":state_value,
+                    })
+            loaded_results.sort(key=lambda row:(row["executed_at"], row["tool_id"]), reverse=True)
+            if not loaded_results:
+                st.info("No structured calculation results are loaded in this session. Run an entitled tool first; this inspector will then show its method, saved assumptions, formulas, warnings and provenance.")
+            else:
+                result_labels = [
+                    f'{row["tool_id"]} · {row["method"][:100]} · {row["executed_at"]}'
+                    for row in loaded_results
+                ]
+                choice = st.selectbox("Select a loaded result", result_labels, key="t008_result_choice")
+                selected_result = loaded_results[result_labels.index(choice)]["state"]
+                result_payload = selected_result.get("result", {})
+                st.caption(
+                    f'Source: {selected_result.get("source", "UNVERIFIED")} · '
+                    f'Persistence: {selected_result.get("persistence_status", "UNVERIFIED")} · '
+                    f'Executed: {selected_result.get("executed_at", "timestamp unavailable")}'
+                )
+                st.markdown("**Method**")
+                st.write(result_payload.get("method", result_payload.get("message", "Method not supplied")))
+                st.markdown("**Input signature**")
+                st.code(str(selected_result.get("signature", "not recorded")), language="text")
+                formulas = result_payload.get("formulas", {})
+                if isinstance(formulas, dict) and formulas:
+                    st.markdown("**Formulas**")
+                    st.dataframe(pd.DataFrame([{"Output":k,"Formula":v} for k,v in formulas.items()]), use_container_width=True, hide_index=True)
+                elif result_payload.get("formula"):
+                    st.write(result_payload["formula"])
+                for heading, field in [("Assumptions","assumptions"),("Warnings and limitations","warnings")]:
+                    st.markdown(f"**{heading}**")
+                    values = result_payload.get(field, [])
+                    if isinstance(values, str):
+                        values = [values]
+                    if values:
+                        for value in values:
+                            st.write(f"• {value}")
+                    else:
+                        st.caption("No structured items were recorded for this result.")
+                if result_payload.get("provenance") is not None:
+                    st.markdown("**Provenance**")
+                    st.json(result_payload["provenance"])
+                if result_payload.get("metrics"):
+                    metric_values = result_payload["metrics"]
+                    if isinstance(metric_values, dict):
+                        st.dataframe(pd.DataFrame([{"Metric":k,"Value":"—" if v is None else str(v)} for k,v in metric_values.items()]), use_container_width=True, hide_index=True)
+                for table_name, table in result_payload.items():
+                    if isinstance(table, pd.DataFrame):
+                        st.markdown(f"**{table_name.replace('_',' ').title()}**")
+                        st.dataframe(table, use_container_width=True, hide_index=True)
+
+        elif selected_id == "T010":
+            st.markdown("### Interactive Learning and Help Center")
+            st.caption("Searches curated method guidance and assumptions; it does not execute the target tool or independently validate your plant's data.")
+            help_query = st.text_input("Search a topic or question", "", max_chars=300, key="t010_help_query")
+            help_ids = [""] + [row["tool_id"] for row in TOOL_TARGETS]
+            help_tool = st.selectbox("Optional related tool", help_ids, format_func=lambda x: "No specific tool" if not x else next((row["canonical_name"] + " · " + x for row in TOOL_TARGETS if row["tool_id"] == x), x), key="t010_help_tool")
+            signature = _fingerprint(help_query, help_tool)
+            saved = _run_engine_tool(
+                "T010", signature, "Search contextual help",
+                lambda: search_contextual_help(query=help_query, tool_id=help_tool),
+            )
+            if saved and saved.get("signature") == signature:
+                articles = saved.get("result", {}).get("articles", [])
+                if not articles:
+                    st.info("No curated article matched that query/tool ID. Try a broader topic such as capacity, OEE, facility, reliability, research or ROI.")
+                for article in articles:
+                    with st.container(border=True):
+                        st.subheader(article.get("topic", "Help topic"))
+                        st.write(article.get("summary", ""))
+                        st.markdown("**Suggested steps**")
+                        for step in article.get("steps", []):
+                            st.write(f"• {step}")
+                        st.caption("Related canonical tools: " + ", ".join(article.get("related_tools", [])))
+                        for tool_id in article.get("related_tools", []):
+                            target = next((row for row in TOOL_TARGETS if row["tool_id"] == tool_id), None)
+                            if target:
+                                st.button(
+                                    f"Open {tool_id} · {target['canonical_name']}",
+                                    key=f"t010_open_{tool_id}", on_click=_jump_to_target, args=(tool_id,),
+                                )
+
+        elif selected_id == "T089":
+            st.markdown("### Student Learning and Practice Mode")
+            st.caption("Practice values are deterministic teaching examples, not plant observations. The method and unit convention are shown with the answer check.")
+            topic = st.selectbox("Practice topic", ["Takt time", "OEE", "Standard time"], key="t089_topic")
+            question = get_practice_question(topic=topic)
+            st.info(question["prompt"])
+            answer = st.number_input(
+                f"Your answer ({question['unit']})", value=0.0, format="%.6f",
+                key="t089_answer",
+            )
+            signature = _fingerprint(topic, float(answer))
+            saved = _run_engine_tool(
+                "T089", signature, "Check practice answer",
+                lambda: check_practice_answer(topic=topic, answer=float(answer)),
+            )
+            if saved and saved.get("signature") == signature:
+                result_payload = saved.get("result", {})
+                if result_payload.get("is_correct"):
+                    st.success("Correct within the stated rounding tolerance.")
+                else:
+                    st.warning("Not yet correct. Review the solution steps and unit convention.")
+                st.markdown("**Worked solution**")
+                st.write(result_payload.get("worked_formula", "No formula supplied"))
+                for step in result_payload.get("solution_steps", []):
+                    st.write(f"• {step}")
+                st.caption(f'Accepted absolute rounding tolerance: {result_payload.get("metrics", {}).get("accepted_absolute_tolerance")}')
+                
+        elif selected_id == "T020":
             st.warning("LIMITED VALIDATION MODE — the hash detects changes in the supplied table and metadata. It is not a digital signature, proof of authenticity, or automatic control over all legacy downstream routes.")
             st.markdown("### Dataset Versioning and Lineage")
             st.caption("Record the dataset version, source metadata, transformations and any downstream runs whose dataset fingerprint you know. Raw dataset cells are not embedded in the lineage record.")
