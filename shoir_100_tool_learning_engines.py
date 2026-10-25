@@ -157,6 +157,17 @@ _PRACTICE_QUESTIONS = {
 }
 
 
+def guided_study_required_inputs(problem_type: str) -> list[str]:
+    kind = str(problem_type or "").strip()
+    if kind not in _STUDY_TEMPLATES:
+        raise ValueError(f"Problem type must be one of: {', '.join(_STUDY_TEMPLATES)}.")
+    return list(_STUDY_TEMPLATES[kind]["required"])
+
+
+def guided_study_problem_types() -> list[str]:
+    return list(_STUDY_TEMPLATES)
+
+
 def build_guided_study_plan(
     *, problem_type: str, objective: str = "", data_state: str = "No validated dataset",
     key_constraints: str = "", available_fields: list[str] | None = None,
@@ -178,7 +189,8 @@ def build_guided_study_plan(
     if len(fields) > 100:
         raise ValueError("Enter no more than 100 available field names.")
     template = _STUDY_TEMPLATES[kind]
-    missing = list(template["required"])
+    provided = set(fields)
+    missing = [field for field in template["required"] if field not in provided]
     if state == "No validated dataset":
         missing.insert(0, "approved source dataset or documented manual observations")
     elif state == "Imported but not validated":
