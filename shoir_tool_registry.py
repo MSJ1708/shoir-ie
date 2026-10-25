@@ -145,7 +145,7 @@ def _load_targets() -> tuple[dict[str, Any], ...]:
         external_dependency = "No external configuration established by this source audit."
         if tool_id in {"T048", "T074", "T096", "T098"}:
             external_dependency = "Approved data source or provider configuration must be explicitly set up and tested; live operation is not assumed."
-        if tool_id in {"T015", "T016", "T017", "T018", "T019", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T033", "T034", "T035", "T036", "T037", "T038", "T040", "T041", "T042", "T043", "T045", "T047", "T049", "T050", "T051", "T052", "T054", "T055", "T056", "T058", "T059", "T063", "T066", "T070", "T072", "T075", "T076", "T077", "T078", "T079", "T081", "T082", "T083", "T084", "T085"}:
+        if tool_id in {"T015", "T016", "T017", "T018", "T019", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T033", "T034", "T035", "T036", "T037", "T038", "T040", "T041", "T042", "T043", "T045", "T047", "T048", "T049", "T050", "T051", "T052", "T054", "T055", "T056", "T058", "T059", "T063", "T066", "T070", "T072", "T075", "T076", "T077", "T078", "T079", "T081", "T082", "T083", "T084", "T085"}:
             persistence_scope = (
                 "Focused result and input snapshot are saved through workspace_persistence.py for authenticated users; "
                 "managed storage is used only when configured, otherwise the local SQLite fallback may be ephemeral. "
@@ -172,7 +172,7 @@ def _load_targets() -> tuple[dict[str, Any], ...]:
             "entitlement_enforcement_points": (
                 "Direct Workbench specialist methods require _require_focused_tool_actor() plus require_tool_access(tier, tool_id) before calculation; "
                 "the capability directory also checks target access. Mapped legacy module routes still enforce their native policy."
-                if tool_id in {"T015", "T016", "T017", "T018", "T019", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T033", "T034", "T035", "T036", "T037", "T038", "T040", "T041", "T042", "T043", "T045", "T047", "T049", "T050", "T051", "T052", "T054", "T055", "T056", "T058", "T059", "T063", "T066", "T070", "T072", "T075", "T076", "T077", "T078", "T079", "T081", "T082", "T083", "T084", "T085"}
+                if tool_id in {"T015", "T016", "T017", "T018", "T019", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T033", "T034", "T035", "T036", "T037", "T038", "T040", "T041", "T042", "T043", "T045", "T047", "T048", "T049", "T050", "T051", "T052", "T054", "T055", "T056", "T058", "T059", "T063", "T066", "T070", "T072", "T075", "T076", "T077", "T078", "T079", "T081", "T082", "T083", "T084", "T085"}
                 else
                 "Target catalog gate: tier_allows_tool(tool_id, tier). Target execution is not yet wired to this ID; "
                 "the mapped legacy route must also enforce its native server-side policy."
@@ -228,6 +228,7 @@ def _load_targets() -> tuple[dict[str, Any], ...]:
                 "T079": "tests/test_shoir_target_engines.py::test_water_waste_flow_balance_reconciles_and_refuses_mixed_units; tests/test_shoir_target_engines.py::test_water_waste_processor_does_not_combine_unlike_measurement_periods",
                 "T043": "tests/test_shoir_target_engines.py::test_preventive_maintenance_planner_orders_overdue_tasks_and_validates_dates",
                 "T047": "tests/test_shoir_target_engines.py::test_hazard_screen_scores_and_separates_residual_risk_and_missing_controls",
+                "T048": "tests/test_shoir_target_engines.py::test_equipment_anomaly_monitor_detects_spike_and_reports_freshness_deterministically; tests/test_shoir_target_engines.py::test_equipment_anomaly_monitor_distinguishes_stale_data_and_rejects_bad_inputs",
                 "T054": "tests/test_shoir_target_engines.py::test_one_level_mrp_calculates_net_requirements_lot_multiple_and_release_period",
                 "T084": "tests/test_shoir_target_engines.py::test_project_portfolio_score_normalizes_direction_and_weights_reproducibly",
             }.get(tool_id, "tests/test_shoir_100_tool_registry.py::test_all_100_tool_metadata_contracts (catalog contract only; not an engineering-engine fixture)"),
