@@ -5969,8 +5969,10 @@ def assess_capa_8d_records(
 
         opened_raw = str(raw.get("opened_date", "")).strip()
         due_raw = str(raw.get("due_date", "")).strip()
-        opened_date = pd.to_datetime(opened_raw, errors="coerce").date() if opened_raw else None
-        due_date = pd.to_datetime(due_raw, errors="coerce").date() if due_raw else None
+        opened_parsed = pd.to_datetime(opened_raw, errors="coerce") if opened_raw else None
+        due_parsed = pd.to_datetime(due_raw, errors="coerce") if due_raw else None
+        opened_date = None if opened_parsed is None or pd.isna(opened_parsed) else opened_parsed.date()
+        due_date = None if due_parsed is None or pd.isna(due_parsed) else due_parsed.date()
         if opened_raw and opened_date is None:
             raise ValueError(f"Record {capa_id} has an invalid opened_date.")
         if due_raw and due_date is None:
@@ -6003,7 +6005,8 @@ def assess_capa_8d_records(
             overdue_total += 1
         if missing:
             missing_total += 1
-        completeness_pct = 100.0 * (len(required_fields) + 4 - len(missing)) / (len(required_fields) + 4)
+        total_requirements = len(required_fields) + 4 + (3 if status == "CLOSED" else 0)
+        completeness_pct = 100.0 * max(0, total_requirements - len(missing)) / total_requirements
         if status == "CLOSED" and not missing:
             workflow_state = "CLOSED_RECORD_COMPLETE"
         elif status == "CLOSED" and missing:
