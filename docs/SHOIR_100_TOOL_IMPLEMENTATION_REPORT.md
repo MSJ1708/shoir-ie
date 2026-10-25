@@ -10,7 +10,7 @@ The implementation uses the existing `pages/Industrial_Engineering_Workbench.py`
 
 ## Focused execution methods
 
-There were 42 focused method runners before this continuation. **Three additional methods have now been added as executable Workbench forms, for 45 target IDs with focused execution paths total.** The implementation matrix links every target to its minimum tier, contracts, evidence tests and remaining limitations.
+There were 42 focused method runners before this continuation. **Five additional methods have now been added as executable Workbench forms in this continuation, for 47 target IDs with focused execution paths total.** The implementation matrix links every target to its minimum tier, contracts, evidence tests and remaining limitations.
 
 ### Lean, manufacturing, quality and economics
 
@@ -54,6 +54,8 @@ This continuation adds three method-backed forms inside the existing Workbench:
 | T033 | Measurement Systems Analysis | Balanced crossed gage R&R via two-way random-effects ANOVA and nonnegative method-of-moments variance components. It does not support nested designs, confidence intervals, AIAG reference tables, or certification. |
 | T036 | Regression and ANOVA Studio | Full-rank ordinary least squares with intercept, coefficient diagnostics when estimable, model F-test, regression ANOVA and residual table. Categorical encoding, nonlinear model selection, robust standard errors and multiple-testing correction are outside the current method. |
 | T037 | Hypothesis Testing Assistant | Research Pack-gated two-sided one-sample, independent Welch and paired t-tests with degrees of freedom, p-value, confidence interval and Cohen's d when estimable. It does not auto-validate assumptions or provide multiple-testing correction. |
+| T049 | Maintenance Backlog Optimizer | Greedy work-order selection under a labor-hours budget with due-date/criticality scoring and skill eligibility; no downtime windows or globally optimal scheduling. |
+| T058 | Supplier Performance and Risk Scorecard | Weighted supplier scores with missing-evidence visibility and incomplete suppliers excluded from ranking; weights remain user judgments, not objective risk probabilities. |
 
 All three are still IMPLEMENTED_NEEDS_VALIDATION. They have independent fixture/boundary tests and a local Workbench AppTest, but those tests must pass on the final head and do not replace authenticated hosted browser, managed persistence, export or six-package access verification.
 
@@ -85,8 +87,8 @@ The registry and matrix contain 100 target IDs, T001–T100. Current classificat
 | Status | Count |
 |---|---:|
 | `VERIFIED_WORKING` | 0 |
-| `IMPLEMENTED_NEEDS_VALIDATION` | 72 |
-| `FOUNDATION_ONLY` | 26 |
+| `IMPLEMENTED_NEEDS_VALIDATION` | 74 |
+| `FOUNDATION_ONLY` | 24 |
 | `EXTERNAL_CONFIGURATION_REQUIRED` | 2 |
 | `MISSING` | 0 |
 | `BLOCKED` | 0 |
