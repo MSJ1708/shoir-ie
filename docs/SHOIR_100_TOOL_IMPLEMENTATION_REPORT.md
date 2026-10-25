@@ -1,7 +1,7 @@
 # Shoir-IE 100-tool integration report
 
-**Branch:** `feat/shoir-100-tools-integration-20261025`  
-**Scope:** code-grounded additions to the existing Shoir-IE Workbench  
+**Branch:** `agent/shoir-100-release-gates-verify-20261025`  
+**Scope:** code-grounded 100-target Workbench additions, automated authorization coverage, and persistence Edge Function hardening; no production deployment  
 **Current release status:** implementation tranche in progress; NO-GO until current CI, authenticated browser, persistence, integration and release checks pass
 
 ## UI and architecture preserved
@@ -144,13 +144,51 @@ The registry and matrix contain 100 target IDs, T001–T100. Current classificat
 
 These are evidence classifications, not a quality score. `IMPLEMENTED_NEEDS_VALIDATION` means a real implementation/first-pass method is mapped but mandatory verification remains incomplete. `FOUNDATION_ONLY` means the specialist promised behavior remains incomplete. Zero missing catalogue mappings does **not** mean all 100 tools are complete.
 
+## Security review and threat model
+
+A repository-level threat model is maintained at [docs/SHOIR_SECURITY_THREAT_MODEL.md](./SHOIR_SECURITY_THREAT_MODEL.md). It records the main assets and trust boundaries, observed controls, evidence limits and release blockers. This is a source review, not a penetration-test report or security certification.
+
+Changes made in this candidate branch:
+- The persistence Edge Function now reads JSON through a bounded stream (12 MiB maximum), rejects malformed/non-object bodies, validates workspace state as an object with an 8 MiB serialized limit, and validates before upsert so malformed or oversized state does not replace the last valid saved state.
+- Unexpected persistence exceptions are mapped to a generic server error rather than returning raw database/storage/provider messages. Known public auth, subscription, rate-limit and payment-proof validation errors retain controlled statuses/messages.
+- Added Deno regression tests for bounded input, malformed JSON, workspace-state limits, status mapping and internal error redaction.
+- The Edge Function workflow now runs formatting, type-checking and Deno tests for this helper, and is configured to run for this stacked integration PR.
+- Added a Python release-gate test covering registry/matrix identity, all 100 target IDs, all six package states, direct authorization allows/denies, unknown-target fail-closed behavior, and Research Pack versus Enterprise Plus separation.
+- Enabled security-quality, platform and engine-regression workflows for pull requests targeting the current 100-tool integration base, in addition to main.
+
+Residual security limitations are material:
+- The repository currently reports main branch protection disabled with required status checks off. The available connected GitHub action could read this state but could not change branch protection; repository settings/admin action is still required.
+- Cross-user/cross-workspace denial has not been proven against two disposable authenticated staging accounts and the deployed Supabase project. RLS policy source review is not a substitute for that runtime test.
+- Full review of every SQL execution path, import/export format, Copilot entry point, connector URL, API/plugin action and browser rendering sink is not complete. The workflow secret-pattern guard only scans three application entry files; dependency/security jobs must be checked on the exact release head.
+- No authenticated hosted browser run, staging import-to-export-to-decision run, renewal-only/account revocation walkthrough, production deployment parity check, or independent penetration test is evidenced by this branch.
+- Request and workspace limits are intentional safety bounds; large workspace payloads above these limits will be rejected without replacing the prior saved state. Verify representative production workspace sizes in staging before deployment.
+
 ## Verification / release gates
 
-A previous run on an earlier code revision reported 705 passed, 2 failed and 2 skipped, and a later branch note reported 740 passed and 2 skipped before the most recent methods were integrated. Those results do not certify the current branch head.
+### Canonical 100-target accounting
+The matrix and runtime registry were reconciled: both contain exactly 100 unique IDs (T001–T100) with matching canonical name, minimum tier and implementation status. The classification remains 0 VERIFIED_WORKING, 87 IMPLEMENTED_NEEDS_VALIDATION, 11 FOUNDATION_ONLY, 2 EXTERNAL_CONFIGURATION_REQUIRED, 0 MISSING, and 0 BLOCKED. This means all targets are accounted for, not that all are operational.
 
-Run GitHub Actions for validation, tests, engine regression, security/quality and platform tests on the updated branch head. A passing conclusion must be confirmed against the exact resulting SHA. The authenticated browser acceptance matrix remains unverified, including direct-route/API/Copilot/export tier enforcement, save/reload/re-login, cross-workspace isolation, real workbook-to-decision flow and configured live integrations.
+The newly added test tests/test_shoir_100_tool_tier_truth_table.py is intended to make this cross-check and the six-package authorization truth table part of automated regression coverage. It exercises the canonical authorization helper, not every legacy route or external API callsite; route/API/Copilot/export-level enforcement still requires dedicated authenticated acceptance.
 
-Before merging, run all workflows on the exact final commit, fix every regression, complete authenticated browser and persistence/export checks, review deployment parity, and keep the PR in draft/NO-GO until mandatory acceptance is evidenced.
+### CI evidence must match the candidate SHA
+Earlier failures were diagnosed and the underlying assertion/selection issues corrected:
+- On earlier PR #187 head 20ed6d39bcbfbbaec6c08f2241136293058ba97a, the validation suite reported one failure and 792 passes: Streamlit AppTest passed a formatted display label back to a selectbox and the formatter applied twice.
+- The test now selects the stable underlying ID T021, and the reproducibility-pack assertion now inspects Streamlit download_button elements rather than the ordinary button collection; the actual Workbench uses the expected ZIP download control.
+- The Deno Edge Function checks (format, type-check and security tests) passed on predecessor commit 72091c5f4543ffaca82d870d927bd578bd8c4962 ([workflow run](https://github.com/MSJ1708/shoir-ie/actions/runs/40201706751)). This is historical evidence for that exact revision, not proof that a later head has passed.
+
+The latest branch changes also expanded workflow triggers and added the six-package target regression test. Earlier workflow conclusions must not be reused as proof for a later head. Confirm the latest commit SHA and conclusions for all of these workflows before making a merge decision: [Shoir-IE validation](https://github.com/MSJ1708/shoir-ie/actions/workflows/shoir-validation.yml), [security and quality](https://github.com/MSJ1708/shoir-ie/actions/workflows/security-quality.yml), [platform tests](https://github.com/MSJ1708/shoir-ie/actions/workflows/platform-tests.yml), [engine regression](https://github.com/MSJ1708/shoir-ie/actions/workflows/engine-regression.yml), and [Edge Function verification](https://github.com/MSJ1708/shoir-ie/actions/workflows/edge-function-check.yml).
+
+The validation workflow's hosted live-deployment-smoke job is skipped on this stacked feature PR by its current condition; its local browser smoke is not authenticated application acceptance and cannot establish deployed-commit parity.
+
+### Mandatory gates still open
+Before this may be considered for merge or deployment, the exact final head must pass all applicable workflows and then complete the following in isolated staging:
+- Authenticated browser walkthroughs for each advertised operational target, including correct action/output/error handling and tier-denial tests.
+- Direct route/action/API/plugin/Copilot/export authorization checks, including all restricted tiers and unmapped-target fail-closed behavior.
+- Save/reload/re-login, interrupted-save recovery and two-user cross-workspace isolation checks.
+- Valid multi-sheet workbook import, validation, mapping, deterministic engineering calculation, scenario comparison, decision save, export generation, reopen and expected-value verification; invalid input must preserve the previous valid state.
+- Facility Layout, Excel cleaning, Industrial Workbook, integration diagnostics, executive report exports, workspace/RBAC and security/governance walkthroughs.
+- Staging database/RLS policy tests, migration and Edge Function dependency parity, dependency-scan review, and verification that no unresolved critical/high security finding remains.
+- Confirmed deployment parity for the SHA being released. No production deployment was performed by this work.
 
 ## Release position
 
