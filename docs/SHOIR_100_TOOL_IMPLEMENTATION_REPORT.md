@@ -10,7 +10,7 @@ The implementation uses the existing `pages/Industrial_Engineering_Workbench.py`
 
 ## Focused execution methods
 
-There were 19 focused method runners in the branch before this tranche. **23 additional methods have since been added or expanded into Workbench forms, for 42 target IDs with focused execution paths total.** The implementation matrix links every target to its minimum tier, contracts, evidence tests and remaining limitations.
+The original focused tranche documented 19 runners, followed by 23 additional methods. This follow-on change adds four more target-ID execution paths (T036, T037, T051 and T072), taking the documented focused-method set from 42 to 46 IDs. Other existing module workflows may cover additional targets, but they are not counted as focused runners unless wired to the stable target ID and its execution gate. The implementation matrix links every target to its minimum tier, contracts, evidence tests and remaining limitations.
 
 ### Lean, manufacturing, quality and economics
 
@@ -46,6 +46,19 @@ There were 19 focused method runners in the branch before this tranche. **23 add
 | T077 | Energy Performance Optimizer | Compare baseline/alternative energy intensity, cost and emissions from scenario inputs; no plant control or guaranteed savings. |
 
 The methods use user-entered values and explicitly marked illustrative examples. A calculated number does not prove data accuracy or operational suitability.
+
+### Additional statistical, forecasting and simulation methods
+
+This follow-on branch adds four stable-ID runners to the existing Workbench target directory without creating new top-level navigation:
+
+| ID | Implemented baseline | Scope / limitation |
+|---|---|---|
+| T036 | Linear regression and one-way ANOVA | One numeric predictor for ordinary least squares, or an independent-groups one-way ANOVA. Includes residual/group summaries, ANOVA table and supported inference; does not include multivariable modeling, causal conclusions or post-hoc pairwise tests. |
+| T037 | Welch independent-samples t-test | Two-sided test, Welch degrees of freedom and confidence interval for the mean difference. Other test families, paired designs and multiplicity correction are not included. The minimum tier remains Research Pack. |
+| T051 | Chronological demand baseline comparison | Compares naive-last-value, training-mean and trailing moving-average baselines on a chronological holdout; the lowest-MAE baseline provides a simple forecast. It does not provide trend/seasonality models or prediction intervals. |
+| T072 | Seeded Monte Carlo net-value simulation | Supports declared independent benefit/cost inputs with normal, uniform, triangular or constant distributions. Reports quantiles, probability of negative net value, component correlation and a running-mean view. Correlations between inputs and cash-flow timing are not modeled; the result is not verified ROI. |
+
+The four methods use explicit execution-time require_tool_access checks, the existing authenticated-user guard, saved input snapshots and the shared result renderer. Deterministic golden/boundary tests and Workbench AppTest coverage were added. Those tests must still pass on the exact final commit before the new methods can be considered validated. The implementation status for all four remains IMPLEMENTED_NEEDS_VALIDATION; authenticated save/reload, export and browser acceptance remain open.
 
 ## Calculation safety and regression protection
 
