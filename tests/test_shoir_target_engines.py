@@ -1535,3 +1535,93 @@ def test_discrete_event_simulation_rejects_invalid_job_counts_stations_and_distr
     with pytest.raises(ValueError, match="greater than zero"):
         simulate_discrete_event_process([{"station": "Cut", "servers": 1, "mean_service_time": -1}], job_count=3, mean_interarrival_time=1)
 
+
+
+def test_solver_diagnostics_returns_optimal_solution_and_independently_checks_constraints():
+    from shoir_target_engines import run_solver_diagnostics
+
+    result = run_solver_diagnostics(
+        {
+            "x": {"low": 0, "up": 10, "category": "Continuous"},
+            "y": {"low": 0, "up": 10, "category": "Continuous"},
+        },
+        {"x": 3, "y": 2},
+        [
+            {"name": "minimum_output", "coefficients": {"x": 1, "y": 1}, "sense": ">=", "rhs": 4},
+            {"name": "balance", "coefficients": {"x": 1, "y": 3}, "sense": ">=", "rhs": 6},
+        ],
+        direction="minimize",
+    )
+    assert result["status"] == "OPTIMAL_FEASIBLE"
+    assert result["solver_status"] == "Optimal"
+    assert result["independent_feasibility_check"] is True
+    assert result["objective_value"] == pytest.approx(8.0)
+    values = result["variable_values"].set_index("Variable")
+    assert values.loc["x", "Value"] == pytest.approx(0.0)
+    assert values.loc["y", "Value"] == pytest.approx(4.0)
+    assert (values["Bound status"] == "SATISFIED").all()
+    constraints = result["constraint_diagnostics"].set_index("Constraint")
+    assert constraints.loc["minimum_output", "LHS value"] >= 4
+    assert constraints.loc["balance", "LHS value"] >= 6
+    assert (constraints["Status"] == "SATISFIED").all()
+    assert not result["violations"]
+
+
+def test_solver_diagnostics_distinguishes_infeasible_unbounded_and_milp_models():
+    from shoir_target_engines import run_solver_diagnostics
+
+    infeasible = run_solver_diagnostics(
+        {"x": {"low": 0, "up": 1, "category": "Continuous"}},
+        {"x": 1},
+        [{"name": "impossible", "coefficients": {"x": 1}, "sense": ">=", "rhs": 2}],
+    )
+    assert infeasible["solver_status"] == "Infeasible"
+    assert infeasible["status"] == "INFEASIBLE"
+    assert infeasible["objective_value"] is None
+
+    unbounded = run_solver_diagnostics(
+        {"x": {"low": 0, "up": None, "category": "Continuous"}},
+        {"x": 1},
+        [],
+        direction="maximize",
+    )
+    assert unbounded["solver_status"] == "Unbounded"
+    assert unbounded["status"] == "UNBOUNDED"
+    assert unbounded["objective_value"] is None
+
+    integer = run_solver_diagnostics(
+        {"x": {"low": 0, "up": 10, "category": "Integer"}},
+        {"x": 1},
+        [{"name": "minimum", "coefficients": {"x": 1}, "sense": ">=", "rhs": 2.2}],
+        direction="minimize",
+    )
+    assert integer["status"] == "OPTIMAL_FEASIBLE"
+    assert integer["variable_values"].iloc[0]["Value"] == pytest.approx(3.0)
+    assert integer["variable_values"].iloc[0]["Category"] == "integer"
+    assert integer["independent_feasibility_check"] is True
+
+
+def test_solver_diagnostics_rejects_invalid_model_schema_and_uses_clear_solver_error_states():
+    from shoir_target_engines import run_solver_diagnostics
+
+    with pytest.raises(ValueError, match="unknown variable"):
+        run_solver_diagnostics(
+            {"x": {"low": 0, "up": 1}},
+            {"z": 1},
+            [],
+        )
+    with pytest.raises(ValueError, match="Lower bound exceeds upper"):
+        run_solver_diagnostics(
+            {"x": {"low": 5, "up": 1}},
+            {"x": 1},
+            [],
+        )
+    with pytest.raises(ValueError, match="sense must be"):
+        run_solver_diagnostics(
+            {"x": {"low": 0, "up": 1}},
+            {"x": 1},
+            [{"coefficients": {"x": 1}, "sense": "~=", "rhs": 1}],
+        )
+    with pytest.raises(ValueError, match="time limit"):
+        run_solver_diagnostics({"x": {"low": 0}}, {"x": 1}, [], time_limit_seconds=0)
+
