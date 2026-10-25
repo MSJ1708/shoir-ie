@@ -23,6 +23,7 @@ import html
 
 from industrial_platform import render_module, PLATFORM_CATALOG, init_platform_db
 from shoir_tool_registry import TOOL_TARGETS, TOOL_STATUS_VALUES, tier_allows_tool, tool_status_counts, require_tool_access
+from shoir_tool_trust_center import (classify_diagnostic, summarize_capability_registry, search_tool_help, build_redacted_support_bundle, redact_diagnostic_text)
 from industrial_platform_excellence import (
     CANONICAL_TIERS, MODULE_MATRIX, canonical_tier, tier_allows, tier_matrix,
     module_matrix, module_availability, deep_data_quality, validate_schema,
@@ -405,7 +406,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                 "Copilot action, API and export path must enforce their own server-side entitlement checks."
             )
 
-            if selected_tool["tool_id"] in {"T002", "T015", "T016", "T017", "T018", "T019", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T033", "T034", "T035", "T036", "T037", "T038", "T039", "T040", "T041", "T042", "T043", "T045", "T047", "T048", "T049", "T050", "T051", "T052", "T054", "T055", "T056", "T058", "T059", "T062", "T063", "T066", "T069", "T070", "T071", "T072", "T075", "T076", "T077", "T078", "T079", "T081", "T082", "T083", "T084", "T085", "T087", "T089"}:
+            if selected_tool["tool_id"] in {"T002", "T007", "T009", "T010", "T015", "T016", "T017", "T018", "T019", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T033", "T034", "T035", "T036", "T037", "T038", "T039", "T040", "T041", "T042", "T043", "T045", "T047", "T048", "T049", "T050", "T051", "T052", "T054", "T055", "T056", "T058", "T059", "T062", "T063", "T066", "T069", "T070", "T071", "T072", "T075", "T076", "T077", "T078", "T079", "T081", "T082", "T083", "T084", "T085", "T087", "T089", "T100"}:
                 st.markdown("---")
                 st.markdown("**Run focused specialist method**")
                 st.caption(
@@ -419,7 +420,52 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                     )
                 else:
                     with st.form("shoir_target_method_form_" + selected_tool["tool_id"]):
-                        if selected_tool["tool_id"] == "T015":
+                        if selected_tool["tool_id"] == "T007":
+                            st.caption("Paste only the relevant error message. This inspector redacts common credentials and contact details, does not read server logs, and offers rule-based next checks.")
+                            diagnostic_inspector_text = st.text_area(
+                                "Error or warning text",
+                                value="Example: workbook import failed because a required quantity column is missing.",
+                                key="tool007_diagnostic",
+                            )
+                            diagnostic_category = st.selectbox(
+                                "Subsystem (optional hint)",
+                                ["Auto-detect", "Access / login", "Data import / export", "Calculation / units", "Persistence / connectivity", "Other"],
+                                key="tool007_category",
+                            )
+                            run_method = st.form_submit_button("Inspect and redact diagnostic", type="primary", use_container_width=True, key="tool007_run")
+                        elif selected_tool["tool_id"] == "T009":
+                            st.caption("This report summarizes the source registry only. It is not a live health check or authenticated browser acceptance report.")
+                            capability_status_filter = st.selectbox(
+                                "Readiness status",
+                                ["All statuses", *TOOL_STATUS_VALUES],
+                                key="tool009_status_filter",
+                            )
+                            capability_status_limit = st.number_input("Maximum capability rows", min_value=1, max_value=100, value=100, step=5, key="tool009_limit")
+                            run_method = st.form_submit_button("Build capability status report", type="primary", use_container_width=True, key="tool009_run")
+                        elif selected_tool["tool_id"] == "T010":
+                            st.caption("Searchable guidance is generated from canonical tool metadata and its stated limitations; it does not replace method documentation or validation.")
+                            help_query = st.text_input("Search tools, methods, inputs or outputs", key="tool010_query", placeholder="e.g. facility layout, OEE, demand forecast")
+                            help_workbench = st.selectbox(
+                                "Workbench filter",
+                                ["All workbenches"] + sorted({str(item.get("workbench", "")) for item in TOOL_TARGETS if item.get("workbench")}),
+                                key="tool010_workbench",
+                            )
+                            run_method = st.form_submit_button("Search engineering help", type="primary", use_container_width=True, key="tool010_run")
+                        elif selected_tool["tool_id"] == "T100":
+                            st.caption("Creates a local, redacted support packet only. No ticketing backend is configured and this action does not transmit diagnostic data.")
+                            support_component = st.selectbox(
+                                "Affected component",
+                                ["Workbench", "Data import / export", "Calculation engine", "Authentication / access", "Workspace persistence", "Integration / connector", "Reporting / export", "Other"],
+                                key="tool100_component",
+                            )
+                            support_severity = st.selectbox("Reported severity", ["LOW", "MEDIUM", "HIGH", "CRITICAL"], index=1, key="tool100_severity")
+                            support_diagnostic_text = st.text_area(
+                                "What happened? Include the tool ID and a reproducible message; exclude production/customer records.",
+                                value="Example: T017 join preview did not return the expected matched row count.",
+                                key="tool100_diagnostic",
+                            )
+                            run_method = st.form_submit_button("Prepare redacted support bundle", type="primary", use_container_width=True, key="tool100_run")
+                        elif selected_tool["tool_id"] == "T015":
                             st.caption("Field mapping is advisory: exact aliases are still reviewable and fuzzy suggestions always require confirmation.")
                             field_headers_text = st.text_input(
                                 "Source column headers (comma-separated)",
@@ -1112,7 +1158,28 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                             )
                             run_method = st.form_submit_button("Calculate sample size", type="primary", use_container_width=True, key="tool085_run")
 
-                    if selected_tool["tool_id"] == "T015":
+                    if selected_tool["tool_id"] == "T007":
+                        safe_diagnostic = classify_diagnostic(diagnostic_inspector_text)
+                        current_tool_inputs = {
+                            "reported_subsystem": diagnostic_category,
+                            "safe_summary": safe_diagnostic["safe_summary"],
+                            "redactions_applied": safe_diagnostic["redactions_applied"],
+                            "raw_input_stored": False,
+                        }
+                    elif selected_tool["tool_id"] == "T009":
+                        current_tool_inputs = {"status_filter": capability_status_filter, "row_limit": int(capability_status_limit)}
+                    elif selected_tool["tool_id"] == "T010":
+                        current_tool_inputs = {"query_length": len(help_query), "workbench_filter": help_workbench}
+                    elif selected_tool["tool_id"] == "T100":
+                        safe_diagnostic = redact_diagnostic_text(support_diagnostic_text)
+                        current_tool_inputs = {
+                            "component": support_component,
+                            "severity": support_severity,
+                            "redacted_summary": safe_diagnostic["safe_summary"],
+                            "redactions_applied": safe_diagnostic["redactions_applied"],
+                            "raw_input_stored": False,
+                        }
+                    elif selected_tool["tool_id"] == "T015":
                         current_tool_inputs = {"source_headers": field_headers_text, "manual_mapping_json": field_manual_mapping_json, "minimum_confidence": field_min_confidence}
                     elif selected_tool["tool_id"] == "T049":
                         current_tool_inputs = {"work_orders_json": backlog_orders_json, "available_hours": backlog_hours, "available_skills": backlog_skills_text}
@@ -1331,7 +1398,31 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 monitor_equipment_anomalies,
                                 assess_capa_8d_records,
                             )
-                            if selected_tool["tool_id"] == "T015":
+                            if selected_tool["tool_id"] == "T007":
+                                result = classify_diagnostic(diagnostic_inspector_text)
+                                result["reported_subsystem"] = diagnostic_category
+                                result["data_provenance"] = "USER_PROVIDED_DIAGNOSTIC_REDACTED"
+                            elif selected_tool["tool_id"] == "T009":
+                                result = summarize_capability_registry(
+                                    TOOL_TARGETS,
+                                    status_filter=capability_status_filter,
+                                    limit=int(capability_status_limit),
+                                )
+                            elif selected_tool["tool_id"] == "T010":
+                                result = search_tool_help(
+                                    TOOL_TARGETS,
+                                    help_query,
+                                    workbench_filter=help_workbench,
+                                    limit=20,
+                                )
+                            elif selected_tool["tool_id"] == "T100":
+                                result = build_redacted_support_bundle(
+                                    TOOL_TARGETS,
+                                    diagnostic_text=support_diagnostic_text,
+                                    component=support_component,
+                                    severity=support_severity,
+                                )
+                            elif selected_tool["tool_id"] == "T015":
                                 headers = [item.strip() for item in field_headers_text.split(",") if item.strip()]
                                 manual_mapping = json.loads(field_manual_mapping_json)
                                 if not isinstance(manual_mapping, dict):
@@ -1866,7 +1957,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                         except Exception as exc:
                             st.error(f"Tool run could not be completed safely: {exc}")
 
-                    if selected_tool["tool_id"] in {"T017", "T018", "T019", "T024", "T025", "T027", "T034", "T038", "T041", "T043", "T045", "T047", "T048", "T050", "T054", "T059", "T062", "T063", "T069", "T070", "T071", "T076", "T077", "T079", "T082", "T083", "T084"}:
+                    if selected_tool["tool_id"] in {"T007", "T009", "T010", "T017", "T018", "T019", "T024", "T025", "T027", "T034", "T038", "T041", "T043", "T045", "T047", "T048", "T050", "T054", "T059", "T062", "T063", "T069", "T070", "T071", "T076", "T077", "T079", "T082", "T083", "T084", "T100"}:
                         result = st.session_state.get("shoir_tool_result_" + selected_tool["tool_id"])
                         if result:
                             _show_focused_tool_persistence(selected_tool["tool_id"], result, current_tool_inputs)
@@ -1875,6 +1966,16 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 title=selected_tool["canonical_name"],
                                 key_prefix="target_" + selected_tool["tool_id"].lower(),
                             )
+                            if selected_tool["tool_id"] == "T100":
+                                st.download_button(
+                                    "Download redacted support bundle (JSON)",
+                                    data=json.dumps(result, ensure_ascii=False, indent=2).encode("utf-8"),
+                                    file_name=f"{result['support_reference']}.json",
+                                    mime="application/json",
+                                    key="tool100_download_bundle",
+                                    use_container_width=True,
+                                )
+                                st.info("Prepared locally only. Review the contents before sharing; no ticket was opened and no data was sent.")
                     elif selected_tool["tool_id"] == "T016":
                         result = st.session_state.get("shoir_tool_result_T016")
                         if result:
