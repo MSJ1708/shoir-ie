@@ -1646,3 +1646,275 @@ def test_supply_chain_network_rejects_bad_route_links_and_negative_costs():
         optimize_supply_chain_network(suppliers, sites, [{"supplier": "S2", "site": "A", "unit_cost": 1, "capacity": 5, "available": True}], unmet_demand_penalty_per_unit=10)
     with pytest.raises(ValueError, match="cannot be negative"):
         optimize_supply_chain_network(suppliers, sites, [{"supplier": "S1", "site": "A", "unit_cost": -1, "capacity": 5, "available": True}], unmet_demand_penalty_per_unit=10)
+
+
+def test_discrete_event_simulation_matches_deterministic_single_station_golden_case():
+    from shoir_target_engines import simulate_discrete_event_process
+
+    result = simulate_discrete_event_process(
+        [{"station": "Assembly", "servers": 1, "mean_service_time": 2, "service_distribution": "deterministic"}],
+        job_count=3,
+        mean_interarrival_time=1,
+        arrival_distribution="deterministic",
+        warmup_jobs=0,
+        replications=1,
+        random_seed=7,
+        time_unit="minutes",
+    )
+    assert result["status"] == "DISCRETE_EVENT_SIMULATION_COMPLETED"
+    assert result["station_count"] == 1
+    assert result["job_count"] == 3
+    summary = result["metric_summary"].set_index("Metric")
+    assert summary.loc["Average flow time (minutes)", "Mean across replications"] == pytest.approx(3.0)
+    assert summary.loc["Average total queue wait (minutes)", "Mean across replications"] == pytest.approx(1.0)
+    assert summary.loc["Throughput (jobs/minutes)", "Mean across replications"] == pytest.approx(0.5)
+    station = result["station_summary"].iloc[0]
+    assert station["Average queue wait (minutes)"] == pytest.approx(1.0)
+    assert station["Mean utilization across replications (%)"] == pytest.approx(100.0)
+    assert result["replication_results"].iloc[0]["Retained jobs"] == 3
+    assert "alternate routing" in " ".join(result["limitations"])
+
+
+def test_discrete_event_simulation_is_reproducible_and_excludes_warmup_jobs():
+    from shoir_target_engines import simulate_discrete_event_process
+
+    steps = [
+        {"station": "Cut", "servers": 1, "mean_service_time": 1.7, "service_distribution": "exponential"},
+        {"station": "Pack", "servers": 2, "mean_service_time": 2.4, "service_distribution": "exponential"},
+    ]
+    kwargs = dict(
+        job_count=30,
+        mean_interarrival_time=1.5,
+        arrival_distribution="exponential",
+        warmup_jobs=4,
+        replications=5,
+        random_seed=2026,
+        time_unit="hours",
+    )
+    first = simulate_discrete_event_process(steps, **kwargs)
+    second = simulate_discrete_event_process(steps, **kwargs)
+    pd.testing.assert_frame_equal(first["replication_results"], second["replication_results"])
+    pd.testing.assert_frame_equal(first["station_summary"], second["station_summary"])
+    assert first["replications"] == 5
+    assert (first["replication_results"]["Retained jobs"] == 26).all()
+    assert len(first["station_summary"]) == 2
+    assert first["station_summary"]["Mean utilization across replications (%)"].between(0, 100).all()
+    assert (first["metric_summary"]["P05 across replications"] <= first["metric_summary"]["P95 across replications"]).all()
+
+
+def test_discrete_event_simulation_rejects_invalid_job_counts_stations_and_distributions():
+    from shoir_target_engines import simulate_discrete_event_process
+
+    one_station = [{"station": "Cut", "servers": 1, "mean_service_time": 2}]
+    with pytest.raises(ValueError, match="Job count"):
+        simulate_discrete_event_process(one_station, job_count=1, mean_interarrival_time=1)
+    with pytest.raises(ValueError, match="Warm-up jobs"):
+        simulate_discrete_event_process(one_station, job_count=3, mean_interarrival_time=1, warmup_jobs=3)
+    with pytest.raises(ValueError, match="greater than zero"):
+        simulate_discrete_event_process(one_station, job_count=3, mean_interarrival_time=0)
+    with pytest.raises(ValueError, match="Arrival distribution"):
+        simulate_discrete_event_process(one_station, job_count=3, mean_interarrival_time=1, arrival_distribution="normal")
+    with pytest.raises(ValueError, match="unique; duplicate"):
+        simulate_discrete_event_process(
+            [{"station": "Cut", "servers": 1, "mean_service_time": 1},
+             {"station": "cut", "servers": 1, "mean_service_time": 2}],
+            job_count=3, mean_interarrival_time=1,
+        )
+    with pytest.raises(ValueError, match="Server count"):
+        simulate_discrete_event_process([{"station": "Cut", "servers": 0, "mean_service_time": 1}], job_count=3, mean_interarrival_time=1)
+    with pytest.raises(ValueError, match="greater than zero"):
+        simulate_discrete_event_process([{"station": "Cut", "servers": 1, "mean_service_time": -1}], job_count=3, mean_interarrival_time=1)
+
+
+def test_solver_diagnostics_returns_optimal_solution_and_independently_checks_constraints():
+    from shoir_target_engines import run_solver_diagnostics
+
+    result = run_solver_diagnostics(
+        {
+            "x": {"low": 0, "up": 10, "category": "Continuous"},
+            "y": {"low": 0, "up": 10, "category": "Continuous"},
+        },
+        {"x": 3, "y": 2},
+        [
+            {"name": "minimum_output", "coefficients": {"x": 1, "y": 1}, "sense": ">=", "rhs": 4},
+            {"name": "balance", "coefficients": {"x": 1, "y": 3}, "sense": ">=", "rhs": 6},
+        ],
+        direction="minimize",
+    )
+    assert result["status"] == "OPTIMAL_FEASIBLE"
+    assert result["solver_status"] == "Optimal"
+    assert result["independent_feasibility_check"] is True
+    assert result["objective_value"] == pytest.approx(8.0)
+    values = result["variable_values"].set_index("Variable")
+    assert values.loc["x", "Value"] == pytest.approx(0.0)
+    assert values.loc["y", "Value"] == pytest.approx(4.0)
+    assert (values["Bound status"] == "SATISFIED").all()
+    constraints = result["constraint_diagnostics"].set_index("Constraint")
+    assert constraints.loc["minimum_output", "LHS value"] >= 4
+    assert constraints.loc["balance", "LHS value"] >= 6
+    assert (constraints["Status"] == "SATISFIED").all()
+    assert not result["violations"]
+
+
+def test_solver_diagnostics_distinguishes_infeasible_unbounded_and_milp_models():
+    from shoir_target_engines import run_solver_diagnostics
+
+    infeasible = run_solver_diagnostics(
+        {"x": {"low": 0, "up": 1, "category": "Continuous"}},
+        {"x": 1},
+        [{"name": "impossible", "coefficients": {"x": 1}, "sense": ">=", "rhs": 2}],
+    )
+    assert infeasible["solver_status"] == "Infeasible"
+    assert infeasible["status"] == "INFEASIBLE"
+    assert infeasible["objective_value"] is None
+
+    unbounded = run_solver_diagnostics(
+        {"x": {"low": 0, "up": None, "category": "Continuous"}},
+        {"x": 1},
+        [],
+        direction="maximize",
+    )
+    assert unbounded["solver_status"] == "Unbounded"
+    assert unbounded["status"] == "UNBOUNDED"
+    assert unbounded["objective_value"] is None
+
+    integer = run_solver_diagnostics(
+        {"x": {"low": 0, "up": 10, "category": "Integer"}},
+        {"x": 1},
+        [{"name": "minimum", "coefficients": {"x": 1}, "sense": ">=", "rhs": 2.2}],
+        direction="minimize",
+    )
+    assert integer["status"] == "OPTIMAL_FEASIBLE"
+    assert integer["variable_values"].iloc[0]["Value"] == pytest.approx(3.0)
+    assert integer["variable_values"].iloc[0]["Category"] == "integer"
+    assert integer["independent_feasibility_check"] is True
+
+
+def test_solver_diagnostics_rejects_invalid_model_schema_and_uses_clear_solver_error_states():
+    from shoir_target_engines import run_solver_diagnostics
+
+    with pytest.raises(ValueError, match="unknown variable"):
+        run_solver_diagnostics(
+            {"x": {"low": 0, "up": 1}},
+            {"z": 1},
+            [],
+        )
+    with pytest.raises(ValueError, match="Lower bound exceeds upper"):
+        run_solver_diagnostics(
+            {"x": {"low": 5, "up": 1}},
+            {"x": 1},
+            [],
+        )
+    with pytest.raises(ValueError, match="sense must be"):
+        run_solver_diagnostics(
+            {"x": {"low": 0, "up": 1}},
+            {"x": 1},
+            [{"coefficients": {"x": 1}, "sense": "~=", "rhs": 1}],
+        )
+    with pytest.raises(ValueError, match="time limit"):
+        run_solver_diagnostics({"x": {"low": 0}}, {"x": 1}, [], time_limit_seconds=0)
+
+
+def test_reproducibility_pack_contains_hash_verified_payloads_and_redacts_secrets_and_contact_columns():
+    import hashlib
+    import io
+    import json
+    import zipfile
+    from shoir_target_engines import build_reproducibility_pack
+
+    result = {
+        "status": "ANALYSIS_COMPLETED",
+        "seed": 42,
+        "api_token": "DO_NOT_EXPORT_TOKEN_abc",
+        "metadata": "Bearer DO_NOT_EXPORT_BEARER_xyz",
+        "metrics": pd.DataFrame({
+            "Station": ["Cutting", "Packing"],
+            "email": ["private@example.test", "another@example.test"],
+            "Throughput": [12.0, 10.0],
+        }),
+    }
+    inputs = {
+        "job_count": 100,
+        "random_seed": 42,
+        "password": "DO_NOT_EXPORT_PASSWORD_123",
+        "notes": "No credentials should survive redaction",
+    }
+    pack = build_reproducibility_pack(
+        "T071",
+        "Discrete-Event Simulation",
+        result,
+        inputs=inputs,
+        metadata={"study_reference": "Fixture-07", "api_key": "DO_NOT_EXPORT_METADATA_KEY_456"},
+        include_input_snapshot=True,
+        include_result_tables=True,
+    )
+    payload = pack["bundle_bytes"]
+    assert payload.startswith(b"PK")
+    assert hashlib.sha256(payload).hexdigest() == pack["bundle_sha256"]
+    with zipfile.ZipFile(io.BytesIO(payload), "r") as archive:
+        names = set(archive.namelist())
+        assert {"manifest.json", "result_summary.json", "input_snapshot_redacted.json", "run_metadata.json", "SHA256SUMS.txt", "README.txt"} <= names
+        manifest = json.loads(archive.read("manifest.json"))
+        summary_text = archive.read("result_summary.json").decode("utf-8")
+        input_text = archive.read("input_snapshot_redacted.json").decode("utf-8")
+        metadata_text = archive.read("run_metadata.json").decode("utf-8")
+        table_paths = [name for name in names if name.startswith("tables/") and name.endswith(".csv")]
+        assert len(table_paths) == 1
+        table_text = archive.read(table_paths[0]).decode("utf-8")
+        assert "DO_NOT_EXPORT_TOKEN_abc" not in summary_text
+        assert "DO_NOT_EXPORT_BEARER_xyz" not in summary_text
+        assert "DO_NOT_EXPORT_PASSWORD_123" not in input_text
+        assert "DO_NOT_EXPORT_METADATA_KEY_456" not in metadata_text
+        assert "private@example.test" not in table_text
+        assert "[REDACTED]" in table_text
+        assert manifest["configuration_snapshot_included"] is True
+        assert manifest["detailed_result_tables_included"] is True
+        manifest_items = {item["path"]: item for item in manifest["payload_files"]}
+        assert "README.txt" in manifest_items
+        for name, item in manifest_items.items():
+            actual = archive.read(name)
+            assert len(actual) == item["byte_count"]
+            assert hashlib.sha256(actual).hexdigest() == item["sha256"]
+        checksum_lines = archive.read("SHA256SUMS.txt").decode("utf-8").splitlines()
+        for line in checksum_lines:
+            digest, path = line.split("  ", 1)
+            assert hashlib.sha256(archive.read(path)).hexdigest() == digest
+    inventory = pack["artifact_inventory"].set_index("Path")
+    assert inventory.loc["README.txt", "Bytes"] > 0
+    assert pack["status"] == "REPRODUCIBILITY_PACK_CREATED"
+
+
+def test_reproducibility_pack_defaults_to_metadata_and_table_fingerprints_only():
+    import io
+    import json
+    import zipfile
+    from shoir_target_engines import build_reproducibility_pack
+
+    pack = build_reproducibility_pack(
+        "T021",
+        "Time Study",
+        {"status": "CALCULATED", "standard_time": 14.5, "observations": pd.DataFrame({"time": [10, 12, 15]})},
+        inputs={"observation_text": "10,12,15"},
+    )
+    with zipfile.ZipFile(io.BytesIO(pack["bundle_bytes"]), "r") as archive:
+        names = set(archive.namelist())
+        assert "input_snapshot_redacted.json" not in names
+        assert not any(name.startswith("tables/") for name in names)
+        summary = json.loads(archive.read("result_summary.json"))
+        assert summary["standard_time"] == pytest.approx(14.5)
+        assert summary["observations"]["artifact_type"] == "omitted_table_metadata"
+        manifest = json.loads(archive.read("manifest.json"))
+        assert manifest["configuration_snapshot_included"] is False
+        assert manifest["detailed_result_tables_included"] is False
+        assert manifest["configuration_sha256"] == pack["input_fingerprint_sha256"]
+
+
+def test_reproducibility_pack_validates_canonical_ids_and_size_limits():
+    from shoir_target_engines import build_reproducibility_pack
+
+    with pytest.raises(ValueError, match="T001–T100"):
+        build_reproducibility_pack("T999", "Invalid", {"status": "OK"})
+    with pytest.raises(ValueError, match="completed result object"):
+        build_reproducibility_pack("T087", "Reproducibility Pack", "not-an-object")
+    with pytest.raises(ValueError, match="Maximum payload bytes"):
+        build_reproducibility_pack("T087", "Reproducibility Pack", {"status": "OK"}, max_payload_bytes=1)
