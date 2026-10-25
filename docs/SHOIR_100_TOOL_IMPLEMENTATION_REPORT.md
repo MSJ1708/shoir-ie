@@ -10,7 +10,7 @@ The implementation uses the existing `pages/Industrial_Engineering_Workbench.py`
 
 ## Focused execution methods
 
-The original focused tranche was continued with four additional methods (T036, T037, T051 and T072). This integration also carries the separately tested T062 solver diagnostics, T071 discrete-event simulation and T087 reproducibility ZIP into the same branch. The combined Workbench contains 57 distinct stable target IDs with focused runner branches; each remains pending authenticated end-to-end verification. Other existing module workflows may cover additional targets, but they are not counted as focused runners unless wired to the stable target ID and its execution gate. The implementation matrix links every target to its minimum tier, contracts, evidence tests and remaining limitations.
+The original focused tranche was continued with four additional methods (T036, T037, T051 and T072). This integration also carries the separately tested T062 solver diagnostics, T071 discrete-event simulation and T087 reproducibility ZIP into the same branch. The combined Workbench contains 58 distinct stable target IDs with focused runner branches; each remains pending authenticated end-to-end verification. Other existing module workflows may cover additional targets, but they are not counted as focused runners unless wired to the stable target ID and its execution gate. The implementation matrix links every target to its minimum tier, contracts, evidence tests and remaining limitations.
 
 ### Lean, manufacturing, quality and economics
 
@@ -87,6 +87,11 @@ Independent tests use a hand-calculated four-route example (expected total cost 
 
 T089 now has a Starter-accessible practice path inside the existing Workbench. The fixed exercise set covers takt time, OEE, EOQ, Cp and NPV; each numerical answer is checked with a declared tolerance, then the learner sees the reference answer, formula and worked solution. Question prompts do not reveal the answer key before the learner submits. Examples are synthetic educational exercises, not plant observations. Golden-answer, wrong-answer and invalid-input tests plus a Workbench AppTest were added. The tool remains `IMPLEMENTED_NEEDS_VALIDATION` until current CI, authenticated UI and persistence checks pass.
 
+
+### Guided Study Wizard
+
+T002 is now an executable Starter workflow planner in the existing Workbench. It supports capacity/bottleneck, facility-layout, quality/capability, inventory, maintenance/reliability and sustainability goals; cross-references each planned step to the canonical tool registry; lists declared required fields; distinguishes tier-restricted and foundation-only steps; and suggests a next ready step without running or inventing downstream results. Tests cover missing inputs, current tier restrictions, completed-session steps and invalid goals. It remains `IMPLEMENTED_NEEDS_VALIDATION` pending current CI and authenticated persistence/browser checks.
+
 ## Calculation safety and regression protection
 
 Independent golden/boundary tests were added for the new methods, along with three Workbench Streamlit AppTest groups that invoke the forms and check structured results. Key controls include:
@@ -113,8 +118,8 @@ The registry and matrix contain 100 target IDs, T001–T100. Current classificat
 | Status | Count |
 |---|---:|
 | `VERIFIED_WORKING` | 0 |
-| `IMPLEMENTED_NEEDS_VALIDATION` | 81 |
-| `FOUNDATION_ONLY` | 17 |
+| `IMPLEMENTED_NEEDS_VALIDATION` | 82 |
+| `FOUNDATION_ONLY` | 16 |
 | `EXTERNAL_CONFIGURATION_REQUIRED` | 2 |
 | `MISSING` | 0 |
 | `BLOCKED` | 0 |
