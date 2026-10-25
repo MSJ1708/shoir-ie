@@ -445,3 +445,74 @@ def test_workbench_runs_field_mapper_backlog_sop_and_supplier_methods():
             "SAVED_LOCAL_FALLBACK", "SAVED_MANAGED_WORKSPACE", "SESSION_ONLY",
             "SAVE_FAILED", "SAVE_PENDING", "SAVE_STATUS_NOT_CONFIRMED",
         }
+
+
+def test_workbench_runs_regression_and_chronological_demand_forecast():
+    from streamlit.testing.v1 import AppTest
+
+    page = ROOT / "pages" / "Industrial_Engineering_Workbench.py"
+    at = AppTest.from_file(page, default_timeout=90)
+    at.session_state["current_user"] = "statistical-tool-checker"
+    at.session_state["authenticated"] = True
+    at.session_state["user_tier"] = "Professional"
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+
+    at.selectbox(key="shoir_100_tool_inspector").select("T036 · Regression and ANOVA Studio")
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    at.button(key="tool036_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    regression = at.session_state.get("shoir_tool_result_T036")
+    assert regression is not None
+    assert regression["slope"] == pytest.approx(1.9)
+    assert regression["data_provenance"] == "SYNTHETIC_EXAMPLE"
+
+    at.selectbox(key="shoir_100_tool_inspector").select("T051 · Demand Forecasting Studio")
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    at.button(key="tool051_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    forecast = at.session_state.get("shoir_tool_result_T051")
+    assert forecast is not None
+    assert forecast["selected_model"] == "Naive last value"
+    assert forecast["forecast"]["Forecast"].tolist() == [28.0, 28.0, 28.0]
+
+
+def test_workbench_enforces_research_pack_gate_and_runs_welch_and_monte_carlo():
+    from streamlit.testing.v1 import AppTest
+
+    page = ROOT / "pages" / "Industrial_Engineering_Workbench.py"
+    at = AppTest.from_file(page, default_timeout=90)
+    at.session_state["current_user"] = "research-simulation-checker"
+    at.session_state["authenticated"] = True
+    at.session_state["user_tier"] = "Research Pack ($30 add-on)"
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+
+    at.selectbox(key="shoir_100_tool_inspector").select("T037 · Hypothesis Testing Assistant")
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    at.button(key="tool037_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    hypothesis = at.session_state.get("shoir_tool_result_T037")
+    assert hypothesis is not None
+    assert hypothesis["mean_difference_a_minus_b"] == pytest.approx(-6)
+    assert hypothesis["p_value"] < 0.01
+
+    at.session_state["user_tier"] = "Enterprise Plus Tier ($399)"
+    at.selectbox(key="shoir_100_tool_inspector").select("T072 · Monte Carlo Risk Simulator")
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    at.button(key="tool072_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    simulation = at.session_state.get("shoir_tool_result_T072")
+    assert simulation is not None
+    assert simulation["status"] == "SIMULATION_COMPLETED"
+    assert simulation["iterations"] == 10000
+    assert simulation["seed"] == 42
+    assert "not verified ROI" in simulation["warning"]
