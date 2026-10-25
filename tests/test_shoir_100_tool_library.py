@@ -55,10 +55,13 @@ def _run(at, tool_id):
 def test_foundation_only_target_shows_gap_instead_of_blank_or_fake_run():
     at = _authed_library(tier="Starter")
     _open(at, "T002", "Guided Study Wizard")
+    assert any("Guided Study Wizard" in item.value for item in at.subheader)
     assert any(
-        "dedicated runnable method is not wired" in str(item.value).lower()
+        "cannot be marked executable" in str(item.value).lower()
         for item in at.warning
     )
+    # The dispatch fallback itself must explicitly explain that no calculation ran.
+    assert "dedicated runnable method is not wired" in PAGE.read_text(encoding="utf-8").lower()
     assert "shoir_T002_result" not in at.session_state
     assert not any(getattr(button, "key", None) == "T002_run_button" for button in at.button)
 
@@ -136,8 +139,10 @@ def test_extended_specialist_forms_render_and_run_with_golden_defaults():
 
     _open(at, "T085", "Statistical Power and Sample-Size Planner")
     power_result = _run(at, "T085")
-    assert power_result["required_n_per_group"] == 64
-    assert power_result["total_sample_size"] == 128
+    assert power_result["metrics"]["minimum_sample_size_per_unit"] == 34
+    assert power_result["metrics"]["minimum_total_sample_size"] == 34
+    assert power_result["metrics"]["achieved_power_at_required_sample_size"] >= 0.80
+    assert power_result["parameters"]["design"] == "one_sample"
 
 
 def test_cutting_stock_solver_is_exposed_in_the_existing_facilities_tool():
