@@ -435,7 +435,7 @@ def test_workbench_runs_field_mapper_backlog_sop_and_supplier_methods():
         at.selectbox(key="shoir_100_tool_inspector").select(label)
         at.run(timeout=90)
         assert not at.exception, f"{tool_id} selection raised: " + "\n".join(str(error.value) for error in at.exception)
-        next(button for button in at.get("form_submit_button") if getattr(button, "key", None) == button_key).click()
+        at.button(key=button_key).click()
         at.run(timeout=90)
         assert not at.exception, f"{tool_id} run raised: " + "\n".join(str(error.value) for error in at.exception)
         result = at.session_state.get(f"shoir_tool_result_{tool_id}")
