@@ -389,7 +389,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                 "Copilot action, API and export path must enforce their own server-side entitlement checks."
             )
 
-            if selected_tool["tool_id"] in {"T015", "T016", "T017", "T018", "T019", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T034", "T036", "T037", "T038", "T040", "T041", "T042", "T043", "T045", "T047", "T049", "T050", "T051", "T052", "T054", "T055", "T056", "T058", "T059", "T063", "T066", "T070", "T072", "T075", "T076", "T077", "T078", "T079", "T081", "T082", "T083", "T084", "T085"}:
+            if selected_tool["tool_id"] in {"T015", "T016", "T017", "T018", "T019", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T033", "T034", "T035", "T036", "T037", "T038", "T040", "T041", "T042", "T043", "T045", "T047", "T049", "T050", "T051", "T052", "T054", "T055", "T056", "T058", "T059", "T063", "T066", "T070", "T072", "T075", "T076", "T077", "T078", "T079", "T081", "T082", "T083", "T084", "T085"}:
                 st.markdown("---")
                 st.markdown("**Run focused specialist method**")
                 st.caption(
@@ -879,6 +879,26 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 key="tool084_alternatives",
                             )
                             run_method = st.form_submit_button("Score project portfolio", type="primary", use_container_width=True, key="tool084_run")
+                        elif selected_tool["tool_id"] == "T033":
+                            st.caption("Balanced crossed design: every part must be measured by every operator on each repeated trial. Review the organization's MSA standard and acceptance criteria before decisions.")
+                            msa_observations_json = st.text_area(
+                                "Measurements (JSON list with part, operator, trial, measurement)",
+                                value='[{"part":"P1","operator":"A","trial":1,"measurement":9.8},{"part":"P1","operator":"A","trial":2,"measurement":9.9},{"part":"P1","operator":"B","trial":1,"measurement":10.0},{"part":"P1","operator":"B","trial":2,"measurement":10.1},{"part":"P2","operator":"A","trial":1,"measurement":11.8},{"part":"P2","operator":"A","trial":2,"measurement":11.9},{"part":"P2","operator":"B","trial":1,"measurement":12.0},{"part":"P2","operator":"B","trial":2,"measurement":12.1}]',
+                                key="tool033_observations",
+                            )
+                            msa_tolerance = st.number_input("Tolerance width (0 = not supplied)", min_value=0.0, value=6.0, step=0.1, key="tool033_tolerance")
+                            run_method = st.form_submit_button("Analyze crossed Gage R&R", type="primary", use_container_width=True, key="tool033_run")
+                        elif selected_tool["tool_id"] == "T035":
+                            st.caption("Complete 2-level factorial only, factors coded -1/+1, main effects plus pairwise interactions. Plan randomized run order separately; results are not causal proof.")
+                            doe_observations_json = st.text_area(
+                                "Factorial run data (JSON list)",
+                                value='[{"A":-1,"B":-1,"response":6.4},{"A":-1,"B":-1,"response":6.6},{"A":-1,"B":1,"response":9.4},{"A":-1,"B":1,"response":9.6},{"A":1,"B":-1,"response":7.4},{"A":1,"B":-1,"response":7.6},{"A":1,"B":1,"response":16.4},{"A":1,"B":1,"response":16.6}]',
+                                key="tool035_observations",
+                            )
+                            doe_response_field = st.text_input("Response column", "response", key="tool035_response")
+                            doe_factor_fields_text = st.text_input("Factor columns (comma-separated)", "A,B", key="tool035_factors")
+                            doe_alpha = st.number_input("Significance level (alpha)", min_value=0.001, max_value=0.5, value=0.05, step=0.01, key="tool035_alpha")
+                            run_method = st.form_submit_button("Analyze factorial DOE", type="primary", use_container_width=True, key="tool035_run")
                         elif selected_tool["tool_id"] == "T036":
                             regression_mode = st.selectbox(
                                 "Analysis method", ["Linear regression", "One-way ANOVA"],
@@ -1081,6 +1101,10 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                         current_tool_inputs = {"operating_hours": mtbf_operating_hours, "repair_durations_hours_text": repair_durations_text}
                     elif selected_tool["tool_id"] == "T056":
                         current_tool_inputs = {"items_json": inventory_items_json, "currency": inventory_currency, "a_threshold": abc_a_threshold, "b_threshold": abc_b_threshold, "x_cv_max": xyz_x_cutoff, "y_cv_max": xyz_y_cutoff}
+                    elif selected_tool["tool_id"] == "T033":
+                        current_tool_inputs = {"observations_json": msa_observations_json, "tolerance": msa_tolerance}
+                    elif selected_tool["tool_id"] == "T035":
+                        current_tool_inputs = {"observations_json": doe_observations_json, "response_field": doe_response_field, "factor_fields": doe_factor_fields_text, "alpha": doe_alpha}
                     elif selected_tool["tool_id"] == "T036":
                         current_tool_inputs = {"mode": regression_mode, "observations_json": regression_observations_json, "groups_json": anova_groups_json, "alpha": regression_alpha}
                     elif selected_tool["tool_id"] == "T037":
@@ -1130,6 +1154,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 forecast_demand_baselines, simulate_monte_carlo_net_value,
                                 map_industrial_fields, prioritize_maintenance_backlog,
                                 reconcile_sop_plan, score_supplier_performance,
+                                analyze_crossed_gage_rr, analyze_full_factorial_2level,
                             )
                             if selected_tool["tool_id"] == "T015":
                                 headers = [item.strip() for item in field_headers_text.split(",") if item.strip()]
@@ -1451,6 +1476,19 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 if not isinstance(parsed_criteria, list) or not isinstance(parsed_alternatives, list):
                                     raise ValueError("Portfolio criteria and alternatives must each be JSON lists.")
                                 result = score_project_portfolio(parsed_criteria, parsed_alternatives)
+                            elif selected_tool["tool_id"] == "T033":
+                                parsed_msa = json.loads(msa_observations_json)
+                                if not isinstance(parsed_msa, list):
+                                    raise ValueError("Gage R&R observations must be a JSON list.")
+                                result = analyze_crossed_gage_rr(parsed_msa, tolerance=msa_tolerance if msa_tolerance > 0 else None)
+                                result["data_provenance"] = "SYNTHETIC_EXAMPLE" if msa_observations_json.strip().startswith('[{"part":"P1"') else "USER_ENTERED_UNVERIFIED"
+                            elif selected_tool["tool_id"] == "T035":
+                                parsed_doe = json.loads(doe_observations_json)
+                                factors = [item.strip() for item in doe_factor_fields_text.split(",") if item.strip()]
+                                if not isinstance(parsed_doe, list):
+                                    raise ValueError("Factorial DOE observations must be a JSON list of run objects.")
+                                result = analyze_full_factorial_2level(parsed_doe, response_field=doe_response_field.strip(), factor_fields=factors, alpha=doe_alpha)
+                                result["data_provenance"] = "SYNTHETIC_EXAMPLE" if doe_observations_json.strip().startswith('[{"A":-1,"B":-1,"response":6.4') else "USER_ENTERED_UNVERIFIED"
                             elif selected_tool["tool_id"] == "T036":
                                 if regression_mode == "Linear regression":
                                     parsed_observations = json.loads(regression_observations_json)
@@ -1827,6 +1865,36 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                             m3.metric("Incomplete", result["incomplete_score_count"])
                             st.dataframe(result["scorecard"], use_container_width=True, hide_index=True)
                             st.caption(result["warning"])
+                    elif selected_tool["tool_id"] == "T033":
+                        result = st.session_state.get("shoir_tool_result_T033")
+                        if result:
+                            _show_focused_tool_persistence("T033", result, current_tool_inputs)
+                            m1, m2, m3, m4 = st.columns(4)
+                            m1.metric("Gage R&R", f"{result['gage_rr_percent_variance']:.2f}% of variance")
+                            m2.metric("Repeatability SD", f"{result['repeatability_sd']:.4g}")
+                            m3.metric("Reproducibility SD", f"{result['reproducibility_sd']:.4g}")
+                            m4.metric("Distinct categories", str(result["number_of_distinct_categories"] or "Not estimable"))
+                            if result["percent_tolerance"] is not None:
+                                st.metric("% of tolerance (6σ / tolerance)", f"{result['percent_tolerance']:.2f}%")
+                            st.dataframe(result["variance_components"], use_container_width=True, hide_index=True)
+                            st.dataframe(result["anova_table"], use_container_width=True, hide_index=True)
+                            for warning in result["warnings"]:
+                                st.warning(warning)
+                            st.caption(result["assumptions"])
+                            st.warning(result["warning"])
+                    elif selected_tool["tool_id"] == "T035":
+                        result = st.session_state.get("shoir_tool_result_T035")
+                        if result:
+                            _show_focused_tool_persistence("T035", result, current_tool_inputs)
+                            m1, m2, m3 = st.columns(3)
+                            m1.metric("Full-factorial combinations", result["factorial_combinations"])
+                            m2.metric("Runs", result["run_count"])
+                            m3.metric("Model R²", "N/A" if result["r_squared"] is None else f"{result['r_squared']:.4f}")
+                            st.dataframe(result["effects"], use_container_width=True, hide_index=True)
+                            st.plotly_chart(px.bar(result["effects"], x="Term", y="Estimated effect (high − low)", title="DOE estimated factor and pairwise effects"), use_container_width=True)
+                            st.dataframe(result["run_results"], use_container_width=True, hide_index=True)
+                            st.caption(result["assumptions"])
+                            st.warning(result["warning"])
                     elif selected_tool["tool_id"] == "T036":
                         result = st.session_state.get("shoir_tool_result_T036")
                         if result:
