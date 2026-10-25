@@ -289,8 +289,31 @@ def ensure_remote_schema() -> None:
         status TEXT NOT NULL DEFAULT 'Pending',
         requested_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         approved_at TIMESTAMPTZ,
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        terms_accepted BOOLEAN NOT NULL DEFAULT FALSE,
+        terms_version TEXT,
+        privacy_policy_version TEXT,
+        refund_policy_version TEXT,
+        cookie_policy_version TEXT,
+        accepted_at TIMESTAMPTZ
     );
+    ALTER TABLE shoir_subscription_requests ADD COLUMN IF NOT EXISTS terms_accepted BOOLEAN NOT NULL DEFAULT FALSE;
+    ALTER TABLE shoir_subscription_requests ADD COLUMN IF NOT EXISTS terms_version TEXT;
+    ALTER TABLE shoir_subscription_requests ADD COLUMN IF NOT EXISTS privacy_policy_version TEXT;
+    ALTER TABLE shoir_subscription_requests ADD COLUMN IF NOT EXISTS refund_policy_version TEXT;
+    ALTER TABLE shoir_subscription_requests ADD COLUMN IF NOT EXISTS cookie_policy_version TEXT;
+    ALTER TABLE shoir_subscription_requests ADD COLUMN IF NOT EXISTS accepted_at TIMESTAMPTZ;
+    CREATE TABLE IF NOT EXISTS shoir_referrals (
+        id BIGSERIAL PRIMARY KEY,
+        referrer_username_lc TEXT NOT NULL,
+        referred_username_lc TEXT NOT NULL UNIQUE,
+        referral_code TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'Pending' CHECK (status IN ('Pending','Qualified','Declined')),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        qualified_at TIMESTAMPTZ,
+        CHECK (referrer_username_lc <> referred_username_lc)
+    );
+    CREATE INDEX IF NOT EXISTS idx_shoir_referrals_referrer_status ON shoir_referrals(referrer_username_lc, status);
     CREATE INDEX IF NOT EXISTS idx_shoir_requests_status
         ON shoir_subscription_requests(status, requested_at DESC);
     CREATE INDEX IF NOT EXISTS idx_shoir_requests_user
@@ -570,6 +593,12 @@ def edge_register_request(request: Mapping[str, Any]) -> dict[str, Any]:
         "transaction_id": request.get("transaction_id"),
         "proof_base64": proof_base64,
         "proof_content_type": proof_content_type,
+        "referral_code": request.get("referral_code") or None,
+        "terms_accepted": bool(request.get("terms_accepted", False)),
+        "terms_version": request.get("terms_version"),
+        "privacy_policy_version": request.get("privacy_policy_version"),
+        "refund_policy_version": request.get("refund_policy_version"),
+        "cookie_policy_version": request.get("cookie_policy_version"),
     })
 
 def edge_admin_approve(username: str, token: str, request_id: int | None = None, target_username: str | None = None, request_type: str | None = None) -> dict[str, Any]:
@@ -594,6 +623,11 @@ def edge_admin_decline(username: str, token: str, request_id: int) -> dict[str, 
 def edge_admin_list_requests(username: str, token: str) -> list[dict[str, Any]]:
     result = _edge_call("admin_list_requests_session", {"username": username, "token": token})
     return list(result.get("requests") or [])
+
+
+def edge_referral_summary(username: str, token: str) -> dict[str, Any]:
+    """Return the authenticated user's referral code and real attribution counts."""
+    return _edge_call("referral_summary_session", {"username": username, "token": token})
 
 
 def edge_renew_request(username: str, token: str, request: Mapping[str, Any]) -> dict[str, Any]:
@@ -718,23 +752,52 @@ def upsert_remote_account(account: Mapping[str, Any]) -> None:
         conn.commit()
 
 
-def insert_remote_request(request: Mapping[str, Any]) -> None:
+def insert_remote_request(request: Mapping[str, Any]) -> dict[str, Any]:
+    """Create a pending subscription request and report recorded consent/referral state."""
     if edge_backend_configured():
-        edge_register_request(request)
-        return
+        return edge_register_request(request)
     ensure_remote_schema()
+    referral_code = str(request.get("referral_code") or "").strip().upper()
+    username = str(request["username"]).strip()
+    username_lc = username.lower()
+    terms_accepted = bool(request.get("terms_accepted", False))
+    if not terms_accepted or not request.get("terms_version") or not request.get("accepted_at"):
+        raise ValueError("Current beta terms must be accepted before registration.")
+    referral_attributed = False
     with _pg_connect() as conn:
         with conn.cursor() as cur:
+            referrer_lc = None
+            if referral_code:
+                cur.execute(
+                    "SELECT username_lc FROM shoir_accounts WHERE UPPER(COALESCE(affiliate_code,''))=%s AND active=TRUE LIMIT 2",
+                    (referral_code,),
+                )
+                matches = cur.fetchall()
+                if len(matches) != 1:
+                    raise ValueError("Referral code was not found or is ambiguous.")
+                referrer_lc = str(matches[0][0]).strip().lower()
+                if referrer_lc == username_lc:
+                    raise ValueError("Self-referrals are not allowed.")
+                cur.execute(
+                    "SELECT 1 FROM shoir_referrals WHERE referred_username_lc=%s LIMIT 1",
+                    (username_lc,),
+                )
+                if cur.fetchone():
+                    raise ValueError("This account already has referral attribution recorded.")
+
             cur.execute(
                 """
                 INSERT INTO shoir_subscription_requests
                 (username,username_lc,email,tier,request_type,payment_method,
-                 transaction_id,screenshot_path,status,requested_at,updated_at)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                 transaction_id,screenshot_path,status,requested_at,updated_at,
+                 terms_accepted,terms_version,privacy_policy_version,
+                 refund_policy_version,cookie_policy_version,accepted_at)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                RETURNING id
                 """,
                 (
-                    str(request["username"]),
-                    str(request.get("username_lc") or request["username"]).strip().lower(),
+                    username,
+                    username_lc,
                     request.get("email"),
                     request.get("tier"),
                     request.get("request_type", "New"),
@@ -744,10 +807,33 @@ def insert_remote_request(request: Mapping[str, Any]) -> None:
                     request.get("status", "Pending"),
                     request.get("requested_at") or dt.datetime.now(dt.timezone.utc),
                     dt.datetime.now(dt.timezone.utc),
+                    terms_accepted,
+                    request.get("terms_version"),
+                    request.get("privacy_policy_version"),
+                    request.get("refund_policy_version"),
+                    request.get("cookie_policy_version"),
+                    request.get("accepted_at") or dt.datetime.now(dt.timezone.utc),
                 ),
             )
+            request_id = cur.fetchone()[0]
+            if referrer_lc:
+                cur.execute(
+                    """
+                    INSERT INTO shoir_referrals
+                        (referrer_username_lc,referred_username_lc,referral_code,status)
+                    VALUES (%s,%s,%s,'Pending')
+                    """,
+                    (referrer_lc, username_lc, referral_code),
+                )
+                referral_attributed = True
         conn.commit()
-
+    return {
+        "ok": True,
+        "request_id": request_id,
+        "status": "Pending",
+        "legal_acceptance_recorded": True,
+        "referral_attributed": referral_attributed,
+    }
 
 def update_remote_request_status(request_id: int, status: str) -> None:
     if not postgres_backend_configured():

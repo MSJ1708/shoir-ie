@@ -1,4 +1,16 @@
 import streamlit as st
+
+# Session keys owned by widgets must be cleared only before those widgets are
+# instantiated in a rerun. Logout handlers mark the reset and rerun to this point.
+if st.session_state.pop("_shoir_clear_session_before_render", False):
+    _preserve_expired_notice = bool(
+        st.session_state.pop("_shoir_preserve_expired_notice_on_reset", False)
+    )
+    for _reset_key in list(st.session_state.keys()):
+        del st.session_state[_reset_key]
+    if _preserve_expired_notice:
+        st.session_state["subscription_expired_notice"] = True
+
 import pulp
 import math
 import folium
@@ -73,6 +85,9 @@ _DURABLE_STORE_REQUIRED_EXPORTS = (
     "edge_login",
     "edge_logout",
     "edge_admin_list_requests",
+    "edge_admin_approve",
+    "edge_admin_decline",
+    "edge_referral_summary",
     "edge_renew_request",
     "upsert_remote_account",
     "insert_remote_request",
@@ -140,7 +155,7 @@ from shoir_enterprise_layer import (
     build_research_paper_bundle,
 )
 from shoir_unified_product import render_unified_workspace, render_global_product_dock, copilot_context
-from shoir_application_shell import render_application_shell, render_shell_surface, render_post_module_context, shell_health_snapshot
+from shoir_application_shell import SHELL_VERSION, render_application_shell, render_shell_surface, render_post_module_context, shell_health_snapshot
 from shoir_adoption_engine import render_adoption_center
 from shoir_universal_engine import render_universal_engine_surface, postflight_contract
 from shoir_commercial import render_module_enrichment
@@ -287,7 +302,7 @@ st.set_page_config(
     page_title="shoir",
     page_icon="⚡",
     layout="wide",
-    initial_sidebar_state="collapsed"
+    initial_sidebar_state="expanded"
 )
 
 if not st.session_state.get("authenticated"):
@@ -519,6 +534,24 @@ def init_db():
         except sqlite3.OperationalError:
             pass
 
+        # Versioned consent must exist in the local fallback store too, and the
+        # remote request identifier is required to approve/decline the exact
+        # server-side request rather than just a matching username.
+        for _column, _definition in (
+            ("terms_accepted", "INTEGER NOT NULL DEFAULT 0"),
+            ("terms_version", "TEXT"),
+            ("privacy_policy_version", "TEXT"),
+            ("refund_policy_version", "TEXT"),
+            ("cookie_policy_version", "TEXT"),
+            ("accepted_at", "TEXT"),
+            ("remote_request_id", "INTEGER"),
+            ("referral_code", "TEXT"),
+        ):
+            try:
+                cursor.execute(f"ALTER TABLE pending_payments ADD COLUMN {_column} {_definition}")
+            except sqlite3.OperationalError:
+                pass
+
         # 8. System Settings Table (Stores global free-mode toggle)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS system_settings (
@@ -567,7 +600,7 @@ def init_db():
                 (username, password_hash, role, tier, email, trial_expires, affiliate_code, ticket_expiry)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """, ("sho", admin_pass_hash, "Enterprise Admin", "Enterprise Plus Tier ($399)",
-                  "mohsuhailji@gmail.com", "2030-01-01T00:00:00", "AFF-SHO-15", "2030-01-01T00:00:00"))
+                  "mohsuhailji@gmail.com", "2030-01-01T00:00:00", "SHR-ADMIN01", "2030-01-01T00:00:00"))
             cursor.execute("""
                 UPDATE enterprise_users
                 SET password_hash=?, role=?, tier=?, email=?
@@ -586,12 +619,20 @@ def init_db():
                 (username, role, tier, email, trial_expires, affiliate_code, ticket_expiry)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
             """, ("sho", "Enterprise Admin", "Enterprise Plus Tier ($399)",
-                  "mohsuhailji@gmail.com", "2030-01-01T00:00:00", "AFF-SHO-15", "2030-01-01T00:00:00"))
+                  "mohsuhailji@gmail.com", "2030-01-01T00:00:00", "SHR-ADMIN01", "2030-01-01T00:00:00"))
             cursor.execute("""
                 UPDATE enterprise_users
                 SET role=?, tier=?, email=?
                 WHERE LOWER(username)='sho'
             """, ("Enterprise Admin", "Enterprise Plus Tier ($399)", "mohsuhailji@gmail.com"))
+
+        # Rotate legacy discount-looking referral codes to neutral attribution
+        # codes. This changes no payment/subscription records and promises no reward.
+        cursor.execute("""
+            UPDATE enterprise_users
+               SET affiliate_code = 'SHR-' || upper(hex(randomblob(6)))
+             WHERE affiliate_code LIKE 'AFF-%'
+        """)
 
         # Never recreate/delete accounts on app startup.
         cursor.execute("SELECT 1 FROM users WHERE LOWER(username)='sho' LIMIT 1")
@@ -701,79 +742,134 @@ def local_account_exists(username):
 # different registered legal entity (an LLC, for example), swap the
 # name below for that entity's registered name.
 # =====================================================================
+TERMS_VERSION = "2026-10-21-beta-v1"
+PRIVACY_POLICY_VERSION = "2026-10-21-v1"
+REFUND_POLICY_VERSION = "2026-10-23-v2"
+COOKIE_POLICY_VERSION = "2026-10-21-v1"
+
 PRIVACY_POLICY_TEXT = """
-**Last updated:** September 8, 2026
+**Last updated:** October 21, 2026
+**Version:** 2026-10-21-v1
 
-**Who we are:** Shoir-IE ("we", "us"). Contact: shoirtheagent@gmail.com.
+### Who operates Shoir-IE
+Shoir-IE is the product name of an evolving industrial-engineering software platform. Contact: **shoirtheagent@gmail.com**. Before a public commercial launch, the operator must publish its full legal name, official business address and any applicable registration details.
 
-**What we collect, and why:**
-| Data | Why we collect it |
-|---|---|
-| Username, email address | To create and identify your account, and to contact you about it |
-| Password | To secure your account (stored as a salted hash - we never see or store your actual password) |
-| Selected subscription tier, payment method, transaction ID | To verify your payment and activate the correct tier |
-| Payment screenshot you upload | To manually verify that payment was made before activating your account |
-| Account activity (logins, admin actions) | Security audit log, so we can investigate misuse if it happens |
+### Personal information and workspace data
+Depending on which features are used, Shoir-IE may process:
+- Username and email address for account creation, support, sign-in and account recovery.
+- Password submitted during registration and its salted password hash for authentication. The account service hashes the password before persistent account storage; the password is handled transiently to complete registration or sign-in.
+- Selected subscription tier, transaction/reference number, payment status and optional payment evidence for manual STC Pay verification and dispute handling.
+- User-uploaded spreadsheets, datasets, workbook content, analysis inputs, outputs, reports and saved workspace records to deliver the features requested.
+- Optional profile details and referral code/status information.
+- Security, session, audit, support and error-diagnostic events.
+- AI Copilot prompts and relevant context when the AI integration is enabled and you request it.
 
-We only collect what's needed to run this registration-and-approval process. We don't collect analytics, advertising, or behavioral tracking data - there is none of that on this platform.
+Do not submit passwords from other services, payment-card credentials, government identifiers, sensitive personal data, confidential trade secrets, export-controlled material, or another person's information unless you are authorized to share it and the deployment has been approved for that data.
 
-**Who sees it:** Only the platform administrator, for the purpose of verifying your payment and managing your account. We do not sell, rent, or share your data with third parties, advertisers, or analytics providers.
+### Legal basis for processing
 
-**How it's stored:** In a private database on our servers. Passwords are hashed (PBKDF2, salted) - not stored in plain text.
+The lawful basis depends on the particular purpose and applicable law. Processing may be necessary to provide an account or service you request, administer a subscription, comply with a legal obligation, protect the service, or rely on consent or another lawful basis where applicable. Before commercial production, the operator must document and disclose the lawful basis for each processing purpose under Saudi law, and request consent before any processing for which consent is required. Where processing is based on consent, you may withdraw it for future processing by contacting the service, subject to applicable law; withdrawal does not make earlier lawful processing retroactively unlawful.
 
-**How long we keep it:** For as long as your account is active. Payment screenshots are kept only as long as needed to resolve any payment dispute, then deleted.
+### Purposes and sharing
+Information is used to operate accounts and subscriptions, process requested analyses, maintain requested workspace features, protect the service, respond to support requests, record referral attribution and comply with legal obligations. We do not sell personal information.
 
-**Your rights:** You can request a copy of your data, a correction, or deletion, by emailing shoirtheagent@gmail.com. If you're in Saudi Arabia, this is also your right under the Personal Data Protection Law (PDPL); if you're elsewhere, your local data protection law may give you similar rights.
+Shoir-IE uses or is designed to use third-party infrastructure, including Streamlit for hosting, Supabase for account/database/storage functions, Anthropic when AI Copilot is used, and the email provider configured for service messages. Providers process information as needed for the requested service and under their own terms and privacy practices. The exact providers and settings active in a deployment may vary. Information may also be disclosed when reasonably necessary to protect users or the service, or to comply with applicable law.
 
-**Changes:** If this policy changes, we'll update the date above.
+When you use AI Copilot, your prompt and relevant context may be processed by the configured AI provider. Do not include information in a prompt unless you are authorized to share it with that provider and have reviewed the provider's applicable terms and handling practices. We do not promise that third-party providers never retain prompts; consult the provider's policies and the applicable account/deployment settings.
+
+### Hosting location and international transfers
+Information is stored or processed in the regions configured by hosting, database, storage, email and AI providers. Some processing may occur outside the Kingdom of Saudi Arabia. The operator must verify the actual provider regions, contracts, transfer safeguards and applicable Saudi Personal Data Protection Law requirements before production use with regulated or sensitive data. The beta is not certified for sensitive industrial or personal data.
+
+### Security and retention
+We use controls intended to protect accounts and stored information, but the beta has not been independently security-certified and no online service can be guaranteed completely secure. Information may be retained while needed for service delivery, account lifecycle, security, payment review, legal obligations and disputes. A single end-to-end automatic deletion schedule covering every database, backup, cache, log and third-party system is not yet promised. We will review data-access, correction and deletion requests under applicable law; records may need to be retained where the law permits or requires.
+
+### Your requests and rights
+Subject to applicable law, you may request access to your personal information, a readable copy, correction or updating, and destruction where permitted once the information is no longer needed. Contact **shoirtheagent@gmail.com** and avoid including unnecessary sensitive information. We may need to verify your identity. You may also contact the competent Saudi data-protection authority where applicable.
+
+### Changes
+This notice may change as beta features and integrations evolve. We will update the version and date for material changes and seek any consent required by law. Do not use the beta as a substitute for an approved enterprise data-processing arrangement.
 """
 
 TERMS_AND_CONDITIONS_TEXT = """
-**Last updated:** September 8, 2026
+**Last updated:** October 21, 2026
+**Version:** 2026-10-21-beta-v1
 
-**1. The service.** Shoir-IE ("the platform") provides access to a set of operations-research, simulation, and engineering tools, organized into subscription tiers (Starter, Mid-Tier Pro, Enterprise, Research Pack).
+### 1. Beta testing — important
+Shoir-IE is in **beta testing and active development**. Features, calculations, module availability, AI responses, reports, integrations, persistence and security controls may be incomplete, experimental, changed or unavailable. Errors, inaccurate outputs, interruptions, lost work or incompatible exports may occur. Improvements and corrections may be added, but no delivery date is promised. Use synthetic or non-sensitive test data unless the operator has specifically approved your deployment and data type. Keep independent backups.
 
-**2. Accounts & registration.** You must provide accurate registration information. Accounts are activated manually after payment verification by an administrator - this may take time, and we don't guarantee a specific activation window. You're responsible for keeping your password confidential and for all activity on your account.
+### 2. Operator and contact
+Shoir-IE is the product name of the service. Contact: **shoirtheagent@gmail.com**. Before a public commercial launch, the operator must publish its full legal name, official business address and applicable registration details. This beta notice is not a representation that every business-registration or e-commerce obligation has been completed.
 
-**3. Subscription period & renewal.** Each paid subscription is active for **30 days from the date it is activated or renewed**. When the 30-day period ends, access to the Shoir-IE workspace is blocked until a renewal payment is submitted and approved. Your account, saved workspace, research data, and profile are preserved; subscription expiry does not delete your data.
+### 3. Service and feature status
+The platform provides evolving industrial-engineering, data preparation, analytics, simulation, optimization, reporting, research, collaboration and AI-assisted workflows. Availability depends on the selected plan and deployed version. A catalogue entry, demonstration, sample output or marketing example does not mean that a feature is fully verified, certified, connected to a live plant, or available in every deployment.
 
-**4. Payment.** You agree to pay the exact price listed for your selected tier. See the separate Refund Policy for cancellation terms.
+### 4. Accounts and acceptable use
+Provide accurate registration information and protect your credentials. You are responsible for activity using your account except to the extent applicable law provides otherwise. Do not access another user's workspace or the administrator area, bypass plan restrictions, disrupt the service, upload malicious files, scrape or resell access, or use the service unlawfully. Do not use referral codes for fake accounts, self-referrals, misleading claims or unsolicited spam.
 
-**5. Acceptable use.** You may not: share your account with others, attempt to access another user's data or the administrator area, attempt to reverse-engineer, scrape, or resell access to the platform, or use it for any unlawful purpose.
+### 5. Subscription and payment
+Subscription requests are manually reviewed. In the current beta, payment is made separately using the displayed STC Pay QR/payment instructions; there is no integrated card-processing checkout. A transaction reference or receipt is used for manual review. Access begins only after approval and is subject to the period shown in the account. Confirm the selected plan, total amount, subscription period and any applicable tax or fees before paying. Never send payment credentials or one-time verification codes to Shoir-IE.
 
-**6. Outputs are not professional advice.** Simulation results, optimizations, and analyses produced by the platform are decision-support tools, not certified engineering, financial, or legal advice. You're responsible for independently verifying anything you rely on for real-world decisions.
+### 6. Referral codes
+Referral codes are currently beta attribution tools. They may record which code was submitted and whether the referred account was approved after manual payment review. **No discount, free month, commission, cash payment or other referral reward is currently offered or guaranteed.** A reward may be introduced only through separate, current, published program terms. Self-referrals, duplicate/fraudulent accounts and spam are prohibited.
 
-**7. Availability.** The service is provided "as is." We don't guarantee uninterrupted or error-free operation.
+### 7. User content and intellectual property
+You retain rights in data and content that you own and upload. You confirm that you have the required rights, permissions and legal basis to submit it and authorize processing only as needed to provide the features you request. Do not upload content that infringes another person's copyright, trademark, database right, trade secret, privacy or other rights.
 
-**8. Termination.** We may suspend or terminate accounts that violate these terms or that were activated based on fraudulent payment proof.
+Shoir-IE's software, branding, original interface, documentation and owned content are protected by applicable intellectual-property laws and made available only under rights expressly granted by the operator. The repository's proprietary LICENSE applies to the repository code; it does not remove conditions in separately licensed third-party packages or assets. No ownership of Shoir-IE is transferred to you, and no rights to third-party material are granted beyond its own license.
 
-**9. Intellectual property.** The platform, its modules, and its content are owned by Shoir-IE. Nothing here transfers ownership of that to you.
+### 8. Calculations, AI and decision support
+Calculations, forecasts, optimization results, simulations, recommendations, generated text and reports are decision-support outputs for testing and evaluation. Inputs may be incomplete, stale, mis-mapped, incorrectly typed or based on assumptions; formulas, units, solver settings, models, AI responses or exports may be wrong. Outputs may omit constraints, fail to represent actual plant conditions or be unsuitable for your intended purpose. Demonstration values and scenario estimates are not actual customer results, verified savings, causal proof or guarantees of performance.
 
-**10. Limitation of liability.** To the extent permitted by applicable law, Shoir-IE is not liable for indirect or consequential damages arising from use of the platform.
+Independently validate source data, formulas, assumptions, units, solver status, boundary conditions and outputs with a suitably qualified professional before acting on them. Do not use Shoir-IE as the sole or real-time controller for safety-critical operations, machinery, medical decisions, legal or regulatory filings, investment decisions or other high-consequence activity. Obtain plant-specific engineering, safety, security, financial and legal review where appropriate. AI-generated material can be inaccurate or fabricated and must be checked.
 
-**11. Governing law.** _(state the jurisdiction whose law governs this agreement, e.g. Kingdom of Saudi Arabia)_.
+### 9. Availability, changes and termination
+The beta is provided on an evolving, best-efforts basis. We do not promise uninterrupted operation, error-free results, compatibility, permanent storage, a particular uptime, a specific date for improvements, or that a feature will remain available. Features may be changed, suspended or removed for testing, maintenance, security or legal reasons. Access may be suspended for abuse, security risks or unlawful use, subject to applicable law and any mandatory notice or remedy.
 
-**12. Changes.** We may update these terms; continued use after a change means you accept the update.
+### 10. Disclaimers and limitation of liability
+To the maximum extent permitted by applicable law, the service is provided without a promise that it will be fit for a particular purpose or produce a particular operational or financial outcome. To the extent legally permitted, Shoir-IE is not liable for indirect or consequential loss arising from use of, or inability to use, the beta. You remain responsible for decisions, independent backups, validation and obligations under your control.
+
+**Nothing in these terms excludes or limits liability that cannot lawfully be excluded or limited, waives mandatory consumer rights, or excuses fraud, intentional misconduct or other non-waivable obligations.** No contract wording can guarantee that a claim will never be brought or decided against the operator.
+
+### 11. Privacy and third-party services
+The Privacy Policy, Refund Policy and Cookie Policy describe current intended practices. Third-party hosting, database/storage, email and AI providers may process information to deliver requested features. Review the Privacy Policy before submitting personal, confidential or regulated data.
+
+### 12. Refunds and complaints
+Refund requests are handled under the published Refund Policy and applicable law, including mandatory consumer protections. Contact **shoirtheagent@gmail.com** with the account name, payment reference and a short description of the issue. Send only the minimum information needed to locate a transaction.
+
+### 13. Governing law and disputes
+These terms are intended to be governed by the laws and regulations of the **Kingdom of Saudi Arabia**, subject to mandatory rules applying to a user or transaction and the jurisdiction of competent authorities and courts. Nothing here prevents a consumer from exercising a non-waivable statutory right.
+
+### 14. Updates
+Material changes will be reflected in a new version and date. Where required by law, renewed acceptance will be requested before a material change is applied to an existing user's service. Continued use alone does not override mandatory notice or consent requirements.
 """
 
 REFUND_POLICY_TEXT = """
-**Last updated:** September 8, 2026
+**Last updated:** October 23, 2026  
+**Version:** 2026-10-23-v2
 
-Subscription purchases are **final and non-refundable**, except in the following cases:
+Payments are reviewed manually; STC Pay QR is a separate payment step, not an integrated card checkout. Refund requests are assessed under applicable law and mandatory consumer rights. Nothing in this policy waives rights that cannot lawfully be waived.
 
-- You were charged but your account was never activated and the issue isn't resolved within a reasonable time after you contact us.
-- You were charged more than once for the same registration (duplicate/double charge).
-- You were charged the wrong amount for the tier you selected due to a platform error.
+**Statutory rights are preserved.** Nothing in this policy limits mandatory cancellation, rescission, refund or other consumer rights under applicable Saudi law. Article 13 of the Saudi E-Commerce Law describes circumstances in which a consumer may rescind an electronic service contract within a statutory period, subject to conditions and exceptions (including rules relating to whether a service has been used or benefited from, and used software). Eligibility depends on the service and the specific circumstances. This policy is not a blanket denial of statutory rights or a guarantee that every request qualifies; Saudi-qualified counsel must confirm this wording before paid consumer access.
 
-To request a refund under one of these cases, email shoirtheagent@gmail.com with your username and payment proof.
+Contact **shoirtheagent@gmail.com** with your username, payment reference, amount, date and a short description of the issue. Do not email passwords, card details, one-time codes or unnecessary identity documents.
+
+Requests may include:
+- Duplicate payment or payment for the wrong amount.
+- Payment where requested access was not activated and the issue was not resolved after contacting support.
+- A material service failure, billing mistake or other circumstance in which a refund or remedy is required by law or appropriate to resolve the issue.
+
+Where the service was correctly supplied and the law permits, a refund may not be available. Any approved refund will be handled using a reasonable method available for the original payment route; timing can depend on the payment provider and manual verification.
 """
 
 COOKIE_POLICY_TEXT = """
-**Last updated:** September 8, 2026
+**Last updated:** October 21, 2026
+**Version:** 2026-10-21-v1
 
-We use one strictly-necessary session identifier so the platform can keep you signed in while you use it. This is a core function of the underlying web framework (Streamlit) - it's not used to track you, build a profile, or follow you across other sites.
+Shoir-IE relies on session and security mechanisms provided by the Streamlit framework, hosting and account providers to keep sessions working, protect access and deliver requested features. Providers may use additional cookies or similar technologies under their own policies.
 
-**We do not use any analytics, advertising, or third-party tracking cookies.** If that changes in the future, this policy will be updated to reflect it.
+The application source reviewed does not intentionally implement behavioral-advertising cookies. Session, authentication, security and operational logging are not the same as advertising tracking. Blocking required session mechanisms may prevent sign-in or other features from working.
+
+If analytics, advertising or non-essential tracking is introduced, the operator must update this notice and obtain any consent required by applicable law before enabling it.
 """
 
 # =====================================================================
@@ -963,17 +1059,17 @@ TIER_BENEFITS = {
     "Starter": {
         "price": "$29",
         "pitch": "The core industrial-engineering toolkit - replace spreadsheet-based network and inventory decisions with solved, defensible answers.",
-        "gain": "Use the examples to compare candidate network and inventory decisions against explicit objectives and constraints. Runtime and solution quality depend on problem size, data quality, and model setup.",
+        "gain": "What used to take a spreadsheet model and a free afternoon (or a week, for a real MILP network design) now takes minutes, with a mathematically optimal answer instead of a good guess.",
     },
     "Mid-Tier Pro": {
         "price": "$79",
         "pitch": "Adds the day-to-day operations layer - routing, scheduling, quality, and finance - so the whole plant or supply chain runs through one system.",
-        "gain": "Explore routing, scheduling, quality, and finance workflows in one workspace. The amount of re-entry avoided depends on your current tools and the integrations you configure.",
+        "gain": "Replaces 4-5 separate specialist tools (a routing app, a Six Sigma add-in, a capex spreadsheet, a scheduling board) with one connected workspace, so nothing has to be re-entered twice.",
     },
     "Enterprise": {
         "price": "$199",
         "pitch": "Adds automation, simulation-under-uncertainty, and a natural-language copilot - built for a team running live operations, not a single analyst running one-off studies.",
-        "gain": "Explore simulation, automation, and operational visibility. Live alerts, shared data, and proactive maintenance depend on configured capabilities and connected systems.",
+        "gain": "Moves from reactive (find out something broke) to proactive (get warned before it breaks), and from one person driving the tool to a team working off one shared, always-current picture.",
     },
     "Professional": {
         "price": "Plan details",
@@ -988,7 +1084,7 @@ TIER_BENEFITS = {
     "Research Pack": {
         "price": "+$30 add-on",
         "pitch": "A genuinely research-grade layer on top of Enterprise: statistics, reproducibility, adversarial review, and a paper-to-simulation pipeline built for people who have to defend their results to reviewers, not just to a manager.",
-        "gain": "Use statistical, reproducibility, and review workflows to make methods and evidence easier to inspect. Verify outputs, assumptions, and citations before submitting or publishing.",
+        "gain": "Cuts the gap between 'I have a model' and 'I have a submittable, defensible, reproducible result' - the adversarial review and falsification tools specifically catch the weaknesses a real peer reviewer would catch, before submission instead of after rejection.",
     },
 }
 
@@ -1462,7 +1558,7 @@ if st.session_state.get("renewal_mode") and not st.session_state.get("current_us
 
 if not st.session_state.get("current_user"):
     if getattr(_durable_account_store, "APP_ENVIRONMENT", "production") == "staging":
-        st.warning("STAGING TEST ENVIRONMENT — use disposable test accounts and synthetic data only.", icon="🧪")
+        st.warning(f"STAGING TEST ENVIRONMENT · SHOIR-IE SHELL VERSION: {SHELL_VERSION} — use disposable test accounts and synthetic data only.", icon="🧪")
     st.title("🔐 Welcome to Shoir-IE Workspace")
     if st.session_state.pop("subscription_expired_notice", False):
         st.warning(
@@ -1470,6 +1566,7 @@ if not st.session_state.get("current_user"):
             "Your existing account, profile and saved workspace are preserved."
         )
     st.markdown("Please sign in with your approved account or register and submit your payment ticket below.")
+    st.warning("BETA — Shoir-IE is still in testing. Independently validate source data, formulas and outputs before operational decisions; do not rely on beta output alone for safety-critical work.")
     auth_tab1, auth_tab2, auth_tab3 = st.tabs(["🔑 Sign In", "📝 Get Ticket & Register", "🧭 Explore the Modules"])
 
     # ------------------------------------------
@@ -1588,10 +1685,11 @@ if not st.session_state.get("current_user"):
         reg_email = st.text_input("Email Address", placeholder="name@company.com", key="reg_email")
         reg_pass = st.text_input("Password", type="password", key="reg_pass")
         reg_ticket_code = st.text_input("Activation / Ticket Code (If you already have one)", placeholder="Enter ticket code here", key="reg_ticket")
+        reg_referral_code = st.text_input("Referral code (optional)", placeholder="Enter a referral code if someone invited you", key="reg_referral_code")
 
         st.markdown("---")
         st.markdown("### Legal & Privacy")
-        st.caption("Please read before registering. Collecting this data without disclosing it here is what creates legal exposure - showing it isn't optional.")
+        st.caption("Shoir-IE is in beta. Review the current notices before submitting a registration request. Your Terms version and acceptance time are recorded with the request where the connected account service supports it.")
 
         with st.expander("📄 Privacy Policy"):
             st.markdown(PRIVACY_POLICY_TEXT)
@@ -1603,13 +1701,24 @@ if not st.session_state.get("current_user"):
             st.markdown(COOKIE_POLICY_TEXT)
 
         accepted_terms = st.checkbox(
-            "I have read and accept the Privacy Policy, Terms & Conditions, Refund Policy, and Cookie Policy above.",
+            "I agree to the Beta Terms & Conditions and acknowledge the Privacy, Refund, and Cookie notices above.",
             key="reg_chk"
         )
 
         if accepted_terms:
             if st.button("Proceed to Pay & Show QR", type="primary", key="btn_confirm_pay"):
+                st.session_state["_registration_accepted_terms_version"] = TERMS_VERSION
+                st.session_state["_registration_accepted_policy_versions"] = (
+                    PRIVACY_POLICY_VERSION,
+                    REFUND_POLICY_VERSION,
+                    COOKIE_POLICY_VERSION,
+                )
+                st.session_state["_registration_accepted_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
                 st.session_state.show_qr = True
+        else:
+            st.session_state.pop("_registration_accepted_terms_version", None)
+            st.session_state.pop("_registration_accepted_policy_versions", None)
+            st.session_state.pop("_registration_accepted_at", None)
 
         if st.session_state.get("show_qr", False):
             st.markdown("---")
@@ -1632,6 +1741,47 @@ if not st.session_state.get("current_user"):
 
             if confirmed_delivery:
                 if st.button("Send Verification Request", type="primary", key="btn_send_request"):
+                    _accepted_policy_versions = (
+                        PRIVACY_POLICY_VERSION,
+                        REFUND_POLICY_VERSION,
+                        COOKIE_POLICY_VERSION,
+                    )
+                    if (
+                        not accepted_terms
+                        or st.session_state.get("_registration_accepted_terms_version") != TERMS_VERSION
+                        or st.session_state.get("_registration_accepted_policy_versions") != _accepted_policy_versions
+                        or not st.session_state.get("_registration_accepted_at")
+                    ):
+                        st.warning("Review the current Beta Terms & Conditions and policy notices, tick the acknowledgement, then click Proceed to Pay & Show QR before submitting.")
+                        st.stop()
+                    referral_code = str(reg_referral_code or "").strip().upper()
+                    if referral_code and not re.fullmatch(r"[A-Z0-9-]{3,32}", referral_code):
+                        st.warning("Referral codes may contain only letters, numbers and hyphens (3-32 characters).")
+                        st.stop()
+                    local_referrer_username = None
+                    if referral_code and not _durable_accounts_ready:
+                        with sqlite3.connect("enterprise_full_workspace.db") as _ref_conn:
+                            _ref_matches = _ref_conn.execute(
+                                "SELECT username FROM enterprise_users WHERE UPPER(affiliate_code)=? LIMIT 2",
+                                (referral_code,),
+                            ).fetchall()
+                            _existing_referral = _ref_conn.execute(
+                                "SELECT 1 FROM affiliate_referrals WHERE LOWER(referred_user)=LOWER(?) LIMIT 1",
+                                (str(reg_name or "").strip(),),
+                            ).fetchone()
+                        if not _ref_matches:
+                            st.warning("That referral code was not found. Check it or leave the field blank.")
+                            st.stop()
+                        if len(_ref_matches) > 1:
+                            st.warning("That referral code is ambiguous. Please contact support rather than submitting it.")
+                            st.stop()
+                        local_referrer_username = str(_ref_matches[0][0])
+                        if local_referrer_username.strip().lower() == str(reg_name or "").strip().lower():
+                            st.warning("Self-referrals are not allowed.")
+                            st.stop()
+                        if _existing_referral:
+                            st.warning("This username already has referral attribution recorded.")
+                            st.stop()
                     # SECURITY: usernames get displayed elsewhere in the app
                     # with raw HTML rendering allowed. Restricting the
                     # character set here (letters, numbers, . _ -, 3-32
@@ -1674,11 +1824,12 @@ if not st.session_state.get("current_user"):
                             st.warning("Password must be between 8 and 128 characters.")
                             st.stop()
 
+                        _registration_result = {}
                         # The durable service is authoritative. Submit it first so a
                         # failed remote write cannot leave a local-only pending request.
                         if _durable_accounts_ready:
                             try:
-                                insert_remote_request({
+                                _registration_result = insert_remote_request({
                                     "username": reg_name, "password": reg_pass,
                                     "email": reg_email, "tier": reg_tier,
                                     "request_type": "New", "payment_method": "STC Pay (QR)",
@@ -1686,6 +1837,13 @@ if not st.session_state.get("current_user"):
                                     "screenshot_path": file_path, "status": "Pending",
                                     "proof_base64": _registration_proof_base64,
                                     "proof_content_type": _registration_proof_content_type,
+                                    "referral_code": referral_code or None,
+                                    "terms_accepted": True,
+                                    "accepted_at": st.session_state.get("_registration_accepted_at"),
+                                    "terms_version": TERMS_VERSION,
+                                    "privacy_policy_version": PRIVACY_POLICY_VERSION,
+                                    "refund_policy_version": REFUND_POLICY_VERSION,
+                                    "cookie_policy_version": COOKIE_POLICY_VERSION,
                                 })
                             except Exception as exc:
                                 if file_path:
@@ -1698,10 +1856,18 @@ if not st.session_state.get("current_user"):
 
                         conn = sqlite3.connect("enterprise_full_workspace.db")
                         cursor = conn.cursor()
+                        _local_acceptance_at = st.session_state.get("_registration_accepted_at")
+                        _remote_request_id = (
+                            _registration_result.get("request_id")
+                            if _durable_accounts_ready and isinstance(_registration_result, dict)
+                            else None
+                        )
                         cursor.execute("""
                             INSERT INTO pending_payments
-                                (username, password, email, tier, payment_method, transaction_id, screenshot_path, status, timestamp, request_type)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'New')
+                                (username, password, email, tier, payment_method, transaction_id, screenshot_path,
+                                 status, timestamp, request_type, terms_accepted, remote_request_id, referral_code,
+                                 terms_version, privacy_policy_version, refund_policy_version, cookie_policy_version, accepted_at)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'New', ?, ?, ?, ?, ?, ?, ?, ?)
                         """, (
                             reg_name,
                             hash_password(reg_pass),
@@ -1711,14 +1877,36 @@ if not st.session_state.get("current_user"):
                             reg_ticket_code if reg_ticket_code else None,
                             file_path,
                             "Pending",
-                            datetime.datetime.now().isoformat()
+                            datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                            1,
+                            _remote_request_id,
+                            referral_code or None,
+                            TERMS_VERSION,
+                            PRIVACY_POLICY_VERSION,
+                            REFUND_POLICY_VERSION,
+                            COOKIE_POLICY_VERSION,
+                            _local_acceptance_at,
                         ))
+                        if referral_code and local_referrer_username:
+                            cursor.execute(
+                                """INSERT INTO affiliate_referrals
+                                   (referrer, referred_user, discount_applied, timestamp, referral_code, status)
+                                   VALUES (?, ?, 0, ?, ?, 'Pending')""",
+                                (local_referrer_username, reg_name, datetime.datetime.now(datetime.timezone.utc).isoformat(), referral_code),
+                            )
 
                         conn.commit()
                         conn.close()
-
-                        st.success("Request sent successfully! Your code will be emailed to you from shoirtheagent@gmail.com")
+                        if _durable_accounts_ready:
+                            if _registration_result.get("legal_acceptance_recorded") is not True:
+                                st.warning("The account service did not confirm the versioned legal-acceptance record. Check the deployment before relying on that record.")
+                            if referral_code and _registration_result.get("referral_attributed") is not True:
+                                st.warning(str(_registration_result.get("referral_warning") or "The account service did not confirm referral attribution. No reward or discount is implied."))
+                        st.success("Request received. Account activation still requires manual payment review.")
                         st.session_state.show_qr = False
+                        st.session_state.pop("_registration_accepted_terms_version", None)
+                        st.session_state.pop("_registration_accepted_policy_versions", None)
+                        st.session_state.pop("_registration_accepted_at", None)
                         st.rerun()
                     else:
                         st.warning("Please fill in your name, password, and email address.")
@@ -1771,7 +1959,6 @@ if not st.session_state.get("current_user"):
         }
         .module-value-card .module-name {font-weight:850;color:#0f172a;font-size:16px;}
         .module-value-card .module-category {font-size:11px;color:#0f766e;font-weight:800;text-transform:uppercase;letter-spacing:.06em;}
-        .module-value-card .module-access {font-size:11px;color:#64748b;font-weight:700;margin-top:8px;}
         .module-value-card .module-when {font-size:13px;color:#475569;line-height:1.45;margin-top:6px;}
         .module-example {border-left:3px solid #0f766e;padding:8px 11px;background:#f8fafc;border-radius:8px;color:#334155;font-size:13px;line-height:1.5;}
         </style>
@@ -1791,350 +1978,6 @@ if not st.session_state.get("current_user"):
                     f'<div class="value-strip"><b>{_label}</b><span>{_copy}</span></div>',
                     unsafe_allow_html=True
                 )
-
-        st.markdown("### Find a capability for the problem you need to solve")
-        st.markdown(
-            "Start with a real work problem, or search a module name. Choose a plan to see the capabilities "
-            "available at that level, open an example, and use it to picture how the workflow fits your situation."
-        )
-
-        # Optional target-registry view keeps the existing public showcase compact.
-        # When enabled, the established search/category/tier filters also search the
-        # stable-ID target tools and expose their real readiness and mapped route.
-        _target_catalog_rows = []
-        _target_catalog_error = ""
-        try:
-            from shoir_tool_registry import TOOL_TARGETS as _target_tool_targets
-
-            for _target in _target_tool_targets:
-                _tool_id = str(_target.get("tool_id", "")).strip()
-                _canonical_name = str(_target.get("canonical_name", "")).strip()
-                if not _tool_id or not _canonical_name:
-                    continue
-                _target_catalog_rows.append({
-                    "name": f"{_tool_id} · {_canonical_name}",
-                    "category": str(_target.get("workbench") or "Engineering Tools"),
-                    "tier": str(_target.get("target_minimum_tier") or "Starter"),
-                    "when": str(_target.get("calculation_or_action") or ""),
-                    "example": (
-                        f"Required inputs: {_target.get('input_contract', '')}\n\n"
-                        f"Expected output: {_target.get('output_contract', '')}"
-                    ),
-                    "tool_id": _tool_id,
-                    "readiness_status": str(_target.get("implementation_status") or "BLOCKED"),
-                    "mapped_route": str(_target.get("existing_module_or_route") or ""),
-                    "required_inputs": str(_target.get("input_contract") or ""),
-                    "expected_outputs": str(_target.get("output_contract") or ""),
-                    "remaining_gap": str(_target.get("remaining_gap") or ""),
-                    "external_dependency": str(_target.get("external_dependency") or ""),
-                })
-        except Exception as _registry_exc:
-            # Broken target metadata stays visible instead of silently disappearing.
-            _target_catalog_error = type(_registry_exc).__name__
-
-        _include_target_tools = st.checkbox(
-            "Include the 100 target engineering tools (shows readiness and mapped routes)",
-            value=False,
-            key="explore_include_target_tools_v1",
-            help="Optional expanded view. Foundation-only methods and unconfigured integrations are labelled, not presented as verified tools.",
-        )
-        _explore_catalog = list(MODULE_CATALOG)
-        if _include_target_tools:
-            _explore_catalog.extend(_target_catalog_rows)
-            if _target_catalog_error:
-                st.warning(
-                    "The 100-tool directory could not be loaded "
-                    f"({html.escape(_target_catalog_error)}). The existing module catalog is still available."
-                )
-
-        _goal_options = [
-            "Any industrial problem",
-            "Reduce cost, time, or waste",
-            "Improve quality or reliability",
-            "Plan production or capacity",
-            "Improve warehouse or facility flow",
-            "Manage suppliers, stock, or delivery",
-            "Test uncertainty or disruption",
-            "Research or validate a model",
-            "Connect data or automate work",
-            "Build or validate an industrial venture",
-        ]
-        _goal_keywords = {
-            "Any industrial problem": (),
-            "Reduce cost, time, or waste": (
-                "cost", "waste", "lean", "optimization", "optimisation", "inventory",
-                "cycle", "bottleneck", "capacity", "economics", "carbon", "routing",
-                "milp", "facility", "slotting", "meio", "value",
-            ),
-            "Improve quality or reliability": (
-                "quality", "six sigma", "reliability", "defect", "maintenance",
-                "human factors", "ergonom", "sensitivity", "control chart", "niosh",
-            ),
-            "Plan production or capacity": (
-                "production", "capacity", "planning", "bottleneck", "simulation",
-                "lean", "line balancing", "time study", "gantt", "digital twin",
-            ),
-            "Improve warehouse or facility flow": (
-                "warehouse", "facility", "layout", "slotting", "heatmap", "agv",
-                "fleet", "inventory", "travel", "storage", "dispatch",
-            ),
-            "Manage suppliers, stock, or delivery": (
-                "supplier", "fleet", "logistics", "network", "stock", "inventory",
-                "carbon", "route", "meio", "geospatial", "risk", "lead time",
-            ),
-            "Test uncertainty or disruption": (
-                "risk", "scenario", "monte carlo", "simulation", "sensitivity",
-                "adversarial", "shock", "resilience", "uncertainty", "stress",
-            ),
-            "Research or validate a model": (
-                "research", "statistical", "hypothesis", "literature", "regression",
-                "paper", "reproducibility", "peer-review", "formal proof", "quantum",
-                "surrogate", "evidence degradation",
-            ),
-            "Connect data or automate work": (
-                "data", "integration", "copilot", "gateway", "webhook", "agentic",
-                "control tower", "cryptographic", "persistence", "subscription",
-                "operating system", "digital twin", "api",
-            ),
-            "Build or validate an industrial venture": (
-                "venture", "innovation", "commercialization", "pilot", "investor",
-                "customer", "roi", "hypothesis", "evidence",
-            ),
-        }
-
-        def _reset_explorer_filters():
-            st.session_state["explore_goal_filter_v3"] = "Any industrial problem"
-            st.session_state["explore_tier_filter_v3"] = "All capabilities"
-            st.session_state["explore_category_filter_v3"] = "All categories"
-            st.session_state["explore_module_search_v3"] = ""
-
-        _filter_cols = st.columns([1.45, 1.0, 1.15])
-        with _filter_cols[0]:
-            _browse_goal = st.selectbox(
-                "What are you trying to do?",
-                _goal_options,
-                key="explore_goal_filter_v3",
-            )
-        _tier_options = list(MODULE_EXPLORER_TIERS)
-        with _filter_cols[1]:
-            _browse_tier = st.selectbox(
-                "Plan / access level",
-                _tier_options,
-                key="explore_tier_filter_v3",
-                help="Plan filters include the lower tiers already covered by a higher plan. Research Pack is treated as an add-on.",
-            )
-        _category_options = ["All categories"] + sorted({
-            str(m.get("category", "Other")) for m in _explore_catalog
-        })
-        with _filter_cols[2]:
-            _browse_category = st.selectbox(
-                "Area",
-                _category_options,
-                key="explore_category_filter_v3",
-            )
-
-        _search_cols = st.columns([4, 1])
-        with _search_cols[0]:
-            _search = st.text_input(
-                "Search by module, problem, or example",
-                placeholder="Try: warehouse layout, Cpk, supplier risk, forecasting, research, simulation…",
-                key="explore_module_search_v3",
-            )
-        with _search_cols[1]:
-            st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
-            st.button(
-                "Clear filters",
-                key="explore_reset_filters_v3",
-                on_click=_reset_explorer_filters,
-                use_container_width=True,
-            )
-
-        _base_tier_order = [
-            str(t) for t in _tier_options
-            if t not in ("All capabilities", "Research Pack")
-        ]
-        _base_tier_rank = {tier: index for index, tier in enumerate(_base_tier_order)}
-        _research_base_rank = _base_tier_rank.get("Enterprise", len(_base_tier_order) - 1)
-        _query_terms = [
-            token for token in re.findall(r"[a-z0-9]+", _search.lower())
-            if len(token) > 1
-        ]
-        _goal_terms = _goal_keywords.get(_browse_goal, ())
-        _filtered_modules = []
-
-        for _m in _explore_catalog:
-            _module_tier = str(_m.get("tier", "")).strip()
-
-            if _browse_tier == "Research Pack":
-                # The Research Pack is positioned as an add-on to the core
-                # Enterprise layer, not as a replacement for that plan.
-                _available_at_selected_plan = (
-                    _module_tier == "Research Pack"
-                    or (
-                        _module_tier in _base_tier_rank
-                        and _base_tier_rank[_module_tier] <= _research_base_rank
-                    )
-                    or _module_tier not in _base_tier_rank
-                )
-            elif _browse_tier == "All capabilities":
-                _available_at_selected_plan = True
-            elif _module_tier == "Research Pack":
-                _available_at_selected_plan = False
-            elif _module_tier in _base_tier_rank:
-                _available_at_selected_plan = (
-                    _base_tier_rank[_module_tier] <= _base_tier_rank.get(_browse_tier, -1)
-                )
-            else:
-                # Do not silently hide a future or specialist catalog entry
-                # because its tier label is newer than this filter.
-                _available_at_selected_plan = True
-
-            if not _available_at_selected_plan:
-                continue
-            if _browse_category != "All categories" and _m.get("category") != _browse_category:
-                continue
-
-            _haystack = " ".join([
-                str(_m.get("name", "")),
-                str(_m.get("category", "")),
-                str(_m.get("tier", "")),
-                str(_m.get("when", "")),
-                str(_m.get("example", "")),
-                str(_m.get("tool_id", "")),
-                str(_m.get("readiness_status", "")),
-                str(_m.get("mapped_route", "")),
-                str(_m.get("required_inputs", "")),
-                str(_m.get("expected_outputs", "")),
-                str(_m.get("remaining_gap", "")),
-                str(_m.get("external_dependency", "")),
-            ]).lower()
-            if _query_terms and not all(term in _haystack for term in _query_terms):
-                continue
-            if _goal_terms and not any(term in _haystack for term in _goal_terms):
-                continue
-            _filtered_modules.append(_m)
-
-        st.markdown(
-            f"**{len(_filtered_modules)} matches** out of **{len(_explore_catalog)} capabilities/tools**. "
-            "Open any example to see the situation, a possible workflow, and what to review."
-        )
-
-        if _browse_tier != "All capabilities":
-            _benefit = TIER_BENEFITS.get(_browse_tier, {})
-            _tier_price = _benefit.get("price", "")
-            _tier_pitch = _benefit.get("pitch", "")
-            _tier_gain = _benefit.get("gain", "")
-            st.markdown(
-                f"#### {_browse_tier} · {_tier_price}\n"
-                f"**What it is for:** {_tier_pitch}\n\n"
-                f"**What to explore:** {_tier_gain}"
-            )
-
-        _value_hints = {
-            "Core Optimization": "Compare options against a stated objective and constraints.",
-            "Production": "See where capacity is tight and which plan deserves a closer look.",
-            "Quality": "Turn variation or defects into a clearer next investigation.",
-            "Facilities": "Compare flow and space choices before making a physical change.",
-            "Inventory": "Review the trade-off between stock availability and inventory held.",
-            "Logistics": "Compare route, delivery, and resource choices using consistent inputs.",
-            "Risk": "Identify dependencies and decide what evidence would reduce uncertainty.",
-            "Risk & Simulation": "Compare a range of possible outcomes instead of relying on one estimate.",
-            "Research AI": "Make the research question, method, and evidence easier to inspect.",
-            "Research & Experimentation": "Explore how assumptions and evidence quality affect a decision.",
-            "Research Authoring": "Make analysis and supporting evidence easier to explain and reproduce.",
-            "Paper-to-Simulation Pipeline": "Turn a stated model into something that can be examined and tested.",
-            "Peer Review & Stress-Testing": "Surface weaknesses and edge cases before relying on a result.",
-            "Innovation & Commercialization": "Connect a customer problem to a testable pilot and documented evidence.",
-            "Platform": "Keep the workflow, saved context, or decision record easier to follow.",
-            "AI & Automation": "Reduce repetitive hand-offs where the required tools are configured.",
-            "Trust & Security": "Make access, integrity, and review requirements easier to inspect.",
-            "Digital Twin": "Compare a modelled operating condition before considering a live change.",
-            "Sustainability": "Review environmental measures alongside operational trade-offs.",
-            "Finance": "Compare investment choices using explicit financial assumptions.",
-            "Human Factors": "Evaluate a task using a structured method rather than visual guesswork.",
-            "Network Design": "Compare candidate sites and service coverage on a common basis.",
-        }
-
-        for _idx in range(0, len(_filtered_modules), 2):
-            _pair = _filtered_modules[_idx:_idx + 2]
-            _cols = st.columns(len(_pair))
-            for _col, _m in zip(_cols, _pair):
-                with _col:
-                    _module_name = str(_m.get("name", "Capability"))
-                    _module_category = str(_m.get("category", "Industrial Engineering"))
-                    _module_tier = str(_m.get("tier", "")).strip()
-                    _access_label = (
-                        "Research add-on"
-                        if _module_tier == "Research Pack"
-                        else f"Included from {_module_tier}"
-                        if _module_tier in _base_tier_rank
-                        else "Confirm plan access"
-                    )
-                    _target_tool_id = str(_m.get("tool_id", "")).strip()
-                    _target_status = str(_m.get("readiness_status", "")).strip()
-                    if _target_tool_id:
-                        _readiness_label = _target_status.replace("_", " ").title() or "Readiness unresolved"
-                        _access_label = f"{_access_label} · {_target_tool_id} · {_readiness_label}"
-                    _use_case = str(_m.get("when", "")).strip()
-                    _example = str(_m.get("example", "")).strip()
-                    _value_hint = _value_hints.get(
-                        _module_category,
-                        "A documented result you can compare with your starting point.",
-                    )
-                    st.markdown(
-                        f'<div class="module-value-card">'
-                        f'<div class="module-category">{html.escape(_module_category)}</div>'
-                        f'<div class="module-name">{html.escape(_module_name)}</div>'
-                        f'<div class="module-when"><b>Use it when:</b> {html.escape(_use_case)}</div>'
-                        f'<div class="module-access">{html.escape(_access_label)}</div>'
-                        f'</div>',
-                        unsafe_allow_html=True,
-                    )
-                    with st.expander(f"Example & how to use it: {_module_name}"):
-                        st.markdown(f"**Example situation**\n\n{_example}")
-                        st.markdown(
-                            "**A simple way to try it**\n\n"
-                            "1. Start with this situation, the module's demo data if offered, or a small suitable dataset.\n"
-                            "2. Check the inputs, units, and assumptions before running the workflow.\n"
-                            "3. Compare the output with your current baseline and record the next action; export options depend on the module."
-                        )
-                        st.markdown(f"**What to look for**\n\n{_value_hint}")
-                        if _target_tool_id:
-                            st.markdown(f"**Target tool ID and readiness**\n\n**{html.escape(_target_tool_id)}** · **{html.escape(_target_status)}**")
-                            st.markdown(f"**Mapped existing route**\n\n{html.escape(str(_m.get('mapped_route', '')))}")
-                            st.markdown(f"**Required inputs**\n\n{html.escape(str(_m.get('required_inputs', '')))}")
-                            st.markdown(f"**Expected outputs**\n\n{html.escape(str(_m.get('expected_outputs', '')))}")
-                            st.markdown(f"**Remaining gap**\n\n{html.escape(str(_m.get('remaining_gap', '')))}")
-                            _dependency = str(_m.get("external_dependency", "")).strip()
-                            if _dependency:
-                                st.markdown(f"**External configuration**\n\n{html.escape(_dependency)}")
-                            if st.button(
-                                "Open this target in Workbench",
-                                key=f"explore_open_target_{_target_tool_id}",
-                                use_container_width=True,
-                            ):
-                                # Clear persisted filters so the selected target is present
-                                # in the Workbench selector, and expand its readiness directory.
-                                st.session_state["shoir_100_tool_query"] = ""
-                                st.session_state["shoir_100_tool_workbench"] = "All workbenches"
-                                st.session_state["shoir_100_tool_status"] = "All statuses"
-                                st.session_state.pop("shoir_pending_tool_module", None)
-                                st.session_state["shoir_expand_target_directory"] = True
-                                st.session_state["shoir_100_tool_inspector"] = (
-                                    f"{_target_tool_id} · {str(_m.get('name', '')).split(' · ', 1)[-1]}"
-                                )
-                                st.switch_page("pages/Industrial_Engineering_Workbench.py")
-        if not _filtered_modules:
-            st.info(
-                "No capabilities match those choices. Select **Any industrial problem**, choose **All categories**, "
-                "clear the search, or try broader terms such as cost, quality, inventory, production, warehouse, or research."
-            )
-        st.caption(
-            "Examples are illustrative, not verified Shoir-IE customer outcomes. Results depend on the data, assumptions, "
-            "configured integrations, and the workflow you run."
-        )
-
-        st.markdown("---")
 
         st.markdown("### Why industrial teams are moving this way")
         st.markdown(
@@ -2313,6 +2156,164 @@ if not st.session_state.get("current_user"):
             "scenario-only stress are shown as separate quantities; estimates are not verified savings."
         )
 
+        st.markdown("### Find the capability for the problem you have")
+
+        # Optional target-registry view keeps the existing public showcase compact.
+        # Readiness and route metadata are shown only when the visitor opts in.
+        _target_catalog_rows = []
+        _target_catalog_error = ""
+        try:
+            from shoir_tool_registry import TOOL_TARGETS as _target_tool_targets
+
+            for _target in _target_tool_targets:
+                _tool_id = str(_target.get("tool_id", "")).strip()
+                _canonical_name = str(_target.get("canonical_name", "")).strip()
+                if not _tool_id or not _canonical_name:
+                    continue
+                _target_catalog_rows.append({
+                    "name": f"{_tool_id} · {_canonical_name}",
+                    "category": str(_target.get("workbench") or "Engineering Tools"),
+                    "tier": str(_target.get("target_minimum_tier") or "Starter"),
+                    "when": str(_target.get("calculation_or_action") or ""),
+                    "example": (
+                        f"Required inputs: {_target.get('input_contract', '')}\n\n"
+                        f"Expected output: {_target.get('output_contract', '')}"
+                    ),
+                    "tool_id": _tool_id,
+                    "readiness_status": str(_target.get("implementation_status") or "BLOCKED"),
+                    "mapped_route": str(_target.get("existing_module_or_route") or ""),
+                    "required_inputs": str(_target.get("input_contract") or ""),
+                    "expected_outputs": str(_target.get("output_contract") or ""),
+                    "remaining_gap": str(_target.get("remaining_gap") or ""),
+                    "external_dependency": str(_target.get("external_dependency") or ""),
+                })
+        except Exception as _registry_exc:
+            _target_catalog_error = type(_registry_exc).__name__
+
+        _include_target_tools = st.checkbox(
+            "Include the 100 target engineering tools (shows readiness and mapped routes)",
+            value=False,
+            key="explore_include_target_tools_v1",
+            help="Optional expanded view. Foundation-only methods and unconfigured integrations are labelled, not presented as verified tools.",
+        )
+        _explore_catalog = list(MODULE_CATALOG)
+        if _include_target_tools:
+            _explore_catalog.extend(_target_catalog_rows)
+            if _target_catalog_error:
+                st.warning(
+                    "The 100-tool directory could not be loaded "
+                    f"({html.escape(_target_catalog_error)}). The existing module catalog is still available."
+                )
+
+        _tier_options = list(MODULE_EXPLORER_TIERS)
+        _browse_tier = st.selectbox(
+            "Plan / access level",
+            _tier_options,
+            key="explore_tier_filter_v2"
+        )
+        _search = st.text_input(
+            "Search capabilities",
+            placeholder="Try: ShadowShift, Venture Studio, AKDT, logistics resilience, inventory, quality, warehouse, simulation…",
+            key="explore_module_search_v2"
+        )
+        _category_options = ["All categories"] + sorted({str(m.get("category","Other")) for m in _explore_catalog})
+        _browse_category = st.selectbox(
+            "Area",
+            _category_options,
+            key="explore_category_filter_v2"
+        )
+
+        _query = _search.strip().lower()
+        _filtered_modules = []
+        for _m in _explore_catalog:
+            if _browse_tier != "All capabilities" and _m.get("tier") != _browse_tier:
+                continue
+            if _browse_category != "All categories" and _m.get("category") != _browse_category:
+                continue
+            _haystack = " ".join([
+                str(_m.get("name","")),
+                str(_m.get("category","")),
+                str(_m.get("when","")),
+                str(_m.get("example","")),
+                str(_m.get("tool_id","")),
+                str(_m.get("readiness_status","")),
+                str(_m.get("mapped_route","")),
+                str(_m.get("required_inputs","")),
+                str(_m.get("expected_outputs","")),
+                str(_m.get("remaining_gap","")),
+            ]).lower()
+            if _query and _query not in _haystack:
+                continue
+            _filtered_modules.append(_m)
+
+        st.markdown(
+            f"**{len(_filtered_modules)} capabilities shown** · "
+            f"{len(MODULE_CATALOG)} capabilities in the complete catalog"
+        )
+
+        if _browse_tier != "All capabilities":
+            _benefit = TIER_BENEFITS.get(_browse_tier, {})
+            _tier_price = _benefit.get("price", "")
+            _tier_pitch = _benefit.get("pitch", "")
+            _tier_gain = _benefit.get("gain", "")
+            st.markdown(
+                f"#### {_browse_tier} · {_tier_price}\n"
+                f"**{_tier_pitch}**\n\n{_tier_gain}"
+            )
+
+        # Every catalog entry remains visible through the filters and keeps
+        # its concrete "when" and "example" story. No internal implementation
+        # details are exposed on the public buying page.
+        for _idx in range(0, len(_filtered_modules), 2):
+            _pair = _filtered_modules[_idx:_idx + 2]
+            _cols = st.columns(len(_pair))
+            for _col, _m in zip(_cols, _pair):
+                with _col:
+                    st.markdown(
+                        f'<div class="module-value-card">'
+                        f'<div class="module-category">{html.escape(str(_m.get("category","Industrial Engineering")))}</div>'
+                        f'<div class="module-name">{html.escape(str(_m.get("name","Capability")))}</div>'
+                        f'<div class="module-when"><b>Helps when:</b> {html.escape(str(_m.get("when","")))}</div>'
+                        f'</div>',
+                        unsafe_allow_html=True
+                    )
+                    with st.expander("See a real-world example"):
+                        st.markdown(
+                            f'<div class="module-example"><b>Example:</b> '
+                            f'{html.escape(str(_m.get("example","")))}</div>',
+                            unsafe_allow_html=True
+                        )
+                        _target_tool_id = str(_m.get("tool_id", "")).strip()
+                        if _target_tool_id:
+                            _target_status = str(_m.get("readiness_status") or "BLOCKED")
+                            st.markdown(
+                                f"**Target tool ID and readiness**\n\n**{html.escape(_target_tool_id)}** · **{html.escape(_target_status)}**"
+                            )
+                            st.markdown(f"**Mapped existing route**\n\n{html.escape(str(_m.get('mapped_route', '')))}")
+                            st.markdown(f"**Required inputs**\n\n{html.escape(str(_m.get('required_inputs', '')))}")
+                            st.markdown(f"**Expected outputs**\n\n{html.escape(str(_m.get('expected_outputs', '')))}")
+                            st.markdown(f"**Remaining gap**\n\n{html.escape(str(_m.get('remaining_gap', '')))}")
+                            _dependency = str(_m.get("external_dependency", "")).strip()
+                            if _dependency:
+                                st.markdown(f"**External configuration**\n\n{html.escape(_dependency)}")
+                            if st.button(
+                                "Open this target in Workbench",
+                                key=f"explore_open_target_{_target_tool_id}",
+                                use_container_width=True,
+                            ):
+                                st.session_state["shoir_100_tool_query"] = ""
+                                st.session_state["shoir_100_tool_workbench"] = "All workbenches"
+                                st.session_state["shoir_100_tool_status"] = "All statuses"
+                                st.session_state.pop("shoir_pending_tool_module", None)
+                                st.session_state["shoir_expand_target_directory"] = True
+                                st.session_state["shoir_100_tool_inspector"] = (
+                                    f"{_target_tool_id} · {str(_m.get('name', '')).split(' · ', 1)[-1]}"
+                                )
+                                st.switch_page("pages/Industrial_Engineering_Workbench.py")
+
+        if not _filtered_modules:
+            st.info("No capability matches those filters. Try a broader search or select All capabilities.")
+
         st.markdown("---")
         st.markdown("### What changes for the person using it?")
         _outcome_cols = st.columns(3)
@@ -2404,7 +2405,7 @@ if not st.session_state.get("user_affiliate"):
     if row and row[0]:
         st.session_state.user_affiliate = row[0]
     else:
-        new_aff = f"AFF-{st.session_state.current_user.upper()}-15"
+        new_aff = "SHR-" + os.urandom(6).hex().upper()
         cursor.execute("UPDATE enterprise_users SET affiliate_code = ? WHERE username = ?", (new_aff, st.session_state.current_user))
         conn.commit()
         st.session_state.user_affiliate = new_aff
@@ -2509,20 +2510,22 @@ st.session_state.pop("_shoir_requested_module", None)
 if _shell_surface == "logout":
     _logout_user = str(st.session_state.get("current_user") or "")
     _logout_token = str(st.session_state.get("remote_session_token") or st.session_state.get("renewal_session_token") or "")
-    if _logout_user and _logout_token:
-        try:
-            edge_logout(_logout_user, _logout_token)
-        except Exception:
-            st.error("Server logout could not revoke this session. Please retry; you are still signed in.")
-            st.stop()
+    # Flush the last workspace snapshot before revoking its server session. A
+    # post-revocation save cannot be relied on because the Edge API correctly
+    # rejects writes made with a revoked token.
     if _logout_user:
         try:
             save_user_workspace(_logout_user, st.session_state)
             log_audit(_logout_user, "User Logged Out")
         except Exception:
             pass
-    for _logout_key in list(st.session_state.keys()):
-        del st.session_state[_logout_key]
+    if _logout_user and _logout_token:
+        try:
+            edge_logout(_logout_user, _logout_token)
+        except Exception:
+            st.error("Server logout could not revoke this session. Please retry; you are still signed in.")
+            st.stop()
+    st.session_state["_shoir_clear_session_before_render"] = True
     st.rerun()
 # Compatibility contract retained for existing smoke tests and legacy integrations.
 # IMPORTANT: this is state only; it is intentionally NOT reused as a Streamlit widget key,
@@ -2776,12 +2779,8 @@ if str(st.session_state.get("current_user", "")).strip().lower() != "sho":
                         # The server has already expired this workspace scope; local
                         # logout must still complete if revocation transport is down.
                         pass
-                for _expiry_key in list(st.session_state.keys()):
-                    try:
-                        del st.session_state[_expiry_key]
-                    except Exception:
-                        pass
-                st.session_state["subscription_expired_notice"] = True
+                st.session_state["_shoir_preserve_expired_notice_on_reset"] = True
+                st.session_state["_shoir_clear_session_before_render"] = True
                 st.rerun()
             st.caption(
                 f"⏳ Subscription: {int(_sidebar_remaining // 86400)}d "
@@ -2892,8 +2891,7 @@ if st.sidebar.button("Lock / Logout Workspace"):
         except Exception:
             st.error("Server logout could not revoke this session. Please retry; you are still signed in.")
             st.stop()
-    for _key in list(st.session_state.keys()):
-        del st.session_state[_key]
+    st.session_state["_shoir_clear_session_before_render"] = True
     st.rerun()
 elif selected_module in ["Autonomous Cognitive Operations & Zero-Knowledge Mesh (ACO-ZKMS)", "⚡ ACO-ZKMS Master Engine"]:
     import streamlit as st
@@ -9816,23 +9814,69 @@ if current_view == "Edit Account":
             st.success("Profile successfully updated!")
 
 elif current_view == "Become an affiliate":
-    st.header("🤝 Become an Affiliate & Earn Discounts")
-    st.markdown("Share your unique affiliate code with colleagues, friends, or fellow engineers. When someone uses your code during sign-up or login, **both you and the new user receive a 15% discount on your next month's subscription**.")
-    
-    my_code = st.session_state.get("user_affiliate", f"AFF-{st.session_state.current_user.upper()}-15")
-    st.markdown(f"""
-    <div class="api-card" style="text-align: center;">
-        <h3>Your Personal Affiliate Referral Code</h3>
-        <h2><code>{my_code}</code></h2>
-        <p>Share this code to grant new users 15% off and earn a 15% discount on your next month's renewal!</p>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    st.subheader("Affiliate Performance Stats")
-    col_aff1, col_aff2, col_aff3 = st.columns(3)
-    col_aff1.markdown(f"**Total Referrals:** <span class='blue-metric'>3</span>", unsafe_allow_html=True)
-    col_aff2.markdown(f"**Active Discounts Earned:** <span class='blue-metric'>1 Free 15% Month</span>", unsafe_allow_html=True)
-    col_aff3.markdown(f"**Affiliate Tier:** <span class='blue-metric'>Partner Level 1</span>", unsafe_allow_html=True)
+    st.header("🤝 Referral Program — Beta")
+    st.markdown(
+        "Share your referral code with colleagues who may genuinely benefit from testing Shoir-IE. "
+        "Codes are used to attribute sign-ups and, after manual payment approval, track completed referrals."
+    )
+    st.warning(
+        "Referral tracking is in beta. No discount, free month, commission, cash payment or other reward is currently offered or guaranteed. "
+        "A reward may only be introduced through separate, current, published program terms."
+    )
+
+    _referral_counts = {"Pending": 0, "Qualified": 0, "Declined": 0}
+    _referral_summary = None
+    _referral_service_error = None
+    if _durable_accounts_ready:
+        try:
+            _referral_summary = edge_referral_summary(
+                str(st.session_state.get("current_user", "")),
+                str(st.session_state.get("remote_session_token", "")),
+            )
+        except Exception as _referral_exc:
+            _referral_service_error = type(_referral_exc).__name__
+            st.error("The connected account service has not confirmed referral tracking is enabled in this deployment. Do not rely on referral attribution until the server migration and function update are deployed.")
+            _fallback_code = str(st.session_state.get("user_affiliate", "") or "")
+            if _fallback_code:
+                st.code(_fallback_code, language="text")
+            st.caption("No reward is active. This fallback code display is informational and may not be accepted by the connected registration service.")
+    else:
+        with sqlite3.connect("enterprise_full_workspace.db") as _ref_conn:
+            _ref_conn.execute("INSERT OR IGNORE INTO enterprise_users (username) VALUES (?)", (st.session_state.current_user,))
+            _code_row = _ref_conn.execute(
+                "SELECT affiliate_code FROM enterprise_users WHERE LOWER(username)=LOWER(?)",
+                (st.session_state.current_user,),
+            ).fetchone()
+            _local_code = str(_code_row[0] or "").strip() if _code_row else ""
+            if not _local_code or _local_code.upper().startswith("AFF-"):
+                _local_code = "SHR-" + os.urandom(6).hex().upper()
+                _ref_conn.execute(
+                    "UPDATE enterprise_users SET affiliate_code=? WHERE LOWER(username)=LOWER(?)",
+                    (_local_code, st.session_state.current_user),
+                )
+            _counts = _ref_conn.execute(
+                "SELECT status, COUNT(*) FROM affiliate_referrals WHERE LOWER(referrer)=LOWER(?) GROUP BY status",
+                (st.session_state.current_user,),
+            ).fetchall()
+        _referral_counts.update({str(status): int(count) for status, count in _counts})
+        _referral_summary = {"referral_code": _local_code}
+
+    if _referral_summary:
+        my_code = str(_referral_summary.get("referral_code") or "").strip()
+        if my_code:
+            st.session_state.user_affiliate = my_code
+            st.subheader("Your referral code")
+            st.code(my_code, language="text")
+            st.caption("Share this code. The invited person enters it in the optional Referral code field during registration.")
+        if _referral_service_error is None:
+            _referral_counts["Pending"] = int(_referral_summary.get("pending_count", _referral_counts["Pending"]) or 0)
+            _referral_counts["Qualified"] = int(_referral_summary.get("qualified_count", _referral_counts["Qualified"]) or 0)
+            _referral_counts["Declined"] = int(_referral_summary.get("declined_count", _referral_counts["Declined"]) or 0)
+            col_r1, col_r2, col_r3 = st.columns(3)
+            col_r1.metric("Awaiting payment approval", _referral_counts["Pending"])
+            col_r2.metric("Approved referrals", _referral_counts["Qualified"])
+            col_r3.metric("Declined referrals", _referral_counts["Declined"])
+    st.caption("Self-referrals, duplicate/fraudulent accounts, misleading claims and unsolicited spam are prohibited. Referral status is based on recorded attribution and manual account approval; it is not a promise of savings, revenue or a reward.")
 
 elif current_view == "Feedback":
     st.header("💬 User Feedback & Support Center")
@@ -12166,6 +12210,21 @@ if mod == "Admin Panel":
             cursor.execute("ALTER TABLE pending_payments ADD COLUMN password TEXT")
         except sqlite3.OperationalError:
             pass
+        for _column, _definition in (
+            ("request_type", "TEXT DEFAULT 'New'"),
+            ("terms_accepted", "INTEGER NOT NULL DEFAULT 0"),
+            ("terms_version", "TEXT"),
+            ("privacy_policy_version", "TEXT"),
+            ("refund_policy_version", "TEXT"),
+            ("cookie_policy_version", "TEXT"),
+            ("accepted_at", "TEXT"),
+            ("remote_request_id", "INTEGER"),
+            ("referral_code", "TEXT"),
+        ):
+            try:
+                cursor.execute(f"ALTER TABLE pending_payments ADD COLUMN {_column} {_definition}")
+            except sqlite3.OperationalError:
+                pass
         
         # Robust migration check for license_codes: Drop and recreate cleanly if 'id' column is missing
         cursor.execute("PRAGMA table_info(license_codes);")
@@ -12193,16 +12252,20 @@ if mod == "Admin Panel":
                     st.session_state.get("remote_session_token",""),
                 )
                 for rp in remote_pending:
-                    exists = cursor.execute(
-                        "SELECT 1 FROM pending_payments WHERE LOWER(username)=? AND COALESCE(transaction_id,'')=COALESCE(?, '') AND COALESCE(request_type,'New')=? AND status='Pending' LIMIT 1",
+                    _remote_id = int(rp.get("id")) if rp.get("id") is not None else None
+                    _existing_pending = cursor.execute(
+                        "SELECT id, remote_request_id FROM pending_payments WHERE LOWER(username)=? AND COALESCE(transaction_id,'')=COALESCE(?, '') AND COALESCE(request_type,'New')=? AND status='Pending' LIMIT 1",
                         (str(rp.get("username","")).lower(), rp.get("transaction_id"), rp.get("request_type","New")),
                     ).fetchone()
-                    if not exists:
+                    _remote_terms_accepted = 1 if rp.get("terms_accepted") is True else 0
+                    if not _existing_pending:
                         cursor.execute(
                             """
                             INSERT INTO pending_payments
-                            (username,password,email,tier,payment_method,transaction_id,screenshot_path,status,timestamp,request_type)
-                            VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                            (username,password,email,tier,payment_method,transaction_id,screenshot_path,status,timestamp,
+                             request_type,terms_accepted,remote_request_id,terms_version,privacy_policy_version,
+                             refund_policy_version,cookie_policy_version,accepted_at)
+                            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                             """,
                             (
                                 rp.get("username",""),
@@ -12213,8 +12276,41 @@ if mod == "Admin Panel":
                                 rp.get("transaction_id"),
                                 rp.get("screenshot_path") or "",
                                 "Pending",
-                                str(rp.get("requested_at") or datetime.datetime.now().isoformat()),
+                                str(rp.get("requested_at") or datetime.datetime.now(datetime.timezone.utc).isoformat()),
                                 rp.get("request_type","New"),
+                                _remote_terms_accepted,
+                                _remote_id,
+                                rp.get("terms_version"),
+                                rp.get("privacy_policy_version"),
+                                rp.get("refund_policy_version"),
+                                rp.get("cookie_policy_version"),
+                                rp.get("accepted_at"),
+                            ),
+                        )
+                    else:
+                        # Populate the exact server request id and consent metadata
+                        # on legacy local mirrors without overwriting a newer local value.
+                        cursor.execute(
+                            """
+                            UPDATE pending_payments
+                               SET remote_request_id=COALESCE(remote_request_id, ?),
+                                   terms_accepted=CASE WHEN ? = 1 THEN 1 ELSE terms_accepted END,
+                                   terms_version=COALESCE(terms_version, ?),
+                                   privacy_policy_version=COALESCE(privacy_policy_version, ?),
+                                   refund_policy_version=COALESCE(refund_policy_version, ?),
+                                   cookie_policy_version=COALESCE(cookie_policy_version, ?),
+                                   accepted_at=COALESCE(accepted_at, ?)
+                             WHERE id=?
+                            """,
+                            (
+                                _remote_id,
+                                _remote_terms_accepted,
+                                rp.get("terms_version"),
+                                rp.get("privacy_policy_version"),
+                                rp.get("refund_policy_version"),
+                                rp.get("cookie_policy_version"),
+                                rp.get("accepted_at"),
+                                int(_existing_pending[0]),
                             ),
                         )
                 conn.commit()
@@ -12297,6 +12393,52 @@ if mod == "Admin Panel":
                     with col_p2:
                         st.markdown("### Action Controls")
                         if st.button(f"✅ Approve & Send Code", key=f"approve_{row['id']}_{idx}"):
+                            login_username = str(row["username"]).strip()
+                            request_type = str(row.get("request_type", "New") or "New")
+                            request_type = request_type if request_type in {"New", "Renewal"} else "New"
+                            _remote_approval_result = None
+
+                            if _durable_accounts_ready:
+                                # The Edge Function is authoritative. Confirm the
+                                # exact request is approved before making any local
+                                # account changes or emailing a ticket code.
+                                _remote_request_id_value = row.get("remote_request_id")
+                                _approval_request_id = None
+                                try:
+                                    if _remote_request_id_value is not None and not pd.isna(_remote_request_id_value) and str(_remote_request_id_value).strip():
+                                        _approval_request_id = int(_remote_request_id_value)
+                                    _remote_approval_result = edge_admin_approve(
+                                        str(st.session_state.get("current_user", "")),
+                                        str(st.session_state.get("remote_session_token", "")),
+                                        request_id=_approval_request_id,
+                                        target_username=None if _approval_request_id is not None else login_username,
+                                        request_type=request_type,
+                                    )
+                                    if (
+                                        _remote_approval_result.get("ok") is not True
+                                        or _remote_approval_result.get("status") != "Approved"
+                                    ):
+                                        st.error("The account service did not confirm approval. No local activation or ticket email was completed.")
+                                        st.stop()
+                                except Exception as _approval_exc:
+                                    st.error("The account service rejected or could not confirm approval. No local activation or ticket email was completed.")
+                                    st.caption(f"Approval diagnostic: {type(_approval_exc).__name__}")
+                                    st.stop()
+                            elif request_type == "New":
+                                # Local-only fallback must obey the same current
+                                # acceptance contract when no Edge backend is configured.
+                                _local_acceptance_is_current = (
+                                    row.get("terms_accepted") in (True, 1)
+                                    and str(row.get("terms_version") or "") == TERMS_VERSION
+                                    and str(row.get("privacy_policy_version") or "") == PRIVACY_POLICY_VERSION
+                                    and str(row.get("refund_policy_version") or "") == REFUND_POLICY_VERSION
+                                    and str(row.get("cookie_policy_version") or "") == COOKIE_POLICY_VERSION
+                                    and bool(str(row.get("accepted_at") or "").strip())
+                                )
+                                if not _local_acceptance_is_current:
+                                    st.error("This registration cannot be approved because current beta Terms and policy acceptance is missing. Ask the user to resubmit after reviewing the notices.")
+                                    st.stop()
+
                             t_code = "SUB-" + "".join(random.choices(string.ascii_uppercase + string.digits, k=4)) + "-" + "".join(random.choices(string.ascii_uppercase + string.digits, k=4))
                             
                             conn = sqlite3.connect("enterprise_full_workspace.db")
@@ -12313,10 +12455,8 @@ if mod == "Admin Panel":
                                 WHERE username = ?
                             """, (row['tier'], row['email'], row['username']))
                             
-                            # Create or renew the durable login account without deleting it.
-                            login_username = str(row["username"]).strip()
-                            request_type = str(row.get("request_type", "New") or "New")
-                            request_type = request_type if request_type in {"New", "Renewal"} else "New"
+                            # Create or renew the local mirror only after the authoritative
+                            # remote request was approved above, if Edge mode is enabled.
                             login_password = str(row.get("password") or "")
                             now_dt = datetime.datetime.now(datetime.timezone.utc)
 
@@ -12382,28 +12522,8 @@ if mod == "Admin Panel":
                             conn.commit()
                             conn.close()
 
-                            if _durable_accounts_ready:
-                                try:
-                                    upsert_remote_account({
-                                        "username": login_username,
-                                        "password_hash": login_password,
-                                        "role": "User",
-                                        "tier": row["tier"],
-                                        "email": row["email"],
-                                        "created_at": (
-                                            existing_local[5]
-                                            if existing_local and request_type == "Renewal"
-                                            else now_dt.isoformat()
-                                        ),
-                                        "subscription_expires_at": new_expiry,
-                                        "active": True,
-                                        "admin_username": st.session_state.get("current_user",""),
-                                        "admin_session_token": st.session_state.get("remote_session_token",""),
-                                        "target_username": login_username,
-                                        "request_type": request_type,
-                                    })
-                                except Exception:
-                                    pass
+                            # Remote approval already succeeded before local activation.
+                            # Do not call the pending-request approval endpoint twice.
 
                             email_success = send_tier_email(row['email'], row['username'], t_code, row['tier'])
                             if email_success:
@@ -12417,6 +12537,27 @@ if mod == "Admin Panel":
                         # as Declined (so it drops out of the Pending list below) and logs
                         # who declined it, without creating any account or emailing anyone.
                         if st.button("❌ Decline Request", key=f"decline_{row['id']}_{idx}"):
+                            if _durable_accounts_ready:
+                                _decline_id_value = row.get("remote_request_id")
+                                _decline_request_id = None
+                                try:
+                                    if _decline_id_value is not None and not pd.isna(_decline_id_value) and str(_decline_id_value).strip():
+                                        _decline_request_id = int(_decline_id_value)
+                                    if _decline_request_id is None:
+                                        st.error("The exact server request ID is missing. Refresh the administrator queue before declining; no local status was changed.")
+                                        st.stop()
+                                    _remote_decline_result = edge_admin_decline(
+                                        str(st.session_state.get("current_user", "")),
+                                        str(st.session_state.get("remote_session_token", "")),
+                                        _decline_request_id,
+                                    )
+                                    if _remote_decline_result.get("ok") is not True or _remote_decline_result.get("status") != "Declined":
+                                        st.error("The account service did not confirm the decline. No local status was changed.")
+                                        st.stop()
+                                except Exception as _decline_exc:
+                                    st.error("The account service rejected or could not confirm the decline. No local status was changed.")
+                                    st.caption(f"Decline diagnostic: {type(_decline_exc).__name__}")
+                                    st.stop()
                             conn = sqlite3.connect("enterprise_full_workspace.db")
                             cursor = conn.cursor()
                             cursor.execute("UPDATE pending_payments SET status = 'Declined' WHERE id = ?", (row['id'],))

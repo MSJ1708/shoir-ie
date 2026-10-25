@@ -4158,7 +4158,7 @@ def analyze_full_factorial_2level(
     expected = set(product((-1, 1), repeat=len(factors)))
     missing = sorted(expected - set(combo_counts))
     if missing:
-        raise ValueError(f"Full factorial is incomplete; {len(missing)} factor combination(s) are missing.")
+        raise ValueError(f"Full factorial is incomplete; factor combinations are missing: {len(missing)}.")
     terms: list[tuple[str, np.ndarray]] = [("Intercept", np.ones(len(observations), dtype=float))]
     for factor in factors:
         terms.append((factor, x_factors[factor]))
@@ -5403,7 +5403,7 @@ def optimize_facility_location_flow(
             raise ValueError(f"Route {index} references an unknown facility or customer.")
         key = (fid.casefold(), cid.casefold())
         if key in route_keys:
-            raise ValueError(f"Only one route per facility/customer pair is supported; duplicate route {fid} → {cid}.")
+            raise ValueError(f"Routes must be unique for each facility/customer pair; duplicate route {fid} → {cid}.")
         route_keys.add(key)
         unit_cost = _finite_number(row.get("unit_cost"), f"Route {index} unit cost")
         route_capacity = _finite_number(row.get("capacity", total_demand), f"Route {index} capacity")
@@ -5748,14 +5748,16 @@ def build_guided_study_plan(
             status = "COMPLETED_IN_SESSION"
             next_action = "Review the saved result and confirm its input assumptions."
             completed_count += 1
+        elif missing:
+            status = "INPUTS_MISSING"
+            next_action = "Provide: " + ", ".join(missing)
+            if readiness == "FOUNDATION_ONLY":
+                next_action += " This target is also foundation-only and cannot execute until its specialist implementation is complete."
+            missing_count += 1
         elif readiness == "FOUNDATION_ONLY":
             status = "FOUNDATION_ONLY"
             next_action = "This capability is not complete yet; use only a separately supported workflow."
             foundation_count += 1
-        elif missing:
-            status = "INPUTS_MISSING"
-            next_action = "Provide: " + ", ".join(missing)
-            missing_count += 1
         else:
             status = "READY"
             next_action = "Open this tool and validate the inputs before running it."

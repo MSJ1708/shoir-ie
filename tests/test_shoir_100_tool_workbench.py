@@ -639,13 +639,19 @@ def test_workbench_builds_downloadable_reproducibility_pack():
     at.run(timeout=90)
     assert not at.exception, "\n".join(str(error.value) for error in at.exception)
     source = at.selectbox(key="tool087_source_id")
-    assert "T021" in source.options
-    source.select("T021")
+    assert "T021 · Time Study and Standard Time" in source.options
+    # Select the underlying stable target ID. The widget's format_func renders
+    # the human-readable label; feeding that label back into the widget causes
+    # AppTest to apply the formatter twice and creates an invalid value.
+    source.set_value("T021")
     at.checkbox(key="tool087_include_inputs").set_value(True)
     at.checkbox(key="tool087_include_tables").set_value(True)
-    at.run(timeout=90)
-    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+    assert at.checkbox(key="tool087_include_inputs").value is True
+    assert at.checkbox(key="tool087_include_tables").value is True
+    # Form controls are committed together on submit; do not run a separate
+    # app cycle between editing the form and submitting it.
     at.button(key="tool087_run").click()
+    at.run(timeout=90)
     at.run(timeout=90)
     assert not at.exception, "\n".join(str(error.value) for error in at.exception)
     result = at.session_state.get("shoir_tool_result_T087")
@@ -658,7 +664,7 @@ def test_workbench_builds_downloadable_reproducibility_pack():
         assert "SHA256SUMS.txt" in archive.namelist()
         assert "input_snapshot_redacted.json" in archive.namelist()
     assert result["bundle_sha256"]
-    assert any(button.key == "tool087_download" for button in at.button)
+    assert any(button.key == "tool087_download" for button in at.get("download_button"))
 
 
 def test_workbench_runs_facility_location_flow():
@@ -673,7 +679,7 @@ def test_workbench_runs_facility_location_flow():
     at.run(timeout=90)
     assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
 
-    at.selectbox(key="shoir_100_tool_inspector").select("T069")
+    at.selectbox(key="shoir_100_tool_inspector").select("T069 · Network Flow and Location Optimization")
     at.run(timeout=90)
     assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
     at.button(key="tool069_run").click()
@@ -698,7 +704,7 @@ def test_workbench_student_practice_mode_checks_answers_and_shows_solution():
     at.run(timeout=90)
     assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
 
-    at.selectbox(key="shoir_100_tool_inspector").select("T089")
+    at.selectbox(key="shoir_100_tool_inspector").select("T089 · Student Learning and Practice Mode")
     at.run(timeout=90)
     assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
     at.number_input(key="tool089_answer").set_value(2.0)
@@ -723,7 +729,7 @@ def test_workbench_guided_study_wizard_returns_gated_step_plan():
     at.run(timeout=90)
     assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
 
-    at.selectbox(key="shoir_100_tool_inspector").select("T002")
+    at.selectbox(key="shoir_100_tool_inspector").select("T002 · Guided Study Wizard")
     at.run(timeout=90)
     assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
     at.text_input(key="tool002_available_fields").set_value(
@@ -751,7 +757,7 @@ def test_workbench_runs_equipment_anomaly_monitor_and_labels_example_data():
     at.run(timeout=90)
     assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
 
-    at.selectbox(key="shoir_100_tool_inspector").select("T048")
+    at.selectbox(key="shoir_100_tool_inspector").select("T048 · Equipment Anomaly Monitor")
     at.run(timeout=90)
     assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
     at.button(key="tool048_run").click()
@@ -775,7 +781,7 @@ def test_workbench_capa_8d_register_reports_completeness_and_overdue_state():
     at.run(timeout=90)
     assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
 
-    at.selectbox(key="shoir_100_tool_inspector").select("T039")
+    at.selectbox(key="shoir_100_tool_inspector").select("T039 · CAPA and 8D Manager")
     at.run(timeout=90)
     assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
     at.button(key="tool039_run").click()
