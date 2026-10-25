@@ -4220,3 +4220,346 @@ def analyze_full_factorial_2level(
         "assumptions": "Factors are coded -1/+1; the design contains every full-factorial combination. Classical inference additionally requires appropriate error assumptions and positive residual degrees of freedom; run order randomization must be planned separately.",
         "warning": "The model includes main effects and pairwise interactions only. No blocking, center-point curvature, higher-order interaction screening, multiplicity correction or automatic randomization is included; statistical association is not proof of causation.",
     }
+
+
+def detect_equipment_anomalies(
+    observations: Sequence[Mapping[str, Any]], *,
+    timestamp_field: str = "timestamp",
+    value_field: str = "value",
+    threshold: float = 3.5,
+) -> dict[str, Any]:
+    """Flag unusual readings with a robust median/MAD score on supplied time-series data.
+
+    This is an offline detector for imported/user-supplied observations. It does
+    not provide a live sensor connection, predictive-maintenance model or causal
+    diagnosis. When the median and IQR are both zero, non-baseline values are
+    flagged as deviations from a stable baseline without fabricating an infinite
+    score.
+    """
+    if isinstance(observations, (str, bytes)) or not isinstance(observations, Sequence) or len(observations) < 8:
+        raise ValueError("Provide at least eight time-stamped observations for anomaly screening.")
+    timestamp_name = str(timestamp_field or "").strip()
+    value_name = str(value_field or "").strip()
+    if not timestamp_name or not value_name or timestamp_name == value_name:
+        raise ValueError("Timestamp and value field names must be non-empty and distinct.")
+    limit = _finite_number(threshold, "Anomaly threshold")
+    if not 1.0 <= limit <= 10.0:
+        raise ValueError("Anomaly threshold must be between 1.0 and 10.0.")
+    records = []
+    seen_timestamps: set[pd.Timestamp] = set()
+    for i, item in enumerate(observations, start=1):
+        if not isinstance(item, Mapping):
+            raise ValueError(f"Observation {i} must be an object.")
+        if timestamp_name not in item or value_name not in item:
+            raise ValueError(f"Observation {i} must contain '{timestamp_name}' and '{value_name}'.")
+        timestamp = pd.to_datetime(item[timestamp_name], utc=True, errors="coerce")
+        if pd.isna(timestamp):
+            raise ValueError(f"Observation {i} has an invalid timestamp.")
+        if timestamp in seen_timestamps:
+            raise ValueError(f"Duplicate timestamp detected: {timestamp.isoformat()}.")
+        seen_timestamps.add(timestamp)
+        records.append({"Timestamp": timestamp, "Value": _finite_number(item[value_name], f"Value in observation {i}")})
+    frame = pd.DataFrame(records).sort_values("Timestamp").reset_index(drop=True)
+    values = frame["Value"].to_numpy(dtype=float)
+    median = float(np.median(values))
+    deviations = np.abs(values - median)
+    mad = float(np.median(deviations))
+    iqr = float(np.percentile(values, 75) - np.percentile(values, 25))
+    warnings: list[str] = []
+    if mad > np.finfo(float).eps:
+        score = 0.67448975 * (values - median) / mad
+        method = "Robust modified z-score using median absolute deviation"
+    elif iqr > np.finfo(float).eps:
+        robust_scale = iqr / 1.349
+        score = (values - median) / robust_scale
+        method = "IQR-scaled robust deviation (MAD was zero)"
+        warnings.append("MAD was zero; an IQR-scaled fallback was used. Review distribution shape before applying a maintenance threshold.")
+    else:
+        score = np.where(deviations > np.finfo(float).eps, np.sign(values - median) * (limit + 1.0), 0.0)
+        method = "Stable-baseline deviation fallback (MAD and IQR were zero)"
+        warnings.append("Most readings are identical; any distinct reading is flagged as a deviation from the stable baseline. Verify sensor resolution and known operating modes.")
+    frame["Robust score"] = score
+    frame["Threshold"] = limit
+    frame["Anomaly"] = np.abs(score) >= limit
+    frame["Deviation from median"] = values - median
+    anomaly_rows = frame.loc[frame["Anomaly"]].copy().reset_index(drop=True)
+    return {
+        "status": "ANOMALIES_SCREENED",
+        "method": method,
+        "observation_count": len(frame),
+        "anomaly_count": len(anomaly_rows),
+        "anomaly_rate_pct": float(len(anomaly_rows) / len(frame) * 100),
+        "threshold": limit,
+        "median_baseline": median,
+        "mad": mad,
+        "iqr": iqr,
+        "latest_observation_utc": frame["Timestamp"].iloc[-1].isoformat(),
+        "anomaly_table": anomaly_rows,
+        "observations": frame,
+        "warnings": warnings,
+        "warning": "Offline statistical screening only. This is not a live equipment monitor, diagnosis, calibrated failure predictor or automated maintenance controller. Validate sensor context, operating modes, false positives and source freshness before operational decisions.",
+    }
+
+
+def simulate_mm1_discrete_event(
+    arrival_rate_per_time: float,
+    service_rate_per_time: float,
+    *,
+    jobs: int = 5000,
+    replications: int = 10,
+    warmup_fraction: float = 0.1,
+    seed: int = 42,
+    time_unit: str = "time units",
+) -> dict[str, Any]:
+    """Discrete-event FCFS simulation of a single-server M/M/1 queue.
+
+    Inter-arrival and service times are independent exponential random variables.
+    The simulator is intentionally limited to one server and one queue; rates,
+    seed and warm-up are explicit, and replication summaries are reproducible.
+    """
+    arrival_rate = _finite_number(arrival_rate_per_time, "Arrival rate")
+    service_rate = _finite_number(service_rate_per_time, "Service rate")
+    if arrival_rate <= 0 or service_rate <= 0:
+        raise ValueError("Arrival and service rates must be greater than zero.")
+    if isinstance(jobs, bool) or not isinstance(jobs, int) or not 100 <= jobs <= 200_000:
+        raise ValueError("Jobs per replication must be a whole number from 100 through 200000.")
+    if isinstance(replications, bool) or not isinstance(replications, int) or not 2 <= replications <= 50:
+        raise ValueError("Replications must be a whole number from 2 through 50.")
+    warmup = _finite_number(warmup_fraction, "Warm-up fraction")
+    if not 0 <= warmup < 0.5:
+        raise ValueError("Warm-up fraction must be at least 0 and less than 0.5.")
+    if isinstance(seed, bool) or not isinstance(seed, int) or not 0 <= seed <= 2**32 - 1:
+        raise ValueError("Seed must be a non-negative 32-bit integer.")
+    unit = str(time_unit or "").strip()
+    if not unit or len(unit) > 50:
+        raise ValueError("Time unit must be a non-empty label of at most 50 characters.")
+    rng = np.random.default_rng(seed)
+    warmup_jobs = int(math.floor(jobs * warmup))
+    rep_rows: list[dict[str, Any]] = []
+    customer_frames: list[pd.DataFrame] = []
+    for replication in range(1, replications + 1):
+        inter_arrivals = rng.exponential(1.0 / arrival_rate, size=jobs)
+        arrivals = np.cumsum(inter_arrivals)
+        services = rng.exponential(1.0 / service_rate, size=jobs)
+        starts = np.empty(jobs, dtype=float)
+        departures = np.empty(jobs, dtype=float)
+        starts[0] = arrivals[0]
+        departures[0] = starts[0] + services[0]
+        for index in range(1, jobs):
+            starts[index] = max(arrivals[index], departures[index - 1])
+            departures[index] = starts[index] + services[index]
+        waiting = starts - arrivals
+        sojourn = departures - arrivals
+        included = slice(warmup_jobs, jobs)
+        start_time = float(arrivals[warmup_jobs])
+        end_time = float(departures[-1])
+        elapsed = max(end_time - start_time, np.finfo(float).eps)
+        clipped_busy = float(np.sum(np.maximum(
+            0.0,
+            np.minimum(departures[warmup_jobs:], end_time) - np.maximum(starts[warmup_jobs:], start_time),
+        )))
+        mean_wait = float(np.mean(waiting[included]))
+        p95_wait = float(np.percentile(waiting[included], 95))
+        mean_sojourn = float(np.mean(sojourn[included]))
+        throughput = float((jobs - warmup_jobs) / elapsed)
+        utilization = min(1.0, max(0.0, clipped_busy / elapsed))
+        rep_rows.append({
+            "Replication": replication,
+            f"Mean queue wait ({unit})": mean_wait,
+            f"P95 queue wait ({unit})": p95_wait,
+            f"Mean time in system ({unit})": mean_sojourn,
+            "Throughput (jobs / time unit)": throughput,
+            "Server utilization (%)": utilization * 100,
+            "Customers included after warm-up": jobs - warmup_jobs,
+        })
+        if replication == 1:
+            customer_frames.append(pd.DataFrame({
+                "Job": np.arange(1, jobs + 1),
+                f"Arrival ({unit})": arrivals,
+                f"Service start ({unit})": starts,
+                f"Departure ({unit})": departures,
+                f"Queue wait ({unit})": waiting,
+                f"Time in system ({unit})": sojourn,
+                "Warm-up excluded": np.arange(jobs) < warmup_jobs,
+            }))
+    rep_frame = pd.DataFrame(rep_rows)
+    metric_columns = [
+        f"Mean queue wait ({unit})", f"P95 queue wait ({unit})",
+        f"Mean time in system ({unit})", "Throughput (jobs / time unit)",
+        "Server utilization (%)",
+    ]
+    summary_rows = []
+    for metric in metric_columns:
+        values = rep_frame[metric].to_numpy(dtype=float)
+        mean = float(np.mean(values))
+        se = float(np.std(values, ddof=1) / math.sqrt(len(values)))
+        margin = float(t.ppf(0.975, len(values) - 1) * se)
+        summary_rows.append({
+            "Metric": metric,
+            "Mean across replications": mean,
+            "95% CI lower": mean - margin,
+            "95% CI upper": mean + margin,
+        })
+    warning = "One-server FCFS M/M/1 simulation only; arrivals/services are exponential, independent and identically distributed. No process routing, multiple servers, resource failures, shift calendars or plant data calibration are included."
+    stable = arrival_rate < service_rate
+    if not stable:
+        warning += " Arrival rate is at least the service rate; a stationary queue is not stable and wait/WIP should be interpreted as a finite-horizon overload scenario."
+    return {
+        "status": "DISCRETE_EVENT_SIMULATED",
+        "method": "Single-server FCFS M/M/1 discrete-event simulation with explicit warm-up and independent replications",
+        "arrival_rate_per_time": arrival_rate,
+        "service_rate_per_time": service_rate,
+        "utilization_theoretical_pct": arrival_rate / service_rate * 100,
+        "stable_queue": stable,
+        "jobs_per_replication": jobs,
+        "replications": replications,
+        "warmup_fraction": warmup,
+        "warmup_jobs_excluded": warmup_jobs,
+        "seed": seed,
+        "time_unit": unit,
+        "replication_summary": rep_frame,
+        "metric_summary": pd.DataFrame(summary_rows),
+        "sample_customer_events": customer_frames[0].iloc[:min(jobs, 2000)].copy(),
+        "warning": warning,
+        "assumptions": "Synthetic exponential inter-arrival and service times, FCFS discipline, one server and identical replication settings. Random seed is retained for reproducibility.",
+    }
+
+
+def optimize_supply_chain_network(
+    suppliers: Sequence[Mapping[str, Any]],
+    sites: Sequence[Mapping[str, Any]],
+    routes: Sequence[Mapping[str, Any]],
+    *,
+    unmet_demand_penalty_per_unit: float,
+    time_limit_seconds: float = 10.0,
+) -> dict[str, Any]:
+    """Solve a single-period capacitated transportation model with route disruptions.
+
+    Supply capacities constrain shipments; site demand is either met by routes or
+    explicitly reported as unmet demand with a user-declared penalty. Routes marked
+    unavailable are disabled, making the same input schema suitable for what-if
+    disruption scenarios. This is not a multi-period network design optimizer.
+    """
+    for group, label in ((suppliers, "Suppliers"), (sites, "Sites"), (routes, "Routes")):
+        if isinstance(group, (str, bytes)) or not isinstance(group, Sequence) or not group:
+            raise ValueError(f"Provide a non-empty {label.lower()} list.")
+    penalty = _finite_number(unmet_demand_penalty_per_unit, "Unmet-demand penalty per unit")
+    time_limit = _finite_number(time_limit_seconds, "Solver time limit")
+    if penalty <= 0:
+        raise ValueError("Unmet-demand penalty must be greater than zero.")
+    if not 0.1 <= time_limit <= 120:
+        raise ValueError("Solver time limit must be between 0.1 and 120 seconds.")
+
+    def normalize_named_records(records: Sequence[Mapping[str, Any]], name_field: str, quantity_field: str, label: str) -> dict[str, float]:
+        result: dict[str, float] = {}
+        for i, row in enumerate(records, start=1):
+            if not isinstance(row, Mapping):
+                raise ValueError(f"{label} row {i} must be an object.")
+            name = str(row.get(name_field, "")).strip()
+            qty = _finite_number(row.get(quantity_field), f"{label} {name or i} {quantity_field}")
+            if not name or name in result:
+                raise ValueError(f"{label} names must be non-empty and unique.")
+            if qty < 0:
+                raise ValueError(f"{label} {name} {quantity_field} cannot be negative.")
+            result[name] = qty
+        return result
+
+    supply = normalize_named_records(suppliers, "supplier", "supply_capacity", "Supplier")
+    demand = normalize_named_records(sites, "site", "demand", "Site")
+    route_map: dict[tuple[str, str], dict[str, Any]] = {}
+    for i, route in enumerate(routes, start=1):
+        if not isinstance(route, Mapping):
+            raise ValueError(f"Route row {i} must be an object.")
+        source = str(route.get("supplier", "")).strip()
+        destination = str(route.get("site", "")).strip()
+        if source not in supply or destination not in demand:
+            raise ValueError(f"Route {i} references an unknown supplier or site.")
+        key = (source, destination)
+        if key in route_map:
+            raise ValueError(f"Duplicate route found for {source} → {destination}.")
+        cost = _finite_number(route.get("unit_cost"), f"Route {source} → {destination} unit cost")
+        capacity = _finite_number(route.get("capacity"), f"Route {source} → {destination} capacity")
+        if cost < 0 or capacity < 0:
+            raise ValueError("Route cost and capacity cannot be negative.")
+        available = route.get("available", True)
+        if not isinstance(available, bool):
+            raise ValueError(f"Route {source} → {destination} available flag must be boolean.")
+        route_map[key] = {"unit_cost": cost, "capacity": capacity, "available": available}
+
+    model = pulp.LpProblem("shoir_single_period_supply_chain_transport", pulp.LpMinimize)
+    shipment_vars = {
+        key: pulp.LpVariable(f"ship_{i}", lowBound=0, upBound=item["capacity"] if item["available"] else 0)
+        for i, (key, item) in enumerate(route_map.items(), start=1)
+    }
+    unmet_vars = {
+        site: pulp.LpVariable(f"unmet_{i}", lowBound=0)
+        for i, site in enumerate(demand, start=1)
+    }
+    model += pulp.lpSum(route_map[key]["unit_cost"] * shipment_vars[key] for key in route_map) + penalty * pulp.lpSum(unmet_vars.values())
+    for supplier, capacity in supply.items():
+        model += pulp.lpSum(
+            var for (source, _), var in shipment_vars.items() if source == supplier
+        ) <= capacity, f"supplier_capacity_{list(supply).index(supplier)}"
+    for site, requested in demand.items():
+        model += pulp.lpSum(
+            var for (_, destination), var in shipment_vars.items() if destination == site
+        ) + unmet_vars[site] == requested, f"site_demand_{list(demand).index(site)}"
+    solver = pulp.PULP_CBC_CMD(msg=False, timeLimit=time_limit)
+    try:
+        model.solve(solver)
+    except Exception as exc:
+        return {
+            "status": "SOLVER_ERROR",
+            "solver_status": "ERROR",
+            "error": f"Supply chain solver could not execute ({type(exc).__name__}). Check the packaged solver and model inputs.",
+            "warning": "No optimal solution is claimed when the solver could not run.",
+        }
+    status = str(pulp.LpStatus.get(model.status, "Unknown"))
+    if status not in {"Optimal", "Not Solved", "Undefined", "Infeasible", "Unbounded"}:
+        status = "Unknown"
+    if status != "Optimal":
+        return {
+            "status": status.upper().replace(" ", "_"),
+            "solver_status": status,
+            "warning": "A proven optimal solution was not returned; inspect solver availability, model size and time limits before using any plan.",
+        }
+    shipment_rows = []
+    for key, variable in shipment_vars.items():
+        amount = max(0.0, float(variable.value() or 0.0))
+        item = route_map[key]
+        shipment_rows.append({
+            "Supplier": key[0], "Site": key[1], "Units shipped": amount,
+            "Unit transport cost": item["unit_cost"], "Route capacity": item["capacity"],
+            "Route available": item["available"], "Transport cost": amount * item["unit_cost"],
+        })
+    site_rows = []
+    for site, requested in demand.items():
+        shipped = sum(row["Units shipped"] for row in shipment_rows if row["Site"] == site)
+        missing = max(0.0, requested - shipped)
+        site_rows.append({
+            "Site": site, "Demand": requested, "Units supplied": shipped,
+            "Unmet demand": missing, "Service level (%)": (shipped / requested * 100) if requested > 0 else 100.0,
+        })
+    supplier_rows = []
+    for supplier, capacity in supply.items():
+        shipped = sum(row["Units shipped"] for row in shipment_rows if row["Supplier"] == supplier)
+        supplier_rows.append({"Supplier": supplier, "Supply capacity": capacity, "Units shipped": shipped, "Unused capacity": max(0.0, capacity - shipped)})
+    shipments = pd.DataFrame(shipment_rows)
+    site_frame = pd.DataFrame(site_rows)
+    supplier_frame = pd.DataFrame(supplier_rows)
+    return {
+        "status": "OPTIMAL",
+        "solver_status": status,
+        "transport_cost": float(shipments["Transport cost"].sum()) if not shipments.empty else 0.0,
+        "total_unmet_demand": float(site_frame["Unmet demand"].sum()),
+        "unmet_demand_penalty_per_unit": penalty,
+        "objective_cost_including_unmet_penalty": float(pulp.value(model.objective) or 0.0),
+        "total_demand": float(site_frame["Demand"].sum()),
+        "total_supply_capacity": float(supplier_frame["Supply capacity"].sum()),
+        "total_units_shipped": float(shipments["Units shipped"].sum()),
+        "shipment_plan": shipments,
+        "site_service": site_frame,
+        "supplier_utilization": supplier_frame,
+        "method": "Single-period capacitated transportation LP; route availability is a scenario input and unmet demand receives an explicit penalty.",
+        "warning": "This is a single-period transport optimization, not a multi-echelon or time-phased network design model. Verify route capacity, transport unit costs, sourcing restrictions, delivery times, emissions and supplier risks before commitment.",
+    }
