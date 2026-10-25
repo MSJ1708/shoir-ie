@@ -56,6 +56,7 @@ _TOOL049_EXAMPLE_WORK_ORDERS = '[{"work_order_id":"WO-1","task":"Critical bearin
 _TOOL058_EXAMPLE_SUPPLIERS = '[{"supplier":"Acme","scores":{"Delivery":90,"Quality":80},"data_as_of":"2026-Q3","evidence_reference":"sample-audit-1"},{"supplier":"Beta","scores":{"Delivery":75},"data_as_of":"2026-Q3","risk_mitigation":"Provide missing quality evidence"},{"supplier":"Gamma","scores":{"Delivery":70,"Quality":100},"data_as_of":"2026-Q3","evidence_reference":"sample-audit-3"}]'
 _TOOL015_EXAMPLE_COLUMNS = "Timestamp, Qty, Defects, mystery_label"
 _TOOL052_EXAMPLE_PERIODS = '[{"period":"Jan","demand":30,"planned_production":35,"production_capacity":30,"scheduled_receipts":0,"target_safety_stock":15},{"period":"Feb","demand":60,"planned_production":50,"production_capacity":50,"scheduled_receipts":0,"target_safety_stock":20}]'
+_TOOL071_EXAMPLE_STATIONS = '[{"station":"Assembly","servers":1,"mean_service_time":2,"service_distribution":"deterministic"},{"station":"Inspection","servers":1,"mean_service_time":1,"service_distribution":"deterministic"}]'
 
 st.markdown("""
 <style>
@@ -396,7 +397,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                 "Copilot action, API and export path must enforce their own server-side entitlement checks."
             )
 
-            if selected_tool["tool_id"] in {"T015", "T016", "T017", "T018", "T019", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T033", "T034", "T036", "T037", "T038", "T040", "T041", "T042", "T043", "T045", "T047", "T049", "T050", "T052", "T054", "T055", "T056", "T058", "T059", "T063", "T066", "T070", "T075", "T076", "T077", "T078", "T079", "T081", "T082", "T083", "T084", "T085"}:
+            if selected_tool["tool_id"] in {"T015", "T016", "T017", "T018", "T019", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T033", "T034", "T036", "T037", "T038", "T040", "T041", "T042", "T043", "T045", "T047", "T049", "T050", "T052", "T054", "T055", "T056", "T058", "T059", "T063", "T066", "T070", "T071", "T075", "T076", "T077", "T078", "T079", "T081", "T082", "T083", "T084", "T085"}:
                 st.markdown("---")
                 st.markdown("**Run focused specialist method**")
                 st.caption(
@@ -902,6 +903,17 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                             sop_periods_json = st.text_area("Periods (JSON list)", value=_TOOL052_EXAMPLE_PERIODS, key="tool052_periods")
                             sop_starting_inventory = st.number_input("Starting inventory (units)", min_value=0.0, value=20.0, step=5.0, key="tool052_inventory")
                             run_method = st.form_submit_button("Reconcile S&OP plan", type="primary", use_container_width=True, key="tool052_run")
+                        elif selected_tool["tool_id"] == "T071":
+                            st.caption("Event-driven FCFS simulation with finite servers, explicit deterministic/exponential arrivals and service times, seeded replications and job-based warm-up exclusion. Not a calibrated digital twin.")
+                            des_steps_json = st.text_area("Ordered stations (JSON list)", value=_TOOL071_EXAMPLE_STATIONS, key="tool071_steps")
+                            des_job_count = st.number_input("Jobs to simulate", min_value=2, max_value=10000, value=50, step=1, key="tool071_jobs")
+                            des_interarrival = st.number_input("Mean interarrival time", min_value=0.001, value=1.0, step=0.5, key="tool071_interarrival")
+                            des_arrival_distribution = st.selectbox("Arrival distribution", ["deterministic", "exponential"], key="tool071_arrival_dist")
+                            des_warmup_jobs = st.number_input("Initial jobs excluded from performance metrics", min_value=0, max_value=9999, value=5, step=1, key="tool071_warmup")
+                            des_replications = st.number_input("Replications", min_value=1, max_value=100, value=10, step=1, key="tool071_replications")
+                            des_seed = st.number_input("Base random seed", min_value=-2147483648, max_value=2147483647, value=42, step=1, key="tool071_seed")
+                            des_time_unit = st.text_input("Time unit", value="minutes", key="tool071_unit")
+                            run_method = st.form_submit_button("Run discrete-event simulation", type="primary", use_container_width=True, key="tool071_run")
 
                     if selected_tool["tool_id"] == "T021":
                         current_tool_inputs = {
@@ -1043,6 +1055,8 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                         current_tool_inputs = {"source_columns": field_source_columns, "manual_mapping_json": field_manual_mapping_json, "minimum_confidence": field_minimum_confidence}
                     elif selected_tool["tool_id"] == "T052":
                         current_tool_inputs = {"periods_json": sop_periods_json, "starting_inventory": sop_starting_inventory}
+                    elif selected_tool["tool_id"] == "T071":
+                        current_tool_inputs = {"process_steps_json": des_steps_json, "job_count": int(des_job_count), "mean_interarrival_time": des_interarrival, "arrival_distribution": des_arrival_distribution, "warmup_jobs": int(des_warmup_jobs), "replications": int(des_replications), "random_seed": int(des_seed), "time_unit": des_time_unit}
                     else:
                         current_tool_inputs = {
                             "cohen_d": effect_size, "alpha": alpha,
@@ -1082,7 +1096,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 optimize_task_resource_assignment, compare_energy_performance_scenarios,
                                 analyze_measurement_system_gage_rr, fit_regression_anova, run_hypothesis_test,
                                 prioritize_maintenance_backlog, score_supplier_performance,
-                                map_industrial_fields, reconcile_sop_plan,
+                                map_industrial_fields, reconcile_sop_plan, simulate_discrete_event_process,
                             )
                             if selected_tool["tool_id"] == "T021":
                                 try:
@@ -1481,13 +1495,39 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                     if sop_periods_json.strip() == _TOOL052_EXAMPLE_PERIODS
                                     else "USER_ENTERED_UNVERIFIED"
                                 )
+                            elif selected_tool["tool_id"] == "T071":
+                                parsed_des_steps = json.loads(des_steps_json)
+                                if not isinstance(parsed_des_steps, list):
+                                    raise ValueError("DES station setup must be a JSON list of station records.")
+                                result = simulate_discrete_event_process(
+                                    parsed_des_steps,
+                                    job_count=int(des_job_count),
+                                    mean_interarrival_time=des_interarrival,
+                                    arrival_distribution=des_arrival_distribution,
+                                    warmup_jobs=int(des_warmup_jobs),
+                                    replications=int(des_replications),
+                                    random_seed=int(des_seed),
+                                    time_unit=des_time_unit,
+                                )
+                                result["data_provenance"] = (
+                                    "SYNTHETIC_EXAMPLE"
+                                    if des_steps_json.strip() == _TOOL071_EXAMPLE_STATIONS
+                                    and int(des_job_count) == 50
+                                    and float(des_interarrival) == 1.0
+                                    and des_arrival_distribution == "deterministic"
+                                    and int(des_warmup_jobs) == 5
+                                    and int(des_replications) == 10
+                                    and int(des_seed) == 42
+                                    and des_time_unit == "minutes"
+                                    else "MODELLED_FROM_USER_ASSUMPTIONS"
+                                )
                             _persist_focused_tool_result(
                                 selected_tool["tool_id"], result, current_tool_inputs
                             )
                         except Exception as exc:
                             st.error(f"Tool run could not be completed safely: {exc}")
 
-                    if selected_tool["tool_id"] in {"T015", "T017", "T018", "T019", "T024", "T025", "T027", "T033", "T034", "T036", "T037", "T038", "T041", "T043", "T045", "T047", "T049", "T050", "T052", "T054", "T058", "T059", "T063", "T070", "T076", "T077", "T079", "T082", "T083", "T084"}:
+                    if selected_tool["tool_id"] in {"T015", "T017", "T018", "T019", "T024", "T025", "T027", "T033", "T034", "T036", "T037", "T038", "T041", "T043", "T045", "T047", "T049", "T050", "T052", "T054", "T058", "T059", "T063", "T070", "T071", "T076", "T077", "T079", "T082", "T083", "T084"}:
                         result = st.session_state.get("shoir_tool_result_" + selected_tool["tool_id"])
                         if result:
                             _show_focused_tool_persistence(selected_tool["tool_id"], result, current_tool_inputs)
