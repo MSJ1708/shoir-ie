@@ -10,7 +10,7 @@ The implementation uses the existing `pages/Industrial_Engineering_Workbench.py`
 
 ## Focused execution methods
 
-The original focused tranche was continued with four additional methods (T036, T037, T051 and T072). This integration also carries the separately tested T062 solver diagnostics, T071 discrete-event simulation and T087 reproducibility ZIP into the same branch. The combined Workbench contains 55 distinct stable target IDs with focused runner branches; each remains pending authenticated end-to-end verification. Other existing module workflows may cover additional targets, but they are not counted as focused runners unless wired to the stable target ID and its execution gate. The implementation matrix links every target to its minimum tier, contracts, evidence tests and remaining limitations.
+The original focused tranche was continued with four additional methods (T036, T037, T051 and T072). This integration also carries the separately tested T062 solver diagnostics, T071 discrete-event simulation and T087 reproducibility ZIP into the same branch. The combined Workbench contains 56 distinct stable target IDs with focused runner branches; each remains pending authenticated end-to-end verification. Other existing module workflows may cover additional targets, but they are not counted as focused runners unless wired to the stable target ID and its execution gate. The implementation matrix links every target to its minimum tier, contracts, evidence tests and remaining limitations.
 
 ### Lean, manufacturing, quality and economics
 
@@ -73,6 +73,15 @@ This integration adds three executable tools to the existing Workbench, without 
 
 Golden/boundary tests and Workbench AppTests cover deterministic simulation results, seeded repeatability, optimal/infeasible/unbounded/integer solver cases, and ZIP structure/hash/redaction. The tools remain `IMPLEMENTED_NEEDS_VALIDATION` until the exact current head passes automated tests and authenticated persistence/export/browser acceptance.
 
+
+### Network flow and facility-location optimization
+
+| ID | Method | Scope / limitation |
+|---|---|---|
+| T069 | Network Flow and Location Optimization | A capacitated single-period facility-location MILP minimizes fixed site-opening costs plus per-unit shipment costs. It requires all customer demand to be met and independently audits the solver objective, facility capacities, route capacities and customer balances. It does not model multi-period inventory, intermediate transshipment or uncertainty. |
+
+Independent tests use a hand-calculated four-route example (expected total cost 21 units), an infeasible route-capacity case, and invalid/duplicate-route inputs. The method is marked `IMPLEMENTED_NEEDS_VALIDATION` pending current CI and authenticated staging acceptance.
+
 ## Calculation safety and regression protection
 
 Independent golden/boundary tests were added for the new methods, along with three Workbench Streamlit AppTest groups that invoke the forms and check structured results. Key controls include:
@@ -99,8 +108,8 @@ The registry and matrix contain 100 target IDs, T001–T100. Current classificat
 | Status | Count |
 |---|---:|
 | `VERIFIED_WORKING` | 0 |
-| `IMPLEMENTED_NEEDS_VALIDATION` | 79 |
-| `FOUNDATION_ONLY` | 19 |
+| `IMPLEMENTED_NEEDS_VALIDATION` | 80 |
+| `FOUNDATION_ONLY` | 18 |
 | `EXTERNAL_CONFIGURATION_REQUIRED` | 2 |
 | `MISSING` | 0 |
 | `BLOCKED` | 0 |
