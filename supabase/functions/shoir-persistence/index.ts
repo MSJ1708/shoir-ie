@@ -699,7 +699,7 @@ Deno.serve(async (req) => {
           if (cleanupProofError) {
             console.error(
               "Unable to remove unneeded payment proof.",
-              cleanupProofError.code || "unknown",
+              "storage-error",
             );
           }
         }
