@@ -15,7 +15,7 @@ def test_report_contains_methods_equations_limitations_refs_and_hash():
         created_at="2026-10-24T10:00:00+00:00")
     report=result["report_markdown"]
     assert result["status"]=="REPORT_GENERATED"
-    for phrase in ["Cycle-time study","Formulae and equations","Assumptions","Limitations","RUN-123","not independently authenticate"]:
+    for phrase in ["Cycle-time study","Formulae and equations","Assumptions","Limitations","RUN-123","authenticate source documents"]:
         assert phrase in report
     assert hashlib.sha256(report.encode()).hexdigest()==result["sha256"]
     assert result["raw_dataset_included"] is False
