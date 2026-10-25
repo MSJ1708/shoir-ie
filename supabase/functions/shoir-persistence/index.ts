@@ -684,7 +684,10 @@ Deno.serve(async (req) => {
           .eq("username_lc", usernameLc)
           .eq("status", "Pending");
         if (closeRequestError) {
-          console.error("Unable to close request after consent persistence failure.", closeRequestError.code || "unknown");
+          console.error(
+            "Unable to close request after consent persistence failure.",
+            closeRequestError.code || "unknown",
+          );
         }
         if (proofPath) {
           const objectPath = proofPath.replace(
@@ -693,10 +696,16 @@ Deno.serve(async (req) => {
           );
           const { error: cleanupProofError } = await supabase.storage
             .from(PAYMENT_PROOF_BUCKET).remove([objectPath]);
-          if (cleanupProofError) console.error("Unable to remove unneeded payment proof.", cleanupProofError.code || "unknown");
+          if (cleanupProofError) {
+            console.error(
+              "Unable to remove unneeded payment proof.",
+              cleanupProofError.code || "unknown",
+            );
+          }
         }
         return response({
-          error: "The registration was not accepted because its legal-acceptance record could not be saved. No subscription was activated. Refresh and retry, or contact support if the issue continues.",
+          error:
+            "The registration was not accepted because its legal-acceptance record could not be saved. No subscription was activated. Refresh and retry, or contact support if the issue continues.",
         }, 500);
       }
       legalAcceptanceRecorded = true;
