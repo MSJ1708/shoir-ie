@@ -27,7 +27,10 @@ export async function readBoundedJsonObject(
       throw new PublicRequestError("Invalid Content-Length header.", 400);
     }
     if (Number(declaredLength) > maxBytes) {
-      throw new PublicRequestError("Request body exceeds the allowed size limit.", 413);
+      throw new PublicRequestError(
+        "Request body exceeds the allowed size limit.",
+        413,
+      );
     }
   }
 
@@ -50,7 +53,10 @@ export async function readBoundedJsonObject(
         } catch {
           // Cancellation is best effort; never continue buffering the request.
         }
-        throw new PublicRequestError("Request body exceeds the allowed size limit.", 413);
+        throw new PublicRequestError(
+          "Request body exceeds the allowed size limit.",
+          413,
+        );
       }
       chunks.push(value);
     }
@@ -74,7 +80,9 @@ export async function readBoundedJsonObject(
 
   let parsed: unknown;
   try {
-    parsed = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+    parsed = JSON.parse(
+      new TextDecoder("utf-8", { fatal: true }).decode(bytes),
+    );
   } catch {
     throw new PublicRequestError("Request body must be valid UTF-8 JSON.", 400);
   }
@@ -98,17 +106,26 @@ export function normalizeWorkspaceStateJson(
     try {
       const encoded = JSON.stringify(value);
       if (typeof encoded !== "string") {
-        throw new PublicRequestError("Workspace state must be JSON serializable.", 400);
+        throw new PublicRequestError(
+          "Workspace state must be JSON serializable.",
+          400,
+        );
       }
       serialized = encoded;
     } catch (error) {
       if (error instanceof PublicRequestError) throw error;
-      throw new PublicRequestError("Workspace state must be JSON serializable.", 400);
+      throw new PublicRequestError(
+        "Workspace state must be JSON serializable.",
+        400,
+      );
     }
   }
 
   if (new TextEncoder().encode(serialized).byteLength > maxBytes) {
-    throw new PublicRequestError("Workspace state exceeds the allowed size limit.", 413);
+    throw new PublicRequestError(
+      "Workspace state exceeds the allowed size limit.",
+      413,
+    );
   }
 
   let parsed: unknown;
@@ -123,7 +140,9 @@ export function normalizeWorkspaceStateJson(
   return serialized;
 }
 
-export function publicErrorFor(error: unknown): { status: number; message: string } {
+export function publicErrorFor(
+  error: unknown,
+): { status: number; message: string } {
   if (error instanceof PublicRequestError) {
     return { status: error.status, message: error.message };
   }
@@ -146,7 +165,8 @@ export function publicErrorFor(error: unknown): { status: number; message: strin
   }
   if (
     message === "Authentication protection is temporarily unavailable." ||
-    message === "Registration request could not be confirmed by the persistence service."
+    message ===
+      "Registration request could not be confirmed by the persistence service."
   ) {
     return { status: 503, message };
   }
@@ -164,6 +184,7 @@ export function publicErrorFor(error: unknown): { status: number; message: strin
   // Do not return database, storage, or infrastructure error details to callers.
   return {
     status: 500,
-    message: "The persistence service could not complete this request. Retry later.",
+    message:
+      "The persistence service could not complete this request. Retry later.",
   };
 }
