@@ -4504,9 +4504,14 @@ def build_reproducibility_pack(
         r"(?i)\b(password|passphrase|secret|token|api[_ -]?key|service[_ -]?role[_ -]?key|access[_ -]?key)\b(\s*[:=]\s*)([^\s,;]+)|\bBearer\s+[A-Za-z0-9._~+/-]+=*"
     )
 
+    def _replace_secret_text(match: Any) -> str:
+        if match.group(1) is not None:
+            return f"{match.group(1)}{match.group(2) or ''}[REDACTED]"
+        return "Bearer [REDACTED]"
+
     def _safe_string(raw: Any) -> str:
         value = str(raw)
-        value = secret_text.sub(lambda m: f"{m.group(1)}{m.group(2)}[REDACTED]", value)
+        value = secret_text.sub(_replace_secret_text, value)
         # Remove userinfo from a URL while retaining scheme and host for diagnostics.
         value = re.sub(r"(?i)(https?|postgres(?:ql)?|mysql)://[^/@\s:]+(?::[^/@\s]*)?@", r"\1://[REDACTED]@", value)
         return value[:5000]
