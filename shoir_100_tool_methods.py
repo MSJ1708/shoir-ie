@@ -1464,7 +1464,13 @@ def supplier_performance_scorecard(
         missing = []
         for metric in metric_names:
             raw = row.get(f"{metric}_score")
-            if raw is None or (isinstance(raw, str) and not raw.strip()):
+            is_missing = raw is None or (isinstance(raw, str) and not raw.strip())
+            if not is_missing:
+                try:
+                    is_missing = bool(pd.isna(raw))
+                except (TypeError, ValueError):
+                    is_missing = False
+            if is_missing:
                 scores[metric] = None
                 missing.append(metric)
                 continue
