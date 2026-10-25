@@ -738,3 +738,27 @@ def test_workbench_guided_study_wizard_returns_gated_step_plan():
     rows = result["steps"].set_index("Tool ID")
     assert rows.loc["T011", "Step status"] in ("READY", "COMPLETED_IN_SESSION")
     assert rows.loc["T025", "Step status"] == "TIER_RESTRICTED"
+
+
+def test_workbench_runs_equipment_anomaly_monitor_and_labels_example_data():
+    from streamlit.testing.v1 import AppTest
+
+    page = ROOT / "pages" / "Industrial_Engineering_Workbench.py"
+    at = AppTest.from_file(page, default_timeout=90)
+    at.session_state["current_user"] = "anomaly-monitor-checker"
+    at.session_state["authenticated"] = True
+    at.session_state["user_tier"] = "Enterprise"
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+
+    at.selectbox(key="shoir_100_tool_inspector").select("T048")
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    at.button(key="tool048_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    result = at.session_state.get("shoir_tool_result_T048")
+    assert result is not None
+    assert result["status"] == "ANOMALIES_DETECTED"
+    assert result["anomaly_count"] == 1
+    assert result["data_provenance"] == "SYNTHETIC_EXAMPLE"
