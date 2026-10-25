@@ -516,3 +516,40 @@ def test_workbench_enforces_research_pack_gate_and_runs_welch_and_monte_carlo():
     assert simulation["iterations"] == 10000
     assert simulation["seed"] == 42
     assert "not verified ROI" in simulation["warning"]
+
+
+def test_workbench_runs_crossed_msa_and_factorial_doe():
+    from streamlit.testing.v1 import AppTest
+
+    page = ROOT / "pages" / "Industrial_Engineering_Workbench.py"
+    at = AppTest.from_file(page, default_timeout=90)
+    at.session_state["current_user"] = "msa-doe-checker"
+    at.session_state["authenticated"] = True
+    at.session_state["user_tier"] = "Professional Tier"
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+
+    at.selectbox(key="shoir_100_tool_inspector").select("T033 · Measurement Systems Analysis")
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    at.button(key="tool033_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    msa = at.session_state.get("shoir_tool_result_T033")
+    assert msa is not None
+    assert msa["status"] == "CROSSED_GAGE_RR_SCREENED"
+    assert msa["part_count"] == 2
+    assert msa["operator_count"] == 2
+    assert msa["number_of_distinct_categories"] == 12
+
+    at.selectbox(key="shoir_100_tool_inspector").select("T035 · Design of Experiments")
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    at.button(key="tool035_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    doe = at.session_state.get("shoir_tool_result_T035")
+    assert doe is not None
+    effects = doe["effects"].set_index("Term")
+    assert effects.loc["A", "Estimated effect (high − low)"] == pytest.approx(4)
+    assert effects.loc["B", "Estimated effect (high − low)"] == pytest.approx(6)
