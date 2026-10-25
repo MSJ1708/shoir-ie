@@ -25,6 +25,7 @@ __all__ = [
     "normalize_tier",
     "tier_allows",
     "module_required_tier",
+    "module_access_decision",
     "available_modules",
     "audit_module_entitlement_coverage",
     "copilot_gate",
@@ -182,6 +183,7 @@ COPILOT_TOOL_REQUIREMENTS = {
     "literature matrix": "Research Pack",
     "reproducible paper": "Research Pack",
     "paper-to-simulation": "Research Pack",
+    "sample size": "Research Pack",
     # Keep conversational actions aligned with the Enterprise Plus menu.
     "advanced engineering copilot": "Enterprise Plus",
     "live industrial digital twin": "Enterprise Plus",
@@ -241,8 +243,7 @@ def audit_module_entitlement_coverage(modules: Iterable[str]) -> dict[str, objec
     """Audit explicit tier-policy coverage for an observed module catalogue.
 
     A missing policy is reported as unresolved rather than being inferred to mean
-    that the module is free or secure. This is an audit helper only: it does not
-    authorize access or change the existing module-availability behavior.
+    that the module is free, permitted, or secure.
     """
     catalog = unique_modules(modules)
     unmapped: list[str] = []
@@ -277,19 +278,64 @@ def audit_module_entitlement_coverage(modules: Iterable[str]) -> dict[str, objec
     }
 
 
+def module_access_decision(tier: str, module: str) -> dict[str, object]:
+    """Return a fail-closed entitlement decision for a canonical module label.
+
+    This helper is suitable for module discovery/capability checks. Callers must
+    still enforce the same canonical decision at the protected route/action/API
+    boundary; visibility alone is not authorization.
+    """
+    label = str(module or "").strip()
+    required = module_required_tier(label)
+    if not label:
+        return {
+            "allowed": False,
+            "module": label,
+            "required_tier": None,
+            "current_tier": normalize_tier(tier),
+            "reason": "empty_capability",
+        }
+    if required is None:
+        return {
+            "allowed": False,
+            "module": label,
+            "required_tier": None,
+            "current_tier": normalize_tier(tier),
+            "reason": "unmapped_capability",
+        }
+    if required not in TIER_ORDER:
+        return {
+            "allowed": False,
+            "module": label,
+            "required_tier": required,
+            "current_tier": normalize_tier(tier),
+            "reason": "invalid_tier_policy",
+        }
+    allowed = tier_allows(tier, required)
+    return {
+        "allowed": allowed,
+        "module": label,
+        "required_tier": required,
+        "current_tier": normalize_tier(tier),
+        "reason": "allowed" if allowed else "tier_insufficient",
+    }
+
+
 def available_modules(tier: str, modules: Iterable[str]) -> list[str]:
+    """Return only modules with an explicit, valid, entitled policy mapping."""
     result = []
     for module in modules:
-        required = module_required_tier(str(module))
-        if required is None or tier_allows(tier, required):
-            result.append(str(module))
+        label = str(module or "").strip()
+        decision = module_access_decision(tier, label)
+        if decision["allowed"]:
+            result.append(label)
     return result
 
 
 def _looks_like_action_request(prompt: str) -> bool:
     p = re.sub(r"\s+", " ", str(prompt or "").strip().lower())
     return bool(re.search(
-        r"\b(run|execute|perform|calculate|analy[sz]e|build|create|generate|export|clean|format|"
+        r"\b(run|execute|perform|calculate|estimate|analy[sz]e|build|create|generate|export|clean|format|"
         r"compare|optimi[sz]e|fit|test|review|simulate|forecast|open|use|apply|do)\b",
         p,
     ))

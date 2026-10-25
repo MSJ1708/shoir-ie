@@ -112,6 +112,32 @@ def test_module_entitlement_audit_exposes_invalid_policy_tier(monkeypatch):
     ]
 
 
+
+def test_unmapped_and_invalid_module_policies_fail_closed():
+    from shoir_tier_capabilities import module_access_decision
+
+    unknown = "Unregistered Protected Capability"
+    assert module_access_decision("Enterprise Plus", unknown) == {
+        "allowed": False,
+        "module": unknown,
+        "required_tier": None,
+        "current_tier": "Enterprise Plus",
+        "reason": "unmapped_capability",
+    }
+    assert unknown not in available_modules("Enterprise Plus", [unknown, "AI Copilot"])
+
+    MODULE_REQUIREMENTS["Test-only invalid policy"] = "Unknown Tier"
+    try:
+        invalid = module_access_decision("Enterprise Plus", "Test-only invalid policy")
+        assert invalid["allowed"] is False
+        assert invalid["reason"] == "invalid_tier_policy"
+        assert "Test-only invalid policy" not in available_modules(
+            "Enterprise Plus", ["Test-only invalid policy"]
+        )
+    finally:
+        MODULE_REQUIREMENTS.pop("Test-only invalid policy", None)
+
+
 def test_declared_module_entitlement_tiers_are_known_tiers():
     assert set(MODULE_REQUIREMENTS.values()).issubset(set(TIER_ORDER))
 

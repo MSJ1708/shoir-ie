@@ -12,7 +12,7 @@ The helper `audit_module_entitlement_coverage(catalog_names)` provides a machine
 - `INCOMPLETE` means one or more names are unmapped or have an invalid tier value.
 - `EMPTY` means no catalogue names were supplied. It is not a pass.
 - `coverage_percent` measures explicit mapping coverage only. It is not a measure of authorization correctness, test coverage, security, or production readiness.
-- This is an audit-only helper. It intentionally does not alter runtime access decisions; changing implicit/unmapped behavior before the actual catalogue and intended free-tier rules are reconciled could break existing users.
+- Module discovery and Copilot capability enumeration now use `module_access_decision()`, which denies empty, unmapped, and invalid-policy labels rather than implicitly treating them as Starter. This is a fail-closed discovery decision, not a substitute for authorization at the protected route/action/API/export boundary.
 
 ## Current source finding
 
@@ -32,3 +32,10 @@ The 96 names are confirmed source catalog and subscription-feature declarations,
 ## Machine-readable module inventory
 
 See [`MODULE_TIER_INVENTORY.csv`](MODULE_TIER_INVENTORY.csv) for the full 96-name source-level inventory, the currently declared minimum subscription tier, which app tier list first introduces each name, the catalog source(s), and the authenticated-browser status. Every row intentionally remains `UNVERIFIED` for authenticated module walkthroughs until the per-module browser and functional matrix is actually completed. The regression suite checks that this inventory stays synchronized with the source catalog and tier lists.
+
+
+## Follow-up implementation note — 2026-10-24
+
+The readiness-foundation change adds an explicit decision object containing the canonical module label, required tier, normalized current tier, allow/deny result, and a reason code. `available_modules()` now includes only known capabilities with a valid entitlement mapping that the current package permits. A regression test covers unknown and invalid-policy cases. Copilot decision staging also fails closed if the enterprise authorization/audit layer cannot be imported; it no longer silently proceeds after an `ImportError`.
+
+This focused patch does **not** by itself prove that every direct route, export, connector, or dynamic action calls the canonical guard. The exhaustive enforcement-point audit, authenticated module matrix, 100-tool specialist acceptance tests, and staging/hosted verification remain separate release gates.

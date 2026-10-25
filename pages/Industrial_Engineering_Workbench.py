@@ -21,6 +21,23 @@ import streamlit as st
 import html
 
 from industrial_platform import render_module, PLATFORM_CATALOG, init_platform_db
+from shoir_unit_converter import UNIT_OPTIONS, convert_units, convert_currency
+from shoir_100_tool_registry import TOOL_CATALOG
+from shoir_100_tool_ui import (
+    render_data_intelligence_tools,
+    render_acceptance_sampling_tool,
+    render_queueing_tool,
+    render_portfolio_scoring_tool,
+    render_operational_improvement_tools,
+    render_advanced_assurance_tools,
+    render_weibull_tool,
+    render_mtbf_mttr_tool,
+    render_planning_resilience_tools,
+    render_single_station_des_tool,
+)
+from shoir_ie_basic_calculators import (
+    calculate_standard_time, calculate_work_sampling, calculate_takt_capacity,
+)
 from industrial_platform_excellence import (
     CANONICAL_TIERS, MODULE_MATRIX, canonical_tier, tier_allows, tier_matrix,
     module_matrix, module_availability, deep_data_quality, validate_schema,
@@ -206,6 +223,448 @@ if selected == "Engineering Validation Center":
         render_engineering_result(res,"Validation result","validation_result")
     st.dataframe(edited,use_container_width=True)
 
+    # Add a compact utility to the existing Starter validation module instead
+    # of creating another top-level navigation item or changing the app shell.
+    with st.expander("↔ Unit & Currency Converter · Starter", expanded=False):
+        st.caption(
+            "Physical conversions use deterministic built-in definitions. Currency conversion "
+            "uses a rate you provide with its date and source; this tool does not fetch or guess live FX rates."
+        )
+        conversion_kind = st.radio(
+            "Conversion type",
+            ["Physical units", "Currency"],
+            horizontal=True,
+            key="wb_unit_currency_kind",
+        )
+
+        if conversion_kind == "Physical units":
+            dimensions = list(UNIT_OPTIONS)
+            dimension = st.selectbox("Dimension", dimensions, key="wb_unit_dimension")
+            units = list(UNIT_OPTIONS[dimension])
+            c1, c2, c3 = st.columns([1.1, 1, 1])
+            with c1:
+                unit_value = st.number_input(
+                    "Value", value=1.0, step=1.0, key="wb_unit_value"
+                )
+            with c2:
+                unit_from = st.selectbox(
+                    "From unit", units, index=0, key="wb_unit_from"
+                )
+            with c3:
+                unit_to = st.selectbox(
+                    "To unit", units, index=min(1, len(units) - 1), key="wb_unit_to"
+                )
+            unit_inputs = {
+                "kind": "unit",
+                "value": float(unit_value),
+                "from_unit": unit_from,
+                "to_unit": unit_to,
+            }
+            if st.button("Convert units", key="wb_run_unit_conversion", type="primary"):
+                try:
+                    calculated = convert_units(unit_value, unit_from, unit_to)
+                except ValueError as exc:
+                    st.error(str(exc))
+                else:
+                    st.session_state["wb_unit_currency_result"] = {
+                        "kind": "unit",
+                        "inputs": unit_inputs,
+                        "result": calculated,
+                    }
+            saved = st.session_state.get("wb_unit_currency_result")
+            if saved and saved.get("kind") == "unit":
+                if saved.get("inputs") == unit_inputs:
+                    converted = saved["result"]
+                    st.metric(
+                        "Converted value",
+                        f"{converted['output_value']:,.10g} {converted['to_unit']}",
+                    )
+                    st.caption(
+                        f"Method: {converted['method']} Formula: {converted['formula']} "
+                        f"Status: {converted['status']}."
+                    )
+                    st.caption(converted["provenance"])
+                else:
+                    st.warning("The previous conversion is stale because one or more inputs changed. Run the conversion again.")
+
+        else:
+            currencies = ["SAR", "USD", "EUR", "GBP", "AED", "INR", "JPY", "CNY"]
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                currency_amount = st.number_input(
+                    "Amount", value=100.0, step=10.0, key="wb_currency_amount"
+                )
+                currency_from = st.selectbox(
+                    "Source currency", currencies, index=1, key="wb_currency_from"
+                )
+            with c2:
+                currency_to = st.selectbox(
+                    "Target currency", currencies, index=0, key="wb_currency_to"
+                )
+                fx_rate = st.number_input(
+                    "Target units per 1 source unit",
+                    min_value=0.0,
+                    value=1.0,
+                    step=0.0001,
+                    format="%.8f",
+                    key="wb_currency_rate",
+                    help="Enter the rate from your approved source. No live rate is fetched.",
+                )
+            with c3:
+                fx_date = st.date_input(
+                    "Rate effective date", value=datetime.now().date(), key="wb_currency_date"
+                )
+                fx_source = st.text_input(
+                    "Rate source / reference", value="", key="wb_currency_source",
+                    placeholder="Approved rate sheet, provider, or reference",
+                )
+            currency_inputs = {
+                "kind": "currency",
+                "amount": float(currency_amount),
+                "from_currency": currency_from,
+                "to_currency": currency_to,
+                "rate": float(fx_rate),
+                "rate_date": fx_date.isoformat(),
+                "rate_source": fx_source.strip(),
+            }
+            if st.button("Convert currency", key="wb_run_currency_conversion", type="primary"):
+                try:
+                    calculated = convert_currency(
+                        currency_amount, currency_from, currency_to, fx_rate,
+                        fx_date.isoformat(), fx_source,
+                    )
+                except ValueError as exc:
+                    st.error(str(exc))
+                else:
+                    st.session_state["wb_unit_currency_result"] = {
+                        "kind": "currency",
+                        "inputs": currency_inputs,
+                        "result": calculated,
+                    }
+            saved = st.session_state.get("wb_unit_currency_result")
+            if saved and saved.get("kind") == "currency":
+                if saved.get("inputs") == currency_inputs:
+                    converted = saved["result"]
+                    st.metric(
+                        "Converted amount",
+                        f"{converted['output_value']:,.6g} {converted['to_currency']}",
+                    )
+                    st.caption(
+                        f"Rate: {converted['rate']} {converted['to_currency']} per "
+                        f"1 {converted['from_currency']} · Rate date: "
+                        f"{converted['rate_date'] or 'Not required'} · "
+                        f"Source: {converted['rate_source']}"
+                    )
+                    st.warning(converted["provenance"])
+                    for warning in converted.get("warnings", []):
+                        st.caption(warning)
+                else:
+                    st.warning("The previous currency result is stale because one or more rate/input details changed. Run the conversion again.")
+
+    with st.expander("🧭 Capability Status Center · T009", expanded=False):
+        st.caption(
+            "This is a source/readiness inventory for the 100 target capabilities. "
+            "It does not mean a route has passed authenticated acceptance or that a connector is live."
+        )
+        status_counts = {}
+        for item in TOOL_CATALOG:
+            status_counts[item["implementation_status"]] = status_counts.get(item["implementation_status"], 0) + 1
+        r1, r2, r3, r4 = st.columns(4)
+        r1.metric("Targets inventoried", len(TOOL_CATALOG))
+        r2.metric("Needs validation", status_counts.get("IMPLEMENTED_NEEDS_VALIDATION", 0))
+        r3.metric("Foundation only", status_counts.get("FOUNDATION_ONLY", 0))
+        r4.metric("External config", status_counts.get("EXTERNAL_CONFIGURATION_REQUIRED", 0))
+        st.info(
+            f"Authenticated browser verification: {sum(1 for item in TOOL_CATALOG if str(item.get('browser_test','')).startswith('UNVERIFIED'))} / {len(TOOL_CATALOG)} targets are still unverified. "
+            "No entry in this initial matrix is certified as VERIFIED_WORKING."
+        )
+        available_workbenches = list(dict.fromkeys(item["workbench"] for item in TOOL_CATALOG))
+        readiness_options = [
+            "All statuses",
+            "IMPLEMENTED_NEEDS_VALIDATION",
+            "FOUNDATION_ONLY",
+            "MISSING",
+            "EXTERNAL_CONFIGURATION_REQUIRED",
+            "BLOCKED",
+            "VERIFIED_WORKING",
+        ]
+        fl1, fl2, fl3 = st.columns([1.2, 1.2, 1.8])
+        with fl1:
+            readiness_filter = st.selectbox(
+                "Readiness status",
+                readiness_options,
+                key="wb_capability_status_filter",
+            )
+        with fl2:
+            workbench_filter = st.selectbox(
+                "Workbench",
+                ["All workbenches", *available_workbenches],
+                key="wb_capability_workbench_filter",
+            )
+        with fl3:
+            capability_search = st.text_input(
+                "Search target capabilities",
+                value="",
+                key="wb_capability_status_search",
+                placeholder="Search tool name, ID, route, or remaining gap",
+            )
+        readiness_rows = []
+        for item in TOOL_CATALOG:
+            if readiness_filter != "All statuses" and item["implementation_status"] != readiness_filter:
+                continue
+            if workbench_filter != "All workbenches" and item["workbench"] != workbench_filter:
+                continue
+            haystack = " ".join(
+                str(item.get(field, ""))
+                for field in ("tool_id", "canonical_name", "existing_module_or_route", "remaining_gap")
+            ).lower()
+            if capability_search.strip().lower() not in haystack:
+                continue
+            readiness_rows.append({
+                "ID": item["tool_id"],
+                "Capability": item["canonical_name"],
+                "Workbench": item["workbench"],
+                "Target minimum tier": item["target_minimum_tier"],
+                "Readiness": item["implementation_status"],
+                "Current route / source candidate": item["existing_module_or_route"],
+                "Browser evidence": item["browser_test"],
+                "Remaining gap": item["remaining_gap"],
+            })
+        st.dataframe(
+            pd.DataFrame(readiness_rows),
+            use_container_width=True,
+            hide_index=True,
+        )
+        st.caption(
+            "Target-tier labels describe the requested target catalog. They do not override the existing subscription contract or authorize a route by themselves."
+        )
+
+    with st.expander("⏱️ Time Study & Standard Time · T021 · Starter", expanded=False):
+        st.caption(
+            "All observations must represent comparable work cycles and use the same unit. "
+            "Allowance is defined as a fraction of standard time: Standard = Normal / (1 − allowance)."
+        )
+        ts1, ts2, ts3 = st.columns([2, 1, 1])
+        with ts1:
+            observed_text = st.text_input(
+                "Observed cycle times (comma-separated)",
+                value="9, 10, 11, 10.5, 9.5",
+                key="wb_standard_observations",
+            )
+        with ts2:
+            observed_unit = st.selectbox("Time unit", ["s", "min", "h"], index=1, key="wb_standard_unit")
+            performance_rating = st.number_input(
+                "Performance rating (%)", min_value=0.0, max_value=200.0,
+                value=100.0, step=5.0, key="wb_standard_rating",
+            )
+        with ts3:
+            allowance = st.number_input(
+                "Allowance (%)", min_value=0.0, max_value=99.0,
+                value=15.0, step=1.0, key="wb_standard_allowance",
+            )
+        standard_inputs = {
+            "observed_text": observed_text,
+            "unit": observed_unit,
+            "rating": float(performance_rating),
+            "allowance": float(allowance),
+        }
+        if st.button("Calculate standard time", type="primary", key="wb_run_standard_time"):
+            try:
+                if not observed_text.strip():
+                    raise ValueError("Enter at least one observed cycle time.")
+                try:
+                    times = [float(value.strip()) for value in observed_text.split(",") if value.strip()]
+                except ValueError as exc:
+                    raise ValueError("Use comma-separated numeric cycle times, for example 9, 10, 11.") from exc
+                calculated = calculate_standard_time(
+                    times, observed_unit, performance_rating, allowance
+                )
+            except ValueError as exc:
+                st.error(str(exc))
+            else:
+                st.session_state["wb_standard_time_result"] = {
+                    "inputs": standard_inputs,
+                    "result": calculated,
+                }
+        saved_standard = st.session_state.get("wb_standard_time_result")
+        if saved_standard:
+            if saved_standard.get("inputs") == standard_inputs:
+                standard = saved_standard["result"]
+                a, b, c = st.columns(3)
+                a.metric("Mean observed", f"{standard['mean_observed_time']:,.4g} {observed_unit}")
+                b.metric("Normal time", f"{standard['normal_time']:,.4g} {observed_unit}")
+                c.metric("Standard time", f"{standard['standard_time']:,.4g} {observed_unit}")
+                st.caption(standard["formula"])
+                with st.expander("Method, assumptions and warnings", expanded=False):
+                    st.write(standard["method"])
+                    st.write(standard["assumptions"])
+                    if standard["warnings"]:
+                        st.warning(" ".join(standard["warnings"]))
+                    st.caption(standard["provenance"])
+            else:
+                st.warning("The prior time-study result is stale because its observations or assumptions changed. Recalculate before using it.")
+
+    with st.expander("📊 Work Sampling Analyzer · T022 · Starter", expanded=False):
+        st.caption("Wilson score confidence interval for an observed activity proportion. Sampling adequacy is estimated conservatively using p=0.5.")
+        ws1, ws2, ws3, ws4 = st.columns(4)
+        with ws1:
+            sampled_activity = st.number_input(
+                "Activity observations", min_value=0, max_value=100000000,
+                value=40, step=1, key="wb_sampling_activity",
+            )
+        with ws2:
+            sample_total = st.number_input(
+                "Total observations", min_value=1, max_value=100000000,
+                value=100, step=1, key="wb_sampling_total",
+            )
+        with ws3:
+            sampling_confidence = st.selectbox(
+                "Confidence (%)", [90.0, 95.0, 99.0], index=1, key="wb_sampling_confidence",
+            )
+        with ws4:
+            sampling_margin = st.number_input(
+                "Target margin (percentage points)", min_value=0.1, max_value=49.0,
+                value=5.0, step=0.5, key="wb_sampling_margin",
+            )
+        sampling_inputs = {
+            "activity": int(sampled_activity), "total": int(sample_total),
+            "confidence": float(sampling_confidence), "margin": float(sampling_margin),
+        }
+        if st.button("Calculate work-sampling estimate", type="primary", key="wb_run_sampling"):
+            try:
+                calculated = calculate_work_sampling(
+                    sampled_activity, sample_total, sampling_confidence, sampling_margin
+                )
+            except ValueError as exc:
+                st.error(str(exc))
+            else:
+                st.session_state["wb_sampling_result"] = {
+                    "inputs": sampling_inputs, "result": calculated,
+                }
+        saved_sampling = st.session_state.get("wb_sampling_result")
+        if saved_sampling:
+            if saved_sampling.get("inputs") == sampling_inputs:
+                sampling = saved_sampling["result"]
+                a, b, c = st.columns(3)
+                a.metric("Observed activity", f"{sampling['activity_percent']:.2f}%")
+                b.metric(
+                    f"{sampling['confidence_percent']:g}% Wilson interval",
+                    f"{sampling['wilson_interval_lower_percent']:.2f}% – {sampling['wilson_interval_upper_percent']:.2f}%",
+                )
+                c.metric("Conservative sample size", f"{sampling['conservative_required_sample_size']:,}")
+                st.caption(sampling["formula"])
+                if sampling["warnings"]:
+                    for warning in sampling["warnings"]:
+                        st.warning(warning)
+                else:
+                    st.success("The sample meets the selected conservative sample-size target; representativeness still requires engineering review.")
+                with st.expander("Assumptions and method", expanded=False):
+                    st.write(sampling["assumptions"])
+                    st.caption(sampling["provenance"])
+            else:
+                st.warning("The prior work-sampling result is stale because counts or settings changed. Recalculate before use.")
+
+    with st.expander("⏳ Takt Time & Capacity Calculator · T023 · Starter", expanded=False):
+        st.caption("Demand and available time must refer to the same period. Takt is a demand-paced target; capacity is evaluated only when a cycle time is supplied.")
+        tk1, tk2, tk3 = st.columns(3)
+        with tk1:
+            takt_demand = st.number_input(
+                "Demand units per period", min_value=0.0, value=480.0,
+                step=10.0, key="wb_takt_demand",
+            )
+            takt_period = st.text_input(
+                "Demand/time period", value="one shift", key="wb_takt_period",
+            )
+        with tk2:
+            takt_available = st.number_input(
+                "Available time", min_value=0.0, value=8.0,
+                step=0.5, key="wb_takt_available",
+            )
+            takt_available_unit = st.selectbox(
+                "Available-time unit", ["min", "h", "s", "day"],
+                index=1, key="wb_takt_available_unit",
+            )
+        with tk3:
+            takt_unavailable = st.number_input(
+                "Planned breaks / unavailable time", min_value=0.0, value=30.0,
+                step=5.0, key="wb_takt_unavailable",
+            )
+            takt_unavailable_unit = st.selectbox(
+                "Unavailable-time unit", ["min", "h", "s", "day"],
+                key="wb_takt_unavailable_unit",
+            )
+        tk4, tk5 = st.columns(2)
+        with tk4:
+            takt_display_unit = st.selectbox(
+                "Show takt in", ["s", "min", "h"], index=1, key="wb_takt_display_unit",
+            )
+        with tk5:
+            evaluate_capacity = st.checkbox(
+                "Evaluate theoretical capacity using cycle time",
+                value=False, key="wb_takt_evaluate_capacity",
+            )
+            takt_cycle = st.number_input(
+                "Cycle time per unit", min_value=0.0, value=0.9,
+                step=0.1, key="wb_takt_cycle",
+            )
+            takt_cycle_unit = st.selectbox(
+                "Cycle-time unit", ["s", "min", "h"], index=1, key="wb_takt_cycle_unit",
+            )
+        takt_inputs = {
+            "demand": float(takt_demand), "period": takt_period,
+            "available": float(takt_available), "available_unit": takt_available_unit,
+            "unavailable": float(takt_unavailable), "unavailable_unit": takt_unavailable_unit,
+            "cycle": float(takt_cycle) if evaluate_capacity else None,
+            "cycle_unit": takt_cycle_unit, "display_unit": takt_display_unit,
+        }
+        if st.button("Calculate takt and capacity", type="primary", key="wb_run_takt"):
+            try:
+                calculated = calculate_takt_capacity(
+                    demand_units=takt_demand,
+                    demand_period=takt_period,
+                    available_time=takt_available,
+                    available_time_unit=takt_available_unit,
+                    planned_unavailable_time=takt_unavailable,
+                    unavailable_time_unit=takt_unavailable_unit,
+                    cycle_time=takt_cycle if evaluate_capacity else None,
+                    cycle_time_unit=takt_cycle_unit,
+                    takt_output_unit=takt_display_unit,
+                )
+            except ValueError as exc:
+                st.error(str(exc))
+            else:
+                st.session_state["wb_takt_result"] = {
+                    "inputs": takt_inputs, "result": calculated,
+                }
+        saved_takt = st.session_state.get("wb_takt_result")
+        if saved_takt:
+            if saved_takt.get("inputs") == takt_inputs:
+                takt = saved_takt["result"]
+                a, b = st.columns(2)
+                a.metric("Takt time", f"{takt['takt_time']:,.5g} {takt['takt_time_unit']}")
+                if takt["capacity_units_per_period"] is not None:
+                    b.metric("Theoretical capacity", f"{takt['capacity_units_per_period']:,.3g} units / {takt['period']}")
+                    if takt["capacity_feasible"]:
+                        st.success(f"The supplied cycle time implies theoretical capacity above demand by {takt['capacity_margin_units']:,.3g} units per {takt['period']}.")
+                    else:
+                        st.error(f"The supplied cycle time implies theoretical capacity below demand by {abs(takt['capacity_margin_units']):,.3g} units per {takt['period']}.")
+                else:
+                    b.metric("Capacity feasibility", "Not evaluated")
+                st.caption(takt["formula"])
+                with st.expander("Method, assumptions and warnings", expanded=False):
+                    st.write(takt["method"])
+                    st.write(takt["assumptions"])
+                    for warning in takt["warnings"]:
+                        st.warning(warning)
+                    st.caption(takt["provenance"])
+            else:
+                st.warning("The prior takt/capacity result is stale because demand, period, time, or cycle-time inputs changed. Recalculate before use.")
+
+    # Add target methods inside the existing validation workbench, not as new top-level pages.
+    render_data_intelligence_tools(st, RAW_TIER, USER, edited)
+    render_operational_improvement_tools(st, RAW_TIER, USER)
+    render_advanced_assurance_tools(st, RAW_TIER, USER)
+
 elif selected == "Industrial Data Model & Digital Thread":
     st.subheader("🔗 Industrial Digital Thread")
     tab1,tab2,tab3 = st.tabs(["Entities","Relationships","Impact Analysis"])
@@ -286,6 +745,10 @@ elif selected == "Advanced Planning & Scheduling":
             fig=px.timeline(sch,x_start="Start",x_end="Finish",y="Machine",color="Product",hover_data=["Order","LateMin"])
             st.plotly_chart(fig,use_container_width=True)
 
+    render_queueing_tool(st, RAW_TIER, USER)
+
+    render_planning_resilience_tools(st, RAW_TIER, USER)
+
 elif selected == "Quality Engineering & Reliability":
     st.subheader("📈 Quality Engineering & Reliability")
     tab1,tab2,tab3,tab4 = st.tabs(["SPC","Capability / MSA","DOE / ANOVA","Reliability"])
@@ -328,6 +791,10 @@ elif selected == "Quality Engineering & Reliability":
             except Exception as exc:
                 st.error(f"Reliability analysis failed safely: {exc}")
 
+    render_acceptance_sampling_tool(st, RAW_TIER, USER)
+    render_weibull_tool(st, RAW_TIER, USER)
+    render_mtbf_mttr_tool(st, RAW_TIER, USER)
+
 elif selected == "Industrial Simulation Lab":
     st.subheader("🧪 Industrial Simulation Lab")
     tab1,tab2 = st.tabs(["Replication Statistics","Warm-up Diagnostics"])
@@ -345,6 +812,8 @@ elif selected == "Industrial Simulation Lab":
                 render_engineering_result(warmup_diagnostic(nums,int(window)),"Warm-up diagnostics","warmup_result")
             except Exception as exc:
                 st.error(f"Warm-up diagnostic failed safely: {exc}")
+
+    render_single_station_des_tool(st, RAW_TIER, USER)
 
 elif selected == "3D Factory Designer":
     st.subheader("🧱 3D Factory Engineering")
@@ -417,6 +886,8 @@ elif selected == "Capital Investment & Engineering Economics":
     if "wb_econ" in st.session_state:
         st.dataframe(st.session_state["wb_econ"],use_container_width=True,hide_index=True)
         st.plotly_chart(px.density_heatmap(st.session_state["wb_econ"],x="Discount Rate",y="CAPEX Multiplier",z="NPV",text_auto=".0f"),use_container_width=True)
+
+    render_portfolio_scoring_tool(st, RAW_TIER, USER)
 
 elif selected == "Workforce Engineering":
     st.subheader("👷 Workforce Engineering")
