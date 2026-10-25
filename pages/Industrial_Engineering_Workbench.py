@@ -24,6 +24,7 @@ import html
 from industrial_platform import render_module, PLATFORM_CATALOG, init_platform_db
 from shoir_tool_registry import TOOL_TARGETS, TOOL_STATUS_VALUES, tier_allows_tool, tool_status_counts, require_tool_access
 from shoir_tool_trust_center import (classify_diagnostic, summarize_capability_registry, search_tool_help, build_redacted_support_bundle, redact_diagnostic_text)
+from shoir_ergonomics import calculate_rnle_lifting_index
 from industrial_platform_excellence import (
     CANONICAL_TIERS, MODULE_MATRIX, canonical_tier, tier_allows, tier_matrix,
     module_matrix, module_availability, deep_data_quality, validate_schema,
@@ -62,6 +63,10 @@ _TOOL089_PRACTICE_TOPICS = {
 _TOOL069_EXAMPLE_FACILITIES = '[{"id":"F1","fixed_opening_cost":10,"capacity":10},{"id":"F2","fixed_opening_cost":1,"capacity":10}]'
 _TOOL069_EXAMPLE_CUSTOMERS = '[{"id":"C1","demand":5},{"id":"C2","demand":5}]'
 _TOOL069_EXAMPLE_ROUTES = '[{"facility":"F1","customer":"C1","unit_cost":1,"capacity":10},{"facility":"F1","customer":"C2","unit_cost":10,"capacity":10},{"facility":"F2","customer":"C1","unit_cost":5,"capacity":10},{"facility":"F2","customer":"C2","unit_cost":1,"capacity":10}]'
+_TOOL060_EXAMPLE_SUPPLIERS = '[{"supplier":"S1","supply_capacity":60},{"supplier":"S2","supply_capacity":50}]'
+_TOOL060_EXAMPLE_SITES = '[{"site":"A","demand":50},{"site":"B","demand":40}]'
+_TOOL060_EXAMPLE_BASELINE_ROUTES = '[{"supplier":"S1","site":"A","unit_cost":2,"capacity":60,"available":true},{"supplier":"S1","site":"B","unit_cost":4,"capacity":30,"available":true},{"supplier":"S2","site":"A","unit_cost":3,"capacity":30,"available":true},{"supplier":"S2","site":"B","unit_cost":1,"capacity":50,"available":true}]'
+_TOOL060_EXAMPLE_SCENARIO_ROUTES = '[{"supplier":"S1","site":"A","unit_cost":2,"capacity":60,"available":true},{"supplier":"S1","site":"B","unit_cost":4,"capacity":30,"available":true},{"supplier":"S2","site":"A","unit_cost":3,"capacity":30,"available":true},{"supplier":"S2","site":"B","unit_cost":1,"capacity":50,"available":false}]'
 _TOOL071_EXAMPLE_STATIONS = '[{"station":"Assembly","servers":1,"mean_service_time":2,"service_distribution":"deterministic"},{"station":"Inspection","servers":1,"mean_service_time":1,"service_distribution":"deterministic"}]'
 _TOOL062_EXAMPLE_VARIABLES = '{"x":{"low":0,"up":10,"category":"Continuous"},"y":{"low":0,"up":10,"category":"Continuous"}}'
 _TOOL062_EXAMPLE_OBJECTIVE = '{"x":3,"y":2}'
@@ -406,7 +411,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                 "Copilot action, API and export path must enforce their own server-side entitlement checks."
             )
 
-            if selected_tool["tool_id"] in {"T002", "T007", "T009", "T010", "T015", "T016", "T017", "T018", "T019", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T033", "T034", "T035", "T036", "T037", "T038", "T039", "T040", "T041", "T042", "T043", "T045", "T047", "T048", "T049", "T050", "T051", "T052", "T054", "T055", "T056", "T058", "T059", "T062", "T063", "T066", "T069", "T070", "T071", "T072", "T075", "T076", "T077", "T078", "T079", "T081", "T082", "T083", "T084", "T085", "T087", "T089", "T100"}:
+            if selected_tool["tool_id"] in {"T002", "T007", "T009", "T010", "T015", "T016", "T017", "T018", "T019", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T033", "T034", "T035", "T036", "T037", "T038", "T039", "T040", "T041", "T042", "T043", "T045", "T046", "T047", "T048", "T049", "T050", "T051", "T052", "T054", "T055", "T056", "T058", "T059", "T060", "T062", "T063", "T066", "T069", "T070", "T071", "T072", "T075", "T076", "T077", "T078", "T079", "T081", "T082", "T083", "T084", "T085", "T087", "T089", "T100"}:
                 st.markdown("---")
                 st.markdown("**Run focused specialist method**")
                 st.caption(
@@ -793,6 +798,44 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                             slotting_items_json = st.text_area("Items (JSON list: sku, picks_per_day, storage_units, compatibility_group, current_distance_m)", value='[{"sku":"SKU-A","picks_per_day":10,"storage_units":4,"compatibility_group":"food","current_distance_m":10},{"sku":"SKU-B","picks_per_day":4,"storage_units":9,"compatibility_group":"chemical","current_distance_m":20}]', key="tool059_items")
                             slotting_slots_json = st.text_area("Slots (JSON list: slot_id, distance_m, capacity_units, compatibility_group)", value='[{"slot_id":"near-food","distance_m":2,"capacity_units":5,"compatibility_group":"food"},{"slot_id":"near-chemical","distance_m":3,"capacity_units":10,"compatibility_group":"chemical"},{"slot_id":"far-general","distance_m":8,"capacity_units":10,"compatibility_group":"*"}]', key="tool059_slots")
                             run_method = st.form_submit_button("Assign nearest compatible slots", type="primary", use_container_width=True, key="tool059_run")
+                        elif selected_tool["tool_id"] == "T060":
+                            st.caption(
+                                "Compare a single-period capacitated supply plan with an explicitly edited disruption scenario. "
+                                "Unavailable routes are disabled; shortages receive the user-entered penalty. This is not a multi-period "
+                                "or multi-echelon network design model."
+                            )
+                            supply_chain_suppliers_json = st.text_area(
+                                "Suppliers (JSON list: supplier, supply_capacity)",
+                                value=_TOOL060_EXAMPLE_SUPPLIERS, key="tool060_suppliers"
+                            )
+                            supply_chain_sites_json = st.text_area(
+                                "Sites and demand (JSON list: site, demand)",
+                                value=_TOOL060_EXAMPLE_SITES, key="tool060_sites"
+                            )
+                            supply_chain_baseline_routes_json = st.text_area(
+                                "Baseline routes (JSON list: supplier, site, unit_cost, capacity, available)",
+                                value=_TOOL060_EXAMPLE_BASELINE_ROUTES, key="tool060_baseline_routes"
+                            )
+                            supply_chain_scenario_routes_json = st.text_area(
+                                "Disruption / alternative routes (edit available flags or capacities)",
+                                value=_TOOL060_EXAMPLE_SCENARIO_ROUTES, key="tool060_scenario_routes"
+                            )
+                            supply_chain_scenario_name = st.text_input(
+                                "Scenario name", value="Route S2 to site B unavailable",
+                                key="tool060_scenario_name"
+                            )
+                            supply_chain_unmet_penalty = st.number_input(
+                                "Unmet-demand penalty per unit", min_value=0.01,
+                                value=1000.0, step=100.0, key="tool060_unmet_penalty"
+                            )
+                            supply_chain_time_limit = st.number_input(
+                                "Solver time limit (seconds)", min_value=0.1, max_value=120.0,
+                                value=10.0, step=1.0, key="tool060_time_limit"
+                            )
+                            run_method = st.form_submit_button(
+                                "Compare baseline and disruption scenarios",
+                                type="primary", use_container_width=True, key="tool060_run"
+                            )
                         elif selected_tool["tool_id"] == "T063":
                             st.caption("One-to-one minimum-cost assignment only; no calendars, precedence, multi-period or skill constraints.")
                             assignment_tasks_json = st.text_area("Task names (JSON list)", '["Task A","Task B","Task C"]', key="tool063_tasks")
@@ -1008,6 +1051,66 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                             st.caption("Reorder point = average daily demand × lead time + safety stock. Criticality is a user-entered score.")
                             spare_parts_json = st.text_area("Spare parts (JSON list: part, average_daily_demand, lead_time_days, safety_stock, on_hand, scheduled_receipts, unit_cost, criticality_score)", value='[{"part":"Bearing","average_daily_demand":2,"lead_time_days":5,"safety_stock":10,"on_hand":5,"scheduled_receipts":0,"unit_cost":20,"criticality_score":5},{"part":"Gasket","average_daily_demand":0.5,"lead_time_days":2,"safety_stock":1,"on_hand":10,"scheduled_receipts":0,"unit_cost":3,"criticality_score":2}]', key="tool045_parts")
                             run_method = st.form_submit_button("Prioritize spare-parts replenishment", type="primary", use_container_width=True, key="tool045_run")
+                        elif selected_tool["tool_id"] == "T046":
+                            st.caption(
+                                "Single-task Revised NIOSH Lifting Equation (RNLE) screening. "
+                                "Frequency multiplier is interpolated from the NIOSH Table 5; "
+                                "coupling multipliers follow Table 7. Use measured field values."
+                            )
+                            rnle_load_kg = st.number_input(
+                                "Load weight (kg)", min_value=0.1, max_value=1000.0,
+                                value=15.0, step=0.5, key="tool046_load_kg"
+                            )
+                            rnle_h_origin = st.number_input(
+                                "Horizontal hand distance at origin (cm)", min_value=0.0,
+                                max_value=63.0, value=30.0, step=1.0, key="tool046_h_origin"
+                            )
+                            rnle_h_destination = st.number_input(
+                                "Horizontal hand distance at destination (cm)", min_value=0.0,
+                                max_value=63.0, value=40.0, step=1.0, key="tool046_h_destination"
+                            )
+                            rnle_v_origin = st.number_input(
+                                "Vertical hand height at origin (cm)", min_value=0.0,
+                                max_value=175.0, value=75.0, step=1.0, key="tool046_v_origin"
+                            )
+                            rnle_v_destination = st.number_input(
+                                "Vertical hand height at destination (cm)", min_value=0.0,
+                                max_value=175.0, value=100.0, step=1.0, key="tool046_v_destination"
+                            )
+                            rnle_a_origin = st.number_input(
+                                "Asymmetry angle at origin (degrees)", min_value=0.0,
+                                max_value=135.0, value=0.0, step=5.0, key="tool046_a_origin"
+                            )
+                            rnle_a_destination = st.number_input(
+                                "Asymmetry angle at destination (degrees)", min_value=0.0,
+                                max_value=135.0, value=10.0, step=5.0, key="tool046_a_destination"
+                            )
+                            rnle_frequency = st.number_input(
+                                "Average lifting frequency (lifts/minute)", min_value=0.01,
+                                max_value=15.0, value=2.5, step=0.1, key="tool046_frequency"
+                            )
+                            rnle_duration_category = st.selectbox(
+                                "Continuous lifting duration category",
+                                ["≤1 hour", ">1 to ≤2 hours", ">2 to ≤8 hours"],
+                                index=0, key="tool046_duration"
+                            )
+                            rnle_coupling_origin = st.selectbox(
+                                "Hand-to-object coupling quality at origin", ["Good", "Fair", "Poor"],
+                                index=0, key="tool046_coupling_origin"
+                            )
+                            rnle_coupling_destination = st.selectbox(
+                                "Hand-to-object coupling quality at destination", ["Good", "Fair", "Poor"],
+                                index=0, key="tool046_coupling_destination"
+                            )
+                            rnle_applicability_confirmed = st.checkbox(
+                                "Confirm this is one two-handed standing lifting task within RNLE applicability "
+                                "(not seated/kneeling, one-handed, carrying, or an otherwise excluded task).",
+                                value=False, key="tool046_confirm_scope"
+                            )
+                            run_method = st.form_submit_button(
+                                "Calculate RNLE screening", type="primary",
+                                use_container_width=True, key="tool046_run"
+                            )
                         elif selected_tool["tool_id"] == "T047":
                             st.caption("Screening register only, not a certified or legally sufficient site safety assessment.")
                             hazard_json = st.text_area(
@@ -1285,6 +1388,21 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                         current_tool_inputs = {"tasks_json": pm_tasks_json, "as_of_date": pm_as_of_date}
                     elif selected_tool["tool_id"] == "T045":
                         current_tool_inputs = {"parts_json": spare_parts_json}
+                    elif selected_tool["tool_id"] == "T046":
+                        current_tool_inputs = {
+                            "load_kg": rnle_load_kg,
+                            "horizontal_origin_cm": rnle_h_origin,
+                            "horizontal_destination_cm": rnle_h_destination,
+                            "vertical_origin_cm": rnle_v_origin,
+                            "vertical_destination_cm": rnle_v_destination,
+                            "asymmetry_origin_degrees": rnle_a_origin,
+                            "asymmetry_destination_degrees": rnle_a_destination,
+                            "frequency_lifts_per_minute": rnle_frequency,
+                            "duration_category": rnle_duration_category,
+                            "coupling_quality_origin": rnle_coupling_origin,
+                            "coupling_quality_destination": rnle_coupling_destination,
+                            "applicability_confirmed": rnle_applicability_confirmed,
+                        }
                     elif selected_tool["tool_id"] == "T047":
                         current_tool_inputs = {"hazards_json": hazard_json}
                     elif selected_tool["tool_id"] == "T050":
@@ -1293,6 +1411,16 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                         current_tool_inputs = {"bom_json": mrp_bom_json, "inventory_json": mrp_inventory_json, "parent_demand_units": mrp_parent_demand, "due_period": int(mrp_due_period)}
                     elif selected_tool["tool_id"] == "T059":
                         current_tool_inputs = {"items_json": slotting_items_json, "slots_json": slotting_slots_json}
+                    elif selected_tool["tool_id"] == "T060":
+                        current_tool_inputs = {
+                            "suppliers_json": supply_chain_suppliers_json,
+                            "sites_json": supply_chain_sites_json,
+                            "baseline_routes_json": supply_chain_baseline_routes_json,
+                            "scenario_routes_json": supply_chain_scenario_routes_json,
+                            "scenario_name": supply_chain_scenario_name,
+                            "unmet_demand_penalty_per_unit": float(supply_chain_unmet_penalty),
+                            "time_limit_seconds": float(supply_chain_time_limit),
+                        }
                     elif selected_tool["tool_id"] == "T063":
                         current_tool_inputs = {"tasks_json": assignment_tasks_json, "resources_json": assignment_resources_json, "costs_json": assignment_costs_json}
                     elif selected_tool["tool_id"] == "T077":
@@ -1382,7 +1510,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 analyze_process_mining, analyze_water_waste_efficiency,
                                 analyze_weibull_reliability, analyze_spare_parts_criticality,
                                 analyze_safety_incident_trends, optimize_warehouse_slotting,
-                                optimize_task_resource_assignment, compare_energy_performance_scenarios,
+                                optimize_supply_chain_network, optimize_task_resource_assignment, compare_energy_performance_scenarios,
                                 fit_simple_linear_regression, run_one_way_anova, run_welch_t_test,
                                 forecast_demand_baselines, simulate_monte_carlo_net_value,
                                 map_industrial_fields, prioritize_maintenance_backlog,
@@ -1585,6 +1713,76 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 if not isinstance(parsed_slot_items, list) or not isinstance(parsed_slots, list):
                                     raise ValueError("Slotting items and slots must each be JSON lists.")
                                 result = optimize_warehouse_slotting(parsed_slot_items, parsed_slots)
+                            elif selected_tool["tool_id"] == "T060":
+                                try:
+                                    parsed_suppliers = json.loads(supply_chain_suppliers_json)
+                                    parsed_sites = json.loads(supply_chain_sites_json)
+                                    parsed_baseline_routes = json.loads(supply_chain_baseline_routes_json)
+                                    parsed_scenario_routes = json.loads(supply_chain_scenario_routes_json)
+                                except json.JSONDecodeError as exc:
+                                    raise ValueError("Supply-chain suppliers, sites, and both route scenarios must contain valid JSON.") from exc
+                                if not all(isinstance(value, list) for value in (
+                                    parsed_suppliers, parsed_sites, parsed_baseline_routes, parsed_scenario_routes
+                                )):
+                                    raise ValueError("Supply-chain suppliers, sites, and both route scenarios must each be JSON lists.")
+                                baseline_result = optimize_supply_chain_network(
+                                    parsed_suppliers, parsed_sites, parsed_baseline_routes,
+                                    unmet_demand_penalty_per_unit=float(supply_chain_unmet_penalty),
+                                    time_limit_seconds=float(supply_chain_time_limit),
+                                )
+                                scenario_result = optimize_supply_chain_network(
+                                    parsed_suppliers, parsed_sites, parsed_scenario_routes,
+                                    unmet_demand_penalty_per_unit=float(supply_chain_unmet_penalty),
+                                    time_limit_seconds=float(supply_chain_time_limit),
+                                )
+                                both_optimal = baseline_result.get("status") == "OPTIMAL" and scenario_result.get("status") == "OPTIMAL"
+                                result = {
+                                    "status": "SCENARIO_COMPARISON" if both_optimal else "SCENARIO_COMPARISON_INCOMPLETE",
+                                    "solver_status_baseline": baseline_result.get("solver_status", baseline_result.get("status")),
+                                    "solver_status_scenario": scenario_result.get("solver_status", scenario_result.get("status")),
+                                    "scenario_name": str(supply_chain_scenario_name).strip() or "User-defined alternative scenario",
+                                    "baseline_transport_cost": baseline_result.get("transport_cost"),
+                                    "scenario_transport_cost": scenario_result.get("transport_cost"),
+                                    "transport_cost_delta_scenario_minus_baseline": (
+                                        scenario_result["transport_cost"] - baseline_result["transport_cost"]
+                                        if both_optimal else None
+                                    ),
+                                    "baseline_total_unmet_demand": baseline_result.get("total_unmet_demand"),
+                                    "scenario_total_unmet_demand": scenario_result.get("total_unmet_demand"),
+                                    "unmet_demand_delta_scenario_minus_baseline": (
+                                        scenario_result["total_unmet_demand"] - baseline_result["total_unmet_demand"]
+                                        if both_optimal else None
+                                    ),
+                                    "baseline_objective_cost_including_unmet_penalty": baseline_result.get("objective_cost_including_unmet_penalty"),
+                                    "scenario_objective_cost_including_unmet_penalty": scenario_result.get("objective_cost_including_unmet_penalty"),
+                                    "objective_cost_delta_scenario_minus_baseline": (
+                                        scenario_result["objective_cost_including_unmet_penalty"] - baseline_result["objective_cost_including_unmet_penalty"]
+                                        if both_optimal else None
+                                    ),
+                                    "total_demand": baseline_result.get("total_demand"),
+                                    "baseline_shipment_plan": baseline_result.get("shipment_plan"),
+                                    "scenario_shipment_plan": scenario_result.get("shipment_plan"),
+                                    "baseline_site_service": baseline_result.get("site_service"),
+                                    "scenario_site_service": scenario_result.get("site_service"),
+                                    "baseline_supplier_utilization": baseline_result.get("supplier_utilization"),
+                                    "scenario_supplier_utilization": scenario_result.get("supplier_utilization"),
+                                    "method": "Two runs of the single-period capacitated transportation LP; the route-availability/capacity changes are the scenario inputs.",
+                                    "warning": (
+                                        "Compare actual units/cost definitions and validate the supplied network before decisions. "
+                                        "This model covers one period and one supplier-to-site transport layer; it omits lead-time scheduling, "
+                                        "multi-echelon routing, emissions, quality constraints and supplier-risk scoring. "
+                                        + ("Both solves returned OPTIMAL." if both_optimal else "At least one solver did not return OPTIMAL; do not treat the comparison as an optimal plan.")
+                                    ),
+                                    "data_provenance": (
+                                        "SYNTHETIC_EXAMPLE"
+                                        if supply_chain_suppliers_json.strip() == _TOOL060_EXAMPLE_SUPPLIERS
+                                        and supply_chain_sites_json.strip() == _TOOL060_EXAMPLE_SITES
+                                        and supply_chain_baseline_routes_json.strip() == _TOOL060_EXAMPLE_BASELINE_ROUTES
+                                        and supply_chain_scenario_routes_json.strip() == _TOOL060_EXAMPLE_SCENARIO_ROUTES
+                                        and float(supply_chain_unmet_penalty) == 1000.0
+                                        else "MODELLED_FROM_USER_ASSUMPTIONS"
+                                    ),
+                                }
                             elif selected_tool["tool_id"] == "T063":
                                 parsed_assignment_tasks = json.loads(assignment_tasks_json)
                                 parsed_assignment_resources = json.loads(assignment_resources_json)
@@ -1718,6 +1916,27 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 if not isinstance(parsed_parts, list):
                                     raise ValueError("Spare parts must be a JSON list of part objects.")
                                 result = analyze_spare_parts_criticality(parsed_parts)
+                            elif selected_tool["tool_id"] == "T046":
+                                duration_hours = {
+                                    "≤1 hour": 1.0,
+                                    ">1 to ≤2 hours": 2.0,
+                                    ">2 to ≤8 hours": 8.0,
+                                }[rnle_duration_category]
+                                result = calculate_rnle_lifting_index(
+                                    load_kg=rnle_load_kg,
+                                    horizontal_origin_cm=rnle_h_origin,
+                                    horizontal_destination_cm=rnle_h_destination,
+                                    vertical_origin_cm=rnle_v_origin,
+                                    vertical_destination_cm=rnle_v_destination,
+                                    asymmetry_origin_degrees=rnle_a_origin,
+                                    asymmetry_destination_degrees=rnle_a_destination,
+                                    frequency_lifts_per_minute=rnle_frequency,
+                                    duration_hours=duration_hours,
+                                    coupling_quality_origin=rnle_coupling_origin,
+                                    coupling_quality_destination=rnle_coupling_destination,
+                                    applicability_confirmed=rnle_applicability_confirmed,
+                                )
+                                result["data_provenance"] = "USER_ENTERED_UNVERIFIED"
                             elif selected_tool["tool_id"] == "T047":
                                 parsed_hazards = json.loads(hazard_json)
                                 if not isinstance(parsed_hazards, list):
@@ -1939,6 +2158,13 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 if not isinstance(parsed_repro_metadata, dict):
                                     raise ValueError("Run metadata must be a JSON object.")
                                 source_inputs = st.session_state.get("shoir_tool_inputs_" + source_result_tool_id, {})
+                                # Read explicit opt-in flags from the submitted form state.
+                                include_input_snapshot = bool(
+                                    st.session_state.get("tool087_include_inputs", include_input_snapshot)
+                                )
+                                include_result_tables = bool(
+                                    st.session_state.get("tool087_include_tables", include_result_tables)
+                                )
                                 pack_result = build_reproducibility_pack(
                                     source_result_tool_id,
                                     source_tool["canonical_name"],
@@ -1957,7 +2183,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                         except Exception as exc:
                             st.error(f"Tool run could not be completed safely: {exc}")
 
-                    if selected_tool["tool_id"] in {"T007", "T009", "T010", "T017", "T018", "T019", "T024", "T025", "T027", "T034", "T038", "T041", "T043", "T045", "T047", "T048", "T050", "T054", "T059", "T062", "T063", "T069", "T070", "T071", "T076", "T077", "T079", "T082", "T083", "T084", "T100"}:
+                    if selected_tool["tool_id"] in {"T007", "T009", "T010", "T017", "T018", "T019", "T024", "T025", "T027", "T034", "T038", "T041", "T043", "T045", "T046", "T047", "T048", "T050", "T054", "T059", "T060", "T062", "T063", "T069", "T070", "T071", "T076", "T077", "T079", "T082", "T083", "T084", "T100"}:
                         result = st.session_state.get("shoir_tool_result_" + selected_tool["tool_id"])
                         if result:
                             _show_focused_tool_persistence(selected_tool["tool_id"], result, current_tool_inputs)
@@ -1966,6 +2192,47 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 title=selected_tool["canonical_name"],
                                 key_prefix="target_" + selected_tool["tool_id"].lower(),
                             )
+                            if selected_tool["tool_id"] == "T060":
+                                baseline_cost = result.get("baseline_transport_cost")
+                                scenario_cost = result.get("scenario_transport_cost")
+                                baseline_unmet = result.get("baseline_total_unmet_demand")
+                                scenario_unmet = result.get("scenario_total_unmet_demand")
+                                if result.get("status") == "SCENARIO_COMPARISON" and None not in (baseline_cost, scenario_cost):
+                                    k1, k2, k3, k4 = st.columns(4)
+                                    k1.metric("Baseline transport cost", f"{float(baseline_cost):,.2f}")
+                                    k2.metric("Scenario transport cost", f"{float(scenario_cost):,.2f}")
+                                    k3.metric("Transport cost change", f"{float(result['transport_cost_delta_scenario_minus_baseline']):+,.2f}")
+                                    k4.metric("Unmet demand change", f"{float(result['unmet_demand_delta_scenario_minus_baseline']):+,.2f}")
+                                    fig = go.Figure()
+                                    fig.add_trace(go.Bar(name="Transport cost", x=["Baseline", str(result.get("scenario_name") or "Scenario")], y=[float(baseline_cost), float(scenario_cost)]))
+                                    fig.update_layout(
+                                        title="Baseline versus disruption scenario",
+                                        xaxis_title="Model scenario",
+                                        yaxis_title="Transport cost (input cost units)",
+                                        margin=dict(t=55, b=30, l=35, r=20),
+                                    )
+                                    st.plotly_chart(fig, use_container_width=True, key="target_t060_cost_comparison")
+                                    baseline_tab, scenario_tab, service_tab = st.tabs(["Baseline shipment plan", "Scenario shipment plan", "Site service comparison"])
+                                    with baseline_tab:
+                                        st.dataframe(result.get("baseline_shipment_plan"), use_container_width=True, hide_index=True)
+                                    with scenario_tab:
+                                        st.dataframe(result.get("scenario_shipment_plan"), use_container_width=True, hide_index=True)
+                                    with service_tab:
+                                        baseline_service = result.get("baseline_site_service")
+                                        scenario_service = result.get("scenario_site_service")
+                                        if isinstance(baseline_service, pd.DataFrame) and isinstance(scenario_service, pd.DataFrame):
+                                            merged_service = baseline_service.merge(
+                                                scenario_service, on="Site", suffixes=(" (baseline)", " (scenario)")
+                                            )
+                                            st.dataframe(merged_service, use_container_width=True, hide_index=True)
+                                    st.warning(result.get("warning", "Validate the network and all model assumptions before using the scenario."))
+                                else:
+                                    st.error(
+                                        "At least one scenario did not return an optimal result. "
+                                        f"Baseline status: {result.get('solver_status_baseline')}; "
+                                        f"scenario status: {result.get('solver_status_scenario')}. "
+                                        + str(result.get("warning", "No optimal comparison is available."))
+                                    )
                             if selected_tool["tool_id"] == "T100":
                                 st.download_button(
                                     "Download redacted support bundle (JSON)",

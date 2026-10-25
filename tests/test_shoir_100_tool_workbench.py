@@ -639,12 +639,13 @@ def test_workbench_builds_downloadable_reproducibility_pack():
     at.run(timeout=90)
     assert not at.exception, "\n".join(str(error.value) for error in at.exception)
     source = at.selectbox(key="tool087_source_id")
-    assert "T021" in source.options
-    source.select("T021")
+    assert any(str(option).startswith("T021 · Time Study and Standard Time") for option in source.options)
+    # Streamlit format_func renders the label; tests should set the stable source ID.
+    source.set_value("T021")
     at.checkbox(key="tool087_include_inputs").set_value(True)
     at.checkbox(key="tool087_include_tables").set_value(True)
-    at.run(timeout=90)
-    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+    # Streamlit form controls are submitted atomically with the form button.
+    # Do not rerun the app between editing form values and submitting the form.
     at.button(key="tool087_run").click()
     at.run(timeout=90)
     assert not at.exception, "\n".join(str(error.value) for error in at.exception)
@@ -658,7 +659,7 @@ def test_workbench_builds_downloadable_reproducibility_pack():
         assert "SHA256SUMS.txt" in archive.namelist()
         assert "input_snapshot_redacted.json" in archive.namelist()
     assert result["bundle_sha256"]
-    assert any(button.key == "tool087_download" for button in at.button)
+    assert any(button.key == "tool087_download" for button in at.get("download_button"))
 
 
 def test_workbench_runs_facility_location_flow():
@@ -673,7 +674,7 @@ def test_workbench_runs_facility_location_flow():
     at.run(timeout=90)
     assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
 
-    at.selectbox(key="shoir_100_tool_inspector").select("T069")
+    at.selectbox(key="shoir_100_tool_inspector").select("T069 · Network Flow and Location Optimization")
     at.run(timeout=90)
     assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
     at.button(key="tool069_run").click()
@@ -698,7 +699,7 @@ def test_workbench_student_practice_mode_checks_answers_and_shows_solution():
     at.run(timeout=90)
     assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
 
-    at.selectbox(key="shoir_100_tool_inspector").select("T089")
+    at.selectbox(key="shoir_100_tool_inspector").select("T089 · Student Learning and Practice Mode")
     at.run(timeout=90)
     assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
     at.number_input(key="tool089_answer").set_value(2.0)
@@ -723,7 +724,7 @@ def test_workbench_guided_study_wizard_returns_gated_step_plan():
     at.run(timeout=90)
     assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
 
-    at.selectbox(key="shoir_100_tool_inspector").select("T002")
+    at.selectbox(key="shoir_100_tool_inspector").select("T002 · Guided Study Wizard")
     at.run(timeout=90)
     assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
     at.text_input(key="tool002_available_fields").set_value(
@@ -751,7 +752,7 @@ def test_workbench_runs_equipment_anomaly_monitor_and_labels_example_data():
     at.run(timeout=90)
     assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
 
-    at.selectbox(key="shoir_100_tool_inspector").select("T048")
+    at.selectbox(key="shoir_100_tool_inspector").select("T048 · Equipment Anomaly Monitor")
     at.run(timeout=90)
     assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
     at.button(key="tool048_run").click()
@@ -775,7 +776,7 @@ def test_workbench_capa_8d_register_reports_completeness_and_overdue_state():
     at.run(timeout=90)
     assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
 
-    at.selectbox(key="shoir_100_tool_inspector").select("T039")
+    at.selectbox(key="shoir_100_tool_inspector").select("T039 · CAPA and 8D Manager")
     at.run(timeout=90)
     assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
     at.button(key="tool039_run").click()
@@ -787,3 +788,36 @@ def test_workbench_capa_8d_register_reports_completeness_and_overdue_state():
     assert result["record_count"] == 1
     assert result["data_provenance"] == "SYNTHETIC_EXAMPLE"
     assert result["records"].iloc[0]["Workflow state"] == "IN_PROGRESS"
+
+def test_workbench_runs_rnle_ergonomics_screen():
+    from streamlit.testing.v1 import AppTest
+
+    page = ROOT / "pages" / "Industrial_Engineering_Workbench.py"
+    at = AppTest.from_file(page, default_timeout=90)
+    at.session_state["current_user"] = "rnle-workbench-checker"
+    at.session_state["authenticated"] = True
+    at.session_state["user_tier"] = "Professional"
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+
+    at.selectbox(key="shoir_100_tool_inspector").select("T046 · Ergonomics Assessment Toolkit")
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+
+    # Scope confirmation is explicit: the method must not run on an unchecked default.
+    at.checkbox(key="tool046_confirm_scope").check()
+    at.button(key="tool046_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+
+    result = at.session_state.get("shoir_tool_result_T046")
+    assert result is not None, "T046 did not produce a result: " + " | ".join(str(item.value) for item in at.error)
+    assert result["status"] == "CALCULATED_SCREENING"
+    assert result["recommended_weight_limit_kg"] > 0
+    assert result["lifting_index"] > 0
+    assert result["data_provenance"] == "USER_ENTERED_UNVERIFIED"
+    assert result["_workspace_persistence"] in {
+        "SAVED_LOCAL_FALLBACK", "SAVED_MANAGED_WORKSPACE", "SESSION_ONLY",
+        "SAVE_FAILED", "SAVE_PENDING", "SAVE_STATUS_NOT_CONFIRMED",
+    }
+
