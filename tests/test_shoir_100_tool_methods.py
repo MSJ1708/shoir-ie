@@ -435,3 +435,132 @@ def test_hazard_register_distinguishes_inherent_and_residual_risk():
     assert row["inherent_score"] == 20
     assert row["residual_score"] == 10
     assert "not a certified workplace risk assessment" in " ".join(result["warnings"])
+
+def test_maintenance_backlog_prioritization_respects_skill_hours_and_discloses_heuristic():
+    from shoir_100_tool_methods import maintenance_backlog_priority
+
+    result = maintenance_backlog_priority(
+        [
+            {"work_order_id": "WO-1", "asset_id": "A-1", "required_skill": "Mechanical",
+             "criticality_1_to_5": 5, "days_overdue": 8, "estimated_hours": 2},
+            {"work_order_id": "WO-2", "asset_id": "A-2", "required_skill": "Electrical",
+             "criticality_1_to_5": 4, "days_overdue": 2, "estimated_hours": 1},
+            {"work_order_id": "WO-3", "asset_id": "A-3", "required_skill": "Mechanical",
+             "criticality_1_to_5": 5, "days_overdue": 2, "estimated_hours": 1},
+        ],
+        {"Mechanical": 2, "Electrical": 1},
+    )
+    orders = result["work_orders"].set_index("work_order_id")
+    assert result["status"] == "PRIORITIZED_HEURISTIC"
+    assert orders.loc["WO-1", "allocation_status"] == "SCHEDULED_BY_PRIORITY_HEURISTIC"
+    assert orders.loc["WO-2", "allocation_status"] == "SCHEDULED_BY_PRIORITY_HEURISTIC"
+    assert orders.loc["WO-3", "allocation_status"] == "DEFERRED_SKILL_CAPACITY"
+    assert result["scheduled_count"] == 2
+    assert result["skill_capacity"].set_index("skill").loc["Mechanical", "planned_hours"] == pytest.approx(2)
+    assert any("not a globally optimal" in warning for warning in result["warnings"])
+
+
+def test_maintenance_backlog_rejects_duplicate_ids_and_negative_capacity():
+    from shoir_100_tool_methods import maintenance_backlog_priority
+
+    row = {"work_order_id": "WO-1", "asset_id": "A-1", "required_skill": "Mech",
+           "criticality_1_to_5": 3, "days_overdue": 0, "estimated_hours": 1}
+    with pytest.raises(ValueError, match="unique ID"):
+        maintenance_backlog_priority([row, row], {"Mech": 1})
+    with pytest.raises(ValueError, match="non-negative hours"):
+        maintenance_backlog_priority([row], {"Mech": -1})
+
+
+def test_sales_operations_reconciliation_carries_inventory_and_backlog():
+    from shoir_100_tool_methods import sales_operations_reconciliation
+
+    result = sales_operations_reconciliation(
+        [
+            {"period": "P1", "demand_units": 100, "planned_production_units": 90, "available_capacity_units": 95},
+            {"period": "P2", "demand_units": 120, "planned_production_units": 130, "available_capacity_units": 100},
+            {"period": "P3", "demand_units": 100, "planned_production_units": 120, "available_capacity_units": 120},
+        ],
+        initial_inventory_units=10,
+    )
+    table = result["periods"].set_index("period")
+    assert table.loc["P1", "ending_inventory_units"] == pytest.approx(0)
+    assert table.loc["P1", "ending_backlog_units"] == pytest.approx(0)
+    assert table.loc["P2", "capacity_limited_production_units"] == pytest.approx(100)
+    assert table.loc["P2", "ending_backlog_units"] == pytest.approx(20)
+    assert table.loc["P3", "ending_backlog_units"] == pytest.approx(0)
+    assert table.loc["P3", "ending_inventory_units"] == pytest.approx(0)
+    assert result["total_capacity_shortfall_vs_plan_units"] == pytest.approx(30)
+
+
+def test_sales_operations_reconciliation_rejects_duplicate_periods_and_negative_demand():
+    from shoir_100_tool_methods import sales_operations_reconciliation
+
+    row = {"period": "P1", "demand_units": 1, "planned_production_units": 1, "available_capacity_units": 1}
+    with pytest.raises(ValueError, match="unique label"):
+        sales_operations_reconciliation([row, row])
+    bad = dict(row, demand_units=-1)
+    with pytest.raises(ValueError, match="non-negative demand"):
+        sales_operations_reconciliation([bad])
+
+
+def test_supplier_scorecard_keeps_incomplete_supplier_unranked_and_discloses_weights():
+    from shoir_100_tool_methods import supplier_performance_scorecard
+
+    result = supplier_performance_scorecard(
+        [
+            {"supplier": "A", "quality_score": 80, "delivery_score": 90, "cost_score": 70, "risk_management_score": 100},
+            {"supplier": "B", "quality_score": 95, "delivery_score": 95, "cost_score": None, "risk_management_score": 90},
+            {"supplier": "C", "quality_score": 100, "delivery_score": 60, "cost_score": 80, "risk_management_score": 50},
+        ],
+        {"quality": 0.4, "delivery": 0.3, "cost": 0.2, "risk_management": 0.1},
+    )
+    suppliers = result["suppliers"].set_index("supplier")
+    assert suppliers.loc["A", "weighted_score_0_to_100"] == pytest.approx(83)
+    assert suppliers.loc["C", "weighted_score_0_to_100"] == pytest.approx(79)
+    assert pd.isna(suppliers.loc["B", "weighted_score_0_to_100"])
+    assert pd.isna(suppliers.loc["B", "rank"])
+    assert result["ranked_supplier_count"] == 2
+    assert result["unranked_supplier_count"] == 1
+    assert sum(result["weights"].values()) == pytest.approx(1.0)
+
+
+def test_supplier_scorecard_rejects_scores_outside_normalized_range_and_zero_weights():
+    from shoir_100_tool_methods import supplier_performance_scorecard
+
+    row = {"supplier": "A", "quality_score": 101, "delivery_score": 90, "cost_score": 80, "risk_management_score": 90}
+    with pytest.raises(ValueError, match="between 0 and 100"):
+        supplier_performance_scorecard([row])
+    row["quality_score"] = 50
+    with pytest.raises(ValueError, match="positive"):
+        supplier_performance_scorecard([row], {"quality": 0, "delivery": 0, "cost": 0, "risk_management": 0})
+
+
+def test_single_station_des_reproducible_and_reports_replication_diagnostics():
+    from shoir_100_tool_methods import simulate_single_station_des
+
+    args = {
+        "customers": 300, "mean_interarrival": 1.0, "mean_service": 0.8,
+        "arrival_distribution": "exponential", "service_distribution": "exponential",
+        "warmup_customers": 30, "replications": 8, "seed": 11,
+    }
+    first = simulate_single_station_des(**args)
+    second = simulate_single_station_des(**args)
+    assert first["status"] == "SIMULATED"
+    assert first["configuration"]["provenance"] == "SYNTHETIC_SIMULATION"
+    assert len(first["replication_results"]) == 8
+    pd.testing.assert_frame_equal(first["replication_results"], second["replication_results"])
+    assert first["mean_wait_time_units"] >= 0
+    assert 0 <= first["mean_utilization_pct"] <= 100
+    assert first["throughput_customers_per_time_unit"] > 0
+
+
+def test_single_station_des_rejects_invalid_distributions_and_flags_overload():
+    from shoir_100_tool_methods import simulate_single_station_des
+
+    with pytest.raises(ValueError, match="distributions must be exponential or constant"):
+        simulate_single_station_des(arrival_distribution="normal")
+    result = simulate_single_station_des(
+        customers=100, mean_interarrival=1, mean_service=2, warmup_customers=10,
+        replications=3, seed=4,
+    )
+    assert any("offered load" in warning for warning in result["warnings"])
