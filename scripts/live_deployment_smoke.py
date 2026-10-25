@@ -81,7 +81,10 @@ def _tab_bar_layout(app_frame) -> dict:
                     labelRight: labelRect.right,
                     labelClientWidth: label.clientWidth,
                     labelScrollWidth: label.scrollWidth,
-                    whiteSpace: getComputedStyle(button).whiteSpace
+                    labelClientHeight: label.clientHeight,
+                    labelScrollHeight: label.scrollHeight,
+                    whiteSpace: getComputedStyle(button).whiteSpace,
+                    labelWhiteSpace: getComputedStyle(label).whiteSpace
                 };
             });
             return {
@@ -112,9 +115,20 @@ def _validate_tab_bar_layout(layout: dict, viewport_width: int) -> None:
             raise AssertionError(f"Public tab label is horizontally clipped: {tab}")
         if tab["scrollHeight"] > tab["clientHeight"] + 2:
             raise AssertionError(f"Public tab label is vertically clipped: {tab}")
+        if tab["labelClientWidth"] <= 0 or tab["labelClientHeight"] <= 0:
+            raise AssertionError(f"Public tab label has no visible layout box: {tab}")
+        if tab["labelScrollWidth"] > tab["labelClientWidth"] + 2:
+            raise AssertionError(f"Inner public tab label is horizontally clipped: {tab}")
+        if tab["labelScrollHeight"] > tab["labelClientHeight"] + 2:
+            raise AssertionError(f"Inner public tab label is vertically clipped: {tab}")
+        if tab["labelLeft"] < tab["left"] - 2 or tab["labelRight"] > tab["right"] + 2:
+            raise AssertionError(f"Public tab label extends beyond its button: {tab}")
         if tab["labelRight"] > layout["listRight"] + 2:
             raise AssertionError(f"Public tab label extends beyond the visible tab-list: {tab}")
-    if viewport_width <= 600 and any(tab["whiteSpace"] == "nowrap" for tab in layout["tabs"]):
+    if viewport_width <= 600 and any(
+        tab["whiteSpace"] == "nowrap" or tab["labelWhiteSpace"] == "nowrap"
+        for tab in layout["tabs"]
+    ):
         raise AssertionError(f"Mobile tab labels are configured not to wrap: {layout}")
 
 

@@ -53,7 +53,8 @@ def test_tab_bar_layout_validator_catches_mobile_clipping():
             "clientHeight": 42, "scrollHeight": 42,
             "labelLeft": 8, "labelRight": 110,
             "labelClientWidth": 102, "labelScrollWidth": 102,
-            "whiteSpace": "normal",
+            "labelClientHeight": 18, "labelScrollHeight": 18,
+            "whiteSpace": "normal", "labelWhiteSpace": "normal",
         },
         {
             "label": "Get Ticket & Register",
@@ -62,7 +63,8 @@ def test_tab_bar_layout_validator_catches_mobile_clipping():
             "clientHeight": 58, "scrollHeight": 58,
             "labelLeft": 130, "labelRight": 247,
             "labelClientWidth": 117, "labelScrollWidth": 117,
-            "whiteSpace": "normal",
+            "labelClientHeight": 34, "labelScrollHeight": 34,
+            "whiteSpace": "normal", "labelWhiteSpace": "normal",
         },
         {
             "label": "Explore the Modules",
@@ -71,7 +73,8 @@ def test_tab_bar_layout_validator_catches_mobile_clipping():
             "clientHeight": 58, "scrollHeight": 58,
             "labelLeft": 8, "labelRight": 182,
             "labelClientWidth": 174, "labelScrollWidth": 174,
-            "whiteSpace": "normal",
+            "labelClientHeight": 34, "labelScrollHeight": 34,
+            "whiteSpace": "normal", "labelWhiteSpace": "normal",
         },
     ]
     layout = {
@@ -97,9 +100,14 @@ def test_tab_bar_layout_validator_catches_mobile_clipping():
         _validate_tab_bar_layout(vertically_clipped_label, 390)
 
     non_wrapping_mobile_label = {**layout, "tabs": [dict(tab) for tab in good_tabs]}
-    non_wrapping_mobile_label["tabs"][2]["whiteSpace"] = "nowrap"
+    non_wrapping_mobile_label["tabs"][2]["labelWhiteSpace"] = "nowrap"
     with pytest.raises(AssertionError, match="configured not to wrap"):
         _validate_tab_bar_layout(non_wrapping_mobile_label, 390)
+
+    clipped_inner_label = {**layout, "tabs": [dict(tab) for tab in good_tabs]}
+    clipped_inner_label["tabs"][1]["labelScrollWidth"] = clipped_inner_label["tabs"][1]["labelClientWidth"] + 12
+    with pytest.raises(AssertionError, match="Inner public tab label is horizontally clipped"):
+        _validate_tab_bar_layout(clipped_inner_label, 390)
 
 
 def test_tab_bar_layout_validator_allows_desktop_whitespace_when_not_clipped():
