@@ -400,7 +400,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                 "Copilot action, API and export path must enforce their own server-side entitlement checks."
             )
 
-            if selected_tool["tool_id"] in {"T015", "T016", "T017", "T018", "T019", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T033", "T034", "T036", "T037", "T038", "T040", "T041", "T042", "T043", "T045", "T047", "T049", "T050", "T052", "T054", "T055", "T056", "T058", "T059", "T062", "T063", "T066", "T070", "T071", "T075", "T076", "T077", "T078", "T079", "T081", "T082", "T083", "T084", "T085"}:
+            if selected_tool["tool_id"] in {"T015", "T016", "T017", "T018", "T019", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T033", "T034", "T036", "T037", "T038", "T040", "T041", "T042", "T043", "T045", "T047", "T049", "T050", "T052", "T054", "T055", "T056", "T058", "T059", "T062", "T063", "T066", "T070", "T071", "T075", "T076", "T077", "T078", "T079", "T081", "T082", "T083", "T084", "T085", "T087"}:
                 st.markdown("---")
                 st.markdown("**Run focused specialist method**")
                 st.caption(
@@ -926,6 +926,50 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                             solver_time_limit = st.number_input("Solver time limit (seconds)", min_value=0.1, max_value=300.0, value=10.0, step=1.0, key="tool062_time_limit")
                             solver_tolerance = st.select_slider("Feasibility tolerance", options=[1e-7, 1e-6, 1e-5, 1e-4, 1e-3], value=1e-7, key="tool062_tolerance")
                             run_method = st.form_submit_button("Solve and diagnose model", type="primary", use_container_width=True, key="tool062_run")
+                        elif selected_tool["tool_id"] == "T087":
+                            st.caption("Package a previously completed, authorized tool result with method/environment metadata, configuration fingerprint and SHA-256 checksums. Raw inputs and detailed result tables are opt-in. Review the ZIP contents before sharing.")
+                            result_id_candidates = sorted({
+                                key.replace("shoir_tool_result_", "")
+                                for key in st.session_state.keys()
+                                if key.startswith("shoir_tool_result_T")
+                                and isinstance(st.session_state.get(key), dict)
+                                and tier_allows_tool(RAW_TIER, key.replace("shoir_tool_result_", ""))
+                            })
+                            if not result_id_candidates:
+                                st.info("Run an entitled engineering tool in this session first. Only completed, currently authorized results are eligible.")
+                            result_id_options = result_id_candidates or ["NONE"]
+                            source_result_tool_id = st.selectbox(
+                                "Completed result to package",
+                                options=result_id_options,
+                                format_func=lambda tool_id: (
+                                    f"{tool_id} · {next((tool.get('canonical_name', tool_id) for tool in TOOL_TARGETS if tool.get('tool_id') == tool_id), tool_id)}"
+                                    if tool_id != "NONE" else "No completed authorized result"
+                                ),
+                                disabled=not bool(result_id_candidates),
+                                key="tool087_source_id",
+                            )
+                            reproducibility_metadata_json = st.text_area(
+                                "Run metadata (JSON object; e.g. study reference, reviewer, protocol version)",
+                                value='{"study_reference":"demo-study","method_version":"Shoir-IE target engine","notes":"Review before distribution"}',
+                                key="tool087_metadata",
+                            )
+                            include_input_snapshot = st.checkbox(
+                                "Include redacted input snapshot (opt-in)",
+                                value=False,
+                                key="tool087_include_inputs",
+                            )
+                            include_result_tables = st.checkbox(
+                                "Include sanitized result tables (opt-in)",
+                                value=False,
+                                key="tool087_include_tables",
+                            )
+                            run_method = st.form_submit_button(
+                                "Build reproducibility ZIP",
+                                type="primary",
+                                use_container_width=True,
+                                key="tool087_run",
+                                disabled=not bool(result_id_candidates),
+                            )
 
                     if selected_tool["tool_id"] == "T021":
                         current_tool_inputs = {
@@ -1071,6 +1115,8 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                         current_tool_inputs = {"process_steps_json": des_steps_json, "job_count": int(des_job_count), "mean_interarrival_time": des_interarrival, "arrival_distribution": des_arrival_distribution, "warmup_jobs": int(des_warmup_jobs), "replications": int(des_replications), "random_seed": int(des_seed), "time_unit": des_time_unit}
                     elif selected_tool["tool_id"] == "T062":
                         current_tool_inputs = {"variables_json": solver_variables_json, "objective_json": solver_objective_json, "constraints_json": solver_constraints_json, "direction": solver_direction, "time_limit_seconds": solver_time_limit, "feasibility_tolerance": solver_tolerance}
+                    elif selected_tool["tool_id"] == "T087":
+                        current_tool_inputs = {"source_tool_id": source_result_tool_id, "metadata_json": reproducibility_metadata_json, "include_input_snapshot": include_input_snapshot, "include_result_tables": include_result_tables}
                     else:
                         current_tool_inputs = {
                             "cohen_d": effect_size, "alpha": alpha,
@@ -1111,7 +1157,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 analyze_measurement_system_gage_rr, fit_regression_anova, run_hypothesis_test,
                                 prioritize_maintenance_backlog, score_supplier_performance,
                                 map_industrial_fields, reconcile_sop_plan, simulate_discrete_event_process,
-                                run_solver_diagnostics,
+                                run_solver_diagnostics, build_reproducibility_pack,
                             )
                             if selected_tool["tool_id"] == "T021":
                                 try:
@@ -1558,6 +1604,31 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                     and solver_direction == "minimize"
                                     else "MODELLED_FROM_USER_ASSUMPTIONS"
                                 )
+                            elif selected_tool["tool_id"] == "T087":
+                                if source_result_tool_id == "NONE":
+                                    raise ValueError("Run an entitled source tool first; no completed result is available to package.")
+                                source_tool = require_tool_access(RAW_TIER, source_result_tool_id)
+                                source_result = st.session_state.get("shoir_tool_result_" + source_result_tool_id)
+                                if not isinstance(source_result, dict):
+                                    raise ValueError("The selected source result is no longer available in this session; rerun the source tool.")
+                                try:
+                                    parsed_repro_metadata = json.loads(reproducibility_metadata_json or "{}")
+                                except json.JSONDecodeError as exc:
+                                    raise ValueError("Run metadata must be valid JSON.") from exc
+                                if not isinstance(parsed_repro_metadata, dict):
+                                    raise ValueError("Run metadata must be a JSON object.")
+                                source_inputs = st.session_state.get("shoir_tool_inputs_" + source_result_tool_id, {})
+                                pack_result = build_reproducibility_pack(
+                                    source_result_tool_id,
+                                    source_tool["canonical_name"],
+                                    source_result,
+                                    inputs=source_inputs if isinstance(source_inputs, dict) else {},
+                                    metadata=parsed_repro_metadata,
+                                    include_input_snapshot=include_input_snapshot,
+                                    include_result_tables=include_result_tables,
+                                )
+                                st.session_state["shoir_tool_bundle_bytes_T087"] = pack_result.pop("bundle_bytes")
+                                result = pack_result
                             _persist_focused_tool_result(
                                 selected_tool["tool_id"], result, current_tool_inputs
                             )
@@ -1573,6 +1644,27 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 title=selected_tool["canonical_name"],
                                 key_prefix="target_" + selected_tool["tool_id"].lower(),
                             )
+                    elif selected_tool["tool_id"] == "T087":
+                        result = st.session_state.get("shoir_tool_result_T087")
+                        bundle_bytes = st.session_state.get("shoir_tool_bundle_bytes_T087")
+                        if result:
+                            _show_focused_tool_persistence("T087", result, current_tool_inputs)
+                            st.metric("ZIP bundle size", f"{int(result.get('bundle_byte_count', 0)):,} bytes")
+                            st.code(result.get("bundle_sha256", ""))
+                            st.caption("Verify SHA-256 checksums in SHA256SUMS.txt. Review contents before sharing; tables and input snapshots are opt-in.")
+                            if isinstance(bundle_bytes, bytes) and bundle_bytes:
+                                st.download_button(
+                                    "Download reproducibility ZIP",
+                                    data=bundle_bytes,
+                                    file_name=result.get("filename", "shoir_ie_reproducibility_pack.zip"),
+                                    mime="application/zip",
+                                    key="tool087_download",
+                                    use_container_width=True,
+                                )
+                            inventory = result.get("artifact_inventory")
+                            if isinstance(inventory, pd.DataFrame):
+                                st.dataframe(inventory, use_container_width=True, hide_index=True)
+                            st.json(result.get("manifest", {}))
                     elif selected_tool["tool_id"] == "T016":
                         result = st.session_state.get("shoir_tool_result_T016")
                         if result:
