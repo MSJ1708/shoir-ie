@@ -34,7 +34,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 import pulp
-from scipy.stats import nct, norm, t
+from scipy.stats import f, nct, norm, t
 
 
 def _finite_number(value: Any, field: str) -> float:
@@ -3534,4 +3534,416 @@ def score_supplier_performance(
             ascending=[True, True, True], na_position="last", kind="stable"
         ).reset_index(drop=True),
         "warning": "Weights and 0–100 scores are user-defined. Incomplete suppliers are not ranked. Verify evidence recency, score rubric and conflict-of-interest controls before procurement decisions.",
+    }
+
+
+# Additional specialist engines integrated into the 100-tool Workbench.
+# Each method is intentionally scoped to a documented baseline; unsupported
+# assumptions are surfaced in result metadata rather than silently inferred.
+
+def _finite_vector(values: Sequence[Any], field: str, *, minimum: int = 2) -> list[float]:
+    if not isinstance(values, Sequence) or isinstance(values, (str, bytes)):
+        raise ValueError(f"{field} must be a sequence of numeric observations.")
+    result = [_finite_number(value, f"{field} item {i}") for i, value in enumerate(values, start=1)]
+    if len(result) < minimum:
+        raise ValueError(f"{field} must contain at least {minimum} observations.")
+    return result
+
+
+def fit_simple_linear_regression(
+    observations: Sequence[Mapping[str, Any]], *, alpha: float = 0.05
+) -> dict[str, Any]:
+    """Fit ordinary least squares for one numeric predictor and one response.
+
+    Returns coefficient inference and the regression ANOVA decomposition. This
+    is a descriptive first-order model, not a causal model or an extrapolation
+    guarantee. Inputs must already be cleaned and appropriately ordered if time
+    is a predictor.
+    """
+    if not isinstance(observations, Sequence) or isinstance(observations, (str, bytes)):
+        raise ValueError("Observations must be a JSON list of {x, y} objects.")
+    if len(observations) < 3:
+        raise ValueError("Simple linear regression needs at least three observations.")
+    level = _finite_number(alpha, "Alpha")
+    if not 0 < level < 1:
+        raise ValueError("Alpha must be strictly between 0 and 1.")
+    xs: list[float] = []
+    ys: list[float] = []
+    for index, item in enumerate(observations, start=1):
+        if not isinstance(item, Mapping) or "x" not in item or "y" not in item:
+            raise ValueError(f"Observation {index} must contain numeric x and y values.")
+        xs.append(_finite_number(item["x"], f"Observation {index} x"))
+        ys.append(_finite_number(item["y"], f"Observation {index} y"))
+    x = np.asarray(xs, dtype=float)
+    y = np.asarray(ys, dtype=float)
+    x_mean = float(np.mean(x))
+    y_mean = float(np.mean(y))
+    sxx = float(np.sum((x - x_mean) ** 2))
+    if sxx <= np.finfo(float).eps:
+        raise ValueError("Predictor x must contain at least two distinct values.")
+    slope = float(np.sum((x - x_mean) * (y - y_mean)) / sxx)
+    intercept = float(y_mean - slope * x_mean)
+    fitted = intercept + slope * x
+    residuals = y - fitted
+    sse = float(np.sum(residuals ** 2))
+    sst = float(np.sum((y - y_mean) ** 2))
+    if sst <= np.finfo(float).eps:
+        raise ValueError("Response y must vary; R-squared is undefined for a constant response.")
+    ssr = max(0.0, sst - sse)
+    n = len(x)
+    df_regression = 1
+    df_residual = n - 2
+    mse = sse / df_residual
+    residual_se = math.sqrt(max(mse, 0.0))
+    slope_se = residual_se / math.sqrt(sxx)
+    if slope_se <= np.finfo(float).eps:
+        t_stat = math.copysign(math.inf, slope) if slope != 0 else 0.0
+        p_value = 0.0 if slope != 0 else 1.0
+        slope_ci = (slope, slope)
+    else:
+        t_stat = slope / slope_se
+        p_value = float(2 * t.sf(abs(t_stat), df_residual))
+        margin = float(t.ppf(1 - level / 2, df_residual) * slope_se)
+        slope_ci = (slope - margin, slope + margin)
+    if sse <= np.finfo(float).eps and ssr > 0:
+        f_stat = math.inf
+        f_p_value = 0.0
+    elif mse > 0:
+        f_stat = (ssr / df_regression) / mse
+        f_p_value = float(f.sf(f_stat, df_regression, df_residual))
+    else:
+        f_stat = 0.0
+        f_p_value = 1.0
+    r_squared = min(1.0, max(0.0, 1 - sse / sst))
+    adjusted_r_squared = 1 - (1 - r_squared) * (n - 1) / df_residual
+    residual_frame = pd.DataFrame({
+        "Observation": np.arange(1, n + 1),
+        "X": x,
+        "Observed Y": y,
+        "Fitted Y": fitted,
+        "Residual": residuals,
+    })
+    anova_table = pd.DataFrame([
+        {"Source": "Regression", "Sum of squares": ssr, "df": df_regression, "Mean square": ssr / df_regression, "F": f_stat, "p-value": f_p_value},
+        {"Source": "Residual", "Sum of squares": sse, "df": df_residual, "Mean square": mse, "F": None, "p-value": None},
+        {"Source": "Total", "Sum of squares": sst, "df": n - 1, "Mean square": None, "F": None, "p-value": None},
+    ])
+    return {
+        "status": "CALCULATED",
+        "method": "Ordinary least squares; one predictor; two-sided coefficient test",
+        "n": n,
+        "intercept": intercept,
+        "slope": slope,
+        "slope_standard_error": slope_se,
+        "slope_t_statistic": t_stat,
+        "slope_p_value": p_value,
+        "slope_confidence_level": 1 - level,
+        "slope_confidence_interval": slope_ci,
+        "r_squared": r_squared,
+        "adjusted_r_squared": adjusted_r_squared,
+        "residual_standard_error": residual_se,
+        "anova_table": anova_table,
+        "residuals": residual_frame,
+        "formula": "y_hat = intercept + slope*x; R² = 1 − SSE/SST",
+        "assumptions": "Linear mean relation, independent errors, stable error variance and suitable residual distribution for classical inference. Inspect residual plots before relying on p-values or intervals.",
+        "warning": "Association is not proof of causation. This implementation supports one numeric predictor only; no polynomial, multivariable, robust or time-series regression is implied.",
+    }
+
+
+def run_one_way_anova(
+    groups: Mapping[str, Sequence[Any]], *, alpha: float = 0.05
+) -> dict[str, Any]:
+    """Run one-way fixed-factor ANOVA for independent groups with finite values."""
+    if not isinstance(groups, Mapping) or len(groups) < 2:
+        raise ValueError("Provide at least two named groups for one-way ANOVA.")
+    level = _finite_number(alpha, "Alpha")
+    if not 0 < level < 1:
+        raise ValueError("Alpha must be strictly between 0 and 1.")
+    normalized: dict[str, list[float]] = {}
+    for raw_name, values in groups.items():
+        name = str(raw_name or "").strip()
+        if not name:
+            raise ValueError("Every ANOVA group needs a non-empty name.")
+        if name in normalized:
+            raise ValueError(f"ANOVA group names must be unique: {name}.")
+        normalized[name] = _finite_vector(values, f"Group {name}", minimum=2)
+    all_values = np.asarray([value for values in normalized.values() for value in values], dtype=float)
+    grand_mean = float(np.mean(all_values))
+    ss_between = float(sum(len(values) * (float(np.mean(values)) - grand_mean) ** 2 for values in normalized.values()))
+    ss_within = float(sum(sum((np.asarray(values) - float(np.mean(values))) ** 2) for values in normalized.values()))
+    n = len(all_values)
+    k = len(normalized)
+    df_between = k - 1
+    df_within = n - k
+    if df_within <= 0:
+        raise ValueError("ANOVA needs residual degrees of freedom.")
+    ms_between = ss_between / df_between
+    ms_within = ss_within / df_within
+    if ms_within <= np.finfo(float).eps:
+        raise ValueError("Within-group variance is zero; the classical F statistic is undefined for this fixture.")
+    f_stat = ms_between / ms_within
+    p_value = float(f.sf(f_stat, df_between, df_within))
+    ss_total = ss_between + ss_within
+    summary = pd.DataFrame([
+        {"Group": name, "n": len(values), "Mean": float(np.mean(values)), "Standard deviation": float(np.std(values, ddof=1))}
+        for name, values in normalized.items()
+    ])
+    table = pd.DataFrame([
+        {"Source": "Between groups", "Sum of squares": ss_between, "df": df_between, "Mean square": ms_between, "F": f_stat, "p-value": p_value},
+        {"Source": "Within groups", "Sum of squares": ss_within, "df": df_within, "Mean square": ms_within, "F": None, "p-value": None},
+        {"Source": "Total", "Sum of squares": ss_total, "df": n - 1, "Mean square": None, "F": None, "p-value": None},
+    ])
+    return {
+        "status": "CALCULATED",
+        "method": "One-way independent-groups ANOVA",
+        "group_count": k,
+        "observation_count": n,
+        "df_between": df_between,
+        "df_within": df_within,
+        "f_statistic": f_stat,
+        "p_value": p_value,
+        "eta_squared": ss_between / ss_total if ss_total > 0 else 0.0,
+        "alpha": level,
+        "decision": "REJECT_EQUAL_MEANS_NULL" if p_value < level else "FAIL_TO_REJECT_EQUAL_MEANS_NULL",
+        "group_summary": summary,
+        "anova_table": table,
+        "assumptions": "Independent observations, approximate within-group normality and comparable group variances. Inspect study design and residuals; post-hoc pairwise tests are not included.",
+        "warning": "A significant omnibus test indicates that not all group means are equal; it does not identify which groups differ or establish causation.",
+    }
+
+
+def run_welch_t_test(
+    sample_a: Sequence[Any], sample_b: Sequence[Any], *, alpha: float = 0.05
+) -> dict[str, Any]:
+    """Welch two-sided t-test for two independent numeric samples."""
+    a = _finite_vector(sample_a, "Sample A", minimum=2)
+    b = _finite_vector(sample_b, "Sample B", minimum=2)
+    level = _finite_number(alpha, "Alpha")
+    if not 0 < level < 1:
+        raise ValueError("Alpha must be strictly between 0 and 1.")
+    arr_a = np.asarray(a, dtype=float)
+    arr_b = np.asarray(b, dtype=float)
+    mean_a, mean_b = float(np.mean(arr_a)), float(np.mean(arr_b))
+    var_a, var_b = float(np.var(arr_a, ddof=1)), float(np.var(arr_b, ddof=1))
+    component_a, component_b = var_a / len(a), var_b / len(b)
+    standard_error = math.sqrt(component_a + component_b)
+    if standard_error <= np.finfo(float).eps:
+        raise ValueError("Both samples have zero estimated uncertainty; a finite Welch test is undefined.")
+    df_denominator = (component_a ** 2) / (len(a) - 1) + (component_b ** 2) / (len(b) - 1)
+    if df_denominator <= 0:
+        raise ValueError("Welch degrees of freedom could not be established.")
+    degrees_freedom = (component_a + component_b) ** 2 / df_denominator
+    difference = mean_a - mean_b
+    statistic = difference / standard_error
+    p_value = float(2 * t.sf(abs(statistic), degrees_freedom))
+    margin = float(t.ppf(1 - level / 2, degrees_freedom) * standard_error)
+    pooled_descriptive_sd = math.sqrt((var_a + var_b) / 2)
+    effect_size = difference / pooled_descriptive_sd if pooled_descriptive_sd > 0 else None
+    return {
+        "status": "CALCULATED",
+        "method": "Welch independent two-sample t-test (two-sided)",
+        "n_a": len(a),
+        "n_b": len(b),
+        "mean_a": mean_a,
+        "mean_b": mean_b,
+        "mean_difference_a_minus_b": difference,
+        "standard_error": standard_error,
+        "degrees_of_freedom": degrees_freedom,
+        "t_statistic": statistic,
+        "p_value": p_value,
+        "alpha": level,
+        "confidence_interval_level": 1 - level,
+        "mean_difference_confidence_interval": (difference - margin, difference + margin),
+        "descriptive_standardized_difference": effect_size,
+        "decision": "REJECT_NULL" if p_value < level else "FAIL_TO_REJECT_NULL",
+        "assumptions": "Independent observations and suitable sampling; Welch's method does not assume equal population variances. Small samples still require attention to distribution shape and outliers.",
+        "warning": "A p-value is not the probability that the null hypothesis is true. Report the effect estimate, confidence interval, study design and practical context.",
+    }
+
+
+def forecast_demand_baselines(
+    observations: Sequence[Any], *, holdout_periods: int = 3,
+    horizon: int = 3, moving_average_window: int = 3
+) -> dict[str, Any]:
+    """Compare simple fixed-horizon demand baselines on a chronological holdout.
+
+    Baselines are naïve-last-value, training mean and trailing moving average.
+    This deliberately does not claim automatic seasonality detection or prediction
+    intervals. Holdout observations are never used to fit a baseline.
+    """
+    values = _finite_vector(observations, "Demand history", minimum=5)
+    for value, name, minimum, maximum in (
+        (holdout_periods, "Holdout periods", 2, len(values) - 3),
+        (horizon, "Forecast horizon", 1, 100),
+        (moving_average_window, "Moving-average window", 1, len(values)),
+    ):
+        if isinstance(value, bool) or not isinstance(value, int) or not minimum <= value <= maximum:
+            raise ValueError(f"{name} must be an integer from {minimum} through {maximum}.")
+    split = len(values) - holdout_periods
+    train = np.asarray(values[:split], dtype=float)
+    test = np.asarray(values[split:], dtype=float)
+    if moving_average_window > len(train):
+        raise ValueError("Moving-average window cannot exceed the pre-holdout training history.")
+    training_mean = float(np.mean(train))
+    trailing_train_mean = float(np.mean(train[-moving_average_window:]))
+    candidates = {
+        "Naive last value": np.repeat(float(train[-1]), len(test)),
+        "Training mean": np.repeat(training_mean, len(test)),
+        "Trailing moving average": np.repeat(trailing_train_mean, len(test)),
+    }
+    metric_rows = []
+    for name, predicted in candidates.items():
+        errors = test - predicted
+        metric_rows.append({
+            "Model": name,
+            "Holdout MAE": float(np.mean(np.abs(errors))),
+            "Holdout RMSE": float(math.sqrt(np.mean(errors ** 2))),
+            "Holdout bias (actual − forecast)": float(np.mean(errors)),
+        })
+    metric_frame = pd.DataFrame(metric_rows).sort_values(
+        ["Holdout MAE", "Holdout RMSE", "Model"], kind="stable"
+    ).reset_index(drop=True)
+    selected_model = str(metric_frame.iloc[0]["Model"])
+    full = np.asarray(values, dtype=float)
+    future_values = {
+        "Naive last value": float(full[-1]),
+        "Training mean": float(np.mean(full)),
+        "Trailing moving average": float(np.mean(full[-moving_average_window:])),
+    }
+    forecast = pd.DataFrame({
+        "Forecast step": np.arange(1, horizon + 1),
+        "Selected baseline": [selected_model] * horizon,
+        "Forecast": [future_values[selected_model]] * horizon,
+    })
+    backtest = pd.DataFrame({
+        "Holdout step": np.arange(1, holdout_periods + 1),
+        "Observed demand": test,
+        **candidates,
+    })
+    return {
+        "status": "BASELINES_COMPARED",
+        "observation_count": len(values),
+        "training_count": len(train),
+        "holdout_count": len(test),
+        "selected_model": selected_model,
+        "metrics": metric_frame,
+        "backtest": backtest,
+        "forecast": forecast,
+        "method": "Chronological holdout comparison of three simple demand baselines",
+        "warning": "This is a baseline forecast only. No seasonality/trend model, prediction intervals, exogenous drivers or inventory service-level guarantee are included. Validate out-of-sample performance before operational use.",
+    }
+
+
+def simulate_monte_carlo_net_value(
+    components: Sequence[Mapping[str, Any]], *, iterations: int = 10_000,
+    seed: int = 42, output_unit: str = "user-defined units"
+) -> dict[str, Any]:
+    """Monte Carlo net-value screening for independent declared benefit/cost inputs.
+
+    Roles apply a positive sign to benefits and a negative sign to costs. Inputs
+    are sampled independently; the method does not create correlations between
+    components. It is a scenario model, not measured savings or a live twin.
+    """
+    if not isinstance(components, Sequence) or isinstance(components, (str, bytes)) or not 1 <= len(components) <= 30:
+        raise ValueError("Provide between 1 and 30 component definitions.")
+    if isinstance(iterations, bool) or not isinstance(iterations, int) or not 100 <= iterations <= 500_000:
+        raise ValueError("Iterations must be an integer from 100 through 500000.")
+    if isinstance(seed, bool) or not isinstance(seed, int) or not 0 <= seed <= 2**32 - 1:
+        raise ValueError("Seed must be a non-negative 32-bit integer.")
+    unit_label = str(output_unit or "").strip()
+    if not unit_label or len(unit_label) > 50:
+        raise ValueError("Output unit must be a non-empty label of at most 50 characters.")
+    normalized: list[dict[str, Any]] = []
+    names: set[str] = set()
+    for index, raw in enumerate(components, start=1):
+        if not isinstance(raw, Mapping):
+            raise ValueError(f"Component {index} must be an object.")
+        name = str(raw.get("name", "")).strip()
+        role = str(raw.get("role", "")).strip().lower()
+        distribution = str(raw.get("distribution", "")).strip().lower()
+        if not name or name.casefold() in names:
+            raise ValueError(f"Component names must be non-empty and unique (problem at component {index}).")
+        names.add(name.casefold())
+        if role not in {"benefit", "cost"}:
+            raise ValueError(f"Component '{name}' role must be benefit or cost.")
+        if distribution not in {"normal", "uniform", "triangular", "constant"}:
+            raise ValueError(f"Component '{name}' has an unsupported distribution.")
+        item: dict[str, Any] = {"name": name, "role": role, "distribution": distribution}
+        if distribution == "normal":
+            item["mean"] = _finite_number(raw.get("mean"), f"{name} mean")
+            item["sd"] = _finite_number(raw.get("sd"), f"{name} standard deviation")
+            if item["sd"] <= 0:
+                raise ValueError(f"Component '{name}' normal standard deviation must be greater than zero.")
+        elif distribution == "uniform":
+            item["low"] = _finite_number(raw.get("low"), f"{name} low")
+            item["high"] = _finite_number(raw.get("high"), f"{name} high")
+            if item["high"] <= item["low"]:
+                raise ValueError(f"Component '{name}' high must be greater than low.")
+        elif distribution == "triangular":
+            item["low"] = _finite_number(raw.get("low"), f"{name} low")
+            item["mode"] = _finite_number(raw.get("mode"), f"{name} mode")
+            item["high"] = _finite_number(raw.get("high"), f"{name} high")
+            if not item["low"] <= item["mode"] <= item["high"] or item["high"] <= item["low"]:
+                raise ValueError(f"Component '{name}' must satisfy low < high and low <= mode <= high.")
+        else:
+            item["value"] = _finite_number(raw.get("value"), f"{name} value")
+        normalized.append(item)
+    rng = np.random.default_rng(seed)
+    draws: dict[str, np.ndarray] = {}
+    signed_draws: dict[str, np.ndarray] = {}
+    signed_components: list[np.ndarray] = []
+    for item in normalized:
+        kind = item["distribution"]
+        if kind == "normal":
+            raw_values = rng.normal(item["mean"], item["sd"], size=iterations)
+        elif kind == "uniform":
+            raw_values = rng.uniform(item["low"], item["high"], size=iterations)
+        elif kind == "triangular":
+            raw_values = rng.triangular(item["low"], item["mode"], item["high"], size=iterations)
+        else:
+            raw_values = np.full(iterations, item["value"], dtype=float)
+        direction = 1.0 if item["role"] == "benefit" else -1.0
+        draws[item["name"]] = raw_values
+        signed_draws[item["name"]] = raw_values * direction
+        signed_components.append(raw_values * direction)
+    outcomes = np.sum(np.column_stack(signed_components), axis=1)
+    percentiles = {str(p): float(np.percentile(outcomes, p)) for p in (1, 5, 25, 50, 75, 95, 99)}
+    component_rows = []
+    for item in normalized:
+        signed = signed_draws[item["name"]]
+        if float(np.std(signed)) <= np.finfo(float).eps or float(np.std(outcomes)) <= np.finfo(float).eps:
+            correlation = None
+        else:
+            correlation = float(np.corrcoef(signed, outcomes)[0, 1])
+        component_rows.append({
+            "Component": item["name"],
+            "Role": item["role"].title(),
+            "Distribution": item["distribution"],
+            "Mean input": float(np.mean(draws[item["name"]])),
+            "Standard deviation": float(np.std(draws[item["name"]], ddof=1)) if iterations > 1 else 0.0,
+            "Correlation with net outcome (not causal)": correlation,
+        })
+    checkpoints = sorted(set(min(iterations, max(100, int(iterations * fraction))) for fraction in (0.1, 0.25, 0.5, 0.75, 1.0)))
+    convergence = pd.DataFrame([
+        {"Trials": n, "Running mean": float(np.mean(outcomes[:n]))}
+        for n in checkpoints
+    ])
+    return {
+        "status": "SIMULATION_COMPLETED",
+        "iterations": iterations,
+        "seed": seed,
+        "output_unit": unit_label,
+        "mean": float(np.mean(outcomes)),
+        "standard_deviation": float(np.std(outcomes, ddof=1)) if iterations > 1 else 0.0,
+        "probability_negative_pct": float(100 * np.mean(outcomes < 0)),
+        "percentiles": percentiles,
+        "component_summary": pd.DataFrame(component_rows),
+        "convergence": convergence,
+        "sample_outcomes": pd.DataFrame({
+            "Trial": np.arange(1, min(iterations, 2000) + 1),
+            f"Net outcome ({unit_label})": outcomes[:min(iterations, 2000)],
+        }),
+        "method": "Independent Monte Carlo sampling; benefits positive, costs negative; NumPy default_rng",
+        "assumptions": "Each declared component is sampled independently using its specified distribution. Any dependence/correlation, tax effects, timing/discounting or real-world measurement uncertainty must be modeled separately.",
+        "warning": "Simulation output is conditional on user-entered distributions and assumptions; it is not a forecast guarantee, verified ROI, audited savings or automatic plant control.",
     }
