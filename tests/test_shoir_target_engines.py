@@ -1444,3 +1444,15 @@ def test_hypothesis_test_rejects_unsupported_designs_and_mismatched_pairs():
     with pytest.raises(ValueError, match="at least two"):
         run_hypothesis_test("welch_t", [1], [2, 3])
 
+
+
+def test_hypothesis_tests_reject_zero_standard_error_instead_of_fabricating_significance():
+    from shoir_target_engines import run_hypothesis_test
+
+    with pytest.raises(ValueError, match="standard error is zero"):
+        run_hypothesis_test("one_sample_t", [5, 5, 5], null_mean=1)
+    with pytest.raises(ValueError, match="standard error is zero"):
+        run_hypothesis_test("welch_t", [1, 1, 1], [5, 5, 5])
+    with pytest.raises(ValueError, match="standard error is zero"):
+        run_hypothesis_test("paired_t", [5, 7, 9], [4, 6, 8])
+
