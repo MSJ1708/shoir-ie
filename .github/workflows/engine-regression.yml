@@ -8,6 +8,7 @@ on:
   pull_request:
     branches:
       - main
+      - "feat/shoir-100-tools-integration-20261025"
 
 jobs:
   engine-regression:

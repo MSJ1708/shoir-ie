@@ -40,7 +40,6 @@ EXPECTED_VERSIONS = [
     "20261019140600",
     "20261021130000",
     "20261022110000",
-    "20261023130000",
 ]
 pytestmark = pytest.mark.skipif(
     not DATABASE_URL or psycopg2 is None,
@@ -297,7 +296,7 @@ def test_versioned_migration_history_replays_from_clean_local_postgres():
                            SET terms_accepted=TRUE,
                                terms_version='2026-10-21-beta-v1',
                                privacy_policy_version='2026-10-21-v1',
-                               refund_policy_version='2026-10-23-v2',
+                               refund_policy_version='2026-10-21-v1',
                                cookie_policy_version='2026-10-21-v1',
                                accepted_at=NOW()
                          WHERE id=%s;

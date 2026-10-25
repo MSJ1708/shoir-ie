@@ -1,5 +1,10 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
+import {
+  normalizeWorkspaceStateJson,
+  publicErrorFor,
+  readBoundedJsonObject,
+} from "./security.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -9,7 +14,7 @@ const PAYMENT_PROOF_BUCKET = "subscription-payment-proofs";
 const MAX_PAYMENT_PROOF_BYTES = 512 * 1024;
 const TERMS_VERSION = "2026-10-21-beta-v1";
 const PRIVACY_POLICY_VERSION = "2026-10-21-v1";
-const REFUND_POLICY_VERSION = "2026-10-23-v2";
+const REFUND_POLICY_VERSION = "2026-10-21-v1";
 const COOKIE_POLICY_VERSION = "2026-10-21-v1";
 // Keep these values aligned with the public notices and the matching SQL migration.
 
@@ -308,7 +313,7 @@ async function loginThrottleBuckets(usernameLc: string, req: Request) {
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return response({ ok: true });
   try {
-    const body = await req.json();
+    const body = await readBoundedJsonObject(req);
     const action = String(body.action || "");
 
     if (action === "login") {
@@ -679,7 +684,10 @@ Deno.serve(async (req) => {
           .eq("username_lc", usernameLc)
           .eq("status", "Pending");
         if (closeRequestError) {
-          console.error("Unable to close request after consent persistence failure.", closeRequestError.code || "unknown");
+          console.error(
+            "Unable to close request after consent persistence failure.",
+            closeRequestError.code || "unknown",
+          );
         }
         if (proofPath) {
           const objectPath = proofPath.replace(
@@ -688,10 +696,16 @@ Deno.serve(async (req) => {
           );
           const { error: cleanupProofError } = await supabase.storage
             .from(PAYMENT_PROOF_BUCKET).remove([objectPath]);
-          if (cleanupProofError) console.error("Unable to remove unneeded payment proof.", cleanupProofError.code || "unknown");
+          if (cleanupProofError) {
+            console.error(
+              "Unable to remove unneeded payment proof.",
+              "storage-error",
+            );
+          }
         }
         return response({
-          error: "The registration was not accepted because its legal-acceptance record could not be saved. No subscription was activated. Refresh and retry, or contact support if the issue continues.",
+          error:
+            "The registration was not accepted because its legal-acceptance record could not be saved. No subscription was activated. Refresh and retry, or contact support if the issue continues.",
         }, 500);
       }
       legalAcceptanceRecorded = true;
@@ -761,9 +775,11 @@ Deno.serve(async (req) => {
     }
     if (action === "workspace_save") {
       await getSession(String(body.token), String(body.username));
+      // Validate before upsert so malformed/oversized state never replaces the last valid save.
+      const workspaceState = normalizeWorkspaceStateJson(body.state_json);
       const { error } = await supabase.from("shoir_workspace_states").upsert({
         username_lc: String(body.username).trim().toLowerCase(),
-        state_json: String(body.state_json || "{}"),
+        state_json: workspaceState,
         updated_at: new Date().toISOString(),
       }, { onConflict: "username_lc" });
       if (error) throw error;
@@ -989,9 +1005,7 @@ Deno.serve(async (req) => {
 
     return response({ error: "Unknown action." }, 400);
   } catch (err: unknown) {
-    return response(
-      { error: err instanceof Error ? err.message : String(err) },
-      500,
-    );
+    const failure = publicErrorFor(err);
+    return response({ error: failure.message }, failure.status);
   }
 });
