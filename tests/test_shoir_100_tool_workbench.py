@@ -793,3 +793,36 @@ def test_workbench_capa_8d_register_reports_completeness_and_overdue_state():
     assert result["record_count"] == 1
     assert result["data_provenance"] == "SYNTHETIC_EXAMPLE"
     assert result["records"].iloc[0]["Workflow state"] == "IN_PROGRESS"
+
+
+def test_workbench_runs_rnle_ergonomics_screen():
+    from streamlit.testing.v1 import AppTest
+
+    page = ROOT / "pages" / "Industrial_Engineering_Workbench.py"
+    at = AppTest.from_file(page, default_timeout=90)
+    at.session_state["current_user"] = "rnle-workbench-checker"
+    at.session_state["authenticated"] = True
+    at.session_state["user_tier"] = "Professional"
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+
+    at.selectbox(key="shoir_100_tool_inspector").select("T046 · Ergonomics Assessment Toolkit")
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+
+    # Scope confirmation is explicit: the method must not run on an unchecked default.
+    at.checkbox(key="tool046_confirm_scope").check()
+    at.button(key="tool046_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+
+    result = at.session_state.get("shoir_tool_result_T046")
+    assert result is not None, "T046 did not produce a result: " + " | ".join(str(item.value) for item in at.error)
+    assert result["status"] == "CALCULATED_SCREENING"
+    assert result["recommended_weight_limit_kg"] > 0
+    assert result["lifting_index"] > 0
+    assert result["data_provenance"] == "USER_ENTERED_UNVERIFIED"
+    assert result["_workspace_persistence"] in {
+        "SAVED_LOCAL_FALLBACK", "SAVED_MANAGED_WORKSPACE", "SESSION_ONLY",
+        "SAVE_FAILED", "SAVE_PENDING", "SAVE_STATUS_NOT_CONFIRMED",
+    }
