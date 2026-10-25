@@ -63,6 +63,16 @@ def test_foundation_only_target_shows_gap_instead_of_blank_or_fake_run():
     assert "shoir_T002_result" not in at.session_state
     assert not any(getattr(button, "key", None) == "T002_run_button" for button in at.button)
 
+def test_foundation_target_offers_only_tier_eligible_existing_route_handoff():
+    at = _authed_library(tier="Enterprise")
+    _open(at, "T002", "Guided Study Wizard")
+    assert any(
+        "Open existing module: AI Copilot" in button.label
+        for button in at.button
+    ), "Eligible existing route hand-off should be available to an entitled account."
+    assert "shoir_T002_result" not in at.session_state
+
+
 def test_tool_library_public_preview_is_read_only_without_authentication():
     from streamlit.testing.v1 import AppTest
 
