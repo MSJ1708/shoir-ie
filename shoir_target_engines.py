@@ -5403,7 +5403,7 @@ def optimize_facility_location_flow(
             raise ValueError(f"Route {index} references an unknown facility or customer.")
         key = (fid.casefold(), cid.casefold())
         if key in route_keys:
-            raise ValueError(f"Only one route per facility/customer pair is supported; duplicate route {fid} → {cid}.")
+            raise ValueError(f"Each facility/customer pair must be unique; duplicate route {fid} → {cid}.")
         route_keys.add(key)
         unit_cost = _finite_number(row.get("unit_cost"), f"Route {index} unit cost")
         route_capacity = _finite_number(row.get("capacity", total_demand), f"Route {index} capacity")
