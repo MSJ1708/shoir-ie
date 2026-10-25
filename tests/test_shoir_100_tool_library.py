@@ -52,7 +52,7 @@ def _run(at, tool_id):
 
 
 
-def test_foundation_only_target_shows_gap_instead_of_blank_or_fake_run():
+def test_guided_study_wizard_runs_a_caveated_plan_with_missing_inputs():
     at = _authed_library(tier="Starter")
     _open(at, "T002", "Guided Study Wizard")
     assert any("Guided Study Wizard" in item.value for item in at.subheader)
@@ -60,8 +60,19 @@ def test_foundation_only_target_shows_gap_instead_of_blank_or_fake_run():
         "dedicated runnable method is not wired" in str(item.value).lower()
         for item in at.warning
     )
-    assert "shoir_T002_result" not in at.session_state
-    assert not any(getattr(button, "key", None) == "T002_run_button" for button in at.button)
+
+    button = next(button for button in at.button if getattr(button, "key", None) == "T002_run_button")
+    button.click()
+    at.run(timeout=60)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    saved = at.session_state.get("shoir_T002_result")
+    assert saved is not None
+    assert saved["result"]["status"] == "PLAN_GENERATED"
+    assert saved["result"]["metrics"]["missing_input_count"] > 0
+    assert any(
+        "checklist, not a calculation" in str(item.value).lower()
+        for item in at.warning
+    )
 
 def test_foundation_target_offers_only_tier_eligible_existing_route_handoff():
     at = _authed_library(tier="Enterprise")
