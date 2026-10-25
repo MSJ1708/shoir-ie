@@ -87,9 +87,15 @@ def _frequency_multiplier(
             "NIOSH Table 5 uses 0.2 lifts/minute when observed frequency is lower than 0.2."
         )
     if frequency_lifts_per_minute < 0.1:
+        if duration_hours > 1:
+            raise ValueError(
+                "For lifting less frequently than 0.1 lift/minute, NIOSH guidance usually uses "
+                "the <=1 hour duration category because the recovery period is sufficient. "
+                "Select the <=1 hour category or confirm the duration treatment with a qualified ergonomist."
+            )
         notes.append(
-            "For very infrequent lifting (<0.1 lifts/minute), confirm the recovery-period and "
-            "duration treatment with the NIOSH manual or a qualified ergonomist."
+            "Frequency is below 0.1 lifts/minute. The selected <=1 hour duration category follows "
+            "NIOSH's usual infrequent-lifting guidance; verify recovery-period assumptions in the field."
         )
 
     column = _duration_column(duration_hours)
