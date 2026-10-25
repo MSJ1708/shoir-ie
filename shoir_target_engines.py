@@ -4354,9 +4354,11 @@ def simulate_mm1_discrete_event(
         start_time = float(arrivals[warmup_jobs])
         end_time = float(departures[-1])
         elapsed = max(end_time - start_time, np.finfo(float).eps)
+        # Count service intervals crossing the warm-up boundary as busy time,
+        # while still measuring utilization only inside the post-warm-up window.
         clipped_busy = float(np.sum(np.maximum(
             0.0,
-            np.minimum(departures[warmup_jobs:], end_time) - np.maximum(starts[warmup_jobs:], start_time),
+            np.minimum(departures, end_time) - np.maximum(starts, start_time),
         )))
         mean_wait = float(np.mean(waiting[included]))
         p95_wait = float(np.percentile(waiting[included], 95))
