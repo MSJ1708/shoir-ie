@@ -498,7 +498,7 @@ def _slp_frame(depts: pd.DataFrame, flows: pd.DataFrame) -> pd.DataFrame:
                 "Distance (m)": float(row.distance_m),
                 "REL": rel,
                 "Score": rel_scores.get(rel),
-                "Reason": str(row.reason or ""),
+                "Reason": str(getattr(row, "reason", getattr(row, "Reason", "")) or ""),
                 "Status": "Connected",
             })
     return pd.DataFrame(records)
