@@ -10,7 +10,7 @@ The implementation uses the existing `pages/Industrial_Engineering_Workbench.py`
 
 ## Focused execution methods
 
-The original focused tranche was continued with four additional methods (T036, T037, T051 and T072). This integration also carries the separately tested T062 solver diagnostics, T071 discrete-event simulation and T087 reproducibility ZIP into the same branch. The combined Workbench contains 58 distinct stable target IDs with focused runner branches; each remains pending authenticated end-to-end verification. Other existing module workflows may cover additional targets, but they are not counted as focused runners unless wired to the stable target ID and its execution gate. The implementation matrix links every target to its minimum tier, contracts, evidence tests and remaining limitations.
+The original focused tranche was continued with four additional methods (T036, T037, T051 and T072). This integration also carries the separately tested T062 solver diagnostics, T071 discrete-event simulation and T087 reproducibility ZIP into the same branch. The combined Workbench contains 59 distinct stable target IDs with focused runner branches; each remains pending authenticated end-to-end verification. Other existing module workflows may cover additional targets, but they are not counted as focused runners unless wired to the stable target ID and its execution gate. The implementation matrix links every target to its minimum tier, contracts, evidence tests and remaining limitations.
 
 ### Lean, manufacturing, quality and economics
 
@@ -92,6 +92,11 @@ T089 now has a Starter-accessible practice path inside the existing Workbench. T
 
 T002 is now an executable Starter workflow planner in the existing Workbench. It supports capacity/bottleneck, facility-layout, quality/capability, inventory, maintenance/reliability and sustainability goals; cross-references each planned step to the canonical tool registry; lists declared required fields; distinguishes tier-restricted and foundation-only steps; and suggests a next ready step without running or inventing downstream results. Tests cover missing inputs, current tier restrictions, completed-session steps and invalid goals. It remains `IMPLEMENTED_NEEDS_VALIDATION` pending current CI and authenticated persistence/browser checks.
 
+
+### Equipment anomaly monitoring and freshness
+
+T048 now has an Enterprise-gated path within the existing Workbench. It uses a global median/MAD point-anomaly screen with an explicit zero-MAD fallback, and independently reports freshness (`FRESH`, `STALE`, or `FUTURE_TIMESTAMP`). Invalid timestamps/non-finite values are rejected; out-of-order and duplicate timestamps are surfaced as warnings. The method is **not** a predictive-maintenance model, root-cause analyzer or live sensor integration. Unit and Workbench AppTest cases have been added; the status remains `IMPLEMENTED_NEEDS_VALIDATION` until CI and authenticated staging checks pass.
+
 ## Calculation safety and regression protection
 
 Independent golden/boundary tests were added for the new methods, along with three Workbench Streamlit AppTest groups that invoke the forms and check structured results. Key controls include:
@@ -118,8 +123,8 @@ The registry and matrix contain 100 target IDs, T001–T100. Current classificat
 | Status | Count |
 |---|---:|
 | `VERIFIED_WORKING` | 0 |
-| `IMPLEMENTED_NEEDS_VALIDATION` | 82 |
-| `FOUNDATION_ONLY` | 16 |
+| `IMPLEMENTED_NEEDS_VALIDATION` | 83 |
+| `FOUNDATION_ONLY` | 15 |
 | `EXTERNAL_CONFIGURATION_REQUIRED` | 2 |
 | `MISSING` | 0 |
 | `BLOCKED` | 0 |
