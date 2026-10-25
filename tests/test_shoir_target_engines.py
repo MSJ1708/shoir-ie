@@ -1552,3 +1552,97 @@ def test_full_factorial_doe_rejects_missing_combinations_and_non_coded_levels():
             {"A": 1, "B": -1, "response": 3},
             {"A": 2, "B": 1, "response": 4},
         ], response_field="response", factor_fields=["A", "B"])
+
+
+def test_anomaly_screening_flags_robust_outlier_and_handles_stable_baseline():
+    from shoir_target_engines import detect_equipment_anomalies
+
+    records = [
+        {"timestamp": f"2026-10-{day:02d}T00:00:00Z", "value": value}
+        for day, value in enumerate([99, 100, 101, 100, 99, 100, 101, 100, 99, 100, 100, 140], start=1)
+    ]
+    result = detect_equipment_anomalies(records, threshold=3.5)
+    assert result["status"] == "ANOMALIES_SCREENED"
+    assert result["anomaly_count"] == 1
+    assert result["anomaly_rate_pct"] == pytest.approx(100 / 12)
+    assert result["anomaly_table"].iloc[0]["Value"] == pytest.approx(140)
+    assert result["anomaly_table"].iloc[0]["Anomaly"]
+    assert "not a live equipment monitor" in result["warning"]
+
+    flat_records = [{"timestamp": f"2026-10-{day:02d}T00:00:00Z", "value": 10 if day < 8 else 25} for day in range(1, 9)]
+    fallback = detect_equipment_anomalies(flat_records)
+    assert fallback["anomaly_count"] == 1
+    assert "stable-baseline deviation fallback" in fallback["method"]
+
+
+def test_anomaly_screening_rejects_bad_timestamps_and_duplicate_rows():
+    from shoir_target_engines import detect_equipment_anomalies
+
+    with pytest.raises(ValueError, match="at least eight"):
+        detect_equipment_anomalies([{"timestamp": "2026-01-01T00:00:00Z", "value": 1}] * 4)
+    duplicate_records = [{"timestamp": f"2026-10-{day:02d}T00:00:00Z", "value": day} for day in range(1, 9)]
+    duplicate_records[-1]["timestamp"] = duplicate_records[0]["timestamp"]
+    with pytest.raises(ValueError, match="Duplicate timestamp"):
+        detect_equipment_anomalies(duplicate_records)
+
+
+def test_mm1_discrete_event_simulation_is_seed_reproducible_and_explicit_about_scope():
+    from shoir_target_engines import simulate_mm1_discrete_event
+
+    first = simulate_mm1_discrete_event(0.6, 0.8, jobs=1000, replications=4, warmup_fraction=0.1, seed=17, time_unit="minutes")
+    second = simulate_mm1_discrete_event(0.6, 0.8, jobs=1000, replications=4, warmup_fraction=0.1, seed=17, time_unit="minutes")
+    assert first["status"] == "DISCRETE_EVENT_SIMULATED"
+    assert first["stable_queue"] is True
+    assert first["warmup_jobs_excluded"] == 100
+    assert len(first["replication_summary"]) == 4
+    pd.testing.assert_frame_equal(first["replication_summary"], second["replication_summary"])
+    assert 0 <= first["replication_summary"]["Server utilization (%)"].min()
+    assert first["replication_summary"]["Server utilization (%)"].max() <= 100
+    assert first["sample_customer_events"]["Queue wait (minutes)"].ge(0).all()
+    assert "single-server FCFS M/M/1" in first["warning"]
+
+
+def test_mm1_discrete_event_simulation_rejects_invalid_rates_and_warns_on_instability():
+    from shoir_target_engines import simulate_mm1_discrete_event
+
+    with pytest.raises(ValueError, match="rates must be greater than zero"):
+        simulate_mm1_discrete_event(0, 1, jobs=100)
+    overloaded = simulate_mm1_discrete_event(1.1, 1.0, jobs=100, replications=2, seed=2)
+    assert overloaded["stable_queue"] is False
+    assert "not stable" in overloaded["warning"]
+
+
+def test_supply_chain_network_transport_optimizes_cost_and_detects_route_disruption():
+    from shoir_target_engines import optimize_supply_chain_network
+
+    suppliers = [{"supplier": "S1", "supply_capacity": 60}, {"supplier": "S2", "supply_capacity": 50}]
+    sites = [{"site": "A", "demand": 50}, {"site": "B", "demand": 40}]
+    routes = [
+        {"supplier": "S1", "site": "A", "unit_cost": 2, "capacity": 60, "available": True},
+        {"supplier": "S1", "site": "B", "unit_cost": 4, "capacity": 30, "available": True},
+        {"supplier": "S2", "site": "A", "unit_cost": 3, "capacity": 30, "available": True},
+        {"supplier": "S2", "site": "B", "unit_cost": 1, "capacity": 50, "available": True},
+    ]
+    result = optimize_supply_chain_network(suppliers, sites, routes, unmet_demand_penalty_per_unit=1000)
+    assert result["status"] == "OPTIMAL"
+    assert result["total_unmet_demand"] == pytest.approx(0)
+    assert result["transport_cost"] == pytest.approx(140)
+    assert result["total_units_shipped"] == pytest.approx(90)
+    assert result["site_service"]["Service level (%)"].min() == pytest.approx(100)
+
+    disrupted = [dict(route) for route in routes]
+    disrupted[-1]["available"] = False
+    scenario = optimize_supply_chain_network(suppliers, sites, disrupted, unmet_demand_penalty_per_unit=1000)
+    assert scenario["total_unmet_demand"] == pytest.approx(10)
+    assert scenario["site_service"].set_index("Site").loc["B", "Unmet demand"] == pytest.approx(10)
+
+
+def test_supply_chain_network_rejects_bad_route_links_and_negative_costs():
+    from shoir_target_engines import optimize_supply_chain_network
+
+    suppliers = [{"supplier": "S1", "supply_capacity": 10}]
+    sites = [{"site": "A", "demand": 5}]
+    with pytest.raises(ValueError, match="unknown supplier or site"):
+        optimize_supply_chain_network(suppliers, sites, [{"supplier": "S2", "site": "A", "unit_cost": 1, "capacity": 5, "available": True}], unmet_demand_penalty_per_unit=10)
+    with pytest.raises(ValueError, match="cannot be negative"):
+        optimize_supply_chain_network(suppliers, sites, [{"supplier": "S1", "site": "A", "unit_cost": -1, "capacity": 5, "available": True}], unmet_demand_penalty_per_unit=10)
