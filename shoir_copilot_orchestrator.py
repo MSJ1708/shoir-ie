@@ -437,9 +437,13 @@ def stage_copilot_decision(
         raise ValueError("An authenticated actor is required.")
     try:
         from shoir_enterprise_layer import enforce_action_gate, record_canonical_event, upsert_canonical_entity, upsert_canonical_relationship
-        enforce_action_gate(actor, "write", workspace, require_approval=True)
-    except ImportError:
-        pass
+    except ImportError as exc:
+        # Decision staging performs a governed write. If its access-control layer
+        # cannot be loaded, fail closed before creating any decision records.
+        raise RuntimeError(
+            "Governed decision staging is unavailable because its approval/access-control layer could not be loaded."
+        ) from exc
+    enforce_action_gate(actor, "write", workspace, require_approval=True)
 
     from industrial_experience import create_decision, save_decision_spec, register_lineage
 

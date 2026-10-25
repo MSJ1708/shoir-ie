@@ -40,43 +40,43 @@ CANONICAL_TIERS = [
         "key": "Starter",
         "legacy": ["Starter", "Starter Tier"],
         "label": "Starter",
-        "focus": "Core engineering, clean data, validation and guided analysis",
-        "module_limit": "Core",
+        "focus": "Core workspace, learning, basic data handling and foundational engineering methods",
+        "module_limit": "Starter",
+    },
+    {
+        "key": "Mid-Tier Pro",
+        "legacy": ["Mid-Tier Pro", "Mid-Tier Pro Tier", "Mid Tier Pro", "Pro"],
+        "label": "Mid-Tier Pro",
+        "focus": "Broader process improvement, quality operations, inventory and production methods",
+        "module_limit": "Mid-Tier Pro",
     },
     {
         "key": "Professional",
-        "legacy": ["Mid-Tier Pro", "Professional", "Professional Tier"],
+        "legacy": ["Professional", "Professional Tier"],
         "label": "Professional",
-        "focus": "Advanced planning, quality, workforce, economics and sustainability",
+        "focus": "Advanced specialist analysis, reliability, statistics and planning",
         "module_limit": "Professional",
     },
     {
-        "key": "Operations",
-        "legacy": ["Operations", "Industrial Operations Tier"],
-        "label": "Industrial Operations",
-        "focus": "Connected manufacturing, simulation, control and operational execution",
-        "module_limit": "Enterprise",
-    },
-    {
         "key": "Enterprise",
-        "legacy": ["Enterprise", "Enterprise Tier"],
+        "legacy": ["Enterprise", "Enterprise Tier", "Operations", "Industrial Operations Tier"],
         "label": "Enterprise",
-        "focus": "Optimization, digital thread, governance, simulation and collaboration",
+        "focus": "Advanced optimization, workflows, governance, simulation and collaboration",
         "module_limit": "Enterprise",
     },
     {
         "key": "Enterprise Plus",
         "legacy": ["Enterprise Plus", "Enterprise Plus Tier", "Industrial Enterprise"],
         "label": "Enterprise Plus",
-        "focus": "Advanced Copilot, live twin, governance and enterprise-scale orchestration",
+        "focus": "Advanced connected digital-twin, identity and data-governance capabilities",
         "module_limit": "Enterprise Plus",
     },
     {
-        "key": "Research",
-        "legacy": ["Research Pack", "Research & Innovation", "Research Tier"],
-        "label": "Research & Innovation",
-        "focus": "Experiments, reproducibility, advanced analytics and academic workflows",
-        "module_limit": "Enterprise Plus",
+        "key": "Research Pack",
+        "legacy": ["Research Pack", "Research Pack Tier", "Research & Innovation", "Research Tier"],
+        "label": "Research Pack (add-on)",
+        "focus": "Formal study design, research evidence, literature, methods and reproducibility; inherits through Enterprise only",
+        "module_limit": "Enterprise + Research Pack-only capabilities (not Enterprise Plus)",
     },
 ]
 
@@ -155,26 +155,21 @@ def _norm(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", str(value or "").strip().lower()).strip()
 
 def canonical_tier(value: str) -> str:
-    v = _norm(value)
-    for tier in CANONICAL_TIERS:
-        if any(_norm(alias) == v for alias in tier["legacy"]):
-            return tier["key"]
-    if "enterprise plus" in v or "industrial enterprise" in v:
-        return "Enterprise Plus"
-    if "enterprise" in v:
-        return "Enterprise"
-    if "operations" in v:
-        return "Operations"
-    if "professional" in v or "mid tier pro" in v or v == "pro":
-        return "Professional"
-    if "research" in v:
-        return "Research"
-    return "Starter"
+    """Resolve against the shared product tier names; unknown labels stay unresolved."""
+    try:
+        from shoir_tier_capabilities import normalize_tier
+        return normalize_tier(value)
+    except Exception:
+        return "UNRESOLVED"
 
 def tier_allows(current: str, required: str) -> bool:
-    c = canonical_tier(current)
-    r = canonical_tier(required)
-    return TIER_ORDER.index(c) >= TIER_ORDER.index(r)
+    """Share the app's exact tier contract (Research Pack is not Enterprise Plus)."""
+    try:
+        from shoir_tier_capabilities import tier_allows as shared_tier_allows
+        return bool(shared_tier_allows(current, required))
+    except Exception:
+        # Fail closed if the central entitlement policy cannot be loaded.
+        return False
 
 def tier_matrix() -> pd.DataFrame:
     rows = []

@@ -146,6 +146,7 @@ def _pack(value: Any) -> Any:
         return {
             "__type__": "dataframe",
             "value": value.to_json(orient="split", date_format="iso"),
+            "dtypes": [str(dtype) for dtype in value.dtypes],
         }
     if isinstance(value, pd.Series):
         return {
@@ -177,7 +178,18 @@ def _unpack(value: Any) -> Any:
     kind = value["__type__"]
     payload = value.get("value")
     if kind == "dataframe":
-        return pd.read_json(StringIO(payload), orient="split")
+        frame = pd.read_json(StringIO(payload), orient="split")
+        # New snapshots retain dtype metadata; legacy snapshots without it remain readable.
+        # Restore each recorded column type so saved numeric results do not silently
+        # change schema (for example, integer-looking measurements becoming int64).
+        for column, dtype_name in zip(frame.columns, value.get("dtypes", [])):
+            try:
+                frame[column] = frame[column].astype(dtype_name)
+            except (TypeError, ValueError, OverflowError) as exc:
+                raise ValueError(
+                    f"Unable to restore saved dataframe column {column!r} to dtype {dtype_name!r}."
+                ) from exc
+        return frame
     if kind == "series":
         return pd.read_json(StringIO(payload), typ="series")
     if kind == "datetime":

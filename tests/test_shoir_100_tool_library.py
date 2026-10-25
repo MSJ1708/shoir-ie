@@ -1,0 +1,740 @@
+"""Authenticated AppTest smoke checks for the additive 100-tool library.
+
+These tests verify that the routed capability form renders and runs in the actual
+Streamlit page with disposable in-memory session state. They do not substitute for
+the separate hosted-browser, durable-persistence or production integration gates.
+"""
+from pathlib import Path
+
+import pytest
+
+ROOT = Path(__file__).resolve().parents[1]
+PAGE = ROOT / "pages" / "Engineering_Tool_Library.py"
+
+
+def _authed_library(tier="Research Pack"):
+    from streamlit.testing.v1 import AppTest
+
+    at = AppTest.from_file(PAGE, default_timeout=60)
+    at.session_state["authenticated"] = True
+    at.session_state["current_user"] = "disposable-tool-library-checker"
+    # Research Pack inherits ordinary capabilities through Enterprise, but not
+    # Enterprise Plus. This allows testing of all the targets in this tranche.
+    at.session_state["user_tier"] = tier
+    at.run(timeout=60)
+    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+    return at
+
+
+def _open(at, tool_id, name):
+    at.selectbox(key="tool_library_detail").select(f"{tool_id} · {name}")
+    at.run(timeout=60)
+    assert not at.exception, (
+        f"{tool_id} form failed to render:\n"
+        + "\n".join(str(error.value) for error in at.exception)
+    )
+
+
+def _run(at, tool_id):
+    button = at.button(key=f"{tool_id}_run_button")
+    button.click()
+    at.run(timeout=60)
+    assert not at.exception, (
+        f"{tool_id} action failed:\n"
+        + "\n".join(str(error.value) for error in at.exception)
+    )
+    result = at.session_state.get(f"shoir_{tool_id}_result")
+    assert result is not None, (
+        f"{tool_id} returned no result; visible errors: "
+        + " | ".join(str(error.value) for error in at.error)
+    )
+    return result["result"]
+
+
+
+def test_guided_study_wizard_runs_a_caveated_plan_with_missing_inputs():
+    at = _authed_library(tier="Starter")
+    _open(at, "T002", "Guided Study Wizard")
+    assert any("Guided Study Wizard" in item.value for item in at.subheader)
+    assert any(
+        "dedicated runnable method is not wired" in str(item.value).lower()
+        for item in at.warning
+    )
+
+    button = next(button for button in at.button if getattr(button, "key", None) == "T002_run_button")
+    button.click()
+    at.run(timeout=60)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    saved = at.session_state.get("shoir_T002_result")
+    assert saved is not None
+    assert saved["result"]["status"] == "PLAN_GENERATED"
+    assert saved["result"]["metrics"]["missing_input_count"] > 0
+    assert any(
+        "inputs or validation steps still required before analysis" in str(item.value).lower()
+        for item in at.warning
+    )
+
+def test_foundation_target_offers_only_tier_eligible_existing_route_handoff():
+    at = _authed_library(tier="Enterprise")
+    _open(at, "T002", "Guided Study Wizard")
+    assert any(
+        "Open existing module: AI Copilot" in button.label
+        for button in at.button
+    ), "Eligible existing route hand-off should be available to an entitled account."
+    assert "shoir_T002_result" not in at.session_state
+
+
+def test_tool_library_public_preview_is_read_only_without_authentication():
+    from streamlit.testing.v1 import AppTest
+
+    at = AppTest.from_file(PAGE, default_timeout=60)
+    at.run(timeout=60)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    assert any("Engineering Tool Library" in item.value for item in at.title)
+    assert any("PUBLIC READ-ONLY PREVIEW" in item.value for item in at.info)
+
+    # Public visitors can inspect a capability contract, but cannot execute it.
+    at.selectbox(key="tool_library_detail").select("T016 · Unit and Currency Converter")
+    at.run(timeout=60)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    assert any("cannot execute calculations" in item.value.lower() for item in at.info)
+    assert not any(getattr(button, "key", None) == "T016_run_button" for button in at.button)
+
+
+def test_public_explore_modules_links_to_the_grouped_library():
+    source = (ROOT / "app.py").read_text(encoding="utf-8")
+    start = source.index("with auth_tab3:")
+    section = source[start:start + 30000]
+    assert "st.page_link(" in section
+    assert '"pages/Engineering_Tool_Library.py"' in section
+    assert "Browse the 100-tool Engineering Library" in section
+def test_extended_specialist_forms_render_and_run_with_golden_defaults():
+    at = _authed_library()
+
+    _open(at, "T016", "Unit and Currency Converter")
+    unit_result = _run(at, "T016")
+    assert unit_result["converted_value"] == pytest.approx(1.0)
+
+    _open(at, "T022", "Work Sampling Analyzer")
+    sample_result = _run(at, "T022")
+    assert sample_result["total_observations"] == 100
+    assert sample_result["minimum_observations_for_target_margin"] == 385
+
+    _open(at, "T028", "Root-Cause Analysis Toolkit")
+    pareto_result = _run(at, "T028")
+    assert pareto_result["total_count"] == 100
+    assert pareto_result["categories_to_reach_80_percent"] == 2
+
+    _open(at, "T029", "5S and Workplace Audit")
+    audit_result = _run(at, "T029")
+    assert audit_result["overall_5s_score_pct_equal_pillar_weight"] == pytest.approx(70.0)
+
+    _open(at, "T030", "Kaizen and A3 Improvement Manager")
+    a3_result = _run(at, "T030")
+    assert a3_result["target_progress_pct"] == pytest.approx(50.0)
+    assert a3_result["outcome_status"] != "VERIFIED_SAVINGS"
+
+    _open(at, "T031", "Statistical Process Control")
+    spc_result = _run(at, "T031")
+    assert spc_result["mean"] == pytest.approx(10.5)
+
+    _open(at, "T040", "Quality Cost and Defect Analyzer")
+    copq_result = _run(at, "T040")
+    assert copq_result["cost_of_poor_quality"] == pytest.approx(190.0)
+
+    _open(at, "T042", "MTBF and MTTR Analyzer")
+    reliability_result = _run(at, "T042")
+    assert reliability_result["mtbf_hours"] == pytest.approx(200.0)
+    assert reliability_result["mttr_hours"] == pytest.approx(2.0)
+
+    _open(at, "T056", "ABC/XYZ Inventory Analyzer")
+    inventory_result = _run(at, "T056")
+    assert inventory_result["annual_usage_value_total"] == pytest.approx(1000.0)
+
+    _open(at, "T075", "Forecast and Model Drift Monitor")
+    drift_result = _run(at, "T075")
+    assert drift_result["status"] == "DRIFT_ALERT"
+    assert drift_result["mae"] == pytest.approx(7 / 3)
+
+    _open(at, "T085", "Statistical Power and Sample-Size Planner")
+    power_result = _run(at, "T085")
+    assert power_result["metrics"]["minimum_sample_size_per_unit"] == 34
+    assert power_result["metrics"]["minimum_total_sample_size"] == 34
+    assert power_result["metrics"]["achieved_power_at_required_sample_size"] >= 0.80
+    assert power_result["parameters"]["design"] == "one_sample"
+
+
+def test_cutting_stock_solver_is_exposed_in_the_existing_facilities_tool():
+    at = _authed_library()
+    _open(at, "T066", "Cutting Stock and Bin Packing")
+    # This is a separate solver action under the existing target, not a new top-level
+    # module. A solver exception must remain visible and must not erase prior state.
+    button = at.button(key="T066_CUT_run_button")
+    button.click()
+    at.run(timeout=60)
+    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+    result = at.session_state.get("shoir_T066_CUT_result")
+    assert result is not None, "Cutting-stock action did not return a structured result."
+    assert result["result"]["status"] == "OPTIMAL"
+    assert result["result"]["stock_count"] == 2
+
+def test_lower_tier_cannot_render_or_execute_research_only_tool():
+    from streamlit.testing.v1 import AppTest
+
+    at = _authed_library(tier="Starter")
+    _open(at, "T085", "Statistical Power and Sample-Size Planner")
+    assert any(
+        "does not grant this target capability" in str(item.value).lower()
+        for item in at.warning
+    )
+    assert "shoir_T085_result" not in at.session_state
+    with pytest.raises(KeyError):
+        at.button(key="T085_run_button")
+
+
+
+def test_new_data_tools_render_and_run_in_validation_mode():
+    at = _authed_library()
+
+    _open(at, "T013", "Data Quality Profiler")
+    profile = _run(at, "T013")
+    assert profile["status"] == "PROFILED"
+    assert profile["metrics"]["row_count"] == 5
+    assert profile["metrics"]["missing_cell_count"] == 1
+
+    _open(at, "T017", "Data Join and Merge Studio")
+    joined = _run(at, "T017")
+    assert joined["status"] == "PREVIEWED"
+    assert joined["metrics"]["output_rows"] == 3
+    assert joined["metrics"]["unmatched_right_input_rows"] == 1
+
+    _open(at, "T018", "Time-Series Data Processor")
+    processed = _run(at, "T018")
+    assert processed["status"] == "PROCESSED"
+    assert processed["metrics"]["duplicate_timestamp_rows"] == 2
+    assert processed["metrics"]["missing_intervals"] == 1
+
+    _open(at, "T019", "Synthetic Industrial Data Generator")
+    synthetic = _run(at, "T019")
+    assert synthetic["status"] == "GENERATED_SYNTHETIC"
+    assert synthetic["source"] == "SYNTHETIC"
+    assert len(synthetic["dataset"]) == 100
+    assert set(synthetic["dataset"]["data_status"]) == {"SYNTHETIC"}
+
+
+def test_lower_tier_cannot_run_mid_tier_join_preview():
+    from streamlit.testing.v1 import AppTest
+
+    at = _authed_library(tier="Starter")
+    _open(at, "T017", "Data Join and Merge Studio")
+    assert any("does not grant this target capability" in str(item.value).lower() for item in at.warning)
+    assert "shoir_T017_result" not in at.session_state
+    with pytest.raises(KeyError):
+        at.button(key="T017_run_button")
+
+
+def test_manufacturing_operations_tools_render_and_run_with_golden_defaults():
+    at = _authed_library()
+
+    _open(at, "T024", "Production Line Balancer")
+    line_result = _run(at, "T024")
+    assert line_result["status"] == "FEASIBLE_HEURISTIC"
+    assert line_result["metrics"]["total_work_content"] == pytest.approx(12.0)
+    assert line_result["metrics"]["station_count"] == 3
+    assert line_result["metrics"]["line_efficiency_percent"] == pytest.approx(12 / 18 * 100)
+
+    _open(at, "T025", "Bottleneck and Constraint Analyzer")
+    bottleneck = _run(at, "T025")
+    assert bottleneck["metrics"]["candidate_stage"] == "Welding"
+    assert bottleneck["metrics"]["evidence_label"] == "INFERRED_FROM_CYCLE_TIME"
+
+    _open(at, "T027", "Value Stream Mapping Studio")
+    vsm = _run(at, "T027")
+    assert vsm["metrics"]["value_added_time"] == pytest.approx(8.0)
+    assert vsm["metrics"]["explicit_lead_time"] == pytest.approx(53.0)
+    assert vsm["metrics"]["process_cycle_efficiency_percent"] == pytest.approx(8 / 53 * 100)
+
+    _open(at, "T070", "Queuing and Service-System Analyzer")
+    queue = _run(at, "T070")
+    assert queue["metrics"]["utilization_percent"] == pytest.approx(100 * 2 / 3)
+    assert queue["metrics"]["mean_time_in_system"] == pytest.approx(1.0)
+    assert queue["metrics"]["mean_queue_wait"] == pytest.approx(2 / 3)
+
+
+def test_starter_cannot_render_or_execute_mid_tier_line_balancer():
+    at = _authed_library(tier="Starter")
+    _open(at, "T024", "Production Line Balancer")
+    assert any("does not grant this target capability" in str(item.value).lower() for item in at.warning)
+    assert "shoir_T024_result" not in at.session_state
+    with pytest.raises(KeyError):
+        at.button(key="T024_run_button")
+
+
+def test_quality_planning_and_risk_tools_render_and_run_with_golden_defaults():
+    at = _authed_library()
+
+    _open(at, "T034", "Acceptance Sampling Planner")
+    sampling = _run(at, "T034")
+    assert sampling["status"] == "CALCULATED"
+    assert 0 <= sampling["metrics"]["producer_risk_at_aql"] <= 1
+    assert 0 <= sampling["metrics"]["consumer_risk_at_ltpd"] <= 1
+    assert len(sampling["operating_characteristic"]) == 21
+
+    _open(at, "T051", "Demand Forecasting Studio")
+    forecast = _run(at, "T051")
+    assert forecast["status"] == "FORECASTED"
+    assert forecast["metrics"]["selected_model_by_holdout_mae"] == "naive_last_value"
+    assert len(forecast["backtest"]) == 2
+    assert len(forecast["forecast"]) == 2
+
+    _open(at, "T054", "Material Requirements Planner")
+    mrp = _run(at, "T054")
+    assert mrp["status"] == "PLANNED"
+    assert mrp["metrics"]["planned_order_count"] == 8
+    assert {row["item"] for row in mrp["planned_releases"]} == {"PRODUCT", "COMP_A", "COMP_B", "RAW_X"}
+
+    _open(at, "T072", "Monte Carlo Risk Simulator")
+    simulation = _run(at, "T072")
+    assert simulation["status"] == "SIMULATED"
+    assert simulation["metrics"]["iterations"] == 5000
+    assert simulation["metrics"]["p05"] <= simulation["metrics"]["p50"] <= simulation["metrics"]["p95"]
+    assert sum(row["count"] for row in simulation["histogram"]) == 5000
+
+
+def test_starter_cannot_execute_acceptance_sampling_planner():
+    at = _authed_library(tier="Starter")
+    _open(at, "T034", "Acceptance Sampling Planner")
+    assert any("does not grant this target capability" in str(item.value).lower() for item in at.warning)
+    assert "shoir_T034_result" not in at.session_state
+    with pytest.raises(KeyError):
+        at.button(key="T034_run_button")
+
+
+def test_ols_regression_tool_renders_runs_and_reports_golden_metrics():
+    at = _authed_library(tier="Professional")
+    _open(at, "T036", "Regression and ANOVA Studio")
+    result = _run(at, "T036")
+    metrics = result["metrics"]
+    coefficients = result["coefficient_table"].set_index("Term")["Coefficient"]
+    assert coefficients["Intercept"] == pytest.approx(1.0)
+    assert coefficients["Load"] == pytest.approx(2.0)
+    assert metrics["R_squared"] == pytest.approx(1.0)
+    assert len(result["prediction_residuals"]) == 6
+
+
+def test_research_hypothesis_testing_tool_runs_in_research_pack():
+    at = _authed_library(tier="Research Pack")
+    _open(at, "T037", "Hypothesis Testing Assistant")
+    result = _run(at, "T037")
+    assert result["status"] == "CALCULATED"
+    assert result["metrics"]["test_type"] == "one_sample"
+    assert result["metrics"]["n_sample_a"] == 6
+    assert 0 <= result["metrics"]["p_value"] <= 1
+    assert result["metrics"]["confidence_interval_lower"] < result["metrics"]["confidence_interval_upper"]
+
+
+def test_starter_cannot_render_or_execute_research_hypothesis_testing():
+    at = _authed_library(tier="Starter")
+    _open(at, "T037", "Hypothesis Testing Assistant")
+    assert any("does not grant this target capability" in str(item.value).lower() for item in at.warning)
+    assert "shoir_T037_result" not in at.session_state
+    with pytest.raises(KeyError):
+        at.button(key="T037_run_button")
+
+
+def test_quality_asset_supplier_and_sustainability_tools_run_in_validation_mode():
+    at = _authed_library(tier="Research Pack")
+
+    _open(at, "T038", "FMEA Manager")
+    fmea = _run(at, "T038")
+    assert fmea["metrics"]["failure_mode_count"] == 2
+    assert fmea["metrics"]["maximum_rpn"] == 96
+    assert len(fmea["revision_history"]) == 0
+
+    _open(at, "T039", "CAPA and 8D Manager")
+    capa = _run(at, "T039")
+    assert capa["metrics"]["closure_ready"] is False
+    assert capa["record"]["evidence_state"] == "USER_ENTERED_UNVERIFIED"
+    assert capa["record"]["revision"] == 1
+    assert len(at.session_state["shoir_capa_8d_register"]) == 1
+
+    _open(at, "T043", "Preventive Maintenance Planner")
+    maintenance = _run(at, "T043")
+    assert maintenance["metrics"]["overdue_tasks"] == 1
+    assert maintenance["metrics"]["due_within_30_days"] == 1
+
+    _open(at, "T045", "Spare Parts and Criticality Planner")
+    spares = _run(at, "T045")
+    assert spares["metrics"]["parts_count"] == 2
+    assert spares["metrics"]["parts_below_reorder_point"] >= 1
+
+    _open(at, "T058", "Supplier Performance and Risk Scorecard")
+    suppliers = _run(at, "T058")
+    supplier_rows = suppliers["scorecard"].set_index("supplier")
+    assert supplier_rows.loc["Supplier A", "weighted_score_on_available_evidence"] == pytest.approx(84)
+    assert supplier_rows.loc["Supplier B", "evidence_coverage_percent"] == pytest.approx(80)
+
+    _open(at, "T077", "Energy Performance Optimizer")
+    energy = _run(at, "T077")
+    assert energy["metrics"]["baseline_kwh_per_unit"] == pytest.approx(10)
+    assert energy["metrics"]["estimated_energy_difference_kwh"] == pytest.approx(210)
+
+    _open(at, "T079", "Water and Waste Efficiency Analyzer")
+    resources = _run(at, "T079")
+    assert resources["metrics"]["total_water_input_m3"] == pytest.approx(104)
+    assert resources["metrics"]["total_recycling_rate_percent"] == pytest.approx(17 / 44 * 100)
+
+    _open(at, "T083", "Evidence-Based ROI Tracker")
+    roi = _run(at, "T083")
+    assert roi["metrics"]["net_benefit_after_implementation_cost"] == pytest.approx(2000)
+    assert roi["metrics"]["verified_savings"] is False
+    assert roi["metrics"]["evidence_state"] == "ESTIMATE_ONLY"
+
+
+def test_starter_cannot_render_or_execute_professional_spare_parts_planner():
+    at = _authed_library(tier="Starter")
+    _open(at, "T045", "Spare Parts and Criticality Planner")
+    assert any("does not grant this target capability" in str(item.value).lower() for item in at.warning)
+    assert "shoir_T045_result" not in at.session_state
+    with pytest.raises(KeyError):
+        at.button(key="T045_run_button")
+
+
+def test_hazard_sop_assignment_scenario_portfolio_evidence_and_kpi_tools_run():
+    at = _authed_library(tier="Research Pack")
+
+    _open(at, "T047", "Job Safety and Hazard Register")
+    hazards = _run(at, "T047")
+    assert hazards["metrics"]["hazard_count"] == 2
+    assert hazards["metrics"]["maximum_residual_score"] == 12
+
+    _open(at, "T052", "Sales and Operations Planning")
+    sop = _run(at, "T052")
+    assert sop["metrics"]["capacity_exceeded_periods"] == 1
+    assert sop["metrics"]["ending_backlog_units"] == pytest.approx(0)
+    assert sop["metrics"]["ending_inventory_units"] == pytest.approx(0)
+
+    _open(at, "T063", "Assignment and Scheduling Optimizer")
+    assignment = _run(at, "T063")
+    assert assignment["metrics"]["total_assignment_cost"] == pytest.approx(6)
+    assert assignment["metrics"]["assignment_complete"] is True
+
+    _open(at, "T073", "What-If Scenario Manager")
+    scenarios = _run(at, "T073")
+    assert scenarios["metrics"]["baseline_capacity_units"] == pytest.approx(99.75)
+    assert scenarios["metrics"]["scenarios_meeting_entered_demand"] == 2
+
+    _open(at, "T084", "Engineering Project Portfolio Scorer")
+    portfolio = _run(at, "T084")
+    assert portfolio["metrics"]["top_ranked_project_id"] == "PR-02"
+    assert portfolio["metrics"]["top_weighted_score"] == pytest.approx(85)
+
+    _open(at, "T086", "Hypothesis and Evidence Register")
+    evidence = _run(at, "T086")
+    assert evidence["metrics"]["evidence_record_count"] == 1
+    assert evidence["metrics"]["independently_verified_count"] == 0
+
+    _open(at, "T094", "KPI Dashboard and Alert Center")
+    kpis = _run(at, "T094")
+    assert kpis["metrics"]["alert_count"] == 2
+    assert kpis["metrics"]["stale_metric_count"] == 1
+    assert kpis["metrics"]["alert_and_stale_count"] == 1
+
+
+def test_starter_cannot_execute_enterprise_kpi_alert_center():
+    at = _authed_library(tier="Starter")
+    _open(at, "T094", "KPI Dashboard and Alert Center")
+    assert any("does not grant this target capability" in str(item.value).lower() for item in at.warning)
+    assert "shoir_T094_result" not in at.session_state
+    with pytest.raises(KeyError):
+        at.button(key="T094_run_button")
+
+
+def test_field_mapper_and_safety_incident_trends_run_in_streamlit():
+    at = _authed_library(tier="Starter")
+    _open(at, "T015", "Industrial Field Mapper")
+    mapped = _run(at, "T015")
+    table = mapped["mapping_table"].set_index("source_column")
+    assert table.loc["Asset ID", "canonical_field"] == "asset_id"
+    assert table.loc["Produced Units", "canonical_field"] == "units_produced"
+    assert table.loc["custom_field", "mapping_status"] == "UNMAPPED"
+
+    # Safety trend analysis belongs to Mid-Tier Pro and above, not Starter.
+    restricted = _authed_library(tier="Mid-Tier Pro")
+    _open(restricted, "T050", "Safety Incident Trend Analyzer")
+    incidents = _run(restricted, "T050")
+    assert incidents["metrics"]["incident_count"] == 4
+    assert incidents["metrics"]["exposure_hours"] == pytest.approx(22000)
+    assert incidents["metrics"]["overall_incident_rate"] == pytest.approx(4 / 22000 * 200000)
+    assert incidents["metrics"]["incident_categories"] == 2
+
+
+def test_starter_is_denied_safety_incident_trend_action():
+    at = _authed_library(tier="Starter")
+    _open(at, "T050", "Safety Incident Trend Analyzer")
+    assert any("does not grant this target capability" in str(item.value).lower() for item in at.warning)
+    assert "shoir_T050_result" not in at.session_state
+    with pytest.raises(KeyError):
+        at.button(key="T050_run_button")
+
+
+def test_dataset_versioning_tool_creates_repeatable_fingerprint_and_saves_lineage():
+    at = _authed_library(tier="Professional")
+    _open(at, "T020", "Dataset Versioning and Lineage")
+    record = _run(at, "T020")
+    assert record["tool_id"] == "T020"
+    assert record["status"] == "VERSIONED"
+    assert record["raw_dataset_included"] is False
+    assert record["row_count"] == 3
+    assert record["metrics"]["transformation_count"] == 2
+    assert record["version_id"].startswith("DSV-")
+    assert at.session_state["shoir_dataset_lineage_versions"][-1]["version_id"] == record["version_id"]
+
+
+def test_starter_cannot_access_dataset_versioning():
+    at = _authed_library(tier="Starter")
+    _open(at, "T020", "Dataset Versioning and Lineage")
+    assert any("does not grant this target capability" in str(item.value).lower() for item in at.warning)
+    assert "shoir_T020_result" not in at.session_state
+    with pytest.raises(KeyError):
+        at.button(key="T020_run_button")
+
+
+def test_weibull_reliability_tool_runs_for_professional_and_denies_starter():
+    at = _authed_library(tier="Professional")
+    _open(at, "T041", "Weibull Reliability Analyzer")
+    result = _run(at, "T041")
+    assert result["status"] == "CALCULATED"
+    assert result["metrics"]["observed_failures"] == 12
+    assert result["metrics"]["right_censored_count"] == 0
+    assert result["parameters"]["shape"] > 0
+    assert result["parameters"]["scale"] > 0
+    assert len(result["reliability_at_horizons"]) == 4
+
+    denied = _authed_library(tier="Starter")
+    _open(denied, "T041", "Weibull Reliability Analyzer")
+    assert any("does not grant this target capability" in str(item.value).lower() for item in denied.warning)
+    assert "shoir_T041_result" not in denied.session_state
+    with pytest.raises(KeyError):
+        denied.button(key="T041_run_button")
+
+
+def test_constraint_solver_diagnostics_shows_optimal_solution_and_denies_starter():
+    at = _authed_library(tier="Professional")
+    _open(at, "T062", "Constraint and Solver Diagnostics")
+    result = _run(at, "T062")
+    assert result["status"] == "OPTIMAL"
+    assert result["objective_value"] == pytest.approx(10)
+    assert result["metrics"]["constraints_satisfied"] is True
+    assert set(result["constraint_diagnostics"]["status"]) == {"SATISFIED"}
+
+    denied = _authed_library(tier="Starter")
+    _open(denied, "T062", "Constraint and Solver Diagnostics")
+    assert any("does not grant this target capability" in str(item.value).lower() for item in denied.warning)
+    assert "shoir_T062_result" not in denied.session_state
+    with pytest.raises(KeyError):
+        denied.button(key="T062_run_button")
+
+
+def test_maintenance_backlog_optimizer_respects_capacity_and_tier():
+    at = _authed_library(tier="Professional")
+    _open(at, "T049", "Maintenance Backlog Optimizer")
+    result = _run(at, "T049")
+    assert result["status"] == "OPTIMAL"
+    assert result["metrics"]["scheduled_count"] == 3
+    plan = result["work_plan"].set_index("work_order_id")
+    assert plan.loc["WO-B", "schedule_status"] == "SCHEDULED"
+    assert plan.loc["WO-C", "schedule_status"] == "SCHEDULED"
+    assert plan.loc["WO-D", "schedule_status"] == "SCHEDULED"
+    assert plan.loc["WO-A", "schedule_status"] == "NOT_SCHEDULED_CAPACITY_TRADEOFF"
+    assert result["slot_utilization"].set_index("slot_id").loc["DAY-MECH-4H", "scheduled_hours"] == pytest.approx(4)
+
+    denied = _authed_library(tier="Starter")
+    _open(denied, "T049", "Maintenance Backlog Optimizer")
+    assert any("does not grant this target capability" in str(item.value).lower() for item in denied.warning)
+    assert "shoir_T049_result" not in denied.session_state
+    with pytest.raises(KeyError):
+        denied.button(key="T049_run_button")
+
+
+def test_reproducibility_pack_is_valid_zip_and_research_pack_gated():
+    import base64
+    import io
+    import zipfile
+
+    at = _authed_library(tier="Research Pack")
+    _open(at, "T087", "Reproducibility Pack Generator")
+    result = _run(at, "T087")
+    assert result["status"] == "PACKAGE_BUILT"
+    assert result["raw_dataset_included"] is False
+    archive_bytes = base64.b64decode(result["archive_base64"])
+    assert zipfile.is_zipfile(io.BytesIO(archive_bytes))
+    with zipfile.ZipFile(io.BytesIO(archive_bytes)) as archive:
+        assert archive.testzip() is None
+        assert "checksums.sha256" in archive.namelist()
+        assert "manifest.json" in archive.namelist()
+
+    denied = _authed_library(tier="Enterprise Plus")
+    _open(denied, "T087", "Reproducibility Pack Generator")
+    assert any("does not grant this target capability" in str(item.value).lower() for item in denied.warning)
+    assert "shoir_T087_result" not in denied.session_state
+    with pytest.raises(KeyError):
+        denied.button(key="T087_run_button")
+
+
+def test_gage_rr_analyzer_runs_crossed_design_and_denies_starter():
+    at = _authed_library(tier="Professional")
+    _open(at, "T033", "Measurement Systems Analysis")
+    result = _run(at, "T033")
+    assert result["status"] == "CALCULATED"
+    assert result["metrics"]["part_count"] == 3
+    assert result["metrics"]["appraiser_count"] == 2
+    assert result["metrics"]["replicates_per_cell"] == 3
+    assert len(result["anova_table"]) == 4
+    assert result["variance_components"]["variance_component"].ge(0).all()
+
+    denied = _authed_library(tier="Starter")
+    _open(denied, "T033", "Measurement Systems Analysis")
+    assert any("does not grant this target capability" in str(item.value).lower() for item in denied.warning)
+    assert "shoir_T033_result" not in denied.session_state
+    with pytest.raises(KeyError):
+        denied.button(key="T033_run_button")
+
+
+def test_equipment_anomaly_screen_flags_outlier_but_does_not_claim_live_feed():
+    at = _authed_library(tier="Enterprise")
+    _open(at, "T048", "Equipment Anomaly Monitor")
+    result = _run(at, "T048")
+    assert result["status"] == "CALCULATED_OFFLINE_DATA"
+    assert result["metrics"]["external_connector_live"] is False
+    assert result["metrics"]["flagged_observation_count"] == 1
+    flagged = result["anomaly_table"].query("anomaly_flag == True")
+    assert flagged.iloc[0]["value"] == pytest.approx(40.0)
+
+    denied = _authed_library(tier="Starter")
+    _open(denied, "T048", "Equipment Anomaly Monitor")
+    assert any("does not grant this target capability" in str(item.value).lower() for item in denied.warning)
+    assert "shoir_T048_result" not in denied.session_state
+    with pytest.raises(KeyError):
+        denied.button(key="T048_run_button")
+
+
+def test_discrete_event_simulation_runs_replications_and_denies_starter():
+    at = _authed_library(tier="Enterprise")
+    _open(at, "T071", "Discrete-Event Simulation")
+    result = _run(at, "T071")
+    assert result["status"] == "SIMULATED"
+    assert result["metrics"]["replications"] == 5
+    assert result["metrics"]["station_count"] == 3
+    assert result["metrics"]["live_data_connected"] is False
+    assert len(result["replication_summary"]) == 5
+    assert result["metrics"]["mean_throughput_units_per_hour"] > 0
+    assert result["metrics"]["mean_flow_time_approx_95pct_t_interval"] is not None
+
+    denied = _authed_library(tier="Starter")
+    _open(denied, "T071", "Discrete-Event Simulation")
+    assert any("does not grant this target capability" in str(item.value).lower() for item in denied.warning)
+    assert "shoir_T071_result" not in denied.session_state
+    with pytest.raises(KeyError):
+        denied.button(key="T071_run_button")
+
+
+def test_power_sample_size_planner_uses_noncentral_t_and_research_pack_boundary():
+    at = _authed_library(tier="Research Pack")
+    _open(at, "T085", "Statistical Power and Sample-Size Planner")
+    result = _run(at, "T085")
+    metrics = result["metrics"]
+    assert metrics["minimum_sample_size_per_unit"] > 0
+    assert metrics["minimum_total_sample_size"] == metrics["minimum_sample_size_per_unit"]
+    assert metrics["achieved_power_at_required_sample_size"] >= 0.80
+    assert result["parameters"]["design"] == "one_sample"
+
+    denied = _authed_library(tier="Enterprise Plus")
+    _open(denied, "T085", "Statistical Power and Sample-Size Planner")
+    assert any("does not grant this target capability" in str(item.value).lower() for item in denied.warning)
+    assert "shoir_T085_result" not in denied.session_state
+    with pytest.raises(KeyError):
+        denied.button(key="T085_run_button")
+
+
+def test_research_methods_report_builds_downloadable_markdown_and_gates_tier():
+    at = _authed_library(tier="Research Pack")
+    _open(at, "T090", "Research Report and Methods Builder")
+    result = _run(at, "T090")
+    assert result["status"] == "REPORT_GENERATED"
+    assert result["report_markdown"].startswith("# ")
+    assert "Limitations" in result["report_markdown"]
+    assert result["raw_dataset_included"] is False
+    assert len(result["sha256"]) == 64
+
+    denied = _authed_library(tier="Enterprise Plus")
+    _open(denied, "T090", "Research Report and Methods Builder")
+    assert any("does not grant this target capability" in str(item.value).lower() for item in denied.warning)
+    assert "shoir_T090_result" not in denied.session_state
+    with pytest.raises(KeyError):
+        denied.button(key="T090_run_button")
+
+
+def test_guided_study_wizard_generates_missing_input_plan_without_fake_analysis():
+    at = _authed_library(tier="Starter")
+    _open(at, "T002", "Guided Study Wizard")
+    at.text_input(key="t002_objective").set_value("Identify the production bottleneck")
+    at.button(key="T002_run_button").click()
+    at.run(timeout=60)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    saved = at.session_state.get("shoir_T002_result")
+    assert saved is not None
+    plan = saved["result"]
+    assert plan["status"] == "PLAN_GENERATED"
+    assert plan["metrics"]["missing_input_count"] > 0
+    assert plan["metrics"]["ready_to_analyze"] is False
+    assert any("No plant result" in warning for warning in plan["warnings"])
+
+
+def test_formula_inspector_reads_existing_structured_session_result():
+    at = _authed_library(tier="Starter")
+    at.session_state["shoir_T023_result"] = {
+        "signature": "synthetic-fixture-signature",
+        "source": "SYNTHETIC TEST FIXTURE",
+        "executed_at": "2026-10-25T00:00:00+00:00",
+        "persistence_status": "SESSION_ONLY_SAVE_FAILED",
+        "result": {
+            "status": "CALCULATED",
+            "method": "Takt time",
+            "formula": "net_available_minutes / demand_units",
+            "assumptions": ["The production period is the same in numerator and denominator."],
+            "warnings": ["Synthetic fixture only."],
+            "metrics": {"takt_minutes_per_unit": 1.2},
+        },
+    }
+    _open(at, "T008", "Formula and Assumption Inspector")
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    assert any("net_available_minutes / demand_units" in item.value for item in at.markdown)
+    assert any("Takt time" in item.value for item in at.markdown)
+
+
+def test_contextual_help_search_returns_curated_capacity_article_and_route_action():
+    at = _authed_library(tier="Starter")
+    _open(at, "T010", "Interactive Learning and Help Center")
+    at.text_input(key="t010_help_query").set_value("capacity")
+    at.button(key="T010_run_button").click()
+    at.run(timeout=60)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    saved = at.session_state.get("shoir_T010_result")
+    assert saved is not None
+    articles = saved["result"]["articles"]
+    assert any("T023" in article["related_tools"] or "T025" in article["related_tools"] for article in articles)
+    assert any("Open T023" in button.label for button in at.button)
+
+
+def test_student_practice_mode_checks_answer_and_explains_rounding():
+    at = _authed_library(tier="Starter")
+    _open(at, "T089", "Student Learning and Practice Mode")
+    at.number_input(key="t089_answer").set_value(1.2)
+    at.button(key="T089_run_button").click()
+    at.run(timeout=60)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    saved = at.session_state.get("shoir_T089_result")
+    assert saved is not None
+    assert saved["result"]["is_correct"] is True
+    assert "480 min / 400 units = 1.2 min/unit" in saved["result"]["worked_formula"]

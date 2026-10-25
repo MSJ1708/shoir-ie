@@ -2,6 +2,7 @@ import io
 import zipfile
 
 import pandas as pd
+import pytest
 
 from shoir_copilot_orchestrator import (
     WORKFLOW_STEPS,
@@ -156,3 +157,18 @@ def test_export_bundle_carries_linked_knowledge():
     with zipfile.ZipFile(io.BytesIO(bundle), "r") as zf:
         assert "knowledge_context.txt" in zf.namelist()
         assert b"verify data units" in zf.read("knowledge_context.txt")
+
+def test_decision_staging_fails_closed_if_approval_layer_cannot_import(monkeypatch):
+    import sys
+    from shoir_copilot_orchestrator import stage_copilot_decision
+
+    # A governed write must not fall through to creating a decision without
+    # the server-side approval/action-gate module.
+    monkeypatch.setitem(sys.modules, "shoir_enterprise_layer", None)
+    with pytest.raises(RuntimeError, match="approval/access-control layer"):
+        stage_copilot_decision(
+            {"result": pd.DataFrame({"value": [1]})},
+            actor="disposable-test-actor",
+            workspace="test-workspace",
+        )
+
