@@ -40,3 +40,87 @@ def test_public_tab_smoke_rejects_clipped_mobile_labels():
     assert 'tab["scrollHeight"] > tab["clientHeight"] + 2' in source
     assert 'viewport_width <= 600' in source
 
+def test_tab_bar_layout_validator_catches_mobile_clipping():
+    from scripts.live_deployment_smoke import _validate_tab_bar_layout
+
+    good_tabs = [
+        {
+            "label": "Sign In",
+            "left": 0, "right": 118, "top": 0, "bottom": 42,
+            "clientWidth": 118, "scrollWidth": 118,
+            "clientHeight": 42, "scrollHeight": 42,
+            "labelLeft": 8, "labelRight": 110,
+            "labelClientWidth": 102, "labelScrollWidth": 102,
+            "whiteSpace": "normal",
+        },
+        {
+            "label": "Get Ticket & Register",
+            "left": 122, "right": 255, "top": 0, "bottom": 58,
+            "clientWidth": 133, "scrollWidth": 133,
+            "clientHeight": 58, "scrollHeight": 58,
+            "labelLeft": 130, "labelRight": 247,
+            "labelClientWidth": 117, "labelScrollWidth": 117,
+            "whiteSpace": "normal",
+        },
+        {
+            "label": "Explore the Modules",
+            "left": 0, "right": 190, "top": 62, "bottom": 120,
+            "clientWidth": 190, "scrollWidth": 190,
+            "clientHeight": 58, "scrollHeight": 58,
+            "labelLeft": 8, "labelRight": 182,
+            "labelClientWidth": 174, "labelScrollWidth": 174,
+            "whiteSpace": "normal",
+        },
+    ]
+    layout = {
+        "viewportWidth": 390,
+        "listLeft": 0, "listRight": 390, "listWidth": 390,
+        "clientWidth": 390, "scrollWidth": 390, "scrollLeft": 0,
+        "tabCount": 3, "tabs": good_tabs,
+    }
+    _validate_tab_bar_layout(layout, 390)
+
+    horizontally_scrolling = {**layout, "scrollWidth": 520}
+    with pytest.raises(AssertionError, match="horizontal scrolling"):
+        _validate_tab_bar_layout(horizontally_scrolling, 390)
+
+    clipped_label = {**layout, "tabs": [dict(tab) for tab in good_tabs]}
+    clipped_label["tabs"][1]["scrollWidth"] = clipped_label["tabs"][1]["clientWidth"] + 12
+    with pytest.raises(AssertionError, match="horizontally clipped"):
+        _validate_tab_bar_layout(clipped_label, 390)
+
+    vertically_clipped_label = {**layout, "tabs": [dict(tab) for tab in good_tabs]}
+    vertically_clipped_label["tabs"][1]["scrollHeight"] = vertically_clipped_label["tabs"][1]["clientHeight"] + 12
+    with pytest.raises(AssertionError, match="vertically clipped"):
+        _validate_tab_bar_layout(vertically_clipped_label, 390)
+
+    non_wrapping_mobile_label = {**layout, "tabs": [dict(tab) for tab in good_tabs]}
+    non_wrapping_mobile_label["tabs"][2]["whiteSpace"] = "nowrap"
+    with pytest.raises(AssertionError, match="configured not to wrap"):
+        _validate_tab_bar_layout(non_wrapping_mobile_label, 390)
+
+
+def test_tab_bar_layout_validator_allows_desktop_whitespace_when_not_clipped():
+    from scripts.live_deployment_smoke import _validate_tab_bar_layout
+
+    tabs = [
+        {
+            "label": name, "left": left, "right": right, "top": 0, "bottom": 44,
+            "clientWidth": right - left, "scrollWidth": right - left,
+            "clientHeight": 44, "scrollHeight": 44,
+            "labelLeft": left + 8, "labelRight": right - 8,
+            "labelClientWidth": right - left - 16, "labelScrollWidth": right - left - 16,
+            "whiteSpace": "nowrap",
+        }
+        for name, left, right in [
+            ("Sign In", 0, 150),
+            ("Get Ticket & Register", 150, 380),
+            ("Explore the Modules", 380, 600),
+        ]
+    ]
+    layout = {
+        "viewportWidth": 1440, "listLeft": 0, "listRight": 1440, "listWidth": 1440,
+        "clientWidth": 1440, "scrollWidth": 1440, "scrollLeft": 0,
+        "tabCount": 3, "tabs": tabs,
+    }
+    _validate_tab_bar_layout(layout, 1440)

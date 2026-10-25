@@ -143,3 +143,13 @@ Before merging, run all workflows on the exact final commit, fix every regressio
 ## Release position
 
 **DRAFT / NO-GO.** This integration tranche preserves the current UX and adds executable calculation-backed tools, but it does not complete all 100 targets or certify workforce/production readiness. Do not merge or make commercial readiness claims until the remaining foundation-only capabilities and the mandatory release checks are completed.
+
+
+## Current continuation findings — 25 October 2026
+
+- A completed local public-shell browser smoke on commit f3e92e71bd8cb064426dd05ed2e3f6d12a758b0a passed its automated HTTP, JavaScript-console, and page-wide overflow checks at 1440px and 390px. Artifact 12597898421 contains the redacted screenshots and result.json. Visual inspection of the 390px screenshots nevertheless found the three public authentication tabs scrolling sideways and showing clipped labels; page-wide overflow alone was not sufficient to catch this defect.
+- app.py now applies mobile-only wrapping to the public sign-in/registration/module-explorer tabs at widths up to 600px. Desktop tab styling is not intentionally changed.
+- scripts/live_deployment_smoke.py now measures the tab-list and individual tab geometry, checks horizontal/vertical clipping, and requires wrapping on narrow screens. Tests also exercise this validator with synthetic geometry fixtures.
+- Validation, engine regression, platform tests, and security/quality workflows passed on the earlier commit above, but those results predate the latest responsive fix and geometry assertions. CI on the current branch head must complete before the new fix can be considered checked.
+- Authenticated module execution, save/reload/re-login, cross-workspace isolation, real workbook-to-decision/export workflows, and a hosted live-deployment smoke are still not established by this public unauthenticated-shell artifact. The authenticated release-gate workflow is manual and requires dedicated staging credentials; no such credentials are read or exposed by this audit.
+
