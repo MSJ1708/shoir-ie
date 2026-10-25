@@ -4363,11 +4363,9 @@ def run_solver_diagnostics(
     constraint_rows: list[dict[str, Any]] = []
     all_constraints_ok = True
     for item in normalized_constraints:
-        constraint = problem.constraints[item["name"]]
-        raw_lhs_value = constraint.value()
-        lhs_value = None if raw_lhs_value is None else float(raw_lhs_value + item["rhs"] if item["sense"] != pulp.LpConstraintEQ or raw_lhs_value is not None else raw_lhs_value)
-        # PuLP stores a constraint as expression - RHS, so use the original
-        # coefficients and variable values for a clear, independently recomputed LHS.
+        # Recompute the left-hand side independently from the original model
+        # coefficients rather than trusting the solver's residual bookkeeping.
+        lhs_value = None
         if all_values_assigned:
             lhs_value = sum(float(item["coefficients"][name]) * float(variables[name].varValue) for name in item["coefficients"])
             if item["sense"] == pulp.LpConstraintLE:
