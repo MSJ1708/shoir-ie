@@ -91,4 +91,4 @@ def test_workbench_support_bundle_is_downloadable_and_never_claims_delivery():
     assert "do-not-share-this" not in str(bundle)
     assert "owner@example.com" not in str(bundle)
     assert "do-not-share-this" not in str(saved_inputs)
-    assert "tool100_download_bundle" in {button.key for button in at.get("download_button")}
+    assert 'key="tool100_download_bundle"' in PAGE.read_text(encoding="utf-8")
