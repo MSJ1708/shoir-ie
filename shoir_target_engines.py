@@ -1,4 +1,4 @@
-"""Validated first-pass deterministic engines for nineteen focused Shoir-IE targets.
+"""Validated first-pass deterministic engines for focused Shoir-IE target tools.
 
 Scope:
 * T016 converts supported dimensional units and currencies only with a dated user-supplied rate.
@@ -29,6 +29,7 @@ from __future__ import annotations
 import math
 from datetime import date as _date
 from collections.abc import Mapping, Sequence
+from itertools import product
 from typing import Any
 
 import numpy as np
