@@ -500,3 +500,34 @@ def test_workbench_runs_measurement_system_regression_and_research_hypothesis_to
     assert hypothesis["sample_size_a"] == 4
     assert hypothesis["reject_null_hypothesis"] is False
     assert hypothesis["data_provenance"] == "SYNTHETIC_EXAMPLE"
+
+
+def test_workbench_runs_discrete_event_simulation():
+    """Verify T071 is wired to the shared Workbench and keeps assumptions explicit."""
+    from streamlit.testing.v1 import AppTest
+
+    page = ROOT / "pages" / "Industrial_Engineering_Workbench.py"
+    at = AppTest.from_file(page, default_timeout=90)
+    at.session_state["current_user"] = "des-simulation-checker"
+    at.session_state["authenticated"] = True
+    at.session_state["user_tier"] = "Research Pack"
+    at.run(timeout=90)
+    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+
+    at.selectbox(key="shoir_100_tool_inspector").select("T071 · Discrete-Event Simulation")
+    at.run(timeout=90)
+    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+    at.button(key="tool071_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+    result = at.session_state.get("shoir_tool_result_T071")
+    assert result is not None
+    assert result["status"] == "DISCRETE_EVENT_SIMULATION_COMPLETED"
+    assert result["job_count"] == 50
+    assert result["warmup_jobs_excluded_from_performance_metrics"] == 5
+    assert result["replications"] == 10
+    assert result["station_count"] == 2
+    assert len(result["replication_results"]) == 10
+    assert len(result["station_summary"]) == 2
+    assert result["data_provenance"] == "SYNTHETIC_EXAMPLE"
+
