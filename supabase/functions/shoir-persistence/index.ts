@@ -1,5 +1,10 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
+import {
+  normalizeWorkspaceStateJson,
+  publicErrorFor,
+  readBoundedJsonObject,
+} from "./security.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -303,7 +308,7 @@ async function loginThrottleBuckets(usernameLc: string, req: Request) {
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return response({ ok: true });
   try {
-    const body = await req.json();
+    const body = await readBoundedJsonObject(req);
     const action = String(body.action || "");
 
     if (action === "login") {
@@ -567,9 +572,11 @@ Deno.serve(async (req) => {
     }
     if (action === "workspace_save") {
       await getSession(String(body.token), String(body.username));
+      // Validate before upsert so malformed/oversized state never replaces the last valid save.
+      const workspaceState = normalizeWorkspaceStateJson(body.state_json);
       const { error } = await supabase.from("shoir_workspace_states").upsert({
         username_lc: String(body.username).trim().toLowerCase(),
-        state_json: String(body.state_json || "{}"),
+        state_json: workspaceState,
         updated_at: new Date().toISOString(),
       }, { onConflict: "username_lc" });
       if (error) throw error;
@@ -722,9 +729,7 @@ Deno.serve(async (req) => {
 
     return response({ error: "Unknown action." }, 400);
   } catch (err: unknown) {
-    return response(
-      { error: err instanceof Error ? err.message : String(err) },
-      500,
-    );
+    const failure = publicErrorFor(err);
+    return response({ error: failure.message }, failure.status);
   }
 });
