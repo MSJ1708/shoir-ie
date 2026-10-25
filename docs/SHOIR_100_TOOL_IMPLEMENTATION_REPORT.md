@@ -10,7 +10,7 @@ The implementation uses the existing `pages/Industrial_Engineering_Workbench.py`
 
 ## Focused execution methods
 
-The original focused tranche was continued with four additional methods (T036, T037, T051 and T072). This integration also carries the separately tested T062 solver diagnostics, T071 discrete-event simulation and T087 reproducibility ZIP into the same branch. The combined Workbench contains 64 distinct stable target IDs with focused runner branches, including the four trust/help/support actions added in this tranche; each remains pending authenticated end-to-end verification. Other existing module workflows may cover additional targets, but they are not counted as focused runners unless wired to the stable target ID and its execution gate. The implementation matrix links every target to its minimum tier, contracts, evidence tests and remaining limitations.
+The original focused tranche was continued with four additional methods (T036, T037, T051 and T072). This integration also carries the separately tested T062 solver diagnostics, T071 discrete-event simulation and T087 reproducibility ZIP into the same branch. The combined Workbench contains 65 distinct stable target IDs with focused runner branches, including the four trust/help/support actions added in this tranche; each remains pending authenticated end-to-end verification. Other existing module workflows may cover additional targets, but they are not counted as focused runners unless wired to the stable target ID and its execution gate. The implementation matrix links every target to its minimum tier, contracts, evidence tests and remaining limitations.
 
 ### Lean, manufacturing, quality and economics
 
@@ -109,6 +109,14 @@ The focused actions use the existing authenticated actor check, `require_tool_ac
 ### Equipment anomaly monitoring and freshness
 
 T048 now has an Enterprise-gated path within the existing Workbench. It uses a global median/MAD point-anomaly screen with an explicit zero-MAD fallback, and independently reports freshness (`FRESH`, `STALE`, or `FUTURE_TIMESTAMP`). Invalid timestamps/non-finite values are rejected; out-of-order and duplicate timestamps are surfaced as warnings. The method is **not** a predictive-maintenance model, root-cause analyzer or live sensor integration. Unit and Workbench AppTest cases have been added; the status remains `IMPLEMENTED_NEEDS_VALIDATION` until CI and authenticated staging checks pass.
+
+### Ergonomics: Revised NIOSH Lifting Equation (T046)
+
+T046 now has an execution path in the existing Workbench using `shoir_ergonomics.py`, not a generic ergonomic risk score. It calculates the single-task Revised NIOSH Lifting Equation (RNLE) for an explicitly confirmed two-handed standing lifting task: endpoint horizontal/vertical/asymmetry multipliers, distance multiplier, Table 5 frequency multiplier (linear interpolation between table rows), independently classified origin/destination coupling multipliers from Table 7, the lower endpoint recommended weight limit (RWL), and lifting index (`LI = load / RWL`).
+
+The calculation uses the NIOSH 23 kg load constant and documents the method/source, formulas, entered-data provenance, assumptions and warnings. Table 5 and Table 7 use the vertical category boundary of 30 inches (76.2 cm); this was explicitly tested after review of the official NIOSH manual. Origin and destination coupling quality are separate inputs. For frequencies below 0.1 lift/minute, the method requires the usual <=1 hour duration category or a qualified confirmation rather than silently applying an inconsistent duration category. The code rejects invalid/non-finite measurements and zero frequency multipliers, and requires the user to confirm that the task is within scope before it runs. Official method reference: [NIOSH Applications Manual 94-110, revised September 2021](https://www.cdc.gov/niosh/docs/94-110/).
+
+The supported calculation is deliberately limited: it is not a multiple-task RNLE assessment, it does not cover every lifting situation, and an LI or RWL alone does not certify a task or establish medical/safety suitability. Qualified review and accurate field measurements are still required. Golden, interpolation, coupling and boundary fixtures plus a Workbench AppTest have been added. T046 remains `IMPLEMENTED_NEEDS_VALIDATION`; hosted authenticated browser, tier-denial, durable persistence/re-login, cross-workspace isolation and Arabic/RTL checks have not been completed.
 
 ## Calculation safety and regression protection
 
