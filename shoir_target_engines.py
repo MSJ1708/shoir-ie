@@ -5795,3 +5795,120 @@ def build_guided_study_plan(
         "warning": "This is a study plan, not an engineering result. Run each tool separately, validate its data and assumptions, and do not treat estimates as realized outcomes.",
         "data_provenance": "USER-PROVIDED INPUT INVENTORY AND CANONICAL TOOL REGISTRY",
     }
+
+
+def monitor_equipment_anomalies(
+    observations: Sequence[Mapping[str, Any]],
+    *,
+    value_field: str = "value",
+    timestamp_field: str = "timestamp",
+    modified_z_threshold: float = 3.5,
+    max_age_hours: float = 72.0,
+    evaluation_time_utc: Any = None,
+) -> dict[str, Any]:
+    """Flag point anomalies using a global median/MAD baseline and disclose freshness.
+
+    The zero-MAD branch uses a documented absolute-deviation fallback. This is a
+    screening method, not a predictive-maintenance model or causal diagnosis.
+    """
+    if not isinstance(observations, Sequence) or isinstance(observations, (str, bytes)):
+        raise ValueError("Observations must be a JSON list of timestamp/value records.")
+    if not 5 <= len(observations) <= 50000:
+        raise ValueError("Anomaly monitoring requires between 5 and 50,000 observations.")
+    if any(not isinstance(row, Mapping) for row in observations):
+        raise ValueError("Every observation must be an object.")
+    threshold = _finite_number(modified_z_threshold, "Modified-z threshold")
+    if not 1.0 <= threshold <= 10.0:
+        raise ValueError("Modified-z threshold must be between 1.0 and 10.0.")
+    max_age = _finite_number(max_age_hours, "Maximum data age in hours")
+    if not 0.01 <= max_age <= 8760:
+        raise ValueError("Maximum data age must be between 0.01 and 8,760 hours.")
+    if not str(value_field).strip() or not str(timestamp_field).strip():
+        raise ValueError("Timestamp and value column names are required.")
+
+    records = []
+    for index, row in enumerate(observations, start=1):
+        timestamp = pd.to_datetime(row.get(timestamp_field), utc=True, errors="coerce")
+        if pd.isna(timestamp):
+            raise ValueError(f"Observation {index} has a missing or invalid timestamp.")
+        if value_field not in row:
+            raise ValueError(f"Observation {index} is missing value field {value_field!r}.")
+        value = _finite_number(row[value_field], f"Observation {index} value")
+        records.append({"timestamp": timestamp, "value": value, "source_row": index})
+    frame = pd.DataFrame(records)
+    original_times = list(frame["timestamp"])
+    out_of_order = sum(1 for i in range(1, len(original_times)) if original_times[i] < original_times[i-1])
+    duplicate_timestamps = int(frame["timestamp"].duplicated(keep=False).sum())
+    frame = frame.sort_values("timestamp", kind="stable").reset_index(drop=True)
+
+    values = frame["value"].to_numpy(dtype=float)
+    median = float(np.median(values))
+    deviations = np.abs(values - median)
+    mad = float(np.median(deviations))
+    warnings = []
+    if mad > max(1e-12, abs(median) * 1e-12):
+        modified_z = 0.6744897501960817 * (values - median) / mad
+        anomalies = np.abs(modified_z) > threshold
+        method = "GLOBAL_MEDIAN_MAD_MODIFIED_Z"
+        frame["modified_z_score"] = modified_z
+    else:
+        absolute_limit = max(1e-9, abs(median) * 0.01)
+        anomalies = deviations > absolute_limit
+        frame["modified_z_score"] = None
+        method = "ZERO_MAD_ABSOLUTE_DEVIATION_FALLBACK"
+        warnings.append(
+            f"Baseline MAD is zero; points more than {absolute_limit:.6g} from the median are flagged using an absolute-deviation fallback."
+        )
+    frame["is_anomaly"] = anomalies.astype(bool)
+    frame["baseline_median"] = median
+    frame["baseline_mad"] = mad
+
+    if evaluation_time_utc is None or not str(evaluation_time_utc).strip():
+        evaluation_time = pd.Timestamp.now(tz="UTC")
+    else:
+        evaluation_time = pd.to_datetime(evaluation_time_utc, utc=True, errors="coerce")
+        if pd.isna(evaluation_time):
+            raise ValueError("Evaluation time must be a valid UTC-compatible timestamp.")
+    latest = frame["timestamp"].max()
+    age_hours = float((evaluation_time - latest).total_seconds() / 3600.0)
+    if age_hours < -0.0833333333:
+        freshness = "FUTURE_TIMESTAMP"
+        warnings.append("Latest observation is more than five minutes ahead of the evaluation time.")
+    elif age_hours <= max_age:
+        freshness = "FRESH"
+    else:
+        freshness = "STALE"
+        warnings.append(f"Latest observation is {age_hours:.1f} hours old, exceeding the {max_age:g}-hour freshness limit.")
+    if out_of_order:
+        warnings.append(f"{out_of_order} observations were out of timestamp order and were sorted for analysis.")
+    if duplicate_timestamps:
+        warnings.append(f"{duplicate_timestamps} rows share duplicate timestamps; check sampling and deduplicate if appropriate.")
+    anomaly_frame = frame.loc[frame["is_anomaly"]].copy().reset_index(drop=True)
+    count = int(frame["is_anomaly"].sum())
+    return {
+        "status": "ANOMALIES_DETECTED" if count else "NO_ANOMALIES_DETECTED",
+        "detection_method": method,
+        "value_field": str(value_field),
+        "timestamp_field": str(timestamp_field),
+        "observation_count": int(len(frame)),
+        "anomaly_count": count,
+        "anomaly_rate_pct": 100.0 * count / len(frame),
+        "baseline_median": median,
+        "baseline_mad": mad,
+        "modified_z_threshold": threshold,
+        "freshness_status": freshness,
+        "latest_observation_utc": latest.isoformat(),
+        "data_age_hours": age_hours,
+        "maximum_data_age_hours": max_age,
+        "out_of_order_rows": out_of_order,
+        "duplicate_timestamp_rows": duplicate_timestamps,
+        "series": frame,
+        "anomalies": anomaly_frame,
+        "warnings": warnings,
+        "method_limitations": [
+            "Uses a global point-anomaly baseline and does not model seasonality, operating modes, multivariate relationships, or causal faults.",
+            "False positives depend on the supplied threshold and the representativeness of the observation window.",
+            "Freshness is reported separately; fresh data does not establish sensor accuracy or plant connectivity.",
+        ],
+        "data_provenance": "USER_ENTERED_UNVERIFIED",
+    }
