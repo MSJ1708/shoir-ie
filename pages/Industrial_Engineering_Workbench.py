@@ -1380,8 +1380,8 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                         raise ValueError("ANOVA groups must be a JSON object mapping group names to numeric lists.")
                                     result = run_one_way_anova(parsed_groups, alpha=regression_alpha)
                                 result["data_provenance"] = "SYNTHETIC_EXAMPLE" if (
-                                    regression_observations_json.strip() == '[{"x":1,"y":2},{"x":2,"y":4},{"x":3,"y":5},{"x":4,"y":8}]'
-                                    or anova_groups_json.strip() == '{"Line A":[1,2,3],"Line B":[4,5,6],"Line C":[7,8,9]}'
+                                    (regression_mode == "Linear regression" and regression_observations_json.strip() == '[{"x":1,"y":2},{"x":2,"y":4},{"x":3,"y":5},{"x":4,"y":8}]')
+                                    or (regression_mode == "One-way ANOVA" and anova_groups_json.strip() == '{"Line A":[1,2,3],"Line B":[4,5,6],"Line C":[7,8,9]}')
                                 ) else "USER_ENTERED_UNVERIFIED"
                             elif selected_tool["tool_id"] == "T037":
                                 try:
