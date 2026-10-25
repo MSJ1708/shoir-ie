@@ -932,6 +932,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 key.replace("shoir_tool_result_", "")
                                 for key in st.session_state.keys()
                                 if key.startswith("shoir_tool_result_T")
+                                and key != "shoir_tool_result_T087"
                                 and isinstance(st.session_state.get(key), dict)
                                 and tier_allows_tool(RAW_TIER, key.replace("shoir_tool_result_", ""))
                             })
