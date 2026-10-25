@@ -10,7 +10,7 @@ The implementation uses the existing `pages/Industrial_Engineering_Workbench.py`
 
 ## Focused execution methods
 
-There were 42 focused method runners before this continuation. **Nine additional methods have now been added as executable Workbench forms in this continuation, for 51 target IDs with focused execution paths total.** The implementation matrix links every target to its minimum tier, contracts, evidence tests and remaining limitations.
+There were 42 focused method runners before this continuation. **Ten additional methods have now been added as executable Workbench forms in this continuation, for 52 target IDs with focused execution paths total.** The implementation matrix links every target to its minimum tier, contracts, evidence tests and remaining limitations.
 
 ### Lean, manufacturing, quality and economics
 
@@ -55,6 +55,7 @@ This continuation adds three method-backed forms inside the existing Workbench:
 | T052 | Sales and Operations Planning | Aggregate time-phased demand/capacity/inventory/backlog/safety-stock reconciliation; not a multi-product, finite-capacity or workforce optimizer. |
 | T071 | Discrete-Event Simulation | Event-driven FCFS serial-route model with deterministic/exponential arrivals and service, finite servers, seeded replications and job-based warm-up. Does not model failures, alternate routes, rework or shared labor. |
 | T062 | Constraint and Solver Diagnostics | LP/MILP solver-state analysis with independent variable-bound/integrality and constraint-residual checks; supports continuous/integer/binary variables, not IIS generation or proof that the model formulation is complete. |
+| T087 | Reproducibility Pack Generator | Creates a ZIP with versioned run metadata, redacted configuration fingerprint, manifest and SHA-256 checksums; optional inputs/tables are opt-in and sensitive column names are redacted. |
 | T033 | Measurement Systems Analysis | Balanced crossed gage R&R via two-way random-effects ANOVA and nonnegative method-of-moments variance components. It does not support nested designs, confidence intervals, AIAG reference tables, or certification. |
 | T036 | Regression and ANOVA Studio | Full-rank ordinary least squares with intercept, coefficient diagnostics when estimable, model F-test, regression ANOVA and residual table. Categorical encoding, nonlinear model selection, robust standard errors and multiple-testing correction are outside the current method. |
 | T037 | Hypothesis Testing Assistant | Research Pack-gated two-sided one-sample, independent Welch and paired t-tests with degrees of freedom, p-value, confidence interval and Cohen's d when estimable. It does not auto-validate assumptions or provide multiple-testing correction. |
@@ -91,8 +92,8 @@ The registry and matrix contain 100 target IDs, T001–T100. Current classificat
 | Status | Count |
 |---|---:|
 | `VERIFIED_WORKING` | 0 |
-| `IMPLEMENTED_NEEDS_VALIDATION` | 78 |
-| `FOUNDATION_ONLY` | 20 |
+| `IMPLEMENTED_NEEDS_VALIDATION` | 79 |
+| `FOUNDATION_ONLY` | 19 |
 | `EXTERNAL_CONFIGURATION_REQUIRED` | 2 |
 | `MISSING` | 0 |
 | `BLOCKED` | 0 |
