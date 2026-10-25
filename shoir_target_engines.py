@@ -4195,3 +4195,251 @@ def simulate_discrete_event_process(
         "data_provenance": "USER_ENTERED_UNVERIFIED",
     }
 
+
+
+def run_solver_diagnostics(
+    variable_spec: Mapping[str, Mapping[str, Any]],
+    objective_coefficients: Mapping[str, Any],
+    constraints: Sequence[Mapping[str, Any]],
+    *,
+    direction: str = "minimize",
+    time_limit_seconds: float = 10.0,
+    feasibility_tolerance: float = 1e-7,
+) -> dict[str, Any]:
+    """Build and solve a bounded/continuous-or-integer linear model and audit its solution.
+
+    Supported variable categories are Continuous, Integer and Binary. This is a
+    compact LP/MILP diagnostics runner: it reports the actual solver termination
+    state and independently recomputes variable-bound and constraint violations.
+    It does not infer an IIS or claim an optimal result from a merely feasible
+    time-limited incumbent.
+    """
+    if not isinstance(variable_spec, Mapping) or not variable_spec:
+        raise ValueError("Provide a non-empty JSON object of variable specifications.")
+    if not isinstance(objective_coefficients, Mapping) or not objective_coefficients:
+        raise ValueError("Provide a non-empty objective coefficient object.")
+    if isinstance(constraints, (str, bytes)) or not isinstance(constraints, Sequence):
+        raise ValueError("Constraints must be a JSON list of constraint records.")
+    direction_value = str(direction or "").strip().lower()
+    if direction_value not in {"minimize", "min", "maximize", "max"}:
+        raise ValueError("Objective direction must be minimize or maximize.")
+    time_limit = _finite_number(time_limit_seconds, "Solver time limit")
+    if not 0.1 <= time_limit <= 300:
+        raise ValueError("Solver time limit must be between 0.1 and 300 seconds.")
+    tolerance = _finite_number(feasibility_tolerance, "Feasibility tolerance")
+    if not 1e-10 <= tolerance <= 1e-2:
+        raise ValueError("Feasibility tolerance must be between 1e-10 and 0.01.")
+
+    normalized_specs: dict[str, dict[str, Any]] = {}
+    for raw_name, raw_spec in variable_spec.items():
+        name = str(raw_name).strip()
+        if not name or name in normalized_specs:
+            raise ValueError("Variable names must be non-empty and unique.")
+        if not isinstance(raw_spec, Mapping):
+            raise ValueError(f"Variable specification for '{name}' must be an object.")
+        category = str(raw_spec.get("category", "Continuous")).strip().lower()
+        categories = {"continuous": pulp.LpContinuous, "integer": pulp.LpInteger, "binary": pulp.LpBinary}
+        if category not in categories:
+            raise ValueError(f"Variable '{name}' category must be Continuous, Integer or Binary.")
+        low_raw, high_raw = raw_spec.get("low", 0), raw_spec.get("up")
+        low = None if low_raw is None or str(low_raw).strip() == "" else _finite_number(low_raw, f"Lower bound for {name}")
+        high = None if high_raw is None or str(high_raw).strip() == "" else _finite_number(high_raw, f"Upper bound for {name}")
+        if low is not None and high is not None and low > high:
+            raise ValueError(f"Lower bound exceeds upper bound for variable '{name}'.")
+        if category == "binary":
+            if (low is not None and low > 0) or (high is not None and high < 1):
+                raise ValueError(f"Binary variable '{name}' bounds must allow values 0 and/or 1.")
+            low, high = 0.0, 1.0
+        normalized_specs[name] = {"low": low, "up": high, "category": category, "pulp_category": categories[category]}
+
+    objective: dict[str, float] = {}
+    for raw_name, raw_coeff in objective_coefficients.items():
+        name = str(raw_name).strip()
+        if name not in normalized_specs:
+            raise ValueError(f"Objective references unknown variable '{name}'.")
+        objective[name] = _finite_number(raw_coeff, f"Objective coefficient for {name}")
+    if not objective:
+        raise ValueError("At least one objective coefficient is required.")
+
+    normalized_constraints: list[dict[str, Any]] = []
+    used_names: set[str] = set()
+    for index, raw in enumerate(constraints, start=1):
+        if not isinstance(raw, Mapping):
+            raise ValueError(f"Constraint row {index} must be an object.")
+        name = str(raw.get("name", f"constraint_{index}")).strip() or f"constraint_{index}"
+        if name.casefold() in used_names:
+            raise ValueError(f"Constraint names must be unique; duplicate: {name}.")
+        used_names.add(name.casefold())
+        coefficients_raw = raw.get("coefficients")
+        if not isinstance(coefficients_raw, Mapping) or not coefficients_raw:
+            raise ValueError(f"Constraint '{name}' needs a non-empty coefficients object.")
+        coefficients: dict[str, float] = {}
+        for raw_var, raw_coeff in coefficients_raw.items():
+            var_name = str(raw_var).strip()
+            if var_name not in normalized_specs:
+                raise ValueError(f"Constraint '{name}' references unknown variable '{var_name}'.")
+            coefficients[var_name] = _finite_number(raw_coeff, f"Coefficient of {var_name} in constraint {name}")
+        sense_raw = str(raw.get("sense", "<=")).strip()
+        senses = {"<=": pulp.LpConstraintLE, "≤": pulp.LpConstraintLE, ">=": pulp.LpConstraintGE, "≥": pulp.LpConstraintGE, "=": pulp.LpConstraintEQ, "==": pulp.LpConstraintEQ}
+        if sense_raw not in senses:
+            raise ValueError(f"Constraint '{name}' sense must be <=, >= or ==.")
+        rhs = _finite_number(raw.get("rhs"), f"Right-hand side for constraint {name}")
+        normalized_constraints.append({"name": name, "coefficients": coefficients, "sense": senses[sense_raw], "sense_label": sense_raw, "rhs": rhs})
+
+    problem = pulp.LpProblem(
+        "ShoirIE_Solver_Diagnostics",
+        pulp.LpMinimize if direction_value in {"minimize", "min"} else pulp.LpMaximize,
+    )
+    variables = {
+        name: pulp.LpVariable(name, lowBound=spec["low"], upBound=spec["up"], cat=spec["pulp_category"])
+        for name, spec in normalized_specs.items()
+    }
+    problem += pulp.lpSum(coefficient * variables[name] for name, coefficient in objective.items()), "objective"
+    for item in normalized_constraints:
+        expression = pulp.lpSum(coefficient * variables[name] for name, coefficient in item["coefficients"].items())
+        if item["sense"] == pulp.LpConstraintLE:
+            problem += expression <= item["rhs"], item["name"]
+        elif item["sense"] == pulp.LpConstraintGE:
+            problem += expression >= item["rhs"], item["name"]
+        else:
+            problem += expression == item["rhs"], item["name"]
+
+    try:
+        solver_status_code = problem.solve(pulp.PULP_CBC_CMD(msg=False, timeLimit=time_limit))
+    except Exception as exc:
+        return {
+            "status": "SOLVER_ERROR",
+            "solver_status": "SOLVER_ERROR",
+            "solver_message": f"{type(exc).__name__}: {str(exc)[:400]}",
+            "objective_value": None,
+            "variable_values": pd.DataFrame(columns=["Variable", "Value", "Category", "Lower bound", "Upper bound", "Bound status"]),
+            "constraint_diagnostics": pd.DataFrame(columns=["Constraint", "Relation", "Right-hand side", "LHS value", "Violation", "Status"]),
+            "warnings": ["The model was validated, but the configured CBC solver did not return a result; do not use a prior result as if this run succeeded."],
+            "data_provenance": "USER_ENTERED_UNVERIFIED",
+        }
+
+    solver_status = pulp.LpStatus.get(solver_status_code, f"UNKNOWN_STATUS_{solver_status_code}")
+    solution_status_code = getattr(problem, "sol_status", None)
+    solution_status = pulp.LpSolution.get(solution_status_code, "UNKNOWN_SOLUTION_STATUS")
+    variable_rows: list[dict[str, Any]] = []
+    violations: list[str] = []
+    all_values_assigned = True
+    all_bounds_ok = True
+
+    for name, variable in variables.items():
+        raw_value = variable.varValue
+        value = None if raw_value is None else float(raw_value)
+        spec = normalized_specs[name]
+        bound_violation = 0.0
+        if value is None or not math.isfinite(value):
+            all_values_assigned = False
+            all_bounds_ok = False
+            bound_status = "NO_FINITE_VALUE"
+            violations.append(f"{name}: no finite solution value")
+        else:
+            if spec["low"] is not None:
+                bound_violation = max(bound_violation, float(spec["low"]) - value)
+            if spec["up"] is not None:
+                bound_violation = max(bound_violation, value - float(spec["up"]))
+            if spec["category"] in {"integer", "binary"}:
+                bound_violation = max(bound_violation, abs(value - round(value)))
+            bound_violation = max(0.0, bound_violation)
+            if bound_violation > tolerance:
+                all_bounds_ok = False
+                bound_status = "VIOLATED"
+                violations.append(f"{name}: bound/integrality violation {bound_violation:g}")
+            else:
+                bound_status = "SATISFIED"
+        variable_rows.append({
+            "Variable": name,
+            "Value": value,
+            "Category": spec["category"],
+            "Lower bound": spec["low"],
+            "Upper bound": spec["up"],
+            "Bound violation": bound_violation,
+            "Bound status": bound_status,
+        })
+
+    constraint_rows: list[dict[str, Any]] = []
+    all_constraints_ok = True
+    for item in normalized_constraints:
+        constraint = problem.constraints[item["name"]]
+        raw_lhs_value = constraint.value()
+        lhs_value = None if raw_lhs_value is None else float(raw_lhs_value + item["rhs"] if item["sense"] != pulp.LpConstraintEQ or raw_lhs_value is not None else raw_lhs_value)
+        # PuLP stores a constraint as expression - RHS, so use the original
+        # coefficients and variable values for a clear, independently recomputed LHS.
+        if all_values_assigned:
+            lhs_value = sum(float(item["coefficients"][name]) * float(variables[name].varValue) for name in item["coefficients"])
+            if item["sense"] == pulp.LpConstraintLE:
+                violation = max(0.0, lhs_value - item["rhs"])
+            elif item["sense"] == pulp.LpConstraintGE:
+                violation = max(0.0, item["rhs"] - lhs_value)
+            else:
+                violation = abs(lhs_value - item["rhs"])
+            status = "SATISFIED" if violation <= tolerance else "VIOLATED"
+        else:
+            violation = None
+            status = "NO_FINITE_CANDIDATE"
+        if violation is None or violation > tolerance:
+            all_constraints_ok = False
+            if violation is not None:
+                violations.append(f"{item['name']}: constraint violation {violation:g}")
+        constraint_rows.append({
+            "Constraint": item["name"],
+            "Relation": item["sense_label"],
+            "Right-hand side": item["rhs"],
+            "LHS value": lhs_value,
+            "Violation": violation,
+            "Status": status,
+        })
+
+    complete_feasible_candidate = all_values_assigned and all_bounds_ok and all_constraints_ok
+    objective_value = None
+    if complete_feasible_candidate:
+        obj = pulp.value(problem.objective)
+        if obj is not None and math.isfinite(float(obj)):
+            objective_value = float(obj)
+
+    if solver_status == "Infeasible":
+        interpretation_status = "INFEASIBLE"
+        warnings = ["The solver reported infeasibility; no feasible decision should be inferred from any leftover variable values."]
+        objective_value = None
+    elif solver_status == "Unbounded":
+        interpretation_status = "UNBOUNDED"
+        warnings = ["The solver reported an unbounded objective; review missing bounds, sign conventions and formulation before using the model."]
+        objective_value = None
+    elif solver_status == "Optimal" and complete_feasible_candidate and objective_value is not None:
+        interpretation_status = "OPTIMAL_FEASIBLE"
+        warnings = []
+    elif complete_feasible_candidate and solver_status not in {"Infeasible", "Unbounded", "Undefined"}:
+        interpretation_status = "FEASIBLE_NOT_PROVEN_OPTIMAL"
+        warnings = ["A feasible candidate exists, but optimality has not been proven by the solver status."]
+    else:
+        interpretation_status = "NO_VERIFIED_FEASIBLE_SOLUTION"
+        warnings = ["No independently verified feasible candidate was found; inspect solver status and listed violations."]
+    if violations:
+        warnings.append("One or more variable or constraint residual checks failed; see the diagnostic tables.")
+
+    return {
+        "status": interpretation_status,
+        "solver_status": solver_status,
+        "solution_status": solution_status,
+        "objective_direction": "minimize" if direction_value in {"minimize", "min"} else "maximize",
+        "objective_value": objective_value,
+        "variable_count": len(variables),
+        "constraint_count": len(normalized_constraints),
+        "feasibility_tolerance": tolerance,
+        "time_limit_seconds": time_limit,
+        "variable_values": pd.DataFrame(variable_rows),
+        "constraint_diagnostics": pd.DataFrame(constraint_rows),
+        "independent_feasibility_check": bool(complete_feasible_candidate),
+        "violations": violations,
+        "warnings": warnings,
+        "limitations": [
+            "Only a linear objective and linear constraints are supported; variable categories are Continuous, Integer and Binary.",
+            "An infeasibility explanation/IIS is not generated. The returned residual checks validate a candidate but do not prove model correctness or completeness.",
+            "A time-limited feasible incumbent is explicitly not labeled optimal unless the solver reports Optimal.",
+        ],
+        "data_provenance": "USER_ENTERED_UNVERIFIED",
+    }
+
