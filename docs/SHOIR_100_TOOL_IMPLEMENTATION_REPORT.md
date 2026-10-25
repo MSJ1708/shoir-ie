@@ -10,7 +10,7 @@ The implementation uses the existing `pages/Industrial_Engineering_Workbench.py`
 
 ## Focused execution methods
 
-The original focused tranche was continued with four additional methods (T036, T037, T051 and T072). This integration also carries the separately tested T062 solver diagnostics, T071 discrete-event simulation and T087 reproducibility ZIP into the same branch. The combined Workbench contains 56 distinct stable target IDs with focused runner branches; each remains pending authenticated end-to-end verification. Other existing module workflows may cover additional targets, but they are not counted as focused runners unless wired to the stable target ID and its execution gate. The implementation matrix links every target to its minimum tier, contracts, evidence tests and remaining limitations.
+The original focused tranche was continued with four additional methods (T036, T037, T051 and T072). This integration also carries the separately tested T062 solver diagnostics, T071 discrete-event simulation and T087 reproducibility ZIP into the same branch. The combined Workbench contains 57 distinct stable target IDs with focused runner branches; each remains pending authenticated end-to-end verification. Other existing module workflows may cover additional targets, but they are not counted as focused runners unless wired to the stable target ID and its execution gate. The implementation matrix links every target to its minimum tier, contracts, evidence tests and remaining limitations.
 
 ### Lean, manufacturing, quality and economics
 
@@ -82,6 +82,11 @@ Golden/boundary tests and Workbench AppTests cover deterministic simulation resu
 
 Independent tests use a hand-calculated four-route example (expected total cost 21 units), an infeasible route-capacity case, and invalid/duplicate-route inputs. The method is marked `IMPLEMENTED_NEEDS_VALIDATION` pending current CI and authenticated staging acceptance.
 
+
+### Student Learning and Practice Mode
+
+T089 now has a Starter-accessible practice path inside the existing Workbench. The fixed exercise set covers takt time, OEE, EOQ, Cp and NPV; each numerical answer is checked with a declared tolerance, then the learner sees the reference answer, formula and worked solution. Question prompts do not reveal the answer key before the learner submits. Examples are synthetic educational exercises, not plant observations. Golden-answer, wrong-answer and invalid-input tests plus a Workbench AppTest were added. The tool remains `IMPLEMENTED_NEEDS_VALIDATION` until current CI, authenticated UI and persistence checks pass.
+
 ## Calculation safety and regression protection
 
 Independent golden/boundary tests were added for the new methods, along with three Workbench Streamlit AppTest groups that invoke the forms and check structured results. Key controls include:
@@ -108,8 +113,8 @@ The registry and matrix contain 100 target IDs, T001–T100. Current classificat
 | Status | Count |
 |---|---:|
 | `VERIFIED_WORKING` | 0 |
-| `IMPLEMENTED_NEEDS_VALIDATION` | 80 |
-| `FOUNDATION_ONLY` | 18 |
+| `IMPLEMENTED_NEEDS_VALIDATION` | 81 |
+| `FOUNDATION_ONLY` | 17 |
 | `EXTERNAL_CONFIGURATION_REQUIRED` | 2 |
 | `MISSING` | 0 |
 | `BLOCKED` | 0 |
