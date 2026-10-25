@@ -108,7 +108,13 @@ def render_engineering_result(value, title="Analysis result", key_prefix="result
             for i,(k,v) in enumerate(scalar.items()):
                 label=str(k).replace("_"," ").title()
                 display=f"{v:,.3f}" if isinstance(v,(float,np.floating)) else f"{v:,}" if isinstance(v,(int,np.integer)) else str(v)
-                cols[i%len(cols)].metric(label,display)
+                # Long narrative diagnostics and guidance belong in the text flow,
+                # not cramped into KPI cards. Short metrics retain the established UI.
+                if isinstance(v, str) and len(v) > 90:
+                    st.markdown(f"**{label}**")
+                    st.write(v)
+                else:
+                    cols[i%len(cols)].metric(label,display)
         for k,df in frames.items():
             st.markdown(f"**{str(k).replace('_',' ').title()}**")
             st.dataframe(df,use_container_width=True,hide_index=True)
@@ -428,7 +434,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 key="tool007_diagnostic",
                             )
                             diagnostic_category = st.selectbox(
-                                "Subsystem (optional hint)",
+                                "Subsystem label (context only)",
                                 ["Auto-detect", "Access / login", "Data import / export", "Calculation / units", "Persistence / connectivity", "Other"],
                                 key="tool007_category",
                             )
