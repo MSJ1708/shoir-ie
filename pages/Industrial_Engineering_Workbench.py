@@ -403,7 +403,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                 "Copilot action, API and export path must enforce their own server-side entitlement checks."
             )
 
-            if selected_tool["tool_id"] in {"T015", "T016", "T017", "T018", "T019", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T033", "T034", "T035", "T036", "T037", "T038", "T040", "T041", "T042", "T043", "T045", "T047", "T049", "T050", "T051", "T052", "T054", "T055", "T056", "T058", "T059", "T062", "T063", "T066", "T069", "T070", "T071", "T072", "T075", "T076", "T077", "T078", "T079", "T081", "T082", "T083", "T084", "T085", "T087", "T089"}:
+            if selected_tool["tool_id"] in {"T002", "T015", "T016", "T017", "T018", "T019", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T033", "T034", "T035", "T036", "T037", "T038", "T040", "T041", "T042", "T043", "T045", "T047", "T049", "T050", "T051", "T052", "T054", "T055", "T056", "T058", "T059", "T062", "T063", "T066", "T069", "T070", "T071", "T072", "T075", "T076", "T077", "T078", "T079", "T081", "T082", "T083", "T084", "T085", "T087", "T089"}:
                 st.markdown("---")
                 st.markdown("**Run focused specialist method**")
                 st.caption(
@@ -504,6 +504,28 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                             xyz_x_cutoff = st.number_input("Maximum X demand CV", min_value=0.0, value=0.50, step=0.05, key="tool056_x_cv")
                             xyz_y_cutoff = st.number_input("Maximum Y demand CV", min_value=0.01, value=1.0, step=0.05, key="tool056_y_cv")
                             run_method = st.form_submit_button("Classify ABC / XYZ inventory", type="primary", use_container_width=True, key="tool056_run")
+                        elif selected_tool["tool_id"] == "T002":
+                            st.caption("Build a rule-based study plan from the problem you selected and the fields you already have. The wizard does not calculate results or bypass the access gate of any recommended tool.")
+                            guided_goal = st.selectbox(
+                                "Engineering problem",
+                                options=["capacity_bottleneck", "facility_layout", "quality_capability", "inventory_planning", "maintenance_reliability", "energy_sustainability"],
+                                format_func=lambda key: {
+                                    "capacity_bottleneck": "Production capacity and bottleneck",
+                                    "facility_layout": "Facility layout and material flow",
+                                    "quality_capability": "Quality and process capability",
+                                    "inventory_planning": "Inventory and replenishment",
+                                    "maintenance_reliability": "Maintenance and reliability",
+                                    "energy_sustainability": "Energy and sustainability",
+                                }[key],
+                                key="tool002_goal",
+                            )
+                            guided_fields_text = st.text_input(
+                                "Input fields you already have (comma-separated canonical names)",
+                                value="",
+                                placeholder="source_file, validated_dataset, process_table, demand, time_unit",
+                                key="tool002_available_fields",
+                            )
+                            run_method = st.form_submit_button("Build guided study plan", type="primary", use_container_width=True, key="tool002_run")
                         elif selected_tool["tool_id"] == "T089":
                             st.caption("Starter practice mode with fixed, reproducible engineering examples. Answers are checked against an explicit formula and worked solution; examples are not plant data.")
                             practice_topic = st.selectbox(
@@ -1212,6 +1234,9 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                         current_tool_inputs = {"history_text": demand_history_text, "holdout_periods": int(demand_holdout), "horizon": int(demand_horizon), "moving_average_window": int(demand_ma_window)}
                     elif selected_tool["tool_id"] == "T072":
                         current_tool_inputs = {"components_json": monte_carlo_components_json, "iterations": int(monte_carlo_iterations), "seed": int(monte_carlo_seed), "unit": monte_carlo_unit}
+                    elif selected_tool["tool_id"] == "T002":
+                        current_tool_inputs = {"goal": guided_goal, "available_data_fields": guided_fields_text}
+
                     elif selected_tool["tool_id"] == "T089":
                         current_tool_inputs = {"topic_id": practice_topic, "submitted_answer": practice_answer}
 
@@ -1272,6 +1297,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 optimize_facility_location_flow,
                                 get_student_practice_problem,
                                 evaluate_student_practice_answer,
+                                build_guided_study_plan,
                             )
                             if selected_tool["tool_id"] == "T015":
                                 headers = [item.strip() for item in field_headers_text.split(",") if item.strip()]
@@ -1653,6 +1679,21 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                     effect_size, alpha, target_power,
                                     max_n_per_group=int(search_limit),
                                 )
+                            elif selected_tool["tool_id"] == "T002":
+                                completed_ids = [
+                                    key.replace("shoir_tool_result_", "")
+                                    for key in st.session_state.keys()
+                                    if key.startswith("shoir_tool_result_T")
+                                    and isinstance(st.session_state.get(key), dict)
+                                    and tier_allows_tool(RAW_TIER, key.replace("shoir_tool_result_", ""))
+                                ]
+                                result = build_guided_study_plan(
+                                    guided_goal,
+                                    available_data_fields=guided_fields_text,
+                                    completed_tool_ids=completed_ids,
+                                    tier=RAW_TIER,
+                                )
+
                             elif selected_tool["tool_id"] == "T089":
                                 get_student_practice_problem(practice_topic)
                                 result = evaluate_student_practice_answer(practice_topic, practice_answer)
@@ -1826,6 +1867,22 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                             st.dataframe(result["classification"], use_container_width=True, hide_index=True)
                             value_column = f"Annual usage value ({result['currency']})"
                             st.plotly_chart(px.bar(result["classification"], x="SKU", y=value_column, color="ABC", title="ABC value segmentation"), use_container_width=True)
+                    elif selected_tool["tool_id"] == "T002":
+                        result = st.session_state.get("shoir_tool_result_T002")
+                        if result:
+                            _show_focused_tool_persistence("T002", result, current_tool_inputs)
+                            c1, c2, c3 = st.columns(3)
+                            c1.metric("Workflow steps", result["step_count"])
+                            c2.metric("Steps with missing inputs", result["missing_input_step_count"])
+                            c3.metric("Tier-restricted steps", result["tier_restricted_step_count"])
+                            next_step = result.get("next_recommended_step")
+                            if next_step:
+                                st.info(f"Next ready step: {next_step['tool_id']} · {next_step['canonical_name']}. Select that target in the Workbench to run it.")
+                            else:
+                                st.info("No step is immediately ready. Review the missing inputs, tier restrictions and foundation-only statuses below.")
+                            st.dataframe(result["steps"], use_container_width=True, hide_index=True)
+                            st.warning(result["warning"])
+                            st.caption("The guided wizard orders work only; it does not run downstream methods or fabricate results.")
                     elif selected_tool["tool_id"] == "T089":
                         result = st.session_state.get("shoir_tool_result_T089")
                         if result:
