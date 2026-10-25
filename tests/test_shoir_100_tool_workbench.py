@@ -230,7 +230,7 @@ def test_workbench_runs_oee_capability_inventory_carbon_and_economics():
         at.selectbox(key="shoir_100_tool_inspector").select(label)
         at.run(timeout=60)
         assert not at.exception, f"{tool_id} selection raised: " + "\n".join(str(error.value) for error in at.exception)
-        at.button(key=button_key).click()
+        at.get("form_submit_button")(key=button_key).click()
         at.run(timeout=60)
         assert not at.exception, f"{tool_id} run raised: " + "\n".join(str(error.value) for error in at.exception)
         result = at.session_state.get(f"shoir_tool_result_{tool_id}")
