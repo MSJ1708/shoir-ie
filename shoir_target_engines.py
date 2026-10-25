@@ -3945,5 +3945,5 @@ def simulate_monte_carlo_net_value(
         }),
         "method": "Independent Monte Carlo sampling; benefits positive, costs negative; NumPy default_rng",
         "assumptions": "Each declared component is sampled independently using its specified distribution. Any dependence/correlation, tax effects, timing/discounting or real-world measurement uncertainty must be modeled separately.",
-        "warning": "Simulation output is conditional on user-entered distributions and assumptions; it is not a forecast guarantee, verified ROI, audited savings or automatic plant control.",
+        "warning": "This simulated net outcome is not verified ROI, audited savings, a forecast guarantee or an automatic plant-control result. It is conditional on user-entered distributions and assumptions.",
     }
