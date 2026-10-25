@@ -1572,7 +1572,7 @@ def test_anomaly_screening_flags_robust_outlier_and_handles_stable_baseline():
     flat_records = [{"timestamp": f"2026-10-{day:02d}T00:00:00Z", "value": 10 if day < 8 else 25} for day in range(1, 9)]
     fallback = detect_equipment_anomalies(flat_records)
     assert fallback["anomaly_count"] == 1
-    assert "stable-baseline deviation fallback" in fallback["method"]
+    assert fallback["method"] == "ZERO_MAD_ABSOLUTE_DEVIATION_FALLBACK"
 
 
 def test_anomaly_screening_rejects_bad_timestamps_and_duplicate_rows():
@@ -1599,7 +1599,7 @@ def test_mm1_discrete_event_simulation_is_seed_reproducible_and_explicit_about_s
     assert 0 <= first["replication_summary"]["Server utilization (%)"].min()
     assert first["replication_summary"]["Server utilization (%)"].max() <= 100
     assert first["sample_customer_events"]["Queue wait (minutes)"].ge(0).all()
-    assert "single-server FCFS M/M/1" in first["warning"]
+    assert "One-server FCFS M/M/1 simulation only" in first["warning"]
 
 
 def test_mm1_discrete_event_simulation_rejects_invalid_rates_and_warns_on_instability():
