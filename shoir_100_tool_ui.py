@@ -509,3 +509,117 @@ def render_mtbf_mttr_tool(st: Any, tier: str, actor: str) -> None:
         result = st.session_state.get("T042_last_result")
         if result:
             _show_result(st, "T042", result)
+
+def render_planning_resilience_tools(st: Any, tier: str, actor: str) -> None:
+    """Show capacity-limited planning and supplier methods inside the existing planning Workbench."""
+    from shoir_100_tool_methods import (
+        maintenance_backlog_priority, sales_operations_reconciliation,
+        supplier_performance_scorecard,
+    )
+
+    st.divider()
+    st.subheader("Planning & Supply-Chain Decision Tools")
+    st.caption("Calculation-backed planning aids. Inputs are illustrative until replaced with approved plant/supplier records.")
+
+    with st.expander("T049 · Maintenance Backlog Optimizer · Professional", expanded=False):
+        st.caption("Greedy skills-capacity prioritization by criticality, overdue days and duration. It is a transparent heuristic, not a globally optimal schedule.")
+        work_orders = st.data_editor(
+            pd.DataFrame([
+                {"work_order_id": "WO-001", "asset_id": "PUMP-01", "description": "Bearing inspection",
+                 "required_skill": "Mechanical", "criticality_1_to_5": 5, "days_overdue": 8, "estimated_hours": 2.0},
+                {"work_order_id": "WO-002", "asset_id": "MOTOR-02", "description": "Electrical check",
+                 "required_skill": "Electrical", "criticality_1_to_5": 4, "days_overdue": 2, "estimated_hours": 1.0},
+                {"work_order_id": "WO-003", "asset_id": "PUMP-03", "description": "Seal replacement",
+                 "required_skill": "Mechanical", "criticality_1_to_5": 5, "days_overdue": 2, "estimated_hours": 1.0},
+            ]),
+            num_rows="dynamic", use_container_width=True, key="t049_work_orders",
+        )
+        skill_capacity_text = st.text_area(
+            "Available labor hours by skill (JSON)", value='{"Mechanical": 2, "Electrical": 1}',
+            key="t049_skill_capacity",
+        )
+        if st.button("Prioritize maintenance backlog", key="t049_run", type="primary"):
+            def run_backlog():
+                try:
+                    capacity = json.loads(skill_capacity_text)
+                except json.JSONDecodeError as exc:
+                    raise ValueError("Skill-capacity input must be valid JSON, for example {\"Mechanical\": 8}.") from exc
+                return maintenance_backlog_priority(work_orders.to_dict("records"), capacity)
+            _run(st, tier, actor, "T049", run_backlog)
+        result = st.session_state.get("T049_last_result")
+        if result:
+            _show_result(st, "T049", result)
+
+    with st.expander("T052 · Sales and Operations Planning Reconciliation · Professional", expanded=False):
+        st.caption("Reconciles demand, capacity-limited production, ending inventory and carried backlog for one product family and one unit basis.")
+        plan = st.data_editor(
+            pd.DataFrame([
+                {"period": "P1", "demand_units": 100.0, "planned_production_units": 90.0, "available_capacity_units": 95.0},
+                {"period": "P2", "demand_units": 120.0, "planned_production_units": 130.0, "available_capacity_units": 100.0},
+                {"period": "P3", "demand_units": 100.0, "planned_production_units": 120.0, "available_capacity_units": 120.0},
+            ]),
+            num_rows="dynamic", use_container_width=True, key="t052_period_plan",
+        )
+        c1, c2 = st.columns(2)
+        initial_inventory = c1.number_input("Initial inventory units", min_value=0.0, value=10.0, step=1.0, key="t052_initial_inventory")
+        initial_backlog = c2.number_input("Initial backlog units", min_value=0.0, value=0.0, step=1.0, key="t052_initial_backlog")
+        if st.button("Reconcile S&OP volumes", key="t052_run", type="primary"):
+            _run(st, tier, actor, "T052", lambda: sales_operations_reconciliation(
+                plan.to_dict("records"), initial_inventory, initial_backlog,
+            ))
+        result = st.session_state.get("T052_last_result")
+        if result:
+            _show_result(st, "T052", result)
+
+    with st.expander("T058 · Supplier Performance and Risk Scorecard · Mid-Tier Pro", expanded=False):
+        st.caption("Higher means better on every component; incomplete suppliers stay unranked. Replace illustrative scores and document the scoring rubric before using it in procurement.")
+        supplier_rows = st.data_editor(
+            pd.DataFrame([
+                {"supplier": "Supplier A", "quality_score": 80.0, "delivery_score": 90.0, "cost_score": 70.0, "risk_management_score": 85.0},
+                {"supplier": "Supplier B", "quality_score": 95.0, "delivery_score": 95.0, "cost_score": None, "risk_management_score": 90.0},
+                {"supplier": "Supplier C", "quality_score": 100.0, "delivery_score": 60.0, "cost_score": 80.0, "risk_management_score": 50.0},
+            ]),
+            num_rows="dynamic", use_container_width=True, key="t058_supplier_scores",
+        )
+        st.caption("Score weights (the method normalizes positive weights to sum to 1.0).")
+        w1, w2, w3, w4 = st.columns(4)
+        weights = {
+            "quality": w1.number_input("Quality weight", min_value=0.0, value=0.35, step=0.05, key="t058_w_quality"),
+            "delivery": w2.number_input("Delivery weight", min_value=0.0, value=0.35, step=0.05, key="t058_w_delivery"),
+            "cost": w3.number_input("Cost weight", min_value=0.0, value=0.15, step=0.05, key="t058_w_cost"),
+            "risk_management": w4.number_input("Risk-control weight", min_value=0.0, value=0.15, step=0.05, key="t058_w_risk"),
+        }
+        if st.button("Score supplier evidence", key="t058_run", type="primary"):
+            _run(st, tier, actor, "T058", lambda: supplier_performance_scorecard(supplier_rows.to_dict("records"), weights))
+        result = st.session_state.get("T058_last_result")
+        if result:
+            _show_result(st, "T058", result)
+
+
+def render_single_station_des_tool(st: Any, tier: str, actor: str) -> None:
+    """Render the explicitly scoped single-station DES inside the existing simulation module."""
+    from shoir_100_tool_methods import simulate_single_station_des
+
+    st.divider()
+    with st.expander("T071 · Discrete-Event Simulation — Single-Station Queue · Enterprise", expanded=False):
+        st.caption("Seeded discrete-event FCFS model with arrival, waiting, service and departure events, warm-up exclusion and replications. This is not a live digital twin.")
+        c1, c2, c3 = st.columns(3)
+        customers = c1.number_input("Customers per replication", min_value=10, max_value=10000, value=300, step=50, key="t071_customers")
+        warmup = c2.number_input("Warm-up customers", min_value=0, max_value=9998, value=30, step=10, key="t071_warmup")
+        replications = c3.number_input("Replications", min_value=2, max_value=100, value=8, step=1, key="t071_replications")
+        c4, c5 = st.columns(2)
+        mean_arrival = c4.number_input("Mean interarrival time", min_value=0.001, value=1.0, step=0.1, key="t071_interarrival")
+        mean_service = c5.number_input("Mean service time", min_value=0.001, value=0.8, step=0.1, key="t071_service")
+        c6, c7, c8 = st.columns(3)
+        arrival_distribution = c6.selectbox("Arrival distribution", ["exponential", "constant"], key="t071_arrival_distribution")
+        service_distribution = c7.selectbox("Service distribution", ["exponential", "constant"], key="t071_service_distribution")
+        seed = c8.number_input("Random seed", min_value=0, max_value=4294967295, value=42, step=1, key="t071_seed")
+        if st.button("Run discrete-event replications", key="t071_run", type="primary"):
+            _run(st, tier, actor, "T071", lambda: simulate_single_station_des(
+                customers=int(customers), mean_interarrival=mean_arrival, mean_service=mean_service,
+                arrival_distribution=arrival_distribution, service_distribution=service_distribution,
+                warmup_customers=int(warmup), replications=int(replications), seed=int(seed),
+            ))
+        result = st.session_state.get("T071_last_result")
+        if result:
+            _show_result(st, "T071", result)
