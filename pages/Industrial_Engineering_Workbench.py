@@ -2158,6 +2158,13 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 if not isinstance(parsed_repro_metadata, dict):
                                     raise ValueError("Run metadata must be a JSON object.")
                                 source_inputs = st.session_state.get("shoir_tool_inputs_" + source_result_tool_id, {})
+                                # Read explicit opt-in flags from the submitted form state.
+                                include_input_snapshot = bool(
+                                    st.session_state.get("tool087_include_inputs", include_input_snapshot)
+                                )
+                                include_result_tables = bool(
+                                    st.session_state.get("tool087_include_tables", include_result_tables)
+                                )
                                 pack_result = build_reproducibility_pack(
                                     source_result_tool_id,
                                     source_tool["canonical_name"],
