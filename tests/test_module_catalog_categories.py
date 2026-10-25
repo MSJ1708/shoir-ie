@@ -144,6 +144,30 @@ def test_global_search_routes_modules_to_matching_primary_sections():
     assert _module_target_section("Engineering Decision Center", metadata) == "DECISIONS"
 
 
+
+
+def test_explore_modules_can_opt_in_to_target_tools_with_readiness_and_existing_routes():
+    source = APP_PATH.read_text(encoding="utf-8")
+
+    assert "from shoir_tool_registry import TOOL_TARGETS as _target_tool_targets" in source
+    assert "Include the 100 target engineering tools" in source
+    assert 'key="explore_include_target_tools_v1"' in source
+    assert "_explore_catalog = list(MODULE_CATALOG)" in source
+    assert "_explore_catalog.extend(_target_catalog_rows)" in source
+    assert "for _m in _explore_catalog:" in source
+    assert '"readiness_status"' in source
+    assert '"mapped_route"' in source
+    assert "Open this target in Workbench" in source
+    assert 'st.session_state["shoir_100_tool_query"] = ""' in source
+    assert 'st.session_state["shoir_100_tool_workbench"] = "All workbenches"' in source
+    assert 'st.session_state["shoir_100_tool_status"] = "All statuses"' in source
+    assert 'st.session_state["shoir_expand_target_directory"] = True' in source
+    workbench_source = (APP_PATH.parent / "pages" / "Industrial_Engineering_Workbench.py").read_text(encoding="utf-8")
+    assert 'st.session_state.pop("shoir_expand_target_directory", False)' in workbench_source
+    assert 'with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_directory)' in workbench_source
+    assert 'st.switch_page("pages/Industrial_Engineering_Workbench.py")' in source
+
+
 def test_recently_added_resilience_tools_have_meaningful_shell_groups():
     _, catalog, _ = _catalog_snapshot()
     expected = {
