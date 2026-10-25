@@ -27,6 +27,7 @@ browser, persistence, export, or live-data acceptance checks.
 from __future__ import annotations
 
 import math
+import re
 from datetime import date as _date
 from collections.abc import Mapping, Sequence
 from typing import Any
@@ -1843,7 +1844,7 @@ def plan_acceptance_sampling(
                     "producer_risk_at_aql": 1.0 - p_accept_aql,
                     "consumer_risk_at_ltpd": p_accept_ltpd,
                     "max_sample_size_searched": max_sample_size,
-                    "warning": "Plan is an analytical binomial approximation. Confirm the governing standard, lot size and contractual sampling rule before release inspection.",
+                    "warning": "Plan uses a large-lot binomial approximation. Confirm the governing standard, lot size and contractual sampling rule before release inspection.",
                 }
     return {
         "status": "LIMIT_REACHED",
