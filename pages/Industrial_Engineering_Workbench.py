@@ -389,7 +389,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                 "Copilot action, API and export path must enforce their own server-side entitlement checks."
             )
 
-            if selected_tool["tool_id"] in {"T016", "T017", "T018", "T019", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T034", "T038", "T040", "T041", "T042", "T043", "T045", "T047", "T050", "T054", "T055", "T056", "T059", "T063", "T066", "T070", "T075", "T076", "T077", "T078", "T079", "T081", "T082", "T083", "T084", "T085"}:
+            if selected_tool["tool_id"] in {"T016", "T017", "T018", "T019", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T034", "T036", "T037", "T038", "T040", "T041", "T042", "T043", "T045", "T047", "T050", "T051", "T054", "T055", "T056", "T059", "T063", "T066", "T070", "T072", "T075", "T076", "T077", "T078", "T079", "T081", "T082", "T083", "T084", "T085"}:
                 st.markdown("---")
                 st.markdown("**Run focused specialist method**")
                 st.caption(
@@ -833,6 +833,54 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 key="tool084_alternatives",
                             )
                             run_method = st.form_submit_button("Score project portfolio", type="primary", use_container_width=True, key="tool084_run")
+                        elif selected_tool["tool_id"] == "T036":
+                            regression_mode = st.selectbox(
+                                "Analysis method", ["Linear regression", "One-way ANOVA"],
+                                key="tool036_mode",
+                            )
+                            st.caption("Regression fits one numeric predictor. ANOVA compares independent groups. Example values are synthetic and do not establish causality.")
+                            regression_observations_json = st.text_area(
+                                "Regression observations (JSON list of x/y objects)",
+                                value='[{"x":1,"y":2},{"x":2,"y":4},{"x":3,"y":5},{"x":4,"y":8}]',
+                                key="tool036_observations",
+                            )
+                            anova_groups_json = st.text_area(
+                                "ANOVA groups (JSON object mapping names to numeric lists)",
+                                value='{"Line A":[1,2,3],"Line B":[4,5,6],"Line C":[7,8,9]}',
+                                key="tool036_groups",
+                            )
+                            regression_alpha = st.number_input(
+                                "Significance level (alpha)", min_value=0.001, max_value=0.5,
+                                value=0.05, step=0.01, key="tool036_alpha",
+                            )
+                            run_method = st.form_submit_button("Run regression / ANOVA", type="primary", use_container_width=True, key="tool036_run")
+                        elif selected_tool["tool_id"] == "T037":
+                            st.caption("Research Pack method: Welch's two-sided t-test for two independent samples. The method does not assume equal population variances.")
+                            hypothesis_sample_a = st.text_input("Sample A (comma-separated numeric observations)", "2, 3, 4, 5", key="tool037_sample_a")
+                            hypothesis_sample_b = st.text_input("Sample B (comma-separated numeric observations)", "8, 9, 10, 11", key="tool037_sample_b")
+                            hypothesis_alpha = st.number_input(
+                                "Significance level (alpha)", min_value=0.001, max_value=0.5,
+                                value=0.05, step=0.01, key="tool037_alpha",
+                            )
+                            run_method = st.form_submit_button("Run Welch t-test", type="primary", use_container_width=True, key="tool037_run")
+                        elif selected_tool["tool_id"] == "T051":
+                            st.caption("Chronological holdout comparison of naïve, training-mean and trailing moving-average baselines. Forecast intervals and seasonal models are not included.")
+                            demand_history_text = st.text_area("Demand history in chronological order (comma-separated)", "10, 12, 13, 15, 17, 20, 23, 25, 26, 28", key="tool051_history")
+                            demand_holdout = st.number_input("Holdout periods", min_value=2, max_value=100, value=3, step=1, key="tool051_holdout")
+                            demand_horizon = st.number_input("Forecast horizon", min_value=1, max_value=100, value=3, step=1, key="tool051_horizon")
+                            demand_ma_window = st.number_input("Moving-average window", min_value=1, max_value=100, value=3, step=1, key="tool051_window")
+                            run_method = st.form_submit_button("Compare demand baselines", type="primary", use_container_width=True, key="tool051_run")
+                        elif selected_tool["tool_id"] == "T072":
+                            st.caption("Independent-input Monte Carlo screening. Declare each benefit/cost distribution; correlations are not inferred, and outputs are simulations, not verified ROI.")
+                            monte_carlo_components_json = st.text_area(
+                                "Components (JSON list: name, role benefit/cost, distribution and parameters)",
+                                value='[{"name":"Output benefit","role":"benefit","distribution":"triangular","low":70,"mode":90,"high":110},{"name":"Implementation cost","role":"cost","distribution":"normal","mean":50,"sd":5}]',
+                                key="tool072_components",
+                            )
+                            monte_carlo_iterations = st.number_input("Simulation trials", min_value=1000, max_value=100000, value=10000, step=1000, key="tool072_iterations")
+                            monte_carlo_seed = st.number_input("Random seed", min_value=0, max_value=4294967295, value=42, step=1, key="tool072_seed")
+                            monte_carlo_unit = st.text_input("Net outcome unit / currency label", "SAR (illustrative)", key="tool072_unit")
+                            run_method = st.form_submit_button("Run Monte Carlo simulation", type="primary", use_container_width=True, key="tool072_run")
                         elif selected_tool["tool_id"] == "T085":
                             st.caption("Balanced, independent, two-sided two-sample t-test; normal outcomes and equal-variance assumptions.")
                             effect_size = st.number_input(
@@ -979,6 +1027,14 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                         current_tool_inputs = {"operating_hours": mtbf_operating_hours, "repair_durations_hours_text": repair_durations_text}
                     elif selected_tool["tool_id"] == "T056":
                         current_tool_inputs = {"items_json": inventory_items_json, "currency": inventory_currency, "a_threshold": abc_a_threshold, "b_threshold": abc_b_threshold, "x_cv_max": xyz_x_cutoff, "y_cv_max": xyz_y_cutoff}
+                    elif selected_tool["tool_id"] == "T036":
+                        current_tool_inputs = {"mode": regression_mode, "observations_json": regression_observations_json, "groups_json": anova_groups_json, "alpha": regression_alpha}
+                    elif selected_tool["tool_id"] == "T037":
+                        current_tool_inputs = {"sample_a": hypothesis_sample_a, "sample_b": hypothesis_sample_b, "alpha": hypothesis_alpha}
+                    elif selected_tool["tool_id"] == "T051":
+                        current_tool_inputs = {"history_text": demand_history_text, "holdout_periods": int(demand_holdout), "horizon": int(demand_horizon), "moving_average_window": int(demand_ma_window)}
+                    elif selected_tool["tool_id"] == "T072":
+                        current_tool_inputs = {"components_json": monte_carlo_components_json, "iterations": int(monte_carlo_iterations), "seed": int(monte_carlo_seed), "unit": monte_carlo_unit}
                     else:
                         current_tool_inputs = {
                             "cohen_d": effect_size, "alpha": alpha,
@@ -1016,6 +1072,8 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 analyze_weibull_reliability, analyze_spare_parts_criticality,
                                 analyze_safety_incident_trends, optimize_warehouse_slotting,
                                 optimize_task_resource_assignment, compare_energy_performance_scenarios,
+                                fit_simple_linear_regression, run_one_way_anova, run_welch_t_test,
+                                forecast_demand_baselines, simulate_monte_carlo_net_value,
                             )
                             if selected_tool["tool_id"] == "T021":
                                 try:
@@ -1310,6 +1368,48 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 if not isinstance(parsed_criteria, list) or not isinstance(parsed_alternatives, list):
                                     raise ValueError("Portfolio criteria and alternatives must each be JSON lists.")
                                 result = score_project_portfolio(parsed_criteria, parsed_alternatives)
+                            elif selected_tool["tool_id"] == "T036":
+                                if regression_mode == "Linear regression":
+                                    parsed_observations = json.loads(regression_observations_json)
+                                    if not isinstance(parsed_observations, list):
+                                        raise ValueError("Regression observations must be a JSON list.")
+                                    result = fit_simple_linear_regression(parsed_observations, alpha=regression_alpha)
+                                else:
+                                    parsed_groups = json.loads(anova_groups_json)
+                                    if not isinstance(parsed_groups, dict):
+                                        raise ValueError("ANOVA groups must be a JSON object mapping group names to numeric lists.")
+                                    result = run_one_way_anova(parsed_groups, alpha=regression_alpha)
+                                result["data_provenance"] = "SYNTHETIC_EXAMPLE" if (
+                                    regression_observations_json.strip() == '[{"x":1,"y":2},{"x":2,"y":4},{"x":3,"y":5},{"x":4,"y":8}]'
+                                    or anova_groups_json.strip() == '{"Line A":[1,2,3],"Line B":[4,5,6],"Line C":[7,8,9]}'
+                                ) else "USER_ENTERED_UNVERIFIED"
+                            elif selected_tool["tool_id"] == "T037":
+                                try:
+                                    sample_a_values = [float(item.strip()) for item in hypothesis_sample_a.split(",") if item.strip()]
+                                    sample_b_values = [float(item.strip()) for item in hypothesis_sample_b.split(",") if item.strip()]
+                                except ValueError as exc:
+                                    raise ValueError("Both samples must be comma-separated numeric observations.") from exc
+                                result = run_welch_t_test(sample_a_values, sample_b_values, alpha=hypothesis_alpha)
+                                result["data_provenance"] = "USER_ENTERED_UNVERIFIED"
+                            elif selected_tool["tool_id"] == "T051":
+                                try:
+                                    demand_values = [float(item.strip()) for item in demand_history_text.split(",") if item.strip()]
+                                except ValueError as exc:
+                                    raise ValueError("Demand history must be comma-separated numeric observations in chronological order.") from exc
+                                result = forecast_demand_baselines(
+                                    demand_values, holdout_periods=int(demand_holdout),
+                                    horizon=int(demand_horizon), moving_average_window=int(demand_ma_window),
+                                )
+                                result["data_provenance"] = "USER_ENTERED_UNVERIFIED"
+                            elif selected_tool["tool_id"] == "T072":
+                                parsed_components = json.loads(monte_carlo_components_json)
+                                if not isinstance(parsed_components, list):
+                                    raise ValueError("Monte Carlo components must be a JSON list.")
+                                result = simulate_monte_carlo_net_value(
+                                    parsed_components, iterations=int(monte_carlo_iterations),
+                                    seed=int(monte_carlo_seed), output_unit=monte_carlo_unit,
+                                )
+                                result["data_provenance"] = "SIMULATION — USER-DECLARED DISTRIBUTIONS"
                             elif selected_tool["tool_id"] == "T085":
                                 result = plan_two_sample_t_sample_size(
                                     effect_size, alpha, target_power,
@@ -1598,6 +1698,86 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 st.warning(result["message"])
                             else:
                                 st.write(result["message"])
+                    elif selected_tool["tool_id"] == "T036":
+                        result = st.session_state.get("shoir_tool_result_T036")
+                        if result:
+                            _show_focused_tool_persistence("T036", result, current_tool_inputs)
+                            st.markdown(f"**Method:** {result['method']}")
+                            if result["method"].startswith("Ordinary least squares"):
+                                m1, m2, m3, m4 = st.columns(4)
+                                m1.metric("Slope", f"{result['slope']:.5g}")
+                                m2.metric("Intercept", f"{result['intercept']:.5g}")
+                                m3.metric("R²", f"{result['r_squared']:.4f}")
+                                m4.metric("Slope p-value", f"{result['slope_p_value']:.4g}")
+                                st.caption(f"95% slope confidence interval: {result['slope_confidence_interval']}")
+                                st.dataframe(result["anova_table"], use_container_width=True, hide_index=True)
+                                st.plotly_chart(px.scatter(result["residuals"], x="X", y="Residual", title="Regression residuals by predictor"), use_container_width=True)
+                                st.dataframe(result["residuals"], use_container_width=True, hide_index=True)
+                            else:
+                                m1, m2, m3 = st.columns(3)
+                                m1.metric("F statistic", f"{result['f_statistic']:.4g}")
+                                m2.metric("p-value", f"{result['p_value']:.4g}")
+                                m3.metric("Eta squared", f"{result['eta_squared']:.4f}")
+                                st.markdown(f"**Decision at alpha={result['alpha']}:** {result['decision']}")
+                                st.dataframe(result["group_summary"], use_container_width=True, hide_index=True)
+                                st.dataframe(result["anova_table"], use_container_width=True, hide_index=True)
+                            st.warning(result["warning"])
+                            st.caption(result["assumptions"])
+                    elif selected_tool["tool_id"] == "T037":
+                        result = st.session_state.get("shoir_tool_result_T037")
+                        if result:
+                            _show_focused_tool_persistence("T037", result, current_tool_inputs)
+                            m1, m2, m3 = st.columns(3)
+                            m1.metric("Two-sided p-value", f"{result['p_value']:.4g}")
+                            m2.metric("t statistic", f"{result['t_statistic']:.4g}")
+                            m3.metric("Mean difference A − B", f"{result['mean_difference_a_minus_b']:.4g}")
+                            st.markdown(f"**Decision at alpha={result['alpha']}:** {result['decision']}")
+                            st.caption(f"95% confidence interval for mean difference: {result['mean_difference_confidence_interval']}")
+                            st.dataframe(pd.DataFrame([
+                                {"Measure": "Sample A mean", "Value": result["mean_a"]},
+                                {"Measure": "Sample B mean", "Value": result["mean_b"]},
+                                {"Measure": "Degrees of freedom", "Value": result["degrees_of_freedom"]},
+                                {"Measure": "Descriptive standardized difference", "Value": result["descriptive_standardized_difference"]},
+                            ]), use_container_width=True, hide_index=True)
+                            st.caption(result["assumptions"])
+                            st.warning(result["warning"])
+                    elif selected_tool["tool_id"] == "T051":
+                        result = st.session_state.get("shoir_tool_result_T051")
+                        if result:
+                            _show_focused_tool_persistence("T051", result, current_tool_inputs)
+                            m1, m2, m3 = st.columns(3)
+                            m1.metric("Selected baseline", result["selected_model"])
+                            m2.metric("Holdout periods", str(result["holdout_count"]))
+                            m3.metric("Forecast horizon", str(len(result["forecast"])))
+                            st.dataframe(result["metrics"], use_container_width=True, hide_index=True)
+                            st.markdown("**Chronological holdout comparison**")
+                            st.dataframe(result["backtest"], use_container_width=True, hide_index=True)
+                            st.markdown("**Selected baseline forecast**")
+                            st.dataframe(result["forecast"], use_container_width=True, hide_index=True)
+                            st.plotly_chart(px.line(
+                                result["backtest"], x="Holdout step",
+                                y=["Observed demand", "Naive last value", "Training mean", "Trailing moving average"],
+                                markers=True, title="Forecast baselines on holdout data",
+                            ), use_container_width=True)
+                            st.warning(result["warning"])
+                    elif selected_tool["tool_id"] == "T072":
+                        result = st.session_state.get("shoir_tool_result_T072")
+                        if result:
+                            _show_focused_tool_persistence("T072", result, current_tool_inputs)
+                            m1, m2, m3 = st.columns(3)
+                            m1.metric(f"Mean net outcome ({result['output_unit']})", f"{result['mean']:,.4g}")
+                            m2.metric("Outcome standard deviation", f"{result['standard_deviation']:,.4g}")
+                            m3.metric("Probability of negative outcome", f"{result['probability_negative_pct']:.2f}%")
+                            st.markdown(f"**Trials:** {result['iterations']:,} · **Seed:** {result['seed']}")
+                            percentile_frame = pd.DataFrame([{"Percentile": f"P{key}", "Outcome": value} for key, value in result["percentiles"].items()])
+                            st.dataframe(percentile_frame, use_container_width=True, hide_index=True)
+                            st.markdown("**Component distribution assumptions and sensitivity**")
+                            st.dataframe(result["component_summary"], use_container_width=True, hide_index=True)
+                            sample_col = result["sample_outcomes"].columns[-1]
+                            st.plotly_chart(px.histogram(result["sample_outcomes"], x=sample_col, nbins=40, title="Simulated net-outcome distribution (sample shown)"), use_container_width=True)
+                            st.plotly_chart(px.line(result["convergence"], x="Trials", y="Running mean", markers=True, title="Running mean diagnostic"), use_container_width=True)
+                            st.caption(result["assumptions"])
+                            st.warning(result["warning"])
                     elif selected_tool["tool_id"] == "T026":
                         result = st.session_state.get("shoir_tool_result_T026")
                         if result:
