@@ -1,6 +1,6 @@
 # Shoir-IE 100-tool integration report
 
-**Branch:** `audit/shoir-100-tools-20261023`  
+**Branch:** `audit/shoir-100-tool-continuation-20261025`  
 **Scope:** code-grounded additions to the existing Shoir-IE Workbench  
 **Current release status:** implementation tranche in progress; NO-GO until current CI, authenticated browser, persistence, integration and release checks pass
 
@@ -10,7 +10,7 @@ The implementation uses the existing `pages/Industrial_Engineering_Workbench.py`
 
 ## Focused execution methods
 
-There were 19 focused method runners in the branch before this tranche. **23 additional methods have since been added or expanded into Workbench forms, for 42 target IDs with focused execution paths total.** The implementation matrix links every target to its minimum tier, contracts, evidence tests and remaining limitations.
+There were 42 focused method runners before this continuation. **Three additional methods have now been added as executable Workbench forms, for 45 target IDs with focused execution paths total.** The implementation matrix links every target to its minimum tier, contracts, evidence tests and remaining limitations.
 
 ### Lean, manufacturing, quality and economics
 
@@ -44,6 +44,18 @@ There were 19 focused method runners in the branch before this tranche. **23 add
 | T059 | Warehouse Slotting and Picking Optimizer | Greedy nearest compatible slot assignment with capacity checks and unassigned-item reporting; not globally optimal. |
 | T063 | Assignment and Scheduling Optimizer | Minimum-cost one-to-one Hungarian assignment; no calendars, skill constraints, precedence or multi-period scheduling. |
 | T077 | Energy Performance Optimizer | Compare baseline/alternative energy intensity, cost and emissions from scenario inputs; no plant control or guaranteed savings. |
+
+### Measurement systems, regression and research statistics
+
+This continuation adds three method-backed forms inside the existing Workbench:
+
+| ID | Method | Implemented scope and explicit limitations |
+|---|---|---|
+| T033 | Measurement Systems Analysis | Balanced crossed gage R&R via two-way random-effects ANOVA and nonnegative method-of-moments variance components. It does not support nested designs, confidence intervals, AIAG reference tables, or certification. |
+| T036 | Regression and ANOVA Studio | Full-rank ordinary least squares with intercept, coefficient diagnostics when estimable, model F-test, regression ANOVA and residual table. Categorical encoding, nonlinear model selection, robust standard errors and multiple-testing correction are outside the current method. |
+| T037 | Hypothesis Testing Assistant | Research Pack-gated two-sided one-sample, independent Welch and paired t-tests with degrees of freedom, p-value, confidence interval and Cohen's d when estimable. It does not auto-validate assumptions or provide multiple-testing correction. |
+
+All three are still IMPLEMENTED_NEEDS_VALIDATION. They have independent fixture/boundary tests and a local Workbench AppTest, but those tests must pass on the final head and do not replace authenticated hosted browser, managed persistence, export or six-package access verification.
 
 The methods use user-entered values and explicitly marked illustrative examples. A calculated number does not prove data accuracy or operational suitability.
 
