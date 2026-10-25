@@ -644,8 +644,8 @@ def test_workbench_builds_downloadable_reproducibility_pack():
     source.select("T021 · Time Study and Standard Time")
     at.checkbox(key="tool087_include_inputs").set_value(True)
     at.checkbox(key="tool087_include_tables").set_value(True)
-    at.run(timeout=90)
-    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+    # Form widget changes are submitted together with the button click. Running
+    # the app before submit would discard the pending browser-form values.
     at.button(key="tool087_run").click()
     at.run(timeout=90)
     assert not at.exception, "\n".join(str(error.value) for error in at.exception)

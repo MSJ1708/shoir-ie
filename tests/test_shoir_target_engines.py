@@ -1599,7 +1599,7 @@ def test_mm1_discrete_event_simulation_is_seed_reproducible_and_explicit_about_s
     assert 0 <= first["replication_summary"]["Server utilization (%)"].min()
     assert first["replication_summary"]["Server utilization (%)"].max() <= 100
     assert first["sample_customer_events"]["Queue wait (minutes)"].ge(0).all()
-    assert "single-server FCFS M/M/1" in first["warning"].lower()
+    assert "single-server fcfs m/m/1" in first["warning"].lower()
 
 
 def test_mm1_discrete_event_simulation_rejects_invalid_rates_and_warns_on_instability():
