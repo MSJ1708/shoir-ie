@@ -6,6 +6,7 @@ methods are expressly labelled and remain unverified until end-to-end acceptance
 they remain IMPLEMENTED_NEEDS_VALIDATION until authenticated E2E and independent
 acceptance checks pass. Existing routes and navigation are left unchanged.
 """
+import base64
 import hashlib
 import io
 import json
@@ -24,6 +25,12 @@ from shoir_100_tool_lineage_engines import build_dataset_lineage_record
 from shoir_100_tool_reliability_engines import fit_weibull_reliability
 from shoir_100_tool_solver_diagnostics import solve_and_diagnose_linear_program
 from shoir_100_tool_maintenance_engine import optimize_maintenance_backlog
+from shoir_100_tool_msa_engine import analyze_crossed_gage_rr
+from shoir_100_tool_anomaly_engine import screen_time_series_anomalies
+from shoir_100_tool_simulation_engine import simulate_serial_flow_line
+from shoir_100_tool_reproducibility import build_reproducibility_pack
+from shoir_100_tool_research_report import build_research_methods_report
+from shoir_100_tool_power_engine import plan_t_test_power
 
 from shoir_100_tool_registry import (
     TOOL_TARGETS, TOOL_STATUSES, TOOL_TIER_ORDER, WORKBENCHES,
@@ -1053,14 +1060,23 @@ if rows:
             _run_engine_tool("T086", signature, "Validate and save evidence register", lambda: build_hypothesis_evidence_register(evidence_frame))
 
         elif selected_id == "T085":
-            st.warning("VALIDATION MODE — balanced independent two-sample t-test assumptions are not automatically verified.")
+            st.warning("RESEARCH PACK · LIMITED VALIDATION MODE — this is a t-test planning calculation, not a guarantee of significance or a substitute for a reviewed study design.")
             st.markdown("### Statistical power and sample-size planner")
-            effect = st.number_input("Standardized effect size (Cohen's d; positive)", min_value=0.01, value=0.5, step=0.05, key="t085_effect")
-            alpha = st.selectbox("Two-sided significance alpha", [0.01, 0.05, 0.10], index=1, key="t085_alpha")
+            st.caption("The calculation assumes the selected t-test design and a user-supplied standardized effect size. Clustering, attrition, multiple-comparison adjustments and complex longitudinal designs are not included.")
+            effect = st.number_input("Standardized effect size (Cohen's d; positive)", min_value=0.01, max_value=10.0, value=0.5, step=0.05, key="t085_effect")
+            design = st.selectbox("Supported study design", ["one_sample", "paired", "two_independent_equal_n"], key="t085_design")
+            alternative = st.selectbox("Alternative hypothesis", ["two-sided", "greater", "less"], key="t085_alternative")
+            alpha = st.selectbox("Significance alpha", [0.01, 0.05, 0.10], index=1, key="t085_alpha")
             power = st.slider("Target statistical power", min_value=0.5, max_value=0.99, value=0.8, step=0.01, key="t085_power")
-            max_n = st.number_input("Maximum n per group searched", min_value=10, max_value=10000, value=500, step=10, key="t085_max_n")
-            signature = _fingerprint(effect, alpha, power, max_n)
-            _run_engine_tool("T085", signature, "Estimate sample size", lambda: plan_two_sample_t_sample_size(effect_size=effect, alpha=alpha, target_power=power, max_n_per_group=int(max_n)))
+            max_n = st.number_input("Maximum sample size searched", min_value=10, max_value=10000, value=500, step=10, key="t085_max_n")
+            signature = _fingerprint(effect, design, alternative, alpha, power, max_n)
+            _run_engine_tool(
+                "T085", signature, "Estimate statistical power and sample size",
+                lambda: plan_t_test_power(
+                    effect_size_d=float(effect), alpha=float(alpha), target_power=float(power),
+                    design=design, alternative=alternative, maximum_sample_size=int(max_n),
+                ),
+            )
 
         elif selected_id == "T021":
             st.warning("LIMITED VALIDATION MODE — these calculations do not replace a reviewed time-study protocol.")
@@ -1929,6 +1945,183 @@ if rows:
                 stale_days = st.number_input("Stale after (calendar days)", min_value=0, value=7, step=1, key="t094_stale_days")
             signature = _fingerprint(kpi_frame.to_json(orient="split", date_format="iso"), as_of, stale_days)
             _run_engine_tool("T094", signature, "Evaluate KPI thresholds and freshness", lambda: evaluate_kpi_thresholds(kpi_frame, as_of_date=as_of, stale_after_days=int(stale_days)))
+
+        elif selected_id == "T033":
+            st.warning("LIMITED VALIDATION MODE — crossed Gauge R&R assumes a balanced parts × appraisers × replicates design; review the study design and measurement units before using results.")
+            st.markdown("### Measurement Systems Analysis — crossed Gauge R&R")
+            st.caption("Synthetic starter data are provided for testing. Replace them with approved measurement readings and keep one consistent measurement unit.")
+            msa_default = pd.DataFrame([
+                {"part_id":"P1","appraiser":"A1","measurement":10.0},
+                {"part_id":"P1","appraiser":"A1","measurement":10.1},
+                {"part_id":"P1","appraiser":"A1","measurement":9.9},
+                {"part_id":"P1","appraiser":"A2","measurement":10.2},
+                {"part_id":"P1","appraiser":"A2","measurement":10.1},
+                {"part_id":"P1","appraiser":"A2","measurement":10.3},
+                {"part_id":"P2","appraiser":"A1","measurement":20.0},
+                {"part_id":"P2","appraiser":"A1","measurement":20.1},
+                {"part_id":"P2","appraiser":"A1","measurement":19.9},
+                {"part_id":"P2","appraiser":"A2","measurement":20.2},
+                {"part_id":"P2","appraiser":"A2","measurement":20.1},
+                {"part_id":"P2","appraiser":"A2","measurement":20.3},
+                {"part_id":"P3","appraiser":"A1","measurement":30.0},
+                {"part_id":"P3","appraiser":"A1","measurement":30.1},
+                {"part_id":"P3","appraiser":"A1","measurement":29.9},
+                {"part_id":"P3","appraiser":"A2","measurement":30.2},
+                {"part_id":"P3","appraiser":"A2","measurement":30.1},
+                {"part_id":"P3","appraiser":"A2","measurement":30.3},
+            ])
+            msa_frame = st.data_editor(msa_default, num_rows="dynamic", use_container_width=True, key="t033_measurement_editor", hide_index=True)
+            part_col = st.selectbox("Part identifier column", list(msa_frame.columns), index=list(msa_frame.columns).index("part_id") if "part_id" in msa_frame.columns else 0, key="t033_part_col")
+            appraiser_col = st.selectbox("Appraiser column", list(msa_frame.columns), index=list(msa_frame.columns).index("appraiser") if "appraiser" in msa_frame.columns else min(1, len(msa_frame.columns)-1), key="t033_appraiser_col")
+            numeric_cols = [col for col in msa_frame.columns if pd.api.types.is_numeric_dtype(msa_frame[col])]
+            measure_default = numeric_cols[0] if numeric_cols else msa_frame.columns[-1]
+            measurement_col = st.selectbox("Measurement column", list(msa_frame.columns), index=list(msa_frame.columns).index(measure_default), key="t033_measurement_col")
+            tolerance_text = st.text_input("Specification tolerance width (optional)", "", key="t033_tolerance")
+            signature = _fingerprint(msa_frame.to_json(orient="split", date_format="iso"), part_col, appraiser_col, measurement_col, tolerance_text)
+            _run_engine_tool(
+                "T033", signature, "Analyze Gauge R&R",
+                lambda: analyze_crossed_gage_rr(
+                    msa_frame, part_col=part_col, appraiser_col=appraiser_col,
+                    measurement_col=measurement_col,
+                    tolerance_width=float(tolerance_text) if tolerance_text.strip() else None,
+                ),
+            )
+
+        elif selected_id == "T048":
+            st.warning("OFFLINE DATA SCREEN — this method does not connect to live telemetry, diagnose a physical fault or prove causation.")
+            st.markdown("### Equipment Anomaly Monitor")
+            st.caption("The built-in observations are synthetic. Review flagged values with calibration, maintenance and process context; flags can be false positives.")
+            anomaly_default = pd.DataFrame([
+                {"timestamp":"2026-10-24T08:00:00Z","series_id":"SYNTHETIC-ASSET-01","value":10.0},
+                {"timestamp":"2026-10-24T09:00:00Z","series_id":"SYNTHETIC-ASSET-01","value":10.1},
+                {"timestamp":"2026-10-24T10:00:00Z","series_id":"SYNTHETIC-ASSET-01","value":9.9},
+                {"timestamp":"2026-10-24T11:00:00Z","series_id":"SYNTHETIC-ASSET-01","value":10.2},
+                {"timestamp":"2026-10-24T12:00:00Z","series_id":"SYNTHETIC-ASSET-01","value":9.8},
+                {"timestamp":"2026-10-24T13:00:00Z","series_id":"SYNTHETIC-ASSET-01","value":10.05},
+                {"timestamp":"2026-10-24T14:00:00Z","series_id":"SYNTHETIC-ASSET-01","value":9.95},
+                {"timestamp":"2026-10-24T15:00:00Z","series_id":"SYNTHETIC-ASSET-01","value":40.0},
+            ])
+            anomaly_frame = st.data_editor(anomaly_default, num_rows="dynamic", use_container_width=True, key="t048_anomaly_editor", hide_index=True)
+            anomaly_cols = list(anomaly_frame.columns)
+            timestamp_col = st.selectbox("Timestamp column", anomaly_cols, index=anomaly_cols.index("timestamp") if "timestamp" in anomaly_cols else 0, key="t048_timestamp_col")
+            series_col = st.selectbox("Series / asset column", anomaly_cols, index=anomaly_cols.index("series_id") if "series_id" in anomaly_cols else min(1, len(anomaly_cols)-1), key="t048_series_col")
+            numeric_cols = [col for col in anomaly_cols if pd.api.types.is_numeric_dtype(anomaly_frame[col])]
+            value_default = numeric_cols[0] if numeric_cols else anomaly_cols[-1]
+            value_col = st.selectbox("Measured value column", anomaly_cols, index=anomaly_cols.index(value_default), key="t048_value_col")
+            threshold = st.slider("Modified robust z-score threshold", min_value=2.0, max_value=10.0, value=3.5, step=0.1, key="t048_threshold")
+            as_of = st.text_input("As-of timestamp (ISO-8601 with timezone)", "2026-10-25T00:00:00Z", key="t048_as_of")
+            signature = _fingerprint(anomaly_frame.to_json(orient="split", date_format="iso"), timestamp_col, series_col, value_col, threshold, as_of)
+            _run_engine_tool(
+                "T048", signature, "Screen imported time series for anomalies",
+                lambda: screen_time_series_anomalies(
+                    anomaly_frame, timestamp_col=timestamp_col, series_col=series_col,
+                    value_col=value_col, threshold=float(threshold), as_of_datetime=as_of,
+                    minimum_points_per_series=5,
+                ),
+            )
+
+        elif selected_id == "T071":
+            st.warning("SIMULATION ONLY — this is a discrete-event serial-flow model, not a live digital twin or a controller. Verify arrival, service and resource assumptions against measured process data.")
+            st.markdown("### Discrete-Event Simulation")
+            stations_default = pd.DataFrame([
+                {"sequence":1,"station_id":"Station A","servers":1,"mean_service_minutes":3.0,"service_time_cv":0.0},
+                {"sequence":2,"station_id":"Station B","servers":1,"mean_service_minutes":4.0,"service_time_cv":0.0},
+                {"sequence":3,"station_id":"Station C","servers":1,"mean_service_minutes":2.0,"service_time_cv":0.0},
+            ])
+            stations = st.data_editor(stations_default, num_rows="dynamic", use_container_width=True, key="t071_station_editor", hide_index=True)
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                entity_count = st.number_input("Entities", min_value=10, max_value=5000, value=200, step=10, key="t071_entity_count")
+                warmup = st.number_input("Warm-up entities excluded", min_value=0, max_value=4998, value=20, step=1, key="t071_warmup")
+            with c2:
+                interarrival = st.number_input("Mean interarrival time (minutes)", min_value=0.01, value=5.0, step=0.5, key="t071_interarrival")
+                arrival_pattern = st.selectbox("Arrival pattern", ["fixed", "exponential"], key="t071_arrival_pattern")
+            with c3:
+                replications = st.number_input("Replications", min_value=1, max_value=20, value=5, step=1, key="t071_replications")
+                random_seed = st.number_input("Random seed", min_value=0, value=42, step=1, key="t071_seed")
+            signature = _fingerprint(stations.to_json(orient="split", date_format="iso"), entity_count, warmup, interarrival, arrival_pattern, replications, random_seed)
+            _run_engine_tool(
+                "T071", signature, "Run discrete-event simulation",
+                lambda: simulate_serial_flow_line(
+                    stations, entity_count=int(entity_count), mean_interarrival_minutes=float(interarrival),
+                    arrival_pattern=arrival_pattern, warmup_entities=int(warmup),
+                    replications=int(replications), random_seed=int(random_seed),
+                ),
+            )
+
+        elif selected_id == "T087":
+            st.warning("RESEARCH PACK · METADATA-ONLY REPRODUCIBILITY PACK — source data are excluded, and checksums do not authenticate the source or independently validate calculations.")
+            st.markdown("### Reproducibility Pack Generator")
+            st.caption("Only scalar metadata is packaged. Do not enter personal data, credentials, connection strings or raw observations.")
+            project_name = st.text_input("Project / study label", "Synthetic study", key="t087_project")
+            app_version = st.text_input("Shoir-IE version label", "NOT_RECORDED", key="t087_app_version")
+            git_ref = st.text_input("Git commit or study reference", "NOT_RECORDED", key="t087_git_ref")
+            fingerprint_default = hashlib.sha256(b"SHOIR-IE SYNTHETIC DEMO DATASET v1").hexdigest()
+            dataset_fingerprint = st.text_input("Dataset SHA-256 fingerprint", fingerprint_default, key="t087_fingerprint")
+            method_name = st.text_input("Method name", "Illustrative engineering method", key="t087_method")
+            method_version = st.text_input("Method version", "User-entered", key="t087_method_version")
+            parameters_text = st.text_area("Method parameters (JSON scalar object)", '{"source_state":"SYNTHETIC","seed":42}', key="t087_parameters")
+            output_text = st.text_area("Output summary (JSON scalar object)", '{"source_state":"SYNTHETIC","result_state":"ILLUSTRATIVE_ONLY"}', key="t087_outputs")
+            seed_text = st.text_input("Random seed (optional integer)", "42", key="t087_seed")
+            signature = _fingerprint(project_name, app_version, git_ref, dataset_fingerprint, method_name, method_version, parameters_text, output_text, seed_text)
+            def build_t087():
+                try:
+                    parameters_obj = json.loads(parameters_text)
+                    output_obj = json.loads(output_text)
+                    if not isinstance(parameters_obj, dict) or not isinstance(output_obj, dict):
+                        raise ValueError("Parameters and output summary must each be a JSON object.")
+                    seed_value = int(seed_text) if seed_text.strip() else None
+                except (json.JSONDecodeError, TypeError, ValueError) as exc:
+                    raise ValueError(f"Invalid reproducibility input: {exc}") from exc
+                return build_reproducibility_pack(
+                    project_name=project_name, app_version=app_version, git_commit=git_ref,
+                    dataset_fingerprint=dataset_fingerprint, method_name=method_name,
+                    method_version=method_version, parameters=parameters_obj,
+                    output_summary=output_obj, random_seed=seed_value,
+                )
+            saved = _run_engine_tool("T087", signature, "Build reproducibility ZIP", build_t087)
+            if saved and saved.get("signature") == signature:
+                artifact = saved.get("result", {}).get("archive_base64")
+                if artifact:
+                    st.download_button(
+                        "Download reproducibility ZIP", base64.b64decode(artifact),
+                        file_name="shoir_ie_reproducibility_pack.zip", mime="application/zip",
+                        key="T087_archive_download",
+                    )
+
+        elif selected_id == "T090":
+            st.warning("RESEARCH PACK · REPORT DRAFT — the report structures user-supplied methods and results; it does not independently verify calculations or citations.")
+            st.markdown("### Research Report and Methods Builder")
+            title = st.text_input("Report title", "Synthetic methods report", key="t090_title")
+            authors = st.text_input("Authors / team (optional)", "", key="t090_authors")
+            purpose = st.text_area("Purpose / research question", "Document the method, assumptions and limitations for a study.", key="t090_purpose")
+            method_name = st.text_input("Method name", "Example analysis method", key="t090_method")
+            method_version = st.text_input("Method version", "1.0", key="t090_method_version")
+            dataset_description = st.text_area("Dataset description", "Synthetic demo data only; not measured plant or customer observations.", key="t090_dataset")
+            formula = st.text_area("Formulae / equations", "", key="t090_formula")
+            parameters = st.text_area("Parameters / configuration", "Replace these defaults with values from the executed study.", key="t090_parameters")
+            results_summary = st.text_area("Results summary", "Illustrative placeholder only. Replace with a result from a validated run.", key="t090_results")
+            limitations = st.text_area("Limitations (one per line)", "Synthetic data only\nNot independently reviewed", key="t090_limitations")
+            signature = _fingerprint(title, authors, purpose, method_name, method_version, dataset_description, formula, parameters, results_summary, limitations)
+            saved = _run_engine_tool(
+                "T090", signature, "Generate research methods report",
+                lambda: build_research_methods_report(
+                    title=title, authors_or_team=authors, purpose=purpose,
+                    method_name=method_name, method_version=method_version,
+                    dataset_description=dataset_description, formula_or_equations=formula,
+                    parameters=parameters, results_summary=results_summary,
+                    limitations=[line.strip() for line in limitations.splitlines() if line.strip()],
+                ),
+            )
+            if saved and saved.get("signature") == signature:
+                report_result = saved.get("result", {})
+                report_text = report_result.get("report_markdown")
+                if isinstance(report_text, str) and report_text:
+                    st.download_button(
+                        "Download research methods Markdown", report_text.encode("utf-8"),
+                        file_name=f"{report_result.get('file_name','shoir_ie_research_report')}.md",
+                        mime="text/markdown", key="T090_report_download",
+                    )
 
         elif selected_id == "T019":
             st.warning("SYNTHETIC ONLY — this generator creates practice data, not real industrial observations or verified benchmarks.")
