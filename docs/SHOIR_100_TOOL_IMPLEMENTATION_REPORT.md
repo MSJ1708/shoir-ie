@@ -1,6 +1,6 @@
 # Shoir-IE 100-tool integration report
 
-**Branch:** `audit/shoir-100-tools-20261023`  
+**Branch:** `feat/shoir-100-tools-integration-20261025`  
 **Scope:** code-grounded additions to the existing Shoir-IE Workbench  
 **Current release status:** implementation tranche in progress; NO-GO until current CI, authenticated browser, persistence, integration and release checks pass
 
@@ -10,7 +10,7 @@ The implementation uses the existing `pages/Industrial_Engineering_Workbench.py`
 
 ## Focused execution methods
 
-The original focused tranche documented 19 runners, followed by 23 additional methods. This follow-on change adds four more target-ID execution paths (T036, T037, T051 and T072), taking the documented focused-method set from 42 to 46 IDs. Other existing module workflows may cover additional targets, but they are not counted as focused runners unless wired to the stable target ID and its execution gate. The implementation matrix links every target to its minimum tier, contracts, evidence tests and remaining limitations.
+The original focused tranche was continued with four additional methods (T036, T037, T051 and T072). This integration also carries the separately tested T062 solver diagnostics, T071 discrete-event simulation and T087 reproducibility ZIP into the same branch. The combined Workbench contains 55 distinct stable target IDs with focused runner branches; each remains pending authenticated end-to-end verification. Other existing module workflows may cover additional targets, but they are not counted as focused runners unless wired to the stable target ID and its execution gate. The implementation matrix links every target to its minimum tier, contracts, evidence tests and remaining limitations.
 
 ### Lean, manufacturing, quality and economics
 
@@ -60,6 +60,19 @@ This follow-on branch adds four stable-ID runners to the existing Workbench targ
 
 The four methods use explicit execution-time require_tool_access checks, the existing authenticated-user guard, saved input snapshots and the shared result renderer. Deterministic golden/boundary tests and Workbench AppTest coverage were added. Those tests must still pass on the exact final commit before the new methods can be considered validated. The implementation status for all four remains IMPLEMENTED_NEEDS_VALIDATION; authenticated save/reload, export and browser acceptance remain open.
 
+
+### Solver diagnostics, discrete-event simulation and reproducibility export
+
+This integration adds three executable tools to the existing Workbench, without changing primary navigation:
+
+| ID | Method | Scope / limitation |
+|---|---|---|
+| T062 | Constraint and Solver Diagnostics | LP/MILP execution with actual solver status and independent bound, integrality and constraint residual checks. It does not create an irreducible infeasible subsystem or prove that the supplied formulation reflects the real operation. |
+| T071 | Discrete-Event Simulation | Event-driven first-come-first-served serial process with finite servers, explicit deterministic/exponential assumptions, seeded replications and warm-up job exclusion. It is not a calibrated digital twin or arbitrary-routes simulator. |
+| T087 | Reproducibility Pack Generator | Creates a ZIP with result/configuration metadata, SHA-256 manifests and optional redacted inputs/tables. Detailed payloads are opt-in; users must review the bundle before sharing. |
+
+Golden/boundary tests and Workbench AppTests cover deterministic simulation results, seeded repeatability, optimal/infeasible/unbounded/integer solver cases, and ZIP structure/hash/redaction. The tools remain `IMPLEMENTED_NEEDS_VALIDATION` until the exact current head passes automated tests and authenticated persistence/export/browser acceptance.
+
 ## Calculation safety and regression protection
 
 Independent golden/boundary tests were added for the new methods, along with three Workbench Streamlit AppTest groups that invoke the forms and check structured results. Key controls include:
@@ -86,8 +99,8 @@ The registry and matrix contain 100 target IDs, T001–T100. Current classificat
 | Status | Count |
 |---|---:|
 | `VERIFIED_WORKING` | 0 |
-| `IMPLEMENTED_NEEDS_VALIDATION` | 72 |
-| `FOUNDATION_ONLY` | 26 |
+| `IMPLEMENTED_NEEDS_VALIDATION` | 79 |
+| `FOUNDATION_ONLY` | 19 |
 | `EXTERNAL_CONFIGURATION_REQUIRED` | 2 |
 | `MISSING` | 0 |
 | `BLOCKED` | 0 |
@@ -96,9 +109,9 @@ These are evidence classifications, not a quality score. `IMPLEMENTED_NEEDS_VALI
 
 ## Verification / release gates
 
-A previous run on an earlier code revision reported 705 passed, 2 failed and 2 skipped. The two known failures (scalar-list diagnostics in the shared renderer and a mistaken VSM expected percentage) were patched after that run. Those earlier CI results do not certify this branch head.
+A previous run on an earlier code revision reported 705 passed, 2 failed and 2 skipped, and a later branch note reported 740 passed and 2 skipped before the most recent methods were integrated. Those results do not certify the current branch head.
 
-For the updated current head, GitHub Actions had been observed queued for validation, tests, engine regression, security/quality and platform tests. A final passing conclusion has not yet been confirmed here. The authenticated browser acceptance matrix remains unverified, including direct-route/API/Copilot/export tier enforcement, save/reload/re-login, cross-workspace isolation, real workbook-to-decision flow and configured live integrations.
+Run GitHub Actions for validation, tests, engine regression, security/quality and platform tests on the updated branch head. A passing conclusion must be confirmed against the exact resulting SHA. The authenticated browser acceptance matrix remains unverified, including direct-route/API/Copilot/export tier enforcement, save/reload/re-login, cross-workspace isolation, real workbook-to-decision flow and configured live integrations.
 
 Before merging, run all workflows on the exact final commit, fix every regression, complete authenticated browser and persistence/export checks, review deployment parity, and keep the PR in draft/NO-GO until mandatory acceptance is evidenced.
 
