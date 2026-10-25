@@ -641,7 +641,7 @@ def test_workbench_builds_downloadable_reproducibility_pack():
     assert not at.exception, "\n".join(str(error.value) for error in at.exception)
     source = at.selectbox(key="tool087_source_id")
     assert any(option.startswith("T021 · ") for option in source.options)
-    source.select("T021 · Time Study and Standard Time")
+    source.select("T021")
     at.checkbox(key="tool087_include_inputs").set_value(True)
     at.checkbox(key="tool087_include_tables").set_value(True)
     # Form widget changes are submitted together with the button click. Running
