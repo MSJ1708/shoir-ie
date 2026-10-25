@@ -113,3 +113,30 @@ def test_rnle_rejects_zero_frequency_multiplier_instead_of_returning_fake_succes
                 duration_hours=1,
             )
         )
+
+def test_rnle_uses_exact_30_inch_vertical_cutoff_for_frequency_and_coupling_tables():
+    # NIOSH Table 5/7 use a 30-inch boundary (76.2 cm), not 75 cm.
+    with pytest.raises(ValueError, match="frequency-table multiplier is zero"):
+        calculate_rnle_lifting_index(
+            **_ideal_inputs(
+                vertical_origin_cm=76.1,
+                vertical_destination_cm=76.1,
+                frequency_lifts_per_minute=11,
+                duration_hours=2,
+                coupling_quality="Fair",
+            )
+        )
+
+    result = calculate_rnle_lifting_index(
+        **_ideal_inputs(
+            vertical_origin_cm=76.2,
+            vertical_destination_cm=76.2,
+            frequency_lifts_per_minute=11,
+            duration_hours=2,
+            coupling_quality="Fair",
+        )
+    )
+    assert result["frequency_multiplier"] == pytest.approx(0.23)
+    assert result["endpoint_results"]["origin"]["coupling_multiplier"] == pytest.approx(1.0)
+    assert result["endpoint_results"]["destination"]["coupling_multiplier"] == pytest.approx(1.0)
+
