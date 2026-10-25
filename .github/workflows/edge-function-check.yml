@@ -7,7 +7,7 @@ on:
       - "supabase/functions/**"
       - ".github/workflows/edge-function-check.yml"
   pull_request:
-    branches: ["main"]
+    branches: ["main", "feat/shoir-100-tools-integration-20261025"]
     paths:
       - "supabase/functions/**"
       - ".github/workflows/edge-function-check.yml"
@@ -25,7 +25,9 @@ jobs:
         uses: denoland/setup-deno@v2
         with:
           deno-version: v2.x
-      - name: Check Edge Function formatting
-        run: deno fmt --check supabase/functions/shoir-persistence/index.ts
-      - name: Type-check Edge Function
-        run: deno check supabase/functions/shoir-persistence/index.ts
+      - name: Check Edge Function and security helper formatting
+        run: deno fmt --check supabase/functions/shoir-persistence/index.ts supabase/functions/shoir-persistence/security.ts supabase/functions/shoir-persistence/security_test.ts
+      - name: Type-check Edge Function and security helper tests
+        run: deno check supabase/functions/shoir-persistence/index.ts supabase/functions/shoir-persistence/security_test.ts
+      - name: Test bounded request parsing and safe error mapping
+        run: deno test supabase/functions/shoir-persistence/security_test.ts
