@@ -389,7 +389,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                 "Copilot action, API and export path must enforce their own server-side entitlement checks."
             )
 
-            if selected_tool["tool_id"] in {"T016", "T017", "T018", "T019", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T034", "T036", "T037", "T038", "T040", "T041", "T042", "T043", "T045", "T047", "T050", "T051", "T054", "T055", "T056", "T059", "T063", "T066", "T070", "T072", "T075", "T076", "T077", "T078", "T079", "T081", "T082", "T083", "T084", "T085"}:
+            if selected_tool["tool_id"] in {"T015", "T016", "T017", "T018", "T019", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T034", "T036", "T037", "T038", "T040", "T041", "T042", "T043", "T045", "T047", "T049", "T050", "T051", "T052", "T054", "T055", "T056", "T058", "T059", "T063", "T066", "T070", "T072", "T075", "T076", "T077", "T078", "T079", "T081", "T082", "T083", "T084", "T085"}:
                 st.markdown("---")
                 st.markdown("**Run focused specialist method**")
                 st.caption(
@@ -403,7 +403,53 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                     )
                 else:
                     with st.form("shoir_target_method_form_" + selected_tool["tool_id"]):
-                        if selected_tool["tool_id"] == "T016":
+                        if selected_tool["tool_id"] == "T015":
+                            st.caption("Field mapping is advisory: exact aliases are still reviewable and fuzzy suggestions always require confirmation.")
+                            field_headers_text = st.text_input(
+                                "Source column headers (comma-separated)",
+                                "Timestamp,Qty,Defects,Machine ID", key="tool015_headers",
+                            )
+                            field_manual_mapping_json = st.text_area(
+                                "Optional manual mapping JSON (source header → canonical ID)",
+                                "{}", key="tool015_manual_mapping",
+                            )
+                            field_min_confidence = st.slider(
+                                "Minimum fuzzy-match confidence", min_value=0.0, max_value=1.0,
+                                value=0.65, step=0.05, key="tool015_confidence",
+                            )
+                            run_method = st.form_submit_button("Map industrial fields", type="primary", use_container_width=True, key="tool015_run")
+                        elif selected_tool["tool_id"] == "T049":
+                            st.caption("Greedy priority heuristic, not a globally optimal schedule. Confirm asset criticality, permits, spares, dependencies and safety constraints before dispatch.")
+                            backlog_orders_json = st.text_area(
+                                "Maintenance work orders (JSON list)",
+                                value='[{"work_order_id":"WO-101","task":"Inspect critical pump","asset":"P-101","criticality_score":5,"days_until_due":-2,"estimated_hours":5,"required_skill":"Mechanical"},{"work_order_id":"WO-102","task":"Replace seal","asset":"P-102","criticality_score":4,"days_until_due":0,"estimated_hours":2,"required_skill":"Mechanical"},{"work_order_id":"WO-103","task":"Check sensor","asset":"S-103","criticality_score":2,"days_until_due":7,"estimated_hours":3,"required_skill":"Electrical"}]',
+                                key="tool049_orders",
+                            )
+                            backlog_hours = st.number_input("Available maintenance labor hours", min_value=0.0, value=7.0, step=0.5, key="tool049_hours")
+                            backlog_skills_text = st.text_input("Available skills (comma-separated)", "Mechanical, Electrical", key="tool049_skills")
+                            run_method = st.form_submit_button("Prioritize maintenance backlog", type="primary", use_container_width=True, key="tool049_run")
+                        elif selected_tool["tool_id"] == "T052":
+                            st.caption("Aggregate deterministic supply/demand reconciliation. Scheduled receipts, planned production and capacity must share one period and product-family basis.")
+                            sop_periods_json = st.text_area(
+                                "Periods (JSON list; demand, planned_production, optional capacity/receipts/safety stock)",
+                                value='[{"period":"Jan","demand":30,"planned_production":35,"production_capacity":30,"scheduled_receipts":0,"target_safety_stock":15},{"period":"Feb","demand":60,"planned_production":40,"production_capacity":50,"scheduled_receipts":10,"target_safety_stock":20}]',
+                                key="tool052_periods",
+                            )
+                            sop_starting_inventory = st.number_input("Starting inventory", min_value=0.0, value=20.0, step=5.0, key="tool052_starting_inventory")
+                            run_method = st.form_submit_button("Reconcile S&OP plan", type="primary", use_container_width=True, key="tool052_run")
+                        elif selected_tool["tool_id"] == "T058":
+                            st.caption("Scores and weights are user-defined. Suppliers with missing criteria are shown as incomplete and are not ranked.")
+                            supplier_scores_json = st.text_area(
+                                "Supplier score records (JSON list)",
+                                value='[{"supplier":"Acme","scores":{"Delivery":90,"Quality":80},"data_as_of":"2026-Q3","evidence_reference":"audit-1"},{"supplier":"Beta","scores":{"Delivery":75},"data_as_of":"2026-Q3"},{"supplier":"Gamma","scores":{"Delivery":70,"Quality":100},"data_as_of":"2026-Q3","evidence_reference":"audit-3"}]',
+                                key="tool058_suppliers",
+                            )
+                            supplier_weights_json = st.text_area(
+                                "Criterion weights (JSON object)", value='{"Delivery":0.4,"Quality":0.6}',
+                                key="tool058_weights",
+                            )
+                            run_method = st.form_submit_button("Score supplier performance", type="primary", use_container_width=True, key="tool058_run")
+                        elif selected_tool["tool_id"] == "T016":
                             st.caption("Prefilled amount and unit pair are illustrative examples. Physical units use fixed conversion factors; currency conversion requires a dated, sourced rate you provide.")
                             amount_to_convert = st.number_input("Value to convert", value=100.0, step=1.0, key="tool016_amount")
                             unit_choices = ["mm", "cm", "m", "km", "in", "ft", "mi", "mg", "g", "kg", "lb", "oz", "ms", "s", "min", "h", "day", "mL", "L", "m³", "gal", "Wh", "kWh", "MJ", "GJ", "Pa", "kPa", "bar", "psi", "°C", "°F", "K", "SAR", "USD", "EUR", "GBP", "AED", "INR", "JPY"]
@@ -901,7 +947,15 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                             )
                             run_method = st.form_submit_button("Calculate sample size", type="primary", use_container_width=True, key="tool085_run")
 
-                    if selected_tool["tool_id"] == "T021":
+                    if selected_tool["tool_id"] == "T015":
+                        current_tool_inputs = {"source_headers": field_headers_text, "manual_mapping_json": field_manual_mapping_json, "minimum_confidence": field_min_confidence}
+                    elif selected_tool["tool_id"] == "T049":
+                        current_tool_inputs = {"work_orders_json": backlog_orders_json, "available_hours": backlog_hours, "available_skills": backlog_skills_text}
+                    elif selected_tool["tool_id"] == "T052":
+                        current_tool_inputs = {"periods_json": sop_periods_json, "starting_inventory": sop_starting_inventory}
+                    elif selected_tool["tool_id"] == "T058":
+                        current_tool_inputs = {"suppliers_json": supplier_scores_json, "weights_json": supplier_weights_json}
+                    elif selected_tool["tool_id"] == "T021":
                         current_tool_inputs = {
                             "observation_times_text": observation_text,
                             "performance_rating_pct": rating,
@@ -1074,8 +1128,37 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 optimize_task_resource_assignment, compare_energy_performance_scenarios,
                                 fit_simple_linear_regression, run_one_way_anova, run_welch_t_test,
                                 forecast_demand_baselines, simulate_monte_carlo_net_value,
+                                map_industrial_fields, prioritize_maintenance_backlog,
+                                reconcile_sop_plan, score_supplier_performance,
                             )
-                            if selected_tool["tool_id"] == "T021":
+                            if selected_tool["tool_id"] == "T015":
+                                headers = [item.strip() for item in field_headers_text.split(",") if item.strip()]
+                                manual_mapping = json.loads(field_manual_mapping_json)
+                                if not isinstance(manual_mapping, dict):
+                                    raise ValueError("Manual field mapping must be a JSON object from source header to canonical field ID.")
+                                result = map_industrial_fields(headers, manual_mapping=manual_mapping, minimum_confidence=field_min_confidence)
+                                result["data_provenance"] = "SYNTHETIC_EXAMPLE" if field_headers_text.strip() == "Timestamp,Qty,Defects,Machine ID" and field_manual_mapping_json.strip() == "{}" else "USER_ENTERED_UNVERIFIED"
+                            elif selected_tool["tool_id"] == "T049":
+                                parsed_backlog = json.loads(backlog_orders_json)
+                                if not isinstance(parsed_backlog, list):
+                                    raise ValueError("Maintenance work orders must be a JSON list.")
+                                skill_list = [item.strip() for item in backlog_skills_text.split(",") if item.strip()]
+                                result = prioritize_maintenance_backlog(parsed_backlog, backlog_hours, available_skills=skill_list)
+                                result["data_provenance"] = "SYNTHETIC_EXAMPLE" if '"WO-101"' in backlog_orders_json and '"WO-102"' in backlog_orders_json and '"WO-103"' in backlog_orders_json else "USER_ENTERED_UNVERIFIED"
+                            elif selected_tool["tool_id"] == "T052":
+                                parsed_periods = json.loads(sop_periods_json)
+                                if not isinstance(parsed_periods, list):
+                                    raise ValueError("S&OP periods must be a JSON list of period objects.")
+                                result = reconcile_sop_plan(parsed_periods, starting_inventory=sop_starting_inventory)
+                                result["data_provenance"] = "SYNTHETIC_EXAMPLE" if sop_periods_json.strip().startswith('[{"period":"Jan"') else "USER_ENTERED_UNVERIFIED"
+                            elif selected_tool["tool_id"] == "T058":
+                                parsed_suppliers = json.loads(supplier_scores_json)
+                                parsed_weights = json.loads(supplier_weights_json)
+                                if not isinstance(parsed_suppliers, list) or not isinstance(parsed_weights, dict):
+                                    raise ValueError("Supplier records must be a JSON list and criterion weights must be a JSON object.")
+                                result = score_supplier_performance(parsed_suppliers, parsed_weights)
+                                result["data_provenance"] = "SYNTHETIC_EXAMPLE" if '"supplier":"Acme"' in supplier_scores_json and '"supplier":"Gamma"' in supplier_scores_json else "USER_ENTERED_UNVERIFIED"
+                            elif selected_tool["tool_id"] == "T021":
                                 try:
                                     observation_times = [float(item.strip()) for item in observation_text.split(",") if item.strip()]
                                 except ValueError as exc:
@@ -1698,6 +1781,52 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 st.warning(result["message"])
                             else:
                                 st.write(result["message"])
+                    elif selected_tool["tool_id"] == "T015":
+                        result = st.session_state.get("shoir_tool_result_T015")
+                        if result:
+                            _show_focused_tool_persistence("T015", result, current_tool_inputs)
+                            m1, m2, m3 = st.columns(3)
+                            m1.metric("Source columns", result["source_column_count"])
+                            m2.metric("Mapped/suggested", result["mapped_or_suggested_count"])
+                            m3.metric("Needs review", result["needs_manual_review_count"])
+                            st.dataframe(result["mapping_table"], use_container_width=True, hide_index=True)
+                            st.warning(result["warning"])
+                    elif selected_tool["tool_id"] == "T049":
+                        result = st.session_state.get("shoir_tool_result_T049")
+                        if result:
+                            _show_focused_tool_persistence("T049", result, current_tool_inputs)
+                            m1, m2, m3 = st.columns(3)
+                            m1.metric("Selected work orders", result["selected_count"])
+                            m2.metric("Deferred work orders", result["deferred_count"])
+                            m3.metric("Labor hours selected", f"{result['selected_labor_hours']:.2f}")
+                            st.markdown(f"**Priority method:** {result['method']}")
+                            st.markdown("**Recommended queue**")
+                            st.dataframe(result["selected_work_orders"], use_container_width=True, hide_index=True)
+                            st.markdown("**Deferred / blocked**")
+                            st.dataframe(result["deferred_work_orders"], use_container_width=True, hide_index=True)
+                            st.warning(result["warning"])
+                    elif selected_tool["tool_id"] == "T052":
+                        result = st.session_state.get("shoir_tool_result_T052")
+                        if result:
+                            _show_focused_tool_persistence("T052", result, current_tool_inputs)
+                            m1, m2, m3 = st.columns(3)
+                            m1.metric("Total demand", f"{result['total_demand']:,.0f}")
+                            m2.metric("Ending inventory", f"{result['ending_inventory']:,.1f}")
+                            m3.metric("Ending backlog", f"{result['ending_backlog']:,.1f}")
+                            st.dataframe(result["period_plan"], use_container_width=True, hide_index=True)
+                            st.plotly_chart(px.bar(result["period_plan"], x="Period", y=["Demand", "Capacity-constrained production", "Ending inventory", "Ending backlog"], barmode="group", title="S&OP supply, demand and remaining position"), use_container_width=True)
+                            st.caption(result["assumptions"])
+                            st.warning(result["warning"])
+                    elif selected_tool["tool_id"] == "T058":
+                        result = st.session_state.get("shoir_tool_result_T058")
+                        if result:
+                            _show_focused_tool_persistence("T058", result, current_tool_inputs)
+                            m1, m2, m3 = st.columns(3)
+                            m1.metric("Suppliers", result["supplier_count"])
+                            m2.metric("Complete scorecards", result["complete_score_count"])
+                            m3.metric("Incomplete", result["incomplete_score_count"])
+                            st.dataframe(result["scorecard"], use_container_width=True, hide_index=True)
+                            st.caption(result["warning"])
                     elif selected_tool["tool_id"] == "T036":
                         result = st.session_state.get("shoir_tool_result_T036")
                         if result:
