@@ -171,6 +171,26 @@ COPILOT_TOOL_REQUIREMENTS = {
     "quality analysis": "Mid-Tier Pro",
     "gage r&r": "Mid-Tier Pro",
     "process capability": "Mid-Tier Pro",
+    "unit conversion": "Starter",
+    "unit converter": "Starter",
+    "currency converter": "Starter",
+    "convert units": "Starter",
+    "statistical process control": "Mid-Tier Pro",
+    "control chart": "Mid-Tier Pro",
+    "quality cost": "Mid-Tier Pro",
+    "cost of poor quality": "Mid-Tier Pro",
+    "mtbf": "Professional",
+    "mttr": "Professional",
+    "abc xyz inventory": "Mid-Tier Pro",
+    "abc/xyz inventory": "Mid-Tier Pro",
+    "oee": "Mid-Tier Pro",
+    "inventory policy": "Mid-Tier Pro",
+    "economic order quantity": "Mid-Tier Pro",
+    "reorder point": "Mid-Tier Pro",
+    "carbon emissions": "Mid-Tier Pro",
+    "carbon accounting": "Mid-Tier Pro",
+    "engineering economics": "Mid-Tier Pro",
+    "payback period": "Mid-Tier Pro",
     "npv": "Mid-Tier Pro",
     "meio": "Mid-Tier Pro",
     "research ai": "Research Pack",
@@ -278,11 +298,19 @@ def audit_module_entitlement_coverage(modules: Iterable[str]) -> dict[str, objec
 
 
 def available_modules(tier: str, modules: Iterable[str]) -> list[str]:
+    """Return only modules with an explicit policy that permits the current tier.
+
+    Unknown/unmapped module names are withheld; catalog auditing should report
+    them separately rather than accidentally making them available by default.
+    """
     result = []
     for module in modules:
-        required = module_required_tier(str(module))
-        if required is None or tier_allows(tier, required):
-            result.append(str(module))
+        name = str(module or "").strip()
+        if not name:
+            continue
+        required = module_required_tier(name)
+        if required is not None and tier_allows(tier, required):
+            result.append(name)
     return result
 
 
