@@ -5795,3 +5795,144 @@ def build_guided_study_plan(
         "warning": "This is a study plan, not an engineering result. Run each tool separately, validate its data and assumptions, and do not treat estimates as realized outcomes.",
         "data_provenance": "USER-PROVIDED INPUT INVENTORY AND CANONICAL TOOL REGISTRY",
     }
+
+def build_rcm_decision_register(
+    failure_modes: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Validate a user-authored RCM decision register and flag review needs.
+
+    This is a structured worksheet with limited completeness/mismatch rules. It
+    does not run or certify a complete Reliability-Centered Maintenance method,
+    and it never selects or approves a maintenance task on the user's behalf.
+    """
+    if isinstance(failure_modes, (str, bytes)) or not isinstance(failure_modes, Sequence) or not failure_modes:
+        raise ValueError("Provide a non-empty JSON list of failure-mode decision objects.")
+
+    consequence_labels = {
+        "safety_environmental": "Safety / environmental",
+        "operational": "Operational",
+        "non_operational": "Non-operational",
+        "hidden_function": "Hidden-function",
+    }
+    strategy_labels = {
+        "condition_directed": "Condition-directed task",
+        "scheduled_restoration": "Scheduled restoration",
+        "scheduled_discard": "Scheduled discard",
+        "failure_finding": "Failure-finding task",
+        "run_to_failure": "Run to failure",
+        "redesign": "Redesign / one-time change",
+        "undecided": "Undecided",
+    }
+    required_text = (
+        "asset", "function", "failure_mode", "failure_effect",
+        "consequence_rationale", "proposed_task", "evidence_reference",
+    )
+    seen: set[tuple[str, str, str]] = set()
+    rows: list[dict[str, Any]] = []
+    for index, item in enumerate(failure_modes, start=1):
+        if not isinstance(item, Mapping):
+            raise ValueError(f"Failure-mode record {index} must be an object.")
+        missing = [key for key in required_text if not str(item.get(key) or "").strip()]
+        if missing:
+            raise ValueError(
+                f"Failure-mode record {index} is missing required fields: {', '.join(missing)}."
+            )
+        asset = str(item["asset"]).strip()
+        function = str(item["function"]).strip()
+        failure_mode = str(item["failure_mode"]).strip()
+        key = (asset.casefold(), function.casefold(), failure_mode.casefold())
+        if key in seen:
+            raise ValueError(
+                f"Duplicate asset/function/failure-mode record at item {index}: "
+                f"{asset} / {function} / {failure_mode}."
+            )
+        seen.add(key)
+
+        raw_consequence = str(item.get("consequence_category") or "").strip().casefold()
+        consequence = raw_consequence.replace("-", "_").replace(" ", "_")
+        if consequence not in consequence_labels:
+            raise ValueError(
+                f"Failure-mode record {index} consequence_category must be one of: "
+                + ", ".join(consequence_labels)
+                + "."
+            )
+        raw_strategy = str(item.get("task_strategy") or "").strip().casefold()
+        strategy = raw_strategy.replace("-", "_").replace(" ", "_")
+        if strategy not in strategy_labels:
+            raise ValueError(
+                f"Failure-mode record {index} task_strategy must be one of: "
+                + ", ".join(strategy_labels)
+                + "."
+            )
+
+        interval_value = item.get("task_interval_days")
+        interval_days = None
+        if interval_value not in (None, ""):
+            if isinstance(interval_value, bool):
+                raise ValueError(f"Failure-mode record {index} task_interval_days must be a positive whole number.")
+            interval_number = _finite_number(interval_value, f"Failure-mode record {index} task interval")
+            if interval_number <= 0 or not interval_number.is_integer():
+                raise ValueError(f"Failure-mode record {index} task_interval_days must be a positive whole number.")
+            interval_days = int(interval_number)
+
+        condition_indicator = str(item.get("condition_indicator") or "").strip()
+        interval_strategies = {"scheduled_restoration", "scheduled_discard", "failure_finding"}
+        if strategy in interval_strategies and interval_days is None:
+            raise ValueError(
+                f"Failure-mode record {index} task_interval_days is required for "
+                f"{strategy_labels[strategy].lower()}."
+            )
+        if strategy == "condition_directed" and not condition_indicator:
+            raise ValueError(
+                f"Failure-mode record {index} condition_indicator is required for a condition-directed task."
+            )
+
+        flags: list[str] = []
+        if strategy == "undecided":
+            flags.append("TASK_STRATEGY_UNDECIDED")
+        if consequence == "hidden_function" and strategy != "failure_finding":
+            flags.append("HIDDEN_FUNCTION_FAILURE_FINDING_REVIEW")
+        if strategy == "failure_finding" and consequence != "hidden_function":
+            flags.append("FAILURE_FINDING_APPLICABILITY_REVIEW")
+        if strategy == "run_to_failure" and consequence in {
+            "safety_environmental", "operational", "hidden_function"
+        }:
+            flags.append("HIGH_CONSEQUENCE_RUN_TO_FAILURE_REQUIRES_FORMAL_REVIEW")
+
+        rows.append({
+            "Asset": asset,
+            "Function": function,
+            "Failure mode": failure_mode,
+            "Failure effect": str(item["failure_effect"]).strip(),
+            "Consequence category": consequence_labels[consequence],
+            "Consequence rationale": str(item["consequence_rationale"]).strip(),
+            "Proposed task": str(item["proposed_task"]).strip(),
+            "Task strategy": strategy_labels[strategy],
+            "Task interval (days)": interval_days,
+            "Condition indicator": condition_indicator,
+            "Evidence reference": str(item["evidence_reference"]).strip(),
+            "Decision flags": "; ".join(flags) if flags else "No rule-based flags; human review still required",
+            "Human review status": "PENDING",
+            "Owner": str(item.get("owner") or "").strip(),
+        })
+
+    register = pd.DataFrame(rows)
+    flags = register["Decision flags"].astype(str)
+    return {
+        "status": "STRUCTURED_FOR_HUMAN_REVIEW",
+        "method": "Structured RCM worksheet with limited completeness and task/consequence mismatch checks",
+        "failure_mode_count": int(len(register)),
+        "unique_asset_count": int(register["Asset"].nunique()),
+        "open_review_count": int(len(register)),
+        "unresolved_strategy_count": int((register["Task strategy"] == strategy_labels["undecided"]).sum()),
+        "high_consequence_run_to_failure_count": int(flags.str.contains(
+            "HIGH_CONSEQUENCE_RUN_TO_FAILURE_REQUIRES_FORMAL_REVIEW", regex=False
+        ).sum()),
+        "rule_flag_count": int((flags != "No rule-based flags; human review still required").sum()),
+        "human_review_required": True,
+        "review_register": register,
+        "formula": "No numeric risk score or task recommendation is computed; the tool validates required fields and emits explicit rule-based review flags.",
+        "assumptions": "Failure descriptions, consequence categories, selected strategies and evidence references are user supplied. The tool does not validate the source evidence, determine task applicability, estimate failure probabilities or approve maintenance policy.",
+        "warning": "This is not a complete or certified RCM analysis and is not a substitute for the organization's approved RCM method or qualified engineering/safety review. Every row remains PENDING until the accountable review occurs outside this calculator.",
+    }
+
