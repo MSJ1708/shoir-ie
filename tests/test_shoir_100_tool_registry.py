@@ -150,3 +150,17 @@ def test_workbench_tier_gate_keeps_research_pack_separate_from_enterprise_plus()
     research_view = module_availability("Research Pack")
     plus_rows = research_view[research_view["Required Tier"] == "Enterprise Plus"]
     assert not plus_rows["Available"].any()
+
+
+def test_rnle_ergonomics_target_has_real_gated_runner_and_explicit_validation_state():
+    tool = get_tool("T046")
+    assert tool is not None
+    assert tool["canonical_name"] == "Ergonomics Assessment Toolkit"
+    assert tool["implementation_status"] == "IMPLEMENTED_NEEDS_VALIDATION"
+    assert "shoir_ergonomics.py" in tool["source_files"]
+    assert "require_tool_access" in tool["entitlement_enforcement_points"]
+    assert "tests/test_shoir_ergonomics.py::" in tool["unit_test"]
+    assert not tier_allows_tool("Starter", "T046")
+    assert not tier_allows_tool("Mid-Tier Pro", "T046")
+    assert tier_allows_tool("Professional", "T046")
+    assert "UNVERIFIED" in tool["browser_test"]
