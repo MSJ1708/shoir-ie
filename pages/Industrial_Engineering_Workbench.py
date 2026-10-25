@@ -57,6 +57,9 @@ _TOOL058_EXAMPLE_SUPPLIERS = '[{"supplier":"Acme","scores":{"Delivery":90,"Quali
 _TOOL015_EXAMPLE_COLUMNS = "Timestamp, Qty, Defects, mystery_label"
 _TOOL052_EXAMPLE_PERIODS = '[{"period":"Jan","demand":30,"planned_production":35,"production_capacity":30,"scheduled_receipts":0,"target_safety_stock":15},{"period":"Feb","demand":60,"planned_production":50,"production_capacity":50,"scheduled_receipts":0,"target_safety_stock":20}]'
 _TOOL071_EXAMPLE_STATIONS = '[{"station":"Assembly","servers":1,"mean_service_time":2,"service_distribution":"deterministic"},{"station":"Inspection","servers":1,"mean_service_time":1,"service_distribution":"deterministic"}]'
+_TOOL062_EXAMPLE_VARIABLES = '{"x":{"low":0,"up":10,"category":"Continuous"},"y":{"low":0,"up":10,"category":"Continuous"}}'
+_TOOL062_EXAMPLE_OBJECTIVE = '{"x":3,"y":2}'
+_TOOL062_EXAMPLE_CONSTRAINTS = '[{"name":"minimum_output","coefficients":{"x":1,"y":1},"sense":">=","rhs":4},{"name":"balance","coefficients":{"x":1,"y":3},"sense":">=","rhs":6}]'
 
 st.markdown("""
 <style>
@@ -397,7 +400,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                 "Copilot action, API and export path must enforce their own server-side entitlement checks."
             )
 
-            if selected_tool["tool_id"] in {"T015", "T016", "T017", "T018", "T019", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T033", "T034", "T036", "T037", "T038", "T040", "T041", "T042", "T043", "T045", "T047", "T049", "T050", "T052", "T054", "T055", "T056", "T058", "T059", "T063", "T066", "T070", "T071", "T075", "T076", "T077", "T078", "T079", "T081", "T082", "T083", "T084", "T085"}:
+            if selected_tool["tool_id"] in {"T015", "T016", "T017", "T018", "T019", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T033", "T034", "T036", "T037", "T038", "T040", "T041", "T042", "T043", "T045", "T047", "T049", "T050", "T052", "T054", "T055", "T056", "T058", "T059", "T062", "T063", "T066", "T070", "T071", "T075", "T076", "T077", "T078", "T079", "T081", "T082", "T083", "T084", "T085"}:
                 st.markdown("---")
                 st.markdown("**Run focused specialist method**")
                 st.caption(
@@ -914,6 +917,15 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                             des_seed = st.number_input("Base random seed", min_value=-2147483648, max_value=2147483647, value=42, step=1, key="tool071_seed")
                             des_time_unit = st.text_input("Time unit", value="minutes", key="tool071_unit")
                             run_method = st.form_submit_button("Run discrete-event simulation", type="primary", use_container_width=True, key="tool071_run")
+                        elif selected_tool["tool_id"] == "T062":
+                            st.caption("Run a linear or mixed-integer model and independently check variable bounds/integrality and each constraint residual. Solver status is not the same as proof that the model formulation is correct; no IIS is generated.")
+                            solver_variables_json = st.text_area("Variables (JSON object: name → {low, up, category})", value=_TOOL062_EXAMPLE_VARIABLES, key="tool062_variables")
+                            solver_objective_json = st.text_area("Objective coefficients (JSON object)", value=_TOOL062_EXAMPLE_OBJECTIVE, key="tool062_objective")
+                            solver_constraints_json = st.text_area("Linear constraints (JSON list)", value=_TOOL062_EXAMPLE_CONSTRAINTS, key="tool062_constraints")
+                            solver_direction = st.selectbox("Objective direction", ["minimize", "maximize"], key="tool062_direction")
+                            solver_time_limit = st.number_input("Solver time limit (seconds)", min_value=0.1, max_value=300.0, value=10.0, step=1.0, key="tool062_time_limit")
+                            solver_tolerance = st.select_slider("Feasibility tolerance", options=[1e-7, 1e-6, 1e-5, 1e-4, 1e-3], value=1e-7, key="tool062_tolerance")
+                            run_method = st.form_submit_button("Solve and diagnose model", type="primary", use_container_width=True, key="tool062_run")
 
                     if selected_tool["tool_id"] == "T021":
                         current_tool_inputs = {
@@ -1057,6 +1069,8 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                         current_tool_inputs = {"periods_json": sop_periods_json, "starting_inventory": sop_starting_inventory}
                     elif selected_tool["tool_id"] == "T071":
                         current_tool_inputs = {"process_steps_json": des_steps_json, "job_count": int(des_job_count), "mean_interarrival_time": des_interarrival, "arrival_distribution": des_arrival_distribution, "warmup_jobs": int(des_warmup_jobs), "replications": int(des_replications), "random_seed": int(des_seed), "time_unit": des_time_unit}
+                    elif selected_tool["tool_id"] == "T062":
+                        current_tool_inputs = {"variables_json": solver_variables_json, "objective_json": solver_objective_json, "constraints_json": solver_constraints_json, "direction": solver_direction, "time_limit_seconds": solver_time_limit, "feasibility_tolerance": solver_tolerance}
                     else:
                         current_tool_inputs = {
                             "cohen_d": effect_size, "alpha": alpha,
@@ -1097,6 +1111,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 analyze_measurement_system_gage_rr, fit_regression_anova, run_hypothesis_test,
                                 prioritize_maintenance_backlog, score_supplier_performance,
                                 map_industrial_fields, reconcile_sop_plan, simulate_discrete_event_process,
+                                run_solver_diagnostics,
                             )
                             if selected_tool["tool_id"] == "T021":
                                 try:
@@ -1521,13 +1536,35 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                     and des_time_unit == "minutes"
                                     else "MODELLED_FROM_USER_ASSUMPTIONS"
                                 )
+                            elif selected_tool["tool_id"] == "T062":
+                                parsed_solver_variables = json.loads(solver_variables_json)
+                                parsed_solver_objective = json.loads(solver_objective_json)
+                                parsed_solver_constraints = json.loads(solver_constraints_json)
+                                if not isinstance(parsed_solver_variables, dict) or not isinstance(parsed_solver_objective, dict) or not isinstance(parsed_solver_constraints, list):
+                                    raise ValueError("Variables and objective must be JSON objects, and constraints must be a JSON list.")
+                                result = run_solver_diagnostics(
+                                    parsed_solver_variables,
+                                    parsed_solver_objective,
+                                    parsed_solver_constraints,
+                                    direction=solver_direction,
+                                    time_limit_seconds=solver_time_limit,
+                                    feasibility_tolerance=solver_tolerance,
+                                )
+                                result["data_provenance"] = (
+                                    "SYNTHETIC_EXAMPLE"
+                                    if solver_variables_json.strip() == _TOOL062_EXAMPLE_VARIABLES
+                                    and solver_objective_json.strip() == _TOOL062_EXAMPLE_OBJECTIVE
+                                    and solver_constraints_json.strip() == _TOOL062_EXAMPLE_CONSTRAINTS
+                                    and solver_direction == "minimize"
+                                    else "MODELLED_FROM_USER_ASSUMPTIONS"
+                                )
                             _persist_focused_tool_result(
                                 selected_tool["tool_id"], result, current_tool_inputs
                             )
                         except Exception as exc:
                             st.error(f"Tool run could not be completed safely: {exc}")
 
-                    if selected_tool["tool_id"] in {"T015", "T017", "T018", "T019", "T024", "T025", "T027", "T033", "T034", "T036", "T037", "T038", "T041", "T043", "T045", "T047", "T049", "T050", "T052", "T054", "T058", "T059", "T063", "T070", "T071", "T076", "T077", "T079", "T082", "T083", "T084"}:
+                    if selected_tool["tool_id"] in {"T015", "T017", "T018", "T019", "T024", "T025", "T027", "T033", "T034", "T036", "T037", "T038", "T041", "T043", "T045", "T047", "T049", "T050", "T052", "T054", "T058", "T059", "T062", "T063", "T070", "T071", "T076", "T077", "T079", "T082", "T083", "T084"}:
                         result = st.session_state.get("shoir_tool_result_" + selected_tool["tool_id"])
                         if result:
                             _show_focused_tool_persistence(selected_tool["tool_id"], result, current_tool_inputs)
