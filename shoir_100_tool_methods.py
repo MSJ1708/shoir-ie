@@ -1269,3 +1269,348 @@ def hazard_risk_register(records: Sequence[Mapping[str, Any]]) -> dict[str, Any]
         "warnings": ["This risk register is not a certified workplace risk assessment or safety approval.",
                      "Residual ratings must be justified by effective controls, evidence and competent safety review."],
     }
+
+def maintenance_backlog_priority(
+    records: Sequence[Mapping[str, Any]],
+    skill_capacity_hours: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Prioritize maintenance work with a transparent, skills-capacity greedy heuristic.
+
+    Jobs are ordered by criticality (descending), days overdue (descending), then
+    shorter duration and work-order ID. This is a deterministic heuristic, not a
+    globally optimal scheduling solver; it models one required skill per order.
+    """
+    if not isinstance(records, Sequence) or isinstance(records, (str, bytes)) or not records:
+        raise ValueError("Provide at least one maintenance work order.")
+    if not isinstance(skill_capacity_hours, Mapping) or not skill_capacity_hours:
+        raise ValueError("Provide available labor hours for at least one skill.")
+    capacities: dict[str, float] = {}
+    for skill, raw_hours in skill_capacity_hours.items():
+        name = str(skill or "").strip()
+        hours = _finite(raw_hours, f"{name or 'Unnamed skill'} capacity hours")
+        if not name or hours < 0 or name in capacities:
+            raise ValueError("Skill capacities need unique non-empty skill names and non-negative hours.")
+        capacities[name] = hours
+
+    jobs: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for index, row in enumerate(records, 1):
+        if not isinstance(row, Mapping):
+            raise ValueError(f"Work order {index} must be a mapping.")
+        work_id = str(row.get("work_order_id", "") or "").strip()
+        asset = str(row.get("asset_id", "") or "").strip()
+        description = str(row.get("description", "") or "").strip()
+        skill = str(row.get("required_skill", "") or "").strip()
+        hours = _finite(row.get("estimated_hours"), f"{work_id or index} estimated hours")
+        criticality = _finite(row.get("criticality_1_to_5"), f"{work_id or index} criticality")
+        overdue = _finite(row.get("days_overdue", 0), f"{work_id or index} days overdue")
+        if (
+            not work_id or work_id in seen or not asset or not skill
+            or hours <= 0 or criticality < 1 or criticality > 5 or int(criticality) != criticality
+            or overdue < 0 or int(overdue) != overdue
+        ):
+            raise ValueError(
+                f"Work order {index} needs a unique ID, asset, skill, positive hours, "
+                "integer criticality 1–5, and non-negative integer days overdue."
+            )
+        seen.add(work_id)
+        jobs.append({
+            "work_order_id": work_id, "asset_id": asset, "description": description,
+            "required_skill": skill, "estimated_hours": hours,
+            "criticality_1_to_5": int(criticality), "days_overdue": int(overdue),
+        })
+
+    jobs.sort(key=lambda j: (
+        -j["criticality_1_to_5"], -j["days_overdue"],
+        j["estimated_hours"], j["work_order_id"],
+    ))
+    remaining = dict(capacities)
+    planned = []
+    for rank, job in enumerate(jobs, 1):
+        skill = job["required_skill"]
+        available = remaining.get(skill)
+        if available is None:
+            status = "DEFERRED_SKILL_NOT_CONFIGURED"
+        elif job["estimated_hours"] <= available + 1e-9:
+            status = "SCHEDULED_BY_PRIORITY_HEURISTIC"
+            remaining[skill] = max(0.0, available - job["estimated_hours"])
+        else:
+            status = "DEFERRED_SKILL_CAPACITY"
+        planned.append({
+            **job, "priority_rank": rank, "available_skill_hours_before": available,
+            "allocation_status": status,
+        })
+    order_table = pd.DataFrame(planned)
+    capacity_table = pd.DataFrame([
+        {"skill": skill, "available_hours": capacities[skill],
+         "planned_hours": capacities[skill] - remaining[skill],
+         "remaining_hours": remaining[skill]}
+        for skill in sorted(capacities)
+    ])
+    selected_count = int(order_table["allocation_status"].eq("SCHEDULED_BY_PRIORITY_HEURISTIC").sum())
+    return {
+        "status": "PRIORITIZED_HEURISTIC", "tool_id": "T049", "method_version": METHOD_VERSION,
+        "method": "Greedy scheduling by criticality, days overdue, duration and work-order ID, constrained by skill-hour budgets.",
+        "work_orders": order_table, "skill_capacity": capacity_table,
+        "scheduled_count": selected_count, "deferred_count": int(len(order_table) - selected_count),
+        "warnings": [
+            "This deterministic greedy heuristic is not a globally optimal schedule.",
+            "It models one required skill per work order and does not solve shift calendars, precedence, access permits, or downtime windows.",
+            "Criticality and overdue days are inputs and should be reviewed by accountable maintenance staff.",
+        ],
+    }
+
+
+def sales_operations_reconciliation(
+    periods: Sequence[Mapping[str, Any]],
+    initial_inventory_units: Any = 0,
+    initial_backlog_units: Any = 0,
+) -> dict[str, Any]:
+    """Reconcile period demand, capacity-limited production, inventory and carried backlog."""
+    if not isinstance(periods, Sequence) or isinstance(periods, (str, bytes)) or not periods:
+        raise ValueError("Provide at least one planning period.")
+    inventory = _finite(initial_inventory_units, "Initial inventory units")
+    backlog = _finite(initial_backlog_units, "Initial backlog units")
+    if inventory < 0 or backlog < 0:
+        raise ValueError("Initial inventory and backlog cannot be negative.")
+    seen: set[str] = set()
+    output = []
+    for index, row in enumerate(periods, 1):
+        if not isinstance(row, Mapping):
+            raise ValueError(f"Planning period {index} must be a mapping.")
+        period = str(row.get("period", "") or "").strip()
+        demand = _finite(row.get("demand_units"), f"{period or index} demand units")
+        plan = _finite(row.get("planned_production_units"), f"{period or index} planned production")
+        capacity = _finite(row.get("available_capacity_units"), f"{period or index} capacity")
+        if not period or period in seen or min(demand, plan, capacity) < 0:
+            raise ValueError(f"Period {index} needs a unique label and non-negative demand, plan and capacity.")
+        seen.add(period)
+        opening_inventory, opening_backlog = inventory, backlog
+        production = min(plan, capacity)
+        total_requirement = demand + opening_backlog
+        available_supply = opening_inventory + production
+        inventory = max(0.0, available_supply - total_requirement)
+        backlog = max(0.0, total_requirement - available_supply)
+        output.append({
+            "period": period,
+            "opening_inventory_units": opening_inventory,
+            "opening_backlog_units": opening_backlog,
+            "demand_units": demand,
+            "planned_production_units": plan,
+            "available_capacity_units": capacity,
+            "capacity_limited_production_units": production,
+            "capacity_shortfall_vs_plan_units": max(0.0, plan - capacity),
+            "total_requirement_units": total_requirement,
+            "available_supply_units": available_supply,
+            "ending_inventory_units": inventory,
+            "ending_backlog_units": backlog,
+            "fulfilled_current_period_units": max(0.0, min(demand, available_supply - opening_backlog)),
+        })
+    table = pd.DataFrame(output)
+    return {
+        "status": "RECONCILED", "tool_id": "T052", "method_version": METHOD_VERSION,
+        "method": "Production is capped at available capacity; inventory and backlog carry forward period-by-period in the supplied order.",
+        "periods": table,
+        "total_demand_units": float(table["demand_units"].sum()),
+        "total_production_units": float(table["capacity_limited_production_units"].sum()),
+        "ending_inventory_units": float(table.iloc[-1]["ending_inventory_units"]),
+        "ending_backlog_units": float(table.iloc[-1]["ending_backlog_units"]),
+        "total_capacity_shortfall_vs_plan_units": float(table["capacity_shortfall_vs_plan_units"].sum()),
+        "warnings": [
+            "This is a transparent volume reconciliation, not a complete enterprise S&OP process.",
+            "It assumes one product family and one unit basis; material mix, labor, setup, lead time, cost and service constraints are not modeled.",
+            "Production plans, capacity and demand should come from dated, authorized source data before operational use.",
+        ],
+    }
+
+
+def supplier_performance_scorecard(
+    records: Sequence[Mapping[str, Any]],
+    weights: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Calculate a traceable weighted supplier score; incomplete suppliers remain unranked.
+
+    Every score is normalized to 0–100 where larger is better, including the
+    supplied risk-management score (100 means stronger controls/lower assessed risk).
+    """
+    metric_names = ("quality", "delivery", "cost", "risk_management")
+    default_weights = {"quality": 0.35, "delivery": 0.35, "cost": 0.15, "risk_management": 0.15}
+    source_weights = weights if weights is not None else default_weights
+    if not isinstance(source_weights, Mapping):
+        raise ValueError("Weights must be a mapping of quality, delivery, cost and risk_management.")
+    clean_weights: dict[str, float] = {}
+    for metric in metric_names:
+        weight = _finite(source_weights.get(metric), f"{metric} weight")
+        if weight < 0:
+            raise ValueError("Supplier-score weights cannot be negative.")
+        clean_weights[metric] = weight
+    total_weight = sum(clean_weights.values())
+    if total_weight <= 0:
+        raise ValueError("At least one supplier-score weight must be positive.")
+    clean_weights = {key: value / total_weight for key, value in clean_weights.items()}
+
+    if not isinstance(records, Sequence) or isinstance(records, (str, bytes)) or not records:
+        raise ValueError("Provide at least one supplier record.")
+    output = []
+    seen: set[str] = set()
+    for index, row in enumerate(records, 1):
+        if not isinstance(row, Mapping):
+            raise ValueError(f"Supplier row {index} must be a mapping.")
+        supplier = str(row.get("supplier", "") or "").strip()
+        if not supplier or supplier in seen:
+            raise ValueError(f"Supplier row {index} needs a unique non-empty supplier name.")
+        seen.add(supplier)
+        scores: dict[str, float | None] = {}
+        missing = []
+        for metric in metric_names:
+            raw = row.get(f"{metric}_score")
+            if raw is None or (isinstance(raw, str) and not raw.strip()):
+                scores[metric] = None
+                missing.append(metric)
+                continue
+            value = _finite(raw, f"{supplier} {metric} score")
+            if value < 0 or value > 100:
+                raise ValueError(f"{supplier} {metric} score must be between 0 and 100.")
+            scores[metric] = value
+        complete = not missing
+        weighted_score = (
+            sum(float(scores[m]) * clean_weights[m] for m in metric_names)
+            if complete else None
+        )
+        output.append({
+            "supplier": supplier, **{f"{m}_score": scores[m] for m in metric_names},
+            "completeness": "COMPLETE" if complete else "INCOMPLETE",
+            "missing_evidence": ", ".join(missing),
+            "weighted_score_0_to_100": weighted_score,
+        })
+    table = pd.DataFrame(output)
+    table["_complete_sort"] = table["weighted_score_0_to_100"].notna()
+    table = table.sort_values(
+        ["_complete_sort", "weighted_score_0_to_100", "supplier"],
+        ascending=[False, False, True], na_position="last", kind="stable",
+    ).drop(columns=["_complete_sort"]).reset_index(drop=True)
+    table["rank"] = pd.array(
+        [i + 1 if pd.notna(score) else None for i, score in enumerate(table["weighted_score_0_to_100"])],
+        dtype="Int64",
+    )
+    return {
+        "status": "SCORED_WITH_EVIDENCE_GAPS", "tool_id": "T058", "method_version": METHOD_VERSION,
+        "method": "Weighted mean of four normalized 0–100 scores; suppliers missing any component are deliberately left unranked.",
+        "weights": clean_weights, "suppliers": table,
+        "ranked_supplier_count": int(table["weighted_score_0_to_100"].notna().sum()),
+        "unranked_supplier_count": int(table["weighted_score_0_to_100"].isna().sum()),
+        "warnings": [
+            "Weights are user-selected policy choices, not objectively correct universal priorities.",
+            "All score scales must be normalized so higher means better; risk_management_score means control maturity / lower assessed risk.",
+            "This scorecard is not a probability of supplier failure and does not replace evidence-based supplier qualification.",
+        ],
+    }
+
+
+def simulate_single_station_des(
+    customers: Any = 500,
+    mean_interarrival: Any = 1.0,
+    mean_service: Any = 0.8,
+    arrival_distribution: str = "exponential",
+    service_distribution: str = "exponential",
+    warmup_customers: Any = 50,
+    replications: Any = 20,
+    seed: Any = 42,
+) -> dict[str, Any]:
+    """Run a reproducible single-station FCFS discrete-event queue simulation.
+
+    Supported arrival/service distributions are exponential or constant. The
+    event times are generated from a local seeded RNG; no plant system is read
+    or controlled. Results summarize each replication after the warm-up customers.
+    """
+    n_value = _finite(customers, "Customer count")
+    warm_value = _finite(warmup_customers, "Warm-up customer count")
+    reps_value = _finite(replications, "Replication count")
+    seed_value = _finite(seed, "Random seed")
+    arrival_mean = _finite(mean_interarrival, "Mean interarrival time")
+    service_mean = _finite(mean_service, "Mean service time")
+    arrival_kind = str(arrival_distribution or "").strip().lower()
+    service_kind = str(service_distribution or "").strip().lower()
+    if int(n_value) != n_value or n_value < 10 or n_value > 10000:
+        raise ValueError("Customer count must be an integer from 10 through 10,000.")
+    if int(warm_value) != warm_value or warm_value < 0 or warm_value >= n_value - 1:
+        raise ValueError("Warm-up count must be an integer from 0 to fewer than customers minus one.")
+    if int(reps_value) != reps_value or reps_value < 2 or reps_value > 100:
+        raise ValueError("Replication count must be an integer from 2 through 100.")
+    if int(seed_value) != seed_value or seed_value < 0 or seed_value > 2**32 - 1:
+        raise ValueError("Random seed must be an integer from 0 through 2^32−1.")
+    if arrival_mean <= 0 or service_mean <= 0:
+        raise ValueError("Mean interarrival and service times must be positive.")
+    if arrival_kind not in {"exponential", "constant"} or service_kind not in {"exponential", "constant"}:
+        raise ValueError("Arrival and service distributions must be exponential or constant.")
+
+    rng = np.random.default_rng(int(seed_value))
+    rows = []
+    for replication in range(1, int(reps_value) + 1):
+        interarrivals = (
+            rng.exponential(arrival_mean, int(n_value))
+            if arrival_kind == "exponential" else np.full(int(n_value), arrival_mean)
+        )
+        service = (
+            rng.exponential(service_mean, int(n_value))
+            if service_kind == "exponential" else np.full(int(n_value), service_mean)
+        )
+        arrivals = np.cumsum(interarrivals)
+        starts = np.zeros(int(n_value), dtype=float)
+        departures = np.zeros(int(n_value), dtype=float)
+        for i in range(int(n_value)):
+            starts[i] = max(arrivals[i], departures[i - 1] if i else 0.0)
+            departures[i] = starts[i] + service[i]
+
+        included = slice(int(warm_value), int(n_value))
+        observation_start = float(arrivals[int(warm_value)])
+        observation_end = float(departures[-1])
+        observation_time = observation_end - observation_start
+        waits = starts[included] - arrivals[included]
+        systems = departures[included] - arrivals[included]
+        if observation_time <= 0:
+            raise ValueError("Simulation produced a non-positive observation window.")
+        busy_overlap = float(sum(
+            max(0.0, min(float(departures[i]), observation_end) - max(float(starts[i]), observation_start))
+            for i in range(int(n_value))
+        ))
+        utilization_pct = min(100.0, max(0.0, 100.0 * busy_overlap / observation_time))
+        throughput = len(waits) / observation_time
+        rows.append({
+            "replication": replication,
+            "customers_observed_after_warmup": int(n_value) - int(warm_value),
+            "observation_time_units": observation_time,
+            "mean_wait_time_units": float(np.mean(waits)),
+            "p95_wait_time_units": float(np.quantile(waits, 0.95)),
+            "mean_time_in_system_units": float(np.mean(systems)),
+            "throughput_customers_per_time_unit": float(throughput),
+            "utilization_pct": utilization_pct,
+        })
+    table = pd.DataFrame(rows)
+    offered_load = service_mean / arrival_mean
+    warnings = [
+        "This is a single-server FCFS queue; setups, outages, priority rules, multiple stations and finite buffers are not modeled.",
+        "Synthetic simulation results are not plant measurements or a promise of throughput, savings, or service.",
+        "Mean arrival/service parameters are model inputs; calibrate them against timestamped observations before operational use.",
+    ]
+    if offered_load >= 1.0:
+        warnings.append("Mean service time is at least the mean interarrival time (offered load ≥ 1); long-run queue stability should not be assumed.")
+    return {
+        "status": "SIMULATED", "tool_id": "T071", "method_version": METHOD_VERSION,
+        "method": "Discrete-event event-time model: arrival → queue wait → service start → departure; FCFS single server; output summaries exclude the configured warm-up customers.",
+        "configuration": {
+            "customers_per_replication": int(n_value), "warmup_customers": int(warm_value),
+            "replications": int(reps_value), "seed": int(seed_value),
+            "mean_interarrival": arrival_mean, "mean_service": service_mean,
+            "arrival_distribution": arrival_kind, "service_distribution": service_kind,
+            "offered_load_service_to_interarrival": offered_load,
+            "provenance": "SYNTHETIC_SIMULATION",
+        },
+        "replication_results": table,
+        "mean_wait_time_units": float(table["mean_wait_time_units"].mean()),
+        "p95_wait_time_units": float(table["p95_wait_time_units"].mean()),
+        "mean_time_in_system_units": float(table["mean_time_in_system_units"].mean()),
+        "throughput_customers_per_time_unit": float(table["throughput_customers_per_time_unit"].mean()),
+        "mean_utilization_pct": float(table["utilization_pct"].mean()),
+        "warnings": warnings,
+    }
