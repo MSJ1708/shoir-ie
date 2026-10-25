@@ -403,7 +403,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                 "Copilot action, API and export path must enforce their own server-side entitlement checks."
             )
 
-            if selected_tool["tool_id"] in {"T002", "T015", "T016", "T017", "T018", "T019", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T033", "T034", "T035", "T036", "T037", "T038", "T040", "T041", "T042", "T043", "T045", "T047", "T049", "T050", "T051", "T052", "T054", "T055", "T056", "T058", "T059", "T062", "T063", "T066", "T069", "T070", "T071", "T072", "T075", "T076", "T077", "T078", "T079", "T081", "T082", "T083", "T084", "T085", "T087", "T089"}:
+            if selected_tool["tool_id"] in {"T002", "T015", "T016", "T017", "T018", "T019", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T033", "T034", "T035", "T036", "T037", "T038", "T040", "T041", "T042", "T043", "T044", "T045", "T047", "T049", "T050", "T051", "T052", "T054", "T055", "T056", "T058", "T059", "T062", "T063", "T066", "T069", "T070", "T071", "T072", "T075", "T076", "T077", "T078", "T079", "T081", "T082", "T083", "T084", "T085", "T087", "T089"}:
                 st.markdown("---")
                 st.markdown("**Run focused specialist method**")
                 st.caption(
@@ -934,6 +934,15 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                             )
                             pm_as_of_date = st.text_input("Plan as-of date (YYYY-MM-DD)", "2026-10-24", key="tool043_as_of")
                             run_method = st.form_submit_button("Calculate maintenance due list", type="primary", use_container_width=True, key="tool043_run")
+                        elif selected_tool["tool_id"] == "T044":
+                            st.caption("Review-first worksheet: checks decision completeness and flags limited consequence/task mismatches; it does not make or certify RCM decisions.")
+                            rcm_modes_json = st.text_area(
+                                "Failure modes (JSON list: asset, function, failure_mode, failure_effect, consequence_category, consequence_rationale, proposed_task, task_strategy, evidence_reference; interval/condition fields as required)",
+                                value='[{"asset":"Conveyor-01","function":"Move product to packing line","failure_mode":"Drive belt slips","failure_effect":"Output flow is interrupted","consequence_category":"operational","consequence_rationale":"SYNTHETIC example only; replace with site-reviewed consequence analysis","proposed_task":"Inspect belt condition against an approved limit","task_strategy":"condition_directed","condition_indicator":"Belt wear or slip exceeds an approved limit","evidence_reference":"SYNTHETIC example only; replace with CMMS and inspection records","owner":"Maintenance planner"}]',
+                                key="tool044_modes",
+                            )
+                            st.caption("Strategies: condition_directed, scheduled_restoration, scheduled_discard, failure_finding, run_to_failure, redesign, undecided. Every row remains pending human review.")
+                            run_method = st.form_submit_button("Validate RCM decision register", type="primary", use_container_width=True, key="tool044_run")
                         elif selected_tool["tool_id"] == "T045":
                             st.caption("Reorder point = average daily demand × lead time + safety stock. Criticality is a user-entered score.")
                             spare_parts_json = st.text_area("Spare parts (JSON list: part, average_daily_demand, lead_time_days, safety_stock, on_hand, scheduled_receipts, unit_cost, criticality_score)", value='[{"part":"Bearing","average_daily_demand":2,"lead_time_days":5,"safety_stock":10,"on_hand":5,"scheduled_receipts":0,"unit_cost":20,"criticality_score":5},{"part":"Gasket","average_daily_demand":0.5,"lead_time_days":2,"safety_stock":1,"on_hand":10,"scheduled_receipts":0,"unit_cost":3,"criticality_score":2}]', key="tool045_parts")
@@ -1192,6 +1201,8 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                         current_tool_inputs = {"failure_times_json": weibull_times_json}
                     elif selected_tool["tool_id"] == "T043":
                         current_tool_inputs = {"tasks_json": pm_tasks_json, "as_of_date": pm_as_of_date}
+                    elif selected_tool["tool_id"] == "T044":
+                        current_tool_inputs = {"failure_modes_json": rcm_modes_json}
                     elif selected_tool["tool_id"] == "T045":
                         current_tool_inputs = {"parts_json": spare_parts_json}
                     elif selected_tool["tool_id"] == "T047":
@@ -1278,7 +1289,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 balance_production_line, analyze_bottleneck_capacity,
                                 build_value_stream_map, analyze_fmea, analyze_mm1_queue,
                                 analyze_industrial_cost_variance, calculate_roi_evidence,
-                                plan_preventive_maintenance, assess_job_hazards,
+                                plan_preventive_maintenance, build_rcm_decision_register, assess_job_hazards,
                                 plan_material_requirements, score_project_portfolio,
                                 merge_data_tables, process_time_series,
                                 generate_synthetic_industrial_data, plan_acceptance_sampling,
@@ -1574,6 +1585,11 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 if not isinstance(parsed_pm_tasks, list):
                                     raise ValueError("Maintenance tasks must be a JSON list of task objects.")
                                 result = plan_preventive_maintenance(parsed_pm_tasks, pm_as_of_date)
+                            elif selected_tool["tool_id"] == "T044":
+                                parsed_rcm_modes = json.loads(rcm_modes_json)
+                                if not isinstance(parsed_rcm_modes, list):
+                                    raise ValueError("RCM failure modes must be a JSON list of decision objects.")
+                                result = build_rcm_decision_register(parsed_rcm_modes)
                             elif selected_tool["tool_id"] == "T045":
                                 parsed_parts = json.loads(spare_parts_json)
                                 if not isinstance(parsed_parts, list):
@@ -1798,7 +1814,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                         except Exception as exc:
                             st.error(f"Tool run could not be completed safely: {exc}")
 
-                    if selected_tool["tool_id"] in {"T017", "T018", "T019", "T024", "T025", "T027", "T034", "T038", "T041", "T043", "T045", "T047", "T050", "T054", "T059", "T062", "T063", "T069", "T070", "T071", "T076", "T077", "T079", "T082", "T083", "T084"}:
+                    if selected_tool["tool_id"] in {"T017", "T018", "T019", "T024", "T025", "T027", "T034", "T038", "T041", "T043", "T044", "T045", "T047", "T050", "T054", "T059", "T062", "T063", "T069", "T070", "T071", "T076", "T077", "T079", "T082", "T083", "T084"}:
                         result = st.session_state.get("shoir_tool_result_" + selected_tool["tool_id"])
                         if result:
                             _show_focused_tool_persistence(selected_tool["tool_id"], result, current_tool_inputs)
