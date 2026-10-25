@@ -10,7 +10,7 @@ The implementation uses the existing `pages/Industrial_Engineering_Workbench.py`
 
 ## Focused execution methods
 
-The original focused tranche was continued with four additional methods (T036, T037, T051 and T072). This integration also carries the separately tested T062 solver diagnostics, T071 discrete-event simulation and T087 reproducibility ZIP into the same branch. The combined Workbench contains 58 distinct stable target IDs with focused runner branches; each remains pending authenticated end-to-end verification. Other existing module workflows may cover additional targets, but they are not counted as focused runners unless wired to the stable target ID and its execution gate. The implementation matrix links every target to its minimum tier, contracts, evidence tests and remaining limitations.
+The original focused tranche was continued with four additional methods (T036, T037, T051 and T072). This integration also carries the separately tested T062 solver diagnostics, T071 discrete-event simulation and T087 reproducibility ZIP into the same branch. The combined Workbench contains 59 distinct stable target IDs with focused runner branches; each remains pending authenticated end-to-end verification. Other existing module workflows may cover additional targets, but they are not counted as focused runners unless wired to the stable target ID and its execution gate. The implementation matrix links every target to its minimum tier, contracts, evidence tests and remaining limitations.
 
 ### Lean, manufacturing, quality and economics
 
@@ -24,6 +24,7 @@ The original focused tranche was continued with four additional methods (T036, T
 | T082 | Industrial Costing and Variance Analyzer | Direct-material price/usage/total variance, with reconciliation. |
 | T083 | Evidence-Based ROI Tracker | Cost-reduction and ROI arithmetic; always requires human evidence verification and never self-certifies savings. |
 | T043 | Preventive Maintenance Planner | Interval due dates, overdue state and labor estimate; not a resource/downtime optimizer. |
+| T044 | Reliability-Centered Maintenance Assistant | Review-first decision register with completeness and high-consequence mismatch flags; not a complete or certified RCM method. |
 | T047 | Job Safety and Hazard Register | Severity × likelihood screen with residual scores; not a certified or legally sufficient safety assessment. |
 | T054 | Material Requirements Planner | One-level BOM netting, lot multiples and lead-time release indices; no recursive BOM explosion. |
 | T084 | Engineering Project Portfolio Scorer | Direction-aware min-max normalization with user-defined weights; weight sensitivity not implemented. |
