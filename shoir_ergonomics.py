@@ -170,7 +170,8 @@ def calculate_rnle_lifting_index(
     asymmetry_destination_degrees: float,
     frequency_lifts_per_minute: float,
     duration_hours: float,
-    coupling_quality: str,
+    coupling_quality_origin: str,
+    coupling_quality_destination: str,
     applicability_confirmed: bool,
 ) -> dict[str, Any]:
     """Calculate origin/destination RWL and the single-task RNLE lifting index.
@@ -213,15 +214,17 @@ def calculate_rnle_lifting_index(
     fm, table_frequency, warnings = _frequency_multiplier(frequency, duration, v_origin)
 
     endpoint_inputs = (
-        ("origin", h_origin, v_origin, a_origin),
-        ("destination", h_destination, v_destination, a_destination),
+        ("origin", h_origin, v_origin, a_origin, coupling_quality_origin),
+        ("destination", h_destination, v_destination, a_destination, coupling_quality_destination),
     )
     endpoint_results: dict[str, dict[str, float]] = {}
-    for endpoint, horizontal_cm, vertical_cm, angle_degrees in endpoint_inputs:
+    normalized_couplings: dict[str, str] = {}
+    for endpoint, horizontal_cm, vertical_cm, angle_degrees, coupling_quality in endpoint_inputs:
         hm = _horizontal_multiplier(horizontal_cm, endpoint)
         vm = _vertical_multiplier(vertical_cm, endpoint)
         am = _asymmetric_multiplier(angle_degrees, endpoint)
         cm = _coupling_multiplier(coupling_quality, vertical_cm)
+        normalized_couplings[endpoint] = str(coupling_quality).strip().title()
         rwl = 23.0 * hm * vm * dm * am * fm * cm
         if not math.isfinite(rwl) or rwl <= 0:
             raise ValueError(f"RNLE produced a non-positive recommended weight limit at the {endpoint}.")
@@ -270,7 +273,8 @@ def calculate_rnle_lifting_index(
         "frequency_observed_lifts_per_minute": frequency,
         "frequency_used_for_table_lifts_per_minute": table_frequency,
         "duration_hours": duration,
-        "coupling_quality": str(coupling_quality).strip().title(),
+        "coupling_quality_origin": normalized_couplings["origin"],
+        "coupling_quality_destination": normalized_couplings["destination"],
         "frequency_multiplier": fm,
         "endpoint_results": endpoint_results,
         "limiting_endpoint": limiting_endpoint,
