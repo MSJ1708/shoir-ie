@@ -1572,7 +1572,7 @@ def test_anomaly_screening_flags_robust_outlier_and_handles_stable_baseline():
     flat_records = [{"timestamp": f"2026-10-{day:02d}T00:00:00Z", "value": 10 if day < 8 else 25} for day in range(1, 9)]
     fallback = detect_equipment_anomalies(flat_records)
     assert fallback["anomaly_count"] == 1
-    assert fallback["method"] == "ZERO_MAD_ABSOLUTE_DEVIATION_FALLBACK"
+    assert "stable-baseline deviation fallback" in fallback["method"].lower()
 
 
 def test_anomaly_screening_rejects_bad_timestamps_and_duplicate_rows():
