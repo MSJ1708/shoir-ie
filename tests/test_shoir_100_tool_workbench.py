@@ -710,3 +710,31 @@ def test_workbench_student_practice_mode_checks_answers_and_shows_solution():
     assert result["is_correct"] is True
     assert result["expected_answer"] == pytest.approx(2.0)
     assert result["data_provenance"] == "SYNTHETIC_EXERCISE"
+
+
+def test_workbench_guided_study_wizard_returns_gated_step_plan():
+    from streamlit.testing.v1 import AppTest
+
+    page = ROOT / "pages" / "Industrial_Engineering_Workbench.py"
+    at = AppTest.from_file(page, default_timeout=90)
+    at.session_state["current_user"] = "guided-study-checker"
+    at.session_state["authenticated"] = True
+    at.session_state["user_tier"] = "Starter"
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+
+    at.selectbox(key="shoir_100_tool_inspector").select("T002")
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    at.text_input(key="tool002_available_fields").set_value(
+        "source_file, validated_dataset, process_table, demand, time_unit"
+    )
+    at.button(key="tool002_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    result = at.session_state.get("shoir_tool_result_T002")
+    assert result is not None
+    assert result["status"] == "GUIDED_PLAN_CREATED"
+    rows = result["steps"].set_index("Tool ID")
+    assert rows.loc["T011", "Step status"] in ("READY", "COMPLETED_IN_SESSION")
+    assert rows.loc["T025", "Step status"] == "TIER_RESTRICTED"
