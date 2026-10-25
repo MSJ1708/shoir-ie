@@ -643,9 +643,12 @@ def test_workbench_builds_downloadable_reproducibility_pack():
     source.select("T021 · Time Study and Standard Time")
     at.checkbox(key="tool087_include_inputs").set_value(True)
     at.checkbox(key="tool087_include_tables").set_value(True)
-    at.run(timeout=90)
-    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+    assert at.checkbox(key="tool087_include_inputs").value is True
+    assert at.checkbox(key="tool087_include_tables").value is True
+    # Form controls are committed together on submit; do not run a separate
+    # app cycle between editing the form and submitting it.
     at.button(key="tool087_run").click()
+    at.run(timeout=90)
     at.run(timeout=90)
     assert not at.exception, "\n".join(str(error.value) for error in at.exception)
     result = at.session_state.get("shoir_tool_result_T087")
