@@ -640,7 +640,8 @@ def test_workbench_builds_downloadable_reproducibility_pack():
     assert not at.exception, "\n".join(str(error.value) for error in at.exception)
     source = at.selectbox(key="tool087_source_id")
     assert any(str(option).startswith("T021 · Time Study and Standard Time") for option in source.options)
-    source.select("T021 · Time Study and Standard Time")
+    # Streamlit format_func renders the label; tests should set the stable source ID.
+    source.set_value("T021")
     at.checkbox(key="tool087_include_inputs").set_value(True)
     at.checkbox(key="tool087_include_tables").set_value(True)
     # Streamlit form controls are submitted atomically with the form button.
