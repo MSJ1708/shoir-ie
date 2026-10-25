@@ -16,7 +16,9 @@ def test_tiers_and_matrix():
     assert canonical_tier("Professional Tier ($129)") == "Professional"
     assert canonical_tier("Enterprise Plus Tier ($399)") == "Enterprise Plus"
     assert tier_allows("Enterprise Plus Tier", "Enterprise")
-    assert tier_allows("Research Pack", "Enterprise Plus")
+    assert not tier_allows("Research Pack", "Enterprise Plus")  # Research Pack is a separate add-on.
+    assert tier_allows("Research Pack", "Enterprise")
+    assert tier_allows("Research Pack", "Research")
     assert not tier_allows("Starter", "Enterprise")
 
 def test_validation():
