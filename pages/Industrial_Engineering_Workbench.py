@@ -49,6 +49,13 @@ TIER = canonical_tier(RAW_TIER)
 _TOOL022_EXAMPLE_COUNTS = '{"Productive": 60, "Idle": 25, "Setup": 15}'
 _TOOL028_EXAMPLE_COUNTS = '{"Machine": 12, "Material": 7, "Method": 3}'
 _TOOL029_EXAMPLE_ITEMS = '[{"category":"Sort","criterion":"Remove unnecessary items","score":3,"evidence":"Illustrative example","owner":"","due_date":""},{"category":"Set in Order","criterion":"Label storage locations","score":3,"evidence":"Illustrative example","owner":"","due_date":""},{"category":"Shine","criterion":"Clean workstations","score":3,"evidence":"Illustrative example","owner":"","due_date":""},{"category":"Standardize","criterion":"Display standard work","score":3,"evidence":"Illustrative example","owner":"","due_date":""},{"category":"Sustain","criterion":"Review 5S weekly","score":3,"evidence":"Illustrative example","owner":"","due_date":""}]'
+_TOOL089_PRACTICE_TOPICS = {
+    "takt_time": {"label": "Takt time", "question": "A line has 420 production minutes available in a shift and must produce 210 units. What is takt time?", "unit": "minutes per unit"},
+    "oee_percent": {"label": "Overall equipment effectiveness (OEE)", "question": "Availability is 90%, performance is 80%, and quality is 95%. What is OEE as a percentage?", "unit": "percent"},
+    "eoq_units": {"label": "Economic order quantity (EOQ)", "question": "Annual demand is 10,000 units, order cost is SAR 50 per order, and annual holding cost is SAR 2 per unit. Calculate EOQ.", "unit": "units per order"},
+    "process_capability_cp": {"label": "Process capability Cp", "question": "LSL is 10 mm, USL is 16 mm, and within-subgroup sigma is 1 mm. Calculate Cp.", "unit": "dimensionless index"},
+    "npv_sar": {"label": "Net present value (NPV)", "question": "An investment costs SAR 1,000 now and returns SAR 600 at the end of each of the next two years. At 10% annual discount rate, what is NPV?", "unit": "SAR"},
+}
 _TOOL069_EXAMPLE_FACILITIES = '[{"id":"F1","fixed_opening_cost":10,"capacity":10},{"id":"F2","fixed_opening_cost":1,"capacity":10}]'
 _TOOL069_EXAMPLE_CUSTOMERS = '[{"id":"C1","demand":5},{"id":"C2","demand":5}]'
 _TOOL069_EXAMPLE_ROUTES = '[{"facility":"F1","customer":"C1","unit_cost":1,"capacity":10},{"facility":"F1","customer":"C2","unit_cost":10,"capacity":10},{"facility":"F2","customer":"C1","unit_cost":5,"capacity":10},{"facility":"F2","customer":"C2","unit_cost":1,"capacity":10}]'
@@ -396,7 +403,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                 "Copilot action, API and export path must enforce their own server-side entitlement checks."
             )
 
-            if selected_tool["tool_id"] in {"T015", "T016", "T017", "T018", "T019", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T033", "T034", "T035", "T036", "T037", "T038", "T040", "T041", "T042", "T043", "T045", "T047", "T049", "T050", "T051", "T052", "T054", "T055", "T056", "T058", "T059", "T062", "T063", "T066", "T069", "T070", "T071", "T072", "T075", "T076", "T077", "T078", "T079", "T081", "T082", "T083", "T084", "T085", "T087"}:
+            if selected_tool["tool_id"] in {"T015", "T016", "T017", "T018", "T019", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T033", "T034", "T035", "T036", "T037", "T038", "T040", "T041", "T042", "T043", "T045", "T047", "T049", "T050", "T051", "T052", "T054", "T055", "T056", "T058", "T059", "T062", "T063", "T066", "T069", "T070", "T071", "T072", "T075", "T076", "T077", "T078", "T079", "T081", "T082", "T083", "T084", "T085", "T087", "T089"}:
                 st.markdown("---")
                 st.markdown("**Run focused specialist method**")
                 st.caption(
@@ -497,6 +504,18 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                             xyz_x_cutoff = st.number_input("Maximum X demand CV", min_value=0.0, value=0.50, step=0.05, key="tool056_x_cv")
                             xyz_y_cutoff = st.number_input("Maximum Y demand CV", min_value=0.01, value=1.0, step=0.05, key="tool056_y_cv")
                             run_method = st.form_submit_button("Classify ABC / XYZ inventory", type="primary", use_container_width=True, key="tool056_run")
+                        elif selected_tool["tool_id"] == "T089":
+                            st.caption("Starter practice mode with fixed, reproducible engineering examples. Answers are checked against an explicit formula and worked solution; examples are not plant data.")
+                            practice_topic = st.selectbox(
+                                "Practice topic",
+                                options=list(_TOOL089_PRACTICE_TOPICS),
+                                format_func=lambda topic: _TOOL089_PRACTICE_TOPICS[topic]["label"],
+                                key="tool089_topic",
+                            )
+                            st.info(_TOOL089_PRACTICE_TOPICS[practice_topic]["question"])
+                            st.caption("Units: " + _TOOL089_PRACTICE_TOPICS[practice_topic]["unit"])
+                            practice_answer = st.number_input("Your numerical answer", value=0.0, step=0.1, key="tool089_answer")
+                            run_method = st.form_submit_button("Check answer and show worked solution", type="primary", use_container_width=True, key="tool089_run")
                         elif selected_tool["tool_id"] == "T069":
                             st.caption("Minimize one-period facility opening and shipment costs. All customer demand must be met; opening, route and facility capacities are hard constraints. This is a modelled plan, not a live logistics recommendation.")
                             facility_location_facilities_json = st.text_area("Candidate facilities (JSON list: id, fixed_opening_cost, capacity)", _TOOL069_EXAMPLE_FACILITIES, key="tool069_facilities")
@@ -1193,6 +1212,9 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                         current_tool_inputs = {"history_text": demand_history_text, "holdout_periods": int(demand_holdout), "horizon": int(demand_horizon), "moving_average_window": int(demand_ma_window)}
                     elif selected_tool["tool_id"] == "T072":
                         current_tool_inputs = {"components_json": monte_carlo_components_json, "iterations": int(monte_carlo_iterations), "seed": int(monte_carlo_seed), "unit": monte_carlo_unit}
+                    elif selected_tool["tool_id"] == "T089":
+                        current_tool_inputs = {"topic_id": practice_topic, "submitted_answer": practice_answer}
+
                     elif selected_tool["tool_id"] == "T069":
                         current_tool_inputs = {"facilities_json": facility_location_facilities_json, "customers_json": facility_location_customers_json, "routes_json": facility_location_routes_json, "time_limit_seconds": facility_location_time_limit}
                     elif selected_tool["tool_id"] == "T071":
@@ -1248,6 +1270,8 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 run_solver_diagnostics,
                                 build_reproducibility_pack,
                                 optimize_facility_location_flow,
+                                get_student_practice_problem,
+                                evaluate_student_practice_answer,
                             )
                             if selected_tool["tool_id"] == "T015":
                                 headers = [item.strip() for item in field_headers_text.split(",") if item.strip()]
@@ -1629,6 +1653,10 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                     effect_size, alpha, target_power,
                                     max_n_per_group=int(search_limit),
                                 )
+                            elif selected_tool["tool_id"] == "T089":
+                                get_student_practice_problem(practice_topic)
+                                result = evaluate_student_practice_answer(practice_topic, practice_answer)
+
                             elif selected_tool["tool_id"] == "T069":
                                 try:
                                     parsed_facilities = json.loads(facility_location_facilities_json)
@@ -1798,6 +1826,19 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                             st.dataframe(result["classification"], use_container_width=True, hide_index=True)
                             value_column = f"Annual usage value ({result['currency']})"
                             st.plotly_chart(px.bar(result["classification"], x="SKU", y=value_column, color="ABC", title="ABC value segmentation"), use_container_width=True)
+                    elif selected_tool["tool_id"] == "T089":
+                        result = st.session_state.get("shoir_tool_result_T089")
+                        if result:
+                            _show_focused_tool_persistence("T089", result, current_tool_inputs)
+                            if result.get("is_correct"):
+                                st.success(result.get("message", "Correct."))
+                            else:
+                                st.warning(result.get("message", "Review the worked solution and try again."))
+                            st.metric("Reference answer", f"{result['expected_answer']:,.4g} {result['unit']}")
+                            st.caption("Formula: " + result["formula"])
+                            st.write(result["worked_solution"])
+                            st.write(result["explanation"])
+                            st.caption("Example provenance: SYNTHETIC_EXERCISE")
                     elif selected_tool["tool_id"] == "T087":
                         result = st.session_state.get("shoir_tool_result_T087")
                         bundle_bytes = st.session_state.get("shoir_tool_bundle_bytes_T087")
