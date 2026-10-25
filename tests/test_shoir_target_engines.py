@@ -2045,3 +2045,43 @@ def test_guided_study_plan_handles_user_completed_steps_and_bad_contracts():
         build_guided_study_plan("unknown_goal")
     with pytest.raises(ValueError, match="canonical IDs"):
         build_guided_study_plan("facility_layout", completed_tool_ids=["bad"])
+
+
+def test_equipment_anomaly_monitor_detects_spike_and_reports_freshness_deterministically():
+    from shoir_target_engines import monitor_equipment_anomalies
+
+    observations = [
+        {"timestamp": f"2026-10-25T0{i}:00:00Z", "value": value}
+        for i, value in enumerate([10, 10, 10, 10, 10, 10, 10, 100])
+    ]
+    result = monitor_equipment_anomalies(
+        observations,
+        modified_z_threshold=3.5,
+        max_age_hours=24,
+        evaluation_time_utc="2026-10-25T08:00:00Z",
+    )
+    assert result["status"] == "ANOMALIES_DETECTED"
+    assert result["anomaly_count"] == 1
+    assert result["anomalies"].iloc[0]["value"] == pytest.approx(100)
+    assert result["freshness_status"] == "FRESH"
+    assert result["detection_method"] == "ZERO_MAD_ABSOLUTE_DEVIATION_FALLBACK"
+
+
+def test_equipment_anomaly_monitor_distinguishes_stale_data_and_rejects_bad_inputs():
+    from shoir_target_engines import monitor_equipment_anomalies
+
+    observations = [
+        {"timestamp": f"2026-10-20T0{i}:00:00Z", "value": value}
+        for i, value in enumerate([10, 10, 10, 10, 10, 10])
+    ]
+    stale = monitor_equipment_anomalies(
+        observations, evaluation_time_utc="2026-10-25T08:00:00Z", max_age_hours=24
+    )
+    assert stale["freshness_status"] == "STALE"
+    assert stale["status"] == "NO_ANOMALIES_DETECTED"
+    with pytest.raises(ValueError, match="between 5 and 50,000"):
+        monitor_equipment_anomalies([])
+    with pytest.raises(ValueError, match="invalid timestamp"):
+        monitor_equipment_anomalies([{"timestamp": "bad", "value": 1}] * 5)
+    with pytest.raises(ValueError, match="threshold"):
+        monitor_equipment_anomalies(observations, modified_z_threshold=0.5)
