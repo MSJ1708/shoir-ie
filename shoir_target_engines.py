@@ -3944,3 +3944,254 @@ def run_hypothesis_test(
         "data_provenance": "USER_ENTERED_UNVERIFIED",
     }
 
+
+
+def simulate_discrete_event_process(
+    process_steps: Sequence[Mapping[str, Any]],
+    *,
+    job_count: int,
+    mean_interarrival_time: float,
+    arrival_distribution: str = "deterministic",
+    warmup_jobs: int = 0,
+    replications: int = 1,
+    random_seed: int = 42,
+    time_unit: str = "minutes",
+) -> dict[str, Any]:
+    """Run an event-driven FCFS production route with finite servers and replications.
+
+    Supported interarrival/service distributions are deterministic or exponential.
+    Each job follows the declared station order; each station uses FCFS queues and
+    a fixed number of identical parallel servers. This intentionally does not claim
+    to model failures, setups, alternate routing, priorities or shared labor pools.
+    """
+    import heapq
+    import random
+    from collections import deque
+
+    if isinstance(process_steps, (str, bytes)) or not isinstance(process_steps, Sequence) or not process_steps:
+        raise ValueError("Provide at least one process-station record.")
+    if isinstance(job_count, bool) or not isinstance(job_count, int) or not 2 <= job_count <= 10000:
+        raise ValueError("Job count must be a whole number from 2 through 10,000.")
+    if isinstance(warmup_jobs, bool) or not isinstance(warmup_jobs, int) or not 0 <= warmup_jobs < job_count:
+        raise ValueError("Warm-up jobs must be a whole number from zero up to job_count minus one.")
+    if isinstance(replications, bool) or not isinstance(replications, int) or not 1 <= replications <= 100:
+        raise ValueError("Replications must be a whole number from 1 through 100.")
+    if isinstance(random_seed, bool) or not isinstance(random_seed, int):
+        raise ValueError("Random seed must be a whole number.")
+    unit = str(time_unit or "").strip()
+    if not unit:
+        raise ValueError("A time unit is required.")
+    interarrival_mean = _finite_number(mean_interarrival_time, "Mean interarrival time")
+    if interarrival_mean <= 0:
+        raise ValueError("Mean interarrival time must be greater than zero.")
+    arrival_dist = str(arrival_distribution or "").strip().lower()
+    if arrival_dist not in {"deterministic", "exponential"}:
+        raise ValueError("Arrival distribution must be deterministic or exponential.")
+
+    stations: list[dict[str, Any]] = []
+    station_names: set[str] = set()
+    for index, raw in enumerate(process_steps, start=1):
+        if not isinstance(raw, Mapping):
+            raise ValueError(f"Process station row {index} must be an object.")
+        name = str(raw.get("station", raw.get("name", ""))).strip()
+        if not name:
+            raise ValueError(f"Process station row {index} needs a station name.")
+        if name.casefold() in station_names:
+            raise ValueError(f"Station names must be unique; duplicate: {name}.")
+        station_names.add(name.casefold())
+        servers = raw.get("servers", 1)
+        if isinstance(servers, bool) or not isinstance(servers, int) or not 1 <= servers <= 100:
+            raise ValueError(f"Server count for station '{name}' must be a whole number from 1 through 100.")
+        mean_service = _finite_number(raw.get("mean_service_time"), f"Mean service time for {name}")
+        if mean_service <= 0:
+            raise ValueError(f"Mean service time for station '{name}' must be greater than zero.")
+        distribution = str(raw.get("service_distribution", "deterministic")).strip().lower()
+        if distribution not in {"deterministic", "exponential"}:
+            raise ValueError(f"Service distribution for '{name}' must be deterministic or exponential.")
+        stations.append({
+            "name": name,
+            "servers": servers,
+            "mean_service_time": mean_service,
+            "service_distribution": distribution,
+        })
+
+    retained_count = job_count - warmup_jobs
+    replication_rows: list[dict[str, Any]] = []
+    station_rows: list[dict[str, Any]] = []
+
+    for replication_index in range(replications):
+        seed = random_seed + replication_index
+        rng = random.Random(seed)
+        arrival_times = [0.0]
+        for _ in range(1, job_count):
+            if arrival_dist == "deterministic":
+                interval = interarrival_mean
+            else:
+                interval = rng.expovariate(1.0 / interarrival_mean)
+            arrival_times.append(arrival_times[-1] + interval)
+
+        records = [{
+            "job_id": job_id,
+            "arrival_time": arrival_times[job_id],
+            "station_waits": [0.0] * len(stations),
+            "station_service": [0.0] * len(stations),
+            "completion_time": None,
+        } for job_id in range(job_count)]
+        runtime = [{
+            "queue": deque(),
+            "busy_servers": 0,
+            "busy_time": 0.0,
+            "waits_by_job": {},
+        } for _ in stations]
+        events: list[tuple[float, int, int, str, tuple[Any, ...]]] = []
+        sequence = 0
+
+        def schedule(event_time: float, priority: int, event_name: str, payload: tuple[Any, ...]) -> None:
+            nonlocal sequence
+            heapq.heappush(events, (event_time, priority, sequence, event_name, payload))
+            sequence += 1
+
+        def start_queued_jobs(station_index: int, event_time: float) -> None:
+            station = stations[station_index]
+            state = runtime[station_index]
+            while state["busy_servers"] < station["servers"] and state["queue"]:
+                job_id, queue_arrival = state["queue"].popleft()
+                waiting = max(0.0, event_time - queue_arrival)
+                service_mean = station["mean_service_time"]
+                if station["service_distribution"] == "deterministic":
+                    service_time = service_mean
+                else:
+                    service_time = rng.expovariate(1.0 / service_mean)
+                records[job_id]["station_waits"][station_index] = waiting
+                records[job_id]["station_service"][station_index] = service_time
+                state["waits_by_job"][job_id] = waiting
+                state["busy_servers"] += 1
+                schedule(
+                    event_time + service_time,
+                    0,
+                    "service_complete",
+                    (job_id, station_index, service_time),
+                )
+
+        # Arrivals are discrete events; service completions have priority at tied times.
+        for job_id, event_time in enumerate(arrival_times):
+            schedule(event_time, 1, "station_arrival", (job_id, 0, event_time))
+
+        while events:
+            event_time, _priority, _sequence, event_name, payload = heapq.heappop(events)
+            if event_name == "station_arrival":
+                job_id, station_index, _arrival_time = payload
+                runtime[station_index]["queue"].append((job_id, event_time))
+                start_queued_jobs(station_index, event_time)
+                continue
+
+            job_id, station_index, service_time = payload
+            state = runtime[station_index]
+            state["busy_servers"] -= 1
+            state["busy_time"] += service_time
+            next_station = station_index + 1
+            if next_station < len(stations):
+                schedule(event_time, 1, "station_arrival", (job_id, next_station, event_time))
+            else:
+                records[job_id]["completion_time"] = event_time
+            start_queued_jobs(station_index, event_time)
+
+        retained = records[warmup_jobs:]
+        if any(record["completion_time"] is None for record in retained):
+            raise RuntimeError("Simulation ended with an incomplete retained job.")
+        makespan = max(float(record["completion_time"]) for record in records)
+        observation_start = float(retained[0]["arrival_time"])
+        observation_end = max(float(record["completion_time"]) for record in retained)
+        observation_duration = observation_end - observation_start
+        if observation_duration <= 0 or not math.isfinite(observation_duration):
+            raise RuntimeError("Simulation produced a non-positive observation duration.")
+
+        flow_times = [float(r["completion_time"]) - float(r["arrival_time"]) for r in retained]
+        total_waits = [sum(float(v) for v in r["station_waits"]) for r in retained]
+        total_service = [sum(float(v) for v in r["station_service"]) for r in retained]
+        replication_rows.append({
+            "Replication": replication_index + 1,
+            "Seed": seed,
+            "Retained jobs": retained_count,
+            f"Observation duration ({unit})": observation_duration,
+            f"Throughput (jobs/{unit})": retained_count / observation_duration,
+            f"Average flow time ({unit})": float(np.mean(flow_times)),
+            f"Average total queue wait ({unit})": float(np.mean(total_waits)),
+            f"Average total service time ({unit})": float(np.mean(total_service)),
+            "Jobs with queue wait (%)": float(np.mean([value > 1e-12 for value in total_waits]) * 100.0),
+            f"Simulation makespan ({unit})": makespan,
+        })
+
+        denominator = makespan
+        for station_index, station in enumerate(stations):
+            waits = [float(r["station_waits"][station_index]) for r in retained]
+            services = [float(r["station_service"][station_index]) for r in retained]
+            station_rows.append({
+                "Replication": replication_index + 1,
+                "Station": station["name"],
+                "Servers": station["servers"],
+                f"Mean service input ({unit})": station["mean_service_time"],
+                f"Average retained-job queue wait ({unit})": float(np.mean(waits)),
+                f"Average retained-job service time ({unit})": float(np.mean(services)),
+                "Utilization across all simulated jobs (%)": (
+                    float(runtime[station_index]["busy_time"]) / (denominator * station["servers"]) * 100.0
+                    if denominator > 0 else 0.0
+                ),
+                f"Total station busy time ({unit})": float(runtime[station_index]["busy_time"]),
+            })
+
+    replication_frame = pd.DataFrame(replication_rows)
+    station_frame = pd.DataFrame(station_rows)
+    metric_columns = [
+        f"Throughput (jobs/{unit})",
+        f"Average flow time ({unit})",
+        f"Average total queue wait ({unit})",
+        f"Average total service time ({unit})",
+        "Jobs with queue wait (%)",
+    ]
+    metric_summary = []
+    for column in metric_columns:
+        values = replication_frame[column].astype(float).to_numpy()
+        metric_summary.append({
+            "Metric": column,
+            "Mean across replications": float(np.mean(values)),
+            "P05 across replications": float(np.percentile(values, 5)),
+            "P95 across replications": float(np.percentile(values, 95)),
+        })
+
+    station_summary_rows = []
+    for station_name, group in station_frame.groupby("Station", sort=False):
+        util = group["Utilization across all simulated jobs (%)"].astype(float).to_numpy()
+        wait_col = f"Average retained-job queue wait ({unit})"
+        station_summary_rows.append({
+            "Station": station_name,
+            "Servers": int(group["Servers"].iloc[0]),
+            f"Average queue wait ({unit})": float(group[wait_col].mean()),
+            "Mean utilization across replications (%)": float(np.mean(util)),
+            "P05 utilization (%)": float(np.percentile(util, 5)),
+            "P95 utilization (%)": float(np.percentile(util, 95)),
+        })
+
+    return {
+        "status": "DISCRETE_EVENT_SIMULATION_COMPLETED",
+        "method": "Event-driven FCFS serial process route with finite parallel servers; deterministic or exponential interarrivals/service times; independent seeded replications.",
+        "job_count": job_count,
+        "warmup_jobs_excluded_from_performance_metrics": warmup_jobs,
+        "replications": replications,
+        "base_random_seed": random_seed,
+        "arrival_distribution": arrival_dist,
+        "station_count": len(stations),
+        "time_unit": unit,
+        "metric_summary": pd.DataFrame(metric_summary),
+        "replication_results": replication_frame,
+        "station_summary": pd.DataFrame(station_summary_rows),
+        "station_replication_details": station_frame,
+        "limitations": [
+            "Every job follows the stations in the supplied order and queues FCFS; alternate routing, priorities, setups, breakdowns, rework and shared labor resources are not modeled.",
+            "Warm-up is excluded by dropping the first N completed job IDs from performance metrics; it is not a time-based warm-up deletion.",
+            "Utilization includes all simulated jobs, including warm-up jobs. Service-time distributions are limited to deterministic and exponential.",
+            "Simulation outputs are model-derived; calibrate process assumptions against measured data and validate before operational decisions.",
+        ],
+        "data_provenance": "USER_ENTERED_UNVERIFIED",
+    }
+
