@@ -17,7 +17,8 @@ def _ideal_inputs(**overrides):
         "asymmetry_destination_degrees": 0.0,
         "frequency_lifts_per_minute": 0.2,
         "duration_hours": 1.0,
-        "coupling_quality": "Good",
+        "coupling_quality_origin": "Good",
+        "coupling_quality_destination": "Good",
         "applicability_confirmed": True,
     }
     inputs.update(overrides)
@@ -67,7 +68,8 @@ def test_rnle_coupling_multiplier_uses_each_endpoint_vertical_height():
             load_kg=10,
             vertical_origin_cm=60,
             vertical_destination_cm=90,
-            coupling_quality="Fair",
+            coupling_quality_origin="Fair",
+            coupling_quality_destination="Fair",
             frequency_lifts_per_minute=1,
         )
     )
@@ -123,7 +125,8 @@ def test_rnle_uses_exact_30_inch_vertical_cutoff_for_frequency_and_coupling_tabl
                 vertical_destination_cm=76.1,
                 frequency_lifts_per_minute=11,
                 duration_hours=2,
-                coupling_quality="Fair",
+                coupling_quality_origin="Fair",
+            coupling_quality_destination="Fair",
             )
         )
 
@@ -133,10 +136,46 @@ def test_rnle_uses_exact_30_inch_vertical_cutoff_for_frequency_and_coupling_tabl
             vertical_destination_cm=76.2,
             frequency_lifts_per_minute=11,
             duration_hours=2,
-            coupling_quality="Fair",
+            coupling_quality_origin="Fair",
+            coupling_quality_destination="Fair",
         )
     )
     assert result["frequency_multiplier"] == pytest.approx(0.23)
     assert result["endpoint_results"]["origin"]["coupling_multiplier"] == pytest.approx(1.0)
+    assert result["endpoint_results"]["destination"]["coupling_multiplier"] == pytest.approx(1.0)
+
+def test_rnle_infrequent_lifting_rejects_duration_over_one_hour():
+    with pytest.raises(ValueError, match="<=1 hour duration category"):
+        calculate_rnle_lifting_index(
+            **_ideal_inputs(
+                frequency_lifts_per_minute=0.05,
+                duration_hours=8,
+            )
+        )
+
+    result = calculate_rnle_lifting_index(
+        **_ideal_inputs(
+            frequency_lifts_per_minute=0.05,
+            duration_hours=1,
+        )
+    )
+    assert result["frequency_multiplier"] == pytest.approx(1.0)
+    assert any("infrequent-lifting guidance" in warning for warning in result["warnings"])
+
+
+def test_rnle_supports_different_origin_and_destination_coupling_quality():
+    result = calculate_rnle_lifting_index(
+        **_ideal_inputs(
+            load_kg=10,
+            vertical_origin_cm=60,
+            vertical_destination_cm=90,
+            coupling_quality_origin="Poor",
+            coupling_quality_destination="Good",
+            frequency_lifts_per_minute=1,
+        )
+    )
+    assert result["coupling_quality_origin"] == "Poor"
+    assert result["coupling_quality_destination"] == "Good"
+    assert result["endpoint_results"]["origin"]["coupling_multiplier"] == pytest.approx(0.9)
     assert result["endpoint_results"]["destination"]["coupling_multiplier"] == pytest.approx(1.0)
 
