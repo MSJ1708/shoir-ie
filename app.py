@@ -1481,8 +1481,8 @@ if not st.session_state.get("current_user"):
              ARIA selectors as a fallback and wrap actual tab labels, not just the strip. */
           div[data-testid="stTabs"] [role="tablist"],
           div[data-testid="stTabs"] [data-baseweb="tab-list"] {
-            display: flex !important;
-            flex-wrap: wrap !important;
+            display: grid !important;
+            grid-template-columns: minmax(0, 1fr) !important;
             align-items: stretch !important;
             gap: 0.25rem !important;
             width: 100% !important;
@@ -1494,7 +1494,7 @@ if not st.session_state.get("current_user"):
           }
           div[data-testid="stTabs"] [role="tab"],
           div[data-testid="stTabs"] [data-baseweb="tab"] {
-            flex: 1 1 calc(50% - 0.25rem) !important;
+            width: 100% !important;
             min-width: 0 !important;
             max-width: 100% !important;
             height: auto !important;
