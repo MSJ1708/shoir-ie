@@ -49,6 +49,7 @@ TIER = canonical_tier(RAW_TIER)
 _TOOL022_EXAMPLE_COUNTS = '{"Productive": 60, "Idle": 25, "Setup": 15}'
 _TOOL028_EXAMPLE_COUNTS = '{"Machine": 12, "Material": 7, "Method": 3}'
 _TOOL029_EXAMPLE_ITEMS = '[{"category":"Sort","criterion":"Remove unnecessary items","score":3,"evidence":"Illustrative example","owner":"","due_date":""},{"category":"Set in Order","criterion":"Label storage locations","score":3,"evidence":"Illustrative example","owner":"","due_date":""},{"category":"Shine","criterion":"Clean workstations","score":3,"evidence":"Illustrative example","owner":"","due_date":""},{"category":"Standardize","criterion":"Display standard work","score":3,"evidence":"Illustrative example","owner":"","due_date":""},{"category":"Sustain","criterion":"Review 5S weekly","score":3,"evidence":"Illustrative example","owner":"","due_date":""}]'
+_TOOL048_EXAMPLE_OBSERVATIONS = '[{"timestamp":"2026-10-25T00:00:00Z","value":10},{"timestamp":"2026-10-25T01:00:00Z","value":10},{"timestamp":"2026-10-25T02:00:00Z","value":10},{"timestamp":"2026-10-25T03:00:00Z","value":10},{"timestamp":"2026-10-25T04:00:00Z","value":10},{"timestamp":"2026-10-25T05:00:00Z","value":10},{"timestamp":"2026-10-25T06:00:00Z","value":10},{"timestamp":"2026-10-25T07:00:00Z","value":100}]'
 _TOOL089_PRACTICE_TOPICS = {
     "takt_time": {"label": "Takt time", "question": "A line has 420 production minutes available in a shift and must produce 210 units. What is takt time?", "unit": "minutes per unit"},
     "oee_percent": {"label": "Overall equipment effectiveness (OEE)", "question": "Availability is 90%, performance is 80%, and quality is 95%. What is OEE as a percentage?", "unit": "percent"},
@@ -403,7 +404,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                 "Copilot action, API and export path must enforce their own server-side entitlement checks."
             )
 
-            if selected_tool["tool_id"] in {"T002", "T015", "T016", "T017", "T018", "T019", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T033", "T034", "T035", "T036", "T037", "T038", "T040", "T041", "T042", "T043", "T045", "T047", "T049", "T050", "T051", "T052", "T054", "T055", "T056", "T058", "T059", "T062", "T063", "T066", "T069", "T070", "T071", "T072", "T075", "T076", "T077", "T078", "T079", "T081", "T082", "T083", "T084", "T085", "T087", "T089"}:
+            if selected_tool["tool_id"] in {"T002", "T015", "T016", "T017", "T018", "T019", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T033", "T034", "T035", "T036", "T037", "T038", "T040", "T041", "T042", "T043", "T045", "T047", "T048", "T049", "T050", "T051", "T052", "T054", "T055", "T056", "T058", "T059", "T062", "T063", "T066", "T069", "T070", "T071", "T072", "T075", "T076", "T077", "T078", "T079", "T081", "T082", "T083", "T084", "T085", "T087", "T089"}:
                 st.markdown("---")
                 st.markdown("**Run focused specialist method**")
                 st.caption(
@@ -538,6 +539,15 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                             st.caption("Units: " + _TOOL089_PRACTICE_TOPICS[practice_topic]["unit"])
                             practice_answer = st.number_input("Your numerical answer", value=0.0, step=0.1, key="tool089_answer")
                             run_method = st.form_submit_button("Check answer and show worked solution", type="primary", use_container_width=True, key="tool089_run")
+                        elif selected_tool["tool_id"] == "T048":
+                            st.caption("Robust point-anomaly screening with configurable threshold and a separate data-freshness result. This is not a predictive-maintenance model and does not identify root cause.")
+                            anomaly_observations_json = st.text_area("Time-series observations (JSON list with timestamp and value)", _TOOL048_EXAMPLE_OBSERVATIONS, key="tool048_observations")
+                            anomaly_timestamp_field = st.text_input("Timestamp field", value="timestamp", key="tool048_timestamp_field")
+                            anomaly_value_field = st.text_input("Numeric value field", value="value", key="tool048_value_field")
+                            anomaly_threshold = st.number_input("Modified-z threshold", min_value=1.0, max_value=10.0, value=3.5, step=0.1, key="tool048_threshold")
+                            anomaly_max_age = st.number_input("Maximum accepted data age (hours)", min_value=0.01, max_value=8760.0, value=72.0, step=1.0, key="tool048_max_age")
+                            anomaly_eval_time = st.text_input("Evaluation time UTC (blank uses current UTC)", value="", key="tool048_eval_time")
+                            run_method = st.form_submit_button("Detect anomalies and check freshness", type="primary", use_container_width=True, key="tool048_run")
                         elif selected_tool["tool_id"] == "T069":
                             st.caption("Minimize one-period facility opening and shipment costs. All customer demand must be met; opening, route and facility capacities are hard constraints. This is a modelled plan, not a live logistics recommendation.")
                             facility_location_facilities_json = st.text_area("Candidate facilities (JSON list: id, fixed_opening_cost, capacity)", _TOOL069_EXAMPLE_FACILITIES, key="tool069_facilities")
@@ -1240,6 +1250,9 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                     elif selected_tool["tool_id"] == "T089":
                         current_tool_inputs = {"topic_id": practice_topic, "submitted_answer": practice_answer}
 
+                    elif selected_tool["tool_id"] == "T048":
+                        current_tool_inputs = {"observations_json": anomaly_observations_json, "timestamp_field": anomaly_timestamp_field, "value_field": anomaly_value_field, "modified_z_threshold": anomaly_threshold, "max_age_hours": anomaly_max_age, "evaluation_time_utc": anomaly_eval_time}
+
                     elif selected_tool["tool_id"] == "T069":
                         current_tool_inputs = {"facilities_json": facility_location_facilities_json, "customers_json": facility_location_customers_json, "routes_json": facility_location_routes_json, "time_limit_seconds": facility_location_time_limit}
                     elif selected_tool["tool_id"] == "T071":
@@ -1298,6 +1311,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 get_student_practice_problem,
                                 evaluate_student_practice_answer,
                                 build_guided_study_plan,
+                                monitor_equipment_anomalies,
                             )
                             if selected_tool["tool_id"] == "T015":
                                 headers = [item.strip() for item in field_headers_text.split(",") if item.strip()]
@@ -1698,6 +1712,26 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 get_student_practice_problem(practice_topic)
                                 result = evaluate_student_practice_answer(practice_topic, practice_answer)
 
+                            elif selected_tool["tool_id"] == "T048":
+                                try:
+                                    parsed_anomaly_observations = json.loads(anomaly_observations_json)
+                                except json.JSONDecodeError as exc:
+                                    raise ValueError("Time-series observations must be valid JSON.") from exc
+                                if not isinstance(parsed_anomaly_observations, list):
+                                    raise ValueError("Time-series observations must be a JSON list of objects.")
+                                result = monitor_equipment_anomalies(
+                                    parsed_anomaly_observations,
+                                    value_field=anomaly_value_field.strip(),
+                                    timestamp_field=anomaly_timestamp_field.strip(),
+                                    modified_z_threshold=anomaly_threshold,
+                                    max_age_hours=anomaly_max_age,
+                                    evaluation_time_utc=anomaly_eval_time.strip() or None,
+                                )
+                                result["data_provenance"] = (
+                                    "SYNTHETIC_EXAMPLE"
+                                    if anomaly_observations_json.strip() == _TOOL048_EXAMPLE_OBSERVATIONS
+                                    else "USER_ENTERED_UNVERIFIED"
+                                )
                             elif selected_tool["tool_id"] == "T069":
                                 try:
                                     parsed_facilities = json.loads(facility_location_facilities_json)
@@ -1798,7 +1832,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                         except Exception as exc:
                             st.error(f"Tool run could not be completed safely: {exc}")
 
-                    if selected_tool["tool_id"] in {"T017", "T018", "T019", "T024", "T025", "T027", "T034", "T038", "T041", "T043", "T045", "T047", "T050", "T054", "T059", "T062", "T063", "T069", "T070", "T071", "T076", "T077", "T079", "T082", "T083", "T084"}:
+                    if selected_tool["tool_id"] in {"T017", "T018", "T019", "T024", "T025", "T027", "T034", "T038", "T041", "T043", "T045", "T047", "T048", "T050", "T054", "T059", "T062", "T063", "T069", "T070", "T071", "T076", "T077", "T079", "T082", "T083", "T084"}:
                         result = st.session_state.get("shoir_tool_result_" + selected_tool["tool_id"])
                         if result:
                             _show_focused_tool_persistence(selected_tool["tool_id"], result, current_tool_inputs)
