@@ -1315,3 +1315,152 @@ def test_supplier_scorecard_keeps_incomplete_supplier_unranked():
     assert pd.isna(table.loc["Beta", "Rank among complete scores"])
     with pytest.raises(ValueError, match="between 0 and 100"):
         score_supplier_performance([{"supplier": "Bad", "scores": {"Quality": 105}}], {"Quality": 1})
+
+
+# Additional 100-tool tranche: independent, hand-checkable fixtures.
+def test_simple_regression_matches_hand_checked_fixture_and_exposes_assumptions():
+    from shoir_target_engines import fit_simple_linear_regression
+
+    result = fit_simple_linear_regression([
+        {"x": 1, "y": 2}, {"x": 2, "y": 4},
+        {"x": 3, "y": 5}, {"x": 4, "y": 8},
+    ])
+    assert result["status"] == "CALCULATED"
+    assert result["slope"] == pytest.approx(1.9)
+    assert result["intercept"] == pytest.approx(0.0)
+    assert result["r_squared"] == pytest.approx(1 - 2.7 / 20.75)
+    assert len(result["residuals"]) == 4
+    assert result["anova_table"].iloc[0]["Sum of squares"] == pytest.approx(18.05)
+    assert "Association is not proof of causation" in result["warning"]
+
+
+def test_simple_regression_rejects_invalid_or_unidentifiable_inputs():
+    from shoir_target_engines import fit_simple_linear_regression
+
+    with pytest.raises(ValueError, match="at least three"):
+        fit_simple_linear_regression([{"x": 1, "y": 2}, {"x": 2, "y": 3}])
+    with pytest.raises(ValueError, match="distinct values"):
+        fit_simple_linear_regression([{"x": 1, "y": 2}, {"x": 1, "y": 3}, {"x": 1, "y": 4}])
+    with pytest.raises(ValueError, match="Alpha"):
+        fit_simple_linear_regression([{"x": 1, "y": 2}, {"x": 2, "y": 3}, {"x": 3, "y": 5}], alpha=1)
+
+
+def test_one_way_anova_matches_hand_calculated_f_statistic():
+    from shoir_target_engines import run_one_way_anova
+
+    result = run_one_way_anova({
+        "Line A": [1, 2, 3],
+        "Line B": [4, 5, 6],
+        "Line C": [7, 8, 9],
+    })
+    assert result["f_statistic"] == pytest.approx(27.0)
+    assert result["df_between"] == 2
+    assert result["df_within"] == 6
+    assert result["eta_squared"] == pytest.approx(54 / 60)
+    assert result["p_value"] < 0.01
+    assert result["decision"] == "REJECT_EQUAL_MEANS_NULL"
+
+
+def test_one_way_anova_rejects_incomplete_and_zero_within_variance_cases():
+    from shoir_target_engines import run_one_way_anova
+
+    with pytest.raises(ValueError, match="at least two"):
+        run_one_way_anova({"A": [1, 2]})
+    with pytest.raises(ValueError, match="at least 2 observations"):
+        run_one_way_anova({"A": [1, 2], "B": [3]})
+    with pytest.raises(ValueError, match="variance is zero"):
+        run_one_way_anova({"A": [1, 1], "B": [2, 2]})
+
+
+def test_welch_t_test_matches_group_means_and_interval_direction():
+    from shoir_target_engines import run_welch_t_test
+
+    result = run_welch_t_test([2, 3, 4, 5], [8, 9, 10, 11])
+    assert result["mean_a"] == pytest.approx(3.5)
+    assert result["mean_b"] == pytest.approx(9.5)
+    assert result["mean_difference_a_minus_b"] == pytest.approx(-6.0)
+    assert result["t_statistic"] < 0
+    assert result["p_value"] < 0.01
+    lower, upper = result["mean_difference_confidence_interval"]
+    assert lower < upper < 0
+    assert "does not assume equal population variances" in result["assumptions"]
+
+
+def test_welch_t_test_rejects_zero_variance_and_invalid_alpha():
+    from shoir_target_engines import run_welch_t_test
+
+    with pytest.raises(ValueError, match="zero estimated uncertainty"):
+        run_welch_t_test([1, 1, 1], [2, 2, 2])
+    with pytest.raises(ValueError, match="strictly between"):
+        run_welch_t_test([1, 2], [3, 4], alpha=0)
+
+
+def test_demand_forecast_baselines_use_chronological_holdout_without_leakage():
+    from shoir_target_engines import forecast_demand_baselines
+
+    result = forecast_demand_baselines(
+        [10, 12, 13, 15, 17, 20, 23, 25, 26, 28],
+        holdout_periods=3, horizon=2, moving_average_window=3,
+    )
+    assert result["selected_model"] == "Naive last value"
+    assert result["training_count"] == 7
+    assert result["holdout_count"] == 3
+    backtest = result["backtest"]
+    assert backtest["Observed demand"].tolist() == [25, 26, 28]
+    assert backtest["Naive last value"].tolist() == [23, 23, 23]
+    assert result["metrics"].iloc[0]["Holdout MAE"] == pytest.approx(10 / 3)
+    assert result["forecast"]["Forecast"].tolist() == [28, 28]
+    assert "prediction intervals" in result["warning"]
+
+
+def test_demand_forecasting_rejects_short_or_nonfinite_history():
+    from shoir_target_engines import forecast_demand_baselines
+
+    with pytest.raises(ValueError, match="at least 5"):
+        forecast_demand_baselines([1, 2, 3, 4])
+    with pytest.raises(ValueError, match="finite number"):
+        forecast_demand_baselines([1, 2, float("nan"), 4, 5])
+    with pytest.raises(ValueError, match="Holdout periods"):
+        forecast_demand_baselines([1, 2, 3, 4, 5], holdout_periods=3)
+
+
+def test_monte_carlo_fixed_components_reconcile_and_seed_is_reproducible():
+    from shoir_target_engines import simulate_monte_carlo_net_value
+
+    fixed = simulate_monte_carlo_net_value([
+        {"name": "Benefit", "role": "benefit", "distribution": "constant", "value": 100},
+        {"name": "Cost", "role": "cost", "distribution": "constant", "value": 30},
+    ], iterations=1000, seed=7, output_unit="SAR")
+    assert fixed["mean"] == pytest.approx(70)
+    assert fixed["standard_deviation"] == pytest.approx(0)
+    assert fixed["probability_negative_pct"] == pytest.approx(0)
+    assert fixed["percentiles"]["50"] == pytest.approx(70)
+    assert fixed["sample_outcomes"]["Net outcome (SAR)"].nunique() == 1
+
+    components = [
+        {"name": "Benefit", "role": "benefit", "distribution": "normal", "mean": 100, "sd": 10},
+        {"name": "Cost", "role": "cost", "distribution": "uniform", "low": 20, "high": 30},
+    ]
+    a = simulate_monte_carlo_net_value(components, iterations=1000, seed=123, output_unit="units")
+    b = simulate_monte_carlo_net_value(components, iterations=1000, seed=123, output_unit="units")
+    pd.testing.assert_frame_equal(a["sample_outcomes"], b["sample_outcomes"])
+    assert a["seed"] == 123
+    assert a["iterations"] == 1000
+    assert "independently" in a["assumptions"]
+
+
+def test_monte_carlo_rejects_invalid_distribution_and_resource_bounds():
+    from shoir_target_engines import simulate_monte_carlo_net_value
+
+    with pytest.raises(ValueError, match="high must be greater than low"):
+        simulate_monte_carlo_net_value([
+            {"name": "Bad", "role": "benefit", "distribution": "uniform", "low": 5, "high": 5}
+        ])
+    with pytest.raises(ValueError, match="role must be benefit or cost"):
+        simulate_monte_carlo_net_value([
+            {"name": "Bad", "role": "income", "distribution": "constant", "value": 5}
+        ])
+    with pytest.raises(ValueError, match="Iterations"):
+        simulate_monte_carlo_net_value([
+            {"name": "Known", "role": "benefit", "distribution": "constant", "value": 5}
+        ], iterations=10)
