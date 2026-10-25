@@ -2009,3 +2009,39 @@ def test_student_practice_marks_wrong_answers_and_rejects_invalid_inputs():
         get_student_practice_problem("unspecified_method")
     with pytest.raises(ValueError, match="finite number"):
         evaluate_student_practice_answer("takt_time", float("nan"))
+
+
+def test_guided_study_plan_exposes_missing_inputs_and_registry_readiness_without_fabricating_results():
+    from shoir_target_engines import build_guided_study_plan
+
+    plan = build_guided_study_plan(
+        "capacity_bottleneck",
+        available_data_fields=["source_file", "validated_dataset", "process_table", "demand", "time_unit"],
+        tier="Starter",
+    )
+    assert plan["status"] == "GUIDED_PLAN_CREATED"
+    assert plan["step_count"] == 6
+    rows = plan["steps"].set_index("Tool ID")
+    assert rows.loc["T011", "Step status"] == "READY"
+    assert rows.loc["T025", "Step status"] == "TIER_RESTRICTED"
+    assert rows.loc["T073", "Step status"] == "TIER_RESTRICTED"
+    assert "not an engineering result" in plan["warning"]
+    assert plan["next_recommended_step"]["tool_id"] == "T011"
+
+
+def test_guided_study_plan_handles_user_completed_steps_and_bad_contracts():
+    from shoir_target_engines import build_guided_study_plan
+
+    plan = build_guided_study_plan(
+        "facility_layout",
+        available_data_fields=["departments", "from_to_flows", "distances"],
+        completed_tool_ids=["T065"],
+        tier="Enterprise",
+    )
+    rows = plan["steps"].set_index("Tool ID")
+    assert rows.loc["T065", "Step status"] == "COMPLETED_IN_SESSION"
+    assert rows.loc["T069", "Step status"] == "INPUTS_MISSING"
+    with pytest.raises(ValueError, match="guided-study goals"):
+        build_guided_study_plan("unknown_goal")
+    with pytest.raises(ValueError, match="canonical IDs"):
+        build_guided_study_plan("facility_layout", completed_tool_ids=["bad"])
