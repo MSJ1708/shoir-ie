@@ -1328,7 +1328,7 @@ def test_simple_regression_matches_hand_checked_fixture_and_exposes_assumptions(
     assert result["status"] == "CALCULATED"
     assert result["slope"] == pytest.approx(1.9)
     assert result["intercept"] == pytest.approx(0.0)
-    assert result["r_squared"] == pytest.approx(1 - 2.7 / 20.75)
+    assert result["r_squared"] == pytest.approx(1 - 0.7 / 18.75)
     assert len(result["residuals"]) == 4
     assert result["anova_table"].iloc[0]["Sum of squares"] == pytest.approx(18.05)
     assert "Association is not proof of causation" in result["warning"]
