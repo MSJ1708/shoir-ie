@@ -49,6 +49,9 @@ TIER = canonical_tier(RAW_TIER)
 _TOOL022_EXAMPLE_COUNTS = '{"Productive": 60, "Idle": 25, "Setup": 15}'
 _TOOL028_EXAMPLE_COUNTS = '{"Machine": 12, "Material": 7, "Method": 3}'
 _TOOL029_EXAMPLE_ITEMS = '[{"category":"Sort","criterion":"Remove unnecessary items","score":3,"evidence":"Illustrative example","owner":"","due_date":""},{"category":"Set in Order","criterion":"Label storage locations","score":3,"evidence":"Illustrative example","owner":"","due_date":""},{"category":"Shine","criterion":"Clean workstations","score":3,"evidence":"Illustrative example","owner":"","due_date":""},{"category":"Standardize","criterion":"Display standard work","score":3,"evidence":"Illustrative example","owner":"","due_date":""},{"category":"Sustain","criterion":"Review 5S weekly","score":3,"evidence":"Illustrative example","owner":"","due_date":""}]'
+_TOOL069_EXAMPLE_FACILITIES = '[{"id":"F1","fixed_opening_cost":10,"capacity":10},{"id":"F2","fixed_opening_cost":1,"capacity":10}]'
+_TOOL069_EXAMPLE_CUSTOMERS = '[{"id":"C1","demand":5},{"id":"C2","demand":5}]'
+_TOOL069_EXAMPLE_ROUTES = '[{"facility":"F1","customer":"C1","unit_cost":1,"capacity":10},{"facility":"F1","customer":"C2","unit_cost":10,"capacity":10},{"facility":"F2","customer":"C1","unit_cost":5,"capacity":10},{"facility":"F2","customer":"C2","unit_cost":1,"capacity":10}]'
 _TOOL071_EXAMPLE_STATIONS = '[{"station":"Assembly","servers":1,"mean_service_time":2,"service_distribution":"deterministic"},{"station":"Inspection","servers":1,"mean_service_time":1,"service_distribution":"deterministic"}]'
 _TOOL062_EXAMPLE_VARIABLES = '{"x":{"low":0,"up":10,"category":"Continuous"},"y":{"low":0,"up":10,"category":"Continuous"}}'
 _TOOL062_EXAMPLE_OBJECTIVE = '{"x":3,"y":2}'
@@ -393,7 +396,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                 "Copilot action, API and export path must enforce their own server-side entitlement checks."
             )
 
-            if selected_tool["tool_id"] in {"T015", "T016", "T017", "T018", "T019", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T033", "T034", "T035", "T036", "T037", "T038", "T040", "T041", "T042", "T043", "T045", "T047", "T049", "T050", "T051", "T052", "T054", "T055", "T056", "T058", "T059", "T062", "T063", "T066", "T070", "T071", "T072", "T075", "T076", "T077", "T078", "T079", "T081", "T082", "T083", "T084", "T085", "T087"}:
+            if selected_tool["tool_id"] in {"T015", "T016", "T017", "T018", "T019", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T033", "T034", "T035", "T036", "T037", "T038", "T040", "T041", "T042", "T043", "T045", "T047", "T049", "T050", "T051", "T052", "T054", "T055", "T056", "T058", "T059", "T062", "T063", "T066", "T069", "T070", "T071", "T072", "T075", "T076", "T077", "T078", "T079", "T081", "T082", "T083", "T084", "T085", "T087"}:
                 st.markdown("---")
                 st.markdown("**Run focused specialist method**")
                 st.caption(
@@ -494,6 +497,13 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                             xyz_x_cutoff = st.number_input("Maximum X demand CV", min_value=0.0, value=0.50, step=0.05, key="tool056_x_cv")
                             xyz_y_cutoff = st.number_input("Maximum Y demand CV", min_value=0.01, value=1.0, step=0.05, key="tool056_y_cv")
                             run_method = st.form_submit_button("Classify ABC / XYZ inventory", type="primary", use_container_width=True, key="tool056_run")
+                        elif selected_tool["tool_id"] == "T069":
+                            st.caption("Minimize one-period facility opening and shipment costs. All customer demand must be met; opening, route and facility capacities are hard constraints. This is a modelled plan, not a live logistics recommendation.")
+                            facility_location_facilities_json = st.text_area("Candidate facilities (JSON list: id, fixed_opening_cost, capacity)", _TOOL069_EXAMPLE_FACILITIES, key="tool069_facilities")
+                            facility_location_customers_json = st.text_area("Customer demand (JSON list: id, demand)", _TOOL069_EXAMPLE_CUSTOMERS, key="tool069_customers")
+                            facility_location_routes_json = st.text_area("Available routes (JSON list: facility, customer, unit_cost, capacity; optional available flag)", _TOOL069_EXAMPLE_ROUTES, key="tool069_routes")
+                            facility_location_time_limit = st.number_input("Solver time limit (seconds)", min_value=0.1, max_value=300.0, value=10.0, step=1.0, key="tool069_time_limit")
+                            run_method = st.form_submit_button("Optimize network flow and facility locations", type="primary", use_container_width=True, key="tool069_run")
                         elif selected_tool["tool_id"] == "T071":
                             st.caption("Event-driven FCFS simulation with finite servers, explicit deterministic/exponential arrivals and service times, seeded replications and job-based warm-up exclusion. Not a calibrated digital twin.")
                             des_steps_json = st.text_area("Ordered stations (JSON list)", value=_TOOL071_EXAMPLE_STATIONS, key="tool071_steps")
@@ -1183,6 +1193,8 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                         current_tool_inputs = {"history_text": demand_history_text, "holdout_periods": int(demand_holdout), "horizon": int(demand_horizon), "moving_average_window": int(demand_ma_window)}
                     elif selected_tool["tool_id"] == "T072":
                         current_tool_inputs = {"components_json": monte_carlo_components_json, "iterations": int(monte_carlo_iterations), "seed": int(monte_carlo_seed), "unit": monte_carlo_unit}
+                    elif selected_tool["tool_id"] == "T069":
+                        current_tool_inputs = {"facilities_json": facility_location_facilities_json, "customers_json": facility_location_customers_json, "routes_json": facility_location_routes_json, "time_limit_seconds": facility_location_time_limit}
                     elif selected_tool["tool_id"] == "T071":
                         current_tool_inputs = {"process_steps_json": des_steps_json, "job_count": int(des_job_count), "mean_interarrival_time": des_interarrival, "arrival_distribution": des_arrival_distribution, "warmup_jobs": int(des_warmup_jobs), "replications": int(des_replications), "random_seed": int(des_seed), "time_unit": des_time_unit}
                     elif selected_tool["tool_id"] == "T062":
@@ -1235,6 +1247,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 simulate_discrete_event_process,
                                 run_solver_diagnostics,
                                 build_reproducibility_pack,
+                                optimize_facility_location_flow,
                             )
                             if selected_tool["tool_id"] == "T015":
                                 headers = [item.strip() for item in field_headers_text.split(",") if item.strip()]
@@ -1616,6 +1629,26 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                     effect_size, alpha, target_power,
                                     max_n_per_group=int(search_limit),
                                 )
+                            elif selected_tool["tool_id"] == "T069":
+                                try:
+                                    parsed_facilities = json.loads(facility_location_facilities_json)
+                                    parsed_customers = json.loads(facility_location_customers_json)
+                                    parsed_routes = json.loads(facility_location_routes_json)
+                                except json.JSONDecodeError as exc:
+                                    raise ValueError("Facilities, customers and routes must each be valid JSON.") from exc
+                                if not isinstance(parsed_facilities, list) or not isinstance(parsed_customers, list) or not isinstance(parsed_routes, list):
+                                    raise ValueError("Facilities, customers and routes must each be JSON lists.")
+                                result = optimize_facility_location_flow(
+                                    parsed_facilities, parsed_customers, parsed_routes,
+                                    time_limit_seconds=facility_location_time_limit,
+                                )
+                                result["data_provenance"] = (
+                                    "SYNTHETIC_EXAMPLE"
+                                    if facility_location_facilities_json.strip() == _TOOL069_EXAMPLE_FACILITIES
+                                    and facility_location_customers_json.strip() == _TOOL069_EXAMPLE_CUSTOMERS
+                                    and facility_location_routes_json.strip() == _TOOL069_EXAMPLE_ROUTES
+                                    else "MODELLED_FROM_USER_ASSUMPTIONS"
+                                )
                             elif selected_tool["tool_id"] == "T071":
                                 parsed_des_steps = json.loads(des_steps_json)
                                 if not isinstance(parsed_des_steps, list):
@@ -1696,7 +1729,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                         except Exception as exc:
                             st.error(f"Tool run could not be completed safely: {exc}")
 
-                    if selected_tool["tool_id"] in {"T017", "T018", "T019", "T024", "T025", "T027", "T034", "T038", "T041", "T043", "T045", "T047", "T050", "T054", "T059", "T062", "T063", "T070", "T071", "T076", "T077", "T079", "T082", "T083", "T084"}:
+                    if selected_tool["tool_id"] in {"T017", "T018", "T019", "T024", "T025", "T027", "T034", "T038", "T041", "T043", "T045", "T047", "T050", "T054", "T059", "T062", "T063", "T069", "T070", "T071", "T076", "T077", "T079", "T082", "T083", "T084"}:
                         result = st.session_state.get("shoir_tool_result_" + selected_tool["tool_id"])
                         if result:
                             _show_focused_tool_persistence(selected_tool["tool_id"], result, current_tool_inputs)
