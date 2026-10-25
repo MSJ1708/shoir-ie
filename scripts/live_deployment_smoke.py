@@ -57,9 +57,11 @@ def _visible_text_across_frames(page) -> str:
 
 def _tab_bar_layout(app_frame) -> dict:
     """Capture tab-list and tab-label geometry so clipped mobile labels fail smoke."""
-    tab_list = app_frame.locator('div[data-testid="stTabs"] [data-baseweb="tab-list"]').first
+    tab_list = app_frame.locator('[role="tablist"], div[data-testid="stTabs"] [data-baseweb="tab-list"]').first
     if tab_list.count() == 0:
         raise AssertionError("Streamlit public tab list was not found.")
+    # Wait for Streamlit to complete any tab-triggered rerender before measuring geometry.
+    tab_list.wait_for(state="visible", timeout=8_000)
     return tab_list.evaluate(
         """element => {
             const listRect = element.getBoundingClientRect();
