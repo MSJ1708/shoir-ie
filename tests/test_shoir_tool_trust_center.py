@@ -16,7 +16,7 @@ def test_redaction_removes_credentials_contact_data_and_network_addresses():
     diagnostic = (
         "Request failed password=hunter2 api_key=secret-demo-token "
         "Authorization: Bearer abc.def.ghi user=owner@example.com "
-        "endpoint=https://admin:verysecret@internal.example.com call=192.168.10.4"
+        "endpoint=https://admin:verysecret@internal.example.com call=192.168.10.4 phone=+966 55 123 4567"
     )
     result = redact_diagnostic_text(diagnostic)
 
@@ -28,6 +28,7 @@ def test_redaction_removes_credentials_contact_data_and_network_addresses():
     assert "abc.def.ghi" not in result["safe_summary"]
     assert "owner@example.com" not in result["safe_summary"]
     assert "192.168.10.4" not in result["safe_summary"]
+    assert "+966 55 123 4567" not in result["safe_summary"]
     assert "verysecret" not in result["safe_summary"]
 
 
