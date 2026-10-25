@@ -4441,3 +4441,262 @@ def run_solver_diagnostics(
         "data_provenance": "USER_ENTERED_UNVERIFIED",
     }
 
+
+
+def build_reproducibility_pack(
+    tool_id: str,
+    canonical_name: str,
+    result: Mapping[str, Any],
+    *,
+    inputs: Mapping[str, Any] | None = None,
+    metadata: Mapping[str, Any] | None = None,
+    include_input_snapshot: bool = False,
+    include_result_tables: bool = False,
+    max_payload_bytes: int = 20_000_000,
+) -> dict[str, Any]:
+    """Create a provenance ZIP with hashes, version metadata and optional sanitized inputs/tables.
+
+    Secrets and common credential/PII-bearing fields are redacted. Raw input values
+    and detailed result tables are opt-in. The pack records a SHA-256 fingerprint
+    even when the raw input snapshot is intentionally not included. This is an
+    evidence/reproducibility artifact, not a formal proof or certification.
+    """
+    import hashlib
+    import importlib.metadata
+    import io
+    import json
+    import platform
+    import re
+    import sys
+    import zipfile
+    from datetime import datetime, timezone
+
+    target_id = str(tool_id or "").strip().upper()
+    if not re.fullmatch(r"T\d{3}", target_id):
+        raise ValueError("Tool ID must use a canonical T001–T100 identifier.")
+    name = str(canonical_name or "").strip()
+    if not name:
+        raise ValueError("A canonical tool name is required.")
+    if not isinstance(result, Mapping):
+        raise ValueError("A completed result object is required to build a reproducibility pack.")
+    if inputs is not None and not isinstance(inputs, Mapping):
+        raise ValueError("Inputs must be a JSON-compatible object.")
+    if metadata is not None and not isinstance(metadata, Mapping):
+        raise ValueError("Metadata must be a JSON-compatible object.")
+    if isinstance(max_payload_bytes, bool) or not isinstance(max_payload_bytes, int) or not 1024 <= max_payload_bytes <= 100_000_000:
+        raise ValueError("Maximum payload bytes must be an integer between 1,024 and 100,000,000.")
+
+    sensitive_key = re.compile(
+        r"(?:password|passphrase|secret|token|authorization|cookie|api[_ -]?key|service[_ -]?role|"
+        r"private[_ -]?key|connection[_ -]?string|database[_ -]?url|email|phone|mobile|national[_ -]?id|"
+        r"passport|ssn|access[_ -]?key|refresh[_ -]?token)",
+        re.IGNORECASE,
+    )
+    sensitive_column = re.compile(
+        r"(?:password|passphrase|secret|token|authorization|cookie|api[_ -]?key|service[_ -]?role|"
+        r"private[_ -]?key|connection[_ -]?string|database[_ -]?url|email|e_mail|phone|mobile|national[_ -]?id|"
+        r"passport|ssn|access[_ -]?key|refresh[_ -]?token)",
+        re.IGNORECASE,
+    )
+    secret_text = re.compile(
+        r"(?i)\b(password|passphrase|secret|token|api[_ -]?key|service[_ -]?role[_ -]?key|access[_ -]?key)\b(\s*[:=]\s*)([^\s,;]+)"
+    )
+
+    def _safe_string(raw: Any) -> str:
+        value = str(raw)
+        value = secret_text.sub(lambda m: f"{m.group(1)}{m.group(2)}[REDACTED]", value)
+        # Remove userinfo from a URL while retaining scheme and host for diagnostics.
+        value = re.sub(r"(?i)(https?://)[^/@\s:]+(?::[^/@\s]*)?@", r"\1[REDACTED]@", value)
+        return value[:5000]
+
+    def _normalise(value: Any, *, prefix: str, files: dict[str, bytes], include_tables: bool, depth: int = 0) -> Any:
+        if depth > 12:
+            raise ValueError("The result is nested too deeply to package safely.")
+        if value is None or isinstance(value, (bool, int, str)):
+            return _safe_string(value) if isinstance(value, str) else value
+        if isinstance(value, float):
+            return value if math.isfinite(value) else None
+        if isinstance(value, Mapping):
+            clean: dict[str, Any] = {}
+            for raw_key, raw_value in value.items():
+                key = _safe_string(raw_key)
+                if sensitive_key.search(key):
+                    clean[key] = "[REDACTED]"
+                else:
+                    clean[key] = _normalise(
+                        raw_value, prefix=f"{prefix}_{re.sub(r'[^A-Za-z0-9_-]+', '_', key)[:40]}",
+                        files=files, include_tables=include_tables, depth=depth + 1,
+                    )
+            return clean
+        if isinstance(value, (list, tuple, set)):
+            return [
+                _normalise(item, prefix=f"{prefix}_{index + 1}", files=files, include_tables=include_tables, depth=depth + 1)
+                for index, item in enumerate(list(value))
+            ]
+        if isinstance(value, pd.DataFrame):
+            columns = [str(col) for col in value.columns]
+            row_count = int(len(value))
+            if include_tables:
+                safe_frame = value.copy()
+                redacted_columns: list[str] = []
+                for col in columns:
+                    if sensitive_column.search(col):
+                        safe_frame[col] = "[REDACTED]"
+                        redacted_columns.append(col)
+                table_name = "tables/" + (re.sub(r"[^A-Za-z0-9_-]+", "_", prefix).strip("_") or "result")[:100] + ".csv"
+                payload = safe_frame.to_csv(index=False).encode("utf-8")
+                if len(payload) > max_payload_bytes:
+                    raise ValueError(f"Table {prefix} exceeds the configured {max_payload_bytes:,}-byte payload limit.")
+                if table_name in files:
+                    suffix = hashlib.sha256(payload).hexdigest()[:8]
+                    table_name = table_name.removesuffix(".csv") + "_" + suffix + ".csv"
+                files[table_name] = payload
+                return {
+                    "artifact_type": "csv_table",
+                    "path": table_name,
+                    "row_count": row_count,
+                    "columns": columns,
+                    "redacted_columns": redacted_columns,
+                    "sha256": hashlib.sha256(payload).hexdigest(),
+                }
+            return {
+                "artifact_type": "omitted_table_metadata",
+                "row_count": row_count,
+                "columns": columns,
+                "sha256": hashlib.sha256(value.to_csv(index=False).encode("utf-8")).hexdigest(),
+                "note": "Table values are not embedded; enable detailed result tables to include sanitized CSVs.",
+            }
+        if isinstance(value, pd.Series):
+            return _normalise(value.to_dict(), prefix=prefix, files=files, include_tables=include_tables, depth=depth + 1)
+        if isinstance(value, np.ndarray):
+            return _normalise(value.tolist(), prefix=prefix, files=files, include_tables=include_tables, depth=depth + 1)
+        if isinstance(value, np.generic):
+            return _normalise(value.item(), prefix=prefix, files=files, include_tables=include_tables, depth=depth + 1)
+        if hasattr(value, "isoformat") and callable(value.isoformat):
+            try:
+                return value.isoformat()
+            except Exception:
+                pass
+        if isinstance(value, bytes):
+            return {"artifact_type": "binary_omitted", "byte_count": len(value), "sha256": hashlib.sha256(value).hexdigest()}
+        return _safe_string(value)
+
+    files: dict[str, bytes] = {}
+    result_content = _normalise(
+        result, prefix=target_id.lower(), files=files, include_tables=include_result_tables
+    )
+    result_payload = json.dumps(result_content, ensure_ascii=False, sort_keys=True, indent=2, allow_nan=False).encode("utf-8")
+    if len(result_payload) > max_payload_bytes:
+        raise ValueError(f"Result summary exceeds the configured {max_payload_bytes:,}-byte payload limit.")
+    files["result_summary.json"] = result_payload
+
+    input_object = dict(inputs or {})
+    safe_inputs = _normalise(
+        input_object, prefix="inputs", files=files, include_tables=False
+    )
+    input_payload = json.dumps(safe_inputs, ensure_ascii=False, sort_keys=True, indent=2, allow_nan=False).encode("utf-8")
+    input_fingerprint = hashlib.sha256(input_payload).hexdigest()
+    if include_input_snapshot:
+        if len(input_payload) > max_payload_bytes:
+            raise ValueError(f"Input snapshot exceeds the configured {max_payload_bytes:,}-byte payload limit.")
+        files["input_snapshot_redacted.json"] = input_payload
+
+    metadata_safe = _normalise(
+        dict(metadata or {}), prefix="metadata", files=files, include_tables=False
+    )
+    metadata_payload = json.dumps(metadata_safe, ensure_ascii=False, sort_keys=True, indent=2, allow_nan=False).encode("utf-8")
+    if len(metadata_payload) > 250_000:
+        raise ValueError("User metadata cannot exceed 250,000 bytes.")
+    files["run_metadata.json"] = metadata_payload
+
+    dependency_versions: dict[str, str] = {}
+    for distribution in ("numpy", "pandas", "scipy", "PuLP", "streamlit"):
+        try:
+            dependency_versions[distribution] = importlib.metadata.version(distribution)
+        except importlib.metadata.PackageNotFoundError:
+            dependency_versions[distribution] = "NOT_INSTALLED"
+
+    generated_at = datetime.now(timezone.utc).isoformat()
+    files_manifest = [
+        {"path": path, "byte_count": len(payload), "sha256": hashlib.sha256(payload).hexdigest()}
+        for path, payload in sorted(files.items())
+    ]
+    manifest = {
+        "format": "shoir-ie-reproducibility-pack",
+        "format_version": 1,
+        "tool_id": target_id,
+        "canonical_name": name,
+        "generated_at_utc": generated_at,
+        "python_version": sys.version.split()[0],
+        "python_implementation": platform.python_implementation(),
+        "dependency_versions": dependency_versions,
+        "configuration_sha256": input_fingerprint,
+        "configuration_snapshot_included": bool(include_input_snapshot),
+        "detailed_result_tables_included": bool(include_result_tables),
+        "metadata": metadata_safe,
+        "payload_files": files_manifest,
+        "redaction_policy": {
+            "sensitive_mapping_keys": "Values are replaced with [REDACTED] when their key names match common secret/credential/contact patterns.",
+            "sensitive_table_columns": "Common secret/credential/contact columns are replaced with [REDACTED] when detailed tables are included.",
+            "input_snapshot": "Opt-in; redacted JSON only. Hashes alone do not prove the correctness or completeness of source inputs.",
+        },
+        "limitations": [
+            "This bundle provides reproducibility metadata and fingerprints, not a mathematical proof, audit certification or guarantee that the execution environment is identical.",
+            "Table cells whose column names do not indicate sensitive content may still contain confidential data; review contents before sharing.",
+            "The manifest hashes payload files but deliberately does not attempt to hash itself or the checksum file.",
+        ],
+    }
+    manifest_payload = json.dumps(manifest, ensure_ascii=False, sort_keys=True, indent=2, allow_nan=False).encode("utf-8")
+    checksum_payload = "\n".join(
+        f"{item['sha256']}  {item['path']}" for item in files_manifest
+    ).encode("utf-8") + b"\n"
+
+    archive_buffer = io.BytesIO()
+    with zipfile.ZipFile(archive_buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for member_path, payload in sorted(files.items()):
+            archive.writestr(member_path, payload)
+        archive.writestr("manifest.json", manifest_payload)
+        archive.writestr("SHA256SUMS.txt", checksum_payload)
+        archive.writestr(
+            "README.txt",
+            (
+                f"Shoir-IE Reproducibility Pack — {target_id} {name}\n\n"
+                f"Generated UTC: {generated_at}\n"
+                f"Configuration SHA-256: {input_fingerprint}\n"
+                f"Input snapshot included: {bool(include_input_snapshot)}\n"
+                f"Detailed result tables included: {bool(include_result_tables)}\n\n"
+                "Verify payload hashes against SHA256SUMS.txt. Review the manifest's redaction policy and limitations.\n"
+                "This bundle is not proof of engineering correctness or a substitute for method review.\n"
+            ).encode("utf-8"),
+        )
+    bundle = archive_buffer.getvalue()
+    if len(bundle) > max_payload_bytes:
+        raise ValueError(f"Reproducibility ZIP exceeds the configured {max_payload_bytes:,}-byte payload limit.")
+
+    inventory = pd.DataFrame([
+        {"Path": path, "Bytes": len(payload), "SHA-256": hashlib.sha256(payload).hexdigest()}
+        for path, payload in sorted(files.items())
+    ] + [
+        {"Path": "manifest.json", "Bytes": len(manifest_payload), "SHA-256": hashlib.sha256(manifest_payload).hexdigest()},
+        {"Path": "SHA256SUMS.txt", "Bytes": len(checksum_payload), "SHA-256": hashlib.sha256(checksum_payload).hexdigest()},
+        {"Path": "README.txt", "Bytes": 0, "SHA-256": "INCLUDED_IN_ARCHIVE"},
+    ])
+    return {
+        "status": "REPRODUCIBILITY_PACK_CREATED",
+        "tool_id": target_id,
+        "canonical_name": name,
+        "filename": f"shoir_ie_{target_id.lower()}_reproducibility_pack.zip",
+        "bundle_bytes": bundle,
+        "bundle_sha256": hashlib.sha256(bundle).hexdigest(),
+        "bundle_byte_count": len(bundle),
+        "input_fingerprint_sha256": input_fingerprint,
+        "manifest": manifest,
+        "artifact_inventory": inventory,
+        "included_payload_paths": sorted(files),
+        "data_provenance": "PACKAGED_FROM_SAVED_SESSION_RESULT",
+        "warnings": [
+            "Review bundle contents before sharing; non-sensitive-looking data columns may contain confidential information.",
+            "Input values are excluded by default; only their redacted fingerprint is included unless the input snapshot option is enabled.",
+        ],
+    }
+
