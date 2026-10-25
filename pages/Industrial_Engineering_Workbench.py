@@ -63,6 +63,10 @@ _TOOL089_PRACTICE_TOPICS = {
 _TOOL069_EXAMPLE_FACILITIES = '[{"id":"F1","fixed_opening_cost":10,"capacity":10},{"id":"F2","fixed_opening_cost":1,"capacity":10}]'
 _TOOL069_EXAMPLE_CUSTOMERS = '[{"id":"C1","demand":5},{"id":"C2","demand":5}]'
 _TOOL069_EXAMPLE_ROUTES = '[{"facility":"F1","customer":"C1","unit_cost":1,"capacity":10},{"facility":"F1","customer":"C2","unit_cost":10,"capacity":10},{"facility":"F2","customer":"C1","unit_cost":5,"capacity":10},{"facility":"F2","customer":"C2","unit_cost":1,"capacity":10}]'
+_TOOL060_EXAMPLE_SUPPLIERS = '[{"supplier":"S1","supply_capacity":60},{"supplier":"S2","supply_capacity":50}]'
+_TOOL060_EXAMPLE_SITES = '[{"site":"A","demand":50},{"site":"B","demand":40}]'
+_TOOL060_EXAMPLE_BASELINE_ROUTES = '[{"supplier":"S1","site":"A","unit_cost":2,"capacity":60,"available":true},{"supplier":"S1","site":"B","unit_cost":4,"capacity":30,"available":true},{"supplier":"S2","site":"A","unit_cost":3,"capacity":30,"available":true},{"supplier":"S2","site":"B","unit_cost":1,"capacity":50,"available":true}]'
+_TOOL060_EXAMPLE_SCENARIO_ROUTES = '[{"supplier":"S1","site":"A","unit_cost":2,"capacity":60,"available":true},{"supplier":"S1","site":"B","unit_cost":4,"capacity":30,"available":true},{"supplier":"S2","site":"A","unit_cost":3,"capacity":30,"available":true},{"supplier":"S2","site":"B","unit_cost":1,"capacity":50,"available":false}]'
 _TOOL071_EXAMPLE_STATIONS = '[{"station":"Assembly","servers":1,"mean_service_time":2,"service_distribution":"deterministic"},{"station":"Inspection","servers":1,"mean_service_time":1,"service_distribution":"deterministic"}]'
 _TOOL062_EXAMPLE_VARIABLES = '{"x":{"low":0,"up":10,"category":"Continuous"},"y":{"low":0,"up":10,"category":"Continuous"}}'
 _TOOL062_EXAMPLE_OBJECTIVE = '{"x":3,"y":2}'
@@ -407,7 +411,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                 "Copilot action, API and export path must enforce their own server-side entitlement checks."
             )
 
-            if selected_tool["tool_id"] in {"T002", "T007", "T009", "T010", "T015", "T016", "T017", "T018", "T019", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T033", "T034", "T035", "T036", "T037", "T038", "T039", "T040", "T041", "T042", "T043", "T045", "T046", "T047", "T048", "T049", "T050", "T051", "T052", "T054", "T055", "T056", "T058", "T059", "T062", "T063", "T066", "T069", "T070", "T071", "T072", "T075", "T076", "T077", "T078", "T079", "T081", "T082", "T083", "T084", "T085", "T087", "T089", "T100"}:
+            if selected_tool["tool_id"] in {"T002", "T007", "T009", "T010", "T015", "T016", "T017", "T018", "T019", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T033", "T034", "T035", "T036", "T037", "T038", "T039", "T040", "T041", "T042", "T043", "T045", "T046", "T047", "T048", "T049", "T050", "T051", "T052", "T054", "T055", "T056", "T058", "T059", "T060", "T062", "T063", "T066", "T069", "T070", "T071", "T072", "T075", "T076", "T077", "T078", "T079", "T081", "T082", "T083", "T084", "T085", "T087", "T089", "T100"}:
                 st.markdown("---")
                 st.markdown("**Run focused specialist method**")
                 st.caption(
@@ -794,6 +798,44 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                             slotting_items_json = st.text_area("Items (JSON list: sku, picks_per_day, storage_units, compatibility_group, current_distance_m)", value='[{"sku":"SKU-A","picks_per_day":10,"storage_units":4,"compatibility_group":"food","current_distance_m":10},{"sku":"SKU-B","picks_per_day":4,"storage_units":9,"compatibility_group":"chemical","current_distance_m":20}]', key="tool059_items")
                             slotting_slots_json = st.text_area("Slots (JSON list: slot_id, distance_m, capacity_units, compatibility_group)", value='[{"slot_id":"near-food","distance_m":2,"capacity_units":5,"compatibility_group":"food"},{"slot_id":"near-chemical","distance_m":3,"capacity_units":10,"compatibility_group":"chemical"},{"slot_id":"far-general","distance_m":8,"capacity_units":10,"compatibility_group":"*"}]', key="tool059_slots")
                             run_method = st.form_submit_button("Assign nearest compatible slots", type="primary", use_container_width=True, key="tool059_run")
+                        elif selected_tool["tool_id"] == "T060":
+                            st.caption(
+                                "Compare a single-period capacitated supply plan with an explicitly edited disruption scenario. "
+                                "Unavailable routes are disabled; shortages receive the user-entered penalty. This is not a multi-period "
+                                "or multi-echelon network design model."
+                            )
+                            supply_chain_suppliers_json = st.text_area(
+                                "Suppliers (JSON list: supplier, supply_capacity)",
+                                value=_TOOL060_EXAMPLE_SUPPLIERS, key="tool060_suppliers"
+                            )
+                            supply_chain_sites_json = st.text_area(
+                                "Sites and demand (JSON list: site, demand)",
+                                value=_TOOL060_EXAMPLE_SITES, key="tool060_sites"
+                            )
+                            supply_chain_baseline_routes_json = st.text_area(
+                                "Baseline routes (JSON list: supplier, site, unit_cost, capacity, available)",
+                                value=_TOOL060_EXAMPLE_BASELINE_ROUTES, key="tool060_baseline_routes"
+                            )
+                            supply_chain_scenario_routes_json = st.text_area(
+                                "Disruption / alternative routes (edit available flags or capacities)",
+                                value=_TOOL060_EXAMPLE_SCENARIO_ROUTES, key="tool060_scenario_routes"
+                            )
+                            supply_chain_scenario_name = st.text_input(
+                                "Scenario name", value="Route S2 to site B unavailable",
+                                key="tool060_scenario_name"
+                            )
+                            supply_chain_unmet_penalty = st.number_input(
+                                "Unmet-demand penalty per unit", min_value=0.01,
+                                value=1000.0, step=100.0, key="tool060_unmet_penalty"
+                            )
+                            supply_chain_time_limit = st.number_input(
+                                "Solver time limit (seconds)", min_value=0.1, max_value=120.0,
+                                value=10.0, step=1.0, key="tool060_time_limit"
+                            )
+                            run_method = st.form_submit_button(
+                                "Compare baseline and disruption scenarios",
+                                type="primary", use_container_width=True, key="tool060_run"
+                            )
                         elif selected_tool["tool_id"] == "T063":
                             st.caption("One-to-one minimum-cost assignment only; no calendars, precedence, multi-period or skill constraints.")
                             assignment_tasks_json = st.text_area("Task names (JSON list)", '["Task A","Task B","Task C"]', key="tool063_tasks")
@@ -1369,6 +1411,16 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                         current_tool_inputs = {"bom_json": mrp_bom_json, "inventory_json": mrp_inventory_json, "parent_demand_units": mrp_parent_demand, "due_period": int(mrp_due_period)}
                     elif selected_tool["tool_id"] == "T059":
                         current_tool_inputs = {"items_json": slotting_items_json, "slots_json": slotting_slots_json}
+                    elif selected_tool["tool_id"] == "T060":
+                        current_tool_inputs = {
+                            "suppliers_json": supply_chain_suppliers_json,
+                            "sites_json": supply_chain_sites_json,
+                            "baseline_routes_json": supply_chain_baseline_routes_json,
+                            "scenario_routes_json": supply_chain_scenario_routes_json,
+                            "scenario_name": supply_chain_scenario_name,
+                            "unmet_demand_penalty_per_unit": float(supply_chain_unmet_penalty),
+                            "time_limit_seconds": float(supply_chain_time_limit),
+                        }
                     elif selected_tool["tool_id"] == "T063":
                         current_tool_inputs = {"tasks_json": assignment_tasks_json, "resources_json": assignment_resources_json, "costs_json": assignment_costs_json}
                     elif selected_tool["tool_id"] == "T077":
@@ -1458,7 +1510,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 analyze_process_mining, analyze_water_waste_efficiency,
                                 analyze_weibull_reliability, analyze_spare_parts_criticality,
                                 analyze_safety_incident_trends, optimize_warehouse_slotting,
-                                optimize_task_resource_assignment, compare_energy_performance_scenarios,
+                                optimize_supply_chain_network, optimize_task_resource_assignment, compare_energy_performance_scenarios,
                                 fit_simple_linear_regression, run_one_way_anova, run_welch_t_test,
                                 forecast_demand_baselines, simulate_monte_carlo_net_value,
                                 map_industrial_fields, prioritize_maintenance_backlog,
@@ -1661,6 +1713,76 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 if not isinstance(parsed_slot_items, list) or not isinstance(parsed_slots, list):
                                     raise ValueError("Slotting items and slots must each be JSON lists.")
                                 result = optimize_warehouse_slotting(parsed_slot_items, parsed_slots)
+                            elif selected_tool["tool_id"] == "T060":
+                                try:
+                                    parsed_suppliers = json.loads(supply_chain_suppliers_json)
+                                    parsed_sites = json.loads(supply_chain_sites_json)
+                                    parsed_baseline_routes = json.loads(supply_chain_baseline_routes_json)
+                                    parsed_scenario_routes = json.loads(supply_chain_scenario_routes_json)
+                                except json.JSONDecodeError as exc:
+                                    raise ValueError("Supply-chain suppliers, sites, and both route scenarios must contain valid JSON.") from exc
+                                if not all(isinstance(value, list) for value in (
+                                    parsed_suppliers, parsed_sites, parsed_baseline_routes, parsed_scenario_routes
+                                )):
+                                    raise ValueError("Supply-chain suppliers, sites, and both route scenarios must each be JSON lists.")
+                                baseline_result = optimize_supply_chain_network(
+                                    parsed_suppliers, parsed_sites, parsed_baseline_routes,
+                                    unmet_demand_penalty_per_unit=float(supply_chain_unmet_penalty),
+                                    time_limit_seconds=float(supply_chain_time_limit),
+                                )
+                                scenario_result = optimize_supply_chain_network(
+                                    parsed_suppliers, parsed_sites, parsed_scenario_routes,
+                                    unmet_demand_penalty_per_unit=float(supply_chain_unmet_penalty),
+                                    time_limit_seconds=float(supply_chain_time_limit),
+                                )
+                                both_optimal = baseline_result.get("status") == "OPTIMAL" and scenario_result.get("status") == "OPTIMAL"
+                                result = {
+                                    "status": "SCENARIO_COMPARISON" if both_optimal else "SCENARIO_COMPARISON_INCOMPLETE",
+                                    "solver_status_baseline": baseline_result.get("solver_status", baseline_result.get("status")),
+                                    "solver_status_scenario": scenario_result.get("solver_status", scenario_result.get("status")),
+                                    "scenario_name": str(supply_chain_scenario_name).strip() or "User-defined alternative scenario",
+                                    "baseline_transport_cost": baseline_result.get("transport_cost"),
+                                    "scenario_transport_cost": scenario_result.get("transport_cost"),
+                                    "transport_cost_delta_scenario_minus_baseline": (
+                                        scenario_result["transport_cost"] - baseline_result["transport_cost"]
+                                        if both_optimal else None
+                                    ),
+                                    "baseline_total_unmet_demand": baseline_result.get("total_unmet_demand"),
+                                    "scenario_total_unmet_demand": scenario_result.get("total_unmet_demand"),
+                                    "unmet_demand_delta_scenario_minus_baseline": (
+                                        scenario_result["total_unmet_demand"] - baseline_result["total_unmet_demand"]
+                                        if both_optimal else None
+                                    ),
+                                    "baseline_objective_cost_including_unmet_penalty": baseline_result.get("objective_cost_including_unmet_penalty"),
+                                    "scenario_objective_cost_including_unmet_penalty": scenario_result.get("objective_cost_including_unmet_penalty"),
+                                    "objective_cost_delta_scenario_minus_baseline": (
+                                        scenario_result["objective_cost_including_unmet_penalty"] - baseline_result["objective_cost_including_unmet_penalty"]
+                                        if both_optimal else None
+                                    ),
+                                    "total_demand": baseline_result.get("total_demand"),
+                                    "baseline_shipment_plan": baseline_result.get("shipment_plan"),
+                                    "scenario_shipment_plan": scenario_result.get("shipment_plan"),
+                                    "baseline_site_service": baseline_result.get("site_service"),
+                                    "scenario_site_service": scenario_result.get("site_service"),
+                                    "baseline_supplier_utilization": baseline_result.get("supplier_utilization"),
+                                    "scenario_supplier_utilization": scenario_result.get("supplier_utilization"),
+                                    "method": "Two runs of the single-period capacitated transportation LP; the route-availability/capacity changes are the scenario inputs.",
+                                    "warning": (
+                                        "Compare actual units/cost definitions and validate the supplied network before decisions. "
+                                        "This model covers one period and one supplier-to-site transport layer; it omits lead-time scheduling, "
+                                        "multi-echelon routing, emissions, quality constraints and supplier-risk scoring. "
+                                        + ("Both solves returned OPTIMAL." if both_optimal else "At least one solver did not return OPTIMAL; do not treat the comparison as an optimal plan.")
+                                    ),
+                                    "data_provenance": (
+                                        "SYNTHETIC_EXAMPLE"
+                                        if supply_chain_suppliers_json.strip() == _TOOL060_EXAMPLE_SUPPLIERS
+                                        and supply_chain_sites_json.strip() == _TOOL060_EXAMPLE_SITES
+                                        and supply_chain_baseline_routes_json.strip() == _TOOL060_EXAMPLE_BASELINE_ROUTES
+                                        and supply_chain_scenario_routes_json.strip() == _TOOL060_EXAMPLE_SCENARIO_ROUTES
+                                        and float(supply_chain_unmet_penalty) == 1000.0
+                                        else "MODELLED_FROM_USER_ASSUMPTIONS"
+                                    ),
+                                }
                             elif selected_tool["tool_id"] == "T063":
                                 parsed_assignment_tasks = json.loads(assignment_tasks_json)
                                 parsed_assignment_resources = json.loads(assignment_resources_json)
