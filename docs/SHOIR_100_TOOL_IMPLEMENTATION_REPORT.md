@@ -1,6 +1,6 @@
 # Shoir-IE 100-tool integration report
 
-**Branch:** `feat/shoir-100-tools-integration-20261025`  
+**Branch:** `agent/shoir-100-rnle-ergonomics-20261025` (stacked on `agent/shoir-100-release-gates-20261025`)  
 **Scope:** code-grounded additions to the existing Shoir-IE Workbench  
 **Current release status:** implementation tranche in progress; NO-GO until current CI, authenticated browser, persistence, integration and release checks pass
 
@@ -110,6 +110,14 @@ The focused actions use the existing authenticated actor check, `require_tool_ac
 
 T048 now has an Enterprise-gated path within the existing Workbench. It uses a global median/MAD point-anomaly screen with an explicit zero-MAD fallback, and independently reports freshness (`FRESH`, `STALE`, or `FUTURE_TIMESTAMP`). Invalid timestamps/non-finite values are rejected; out-of-order and duplicate timestamps are surfaced as warnings. The method is **not** a predictive-maintenance model, root-cause analyzer or live sensor integration. Unit and Workbench AppTest cases have been added; the status remains `IMPLEMENTED_NEEDS_VALIDATION` until CI and authenticated staging checks pass.
 
+### Ergonomics: Revised NIOSH Lifting Equation (T046)
+
+T046 now has an execution path in the existing Workbench using `shoir_ergonomics.py`, not a generic ergonomic risk score. It calculates the single-task Revised NIOSH Lifting Equation (RNLE) for an explicitly confirmed two-handed standing lifting task: endpoint horizontal/vertical/asymmetry multipliers, distance multiplier, Table 5 frequency multiplier (linear interpolation between table rows), endpoint coupling multipliers from Table 7, the lower endpoint recommended weight limit (RWL), and lifting index (`LI = load / RWL`).
+
+The calculation uses the NIOSH 23 kg load constant and documents the method/source, formulas, entered-data provenance, assumptions and warnings. Table 5 and Table 7 use the vertical category boundary of 30 inches (76.2 cm); this was explicitly tested after review of the official NIOSH manual. The code rejects invalid/non-finite measurements and zero frequency multipliers, and requires the user to confirm that the task is within scope before it runs. Official method reference: [NIOSH Applications Manual 94-110, revised September 2021](https://www.cdc.gov/niosh/docs/94-110/).
+
+The supported calculation is deliberately limited: it is not a multiple-task RNLE assessment, it does not cover every lifting situation, and an LI or RWL alone does not certify a task or establish medical/safety suitability. Qualified review and accurate field measurements are still required. Golden, interpolation, coupling and boundary fixtures plus a Workbench AppTest have been added. T046 remains `IMPLEMENTED_NEEDS_VALIDATION`; hosted authenticated browser, tier-denial, durable persistence/re-login, cross-workspace isolation and Arabic/RTL checks have not been completed.
+
 ## Calculation safety and regression protection
 
 Independent golden/boundary tests were added for the new methods, along with three Workbench Streamlit AppTest groups that invoke the forms and check structured results. Key controls include:
@@ -136,8 +144,8 @@ The registry and matrix contain 100 target IDs, T001–T100. Current classificat
 | Status | Count |
 |---|---:|
 | `VERIFIED_WORKING` | 0 |
-| `IMPLEMENTED_NEEDS_VALIDATION` | 87 |
-| `FOUNDATION_ONLY` | 11 |
+| `IMPLEMENTED_NEEDS_VALIDATION` | 88 |
+| `FOUNDATION_ONLY` | 10 |
 | `EXTERNAL_CONFIGURATION_REQUIRED` | 2 |
 | `MISSING` | 0 |
 | `BLOCKED` | 0 |
