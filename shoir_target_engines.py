@@ -3947,3 +3947,275 @@ def simulate_monte_carlo_net_value(
         "assumptions": "Each declared component is sampled independently using its specified distribution. Any dependence/correlation, tax effects, timing/discounting or real-world measurement uncertainty must be modeled separately.",
         "warning": "This simulated net outcome is not verified ROI, audited savings, a forecast guarantee or an automatic plant-control result. It is conditional on user-entered distributions and assumptions.",
     }
+
+
+def analyze_crossed_gage_rr(
+    observations: Sequence[Mapping[str, Any]], *,
+    part_field: str = "part",
+    operator_field: str = "operator",
+    trial_field: str = "trial",
+    measurement_field: str = "measurement",
+    tolerance: float | None = None,
+) -> dict[str, Any]:
+    """Estimate crossed, balanced Gage R&R variance components by two-way ANOVA.
+
+    Requires at least 2 parts, 2 operators and 2 repeat trials, with exactly
+    one finite measurement per part/operator/trial combination. Components use
+    the balanced random-effects ANOVA estimators; negative estimates are
+    truncated at zero and explicitly called out in the returned warnings.
+    This is a transparent statistical screening method, not a certification
+    of an organization's measurement-system procedure.
+    """
+    if isinstance(observations, (str, bytes)) or not isinstance(observations, Sequence) or not observations:
+        raise ValueError("Provide a non-empty list of crossed part/operator/trial measurements.")
+    fields = [str(part_field).strip(), str(operator_field).strip(), str(trial_field).strip(), str(measurement_field).strip()]
+    if any(not item for item in fields) or len(set(fields)) != 4:
+        raise ValueError("Part, operator, trial and measurement field names must be non-empty and distinct.")
+    rows: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for index, item in enumerate(observations, start=1):
+        if not isinstance(item, Mapping):
+            raise ValueError(f"Observation {index} must be an object.")
+        missing = [field for field in fields if field not in item]
+        if missing:
+            raise ValueError(f"Observation {index} is missing fields: {', '.join(missing)}.")
+        part = str(item[part_field]).strip()
+        operator = str(item[operator_field]).strip()
+        trial = str(item[trial_field]).strip()
+        if not part or not operator or not trial:
+            raise ValueError(f"Observation {index} must have non-empty part, operator and trial identifiers.")
+        key = (part, operator, trial)
+        if key in seen:
+            raise ValueError(f"Duplicate part/operator/trial observation: {key}.")
+        seen.add(key)
+        rows.append({
+            "part": part, "operator": operator, "trial": trial,
+            "measurement": _finite_number(item[measurement_field], f"Measurement {index}"),
+        })
+    parts = sorted({row["part"] for row in rows})
+    operators = sorted({row["operator"] for row in rows})
+    trials = sorted({row["trial"] for row in rows})
+    p, o, r = len(parts), len(operators), len(trials)
+    if p < 2 or o < 2 or r < 2:
+        raise ValueError("Crossed Gage R&R needs at least two parts, two operators and two repeat trials.")
+    expected_n = p * o * r
+    if len(rows) != expected_n:
+        raise ValueError("The study must be balanced: every part/operator/trial combination must appear exactly once.")
+    frame = pd.DataFrame(rows)
+    counts = frame.groupby(["part", "operator"], observed=True)["trial"].nunique()
+    if not counts.eq(r).all():
+        raise ValueError("The study is not balanced: each part/operator cell needs the same number of trials.")
+    grand = float(frame["measurement"].mean())
+    part_means = frame.groupby("part", observed=True)["measurement"].mean().reindex(parts)
+    operator_means = frame.groupby("operator", observed=True)["measurement"].mean().reindex(operators)
+    cell_means = frame.groupby(["part", "operator"], observed=True)["measurement"].mean()
+    ss_part = float(o * r * np.sum((part_means.to_numpy(dtype=float) - grand) ** 2))
+    ss_operator = float(p * r * np.sum((operator_means.to_numpy(dtype=float) - grand) ** 2))
+    ss_interaction = 0.0
+    for part in parts:
+        for operator in operators:
+            cell = float(cell_means.loc[(part, operator)])
+            ss_interaction += r * (cell - float(part_means.loc[part]) - float(operator_means.loc[operator]) + grand) ** 2
+    ss_repeat = 0.0
+    for row in rows:
+        cell = float(cell_means.loc[(row["part"], row["operator"])])
+        ss_repeat += (row["measurement"] - cell) ** 2
+    df_part = p - 1
+    df_operator = o - 1
+    df_interaction = (p - 1) * (o - 1)
+    df_repeat = p * o * (r - 1)
+    ms_part = ss_part / df_part
+    ms_operator = ss_operator / df_operator
+    ms_interaction = ss_interaction / df_interaction
+    ms_repeat = ss_repeat / df_repeat
+    raw_components = {
+        "Repeatability variance": ms_repeat,
+        "Part × operator interaction variance": (ms_interaction - ms_repeat) / r,
+        "Operator variance": (ms_operator - ms_interaction) / (p * r),
+        "Part-to-part variance": (ms_part - ms_interaction) / (o * r),
+    }
+    truncated = [name for name, value in raw_components.items() if value < 0]
+    variance_components = {name: max(0.0, float(value)) for name, value in raw_components.items()}
+    grr_variance = (
+        variance_components["Repeatability variance"]
+        + variance_components["Part × operator interaction variance"]
+        + variance_components["Operator variance"]
+    )
+    part_variance = variance_components["Part-to-part variance"]
+    total_variance = grr_variance + part_variance
+    if total_variance <= np.finfo(float).eps:
+        raise ValueError("No measurable variation was found; variance-component ratios cannot be estimated.")
+    tolerance_value = None if tolerance is None else _finite_number(tolerance, "Study tolerance")
+    if tolerance_value is not None and tolerance_value <= 0:
+        raise ValueError("Study tolerance must be greater than zero when supplied.")
+    rows_out: list[dict[str, Any]] = []
+    for name in ("Repeatability variance", "Part × operator interaction variance", "Operator variance", "Part-to-part variance"):
+        variance = variance_components[name]
+        sd = math.sqrt(variance)
+        rows_out.append({
+            "Component": name,
+            "Variance": variance,
+            "Standard deviation": sd,
+            "% of total variance": variance / total_variance * 100,
+            "% of total study variation": sd / math.sqrt(total_variance) * 100,
+        })
+    component_table = pd.DataFrame(rows_out)
+    repeatability_sd = math.sqrt(variance_components["Repeatability variance"])
+    reproducibility_sd = math.sqrt(
+        variance_components["Operator variance"] + variance_components["Part × operator interaction variance"]
+    )
+    grr_sd = math.sqrt(grr_variance)
+    part_sd = math.sqrt(part_variance)
+    table = pd.DataFrame([
+        {"Source": "Part", "Sum of squares": ss_part, "df": df_part, "Mean square": ms_part},
+        {"Source": "Operator", "Sum of squares": ss_operator, "df": df_operator, "Mean square": ms_operator},
+        {"Source": "Part × operator", "Sum of squares": ss_interaction, "df": df_interaction, "Mean square": ms_interaction},
+        {"Source": "Repeatability / residual", "Sum of squares": ss_repeat, "df": df_repeat, "Mean square": ms_repeat},
+    ])
+    warnings = []
+    if truncated:
+        warnings.append("Negative raw variance-component estimate(s) were truncated at zero: " + ", ".join(truncated) + ". Consider study design and method suitability.")
+    if tolerance_value is None:
+        pct_tolerance = None
+    else:
+        pct_tolerance = (6 * grr_sd / tolerance_value) * 100
+    ndc = int(math.floor(1.41 * part_sd / grr_sd)) if grr_sd > 0 else None
+    return {
+        "status": "CROSSED_GAGE_RR_SCREENED",
+        "method": "Balanced crossed Gage R&R variance-component screening (two-way random-effects ANOVA)",
+        "part_count": p,
+        "operator_count": o,
+        "repeat_count": r,
+        "measurement_count": len(rows),
+        "repeatability_sd": repeatability_sd,
+        "reproducibility_sd": reproducibility_sd,
+        "gage_rr_sd": grr_sd,
+        "part_to_part_sd": part_sd,
+        "total_study_sd": math.sqrt(total_variance),
+        "gage_rr_percent_variance": grr_variance / total_variance * 100,
+        "gage_rr_percent_study_variation": grr_sd / math.sqrt(total_variance) * 100,
+        "part_percent_variance": part_variance / total_variance * 100,
+        "number_of_distinct_categories": ndc,
+        "tolerance": tolerance_value,
+        "percent_tolerance": pct_tolerance,
+        "variance_components": component_table,
+        "anova_table": table,
+        "negative_component_truncations": truncated,
+        "warnings": warnings,
+        "assumptions": "Balanced crossed design; parts/operator/trials are represented in every combination. Component estimates use the classical balanced random-effects ANOVA equations and may be unstable with small studies.",
+        "warning": "This is a statistical screening result, not automatically a compliant/certified MSA. Confirm the organization's required standard, measurement resolution, part selection, study design, tolerance and acceptance criteria before release decisions.",
+    }
+
+
+def analyze_full_factorial_2level(
+    observations: Sequence[Mapping[str, Any]],
+    *,
+    response_field: str = "response",
+    factor_fields: Sequence[str] = (),
+    alpha: float = 0.05,
+) -> dict[str, Any]:
+    """Analyze a complete 2-level factorial with main and pairwise interaction terms.
+
+    Inputs use -1/+1 coded factor values. Every full-factorial combination must
+    exist. Effects and regression diagnostics are returned; coefficient
+    inference is reported only when residual degrees of freedom and residual
+    variance are available. This does not automatically generate a randomized
+    run order or cover blocking, center points or higher-order interactions.
+    """
+    if isinstance(observations, (str, bytes)) or not isinstance(observations, Sequence) or not observations:
+        raise ValueError("Provide a non-empty list of factorial run objects.")
+    factors = [str(field).strip() for field in factor_fields]
+    response = str(response_field).strip()
+    if not response or len(factors) < 2 or len(factors) > 6:
+        raise ValueError("Choose one response and between two and six factor columns.")
+    if len(set(factors)) != len(factors) or response in factors or any(not field for field in factors):
+        raise ValueError("Response and factor field names must be distinct and non-empty.")
+    level = _finite_number(alpha, "Alpha")
+    if not 0 < level < 1:
+        raise ValueError("Alpha must be strictly between 0 and 1.")
+    names = ["Intercept", *factors]
+    term_columns: list[np.ndarray] = [np.ones(len(observations), dtype=float)]
+    x_factors: dict[str, np.ndarray] = {}
+    y_values: list[float] = []
+    for index, row in enumerate(observations, start=1):
+        if not isinstance(row, Mapping):
+            raise ValueError(f"Run {index} must be an object.")
+        for key in [response, *factors]:
+            if key not in row:
+                raise ValueError(f"Run {index} is missing column '{key}'.")
+    for factor in factors:
+        values = np.asarray([_finite_number(row[factor], f"{factor} in run {i}") for i, row in enumerate(observations, start=1)], dtype=float)
+        unique = set(np.unique(values).tolist())
+        if not unique.issubset({-1.0, 1.0}) or not {-1.0, 1.0}.issubset(unique):
+            raise ValueError(f"Factor '{factor}' must use both coded levels -1 and +1 only.")
+        x_factors[factor] = values
+    y_values = [_finite_number(row[response], f"{response} in run {i}") for i, row in enumerate(observations, start=1)]
+    combo_counts: dict[tuple[int, ...], int] = {}
+    for i in range(len(observations)):
+        combination = tuple(int(x_factors[factor][i]) for factor in factors)
+        combo_counts[combination] = combo_counts.get(combination, 0) + 1
+    expected = set(product((-1, 1), repeat=len(factors)))
+    missing = sorted(expected - set(combo_counts))
+    if missing:
+        raise ValueError(f"Full factorial is incomplete; {len(missing)} factor combination(s) are missing.")
+    terms: list[tuple[str, np.ndarray]] = [("Intercept", np.ones(len(observations), dtype=float))]
+    for factor in factors:
+        terms.append((factor, x_factors[factor]))
+    for i, left in enumerate(factors):
+        for right in factors[i+1:]:
+            terms.append((f"{left} × {right}", x_factors[left] * x_factors[right]))
+    names = [term[0] for term in terms]
+    x = np.column_stack([term[1] for term in terms])
+    y = np.asarray(y_values, dtype=float)
+    coefficients, _, rank, _ = np.linalg.lstsq(x, y, rcond=None)
+    if rank != x.shape[1]:
+        raise ValueError("The selected factorial model is rank-deficient for these observations.")
+    fitted = x @ coefficients
+    residuals = y - fitted
+    sse = float(np.sum(residuals ** 2))
+    grand_mean = float(np.mean(y))
+    sst = float(np.sum((y - grand_mean) ** 2))
+    df_residual = len(y) - x.shape[1]
+    mse = sse / df_residual if df_residual > 0 else None
+    covariance = np.linalg.pinv(x.T @ x) * mse if mse is not None and mse > np.finfo(float).eps else None
+    term_rows: list[dict[str, Any]] = []
+    for i, (name, _) in enumerate(terms):
+        if name == "Intercept":
+            continue
+        coefficient = float(coefficients[i])
+        effect = 2.0 * coefficient
+        standard_error = None if covariance is None else math.sqrt(max(0.0, float(covariance[i, i])))
+        if standard_error is None or standard_error <= np.finfo(float).eps:
+            t_stat = None
+            p_value = None
+        else:
+            t_stat = coefficient / standard_error
+            p_value = float(2 * t.sf(abs(t_stat), df_residual))
+        term_rows.append({
+            "Term": name, "Coefficient": coefficient, "Estimated effect (high − low)": effect,
+            "Standard error": standard_error, "t statistic": t_stat, "p-value": p_value,
+            "Inference available": p_value is not None,
+        })
+    return {
+        "status": "FACTORIAL_ANALYZED",
+        "method": "Complete 2-level factorial; OLS with main effects and pairwise interactions",
+        "run_count": len(y),
+        "factor_count": len(factors),
+        "factor_fields": factors,
+        "response_field": response,
+        "factorial_combinations": len(expected),
+        "minimum_replicates_per_combination": min(combo_counts.values()),
+        "residual_degrees_of_freedom": df_residual,
+        "model_rank": int(rank),
+        "r_squared": (1 - sse / sst) if sst > np.finfo(float).eps else None,
+        "residual_standard_error": math.sqrt(mse) if mse is not None else None,
+        "effects": pd.DataFrame(term_rows).sort_values("Estimated effect (high − low)", key=lambda series: series.abs(), ascending=False).reset_index(drop=True),
+        "run_results": pd.DataFrame({
+            "Run": np.arange(1, len(y) + 1), "Observed response": y,
+            "Fitted response": fitted, "Residual": residuals,
+        }),
+        "model_coefficients": {name: float(value) for name, value in zip(names, coefficients)},
+        "alpha": level,
+        "assumptions": "Factors are coded -1/+1; the design contains every full-factorial combination. Classical inference additionally requires appropriate error assumptions and positive residual degrees of freedom; run order randomization must be planned separately.",
+        "warning": "The model includes main effects and pairwise interactions only. No blocking, center-point curvature, higher-order interaction screening, multiplicity correction or automatic randomization is included; statistical association is not proof of causation.",
+    }
