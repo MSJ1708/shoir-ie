@@ -1974,3 +1974,38 @@ def test_facility_location_flow_reports_infeasible_and_validates_route_contracts
             facilities, customers,
             [{"facility": "F1", "customer": "C1", "unit_cost": -1}],
         )
+
+
+def test_student_practice_examples_match_hand_calculated_answers_and_explain_methods():
+    from shoir_target_engines import evaluate_student_practice_answer, get_student_practice_problem
+
+    topics = {
+        "takt_time": (2.0, 0.01),
+        "oee_percent": (68.4, 0.1),
+        "eoq_units": (math.sqrt(500000.0), 1.0),
+        "process_capability_cp": (1.0, 0.01),
+        "npv_sar": (-1000.0 + 600.0/1.10 + 600.0/(1.10**2), 0.5),
+    }
+    for topic, (answer, tolerance) in topics.items():
+        prompt = get_student_practice_problem(topic)
+        assert prompt["question"]
+        assert prompt["formula"]
+        assert "expected_answer" not in prompt
+        result = evaluate_student_practice_answer(topic, answer)
+        assert result["is_correct"] is True
+        assert result["status"] == "PRACTICE_ANSWER_CHECKED"
+        assert result["worked_solution"]
+        assert result["data_provenance"] == "SYNTHETIC_EXERCISE"
+
+
+def test_student_practice_marks_wrong_answers_and_rejects_invalid_inputs():
+    from shoir_target_engines import evaluate_student_practice_answer, get_student_practice_problem
+
+    wrong = evaluate_student_practice_answer("takt_time", 5.0)
+    assert wrong["is_correct"] is False
+    assert wrong["expected_answer"] == pytest.approx(2.0)
+    assert "try again" in wrong["message"].lower()
+    with pytest.raises(ValueError, match="supported practice topic"):
+        get_student_practice_problem("unspecified_method")
+    with pytest.raises(ValueError, match="finite number"):
+        evaluate_student_practice_answer("takt_time", float("nan"))
