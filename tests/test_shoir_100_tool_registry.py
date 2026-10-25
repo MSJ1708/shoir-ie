@@ -93,6 +93,19 @@ def test_every_target_entitlement_matches_independent_six_state_truth_table(tool
         assert tier_allows(current, tool["target_minimum_tier"]) is expected
 
 
+@pytest.mark.parametrize("tool", TOOL_TARGETS, ids=lambda tool: tool["tool_id"])
+def test_require_tool_access_enforces_six_state_truth_table(tool):
+    """Check direct server-side execution access for all 100 tools across all six states."""
+    for current in ALL_STATES:
+        expected = _expected(current, tool["target_minimum_tier"])
+        if expected:
+            granted = require_tool_access(current, tool["tool_id"])
+            assert granted["tool_id"] == tool["tool_id"]
+        else:
+            with pytest.raises(PermissionError):
+                require_tool_access(current, tool["tool_id"])
+
+
 def test_research_pack_and_enterprise_plus_are_not_interchangeable():
     research_ids = [tool["tool_id"] for tool in TOOL_TARGETS if tool["target_minimum_tier"] == "Research Pack"]
     plus_ids = [tool["tool_id"] for tool in TOOL_TARGETS if tool["target_minimum_tier"] == "Enterprise Plus"]
@@ -123,7 +136,7 @@ def test_status_summary_counts_all_targets_and_never_infers_verified_from_presen
 
 
 def test_focused_workbench_tools_document_direct_gates_tests_and_transient_persistence():
-    focused = {"T015", "T016", "T017", "T018", "T019", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T033", "T034", "T035", "T036", "T037", "T038", "T040", "T041", "T042", "T043", "T045", "T047", "T048", "T049", "T050", "T051", "T052", "T054", "T055", "T056", "T058", "T059", "T063", "T066", "T070", "T072", "T075", "T076", "T077", "T078", "T079", "T081", "T082", "T083", "T084", "T085"}
+    focused = {"T015", "T016", "T017", "T018", "T019", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T033", "T034", "T035", "T036", "T037", "T038", "T040", "T041", "T042", "T043", "T044", "T045", "T047", "T048", "T049", "T050", "T051", "T052", "T054", "T055", "T056", "T058", "T059", "T063", "T066", "T070", "T072", "T075", "T076", "T077", "T078", "T079", "T081", "T082", "T083", "T084", "T085"}
     for tool_id in focused:
         tool = get_tool(tool_id)
         assert tool is not None

@@ -1470,6 +1470,37 @@ if not st.session_state.get("current_user"):
             "Your existing account, profile and saved workspace are preserved."
         )
     st.markdown("Please sign in with your approved account or register and submit your payment ticket below.")
+    # Streamlit's tab bar is horizontally scrollable by default. On narrow phones
+    # that can leave the first or last auth tab label partially clipped. Wrap only
+    # the public landing-page tabs on small screens; desktop layout stays unchanged.
+    st.markdown(
+        """
+        <style>
+        @media (max-width: 600px) {
+          div[data-testid="stTabs"] [data-baseweb="tab-list"] {
+            display: flex !important;
+            flex-wrap: wrap !important;
+            overflow-x: visible !important;
+            white-space: normal !important;
+            align-items: stretch !important;
+            gap: 0.25rem !important;
+          }
+          div[data-testid="stTabs"] button[role="tab"] {
+            flex: 1 1 9rem !important;
+            min-width: 0 !important;
+            max-width: 100% !important;
+            height: auto !important;
+            min-height: 2.5rem !important;
+            padding: 0.45rem 0.55rem !important;
+            white-space: normal !important;
+            overflow-wrap: anywhere !important;
+            text-align: center !important;
+          }
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
     auth_tab1, auth_tab2, auth_tab3 = st.tabs(["🔑 Sign In", "📝 Get Ticket & Register", "🧭 Explore the Modules"])
 
     # ------------------------------------------

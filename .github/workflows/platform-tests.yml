@@ -2,9 +2,9 @@ name: Shoir-IE Platform Tests
 
 on:
   push:
-    branches: ["feature/**"]
+    branches: ["feat/**", "feature/**"]
   pull_request:
-    branches: ["main"]
+    branches: ["main", "feat/**", "feature/**"]
 
 jobs:
   test:

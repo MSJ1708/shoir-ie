@@ -1,4 +1,5 @@
 """App-level regression checks for the preserved Workbench and a real target action."""
+import json
 from pathlib import Path
 
 import pytest
@@ -102,6 +103,33 @@ def test_workbench_denies_focused_tool_execution_to_unauthenticated_guest():
     assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
     assert at.session_state.get("shoir_tool_result_T021") is None
     assert any("Sign in with an active Shoir-IE account" in str(item.value) for item in at.error)
+
+
+def test_workbench_denies_rcm_run_below_professional_tier():
+    """Verify that selecting a visible tool cannot bypass its server-side tier gate."""
+    from streamlit.testing.v1 import AppTest
+
+    page = ROOT / "pages" / "Industrial_Engineering_Workbench.py"
+    at = AppTest.from_file(page, default_timeout=60)
+    at.session_state["current_user"] = "rcm-tier-gate-checker"
+    at.session_state["authenticated"] = True
+    at.session_state["user_tier"] = "Starter"
+    at.run(timeout=60)
+    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+
+    at.selectbox(key="shoir_100_tool_inspector").select(
+        "T044 · Reliability-Centered Maintenance Assistant"
+    )
+    at.run(timeout=60)
+    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+    # Restricted methods are intentionally not rendered; the catalogue still
+    # explains the minimum tier and the runtime does not produce a result.
+    assert not any(button.key == "tool044_run" for button in at.button)
+    assert any(
+        "not executable on the current package" in str(item.value).lower()
+        for item in at.warning
+    )
+    assert at.session_state.get("shoir_tool_result_T044") is None
 
 
 def test_workbench_selects_and_runs_work_sampling_and_pareto_tools():
@@ -318,6 +346,7 @@ def test_workbench_runs_maintenance_hazard_mrp_and_portfolio_methods():
 
     cases = [
         ("T043 · Preventive Maintenance Planner", "tool043_run", "T043", "overdue_task_count", 1),
+        ("T044 · Reliability-Centered Maintenance Assistant", "tool044_run", "T044", "failure_mode_count", 1),
         ("T047 · Job Safety and Hazard Register", "tool047_run", "T047", "high_screen_score_count", 1),
         ("T054 · Material Requirements Planner", "tool054_run", "T054", "total_planned_order_receipts", 30.0),
         ("T084 · Engineering Project Portfolio Scorer", "tool084_run", "T084", "project_count", 2),
@@ -332,6 +361,24 @@ def test_workbench_runs_maintenance_hazard_mrp_and_portfolio_methods():
         result = at.session_state.get(f"shoir_tool_result_{tool_id}")
         assert result is not None, f"{tool_id} returned no result; visible errors: " + " | ".join(str(item.value) for item in at.error)
         assert result[result_key] == pytest.approx(expected)
+        if tool_id == "T044":
+            assert any(
+                "not a complete or certified rcm analysis" in str(item.value).lower()
+                for item in at.warning
+            )
+            assert result["data_provenance"] == "SYNTHETIC_EXAMPLE"
+            assert "synthetic teaching data" in result["provenance_warning"].lower()
+            assert result["human_review_required"] is True
+            assert "no numeric risk score" in result["formula"].lower()
+            assert any(
+                "Human review status" in getattr(frame.value, "columns", [])
+                for frame in at.dataframe
+            )
+            assert any("Data provenance: SYNTHETIC_EXAMPLE" in str(item.value) for item in at.caption)
+            assert not any(
+                getattr(widget, "key", "").startswith("target_t044_review_register_")
+                for widget in at.selectbox
+            )
         assert result.get("_workspace_persistence") in {
             "SAVED_LOCAL_FALLBACK", "SAVED_MANAGED_WORKSPACE", "SESSION_ONLY",
             "SAVE_FAILED", "SAVE_PENDING", "SAVE_STATUS_NOT_CONFIRMED",
@@ -639,12 +686,12 @@ def test_workbench_builds_downloadable_reproducibility_pack():
     at.run(timeout=90)
     assert not at.exception, "\n".join(str(error.value) for error in at.exception)
     source = at.selectbox(key="tool087_source_id")
-    assert "T021" in source.options
+    assert any(option.startswith("T021 · ") for option in source.options)
     source.select("T021")
     at.checkbox(key="tool087_include_inputs").set_value(True)
     at.checkbox(key="tool087_include_tables").set_value(True)
-    at.run(timeout=90)
-    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+    # Form widget changes are submitted together with the button click. Running
+    # the app before submit would discard the pending browser-form values.
     at.button(key="tool087_run").click()
     at.run(timeout=90)
     assert not at.exception, "\n".join(str(error.value) for error in at.exception)
@@ -658,7 +705,7 @@ def test_workbench_builds_downloadable_reproducibility_pack():
         assert "SHA256SUMS.txt" in archive.namelist()
         assert "input_snapshot_redacted.json" in archive.namelist()
     assert result["bundle_sha256"]
-    assert any(button.key == "tool087_download" for button in at.button)
+    assert any(button.key == "tool087_download" for button in at.get("download_button"))
 
 
 def test_workbench_runs_facility_location_flow():
@@ -673,7 +720,7 @@ def test_workbench_runs_facility_location_flow():
     at.run(timeout=90)
     assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
 
-    at.selectbox(key="shoir_100_tool_inspector").select("T069")
+    at.selectbox(key="shoir_100_tool_inspector").select("T069 · Network Flow and Location Optimization")
     at.run(timeout=90)
     assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
     at.button(key="tool069_run").click()
@@ -698,7 +745,7 @@ def test_workbench_student_practice_mode_checks_answers_and_shows_solution():
     at.run(timeout=90)
     assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
 
-    at.selectbox(key="shoir_100_tool_inspector").select("T089")
+    at.selectbox(key="shoir_100_tool_inspector").select("T089 · Student Learning and Practice Mode")
     at.run(timeout=90)
     assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
     at.number_input(key="tool089_answer").set_value(2.0)
@@ -723,7 +770,7 @@ def test_workbench_guided_study_wizard_returns_gated_step_plan():
     at.run(timeout=90)
     assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
 
-    at.selectbox(key="shoir_100_tool_inspector").select("T002")
+    at.selectbox(key="shoir_100_tool_inspector").select("T002 · Guided Study Wizard")
     at.run(timeout=90)
     assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
     at.text_input(key="tool002_available_fields").set_value(
@@ -751,7 +798,7 @@ def test_workbench_runs_equipment_anomaly_monitor_and_labels_example_data():
     at.run(timeout=90)
     assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
 
-    at.selectbox(key="shoir_100_tool_inspector").select("T048")
+    at.selectbox(key="shoir_100_tool_inspector").select("T048 · Equipment Anomaly Monitor")
     at.run(timeout=90)
     assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
     at.button(key="tool048_run").click()
@@ -775,7 +822,7 @@ def test_workbench_capa_8d_register_reports_completeness_and_overdue_state():
     at.run(timeout=90)
     assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
 
-    at.selectbox(key="shoir_100_tool_inspector").select("T039")
+    at.selectbox(key="shoir_100_tool_inspector").select("T039 · CAPA and 8D Manager")
     at.run(timeout=90)
     assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
     at.button(key="tool039_run").click()
@@ -787,3 +834,42 @@ def test_workbench_capa_8d_register_reports_completeness_and_overdue_state():
     assert result["record_count"] == 1
     assert result["data_provenance"] == "SYNTHETIC_EXAMPLE"
     assert result["records"].iloc[0]["Workflow state"] == "IN_PROGRESS"
+
+def test_workbench_rcm_marks_edited_failure_modes_as_user_entered_unverified():
+    from streamlit.testing.v1 import AppTest
+
+    page = ROOT / "pages" / "Industrial_Engineering_Workbench.py"
+    at = AppTest.from_file(page, default_timeout=90)
+    at.session_state["current_user"] = "rcm-provenance-checker"
+    at.session_state["authenticated"] = True
+    at.session_state["user_tier"] = "Professional"
+    at.run(timeout=90)
+    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+
+    at.selectbox(key="shoir_100_tool_inspector").select(
+        "T044 · Reliability-Centered Maintenance Assistant"
+    )
+    at.run(timeout=90)
+    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+    edited = [{
+        "asset": "Line-02",
+        "function": "Transfer material to packing",
+        "failure_mode": "Drive failure",
+        "failure_effect": "Line stops",
+        "consequence_category": "operational",
+        "consequence_rationale": "User-entered example requiring site review.",
+        "proposed_task": "Review vibration history",
+        "task_strategy": "condition_directed",
+        "condition_indicator": "Vibration exceeds the site-approved threshold",
+        "evidence_reference": "USER-ENTERED-REFERENCE",
+    }]
+    at.text_area(key="tool044_modes").set_value(json.dumps(edited))
+    at.button(key="tool044_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+    result = at.session_state.get("shoir_tool_result_T044")
+    assert result is not None
+    assert result["data_provenance"] == "USER_ENTERED_UNVERIFIED"
+    assert "not been independently verified" in result["provenance_warning"].lower()
+    assert all(status == "PENDING" for status in result["review_register"]["Human review status"])
+

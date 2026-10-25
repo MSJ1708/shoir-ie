@@ -10,7 +10,7 @@ The implementation uses the existing `pages/Industrial_Engineering_Workbench.py`
 
 ## Focused execution methods
 
-The original focused tranche was continued with four additional methods (T036, T037, T051 and T072). This integration also carries the separately tested T062 solver diagnostics, T071 discrete-event simulation and T087 reproducibility ZIP into the same branch. The combined Workbench contains 59 distinct stable target IDs with focused runner branches; each remains pending authenticated end-to-end verification. Other existing module workflows may cover additional targets, but they are not counted as focused runners unless wired to the stable target ID and its execution gate. The implementation matrix links every target to its minimum tier, contracts, evidence tests and remaining limitations.
+The original focused tranche was continued with four additional methods (T036, T037, T051 and T072). This integration also carries the separately tested T062 solver diagnostics, T071 discrete-event simulation and T087 reproducibility ZIP into the same branch. The combined Workbench contains 60 distinct stable target IDs with focused runner branches; each remains pending authenticated end-to-end verification. Other existing module workflows may cover additional targets, but they are not counted as focused runners unless wired to the stable target ID and its execution gate. The implementation matrix links every target to its minimum tier, contracts, evidence tests and remaining limitations.
 
 ### Lean, manufacturing, quality and economics
 
@@ -24,6 +24,7 @@ The original focused tranche was continued with four additional methods (T036, T
 | T082 | Industrial Costing and Variance Analyzer | Direct-material price/usage/total variance, with reconciliation. |
 | T083 | Evidence-Based ROI Tracker | Cost-reduction and ROI arithmetic; always requires human evidence verification and never self-certifies savings. |
 | T043 | Preventive Maintenance Planner | Interval due dates, overdue state and labor estimate; not a resource/downtime optimizer. |
+| T044 | Reliability-Centered Maintenance Assistant | Review-first decision register with completeness and high-consequence mismatch flags; not a complete or certified RCM method. |
 | T047 | Job Safety and Hazard Register | Severity × likelihood screen with residual scores; not a certified or legally sufficient safety assessment. |
 | T054 | Material Requirements Planner | One-level BOM netting, lot multiples and lead-time release indices; no recursive BOM explosion. |
 | T084 | Engineering Project Portfolio Scorer | Direction-aware min-max normalization with user-defined weights; weight sensitivity not implemented. |
@@ -123,8 +124,8 @@ The registry and matrix contain 100 target IDs, T001–T100. Current classificat
 | Status | Count |
 |---|---:|
 | `VERIFIED_WORKING` | 0 |
-| `IMPLEMENTED_NEEDS_VALIDATION` | 83 |
-| `FOUNDATION_ONLY` | 15 |
+| `IMPLEMENTED_NEEDS_VALIDATION` | 84 |
+| `FOUNDATION_ONLY` | 14 |
 | `EXTERNAL_CONFIGURATION_REQUIRED` | 2 |
 | `MISSING` | 0 |
 | `BLOCKED` | 0 |
@@ -142,3 +143,14 @@ Before merging, run all workflows on the exact final commit, fix every regressio
 ## Release position
 
 **DRAFT / NO-GO.** This integration tranche preserves the current UX and adds executable calculation-backed tools, but it does not complete all 100 targets or certify workforce/production readiness. Do not merge or make commercial readiness claims until the remaining foundation-only capabilities and the mandatory release checks are completed.
+
+
+## Current continuation findings — 25 October 2026
+
+- A completed local public-shell browser smoke on commit f3e92e71bd8cb064426dd05ed2e3f6d12a758b0a passed its automated HTTP, JavaScript-console, and page-wide overflow checks at 1440px and 390px. Artifact 12597898421 contains the redacted screenshots and result.json. Visual inspection of the 390px screenshots nevertheless found the three public authentication tabs scrolling sideways and showing clipped labels; page-wide overflow alone was not sufficient to catch this defect.
+- app.py now applies mobile-only wrapping to the public sign-in/registration/module-explorer tabs at widths up to 600px. Desktop tab styling is not intentionally changed.
+- T044 now carries `data_provenance` and `provenance_warning` in the saved result, distinguishing the stock example (`SYNTHETIC_EXAMPLE`) from edited input (`USER_ENTERED_UNVERIFIED`). Its result view shows provenance, method/scope, formula, assumptions and limitations beside the review table; Workbench tests cover both provenance paths.
+- scripts/live_deployment_smoke.py now measures the tab-list and individual tab geometry, checks horizontal/vertical clipping, and requires wrapping on narrow screens. Tests also exercise this validator with synthetic geometry fixtures.
+- Validation, engine regression, platform tests, and security/quality workflows passed on the earlier commit above, but those results predate the latest responsive fix and geometry assertions. CI on the current branch head must complete before the new fix can be considered checked.
+- Authenticated module execution, save/reload/re-login, cross-workspace isolation, real workbook-to-decision/export workflows, and a hosted live-deployment smoke are still not established by this public unauthenticated-shell artifact. The authenticated release-gate workflow is manual and requires dedicated staging credentials; no such credentials are read or exposed by this audit.
+

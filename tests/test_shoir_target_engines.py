@@ -1539,7 +1539,7 @@ def test_full_factorial_doe_matches_hand_calculated_effects_and_inference():
 def test_full_factorial_doe_rejects_missing_combinations_and_non_coded_levels():
     from shoir_target_engines import analyze_full_factorial_2level
 
-    with pytest.raises(ValueError, match="combinations are missing"):
+    with pytest.raises(ValueError, match="factor combination is missing"):
         analyze_full_factorial_2level([
             {"A": -1, "B": -1, "response": 1},
             {"A": -1, "B": 1, "response": 2},
@@ -1572,7 +1572,7 @@ def test_anomaly_screening_flags_robust_outlier_and_handles_stable_baseline():
     flat_records = [{"timestamp": f"2026-10-{day:02d}T00:00:00Z", "value": 10 if day < 8 else 25} for day in range(1, 9)]
     fallback = detect_equipment_anomalies(flat_records)
     assert fallback["anomaly_count"] == 1
-    assert "stable-baseline deviation fallback" in fallback["method"]
+    assert "stable-baseline deviation fallback" in fallback["method"].lower()
 
 
 def test_anomaly_screening_rejects_bad_timestamps_and_duplicate_rows():
@@ -1599,7 +1599,7 @@ def test_mm1_discrete_event_simulation_is_seed_reproducible_and_explicit_about_s
     assert 0 <= first["replication_summary"]["Server utilization (%)"].min()
     assert first["replication_summary"]["Server utilization (%)"].max() <= 100
     assert first["sample_customer_events"]["Queue wait (minutes)"].ge(0).all()
-    assert "single-server FCFS M/M/1" in first["warning"]
+    assert "single-server fcfs m/m/1" in first["warning"].lower()
 
 
 def test_mm1_discrete_event_simulation_rejects_invalid_rates_and_warns_on_instability():
@@ -2041,6 +2041,7 @@ def test_guided_study_plan_handles_user_completed_steps_and_bad_contracts():
     rows = plan["steps"].set_index("Tool ID")
     assert rows.loc["T065", "Step status"] == "COMPLETED_IN_SESSION"
     assert rows.loc["T069", "Step status"] == "INPUTS_MISSING"
+    assert "facility_table" in rows.loc["T069", "Missing input fields"]
     with pytest.raises(ValueError, match="guided-study goals"):
         build_guided_study_plan("unknown_goal")
     with pytest.raises(ValueError, match="canonical IDs"):
@@ -2134,3 +2135,83 @@ def test_capa_8d_register_requires_evidence_for_closed_records_and_validates_dat
         assess_capa_8d_records([dict(closed, opened_date="2026-10-25", due_date="2026-10-24")])
     with pytest.raises(ValueError, match="between 1 and 5,000"):
         assess_capa_8d_records([])
+
+def test_rcm_decision_register_requires_human_review_and_flags_high_consequence_choices():
+    from shoir_target_engines import build_rcm_decision_register
+
+    result = build_rcm_decision_register([
+        {
+            "asset": "Press-01",
+            "function": "Form parts within approved dimensions",
+            "failure_mode": "Ram-position drift",
+            "failure_effect": "Out-of-spec parts and production interruption",
+            "consequence_category": "operational",
+            "consequence_rationale": "Synthetic screening example; quality impact requires site confirmation.",
+            "proposed_task": "Inspect the position trend against approved limits",
+            "task_strategy": "condition_directed",
+            "condition_indicator": "Trend exceeds the approved guard band",
+            "evidence_reference": "SYNTHETIC example only; replace with approved inspection/work-order evidence",
+            "owner": "Maintenance planner",
+        },
+        {
+            "asset": "Boiler-01",
+            "function": "Contain and transfer process heat",
+            "failure_mode": "Pressure boundary degradation",
+            "failure_effect": "Potential hazardous release",
+            "consequence_category": "safety_environmental",
+            "consequence_rationale": "Illustrative high-consequence case; qualified site review is mandatory.",
+            "proposed_task": "No planned maintenance task",
+            "task_strategy": "run_to_failure",
+            "evidence_reference": "SYNTHETIC example only; replace with approved engineering evidence",
+        },
+    ])
+
+    assert result["status"] == "STRUCTURED_FOR_HUMAN_REVIEW"
+    assert result["failure_mode_count"] == 2
+    assert result["unique_asset_count"] == 2
+    assert result["open_review_count"] == 2
+    assert result["high_consequence_run_to_failure_count"] == 1
+    assert result["human_review_required"] is True
+    register = result["review_register"]
+    assert register.iloc[0]["Human review status"] == "PENDING"
+    assert register.iloc[0]["Decision flags"] == "No rule-based flags; human review still required"
+    assert "HIGH_CONSEQUENCE_RUN_TO_FAILURE_REQUIRES_FORMAL_REVIEW" in register.iloc[1]["Decision flags"]
+    assert "not a complete or certified rcm analysis" in result["warning"].lower()
+
+
+def test_rcm_decision_register_rejects_duplicate_modes_missing_evidence_and_invalid_task_inputs():
+    from shoir_target_engines import build_rcm_decision_register
+
+    base = {
+        "asset": "CNC-01",
+        "function": "Cut material",
+        "failure_mode": "Spindle stops",
+        "failure_effect": "Production is interrupted",
+        "consequence_category": "operational",
+        "consequence_rationale": "Synthetic example only.",
+        "proposed_task": "Review vibration trend",
+        "task_strategy": "condition_directed",
+        "condition_indicator": "Vibration exceeds approved threshold",
+        "evidence_reference": "SYNTHETIC; replace with actual records",
+    }
+    with pytest.raises(ValueError, match="non-empty JSON list"):
+        build_rcm_decision_register([])
+    with pytest.raises(ValueError, match="evidence_reference"):
+        build_rcm_decision_register([{**base, "evidence_reference": ""}])
+    with pytest.raises(ValueError, match="Duplicate asset/function/failure-mode"):
+        build_rcm_decision_register([base, base])
+    with pytest.raises(ValueError, match="condition_indicator"):
+        build_rcm_decision_register([{**base, "condition_indicator": ""}])
+    with pytest.raises(ValueError, match="positive whole number"):
+        build_rcm_decision_register([{
+            **base,
+            "task_strategy": "scheduled_restoration",
+            "task_interval_days": 0,
+        }])
+    with pytest.raises(ValueError, match="task_interval_days is required"):
+        build_rcm_decision_register([{
+            **base,
+            "task_strategy": "failure_finding",
+            "consequence_category": "hidden_function",
+        }])
+
