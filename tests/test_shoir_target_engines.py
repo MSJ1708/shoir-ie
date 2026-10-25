@@ -2040,7 +2040,7 @@ def test_guided_study_plan_handles_user_completed_steps_and_bad_contracts():
     )
     rows = plan["steps"].set_index("Tool ID")
     assert rows.loc["T065", "Step status"] == "COMPLETED_IN_SESSION"
-    assert rows.loc["T069", "Step status"] == "FOUNDATION_ONLY"
+    assert rows.loc["T069", "Step status"] == "INPUTS_MISSING"
     assert "facility_table" in rows.loc["T069", "Missing input fields"]
     with pytest.raises(ValueError, match="guided-study goals"):
         build_guided_study_plan("unknown_goal")
