@@ -93,6 +93,19 @@ T089 now has a Starter-accessible practice path inside the existing Workbench. T
 T002 is now an executable Starter workflow planner in the existing Workbench. It supports capacity/bottleneck, facility-layout, quality/capability, inventory, maintenance/reliability and sustainability goals; cross-references each planned step to the canonical tool registry; lists declared required fields; distinguishes tier-restricted and foundation-only steps; and suggests a next ready step without running or inventing downstream results. Tests cover missing inputs, current tier restrictions, completed-session steps and invalid goals. It remains `IMPLEMENTED_NEEDS_VALIDATION` pending current CI and authenticated persistence/browser checks.
 
 
+### Trust center, contextual help and safe support bundle
+
+Four previously foundation-only target tools now have focused Workbench actions while retaining the current navigation:
+
+| ID | Implemented behavior | Explicit boundary |
+|---|---|---|
+| T007 | Redacts common credentials, emails, IP addresses and credential-bearing URLs from user-supplied diagnostic text; omits traceback frames/source lines; classifies common access, persistence, import/export, calculation and rate-limit symptoms with next checks. | It does not ingest server logs or prove the cause of a live failure. Redaction is heuristic and must not be treated as a guarantee that arbitrary text contains no sensitive data. |
+| T009 | Checks registry ID completeness/duplicates/unknown statuses and summarizes all declared tool readiness statuses, with an optional filtered list. | This is a registry status report, not live runtime health, CI telemetry, or authenticated browser proof. |
+| T010 | Searches canonical tool metadata and returns each matching tool's minimum tier, purpose, inputs, outputs, status and known limitations. | Guidance is registry-derived; full reviewed lessons, citations and verified deep links are not yet integrated. |
+| T100 | Generates a uniquely referenced JSON bundle containing a redacted summary, severity, component, registry status counts and recovery checks. The Workbench exposes a download control. | The bundle is explicitly `PREPARED_NOT_SENT`. No ticketing backend, incident lifecycle or automatic transmission exists. Raw submitted diagnostics are not included in the persisted input snapshot. |
+
+The focused actions use the existing authenticated actor check, `require_tool_access` gate and workspace-result helper. New deterministic tests cover redaction, traceback removal, status-registry integrity, searchable help, support-bundle non-delivery and the Workbench controls. Current-commit CI execution, authenticated browser acceptance, durable save/reload and workspace-isolation evidence remain required before these capabilities can be called verified.
+
 ### Equipment anomaly monitoring and freshness
 
 T048 now has an Enterprise-gated path within the existing Workbench. It uses a global median/MAD point-anomaly screen with an explicit zero-MAD fallback, and independently reports freshness (`FRESH`, `STALE`, or `FUTURE_TIMESTAMP`). Invalid timestamps/non-finite values are rejected; out-of-order and duplicate timestamps are surfaced as warnings. The method is **not** a predictive-maintenance model, root-cause analyzer or live sensor integration. Unit and Workbench AppTest cases have been added; the status remains `IMPLEMENTED_NEEDS_VALIDATION` until CI and authenticated staging checks pass.
@@ -123,8 +136,8 @@ The registry and matrix contain 100 target IDs, T001–T100. Current classificat
 | Status | Count |
 |---|---:|
 | `VERIFIED_WORKING` | 0 |
-| `IMPLEMENTED_NEEDS_VALIDATION` | 83 |
-| `FOUNDATION_ONLY` | 15 |
+| `IMPLEMENTED_NEEDS_VALIDATION` | 87 |
+| `FOUNDATION_ONLY` | 11 |
 | `EXTERNAL_CONFIGURATION_REQUIRED` | 2 |
 | `MISSING` | 0 |
 | `BLOCKED` | 0 |
