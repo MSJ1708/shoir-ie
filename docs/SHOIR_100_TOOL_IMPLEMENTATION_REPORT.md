@@ -1,6 +1,6 @@
-# Shoir-IE 100-tool implementation matrix — initial source crosswalk
+# Shoir-IE 100-tool implementation report — continuing implementation crosswalk
 
-**Review basis:** target catalog supplied in the implementation prompt; repository `main` at `c7bb3fcff54b6ce5de1ef0df2010fe3ef8029e9f`; implementation branch `feat/100-tool-readiness-foundations-2026-10-24`. Current branch commits add fail-closed entitlement discovery, fail-closed Copilot decision staging, and the first complete T016 converter implementation/UI/tests.
+**Review basis:** target catalog in the implementation prompt; clean-base methods branch `feat/shoir-100-tool-methods-wave-2026-10-24`, based on `main` before this continuation wave. The branch contains a source-grounded T001–T100 registry, tier-gated Workbench methods, target-specific calculation tests, and the additions recorded below. This report is not a release clearance.
 
 ## Status definitions
 
@@ -11,11 +11,12 @@
 - `EXTERNAL_CONFIGURATION_REQUIRED`: a relevant function/adapter surface exists but depends on configured endpoints, credentials, or deployment not verified here.
 - `BLOCKED`: testing/implementation is blocked by a documented external or environment limitation.
 
-## Initial classification counts
+## Current source-matrix counts after the planning/DES implementation wave
 
-- `IMPLEMENTED_NEEDS_VALIDATION`: 61
-- `FOUNDATION_ONLY`: 34
+- `IMPLEMENTED_NEEDS_VALIDATION`: 64
+- `FOUNDATION_ONLY`: 31
 - `EXTERNAL_CONFIGURATION_REQUIRED`: 5
+- `VERIFIED_WORKING`: 0
 
 No entry is marked `VERIFIED_WORKING`. The CSV includes one row for each stable tool ID T001–T100 and all required matrix columns. It distinguishes candidate existing routes from a verified implementation; a candidate mapping is not proof that the target acceptance contract is met.
 
@@ -105,3 +106,13 @@ The latest additive tranche integrates additional specialist calculations into e
 - **T085 Statistical Power and Sample-Size Planner:** a stated normal approximation for two independent equally allocated group means; clustered, attrition, unequal-variance and multiple-comparison corrections are not implied.
 
 Golden/boundary tests were added for these methods. Their corresponding matrix entries remain IMPLEMENTED_NEEDS_VALIDATION; browser acceptance, durable persistence and export/access path verification remain open. The implementation-count change reflects actual method additions and does not convert a registry entry into evidence of a fully verified tool.
+
+
+## 25 October 2026 — continuation implementation wave
+
+- **T049 Maintenance Backlog Optimizer:** added a deterministic greedy priority heuristic constrained by skill-hour capacity. The output identifies scheduled and deferred work orders and remaining capacity. It is explicitly not a globally optimal schedule.
+- **T052 Sales and Operations Planning:** added volume reconciliation across ordered periods, carrying inventory and backlog while capping production at supplied capacity. This is not a complete multi-product S&OP planning system.
+- **T058 Supplier Performance and Risk Scorecard:** added a weighted 0–100 score calculation. Weights are normalized, and any supplier missing a score remains unranked pending evidence.
+- **T071 Discrete-Event Simulation:** added a reproducible single-station FCFS event simulator with supported exponential/constant interarrival and service times, warm-up exclusion and replications. It is marked synthetic and is not a general multi-resource DES or live digital twin.
+
+The four tools are surfaced inside the existing Advanced Planning & Scheduling and Industrial Simulation Lab Workbench routes, not as new top-level navigation. Each execution uses the common `require_tool_access(tier, tool_id, actor)` check. Target-specific golden/boundary/repeatability tests have been added, but they have **not yet been executed on the final branch revision**. Authenticated staging browser checks, tier-denial walkthroughs, durable save/reload, cross-workspace isolation, and real XLSX/PDF/PPTX round-trip verification remain open. The classification stays `VERIFIED_WORKING: 0` until applicable evidence passes.
