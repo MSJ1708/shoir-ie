@@ -2094,35 +2094,34 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                         if result:
                             _show_focused_tool_persistence(selected_tool["tool_id"], result, current_tool_inputs)
                             if selected_tool["tool_id"] == "T044":
-                            if selected_tool["tool_id"] == "T044":
-                                                            # RCM decisions are a review register, not a chart-first
-                                                            # numeric result. Keep human review and the register prominent.
-                                                            st.metric("Failure modes for review", int(result.get("failure_mode_count", 0)))
-                                                            c1, c2 = st.columns(2)
-                                                            c1.metric("Open review items", int(result.get("open_review_count", 0)))
-                                                            c2.metric("Flagged decisions", int(result.get("rule_flag_count", 0)))
-                                                            st.warning(
-                                                                result.get(
-                                                                    "warning",
-                                                                    "RCM output requires qualified human review before use.",
-                                                                )
-                                                            )
-                                                            st.caption(result.get("method", "Structured RCM worksheet"))
-                                                            st.caption("Data provenance: " + str(result.get("data_provenance", "USER_ENTERED_UNVERIFIED")))
-                                                            provenance_warning = result.get("provenance_warning")
-                                                            if provenance_warning:
-                                                                if result.get("data_provenance") == "SYNTHETIC_EXAMPLE":
-                                                                    st.info(provenance_warning)
-                                                                else:
-                                                                    st.warning(provenance_warning)
-                                                            st.caption("Method / scope: " + str(result.get("formula", "Validation and review flags only; no numeric risk score is computed.")))
-                                                            register = result.get("review_register")
-                                                            if isinstance(register, pd.DataFrame):
-                                                                st.markdown("**RCM review register**")
-                                                                st.dataframe(register, use_container_width=True, hide_index=True)
-                                                            else:
-                                                                st.error("The RCM review register was not returned; rerun the tool with valid inputs.")
-                                                            st.caption(result.get("assumptions", "User-provided decision inputs require validation."))
+                                # RCM decisions are a review register, not a chart-first
+                                # numeric result. Keep human review and the register prominent.
+                                st.metric("Failure modes for review", int(result.get("failure_mode_count", 0)))
+                                c1, c2 = st.columns(2)
+                                c1.metric("Open review items", int(result.get("open_review_count", 0)))
+                                c2.metric("Flagged decisions", int(result.get("rule_flag_count", 0)))
+                                st.warning(
+                                    result.get(
+                                        "warning",
+                                        "RCM output requires qualified human review before use.",
+                                    )
+                                )
+                                st.caption(result.get("method", "Structured RCM worksheet"))
+                                st.caption("Data provenance: " + str(result.get("data_provenance", "USER_ENTERED_UNVERIFIED")))
+                                provenance_warning = result.get("provenance_warning")
+                                if provenance_warning:
+                                    if result.get("data_provenance") == "SYNTHETIC_EXAMPLE":
+                                        st.info(provenance_warning)
+                                    else:
+                                        st.warning(provenance_warning)
+                                st.caption("Method / scope: " + str(result.get("formula", "Validation and review flags only; no numeric risk score is computed.")))
+                                register = result.get("review_register")
+                                if isinstance(register, pd.DataFrame):
+                                    st.markdown("**RCM review register**")
+                                    st.dataframe(register, use_container_width=True, hide_index=True)
+                                else:
+                                    st.error("The RCM review register was not returned; rerun the tool with valid inputs.")
+                                st.caption(result.get("assumptions", "User-provided decision inputs require validation."))
                             else:
                                 render_engineering_result(
                                     result,
