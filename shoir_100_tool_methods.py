@@ -1,4 +1,4 @@
-"""Deterministic, scoped methods for eight Shoir-IE 100-tool targets.
+"""Deterministic, scoped methods for selected Shoir-IE 100-tool targets.
 
 These functions expose declared methods and limits. They do not replace authenticated
 browser acceptance, persistent workspace storage, or source-system validation.
