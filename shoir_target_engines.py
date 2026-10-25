@@ -3912,15 +3912,14 @@ def run_hypothesis_test(
         effect_size = difference / sd_difference if sd_difference > 0 else None
         hypothesis = "Two-sided H0: mean paired difference is zero; H1: mean paired difference differs from zero."
 
-    if se > 0:
-        statistic = difference / se
-        p_value = float(2.0 * _t_dist.sf(abs(statistic), df))
-        critical = float(_t_dist.ppf(1.0 - alpha_value / 2.0, df))
-        ci_low, ci_high = difference - critical * se, difference + critical * se
-    else:
-        statistic = 0.0 if difference == 0 else math.copysign(float("inf"), difference)
-        p_value = 1.0 if difference == 0 else 0.0
-        ci_low = ci_high = difference
+    if not math.isfinite(se) or se <= np.finfo(float).eps:
+        raise ValueError(
+            "The standard error is zero or non-finite; the selected t-test statistic and confidence interval are not estimable for this sample/difference."
+        )
+    statistic = difference / se
+    p_value = float(2.0 * _t_dist.sf(abs(statistic), df))
+    critical = float(_t_dist.ppf(1.0 - alpha_value / 2.0, df))
+    ci_low, ci_high = difference - critical * se, difference + critical * se
 
     return {
         "status": "HYPOTHESIS_TEST_CALCULATED",
