@@ -86,7 +86,7 @@ def test_rnle_uses_minimum_table_frequency_when_observed_frequency_is_below_poin
     assert result["frequency_used_for_table_lifts_per_minute"] == pytest.approx(0.2)
     assert result["frequency_multiplier"] == pytest.approx(0.95)
     assert any("uses 0.2 lifts/minute" in warning for warning in result["warnings"])
-    assert any("recovery-period" in warning for warning in result["warnings"])
+    assert any("lower than 0.2" in warning for warning in result["warnings"])
 
 
 def test_rnle_requires_confirmed_applicability_and_rejects_invalid_boundaries():
