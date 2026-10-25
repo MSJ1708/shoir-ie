@@ -96,8 +96,13 @@ export function normalizeWorkspaceStateJson(
     serialized = "{}";
   } else {
     try {
-      serialized = JSON.stringify(value);
-    } catch {
+      const encoded = JSON.stringify(value);
+      if (typeof encoded !== "string") {
+        throw new PublicRequestError("Workspace state must be JSON serializable.", 400);
+      }
+      serialized = encoded;
+    } catch (error) {
+      if (error instanceof PublicRequestError) throw error;
       throw new PublicRequestError("Workspace state must be JSON serializable.", 400);
     }
   }
