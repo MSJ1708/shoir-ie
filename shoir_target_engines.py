@@ -4472,7 +4472,7 @@ def build_reproducibility_pack(
     from datetime import datetime, timezone
 
     target_id = str(tool_id or "").strip().upper()
-    if not re.fullmatch(r"T\d{3}", target_id):
+    if not re.fullmatch(r"T\d{3}", target_id) or not 1 <= int(target_id[1:]) <= 100:
         raise ValueError("Tool ID must use a canonical T001–T100 identifier.")
     name = str(canonical_name or "").strip()
     if not name:
@@ -4489,24 +4489,26 @@ def build_reproducibility_pack(
     sensitive_key = re.compile(
         r"(?:password|passphrase|secret|token|authorization|cookie|api[_ -]?key|service[_ -]?role|"
         r"private[_ -]?key|connection[_ -]?string|database[_ -]?url|email|phone|mobile|national[_ -]?id|"
-        r"passport|ssn|access[_ -]?key|refresh[_ -]?token)",
+        r"passport|ssn|access[_ -]?key|refresh[_ -]?token|employee[_ -]?name|person[_ -]?name|"
+        r"customer[_ -]?contact|contact[_ -]?name|operator[_ -]?name)",
         re.IGNORECASE,
     )
     sensitive_column = re.compile(
         r"(?:password|passphrase|secret|token|authorization|cookie|api[_ -]?key|service[_ -]?role|"
         r"private[_ -]?key|connection[_ -]?string|database[_ -]?url|email|e_mail|phone|mobile|national[_ -]?id|"
-        r"passport|ssn|access[_ -]?key|refresh[_ -]?token)",
+        r"passport|ssn|access[_ -]?key|refresh[_ -]?token|employee[_ -]?name|person[_ -]?name|"
+        r"customer[_ -]?contact|contact[_ -]?name|operator[_ -]?name)",
         re.IGNORECASE,
     )
     secret_text = re.compile(
-        r"(?i)\b(password|passphrase|secret|token|api[_ -]?key|service[_ -]?role[_ -]?key|access[_ -]?key)\b(\s*[:=]\s*)([^\s,;]+)"
+        r"(?i)\b(password|passphrase|secret|token|api[_ -]?key|service[_ -]?role[_ -]?key|access[_ -]?key)\b(\s*[:=]\s*)([^\s,;]+)|\bBearer\s+[A-Za-z0-9._~+/-]+=*"
     )
 
     def _safe_string(raw: Any) -> str:
         value = str(raw)
         value = secret_text.sub(lambda m: f"{m.group(1)}{m.group(2)}[REDACTED]", value)
         # Remove userinfo from a URL while retaining scheme and host for diagnostics.
-        value = re.sub(r"(?i)(https?://)[^/@\s:]+(?::[^/@\s]*)?@", r"\1[REDACTED]@", value)
+        value = re.sub(r"(?i)(https?|postgres(?:ql)?|mysql)://[^/@\s:]+(?::[^/@\s]*)?@", r"\1://[REDACTED]@", value)
         return value[:5000]
 
     def _normalise(value: Any, *, prefix: str, files: dict[str, bytes], include_tables: bool, depth: int = 0) -> Any:
@@ -4617,6 +4619,15 @@ def build_reproducibility_pack(
             dependency_versions[distribution] = "NOT_INSTALLED"
 
     generated_at = datetime.now(timezone.utc).isoformat()
+    files["README.txt"] = (
+        f"Shoir-IE Reproducibility Pack — {target_id} {name}\n\n"
+        f"Generated UTC: {generated_at}\n"
+        f"Configuration SHA-256 (redacted configuration): {input_fingerprint}\n"
+        f"Input snapshot included: {bool(include_input_snapshot)}\n"
+        f"Detailed result tables included: {bool(include_result_tables)}\n\n"
+        "Verify payload hashes against SHA256SUMS.txt. Review manifest redaction policy and limitations.\n"
+        "This bundle is not proof of engineering correctness or a substitute for method review.\n"
+    ).encode("utf-8")
     files_manifest = [
         {"path": path, "byte_count": len(payload), "sha256": hashlib.sha256(payload).hexdigest()}
         for path, payload in sorted(files.items())
@@ -4657,18 +4668,6 @@ def build_reproducibility_pack(
             archive.writestr(member_path, payload)
         archive.writestr("manifest.json", manifest_payload)
         archive.writestr("SHA256SUMS.txt", checksum_payload)
-        archive.writestr(
-            "README.txt",
-            (
-                f"Shoir-IE Reproducibility Pack — {target_id} {name}\n\n"
-                f"Generated UTC: {generated_at}\n"
-                f"Configuration SHA-256: {input_fingerprint}\n"
-                f"Input snapshot included: {bool(include_input_snapshot)}\n"
-                f"Detailed result tables included: {bool(include_result_tables)}\n\n"
-                "Verify payload hashes against SHA256SUMS.txt. Review the manifest's redaction policy and limitations.\n"
-                "This bundle is not proof of engineering correctness or a substitute for method review.\n"
-            ).encode("utf-8"),
-        )
     bundle = archive_buffer.getvalue()
     if len(bundle) > max_payload_bytes:
         raise ValueError(f"Reproducibility ZIP exceeds the configured {max_payload_bytes:,}-byte payload limit.")
@@ -4679,7 +4678,6 @@ def build_reproducibility_pack(
     ] + [
         {"Path": "manifest.json", "Bytes": len(manifest_payload), "SHA-256": hashlib.sha256(manifest_payload).hexdigest()},
         {"Path": "SHA256SUMS.txt", "Bytes": len(checksum_payload), "SHA-256": hashlib.sha256(checksum_payload).hexdigest()},
-        {"Path": "README.txt", "Bytes": 0, "SHA-256": "INCLUDED_IN_ARCHIVE"},
     ])
     return {
         "status": "REPRODUCIBILITY_PACK_CREATED",
