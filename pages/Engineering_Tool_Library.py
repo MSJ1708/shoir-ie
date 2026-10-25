@@ -2147,20 +2147,23 @@ if rows:
                                                            downtime_rate=float(downtime_rate)),
             )
 
+        else:
+            # A catalogued target without a wired, validated method must never render as
+            # an empty/blank page or pretend a successful run. Give the user its real state
+            # and the next safe action while preserving the existing Workbench navigation.
+            st.warning(
+                f"{selected_id} is catalogued, but a dedicated runnable method is not wired "
+                "to this library entry yet. No calculation was run."
+            )
+            st.markdown("**Current gap**")
+            st.write(item.get("remaining_gap", "No gap details are recorded. Treat the capability as unverified."))
+            st.markdown("**Existing route candidate**")
+            st.write(item.get("existing_module_or_route", "No route has been mapped."))
+            st.info(
+                "Use the existing Workbench module only for functionality it actually provides. "
+                "This library entry does not imply that the full target capability is implemented "
+                "or that an unconfigured integration is connected."
+            )
+
 else:
-    # A catalogued target without a wired, validated method must never render as
-    # an empty/blank page or pretend a successful run. Give the user its real state
-    # and the next safe action while preserving the existing Workbench navigation.
-    st.warning(
-        f"{selected_id} is catalogued, but a dedicated runnable method is not wired "
-        "to this library entry yet. No calculation was run."
-    )
-    st.markdown("**Current gap**")
-    st.write(item.get("remaining_gap", "No gap details are recorded. Treat the capability as unverified."))
-    st.markdown("**Existing route candidate**")
-    st.write(item.get("existing_module_or_route", "No route has been mapped."))
-    st.info(
-        "Use the existing Workbench module only for functionality it actually provides. "
-        "This library entry does not imply that the full target capability is implemented "
-        "or that an unconfigured integration is connected."
-    )
+    st.warning("No target capabilities match these filters. Change the workbench, status or search.")
