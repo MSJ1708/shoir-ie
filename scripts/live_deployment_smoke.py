@@ -65,7 +65,7 @@ def _tab_bar_layout(app_frame) -> dict:
     return tab_list.evaluate(
         """element => {
             const listRect = element.getBoundingClientRect();
-            const tabs = Array.from(element.querySelectorAll('button[role="tab"]')).map(button => {
+            const tabs = Array.from(new Set(element.querySelectorAll('[role="tab"], [data-baseweb="tab"]'))).map(button => {
                 const rect = button.getBoundingClientRect();
                 const label = button.querySelector('[data-testid="stMarkdownContainer"]') || button;
                 const labelRect = label.getBoundingClientRect();
