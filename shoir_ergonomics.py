@@ -20,9 +20,9 @@ NIOSH_RNLE_METHOD_VERSION = (
 # NIOSH Table 5 and Table 7 express the vertical boundary as 30 inches.
 NIOSH_VERTICAL_CATEGORY_BOUNDARY_CM = 76.2
 
-# Table 5: FM rows, indexed by frequency and by:
-# <=1h (V<75cm, V>=75cm), >1 to <=2h (V<75cm, V>=75cm),
-# >2 to <=8h (V<75cm, V>=75cm). Values transcribed from NIOSH 94-110 (2021).
+# Table 5: FM rows indexed by frequency. Columns are grouped by duration:
+# <=1h, >1 to <=2h, >2 to <=8h; each duration has V<30 in and V>=30 in.
+# The vertical boundary is 30 inches (76.2 cm), as footnoted in NIOSH 94-110 (2021).
 _FREQUENCY_ROWS: tuple[tuple[float, tuple[float, float, float, float, float, float]], ...] = (
     (0.2, (1.00, 1.00, 0.95, 0.95, 0.85, 0.85)),
     (0.5, (0.97, 0.97, 0.92, 0.92, 0.81, 0.81)),
@@ -84,7 +84,7 @@ def _frequency_multiplier(
     table_frequency = max(0.2, frequency_lifts_per_minute)
     if frequency_lifts_per_minute < 0.2:
         notes.append(
-            "NIOSH table guidance uses 0.2 lifts/minute when observed frequency is lower than 0.2."
+            "NIOSH Table 5 uses 0.2 lifts/minute when observed frequency is lower than 0.2."
         )
     if frequency_lifts_per_minute < 0.1:
         notes.append(
