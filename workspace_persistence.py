@@ -146,6 +146,9 @@ def _pack(value: Any) -> Any:
         return {
             "__type__": "dataframe",
             "value": value.to_json(orient="split", date_format="iso"),
+            # pandas JSON round-trips can infer an integer dtype for float columns
+            # whose current values happen to be whole numbers. Preserve the schema.
+            "dtypes": [str(dtype) for dtype in value.dtypes],
         }
     if isinstance(value, pd.Series):
         return {
@@ -177,7 +180,20 @@ def _unpack(value: Any) -> Any:
     kind = value["__type__"]
     payload = value.get("value")
     if kind == "dataframe":
-        return pd.read_json(StringIO(payload), orient="split")
+        frame = pd.read_json(StringIO(payload), orient="split")
+        dtypes = value.get("dtypes")
+        if isinstance(dtypes, list) and len(dtypes) == len(frame.columns):
+            for column_index, dtype in enumerate(dtypes):
+                try:
+                    frame.isetitem(
+                        column_index,
+                        frame.iloc[:, column_index].astype(dtype),
+                    )
+                except (TypeError, ValueError, OverflowError):
+                    # If a value cannot safely fit the original dtype, preserve
+                    # the decoded values rather than failing workspace recovery.
+                    continue
+        return frame
     if kind == "series":
         return pd.read_json(StringIO(payload), typ="series")
     if kind == "datetime":
