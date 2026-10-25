@@ -445,3 +445,59 @@ def test_workbench_runs_field_mapper_backlog_sop_and_supplier_methods():
             "SAVED_LOCAL_FALLBACK", "SAVED_MANAGED_WORKSPACE", "SESSION_ONLY",
             "SAVE_FAILED", "SAVE_PENDING", "SAVE_STATUS_NOT_CONFIRMED",
         }
+
+
+def test_workbench_runs_measurement_system_regression_and_research_hypothesis_tools():
+    """Exercise the three new tool IDs through the real Workbench form/permission/save path."""
+    from streamlit.testing.v1 import AppTest
+    import math
+
+    page = ROOT / "pages" / "Industrial_Engineering_Workbench.py"
+    at = AppTest.from_file(page, default_timeout=60)
+    at.session_state["current_user"] = "specialist-method-checker"
+    at.session_state["authenticated"] = True
+    at.session_state["user_tier"] = "Research Pack"
+    at.run(timeout=60)
+    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+
+    inspector = at.selectbox(key="shoir_100_tool_inspector")
+    inspector.select("T033 · Measurement Systems Analysis")
+    at.run(timeout=60)
+    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+    at.button(key="tool033_run").click()
+    at.run(timeout=60)
+    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+    msa = at.session_state.get("shoir_tool_result_T033")
+    assert msa is not None
+    assert msa["status"] == "PROVISIONAL_CROSSED_GAGE_RR_CALCULATED"
+    assert msa["gage_rr_standard_deviation"] == pytest.approx(math.sqrt(2.5))
+    assert msa["data_provenance"] == "SYNTHETIC_EXAMPLE"
+
+    inspector = at.selectbox(key="shoir_100_tool_inspector")
+    inspector.select("T036 · Regression and ANOVA Studio")
+    at.run(timeout=60)
+    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+    at.button(key="tool036_run").click()
+    at.run(timeout=60)
+    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+    regression = at.session_state.get("shoir_tool_result_T036")
+    assert regression is not None
+    assert regression["status"] == "OLS_REGRESSION_ANOVA_CALCULATED"
+    assert regression["r_squared"] > 0.99
+    assert regression["data_provenance"] == "SYNTHETIC_EXAMPLE"
+
+    inspector = at.selectbox(key="shoir_100_tool_inspector")
+    inspector.select("T037 · Hypothesis Testing Assistant")
+    at.run(timeout=60)
+    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+    at.button(key="tool037_run").click()
+    at.run(timeout=60)
+    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+    hypothesis = at.session_state.get("shoir_tool_result_T037")
+    assert hypothesis is not None
+    assert hypothesis["status"] == "HYPOTHESIS_TEST_CALCULATED"
+    assert hypothesis["method"] == "One-sample t-test"
+    assert hypothesis["sample_size_a"] == 4
+    assert hypothesis["reject_null_hypothesis"] is False
+    assert hypothesis["data_provenance"] == "SYNTHETIC_EXAMPLE"
+
