@@ -24,16 +24,16 @@ STATUS_VALUES = (
 
 _SECRET_PATTERNS = (
     re.compile(
-        r"(?i)\\b(password|passwd|secret|api[_ -]?key|access[_ -]?token|refresh[_ -]?token|client[_ -]?secret|service[_ -]?role[_ -]?key)\\b\\s*[:=]\\s*(\"[^\"]*\"|'[^']*'|[^\\s,;]+)"
+        r"(?i)\b(password|passwd|secret|api[_ -]?key|access[_ -]?token|refresh[_ -]?token|client[_ -]?secret|service[_ -]?role[_ -]?key)\b\s*[:=]\s*(\"[^\"]*\"|'[^']*'|[^\s,;]+)"
     ),
-    re.compile(r"(?i)\\bBearer\\s+[A-Za-z0-9._~+/=-]+"),
-    re.compile(r"\\b(?:sk-[A-Za-z0-9_-]{16,}|sbp_[A-Za-z0-9_-]{16,}|eyJ[A-Za-z0-9_-]{20,}\\.[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,})\\b"),
-    re.compile(r"(?i)https?://[^/\\s:@]+:[^/\\s@]+@"),
-    re.compile(r"(?i)\\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}\\b"),
-    re.compile(r"(?i)\\b(?:\\d{1,3}\\.){3}\\d{1,3}\\b"),
-    re.compile(r"(?i)\\b[A-Z]:\\\\(?:[^\\\\\\r\\n]+\\\\)*[^\\\\\\r\\n]+"),
+    re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+"),
+    re.compile(r"\b(?:sk-[A-Za-z0-9_-]{16,}|sbp_[A-Za-z0-9_-]{16,}|eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,})\b"),
+    re.compile(r"(?i)https?://[^/\s:@]+:[^/\s@]+@"),
+    re.compile(r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b"),
+    re.compile(r"(?i)\b(?:\d{1,3}\.){3}\d{1,3}\b"),
+    re.compile(r"(?i)\b[A-Z]:\\(?:[^\\\r\n]+\\)*[^\\\r\n]+"),
 )
-_TRACEBACK_FRAME = re.compile(r'^\\s*File ["\'].*["\'], line \\d+')
+_TRACEBACK_FRAME = re.compile(r'^\s*File ["\'].*["\'], line \d+')
 
 
 def _now_utc() -> str:
@@ -45,7 +45,7 @@ def redact_diagnostic_text(value: Any, *, max_chars: int = 12000) -> dict[str, A
     raw = str(value or "")
     truncated = len(raw) > max_chars
     raw = raw[:max_chars]
-    raw = "".join(ch for ch in raw if ch in "\\n\\r\\t" or ord(ch) >= 32)
+    raw = "".join(ch for ch in raw if ch in "\n\r\t" or ord(ch) >= 32)
     redactions = 0
     cleaned = raw
     for pattern in _SECRET_PATTERNS:
@@ -72,7 +72,7 @@ def redact_diagnostic_text(value: Any, *, max_chars: int = 12000) -> dict[str, A
     else:
         cleaned = " ".join(lines)
 
-    cleaned = re.sub(r"\\s+", " ", cleaned).strip()
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
     if not cleaned:
         cleaned = "No diagnostic details were supplied."
     summary = cleaned[:500]
