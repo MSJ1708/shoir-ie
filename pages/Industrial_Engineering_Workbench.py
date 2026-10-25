@@ -49,6 +49,9 @@ TIER = canonical_tier(RAW_TIER)
 _TOOL022_EXAMPLE_COUNTS = '{"Productive": 60, "Idle": 25, "Setup": 15}'
 _TOOL028_EXAMPLE_COUNTS = '{"Machine": 12, "Material": 7, "Method": 3}'
 _TOOL029_EXAMPLE_ITEMS = '[{"category":"Sort","criterion":"Remove unnecessary items","score":3,"evidence":"Illustrative example","owner":"","due_date":""},{"category":"Set in Order","criterion":"Label storage locations","score":3,"evidence":"Illustrative example","owner":"","due_date":""},{"category":"Shine","criterion":"Clean workstations","score":3,"evidence":"Illustrative example","owner":"","due_date":""},{"category":"Standardize","criterion":"Display standard work","score":3,"evidence":"Illustrative example","owner":"","due_date":""},{"category":"Sustain","criterion":"Review 5S weekly","score":3,"evidence":"Illustrative example","owner":"","due_date":""}]'
+_TOOL033_EXAMPLE_MEASUREMENTS = '[{"part":"P1","operator":"A","trial":"1","value":10},{"part":"P1","operator":"A","trial":"2","value":12},{"part":"P1","operator":"B","trial":"1","value":11},{"part":"P1","operator":"B","trial":"2","value":13},{"part":"P2","operator":"A","trial":"1","value":20},{"part":"P2","operator":"A","trial":"2","value":22},{"part":"P2","operator":"B","trial":"1","value":21},{"part":"P2","operator":"B","trial":"2","value":23},{"part":"P3","operator":"A","trial":"1","value":30},{"part":"P3","operator":"A","trial":"2","value":32},{"part":"P3","operator":"B","trial":"1","value":31},{"part":"P3","operator":"B","trial":"2","value":33}]'
+_TOOL036_EXAMPLE_RECORDS = '[{"x":1,"y":2.1},{"x":2,"y":4.0},{"x":3,"y":6.2},{"x":4,"y":7.9},{"x":5,"y":10.2},{"x":6,"y":11.8},{"x":7,"y":14.1},{"x":8,"y":15.9}]'
+_TOOL037_EXAMPLE_SAMPLE_A = "2, 4, 6, 8"
 
 st.markdown("""
 <style>
@@ -852,6 +855,26 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 value=10000, step=100, key="tool085_search_limit"
                             )
                             run_method = st.form_submit_button("Calculate sample size", type="primary", use_container_width=True, key="tool085_run")
+                        elif selected_tool["tool_id"] == "T033":
+                            st.caption("Crossed gauge R&R using a balanced parts × operators × trials design. Example readings are SYNTHETIC; confirm the method and acceptance criteria with a qualified MSA reviewer.")
+                            gage_rr_json = st.text_area("Measurements (JSON list: part, operator, trial, value)", value=_TOOL033_EXAMPLE_MEASUREMENTS, key="tool033_measurements")
+                            gage_rr_unit = st.text_input("Measurement unit", "mm", key="tool033_unit")
+                            gage_rr_tolerance = st.number_input("Optional engineering tolerance width", min_value=0.001, value=1.0, step=0.1, key="tool033_tolerance")
+                            run_method = st.form_submit_button("Calculate crossed gage R&R", type="primary", use_container_width=True, key="tool033_run")
+                        elif selected_tool["tool_id"] == "T036":
+                            st.caption("Ordinary least squares with an intercept, coefficient diagnostics and overall regression ANOVA. Use numeric, complete, independently collected rows; regression does not establish causation.")
+                            regression_records_json = st.text_area("Observations (JSON list of objects)", value=_TOOL036_EXAMPLE_RECORDS, key="tool036_records")
+                            regression_response = st.text_input("Response column", "y", key="tool036_response")
+                            regression_predictors_text = st.text_input("Predictor columns (comma-separated)", "x", key="tool036_predictors")
+                            run_method = st.form_submit_button("Fit regression and ANOVA", type="primary", use_container_width=True, key="tool036_run")
+                        elif selected_tool["tool_id"] == "T037":
+                            st.caption("Research Pack method subset: two-sided one-sample, independent Welch, and paired t-tests only. Example values are synthetic. Check study design and assumptions before interpretation.")
+                            hypothesis_test_type = st.selectbox("Supported test", ["one_sample_t", "welch_t", "paired_t"], format_func=lambda value: {"one_sample_t": "One-sample t-test", "welch_t": "Independent Welch t-test", "paired_t": "Paired t-test"}[value], key="tool037_type")
+                            hypothesis_sample_a = st.text_input("Sample A / first measurements (comma-separated)", _TOOL037_EXAMPLE_SAMPLE_A, key="tool037_sample_a")
+                            hypothesis_sample_b = st.text_input("Sample B / paired measurements (comma-separated)", "1, 3, 5, 7", key="tool037_sample_b")
+                            hypothesis_null_mean = st.number_input("Null hypothesis mean (one-sample test only)", value=4.0, step=0.5, key="tool037_null_mean")
+                            hypothesis_alpha = st.number_input("Significance level (alpha)", min_value=0.001, max_value=0.5, value=0.05, step=0.01, key="tool037_alpha")
+                            run_method = st.form_submit_button("Run hypothesis test", type="primary", use_container_width=True, key="tool037_run")
 
                     if selected_tool["tool_id"] == "T021":
                         current_tool_inputs = {
@@ -979,6 +1002,12 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                         current_tool_inputs = {"operating_hours": mtbf_operating_hours, "repair_durations_hours_text": repair_durations_text}
                     elif selected_tool["tool_id"] == "T056":
                         current_tool_inputs = {"items_json": inventory_items_json, "currency": inventory_currency, "a_threshold": abc_a_threshold, "b_threshold": abc_b_threshold, "x_cv_max": xyz_x_cutoff, "y_cv_max": xyz_y_cutoff}
+                    elif selected_tool["tool_id"] == "T033":
+                        current_tool_inputs = {"measurements_json": gage_rr_json, "unit": gage_rr_unit, "tolerance": gage_rr_tolerance}
+                    elif selected_tool["tool_id"] == "T036":
+                        current_tool_inputs = {"records_json": regression_records_json, "response": regression_response, "predictors": regression_predictors_text}
+                    elif selected_tool["tool_id"] == "T037":
+                        current_tool_inputs = {"test_type": hypothesis_test_type, "sample_a_text": hypothesis_sample_a, "sample_b_text": hypothesis_sample_b, "null_mean": hypothesis_null_mean, "alpha": hypothesis_alpha}
                     else:
                         current_tool_inputs = {
                             "cohen_d": effect_size, "alpha": alpha,
@@ -1016,6 +1045,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 analyze_weibull_reliability, analyze_spare_parts_criticality,
                                 analyze_safety_incident_trends, optimize_warehouse_slotting,
                                 optimize_task_resource_assignment, compare_energy_performance_scenarios,
+                                analyze_measurement_system_gage_rr, fit_regression_anova, run_hypothesis_test,
                             )
                             if selected_tool["tool_id"] == "T021":
                                 try:
@@ -1315,13 +1345,58 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                     effect_size, alpha, target_power,
                                     max_n_per_group=int(search_limit),
                                 )
+                            elif selected_tool["tool_id"] == "T033":
+                                parsed_measurements = json.loads(gage_rr_json)
+                                if not isinstance(parsed_measurements, list):
+                                    raise ValueError("Measurements must be a JSON list of reading objects.")
+                                result = analyze_measurement_system_gage_rr(
+                                    parsed_measurements, tolerance=gage_rr_tolerance, unit=gage_rr_unit
+                                )
+                                result["data_provenance"] = (
+                                    "SYNTHETIC_EXAMPLE"
+                                    if gage_rr_json.strip() == _TOOL033_EXAMPLE_MEASUREMENTS
+                                    else "USER_ENTERED_UNVERIFIED"
+                                )
+                            elif selected_tool["tool_id"] == "T036":
+                                parsed_regression_records = json.loads(regression_records_json)
+                                parsed_predictors = [name.strip() for name in regression_predictors_text.split(",") if name.strip()]
+                                if not isinstance(parsed_regression_records, list):
+                                    raise ValueError("Regression observations must be a JSON list of objects.")
+                                result = fit_regression_anova(
+                                    parsed_regression_records, regression_response, parsed_predictors
+                                )
+                                result["data_provenance"] = (
+                                    "SYNTHETIC_EXAMPLE"
+                                    if regression_records_json.strip() == _TOOL036_EXAMPLE_RECORDS
+                                    else "USER_ENTERED_UNVERIFIED"
+                                )
+                            elif selected_tool["tool_id"] == "T037":
+                                def _parse_test_values(raw: str, label: str) -> list[float]:
+                                    try:
+                                        values = [float(part.strip()) for part in raw.split(",") if part.strip()]
+                                    except ValueError as exc:
+                                        raise ValueError(f"{label} must be comma-separated numeric values.") from exc
+                                    if not values:
+                                        raise ValueError(f"Provide at least two values for {label}.")
+                                    return values
+                                parsed_sample_a = _parse_test_values(hypothesis_sample_a, "Sample A")
+                                parsed_sample_b = _parse_test_values(hypothesis_sample_b, "Sample B") if hypothesis_test_type != "one_sample_t" else None
+                                result = run_hypothesis_test(
+                                    hypothesis_test_type, parsed_sample_a, parsed_sample_b,
+                                    null_mean=hypothesis_null_mean, alpha=hypothesis_alpha,
+                                )
+                                result["data_provenance"] = (
+                                    "SYNTHETIC_EXAMPLE"
+                                    if hypothesis_sample_a.strip() == _TOOL037_EXAMPLE_SAMPLE_A
+                                    else "USER_ENTERED_UNVERIFIED"
+                                )
                             _persist_focused_tool_result(
                                 selected_tool["tool_id"], result, current_tool_inputs
                             )
                         except Exception as exc:
                             st.error(f"Tool run could not be completed safely: {exc}")
 
-                    if selected_tool["tool_id"] in {"T017", "T018", "T019", "T024", "T025", "T027", "T034", "T038", "T041", "T043", "T045", "T047", "T050", "T054", "T059", "T063", "T070", "T076", "T077", "T079", "T082", "T083", "T084"}:
+                    if selected_tool["tool_id"] in {"T017", "T018", "T019", "T024", "T025", "T027", "T033", "T034", "T036", "T037", "T038", "T041", "T043", "T045", "T047", "T050", "T054", "T059", "T063", "T070", "T076", "T077", "T079", "T082", "T083", "T084"}:
                         result = st.session_state.get("shoir_tool_result_" + selected_tool["tool_id"])
                         if result:
                             _show_focused_tool_persistence(selected_tool["tool_id"], result, current_tool_inputs)
