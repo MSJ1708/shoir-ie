@@ -104,6 +104,34 @@ def test_workbench_denies_focused_tool_execution_to_unauthenticated_guest():
     assert any("Sign in with an active Shoir-IE account" in str(item.value) for item in at.error)
 
 
+def test_workbench_denies_rcm_run_below_professional_tier():
+    """Verify that selecting a visible tool cannot bypass its server-side tier gate."""
+    from streamlit.testing.v1 import AppTest
+
+    page = ROOT / "pages" / "Industrial_Engineering_Workbench.py"
+    at = AppTest.from_file(page, default_timeout=60)
+    at.session_state["current_user"] = "rcm-tier-gate-checker"
+    at.session_state["authenticated"] = True
+    at.session_state["user_tier"] = "Starter"
+    at.run(timeout=60)
+    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+
+    at.selectbox(key="shoir_100_tool_inspector").select(
+        "T044 · Reliability-Centered Maintenance Assistant"
+    )
+    at.run(timeout=60)
+    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+    at.button(key="tool044_run").click()
+    at.run(timeout=60)
+
+    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+    assert at.session_state.get("shoir_tool_result_T044") is None
+    assert any(
+        "T044 requires the Professional package." in str(item.value)
+        for item in at.error
+    )
+
+
 def test_workbench_selects_and_runs_work_sampling_and_pareto_tools():
     from streamlit.testing.v1 import AppTest
 
