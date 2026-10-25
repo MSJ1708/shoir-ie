@@ -643,8 +643,8 @@ def test_workbench_builds_downloadable_reproducibility_pack():
     source.select("T021 · Time Study and Standard Time")
     at.checkbox(key="tool087_include_inputs").set_value(True)
     at.checkbox(key="tool087_include_tables").set_value(True)
-    at.run(timeout=90)
-    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+    # Streamlit form controls are submitted atomically with the form button.
+    # Do not rerun the app between editing form values and submitting the form.
     at.button(key="tool087_run").click()
     at.run(timeout=90)
     assert not at.exception, "\n".join(str(error.value) for error in at.exception)
