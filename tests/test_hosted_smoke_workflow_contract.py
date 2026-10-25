@@ -29,3 +29,14 @@ def test_hosted_smoke_documents_that_it_does_not_prove_deployed_sha():
 
     assert "not proof" in source
     assert "triggering Git SHA" in source
+
+def test_public_tab_smoke_rejects_clipped_mobile_labels():
+    source = (ROOT / "scripts" / "live_deployment_smoke.py").read_text(encoding="utf-8")
+
+    assert "def _tab_bar_layout(" in source
+    assert "def _validate_tab_bar_layout(" in source
+    assert 'layout["scrollWidth"] > layout["clientWidth"] + 2' in source
+    assert 'tab["scrollWidth"] > tab["clientWidth"] + 2' in source
+    assert 'tab["scrollHeight"] > tab["clientHeight"] + 2' in source
+    assert 'viewport_width <= 600' in source
+
