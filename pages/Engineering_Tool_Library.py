@@ -489,7 +489,7 @@ if rows:
                 articles = saved.get("result", {}).get("articles", [])
                 if not articles:
                     st.info("No curated article matched that query/tool ID. Try a broader topic such as capacity, OEE, facility, reliability, research or ROI.")
-                for article in articles:
+                for article_index, article in enumerate(articles):
                     with st.container(border=True):
                         st.subheader(article.get("topic", "Help topic"))
                         st.write(article.get("summary", ""))
@@ -502,7 +502,7 @@ if rows:
                             if target:
                                 st.button(
                                     f"Open {tool_id} · {target['canonical_name']}",
-                                    key=f"t010_open_{tool_id}", on_click=_jump_to_target, args=(tool_id,),
+                                    key=f"t010_open_{article_index}_{tool_id}", on_click=_jump_to_target, args=(tool_id,),
                                 )
 
         elif selected_id == "T089":
