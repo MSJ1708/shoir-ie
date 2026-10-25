@@ -49,6 +49,7 @@ TIER = canonical_tier(RAW_TIER)
 _TOOL022_EXAMPLE_COUNTS = '{"Productive": 60, "Idle": 25, "Setup": 15}'
 _TOOL028_EXAMPLE_COUNTS = '{"Machine": 12, "Material": 7, "Method": 3}'
 _TOOL029_EXAMPLE_ITEMS = '[{"category":"Sort","criterion":"Remove unnecessary items","score":3,"evidence":"Illustrative example","owner":"","due_date":""},{"category":"Set in Order","criterion":"Label storage locations","score":3,"evidence":"Illustrative example","owner":"","due_date":""},{"category":"Shine","criterion":"Clean workstations","score":3,"evidence":"Illustrative example","owner":"","due_date":""},{"category":"Standardize","criterion":"Display standard work","score":3,"evidence":"Illustrative example","owner":"","due_date":""},{"category":"Sustain","criterion":"Review 5S weekly","score":3,"evidence":"Illustrative example","owner":"","due_date":""}]'
+_TOOL039_EXAMPLE_RECORDS = '[{"capa_id":"DEMO-CAPA-001","title":"Repeated seal failure","status":"IN_PROGRESS","team":"Maintenance and quality","problem_statement":"Recurring seal failures on pump family","containment_action":"Inspect affected units and quarantine suspect lot","root_cause":"Supplier batch variation; validation still required","corrective_action":"Replace suspect seal batch and verify installation","implementation_evidence":"DEMO-WO-104","preventive_action":"Add supplier lot verification at receipt","closure_review":"Pending review after effectiveness period","effectiveness_evidence":"","owner":"Quality lead (illustrative)","reviewer":"","approval_reference":"","evidence_reference":"DEMO-EVIDENCE-001","opened_date":"2026-10-01","due_date":"2026-11-01"}]'
 _TOOL048_EXAMPLE_OBSERVATIONS = '[{"timestamp":"2026-10-25T00:00:00Z","value":10},{"timestamp":"2026-10-25T01:00:00Z","value":10},{"timestamp":"2026-10-25T02:00:00Z","value":10},{"timestamp":"2026-10-25T03:00:00Z","value":10},{"timestamp":"2026-10-25T04:00:00Z","value":10},{"timestamp":"2026-10-25T05:00:00Z","value":10},{"timestamp":"2026-10-25T06:00:00Z","value":10},{"timestamp":"2026-10-25T07:00:00Z","value":100}]'
 _TOOL089_PRACTICE_TOPICS = {
     "takt_time": {"label": "Takt time", "question": "A line has 420 production minutes available in a shift and must produce 210 units. What is takt time?", "unit": "minutes per unit"},
@@ -404,7 +405,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                 "Copilot action, API and export path must enforce their own server-side entitlement checks."
             )
 
-            if selected_tool["tool_id"] in {"T002", "T015", "T016", "T017", "T018", "T019", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T033", "T034", "T035", "T036", "T037", "T038", "T040", "T041", "T042", "T043", "T045", "T047", "T048", "T049", "T050", "T051", "T052", "T054", "T055", "T056", "T058", "T059", "T062", "T063", "T066", "T069", "T070", "T071", "T072", "T075", "T076", "T077", "T078", "T079", "T081", "T082", "T083", "T084", "T085", "T087", "T089"}:
+            if selected_tool["tool_id"] in {"T002", "T015", "T016", "T017", "T018", "T019", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T033", "T034", "T035", "T036", "T037", "T038", "T039", "T040", "T041", "T042", "T043", "T045", "T047", "T048", "T049", "T050", "T051", "T052", "T054", "T055", "T056", "T058", "T059", "T062", "T063", "T066", "T069", "T070", "T071", "T072", "T075", "T076", "T077", "T078", "T079", "T081", "T082", "T083", "T084", "T085", "T087", "T089"}:
                 st.markdown("---")
                 st.markdown("**Run focused specialist method**")
                 st.caption(
@@ -479,6 +480,19 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                             spc_measurements_text = st.text_input("Chronological measurements (comma-separated)", "10, 11, 9, 10, 12, 11", key="tool031_measurements")
                             spc_unit = st.text_input("Measurement unit", "units", key="tool031_unit")
                             run_method = st.form_submit_button("Calculate I-MR control limits", type="primary", use_container_width=True, key="tool031_run")
+                        elif selected_tool["tool_id"] == "T039":
+                            st.caption("Structured 8D/CAPA record-completeness and due-date review. It tracks missing fields and closure evidence but does not certify the cause, action effectiveness or regulatory compliance.")
+                            capa_records_json = st.text_area(
+                                "CAPA / 8D records (JSON list; edit or add records)",
+                                value=_TOOL039_EXAMPLE_RECORDS,
+                                key="tool039_records",
+                            )
+                            capa_as_of_date = st.text_input(
+                                "Review date (YYYY-MM-DD; blank uses current date)",
+                                value="",
+                                key="tool039_as_of_date",
+                            )
+                            run_method = st.form_submit_button("Review CAPA / 8D register", type="primary", use_container_width=True, key="tool039_run")
                         elif selected_tool["tool_id"] == "T040":
                             st.caption("Prefilled quantities/costs are SYNTHETIC examples. Replace with a measured period and traceable costs. Scrap and rework are mutually exclusive dispositions of defective units.")
                             quality_period = st.text_input("Measurement period", "Example period — replace with actual period", key="tool040_period")
@@ -1226,6 +1240,9 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                         current_tool_inputs = {"amount": amount_to_convert, "source_unit": source_unit, "target_unit": target_unit, "exchange_rate": exchange_rate_value, "exchange_rate_date": exchange_rate_date_value, "exchange_rate_source": exchange_rate_source_value}
                     elif selected_tool["tool_id"] == "T031":
                         current_tool_inputs = {"measurements_text": spc_measurements_text, "unit": spc_unit}
+                    elif selected_tool["tool_id"] == "T039":
+                        current_tool_inputs = {"records_json": capa_records_json, "as_of_date": capa_as_of_date}
+
                     elif selected_tool["tool_id"] == "T040":
                         current_tool_inputs = {"period": quality_period, "currency": quality_currency, "total_units": quality_total_units, "defective_units": quality_defects, "scrap_units": quality_scrap_units, "rework_units": quality_rework_units, "scrap_cost_per_unit": quality_scrap_cost, "rework_cost_per_unit": quality_rework_cost, "inspection_cost": quality_inspection_cost}
                     elif selected_tool["tool_id"] == "T042":
@@ -1312,6 +1329,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 evaluate_student_practice_answer,
                                 build_guided_study_plan,
                                 monitor_equipment_anomalies,
+                                assess_capa_8d_records,
                             )
                             if selected_tool["tool_id"] == "T015":
                                 headers = [item.strip() for item in field_headers_text.split(",") if item.strip()]
@@ -1524,6 +1542,22 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 except ValueError as exc:
                                     raise ValueError("SPC measurements must be comma-separated numbers.") from exc
                                 result = analyze_spc_individuals(values, unit=spc_unit)
+                            elif selected_tool["tool_id"] == "T039":
+                                try:
+                                    parsed_capa_records = json.loads(capa_records_json)
+                                except json.JSONDecodeError as exc:
+                                    raise ValueError("CAPA/8D records must be valid JSON.") from exc
+                                if not isinstance(parsed_capa_records, list):
+                                    raise ValueError("CAPA/8D records must be a JSON list of objects.")
+                                result = assess_capa_8d_records(
+                                    parsed_capa_records,
+                                    as_of_date=capa_as_of_date.strip() or None,
+                                )
+                                result["data_provenance"] = (
+                                    "SYNTHETIC_EXAMPLE"
+                                    if capa_records_json.strip() == _TOOL039_EXAMPLE_RECORDS
+                                    else "USER_ENTERED_UNVERIFIED"
+                                )
                             elif selected_tool["tool_id"] == "T040":
                                 result = analyze_quality_cost_defects(quality_total_units, quality_defects, quality_scrap_units, quality_rework_units, quality_scrap_cost, quality_rework_cost, quality_inspection_cost, currency=quality_currency, period=quality_period)
                             elif selected_tool["tool_id"] == "T042":
@@ -1866,6 +1900,19 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                             chart = result["chart_data"]
                             st.plotly_chart(px.line(chart, x="Observation", y=[f"Measurement ({result['unit']})", f"I center ({result['unit']})", f"I UCL ({result['unit']})", f"I LCL ({result['unit']})"], markers=True, title="Individuals control chart"), use_container_width=True)
                             st.plotly_chart(px.line(chart, x="Observation", y=["Moving range", "MR center", "MR UCL", "MR LCL"], markers=True, title="Moving-range control chart"), use_container_width=True)
+                    elif selected_tool["tool_id"] == "T039":
+                        result = st.session_state.get("shoir_tool_result_T039")
+                        if result:
+                            _show_focused_tool_persistence("T039", result, current_tool_inputs)
+                            c1, c2, c3, c4 = st.columns(4)
+                            c1.metric("CAPA / 8D records", result["record_count"])
+                            c2.metric("Overdue actions", result["overdue_count"])
+                            c3.metric("Records missing evidence", result["records_with_missing_evidence"])
+                            c4.metric("Complete closure records", result["complete_closure_count"])
+                            st.caption(f"Review as of {result['as_of_date']} · provenance: {result.get('data_provenance', 'USER_ENTERED_UNVERIFIED')}")
+                            st.dataframe(result["records"], use_container_width=True, hide_index=True)
+                            st.dataframe(result["workflow_summary"], use_container_width=True, hide_index=True)
+                            st.warning(result["warning"])
                     elif selected_tool["tool_id"] == "T040":
                         result = st.session_state.get("shoir_tool_result_T040")
                         if result:
