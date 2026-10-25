@@ -52,6 +52,8 @@ _TOOL029_EXAMPLE_ITEMS = '[{"category":"Sort","criterion":"Remove unnecessary it
 _TOOL033_EXAMPLE_MEASUREMENTS = '[{"part":"P1","operator":"A","trial":"1","value":10},{"part":"P1","operator":"A","trial":"2","value":12},{"part":"P1","operator":"B","trial":"1","value":11},{"part":"P1","operator":"B","trial":"2","value":13},{"part":"P2","operator":"A","trial":"1","value":20},{"part":"P2","operator":"A","trial":"2","value":22},{"part":"P2","operator":"B","trial":"1","value":21},{"part":"P2","operator":"B","trial":"2","value":23},{"part":"P3","operator":"A","trial":"1","value":30},{"part":"P3","operator":"A","trial":"2","value":32},{"part":"P3","operator":"B","trial":"1","value":31},{"part":"P3","operator":"B","trial":"2","value":33}]'
 _TOOL036_EXAMPLE_RECORDS = '[{"x":1,"y":2.1},{"x":2,"y":4.0},{"x":3,"y":6.2},{"x":4,"y":7.9},{"x":5,"y":10.2},{"x":6,"y":11.8},{"x":7,"y":14.1},{"x":8,"y":15.9}]'
 _TOOL037_EXAMPLE_SAMPLE_A = "2, 4, 6, 8"
+_TOOL049_EXAMPLE_WORK_ORDERS = '[{"work_order_id":"WO-1","task":"Critical bearing","asset":"Pump A","criticality_score":5,"days_until_due":-2,"estimated_hours":4,"required_skill":"Mechanical"},{"work_order_id":"WO-2","task":"Calibration","asset":"Gauge B","criticality_score":4,"days_until_due":0,"estimated_hours":3,"required_skill":"Mechanical"},{"work_order_id":"WO-3","task":"Paint repair","asset":"Frame C","criticality_score":2,"days_until_due":5,"estimated_hours":2,"required_skill":"Electrical"}]'
+_TOOL058_EXAMPLE_SUPPLIERS = '[{"supplier":"Acme","scores":{"Delivery":90,"Quality":80},"data_as_of":"2026-Q3","evidence_reference":"sample-audit-1"},{"supplier":"Beta","scores":{"Delivery":75},"data_as_of":"2026-Q3","risk_mitigation":"Provide missing quality evidence"},{"supplier":"Gamma","scores":{"Delivery":70,"Quality":100},"data_as_of":"2026-Q3","evidence_reference":"sample-audit-3"}]'
 
 st.markdown("""
 <style>
@@ -875,6 +877,18 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                             hypothesis_null_mean = st.number_input("Null hypothesis mean (one-sample test only)", value=4.0, step=0.5, key="tool037_null_mean")
                             hypothesis_alpha = st.number_input("Significance level (alpha)", min_value=0.001, max_value=0.5, value=0.05, step=0.01, key="tool037_alpha")
                             run_method = st.form_submit_button("Run hypothesis test", type="primary", use_container_width=True, key="tool037_run")
+                        elif selected_tool["tool_id"] == "T049":
+                            st.caption("Greedy maintenance backlog priority under a stated labor-hours budget. It is not a globally optimal schedule; supplied skills and due dates must be checked against the actual CMMS/work plan.")
+                            maintenance_orders_json = st.text_area("Maintenance work orders (JSON list)", value=_TOOL049_EXAMPLE_WORK_ORDERS, key="tool049_orders")
+                            maintenance_available_hours = st.number_input("Available qualified labor hours in this planning window", min_value=0.0, value=7.0, step=1.0, key="tool049_hours")
+                            maintenance_skills_text = st.text_input("Available skills (comma-separated; blank means no skill restriction)", "Mechanical, Electrical", key="tool049_skills")
+                            maintenance_due_soon_days = st.number_input("Due-soon window (whole days)", min_value=0, max_value=365, value=3, step=1, key="tool049_due_soon")
+                            run_method = st.form_submit_button("Prioritize maintenance backlog", type="primary", use_container_width=True, key="tool049_run")
+                        elif selected_tool["tool_id"] == "T058":
+                            st.caption("Weighted 0–100 supplier scorecard. Suppliers with missing criteria stay unranked. The weights and scores are user supplied; this is not a verified supplier-risk assessment.")
+                            supplier_records_json = st.text_area("Supplier records (JSON list)", value=_TOOL058_EXAMPLE_SUPPLIERS, key="tool058_suppliers")
+                            supplier_weights_json = st.text_area("Criterion weights (JSON object; values are relative weights)", value='{"Delivery":0.4,"Quality":0.6}', key="tool058_weights")
+                            run_method = st.form_submit_button("Score supplier performance", type="primary", use_container_width=True, key="tool058_run")
 
                     if selected_tool["tool_id"] == "T021":
                         current_tool_inputs = {
@@ -1008,6 +1022,10 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                         current_tool_inputs = {"records_json": regression_records_json, "response": regression_response, "predictors": regression_predictors_text}
                     elif selected_tool["tool_id"] == "T037":
                         current_tool_inputs = {"test_type": hypothesis_test_type, "sample_a_text": hypothesis_sample_a, "sample_b_text": hypothesis_sample_b, "null_mean": hypothesis_null_mean, "alpha": hypothesis_alpha}
+                    elif selected_tool["tool_id"] == "T049":
+                        current_tool_inputs = {"work_orders_json": maintenance_orders_json, "available_hours": maintenance_available_hours, "available_skills": maintenance_skills_text, "due_soon_days": int(maintenance_due_soon_days)}
+                    elif selected_tool["tool_id"] == "T058":
+                        current_tool_inputs = {"suppliers_json": supplier_records_json, "weights_json": supplier_weights_json}
                     else:
                         current_tool_inputs = {
                             "cohen_d": effect_size, "alpha": alpha,
@@ -1046,6 +1064,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 analyze_safety_incident_trends, optimize_warehouse_slotting,
                                 optimize_task_resource_assignment, compare_energy_performance_scenarios,
                                 analyze_measurement_system_gage_rr, fit_regression_anova, run_hypothesis_test,
+                                prioritize_maintenance_backlog, score_supplier_performance,
                             )
                             if selected_tool["tool_id"] == "T021":
                                 try:
@@ -1390,13 +1409,39 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                     if hypothesis_sample_a.strip() == _TOOL037_EXAMPLE_SAMPLE_A
                                     else "USER_ENTERED_UNVERIFIED"
                                 )
+                            elif selected_tool["tool_id"] == "T049":
+                                parsed_work_orders = json.loads(maintenance_orders_json)
+                                if not isinstance(parsed_work_orders, list):
+                                    raise ValueError("Maintenance work orders must be a JSON list of objects.")
+                                skills = [skill.strip() for skill in maintenance_skills_text.split(",") if skill.strip()]
+                                result = prioritize_maintenance_backlog(
+                                    parsed_work_orders, maintenance_available_hours,
+                                    available_skills=skills,
+                                    due_soon_days=int(maintenance_due_soon_days),
+                                )
+                                result["data_provenance"] = (
+                                    "SYNTHETIC_EXAMPLE"
+                                    if maintenance_orders_json.strip() == _TOOL049_EXAMPLE_WORK_ORDERS
+                                    else "USER_ENTERED_UNVERIFIED"
+                                )
+                            elif selected_tool["tool_id"] == "T058":
+                                parsed_suppliers = json.loads(supplier_records_json)
+                                parsed_weights = json.loads(supplier_weights_json)
+                                if not isinstance(parsed_suppliers, list) or not isinstance(parsed_weights, dict):
+                                    raise ValueError("Supplier records must be a JSON list and criterion weights must be a JSON object.")
+                                result = score_supplier_performance(parsed_suppliers, parsed_weights)
+                                result["data_provenance"] = (
+                                    "SYNTHETIC_EXAMPLE"
+                                    if supplier_records_json.strip() == _TOOL058_EXAMPLE_SUPPLIERS
+                                    else "USER_ENTERED_UNVERIFIED"
+                                )
                             _persist_focused_tool_result(
                                 selected_tool["tool_id"], result, current_tool_inputs
                             )
                         except Exception as exc:
                             st.error(f"Tool run could not be completed safely: {exc}")
 
-                    if selected_tool["tool_id"] in {"T017", "T018", "T019", "T024", "T025", "T027", "T033", "T034", "T036", "T037", "T038", "T041", "T043", "T045", "T047", "T050", "T054", "T059", "T063", "T070", "T076", "T077", "T079", "T082", "T083", "T084"}:
+                    if selected_tool["tool_id"] in {"T017", "T018", "T019", "T024", "T025", "T027", "T033", "T034", "T036", "T037", "T038", "T041", "T043", "T045", "T047", "T049", "T050", "T054", "T058", "T059", "T063", "T070", "T076", "T077", "T079", "T082", "T083", "T084"}:
                         result = st.session_state.get("shoir_tool_result_" + selected_tool["tool_id"])
                         if result:
                             _show_focused_tool_persistence(selected_tool["tool_id"], result, current_tool_inputs)
