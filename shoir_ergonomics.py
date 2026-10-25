@@ -17,6 +17,9 @@ NIOSH_RNLE_METHOD_VERSION = (
     "Revised NIOSH Lifting Equation (RNLE), Applications Manual 94-110, revised 2021"
 )
 
+# NIOSH Table 5 and Table 7 express the vertical boundary as 30 inches.
+NIOSH_VERTICAL_CATEGORY_BOUNDARY_CM = 76.2
+
 # Table 5: FM rows, indexed by frequency and by:
 # <=1h (V<75cm, V>=75cm), >1 to <=2h (V<75cm, V>=75cm),
 # >2 to <=8h (V<75cm, V>=75cm). Values transcribed from NIOSH 94-110 (2021).
@@ -90,7 +93,9 @@ def _frequency_multiplier(
         )
 
     column = _duration_column(duration_hours)
-    column += 0 if vertical_origin_cm < 75 else 1
+    # Table 5 boundary is V < 30 in versus V >= 30 in (30 in = 76.2 cm),
+    # evaluated at the origin, not at a 75 cm rounded boundary.
+    column += 0 if vertical_origin_cm < NIOSH_VERTICAL_CATEGORY_BOUNDARY_CM else 1
 
     if table_frequency > 15:
         fm = 0.0
@@ -144,7 +149,7 @@ def _coupling_multiplier(coupling_quality: str, vertical_cm: float) -> float:
     if quality == "good":
         return 1.0
     if quality == "fair":
-        return 0.95 if vertical_cm < 75 else 1.0
+        return 0.95 if vertical_cm < NIOSH_VERTICAL_CATEGORY_BOUNDARY_CM else 1.0
     return 0.90
 
 
@@ -279,5 +284,6 @@ def calculate_rnle_lifting_index(
 __all__ = [
     "NIOSH_RNLE_SOURCE",
     "NIOSH_RNLE_METHOD_VERSION",
+    "NIOSH_VERTICAL_CATEGORY_BOUNDARY_CM",
     "calculate_rnle_lifting_index",
 ]
