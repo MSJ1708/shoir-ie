@@ -1052,9 +1052,13 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 ["≤1 hour", ">1 to ≤2 hours", ">2 to ≤8 hours"],
                                 index=0, key="tool046_duration"
                             )
-                            rnle_coupling = st.selectbox(
-                                "Hand-to-object coupling quality", ["Good", "Fair", "Poor"],
-                                index=0, key="tool046_coupling"
+                            rnle_coupling_origin = st.selectbox(
+                                "Hand-to-object coupling quality at origin", ["Good", "Fair", "Poor"],
+                                index=0, key="tool046_coupling_origin"
+                            )
+                            rnle_coupling_destination = st.selectbox(
+                                "Hand-to-object coupling quality at destination", ["Good", "Fair", "Poor"],
+                                index=0, key="tool046_coupling_destination"
                             )
                             rnle_applicability_confirmed = st.checkbox(
                                 "Confirm this is one two-handed standing lifting task within RNLE applicability "
@@ -1353,7 +1357,8 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                             "asymmetry_destination_degrees": rnle_a_destination,
                             "frequency_lifts_per_minute": rnle_frequency,
                             "duration_category": rnle_duration_category,
-                            "coupling_quality": rnle_coupling,
+                            "coupling_quality_origin": rnle_coupling_origin,
+                            "coupling_quality_destination": rnle_coupling_destination,
                             "applicability_confirmed": rnle_applicability_confirmed,
                         }
                     elif selected_tool["tool_id"] == "T047":
@@ -1805,7 +1810,8 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                     asymmetry_destination_degrees=rnle_a_destination,
                                     frequency_lifts_per_minute=rnle_frequency,
                                     duration_hours=duration_hours,
-                                    coupling_quality=rnle_coupling,
+                                    coupling_quality_origin=rnle_coupling_origin,
+                                    coupling_quality_destination=rnle_coupling_destination,
                                     applicability_confirmed=rnle_applicability_confirmed,
                                 )
                                 result["data_provenance"] = "USER_ENTERED_UNVERIFIED"
