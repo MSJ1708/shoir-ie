@@ -426,7 +426,7 @@ def test_workbench_runs_field_mapper_backlog_sop_and_supplier_methods():
     assert not at.exception, "\n".join(str(error.value) for error in at.exception)
 
     cases = [
-        ("T015 · Industrial Field Mapper", "tool015_run", "T015", "mapped_or_suggested_count", 4),
+        ("T015 · Industrial Field Mapper", "tool015_run", "T015", "mapped_or_suggested_count", 3),
         ("T049 · Maintenance Backlog Optimizer", "tool049_run", "T049", "selected_count", 2),
         ("T052 · Sales and Operations Planning", "tool052_run", "T052", "ending_inventory", 10.0),
         ("T058 · Supplier Performance and Risk Scorecard", "tool058_run", "T058", "complete_score_count", 2),
@@ -445,3 +445,167 @@ def test_workbench_runs_field_mapper_backlog_sop_and_supplier_methods():
             "SAVED_LOCAL_FALLBACK", "SAVED_MANAGED_WORKSPACE", "SESSION_ONLY",
             "SAVE_FAILED", "SAVE_PENDING", "SAVE_STATUS_NOT_CONFIRMED",
         }
+
+
+def test_workbench_runs_measurement_system_regression_and_research_hypothesis_tools():
+    """Exercise the three new tool IDs through the real Workbench form/permission/save path."""
+    from streamlit.testing.v1 import AppTest
+    import math
+
+    page = ROOT / "pages" / "Industrial_Engineering_Workbench.py"
+    at = AppTest.from_file(page, default_timeout=60)
+    at.session_state["current_user"] = "specialist-method-checker"
+    at.session_state["authenticated"] = True
+    at.session_state["user_tier"] = "Research Pack"
+    at.run(timeout=60)
+    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+
+    inspector = at.selectbox(key="shoir_100_tool_inspector")
+    inspector.select("T033 · Measurement Systems Analysis")
+    at.run(timeout=60)
+    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+    at.button(key="tool033_run").click()
+    at.run(timeout=60)
+    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+    msa = at.session_state.get("shoir_tool_result_T033")
+    assert msa is not None
+    assert msa["status"] == "PROVISIONAL_CROSSED_GAGE_RR_CALCULATED"
+    assert msa["gage_rr_standard_deviation"] == pytest.approx(math.sqrt(2.5))
+    assert msa["data_provenance"] == "SYNTHETIC_EXAMPLE"
+
+    inspector = at.selectbox(key="shoir_100_tool_inspector")
+    inspector.select("T036 · Regression and ANOVA Studio")
+    at.run(timeout=60)
+    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+    at.button(key="tool036_run").click()
+    at.run(timeout=60)
+    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+    regression = at.session_state.get("shoir_tool_result_T036")
+    assert regression is not None
+    assert regression["status"] == "OLS_REGRESSION_ANOVA_CALCULATED"
+    assert regression["r_squared"] > 0.99
+    assert regression["data_provenance"] == "SYNTHETIC_EXAMPLE"
+
+    inspector = at.selectbox(key="shoir_100_tool_inspector")
+    inspector.select("T037 · Hypothesis Testing Assistant")
+    at.run(timeout=60)
+    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+    at.button(key="tool037_run").click()
+    at.run(timeout=60)
+    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+    hypothesis = at.session_state.get("shoir_tool_result_T037")
+    assert hypothesis is not None
+    assert hypothesis["status"] == "HYPOTHESIS_TEST_CALCULATED"
+    assert hypothesis["method"] == "One-sample t-test"
+    assert hypothesis["sample_size_a"] == 4
+    assert hypothesis["reject_null_hypothesis"] is False
+    assert hypothesis["data_provenance"] == "SYNTHETIC_EXAMPLE"
+
+
+def test_workbench_runs_discrete_event_simulation():
+    """Verify T071 is wired to the shared Workbench and keeps assumptions explicit."""
+    from streamlit.testing.v1 import AppTest
+
+    page = ROOT / "pages" / "Industrial_Engineering_Workbench.py"
+    at = AppTest.from_file(page, default_timeout=90)
+    at.session_state["current_user"] = "des-simulation-checker"
+    at.session_state["authenticated"] = True
+    at.session_state["user_tier"] = "Research Pack"
+    at.run(timeout=90)
+    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+
+    at.selectbox(key="shoir_100_tool_inspector").select("T071 · Discrete-Event Simulation")
+    at.run(timeout=90)
+    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+    at.button(key="tool071_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+    result = at.session_state.get("shoir_tool_result_T071")
+    assert result is not None
+    assert result["status"] == "DISCRETE_EVENT_SIMULATION_COMPLETED"
+    assert result["job_count"] == 50
+    assert result["warmup_jobs_excluded_from_performance_metrics"] == 5
+    assert result["replications"] == 10
+    assert result["station_count"] == 2
+    assert len(result["replication_results"]) == 10
+    assert len(result["station_summary"]) == 2
+    assert result["data_provenance"] == "SYNTHETIC_EXAMPLE"
+
+
+
+def test_workbench_runs_solver_diagnostics():
+    """Verify T062 uses the current Workbench, solver engine and execution-time tier gate."""
+    from streamlit.testing.v1 import AppTest
+
+    page = ROOT / "pages" / "Industrial_Engineering_Workbench.py"
+    at = AppTest.from_file(page, default_timeout=90)
+    at.session_state["current_user"] = "solver-diagnostics-checker"
+    at.session_state["authenticated"] = True
+    at.session_state["user_tier"] = "Professional"
+    at.run(timeout=90)
+    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+
+    at.selectbox(key="shoir_100_tool_inspector").select("T062 · Constraint and Solver Diagnostics")
+    at.run(timeout=90)
+    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+    at.button(key="tool062_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+    result = at.session_state.get("shoir_tool_result_T062")
+    assert result is not None
+    assert result["status"] == "OPTIMAL_FEASIBLE"
+    assert result["solver_status"] == "Optimal"
+    assert result["objective_value"] == pytest.approx(8.0)
+    assert result["independent_feasibility_check"] is True
+    assert result["constraint_diagnostics"]["Status"].eq("SATISFIED").all()
+    assert result["data_provenance"] == "SYNTHETIC_EXAMPLE"
+
+
+
+def test_workbench_builds_downloadable_reproducibility_pack():
+    """Exercise source-result selection, Research Pack gate, ZIP creation and download wiring."""
+    import io
+    import zipfile
+    from streamlit.testing.v1 import AppTest
+
+    page = ROOT / "pages" / "Industrial_Engineering_Workbench.py"
+    at = AppTest.from_file(page, default_timeout=90)
+    at.session_state["current_user"] = "reproducibility-pack-checker"
+    at.session_state["authenticated"] = True
+    at.session_state["user_tier"] = "Research Pack"
+    at.run(timeout=90)
+    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+
+    at.selectbox(key="shoir_100_tool_inspector").select("T021 · Time Study and Standard Time")
+    at.run(timeout=90)
+    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+    at.button(key="tool021_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+    assert at.session_state.get("shoir_tool_result_T021") is not None
+
+    at.selectbox(key="shoir_100_tool_inspector").select("T087 · Reproducibility Pack Generator")
+    at.run(timeout=90)
+    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+    source = at.selectbox(key="tool087_source_id")
+    assert "T021" in source.options
+    source.select("T021")
+    at.checkbox(key="tool087_include_inputs").set_value(True)
+    at.checkbox(key="tool087_include_tables").set_value(True)
+    at.run(timeout=90)
+    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+    at.button(key="tool087_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+    result = at.session_state.get("shoir_tool_result_T087")
+    payload = at.session_state.get("shoir_tool_bundle_bytes_T087")
+    assert result is not None
+    assert result["status"] == "REPRODUCIBILITY_PACK_CREATED"
+    assert isinstance(payload, bytes) and payload.startswith(b"PK")
+    with zipfile.ZipFile(io.BytesIO(payload), "r") as archive:
+        assert "manifest.json" in archive.namelist()
+        assert "SHA256SUMS.txt" in archive.namelist()
+        assert "input_snapshot_redacted.json" in archive.namelist()
+    assert result["bundle_sha256"]
+    assert any(button.key == "tool087_download" for button in at.button)
+

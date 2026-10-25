@@ -73,3 +73,31 @@ No authenticated per-tier module walkthrough was run. The matrix accurately mark
 ## Release recommendation
 
 **NO-GO for merging this as completion of the requested 100-tool implementation or for declaring Shoir-IE fully verified/workforce-ready.** Revision `a76237f204ba2c6136c16d732c6e8fbc55367899` passed the full 660-test suite, platform, engine-regression, security/quality, compile/import, and local desktop/mobile smoke gates. The hosted public-site smoke failed at desktop and mobile because the endpoint served a sleeping-app page instead of Shoir-IE. The branch provides an auditable 100-target matrix, 19 focused Workbench methods, a corrected Research Pack/Enterprise Plus boundary, authenticated execution gating and improved workspace serialization/persistence coverage. It does not deliver 100 fully implemented/verified tools or authenticated per-tier end-to-end acceptance. The remaining work above is required before the full master prompt can be marked done.
+
+
+## Follow-up continuation — 2026-10-25
+
+The continuation branch audit/shoir-100-tool-continuation-20261025 integrates three additional focused methods into the existing Workbench, without adding a new top-level navigation section:
+
+- **T033 Measurement Systems Analysis:** balanced crossed gage R&R variance-component screening with explicit design validation, tolerance-based percentage, ANOVA table and limitations.
+- **T036 Regression and ANOVA Studio:** numeric full-rank ordinary least squares with coefficient diagnostics, model F-test, ANOVA and residual tables.
+- **T037 Hypothesis Testing Assistant:** Research Pack-gated one-sample, independent Welch and paired two-sided t-tests with confidence intervals and effect size where estimable.
+
+Changes include deterministic engine code, Workbench input forms and execution-time actor/tier checks, user-scoped input/result snapshots through the existing persistence helper, golden/boundary tests, Workbench AppTest coverage, and synchronized registry/matrix evidence.
+
+This tranche intentionally retains IMPLEMENTED_NEEDS_VALIDATION for these three IDs. The code, test cases and documentation have been committed to the continuation branch, but no current-head CI results or authenticated hosted browser/session evidence are inferred from the source changes. The total target registry remains 100 rows; after the additional field-mapping and S&OP integrations, current classifications are 79 IMPLEMENTED_NEEDS_VALIDATION, 19 FOUNDATION_ONLY, 2 EXTERNAL_CONFIGURATION_REQUIRED, and 0 VERIFIED_WORKING.
+
+**Release decision remains NO-GO.** Run focused tests and the full workflow on the exact continuation head; inspect and repair all failures; then complete the authenticated tier/access matrix, save/reload/re-login, cross-workspace isolation, real import/export round trips, current staging/production parity, and qualified legal/commercial review before claiming full readiness.
+
+The same continuation also wires existing deterministic engines for **T049 Maintenance Backlog Optimizer** and **T058 Supplier Performance and Risk Scorecard** into the current Workbench. Both now have sample-data-labelled forms, execution-time canonical ID/tier checks, input/result snapshots, target-specific AppTest coverage, and matrix entries. T049 is explicitly a greedy labor-budget heuristic (not a global schedule); T058 keeps incomplete suppliers unranked and does not claim subjective scores are objective risk probabilities. Both remain validation-required until CI and authenticated hosted checks pass.
+
+After those five catalog status upgrades, the target registry should report 79 IMPLEMENTED_NEEDS_VALIDATION, 19 FOUNDATION_ONLY, 2 EXTERNAL_CONFIGURATION_REQUIRED and 0 VERIFIED_WORKING, contingent on source registry parsing and the current-head test suite passing.
+
+
+The continuation additionally implements **T071 Discrete-Event Simulation** as an event-driven, FCFS serial-route model with finite servers, deterministic/exponential interarrival and service times, job-based warm-up exclusion, seeded replications, and per-station waiting/utilization summaries. Golden deterministic, seeded repeatability and boundary tests plus a Workbench AppTest were added. The method is limited to serial routes and does not claim a calibrated digital twin or model failure/setup/routing complexity.
+
+
+The continuation now also includes **T062 Constraint and Solver Diagnostics** as an execution-gated Workbench workflow. It solves linear continuous/integer/binary models, reports solver termination states, and independently recomputes variable bound/integrality and constraint residuals. Golden tests cover an optimal continuous model, infeasible and unbounded cases, an integer model, and validation failures. It does not produce an IIS or certify a user's formulation.
+
+
+The current continuation also wires **T087 Reproducibility Pack Generator** into the existing Workbench. The user selects an already completed and currently entitled tool result; the source tool entitlement is checked again before export. The ZIP includes a manifest, dependency/runtime versions, configuration fingerprint and SHA-256 checksums; raw inputs and detailed result tables are opt-in. Common credential/contact fields are redacted, and the binary download cache is excluded from durable workspace snapshots. This remains validation-required until the ZIP downloaded from an authenticated hosted session is opened and its member hashes/persistence behavior are verified.

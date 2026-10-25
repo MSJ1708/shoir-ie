@@ -49,6 +49,17 @@ TIER = canonical_tier(RAW_TIER)
 _TOOL022_EXAMPLE_COUNTS = '{"Productive": 60, "Idle": 25, "Setup": 15}'
 _TOOL028_EXAMPLE_COUNTS = '{"Machine": 12, "Material": 7, "Method": 3}'
 _TOOL029_EXAMPLE_ITEMS = '[{"category":"Sort","criterion":"Remove unnecessary items","score":3,"evidence":"Illustrative example","owner":"","due_date":""},{"category":"Set in Order","criterion":"Label storage locations","score":3,"evidence":"Illustrative example","owner":"","due_date":""},{"category":"Shine","criterion":"Clean workstations","score":3,"evidence":"Illustrative example","owner":"","due_date":""},{"category":"Standardize","criterion":"Display standard work","score":3,"evidence":"Illustrative example","owner":"","due_date":""},{"category":"Sustain","criterion":"Review 5S weekly","score":3,"evidence":"Illustrative example","owner":"","due_date":""}]'
+_TOOL033_EXAMPLE_MEASUREMENTS = '[{"part":"P1","operator":"A","trial":"1","value":10},{"part":"P1","operator":"A","trial":"2","value":12},{"part":"P1","operator":"B","trial":"1","value":11},{"part":"P1","operator":"B","trial":"2","value":13},{"part":"P2","operator":"A","trial":"1","value":20},{"part":"P2","operator":"A","trial":"2","value":22},{"part":"P2","operator":"B","trial":"1","value":21},{"part":"P2","operator":"B","trial":"2","value":23},{"part":"P3","operator":"A","trial":"1","value":30},{"part":"P3","operator":"A","trial":"2","value":32},{"part":"P3","operator":"B","trial":"1","value":31},{"part":"P3","operator":"B","trial":"2","value":33}]'
+_TOOL036_EXAMPLE_RECORDS = '[{"x":1,"y":2.1},{"x":2,"y":4.0},{"x":3,"y":6.2},{"x":4,"y":7.9},{"x":5,"y":10.2},{"x":6,"y":11.8},{"x":7,"y":14.1},{"x":8,"y":15.9}]'
+_TOOL037_EXAMPLE_SAMPLE_A = "2, 4, 6, 8"
+_TOOL049_EXAMPLE_WORK_ORDERS = '[{"work_order_id":"WO-1","task":"Critical bearing","asset":"Pump A","criticality_score":5,"days_until_due":-2,"estimated_hours":4,"required_skill":"Mechanical"},{"work_order_id":"WO-2","task":"Calibration","asset":"Gauge B","criticality_score":4,"days_until_due":0,"estimated_hours":3,"required_skill":"Mechanical"},{"work_order_id":"WO-3","task":"Paint repair","asset":"Frame C","criticality_score":2,"days_until_due":5,"estimated_hours":2,"required_skill":"Electrical"}]'
+_TOOL058_EXAMPLE_SUPPLIERS = '[{"supplier":"Acme","scores":{"Delivery":90,"Quality":80},"data_as_of":"2026-Q3","evidence_reference":"sample-audit-1"},{"supplier":"Beta","scores":{"Delivery":75},"data_as_of":"2026-Q3","risk_mitigation":"Provide missing quality evidence"},{"supplier":"Gamma","scores":{"Delivery":70,"Quality":100},"data_as_of":"2026-Q3","evidence_reference":"sample-audit-3"}]'
+_TOOL015_EXAMPLE_COLUMNS = "Timestamp, Qty, Defects, mystery_label"
+_TOOL052_EXAMPLE_PERIODS = '[{"period":"Jan","demand":30,"planned_production":35,"production_capacity":30,"scheduled_receipts":0,"target_safety_stock":15},{"period":"Feb","demand":60,"planned_production":50,"production_capacity":50,"scheduled_receipts":0,"target_safety_stock":20}]'
+_TOOL071_EXAMPLE_STATIONS = '[{"station":"Assembly","servers":1,"mean_service_time":2,"service_distribution":"deterministic"},{"station":"Inspection","servers":1,"mean_service_time":1,"service_distribution":"deterministic"}]'
+_TOOL062_EXAMPLE_VARIABLES = '{"x":{"low":0,"up":10,"category":"Continuous"},"y":{"low":0,"up":10,"category":"Continuous"}}'
+_TOOL062_EXAMPLE_OBJECTIVE = '{"x":3,"y":2}'
+_TOOL062_EXAMPLE_CONSTRAINTS = '[{"name":"minimum_output","coefficients":{"x":1,"y":1},"sense":">=","rhs":4},{"name":"balance","coefficients":{"x":1,"y":3},"sense":">=","rhs":6}]'
 
 st.markdown("""
 <style>
@@ -389,7 +400,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                 "Copilot action, API and export path must enforce their own server-side entitlement checks."
             )
 
-            if selected_tool["tool_id"] in {"T016", "T017", "T018", "T019", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T034", "T038", "T040", "T041", "T042", "T043", "T045", "T047", "T050", "T054", "T055", "T056", "T059", "T063", "T066", "T070", "T075", "T076", "T077", "T078", "T079", "T081", "T082", "T083", "T084", "T085"}:
+            if selected_tool["tool_id"] in {"T015", "T016", "T017", "T018", "T019", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T033", "T034", "T036", "T037", "T038", "T040", "T041", "T042", "T043", "T045", "T047", "T049", "T050", "T052", "T054", "T055", "T056", "T058", "T059", "T062", "T063", "T066", "T070", "T071", "T075", "T076", "T077", "T078", "T079", "T081", "T082", "T083", "T084", "T085", "T087"}:
                 st.markdown("---")
                 st.markdown("**Run focused specialist method**")
                 st.caption(
@@ -852,6 +863,114 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 value=10000, step=100, key="tool085_search_limit"
                             )
                             run_method = st.form_submit_button("Calculate sample size", type="primary", use_container_width=True, key="tool085_run")
+                        elif selected_tool["tool_id"] == "T033":
+                            st.caption("Crossed gauge R&R using a balanced parts × operators × trials design. Example readings are SYNTHETIC; confirm the method and acceptance criteria with a qualified MSA reviewer.")
+                            gage_rr_json = st.text_area("Measurements (JSON list: part, operator, trial, value)", value=_TOOL033_EXAMPLE_MEASUREMENTS, key="tool033_measurements")
+                            gage_rr_unit = st.text_input("Measurement unit", "mm", key="tool033_unit")
+                            gage_rr_tolerance = st.number_input("Optional engineering tolerance width", min_value=0.001, value=1.0, step=0.1, key="tool033_tolerance")
+                            run_method = st.form_submit_button("Calculate crossed gage R&R", type="primary", use_container_width=True, key="tool033_run")
+                        elif selected_tool["tool_id"] == "T036":
+                            st.caption("Ordinary least squares with an intercept, coefficient diagnostics and overall regression ANOVA. Use numeric, complete, independently collected rows; regression does not establish causation.")
+                            regression_records_json = st.text_area("Observations (JSON list of objects)", value=_TOOL036_EXAMPLE_RECORDS, key="tool036_records")
+                            regression_response = st.text_input("Response column", "y", key="tool036_response")
+                            regression_predictors_text = st.text_input("Predictor columns (comma-separated)", "x", key="tool036_predictors")
+                            run_method = st.form_submit_button("Fit regression and ANOVA", type="primary", use_container_width=True, key="tool036_run")
+                        elif selected_tool["tool_id"] == "T037":
+                            st.caption("Research Pack method subset: two-sided one-sample, independent Welch, and paired t-tests only. Example values are synthetic. Check study design and assumptions before interpretation.")
+                            hypothesis_test_type = st.selectbox("Supported test", ["one_sample_t", "welch_t", "paired_t"], format_func=lambda value: {"one_sample_t": "One-sample t-test", "welch_t": "Independent Welch t-test", "paired_t": "Paired t-test"}[value], key="tool037_type")
+                            hypothesis_sample_a = st.text_input("Sample A / first measurements (comma-separated)", _TOOL037_EXAMPLE_SAMPLE_A, key="tool037_sample_a")
+                            hypothesis_sample_b = st.text_input("Sample B / paired measurements (comma-separated)", "1, 3, 5, 7", key="tool037_sample_b")
+                            hypothesis_null_mean = st.number_input("Null hypothesis mean (one-sample test only)", value=4.0, step=0.5, key="tool037_null_mean")
+                            hypothesis_alpha = st.number_input("Significance level (alpha)", min_value=0.001, max_value=0.5, value=0.05, step=0.01, key="tool037_alpha")
+                            run_method = st.form_submit_button("Run hypothesis test", type="primary", use_container_width=True, key="tool037_run")
+                        elif selected_tool["tool_id"] == "T049":
+                            st.caption("Greedy maintenance backlog priority under a stated labor-hours budget. It is not a globally optimal schedule; supplied skills and due dates must be checked against the actual CMMS/work plan.")
+                            maintenance_orders_json = st.text_area("Maintenance work orders (JSON list)", value=_TOOL049_EXAMPLE_WORK_ORDERS, key="tool049_orders")
+                            maintenance_available_hours = st.number_input("Available qualified labor hours in this planning window", min_value=0.0, value=7.0, step=1.0, key="tool049_hours")
+                            maintenance_skills_text = st.text_input("Available skills (comma-separated; blank means no skill restriction)", "Mechanical, Electrical", key="tool049_skills")
+                            maintenance_due_soon_days = st.number_input("Due-soon window (whole days)", min_value=0, max_value=365, value=3, step=1, key="tool049_due_soon")
+                            run_method = st.form_submit_button("Prioritize maintenance backlog", type="primary", use_container_width=True, key="tool049_run")
+                        elif selected_tool["tool_id"] == "T058":
+                            st.caption("Weighted 0–100 supplier scorecard. Suppliers with missing criteria stay unranked. The weights and scores are user supplied; this is not a verified supplier-risk assessment.")
+                            supplier_records_json = st.text_area("Supplier records (JSON list)", value=_TOOL058_EXAMPLE_SUPPLIERS, key="tool058_suppliers")
+                            supplier_weights_json = st.text_area("Criterion weights (JSON object; values are relative weights)", value='{"Delivery":0.4,"Quality":0.6}', key="tool058_weights")
+                            run_method = st.form_submit_button("Score supplier performance", type="primary", use_container_width=True, key="tool058_run")
+                        elif selected_tool["tool_id"] == "T015":
+                            st.caption("Suggest source-to-canonical industrial fields; fuzzy matches require confirmation. Original source headers are retained in the mapping table. This does not alter the imported dataset.")
+                            field_source_columns = st.text_input("Source column names (comma-separated)", _TOOL015_EXAMPLE_COLUMNS, key="tool015_columns")
+                            field_manual_mapping_json = st.text_area("Optional confirmed mapping (JSON object: source header → canonical field ID)", "{}", key="tool015_manual")
+                            field_minimum_confidence = st.slider("Minimum confidence for a suggested mapping", min_value=0.0, max_value=1.0, value=0.65, step=0.05, key="tool015_threshold")
+                            run_method = st.form_submit_button("Suggest industrial field mappings", type="primary", use_container_width=True, key="tool015_run")
+                        elif selected_tool["tool_id"] == "T052":
+                            st.caption("Deterministic time-phased S&OP balance. Capacity limits are applied; unmet demand becomes backlog. This is an aggregate plan, not a finite-capacity optimizer.")
+                            sop_periods_json = st.text_area("Periods (JSON list)", value=_TOOL052_EXAMPLE_PERIODS, key="tool052_periods")
+                            sop_starting_inventory = st.number_input("Starting inventory (units)", min_value=0.0, value=20.0, step=5.0, key="tool052_inventory")
+                            run_method = st.form_submit_button("Reconcile S&OP plan", type="primary", use_container_width=True, key="tool052_run")
+                        elif selected_tool["tool_id"] == "T071":
+                            st.caption("Event-driven FCFS simulation with finite servers, explicit deterministic/exponential arrivals and service times, seeded replications and job-based warm-up exclusion. Not a calibrated digital twin.")
+                            des_steps_json = st.text_area("Ordered stations (JSON list)", value=_TOOL071_EXAMPLE_STATIONS, key="tool071_steps")
+                            des_job_count = st.number_input("Jobs to simulate", min_value=2, max_value=10000, value=50, step=1, key="tool071_jobs")
+                            des_interarrival = st.number_input("Mean interarrival time", min_value=0.001, value=1.0, step=0.5, key="tool071_interarrival")
+                            des_arrival_distribution = st.selectbox("Arrival distribution", ["deterministic", "exponential"], key="tool071_arrival_dist")
+                            des_warmup_jobs = st.number_input("Initial jobs excluded from performance metrics", min_value=0, max_value=9999, value=5, step=1, key="tool071_warmup")
+                            des_replications = st.number_input("Replications", min_value=1, max_value=100, value=10, step=1, key="tool071_replications")
+                            des_seed = st.number_input("Base random seed", min_value=-2147483648, max_value=2147483647, value=42, step=1, key="tool071_seed")
+                            des_time_unit = st.text_input("Time unit", value="minutes", key="tool071_unit")
+                            run_method = st.form_submit_button("Run discrete-event simulation", type="primary", use_container_width=True, key="tool071_run")
+                        elif selected_tool["tool_id"] == "T062":
+                            st.caption("Run a linear or mixed-integer model and independently check variable bounds/integrality and each constraint residual. Solver status is not the same as proof that the model formulation is correct; no IIS is generated.")
+                            solver_variables_json = st.text_area("Variables (JSON object: name → {low, up, category})", value=_TOOL062_EXAMPLE_VARIABLES, key="tool062_variables")
+                            solver_objective_json = st.text_area("Objective coefficients (JSON object)", value=_TOOL062_EXAMPLE_OBJECTIVE, key="tool062_objective")
+                            solver_constraints_json = st.text_area("Linear constraints (JSON list)", value=_TOOL062_EXAMPLE_CONSTRAINTS, key="tool062_constraints")
+                            solver_direction = st.selectbox("Objective direction", ["minimize", "maximize"], key="tool062_direction")
+                            solver_time_limit = st.number_input("Solver time limit (seconds)", min_value=0.1, max_value=300.0, value=10.0, step=1.0, key="tool062_time_limit")
+                            solver_tolerance = st.select_slider("Feasibility tolerance", options=[1e-7, 1e-6, 1e-5, 1e-4, 1e-3], value=1e-7, key="tool062_tolerance")
+                            run_method = st.form_submit_button("Solve and diagnose model", type="primary", use_container_width=True, key="tool062_run")
+                        elif selected_tool["tool_id"] == "T087":
+                            st.caption("Package a previously completed, authorized tool result with method/environment metadata, configuration fingerprint and SHA-256 checksums. Raw inputs and detailed result tables are opt-in. Review the ZIP contents before sharing.")
+                            result_id_candidates = sorted({
+                                key.replace("shoir_tool_result_", "")
+                                for key in st.session_state.keys()
+                                if key.startswith("shoir_tool_result_T")
+                                and key != "shoir_tool_result_T087"
+                                and isinstance(st.session_state.get(key), dict)
+                                and tier_allows_tool(RAW_TIER, key.replace("shoir_tool_result_", ""))
+                            })
+                            if not result_id_candidates:
+                                st.info("Run an entitled engineering tool in this session first. Only completed, currently authorized results are eligible.")
+                            result_id_options = result_id_candidates or ["NONE"]
+                            source_result_tool_id = st.selectbox(
+                                "Completed result to package",
+                                options=result_id_options,
+                                format_func=lambda tool_id: (
+                                    f"{tool_id} · {next((tool.get('canonical_name', tool_id) for tool in TOOL_TARGETS if tool.get('tool_id') == tool_id), tool_id)}"
+                                    if tool_id != "NONE" else "No completed authorized result"
+                                ),
+                                disabled=not bool(result_id_candidates),
+                                key="tool087_source_id",
+                            )
+                            reproducibility_metadata_json = st.text_area(
+                                "Run metadata (JSON object; e.g. study reference, reviewer, protocol version)",
+                                value='{"study_reference":"demo-study","method_version":"Shoir-IE target engine","notes":"Review before distribution"}',
+                                key="tool087_metadata",
+                            )
+                            include_input_snapshot = st.checkbox(
+                                "Include redacted input snapshot (opt-in)",
+                                value=False,
+                                key="tool087_include_inputs",
+                            )
+                            include_result_tables = st.checkbox(
+                                "Include sanitized result tables (opt-in)",
+                                value=False,
+                                key="tool087_include_tables",
+                            )
+                            run_method = st.form_submit_button(
+                                "Build reproducibility ZIP",
+                                type="primary",
+                                use_container_width=True,
+                                key="tool087_run",
+                                disabled=not bool(result_id_candidates),
+                            )
 
                     if selected_tool["tool_id"] == "T021":
                         current_tool_inputs = {
@@ -979,6 +1098,26 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                         current_tool_inputs = {"operating_hours": mtbf_operating_hours, "repair_durations_hours_text": repair_durations_text}
                     elif selected_tool["tool_id"] == "T056":
                         current_tool_inputs = {"items_json": inventory_items_json, "currency": inventory_currency, "a_threshold": abc_a_threshold, "b_threshold": abc_b_threshold, "x_cv_max": xyz_x_cutoff, "y_cv_max": xyz_y_cutoff}
+                    elif selected_tool["tool_id"] == "T033":
+                        current_tool_inputs = {"measurements_json": gage_rr_json, "unit": gage_rr_unit, "tolerance": gage_rr_tolerance}
+                    elif selected_tool["tool_id"] == "T036":
+                        current_tool_inputs = {"records_json": regression_records_json, "response": regression_response, "predictors": regression_predictors_text}
+                    elif selected_tool["tool_id"] == "T037":
+                        current_tool_inputs = {"test_type": hypothesis_test_type, "sample_a_text": hypothesis_sample_a, "sample_b_text": hypothesis_sample_b, "null_mean": hypothesis_null_mean, "alpha": hypothesis_alpha}
+                    elif selected_tool["tool_id"] == "T049":
+                        current_tool_inputs = {"work_orders_json": maintenance_orders_json, "available_hours": maintenance_available_hours, "available_skills": maintenance_skills_text, "due_soon_days": int(maintenance_due_soon_days)}
+                    elif selected_tool["tool_id"] == "T058":
+                        current_tool_inputs = {"suppliers_json": supplier_records_json, "weights_json": supplier_weights_json}
+                    elif selected_tool["tool_id"] == "T015":
+                        current_tool_inputs = {"source_columns": field_source_columns, "manual_mapping_json": field_manual_mapping_json, "minimum_confidence": field_minimum_confidence}
+                    elif selected_tool["tool_id"] == "T052":
+                        current_tool_inputs = {"periods_json": sop_periods_json, "starting_inventory": sop_starting_inventory}
+                    elif selected_tool["tool_id"] == "T071":
+                        current_tool_inputs = {"process_steps_json": des_steps_json, "job_count": int(des_job_count), "mean_interarrival_time": des_interarrival, "arrival_distribution": des_arrival_distribution, "warmup_jobs": int(des_warmup_jobs), "replications": int(des_replications), "random_seed": int(des_seed), "time_unit": des_time_unit}
+                    elif selected_tool["tool_id"] == "T062":
+                        current_tool_inputs = {"variables_json": solver_variables_json, "objective_json": solver_objective_json, "constraints_json": solver_constraints_json, "direction": solver_direction, "time_limit_seconds": solver_time_limit, "feasibility_tolerance": solver_tolerance}
+                    elif selected_tool["tool_id"] == "T087":
+                        current_tool_inputs = {"source_tool_id": source_result_tool_id, "metadata_json": reproducibility_metadata_json, "include_input_snapshot": include_input_snapshot, "include_result_tables": include_result_tables}
                     else:
                         current_tool_inputs = {
                             "cohen_d": effect_size, "alpha": alpha,
@@ -1016,6 +1155,10 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 analyze_weibull_reliability, analyze_spare_parts_criticality,
                                 analyze_safety_incident_trends, optimize_warehouse_slotting,
                                 optimize_task_resource_assignment, compare_energy_performance_scenarios,
+                                analyze_measurement_system_gage_rr, fit_regression_anova, run_hypothesis_test,
+                                prioritize_maintenance_backlog, score_supplier_performance,
+                                map_industrial_fields, reconcile_sop_plan, simulate_discrete_event_process,
+                                run_solver_diagnostics, build_reproducibility_pack,
                             )
                             if selected_tool["tool_id"] == "T021":
                                 try:
@@ -1315,13 +1458,185 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                     effect_size, alpha, target_power,
                                     max_n_per_group=int(search_limit),
                                 )
+                            elif selected_tool["tool_id"] == "T033":
+                                parsed_measurements = json.loads(gage_rr_json)
+                                if not isinstance(parsed_measurements, list):
+                                    raise ValueError("Measurements must be a JSON list of reading objects.")
+                                result = analyze_measurement_system_gage_rr(
+                                    parsed_measurements, tolerance=gage_rr_tolerance, unit=gage_rr_unit
+                                )
+                                result["data_provenance"] = (
+                                    "SYNTHETIC_EXAMPLE"
+                                    if gage_rr_json.strip() == _TOOL033_EXAMPLE_MEASUREMENTS
+                                    else "USER_ENTERED_UNVERIFIED"
+                                )
+                            elif selected_tool["tool_id"] == "T036":
+                                parsed_regression_records = json.loads(regression_records_json)
+                                parsed_predictors = [name.strip() for name in regression_predictors_text.split(",") if name.strip()]
+                                if not isinstance(parsed_regression_records, list):
+                                    raise ValueError("Regression observations must be a JSON list of objects.")
+                                result = fit_regression_anova(
+                                    parsed_regression_records, regression_response, parsed_predictors
+                                )
+                                result["data_provenance"] = (
+                                    "SYNTHETIC_EXAMPLE"
+                                    if regression_records_json.strip() == _TOOL036_EXAMPLE_RECORDS
+                                    else "USER_ENTERED_UNVERIFIED"
+                                )
+                            elif selected_tool["tool_id"] == "T037":
+                                def _parse_test_values(raw: str, label: str) -> list[float]:
+                                    try:
+                                        values = [float(part.strip()) for part in raw.split(",") if part.strip()]
+                                    except ValueError as exc:
+                                        raise ValueError(f"{label} must be comma-separated numeric values.") from exc
+                                    if not values:
+                                        raise ValueError(f"Provide at least two values for {label}.")
+                                    return values
+                                parsed_sample_a = _parse_test_values(hypothesis_sample_a, "Sample A")
+                                parsed_sample_b = _parse_test_values(hypothesis_sample_b, "Sample B") if hypothesis_test_type != "one_sample_t" else None
+                                result = run_hypothesis_test(
+                                    hypothesis_test_type, parsed_sample_a, parsed_sample_b,
+                                    null_mean=hypothesis_null_mean, alpha=hypothesis_alpha,
+                                )
+                                result["data_provenance"] = (
+                                    "SYNTHETIC_EXAMPLE"
+                                    if hypothesis_sample_a.strip() == _TOOL037_EXAMPLE_SAMPLE_A
+                                    else "USER_ENTERED_UNVERIFIED"
+                                )
+                            elif selected_tool["tool_id"] == "T049":
+                                parsed_work_orders = json.loads(maintenance_orders_json)
+                                if not isinstance(parsed_work_orders, list):
+                                    raise ValueError("Maintenance work orders must be a JSON list of objects.")
+                                skills = [skill.strip() for skill in maintenance_skills_text.split(",") if skill.strip()]
+                                result = prioritize_maintenance_backlog(
+                                    parsed_work_orders, maintenance_available_hours,
+                                    available_skills=skills,
+                                    due_soon_days=int(maintenance_due_soon_days),
+                                )
+                                result["data_provenance"] = (
+                                    "SYNTHETIC_EXAMPLE"
+                                    if maintenance_orders_json.strip() == _TOOL049_EXAMPLE_WORK_ORDERS
+                                    else "USER_ENTERED_UNVERIFIED"
+                                )
+                            elif selected_tool["tool_id"] == "T058":
+                                parsed_suppliers = json.loads(supplier_records_json)
+                                parsed_weights = json.loads(supplier_weights_json)
+                                if not isinstance(parsed_suppliers, list) or not isinstance(parsed_weights, dict):
+                                    raise ValueError("Supplier records must be a JSON list and criterion weights must be a JSON object.")
+                                result = score_supplier_performance(parsed_suppliers, parsed_weights)
+                                result["data_provenance"] = (
+                                    "SYNTHETIC_EXAMPLE"
+                                    if supplier_records_json.strip() == _TOOL058_EXAMPLE_SUPPLIERS
+                                    else "USER_ENTERED_UNVERIFIED"
+                                )
+                            elif selected_tool["tool_id"] == "T015":
+                                source_columns = [column.strip() for column in field_source_columns.split(",")]
+                                parsed_manual_mapping = json.loads(field_manual_mapping_json)
+                                if not isinstance(parsed_manual_mapping, dict):
+                                    raise ValueError("Manual field mapping must be a JSON object from source header to canonical field ID.")
+                                result = map_industrial_fields(
+                                    source_columns,
+                                    manual_mapping=parsed_manual_mapping,
+                                    minimum_confidence=field_minimum_confidence,
+                                )
+                                result["data_provenance"] = (
+                                    "SYNTHETIC_EXAMPLE"
+                                    if field_source_columns.strip() == _TOOL015_EXAMPLE_COLUMNS and not parsed_manual_mapping
+                                    else "USER_ENTERED_UNVERIFIED"
+                                )
+                            elif selected_tool["tool_id"] == "T052":
+                                parsed_sop_periods = json.loads(sop_periods_json)
+                                if not isinstance(parsed_sop_periods, list):
+                                    raise ValueError("S&OP periods must be a JSON list of period records.")
+                                result = reconcile_sop_plan(
+                                    parsed_sop_periods,
+                                    starting_inventory=sop_starting_inventory,
+                                )
+                                result["data_provenance"] = (
+                                    "SYNTHETIC_EXAMPLE"
+                                    if sop_periods_json.strip() == _TOOL052_EXAMPLE_PERIODS
+                                    else "USER_ENTERED_UNVERIFIED"
+                                )
+                            elif selected_tool["tool_id"] == "T071":
+                                parsed_des_steps = json.loads(des_steps_json)
+                                if not isinstance(parsed_des_steps, list):
+                                    raise ValueError("DES station setup must be a JSON list of station records.")
+                                result = simulate_discrete_event_process(
+                                    parsed_des_steps,
+                                    job_count=int(des_job_count),
+                                    mean_interarrival_time=des_interarrival,
+                                    arrival_distribution=des_arrival_distribution,
+                                    warmup_jobs=int(des_warmup_jobs),
+                                    replications=int(des_replications),
+                                    random_seed=int(des_seed),
+                                    time_unit=des_time_unit,
+                                )
+                                result["data_provenance"] = (
+                                    "SYNTHETIC_EXAMPLE"
+                                    if des_steps_json.strip() == _TOOL071_EXAMPLE_STATIONS
+                                    and int(des_job_count) == 50
+                                    and float(des_interarrival) == 1.0
+                                    and des_arrival_distribution == "deterministic"
+                                    and int(des_warmup_jobs) == 5
+                                    and int(des_replications) == 10
+                                    and int(des_seed) == 42
+                                    and des_time_unit == "minutes"
+                                    else "MODELLED_FROM_USER_ASSUMPTIONS"
+                                )
+                            elif selected_tool["tool_id"] == "T062":
+                                parsed_solver_variables = json.loads(solver_variables_json)
+                                parsed_solver_objective = json.loads(solver_objective_json)
+                                parsed_solver_constraints = json.loads(solver_constraints_json)
+                                if not isinstance(parsed_solver_variables, dict) or not isinstance(parsed_solver_objective, dict) or not isinstance(parsed_solver_constraints, list):
+                                    raise ValueError("Variables and objective must be JSON objects, and constraints must be a JSON list.")
+                                result = run_solver_diagnostics(
+                                    parsed_solver_variables,
+                                    parsed_solver_objective,
+                                    parsed_solver_constraints,
+                                    direction=solver_direction,
+                                    time_limit_seconds=solver_time_limit,
+                                    feasibility_tolerance=solver_tolerance,
+                                )
+                                result["data_provenance"] = (
+                                    "SYNTHETIC_EXAMPLE"
+                                    if solver_variables_json.strip() == _TOOL062_EXAMPLE_VARIABLES
+                                    and solver_objective_json.strip() == _TOOL062_EXAMPLE_OBJECTIVE
+                                    and solver_constraints_json.strip() == _TOOL062_EXAMPLE_CONSTRAINTS
+                                    and solver_direction == "minimize"
+                                    else "MODELLED_FROM_USER_ASSUMPTIONS"
+                                )
+                            elif selected_tool["tool_id"] == "T087":
+                                if source_result_tool_id == "NONE":
+                                    raise ValueError("Run an entitled source tool first; no completed result is available to package.")
+                                source_tool = require_tool_access(RAW_TIER, source_result_tool_id)
+                                source_result = st.session_state.get("shoir_tool_result_" + source_result_tool_id)
+                                if not isinstance(source_result, dict):
+                                    raise ValueError("The selected source result is no longer available in this session; rerun the source tool.")
+                                try:
+                                    parsed_repro_metadata = json.loads(reproducibility_metadata_json or "{}")
+                                except json.JSONDecodeError as exc:
+                                    raise ValueError("Run metadata must be valid JSON.") from exc
+                                if not isinstance(parsed_repro_metadata, dict):
+                                    raise ValueError("Run metadata must be a JSON object.")
+                                source_inputs = st.session_state.get("shoir_tool_inputs_" + source_result_tool_id, {})
+                                pack_result = build_reproducibility_pack(
+                                    source_result_tool_id,
+                                    source_tool["canonical_name"],
+                                    source_result,
+                                    inputs=source_inputs if isinstance(source_inputs, dict) else {},
+                                    metadata=parsed_repro_metadata,
+                                    include_input_snapshot=include_input_snapshot,
+                                    include_result_tables=include_result_tables,
+                                )
+                                st.session_state["shoir_tool_bundle_bytes_T087"] = pack_result.pop("bundle_bytes")
+                                result = pack_result
                             _persist_focused_tool_result(
                                 selected_tool["tool_id"], result, current_tool_inputs
                             )
                         except Exception as exc:
                             st.error(f"Tool run could not be completed safely: {exc}")
 
-                    if selected_tool["tool_id"] in {"T017", "T018", "T019", "T024", "T025", "T027", "T034", "T038", "T041", "T043", "T045", "T047", "T050", "T054", "T059", "T063", "T070", "T076", "T077", "T079", "T082", "T083", "T084"}:
+                    if selected_tool["tool_id"] in {"T015", "T017", "T018", "T019", "T024", "T025", "T027", "T033", "T034", "T036", "T037", "T038", "T041", "T043", "T045", "T047", "T049", "T050", "T052", "T054", "T058", "T059", "T062", "T063", "T070", "T071", "T076", "T077", "T079", "T082", "T083", "T084"}:
                         result = st.session_state.get("shoir_tool_result_" + selected_tool["tool_id"])
                         if result:
                             _show_focused_tool_persistence(selected_tool["tool_id"], result, current_tool_inputs)
@@ -1330,6 +1645,27 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 title=selected_tool["canonical_name"],
                                 key_prefix="target_" + selected_tool["tool_id"].lower(),
                             )
+                    elif selected_tool["tool_id"] == "T087":
+                        result = st.session_state.get("shoir_tool_result_T087")
+                        bundle_bytes = st.session_state.get("shoir_tool_bundle_bytes_T087")
+                        if result:
+                            _show_focused_tool_persistence("T087", result, current_tool_inputs)
+                            st.metric("ZIP bundle size", f"{int(result.get('bundle_byte_count', 0)):,} bytes")
+                            st.code(result.get("bundle_sha256", ""))
+                            st.caption("Verify SHA-256 checksums in SHA256SUMS.txt. Review contents before sharing; tables and input snapshots are opt-in.")
+                            if isinstance(bundle_bytes, bytes) and bundle_bytes:
+                                st.download_button(
+                                    "Download reproducibility ZIP",
+                                    data=bundle_bytes,
+                                    file_name=result.get("filename", "shoir_ie_reproducibility_pack.zip"),
+                                    mime="application/zip",
+                                    key="tool087_download",
+                                    use_container_width=True,
+                                )
+                            inventory = result.get("artifact_inventory")
+                            if isinstance(inventory, pd.DataFrame):
+                                st.dataframe(inventory, use_container_width=True, hide_index=True)
+                            st.json(result.get("manifest", {}))
                     elif selected_tool["tool_id"] == "T016":
                         result = st.session_state.get("shoir_tool_result_T016")
                         if result:

@@ -58,6 +58,8 @@ _PREFIX_EXCLUDE = (
     # Home/data-hub controls are transient Streamlit widgets, not durable values.
     "shoir_home_",
     "shoir_data_hub_",
+    # ZIP downloads are ephemeral; never serialize their binary payload into workspace JSON.
+    "shoir_tool_bundle_bytes_",
     # Streamlit action widgets are event controls, not durable workspace values.
     # The unified shell uses a consistent shoir_shell_* namespace for UI
     # controls and transient surface state; none of it belongs in persistence.

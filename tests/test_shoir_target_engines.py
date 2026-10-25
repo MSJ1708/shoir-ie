@@ -4,6 +4,7 @@ from __future__ import annotations
 import math
 
 import pytest
+import numpy as np
 import pandas as pd
 
 from shoir_target_engines import (
@@ -1272,7 +1273,7 @@ def test_sop_plan_applies_capacity_limits_and_carries_backlog_forward():
     result = reconcile_sop_plan(
         [
             {"period": "Jan", "demand": 30, "planned_production": 35, "production_capacity": 30, "scheduled_receipts": 0, "target_safety_stock": 15},
-            {"period": "Feb", "demand": 60, "planned_production": 40, "production_capacity": 50, "scheduled_receipts": 0, "target_safety_stock": 20},
+            {"period": "Feb", "demand": 60, "planned_production": 50, "production_capacity": 50, "scheduled_receipts": 0, "target_safety_stock": 20},
         ],
         starting_inventory=20,
     )
@@ -1315,3 +1316,418 @@ def test_supplier_scorecard_keeps_incomplete_supplier_unranked():
     assert pd.isna(table.loc["Beta", "Rank among complete scores"])
     with pytest.raises(ValueError, match="between 0 and 100"):
         score_supplier_performance([{"supplier": "Bad", "scores": {"Quality": 105}}], {"Quality": 1})
+
+
+def _balanced_gage_rr_fixture():
+    readings = []
+    for part, base in (("P1", 10.0), ("P2", 20.0), ("P3", 30.0)):
+        for operator, offset in (("A", 0.0), ("B", 1.0)):
+            readings.extend([
+                {"part": part, "operator": operator, "trial": "1", "value": base + offset},
+                {"part": part, "operator": operator, "trial": "2", "value": base + offset + 2.0},
+            ])
+    return readings
+
+
+def test_crossed_gage_rr_matches_hand_checked_balanced_variance_fixture():
+    from shoir_target_engines import analyze_measurement_system_gage_rr
+
+    result = analyze_measurement_system_gage_rr(
+        _balanced_gage_rr_fixture(), tolerance=20.0, unit="mm"
+    )
+    assert result["status"] == "PROVISIONAL_CROSSED_GAGE_RR_CALCULATED"
+    assert result["part_count"] == 3
+    assert result["operator_count"] == 2
+    assert result["trials_per_cell"] == 2
+    assert result["measurement_count"] == 12
+    assert result["grand_mean"] == pytest.approx(21.5)
+    assert result["repeatability_standard_deviation"] == pytest.approx(math.sqrt(2.0))
+    assert result["gage_rr_standard_deviation"] == pytest.approx(math.sqrt(2.5))
+    assert result["part_to_part_standard_deviation"] == pytest.approx(10.0)
+    assert result["gage_rr_percent_tolerance"] == pytest.approx(6 * math.sqrt(2.5) / 20 * 100)
+    assert result["number_of_distinct_categories"] == 8
+    table = result["variance_components"].set_index("Component")
+    assert table.loc["Repeatability (equipment)", "Variance component"] == pytest.approx(2.0)
+    assert table.loc["Reproducibility (operator)", "Variance component"] == pytest.approx(0.5)
+    assert "qualified reviewer" in " ".join(result["warnings"])
+
+
+def test_crossed_gage_rr_rejects_duplicate_unbalanced_and_invalid_measurements():
+    from shoir_target_engines import analyze_measurement_system_gage_rr
+
+    rows = _balanced_gage_rr_fixture()
+    with pytest.raises(ValueError, match="Duplicate measurement cell"):
+        analyze_measurement_system_gage_rr(rows + [rows[0]])
+    with pytest.raises(ValueError, match="unbalanced or has missing"):
+        analyze_measurement_system_gage_rr(rows[:-1])
+    invalid = _balanced_gage_rr_fixture()
+    invalid[0]["value"] = float("nan")
+    with pytest.raises(ValueError, match="finite number"):
+        analyze_measurement_system_gage_rr(invalid)
+    with pytest.raises(ValueError, match="greater than zero"):
+        analyze_measurement_system_gage_rr(rows, tolerance=0)
+
+
+def test_ols_regression_anova_matches_known_slope_and_reports_residuals():
+    from shoir_target_engines import fit_regression_anova
+
+    records = [
+        {"x": 1, "y": 5.0}, {"x": 2, "y": 8.1}, {"x": 3, "y": 10.9},
+        {"x": 4, "y": 14.2}, {"x": 5, "y": 16.9}, {"x": 6, "y": 20.1},
+    ]
+    result = fit_regression_anova(records, response="y", predictors=["x"])
+    assert result["status"] == "OLS_REGRESSION_ANOVA_CALCULATED"
+    assert result["sample_count"] == 6
+    assert result["model_degrees_freedom"] == 1
+    assert result["residual_degrees_freedom"] == 4
+    assert result["r_squared"] > 0.999
+    coefficients = result["coefficients"].set_index("Term")
+    assert coefficients.loc["Intercept", "Estimate"] == pytest.approx(2.02, abs=0.2)
+    assert coefficients.loc["x", "Estimate"] == pytest.approx(3.0, abs=0.05)
+    assert len(result["residuals"]) == 6
+    anova = result["anova_table"].set_index("Source")
+    assert anova.loc["Regression", "Sum of squares"] > anova.loc["Residual", "Sum of squares"]
+    assert anova.loc["Regression", "F statistic"] > 100
+    assert "does not establish causation" in " ".join(result["warnings"])
+
+
+def test_ols_regression_anova_rejects_rank_deficiency_missing_values_and_small_samples():
+    from shoir_target_engines import fit_regression_anova
+
+    with pytest.raises(ValueError, match="rank-deficient"):
+        fit_regression_anova(
+            [{"x": 1, "z": 2, "y": 3}, {"x": 2, "z": 4, "y": 5},
+             {"x": 3, "z": 6, "y": 7}, {"x": 4, "z": 8, "y": 9}],
+            "y", ["x", "z"],
+        )
+    with pytest.raises(ValueError, match="finite number"):
+        fit_regression_anova([{"x": 1, "y": 2}, {"x": float("inf"), "y": 3},
+                              {"x": 3, "y": 4}, {"x": 4, "y": 5}], "y", ["x"])
+    with pytest.raises(ValueError, match="more observations than predictors"):
+        fit_regression_anova([{"x": 1, "y": 2}, {"x": 2, "y": 4}], "y", ["x"])
+
+
+def test_supported_hypothesis_tests_match_reference_statistics_and_decision_rule():
+    from scipy import stats
+    from shoir_target_engines import run_hypothesis_test
+
+    one_sample = run_hypothesis_test("one_sample_t", [2, 4, 6, 8], null_mean=4, alpha=0.05)
+    reference_one = stats.ttest_1samp([2, 4, 6, 8], popmean=4)
+    assert one_sample["test_statistic"] == pytest.approx(reference_one.statistic)
+    assert one_sample["p_value"] == pytest.approx(reference_one.pvalue)
+    assert one_sample["reject_null_hypothesis"] is False
+    assert one_sample["confidence_interval_low"] < one_sample["mean_difference"] < one_sample["confidence_interval_high"]
+
+    welch = run_hypothesis_test("welch_t", [1, 2, 3], [5, 6, 7], alpha=0.05)
+    reference_welch = stats.ttest_ind([1, 2, 3], [5, 6, 7], equal_var=False)
+    assert welch["test_statistic"] == pytest.approx(reference_welch.statistic)
+    assert welch["p_value"] == pytest.approx(reference_welch.pvalue)
+    assert welch["reject_null_hypothesis"] is True
+
+    paired = run_hypothesis_test("paired_t", [5, 7, 8, 10], [4, 6, 6, 9], alpha=0.05)
+    reference_paired = stats.ttest_rel([5, 7, 8, 10], [4, 6, 6, 9])
+    assert paired["test_statistic"] == pytest.approx(reference_paired.statistic)
+    assert paired["p_value"] == pytest.approx(reference_paired.pvalue)
+    assert paired["sample_size_a"] == paired["sample_size_b"] == 4
+    assert paired["effect_size_cohens_d"] is not None
+
+
+def test_hypothesis_test_rejects_unsupported_designs_and_mismatched_pairs():
+    from shoir_target_engines import run_hypothesis_test
+
+    with pytest.raises(ValueError, match="Supported test types"):
+        run_hypothesis_test("chi_square", [1, 2, 3])
+    with pytest.raises(ValueError, match="same number"):
+        run_hypothesis_test("paired_t", [1, 2, 3], [1, 2])
+    with pytest.raises(ValueError, match="strictly between"):
+        run_hypothesis_test("one_sample_t", [1, 2, 3], alpha=1.0)
+    with pytest.raises(ValueError, match="at least two"):
+        run_hypothesis_test("welch_t", [1], [2, 3])
+
+
+
+def test_hypothesis_tests_reject_zero_standard_error_instead_of_fabricating_significance():
+    from shoir_target_engines import run_hypothesis_test
+
+    with pytest.raises(ValueError, match="standard error is zero"):
+        run_hypothesis_test("one_sample_t", [5, 5, 5], null_mean=1)
+    with pytest.raises(ValueError, match="standard error is zero"):
+        run_hypothesis_test("welch_t", [1, 1, 1], [5, 5, 5])
+    with pytest.raises(ValueError, match="standard error is zero"):
+        run_hypothesis_test("paired_t", [5, 7, 9], [4, 6, 8])
+
+
+
+def test_discrete_event_simulation_matches_deterministic_single_station_golden_case():
+    from shoir_target_engines import simulate_discrete_event_process
+
+    result = simulate_discrete_event_process(
+        [{"station": "Assembly", "servers": 1, "mean_service_time": 2, "service_distribution": "deterministic"}],
+        job_count=3,
+        mean_interarrival_time=1,
+        arrival_distribution="deterministic",
+        warmup_jobs=0,
+        replications=1,
+        random_seed=7,
+        time_unit="minutes",
+    )
+    assert result["status"] == "DISCRETE_EVENT_SIMULATION_COMPLETED"
+    assert result["station_count"] == 1
+    assert result["job_count"] == 3
+    summary = result["metric_summary"].set_index("Metric")
+    assert summary.loc["Average flow time (minutes)", "Mean across replications"] == pytest.approx(3.0)
+    assert summary.loc["Average total queue wait (minutes)", "Mean across replications"] == pytest.approx(1.0)
+    assert summary.loc["Throughput (jobs/minutes)", "Mean across replications"] == pytest.approx(0.5)
+    station = result["station_summary"].iloc[0]
+    assert station["Average queue wait (minutes)"] == pytest.approx(1.0)
+    assert station["Mean utilization across replications (%)"] == pytest.approx(100.0)
+    assert result["replication_results"].iloc[0]["Retained jobs"] == 3
+    assert "alternate routing" in " ".join(result["limitations"])
+
+
+def test_discrete_event_simulation_is_reproducible_and_excludes_warmup_jobs():
+    from shoir_target_engines import simulate_discrete_event_process
+
+    steps = [
+        {"station": "Cut", "servers": 1, "mean_service_time": 1.7, "service_distribution": "exponential"},
+        {"station": "Pack", "servers": 2, "mean_service_time": 2.4, "service_distribution": "exponential"},
+    ]
+    kwargs = dict(
+        job_count=30,
+        mean_interarrival_time=1.5,
+        arrival_distribution="exponential",
+        warmup_jobs=4,
+        replications=5,
+        random_seed=2026,
+        time_unit="hours",
+    )
+    first = simulate_discrete_event_process(steps, **kwargs)
+    second = simulate_discrete_event_process(steps, **kwargs)
+    pd.testing.assert_frame_equal(first["replication_results"], second["replication_results"])
+    pd.testing.assert_frame_equal(first["station_summary"], second["station_summary"])
+    assert first["replications"] == 5
+    assert (first["replication_results"]["Retained jobs"] == 26).all()
+    assert len(first["station_summary"]) == 2
+    assert first["station_summary"]["Mean utilization across replications (%)"].between(0, 100).all()
+    assert (first["metric_summary"]["P05 across replications"] <= first["metric_summary"]["P95 across replications"]).all()
+
+
+def test_discrete_event_simulation_rejects_invalid_job_counts_stations_and_distributions():
+    from shoir_target_engines import simulate_discrete_event_process
+
+    one_station = [{"station": "Cut", "servers": 1, "mean_service_time": 2}]
+    with pytest.raises(ValueError, match="Job count"):
+        simulate_discrete_event_process(one_station, job_count=1, mean_interarrival_time=1)
+    with pytest.raises(ValueError, match="Warm-up jobs"):
+        simulate_discrete_event_process(one_station, job_count=3, mean_interarrival_time=1, warmup_jobs=3)
+    with pytest.raises(ValueError, match="greater than zero"):
+        simulate_discrete_event_process(one_station, job_count=3, mean_interarrival_time=0)
+    with pytest.raises(ValueError, match="Arrival distribution"):
+        simulate_discrete_event_process(one_station, job_count=3, mean_interarrival_time=1, arrival_distribution="normal")
+    with pytest.raises(ValueError, match="unique; duplicate"):
+        simulate_discrete_event_process(
+            [{"station": "Cut", "servers": 1, "mean_service_time": 1},
+             {"station": "cut", "servers": 1, "mean_service_time": 2}],
+            job_count=3, mean_interarrival_time=1,
+        )
+    with pytest.raises(ValueError, match="Server count"):
+        simulate_discrete_event_process([{"station": "Cut", "servers": 0, "mean_service_time": 1}], job_count=3, mean_interarrival_time=1)
+    with pytest.raises(ValueError, match="greater than zero"):
+        simulate_discrete_event_process([{"station": "Cut", "servers": 1, "mean_service_time": -1}], job_count=3, mean_interarrival_time=1)
+
+
+
+def test_solver_diagnostics_returns_optimal_solution_and_independently_checks_constraints():
+    from shoir_target_engines import run_solver_diagnostics
+
+    result = run_solver_diagnostics(
+        {
+            "x": {"low": 0, "up": 10, "category": "Continuous"},
+            "y": {"low": 0, "up": 10, "category": "Continuous"},
+        },
+        {"x": 3, "y": 2},
+        [
+            {"name": "minimum_output", "coefficients": {"x": 1, "y": 1}, "sense": ">=", "rhs": 4},
+            {"name": "balance", "coefficients": {"x": 1, "y": 3}, "sense": ">=", "rhs": 6},
+        ],
+        direction="minimize",
+    )
+    assert result["status"] == "OPTIMAL_FEASIBLE"
+    assert result["solver_status"] == "Optimal"
+    assert result["independent_feasibility_check"] is True
+    assert result["objective_value"] == pytest.approx(8.0)
+    values = result["variable_values"].set_index("Variable")
+    assert values.loc["x", "Value"] == pytest.approx(0.0)
+    assert values.loc["y", "Value"] == pytest.approx(4.0)
+    assert (values["Bound status"] == "SATISFIED").all()
+    constraints = result["constraint_diagnostics"].set_index("Constraint")
+    assert constraints.loc["minimum_output", "LHS value"] >= 4
+    assert constraints.loc["balance", "LHS value"] >= 6
+    assert (constraints["Status"] == "SATISFIED").all()
+    assert not result["violations"]
+
+
+def test_solver_diagnostics_distinguishes_infeasible_unbounded_and_milp_models():
+    from shoir_target_engines import run_solver_diagnostics
+
+    infeasible = run_solver_diagnostics(
+        {"x": {"low": 0, "up": 1, "category": "Continuous"}},
+        {"x": 1},
+        [{"name": "impossible", "coefficients": {"x": 1}, "sense": ">=", "rhs": 2}],
+    )
+    assert infeasible["solver_status"] == "Infeasible"
+    assert infeasible["status"] == "INFEASIBLE"
+    assert infeasible["objective_value"] is None
+
+    unbounded = run_solver_diagnostics(
+        {"x": {"low": 0, "up": None, "category": "Continuous"}},
+        {"x": 1},
+        [],
+        direction="maximize",
+    )
+    assert unbounded["solver_status"] == "Unbounded"
+    assert unbounded["status"] == "UNBOUNDED"
+    assert unbounded["objective_value"] is None
+
+    integer = run_solver_diagnostics(
+        {"x": {"low": 0, "up": 10, "category": "Integer"}},
+        {"x": 1},
+        [{"name": "minimum", "coefficients": {"x": 1}, "sense": ">=", "rhs": 2.2}],
+        direction="minimize",
+    )
+    assert integer["status"] == "OPTIMAL_FEASIBLE"
+    assert integer["variable_values"].iloc[0]["Value"] == pytest.approx(3.0)
+    assert integer["variable_values"].iloc[0]["Category"] == "integer"
+    assert integer["independent_feasibility_check"] is True
+
+
+def test_solver_diagnostics_rejects_invalid_model_schema_and_uses_clear_solver_error_states():
+    from shoir_target_engines import run_solver_diagnostics
+
+    with pytest.raises(ValueError, match="unknown variable"):
+        run_solver_diagnostics(
+            {"x": {"low": 0, "up": 1}},
+            {"z": 1},
+            [],
+        )
+    with pytest.raises(ValueError, match="Lower bound exceeds upper"):
+        run_solver_diagnostics(
+            {"x": {"low": 5, "up": 1}},
+            {"x": 1},
+            [],
+        )
+    with pytest.raises(ValueError, match="sense must be"):
+        run_solver_diagnostics(
+            {"x": {"low": 0, "up": 1}},
+            {"x": 1},
+            [{"coefficients": {"x": 1}, "sense": "~=", "rhs": 1}],
+        )
+    with pytest.raises(ValueError, match="time limit"):
+        run_solver_diagnostics({"x": {"low": 0}}, {"x": 1}, [], time_limit_seconds=0)
+
+
+
+def test_reproducibility_pack_contains_hash_verified_payloads_and_redacts_secrets_and_contact_columns():
+    import hashlib
+    import io
+    import json
+    import zipfile
+    from shoir_target_engines import build_reproducibility_pack
+
+    result = {
+        "status": "ANALYSIS_COMPLETED",
+        "seed": 42,
+        "api_token": "DO_NOT_EXPORT_TOKEN_abc",
+        "metadata": "Bearer DO_NOT_EXPORT_BEARER_xyz",
+        "metrics": pd.DataFrame({
+            "Station": ["Cutting", "Packing"],
+            "email": ["private@example.test", "another@example.test"],
+            "Throughput": [12.0, 10.0],
+        }),
+    }
+    inputs = {
+        "job_count": 100,
+        "random_seed": 42,
+        "password": "DO_NOT_EXPORT_PASSWORD_123",
+        "notes": "No credentials should survive redaction",
+    }
+    pack = build_reproducibility_pack(
+        "T071",
+        "Discrete-Event Simulation",
+        result,
+        inputs=inputs,
+        metadata={"study_reference": "Fixture-07", "api_key": "DO_NOT_EXPORT_METADATA_KEY_456"},
+        include_input_snapshot=True,
+        include_result_tables=True,
+    )
+    payload = pack["bundle_bytes"]
+    assert payload.startswith(b"PK")
+    assert hashlib.sha256(payload).hexdigest() == pack["bundle_sha256"]
+    with zipfile.ZipFile(io.BytesIO(payload), "r") as archive:
+        names = set(archive.namelist())
+        assert {"manifest.json", "result_summary.json", "input_snapshot_redacted.json", "run_metadata.json", "SHA256SUMS.txt", "README.txt"} <= names
+        manifest = json.loads(archive.read("manifest.json"))
+        summary_text = archive.read("result_summary.json").decode("utf-8")
+        input_text = archive.read("input_snapshot_redacted.json").decode("utf-8")
+        metadata_text = archive.read("run_metadata.json").decode("utf-8")
+        table_paths = [name for name in names if name.startswith("tables/") and name.endswith(".csv")]
+        assert len(table_paths) == 1
+        table_text = archive.read(table_paths[0]).decode("utf-8")
+        assert "DO_NOT_EXPORT_TOKEN_abc" not in summary_text
+        assert "DO_NOT_EXPORT_BEARER_xyz" not in summary_text
+        assert "DO_NOT_EXPORT_PASSWORD_123" not in input_text
+        assert "DO_NOT_EXPORT_METADATA_KEY_456" not in metadata_text
+        assert "private@example.test" not in table_text
+        assert "[REDACTED]" in table_text
+        assert manifest["configuration_snapshot_included"] is True
+        assert manifest["detailed_result_tables_included"] is True
+        manifest_items = {item["path"]: item for item in manifest["payload_files"]}
+        assert "README.txt" in manifest_items
+        for name, item in manifest_items.items():
+            actual = archive.read(name)
+            assert len(actual) == item["byte_count"]
+            assert hashlib.sha256(actual).hexdigest() == item["sha256"]
+        checksum_lines = archive.read("SHA256SUMS.txt").decode("utf-8").splitlines()
+        for line in checksum_lines:
+            digest, path = line.split("  ", 1)
+            assert hashlib.sha256(archive.read(path)).hexdigest() == digest
+    inventory = pack["artifact_inventory"].set_index("Path")
+    assert inventory.loc["README.txt", "Bytes"] > 0
+    assert pack["status"] == "REPRODUCIBILITY_PACK_CREATED"
+
+
+def test_reproducibility_pack_defaults_to_metadata_and_table_fingerprints_only():
+    import io
+    import json
+    import zipfile
+    from shoir_target_engines import build_reproducibility_pack
+
+    pack = build_reproducibility_pack(
+        "T021",
+        "Time Study",
+        {"status": "CALCULATED", "standard_time": 14.5, "observations": pd.DataFrame({"time": [10, 12, 15]})},
+        inputs={"observation_text": "10,12,15"},
+    )
+    with zipfile.ZipFile(io.BytesIO(pack["bundle_bytes"]), "r") as archive:
+        names = set(archive.namelist())
+        assert "input_snapshot_redacted.json" not in names
+        assert not any(name.startswith("tables/") for name in names)
+        summary = json.loads(archive.read("result_summary.json"))
+        assert summary["standard_time"] == pytest.approx(14.5)
+        assert summary["observations"]["artifact_type"] == "omitted_table_metadata"
+        manifest = json.loads(archive.read("manifest.json"))
+        assert manifest["configuration_snapshot_included"] is False
+        assert manifest["detailed_result_tables_included"] is False
+        assert manifest["configuration_sha256"] == pack["input_fingerprint_sha256"]
+
+
+def test_reproducibility_pack_validates_canonical_ids_and_size_limits():
+    from shoir_target_engines import build_reproducibility_pack
+
+    with pytest.raises(ValueError, match="T001–T100"):
+        build_reproducibility_pack("T999", "Invalid", {"status": "OK"})
+    with pytest.raises(ValueError, match="completed result object"):
+        build_reproducibility_pack("T087", "Reproducibility Pack", "not-an-object")
+    with pytest.raises(ValueError, match="Maximum payload bytes"):
+        build_reproducibility_pack("T087", "Reproducibility Pack", {"status": "OK"}, max_payload_bytes=1)
+
