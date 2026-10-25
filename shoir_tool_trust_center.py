@@ -31,6 +31,7 @@ _SECRET_PATTERNS = (
     re.compile(r"(?i)https?://[^/\s:@]+:[^/\s@]+@"),
     re.compile(r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b"),
     re.compile(r"(?i)\b(?:\d{1,3}\.){3}\d{1,3}\b"),
+    re.compile(r"(?<!\w)(?:\+\d{1,3}[ -]?)?(?:\(?\d{2,4}\)?[ -])\d{3,4}[ -]\d{3,4}(?!\w)"),
     re.compile(r"(?i)\b[A-Z]:\\(?:[^\\\r\n]+\\)*[^\\\r\n]+"),
 )
 _TRACEBACK_FRAME = re.compile(r'^\s*File ["\'].*["\'], line \d+')
