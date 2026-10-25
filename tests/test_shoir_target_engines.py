@@ -1918,3 +1918,59 @@ def test_reproducibility_pack_validates_canonical_ids_and_size_limits():
         build_reproducibility_pack("T087", "Reproducibility Pack", "not-an-object")
     with pytest.raises(ValueError, match="Maximum payload bytes"):
         build_reproducibility_pack("T087", "Reproducibility Pack", {"status": "OK"}, max_payload_bytes=1)
+
+
+def test_facility_location_flow_matches_hand_checked_fixed_and_variable_costs():
+    from shoir_target_engines import optimize_facility_location_flow
+
+    result = optimize_facility_location_flow(
+        [
+            {"id": "F1", "fixed_opening_cost": 10, "capacity": 10},
+            {"id": "F2", "fixed_opening_cost": 1, "capacity": 10},
+        ],
+        [{"id": "C1", "demand": 5}, {"id": "C2", "demand": 5}],
+        [
+            {"facility": "F1", "customer": "C1", "unit_cost": 1, "capacity": 10},
+            {"facility": "F1", "customer": "C2", "unit_cost": 10, "capacity": 10},
+            {"facility": "F2", "customer": "C1", "unit_cost": 5, "capacity": 10},
+            {"facility": "F2", "customer": "C2", "unit_cost": 1, "capacity": 10},
+        ],
+    )
+    assert result["status"] == "OPTIMAL_FEASIBLE"
+    assert result["solver_status"] == "Optimal"
+    assert result["objective_value"] == pytest.approx(21.0)
+    assert result["fixed_opening_cost"] == pytest.approx(11.0)
+    assert result["variable_shipment_cost"] == pytest.approx(10.0)
+    assert result["independent_feasibility_check"] is True
+    assert result["customer_balance"]["Status"].eq("SATISFIED").all()
+    assert result["facility_table"]["Utilization (%)"].between(0, 100).all()
+
+
+def test_facility_location_flow_reports_infeasible_and_validates_route_contracts():
+    from shoir_target_engines import optimize_facility_location_flow
+
+    facilities = [{"id": "F1", "fixed_opening_cost": 0, "capacity": 10}]
+    customers = [{"id": "C1", "demand": 5}]
+    infeasible = optimize_facility_location_flow(
+        facilities, customers,
+        [{"facility": "F1", "customer": "C1", "unit_cost": 1, "capacity": 2}],
+    )
+    assert infeasible["status"] == "INFEASIBLE"
+    assert infeasible["objective_value"] is None
+
+    with pytest.raises(ValueError, match="unique"):
+        optimize_facility_location_flow(
+            facilities, customers,
+            [{"facility": "F1", "customer": "C1", "unit_cost": 1},
+             {"facility": "F1", "customer": "C1", "unit_cost": 2}],
+        )
+    with pytest.raises(ValueError, match="unknown facility or customer"):
+        optimize_facility_location_flow(
+            facilities, customers,
+            [{"facility": "F2", "customer": "C1", "unit_cost": 1}],
+        )
+    with pytest.raises(ValueError, match="non-negative"):
+        optimize_facility_location_flow(
+            facilities, customers,
+            [{"facility": "F1", "customer": "C1", "unit_cost": -1}],
+        )
