@@ -93,6 +93,19 @@ def test_every_target_entitlement_matches_independent_six_state_truth_table(tool
         assert tier_allows(current, tool["target_minimum_tier"]) is expected
 
 
+@pytest.mark.parametrize("tool", TOOL_TARGETS, ids=lambda tool: tool["tool_id"])
+def test_require_tool_access_enforces_six_state_truth_table(tool):
+    """Check direct server-side execution access for all 100 tools across all six states."""
+    for current in ALL_STATES:
+        expected = _expected(current, tool["target_minimum_tier"])
+        if expected:
+            granted = require_tool_access(current, tool["tool_id"])
+            assert granted["tool_id"] == tool["tool_id"]
+        else:
+            with pytest.raises(PermissionError):
+                require_tool_access(current, tool["tool_id"])
+
+
 def test_research_pack_and_enterprise_plus_are_not_interchangeable():
     research_ids = [tool["tool_id"] for tool in TOOL_TARGETS if tool["target_minimum_tier"] == "Research Pack"]
     plus_ids = [tool["tool_id"] for tool in TOOL_TARGETS if tool["target_minimum_tier"] == "Enterprise Plus"]
