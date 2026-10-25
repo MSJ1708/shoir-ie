@@ -70,7 +70,7 @@ def test_guided_study_wizard_runs_a_caveated_plan_with_missing_inputs():
     assert saved["result"]["status"] == "PLAN_GENERATED"
     assert saved["result"]["metrics"]["missing_input_count"] > 0
     assert any(
-        "checklist, not a calculation" in str(item.value).lower()
+        "inputs or validation steps still required before analysis" in str(item.value).lower()
         for item in at.warning
     )
 
