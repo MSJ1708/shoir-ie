@@ -1625,3 +1625,109 @@ def test_solver_diagnostics_rejects_invalid_model_schema_and_uses_clear_solver_e
     with pytest.raises(ValueError, match="time limit"):
         run_solver_diagnostics({"x": {"low": 0}}, {"x": 1}, [], time_limit_seconds=0)
 
+
+
+def test_reproducibility_pack_contains_hash_verified_payloads_and_redacts_secrets_and_contact_columns():
+    import hashlib
+    import io
+    import json
+    import zipfile
+    from shoir_target_engines import build_reproducibility_pack
+
+    result = {
+        "status": "ANALYSIS_COMPLETED",
+        "seed": 42,
+        "api_token": "DO_NOT_EXPORT_TOKEN_abc",
+        "metadata": "Bearer DO_NOT_EXPORT_BEARER_xyz",
+        "metrics": pd.DataFrame({
+            "Station": ["Cutting", "Packing"],
+            "email": ["private@example.test", "another@example.test"],
+            "Throughput": [12.0, 10.0],
+        }),
+    }
+    inputs = {
+        "job_count": 100,
+        "random_seed": 42,
+        "password": "DO_NOT_EXPORT_PASSWORD_123",
+        "notes": "No credentials should survive redaction",
+    }
+    pack = build_reproducibility_pack(
+        "T071",
+        "Discrete-Event Simulation",
+        result,
+        inputs=inputs,
+        metadata={"study_reference": "Fixture-07", "api_key": "DO_NOT_EXPORT_METADATA_KEY_456"},
+        include_input_snapshot=True,
+        include_result_tables=True,
+    )
+    payload = pack["bundle_bytes"]
+    assert payload.startswith(b"PK")
+    assert hashlib.sha256(payload).hexdigest() == pack["bundle_sha256"]
+    with zipfile.ZipFile(io.BytesIO(payload), "r") as archive:
+        names = set(archive.namelist())
+        assert {"manifest.json", "result_summary.json", "input_snapshot_redacted.json", "run_metadata.json", "SHA256SUMS.txt", "README.txt"} <= names
+        manifest = json.loads(archive.read("manifest.json"))
+        summary_text = archive.read("result_summary.json").decode("utf-8")
+        input_text = archive.read("input_snapshot_redacted.json").decode("utf-8")
+        metadata_text = archive.read("run_metadata.json").decode("utf-8")
+        table_paths = [name for name in names if name.startswith("tables/") and name.endswith(".csv")]
+        assert len(table_paths) == 1
+        table_text = archive.read(table_paths[0]).decode("utf-8")
+        assert "DO_NOT_EXPORT_TOKEN_abc" not in summary_text
+        assert "DO_NOT_EXPORT_BEARER_xyz" not in summary_text
+        assert "DO_NOT_EXPORT_PASSWORD_123" not in input_text
+        assert "DO_NOT_EXPORT_METADATA_KEY_456" not in metadata_text
+        assert "private@example.test" not in table_text
+        assert "[REDACTED]" in table_text
+        assert manifest["configuration_snapshot_included"] is True
+        assert manifest["detailed_result_tables_included"] is True
+        manifest_items = {item["path"]: item for item in manifest["payload_files"]}
+        assert "README.txt" in manifest_items
+        for name, item in manifest_items.items():
+            actual = archive.read(name)
+            assert len(actual) == item["byte_count"]
+            assert hashlib.sha256(actual).hexdigest() == item["sha256"]
+        checksum_lines = archive.read("SHA256SUMS.txt").decode("utf-8").splitlines()
+        for line in checksum_lines:
+            digest, path = line.split("  ", 1)
+            assert hashlib.sha256(archive.read(path)).hexdigest() == digest
+    inventory = pack["artifact_inventory"].set_index("Path")
+    assert inventory.loc["README.txt", "Bytes"] > 0
+    assert pack["status"] == "REPRODUCIBILITY_PACK_CREATED"
+
+
+def test_reproducibility_pack_defaults_to_metadata_and_table_fingerprints_only():
+    import io
+    import json
+    import zipfile
+    from shoir_target_engines import build_reproducibility_pack
+
+    pack = build_reproducibility_pack(
+        "T021",
+        "Time Study",
+        {"status": "CALCULATED", "standard_time": 14.5, "observations": pd.DataFrame({"time": [10, 12, 15]})},
+        inputs={"observation_text": "10,12,15"},
+    )
+    with zipfile.ZipFile(io.BytesIO(pack["bundle_bytes"]), "r") as archive:
+        names = set(archive.namelist())
+        assert "input_snapshot_redacted.json" not in names
+        assert not any(name.startswith("tables/") for name in names)
+        summary = json.loads(archive.read("result_summary.json"))
+        assert summary["standard_time"] == pytest.approx(14.5)
+        assert summary["observations"]["artifact_type"] == "omitted_table_metadata"
+        manifest = json.loads(archive.read("manifest.json"))
+        assert manifest["configuration_snapshot_included"] is False
+        assert manifest["detailed_result_tables_included"] is False
+        assert manifest["configuration_sha256"] == pack["input_fingerprint_sha256"]
+
+
+def test_reproducibility_pack_validates_canonical_ids_and_size_limits():
+    from shoir_target_engines import build_reproducibility_pack
+
+    with pytest.raises(ValueError, match="T001–T100"):
+        build_reproducibility_pack("T999", "Invalid", {"status": "OK"})
+    with pytest.raises(ValueError, match="completed result object"):
+        build_reproducibility_pack("T087", "Reproducibility Pack", "not-an-object")
+    with pytest.raises(ValueError, match="Maximum payload bytes"):
+        build_reproducibility_pack("T087", "Reproducibility Pack", {"status": "OK"}, max_payload_bytes=1)
+
