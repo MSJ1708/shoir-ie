@@ -115,7 +115,7 @@ def test_help_search_returns_real_registry_contracts_and_keeps_known_gaps_visibl
     assert tool["required_inputs"]
     assert tool["expected_outputs"]
     assert "status" in tool
-    assert "not replace tool-specific validation" in result["interpretation"]
+    assert "does not replace tool-specific validation" in result["interpretation"]
 
 
 def test_support_bundle_is_redacted_not_sent_and_has_a_reference():
@@ -135,4 +135,4 @@ def test_support_bundle_is_redacted_not_sent_and_has_a_reference():
     assert result["support_backend_configured"] is False
     assert "top-secret-key" not in result["redacted_summary"]
     assert "owner@example.com" not in result["redacted_summary"]
-    assert "No data was transmitted" in result["next_action"]
+    assert "no data was transmitted" in result["next_action"]
