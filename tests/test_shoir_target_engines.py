@@ -1456,3 +1456,82 @@ def test_hypothesis_tests_reject_zero_standard_error_instead_of_fabricating_sign
     with pytest.raises(ValueError, match="standard error is zero"):
         run_hypothesis_test("paired_t", [5, 7, 9], [4, 6, 8])
 
+
+
+def test_discrete_event_simulation_matches_deterministic_single_station_golden_case():
+    from shoir_target_engines import simulate_discrete_event_process
+
+    result = simulate_discrete_event_process(
+        [{"station": "Assembly", "servers": 1, "mean_service_time": 2, "service_distribution": "deterministic"}],
+        job_count=3,
+        mean_interarrival_time=1,
+        arrival_distribution="deterministic",
+        warmup_jobs=0,
+        replications=1,
+        random_seed=7,
+        time_unit="minutes",
+    )
+    assert result["status"] == "DISCRETE_EVENT_SIMULATION_COMPLETED"
+    assert result["station_count"] == 1
+    assert result["job_count"] == 3
+    summary = result["metric_summary"].set_index("Metric")
+    assert summary.loc["Average flow time (minutes)", "Mean across replications"] == pytest.approx(3.0)
+    assert summary.loc["Average total queue wait (minutes)", "Mean across replications"] == pytest.approx(1.0)
+    assert summary.loc["Throughput (jobs/minutes)", "Mean across replications"] == pytest.approx(0.5)
+    station = result["station_summary"].iloc[0]
+    assert station["Average queue wait (minutes)"] == pytest.approx(1.0)
+    assert station["Mean utilization across replications (%)"] == pytest.approx(100.0)
+    assert result["replication_results"].iloc[0]["Retained jobs"] == 3
+    assert "alternate routing" in " ".join(result["limitations"])
+
+
+def test_discrete_event_simulation_is_reproducible_and_excludes_warmup_jobs():
+    from shoir_target_engines import simulate_discrete_event_process
+
+    steps = [
+        {"station": "Cut", "servers": 1, "mean_service_time": 1.7, "service_distribution": "exponential"},
+        {"station": "Pack", "servers": 2, "mean_service_time": 2.4, "service_distribution": "exponential"},
+    ]
+    kwargs = dict(
+        job_count=30,
+        mean_interarrival_time=1.5,
+        arrival_distribution="exponential",
+        warmup_jobs=4,
+        replications=5,
+        random_seed=2026,
+        time_unit="hours",
+    )
+    first = simulate_discrete_event_process(steps, **kwargs)
+    second = simulate_discrete_event_process(steps, **kwargs)
+    pd.testing.assert_frame_equal(first["replication_results"], second["replication_results"])
+    pd.testing.assert_frame_equal(first["station_summary"], second["station_summary"])
+    assert first["replications"] == 5
+    assert (first["replication_results"]["Retained jobs"] == 26).all()
+    assert len(first["station_summary"]) == 2
+    assert first["station_summary"]["Mean utilization across replications (%)"].between(0, 100).all()
+    assert (first["metric_summary"]["P05 across replications"] <= first["metric_summary"]["P95 across replications"]).all()
+
+
+def test_discrete_event_simulation_rejects_invalid_job_counts_stations_and_distributions():
+    from shoir_target_engines import simulate_discrete_event_process
+
+    one_station = [{"station": "Cut", "servers": 1, "mean_service_time": 2}]
+    with pytest.raises(ValueError, match="Job count"):
+        simulate_discrete_event_process(one_station, job_count=1, mean_interarrival_time=1)
+    with pytest.raises(ValueError, match="Warm-up jobs"):
+        simulate_discrete_event_process(one_station, job_count=3, mean_interarrival_time=1, warmup_jobs=3)
+    with pytest.raises(ValueError, match="greater than zero"):
+        simulate_discrete_event_process(one_station, job_count=3, mean_interarrival_time=0)
+    with pytest.raises(ValueError, match="Arrival distribution"):
+        simulate_discrete_event_process(one_station, job_count=3, mean_interarrival_time=1, arrival_distribution="normal")
+    with pytest.raises(ValueError, match="unique; duplicate"):
+        simulate_discrete_event_process(
+            [{"station": "Cut", "servers": 1, "mean_service_time": 1},
+             {"station": "cut", "servers": 1, "mean_service_time": 2}],
+            job_count=3, mean_interarrival_time=1,
+        )
+    with pytest.raises(ValueError, match="Server count"):
+        simulate_discrete_event_process([{"station": "Cut", "servers": 0, "mean_service_time": 1}], job_count=3, mean_interarrival_time=1)
+    with pytest.raises(ValueError, match="greater than zero"):
+        simulate_discrete_event_process([{"station": "Cut", "servers": 1, "mean_service_time": -1}], job_count=3, mean_interarrival_time=1)
+
