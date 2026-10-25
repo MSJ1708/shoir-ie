@@ -1315,3 +1315,131 @@ def test_supplier_scorecard_keeps_incomplete_supplier_unranked():
     assert pd.isna(table.loc["Beta", "Rank among complete scores"])
     with pytest.raises(ValueError, match="between 0 and 100"):
         score_supplier_performance([{"supplier": "Bad", "scores": {"Quality": 105}}], {"Quality": 1})
+
+
+def _balanced_gage_rr_fixture():
+    readings = []
+    for part, base in (("P1", 10.0), ("P2", 20.0), ("P3", 30.0)):
+        for operator, offset in (("A", 0.0), ("B", 1.0)):
+            readings.extend([
+                {"part": part, "operator": operator, "trial": "1", "value": base + offset},
+                {"part": part, "operator": operator, "trial": "2", "value": base + offset + 2.0},
+            ])
+    return readings
+
+
+def test_crossed_gage_rr_matches_hand_checked_balanced_variance_fixture():
+    from shoir_target_engines import analyze_measurement_system_gage_rr
+
+    result = analyze_measurement_system_gage_rr(
+        _balanced_gage_rr_fixture(), tolerance=20.0, unit="mm"
+    )
+    assert result["status"] == "PROVISIONAL_CROSSED_GAGE_RR_CALCULATED"
+    assert result["part_count"] == 3
+    assert result["operator_count"] == 2
+    assert result["trials_per_cell"] == 2
+    assert result["measurement_count"] == 12
+    assert result["grand_mean"] == pytest.approx(21.5)
+    assert result["repeatability_standard_deviation"] == pytest.approx(math.sqrt(2.0))
+    assert result["gage_rr_standard_deviation"] == pytest.approx(math.sqrt(2.5))
+    assert result["part_to_part_standard_deviation"] == pytest.approx(10.0)
+    assert result["gage_rr_percent_tolerance"] == pytest.approx(6 * math.sqrt(2.5) / 20 * 100)
+    assert result["number_of_distinct_categories"] == 8
+    table = result["variance_components"].set_index("Component")
+    assert table.loc["Repeatability (equipment)", "Variance component"] == pytest.approx(2.0)
+    assert table.loc["Reproducibility (operator)", "Variance component"] == pytest.approx(0.5)
+    assert "qualified reviewer" in " ".join(result["warnings"])
+
+
+def test_crossed_gage_rr_rejects_duplicate_unbalanced_and_invalid_measurements():
+    from shoir_target_engines import analyze_measurement_system_gage_rr
+
+    rows = _balanced_gage_rr_fixture()
+    with pytest.raises(ValueError, match="Duplicate measurement cell"):
+        analyze_measurement_system_gage_rr(rows + [rows[0]])
+    with pytest.raises(ValueError, match="unbalanced or has missing"):
+        analyze_measurement_system_gage_rr(rows[:-1])
+    invalid = _balanced_gage_rr_fixture()
+    invalid[0]["value"] = float("nan")
+    with pytest.raises(ValueError, match="finite number"):
+        analyze_measurement_system_gage_rr(invalid)
+    with pytest.raises(ValueError, match="greater than zero"):
+        analyze_measurement_system_gage_rr(rows, tolerance=0)
+
+
+def test_ols_regression_anova_matches_known_slope_and_reports_residuals():
+    from shoir_target_engines import fit_regression_anova
+
+    records = [
+        {"x": 1, "y": 5.0}, {"x": 2, "y": 8.1}, {"x": 3, "y": 10.9},
+        {"x": 4, "y": 14.2}, {"x": 5, "y": 16.9}, {"x": 6, "y": 20.1},
+    ]
+    result = fit_regression_anova(records, response="y", predictors=["x"])
+    assert result["status"] == "OLS_REGRESSION_ANOVA_CALCULATED"
+    assert result["sample_count"] == 6
+    assert result["model_degrees_freedom"] == 1
+    assert result["residual_degrees_freedom"] == 4
+    assert result["r_squared"] > 0.999
+    coefficients = result["coefficients"].set_index("Term")
+    assert coefficients.loc["Intercept", "Estimate"] == pytest.approx(2.02, abs=0.2)
+    assert coefficients.loc["x", "Estimate"] == pytest.approx(3.0, abs=0.05)
+    assert len(result["residuals"]) == 6
+    anova = result["anova_table"].set_index("Source")
+    assert anova.loc["Regression", "Sum of squares"] > anova.loc["Residual", "Sum of squares"]
+    assert anova.loc["Regression", "F statistic"] > 100
+    assert "does not establish causation" in " ".join(result["warnings"])
+
+
+def test_ols_regression_anova_rejects_rank_deficiency_missing_values_and_small_samples():
+    from shoir_target_engines import fit_regression_anova
+
+    with pytest.raises(ValueError, match="rank-deficient"):
+        fit_regression_anova(
+            [{"x": 1, "z": 2, "y": 3}, {"x": 2, "z": 4, "y": 5},
+             {"x": 3, "z": 6, "y": 7}, {"x": 4, "z": 8, "y": 9}],
+            "y", ["x", "z"],
+        )
+    with pytest.raises(ValueError, match="finite number"):
+        fit_regression_anova([{"x": 1, "y": 2}, {"x": float("inf"), "y": 3},
+                              {"x": 3, "y": 4}, {"x": 4, "y": 5}], "y", ["x"])
+    with pytest.raises(ValueError, match="more observations than predictors"):
+        fit_regression_anova([{"x": 1, "y": 2}, {"x": 2, "y": 4}], "y", ["x"])
+
+
+def test_supported_hypothesis_tests_match_reference_statistics_and_decision_rule():
+    from scipy import stats
+    from shoir_target_engines import run_hypothesis_test
+
+    one_sample = run_hypothesis_test("one_sample_t", [2, 4, 6, 8], null_mean=4, alpha=0.05)
+    reference_one = stats.ttest_1samp([2, 4, 6, 8], popmean=4)
+    assert one_sample["test_statistic"] == pytest.approx(reference_one.statistic)
+    assert one_sample["p_value"] == pytest.approx(reference_one.pvalue)
+    assert one_sample["reject_null_hypothesis"] is False
+    assert one_sample["confidence_interval_low"] < one_sample["mean_difference"] < one_sample["confidence_interval_high"]
+
+    welch = run_hypothesis_test("welch_t", [1, 2, 3], [5, 6, 7], alpha=0.05)
+    reference_welch = stats.ttest_ind([1, 2, 3], [5, 6, 7], equal_var=False)
+    assert welch["test_statistic"] == pytest.approx(reference_welch.statistic)
+    assert welch["p_value"] == pytest.approx(reference_welch.pvalue)
+    assert welch["reject_null_hypothesis"] is True
+
+    paired = run_hypothesis_test("paired_t", [5, 7, 8, 10], [4, 6, 6, 9], alpha=0.05)
+    reference_paired = stats.ttest_rel([5, 7, 8, 10], [4, 6, 6, 9])
+    assert paired["test_statistic"] == pytest.approx(reference_paired.statistic)
+    assert paired["p_value"] == pytest.approx(reference_paired.pvalue)
+    assert paired["sample_size_a"] == paired["sample_size_b"] == 4
+    assert paired["effect_size_cohens_d"] is not None
+
+
+def test_hypothesis_test_rejects_unsupported_designs_and_mismatched_pairs():
+    from shoir_target_engines import run_hypothesis_test
+
+    with pytest.raises(ValueError, match="Supported test types"):
+        run_hypothesis_test("chi_square", [1, 2, 3])
+    with pytest.raises(ValueError, match="same number"):
+        run_hypothesis_test("paired_t", [1, 2, 3], [1, 2])
+    with pytest.raises(ValueError, match="strictly between"):
+        run_hypothesis_test("one_sample_t", [1, 2, 3], alpha=1.0)
+    with pytest.raises(ValueError, match="at least two"):
+        run_hypothesis_test("welch_t", [1], [2, 3])
+
