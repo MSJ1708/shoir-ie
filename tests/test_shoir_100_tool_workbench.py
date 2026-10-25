@@ -501,3 +501,48 @@ def test_workbench_runs_measurement_system_regression_and_research_hypothesis_to
     assert hypothesis["reject_null_hypothesis"] is False
     assert hypothesis["data_provenance"] == "SYNTHETIC_EXAMPLE"
 
+
+
+def test_workbench_runs_maintenance_backlog_and_supplier_scorecard():
+    """Use the existing Workbench and tier gate for two previously foundation-only targets."""
+    from streamlit.testing.v1 import AppTest
+
+    page = ROOT / "pages" / "Industrial_Engineering_Workbench.py"
+    at = AppTest.from_file(page, default_timeout=60)
+    at.session_state["current_user"] = "maintenance-supplier-checker"
+    at.session_state["authenticated"] = True
+    at.session_state["user_tier"] = "Research Pack"
+    at.run(timeout=60)
+    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+
+    inspector = at.selectbox(key="shoir_100_tool_inspector")
+    inspector.select("T049 · Maintenance Backlog Optimizer")
+    at.run(timeout=60)
+    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+    at.button(key="tool049_run").click()
+    at.run(timeout=60)
+    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+    backlog = at.session_state.get("shoir_tool_result_T049")
+    assert backlog is not None
+    assert backlog["status"] == "BACKLOG_PRIORITIZED"
+    assert backlog["selected_count"] == 2
+    assert backlog["selected_labor_hours"] == pytest.approx(7.0)
+    assert backlog["data_provenance"] == "SYNTHETIC_EXAMPLE"
+
+    inspector = at.selectbox(key="shoir_100_tool_inspector")
+    inspector.select("T058 · Supplier Performance and Risk Scorecard")
+    at.run(timeout=60)
+    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+    at.button(key="tool058_run").click()
+    at.run(timeout=60)
+    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+    supplier = at.session_state.get("shoir_tool_result_T058")
+    assert supplier is not None
+    assert supplier["status"] == "SUPPLIER_SCORECARD_CALCULATED"
+    assert supplier["complete_score_count"] == 2
+    assert supplier["incomplete_score_count"] == 1
+    scorecard = supplier["scorecard"].set_index("Supplier")
+    assert scorecard.loc["Acme", "Composite score (0–100)"] == pytest.approx(84.0)
+    assert str(scorecard.loc["Beta", "Score status"]).startswith("INCOMPLETE")
+    assert supplier["data_provenance"] == "SYNTHETIC_EXAMPLE"
+
