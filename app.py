@@ -1477,16 +1477,24 @@ if not st.session_state.get("current_user"):
         """
         <style>
         @media (max-width: 600px) {
+          /* BaseWeb's current Streamlit tabs use data-baseweb attributes; retain
+             ARIA selectors as a fallback and wrap actual tab labels, not just the strip. */
+          div[data-testid="stTabs"] [role="tablist"],
           div[data-testid="stTabs"] [data-baseweb="tab-list"] {
             display: flex !important;
             flex-wrap: wrap !important;
-            overflow-x: visible !important;
-            white-space: normal !important;
             align-items: stretch !important;
             gap: 0.25rem !important;
+            width: 100% !important;
+            max-width: 100% !important;
+            min-width: 0 !important;
+            overflow-x: visible !important;
+            white-space: normal !important;
+            box-sizing: border-box !important;
           }
-          div[data-testid="stTabs"] button[role="tab"] {
-            flex: 1 1 9rem !important;
+          div[data-testid="stTabs"] [role="tab"],
+          div[data-testid="stTabs"] [data-baseweb="tab"] {
+            flex: 1 1 calc(50% - 0.25rem) !important;
             min-width: 0 !important;
             max-width: 100% !important;
             height: auto !important;
@@ -1495,6 +1503,14 @@ if not st.session_state.get("current_user"):
             white-space: normal !important;
             overflow-wrap: anywhere !important;
             text-align: center !important;
+            box-sizing: border-box !important;
+          }
+          div[data-testid="stTabs"] [role="tab"] [data-testid="stMarkdownContainer"],
+          div[data-testid="stTabs"] [data-baseweb="tab"] [data-testid="stMarkdownContainer"] {
+            white-space: normal !important;
+            overflow-wrap: anywhere !important;
+            min-width: 0 !important;
+            max-width: 100% !important;
           }
         }
         </style>
