@@ -5912,3 +5912,138 @@ def monitor_equipment_anomalies(
         ],
         "data_provenance": "USER_ENTERED_UNVERIFIED",
     }
+
+
+def assess_capa_8d_records(
+    records: Sequence[Mapping[str, Any]],
+    *,
+    as_of_date: Any = None,
+) -> dict[str, Any]:
+    """Validate CAPA/8D register records and flag missing evidence and due dates.
+
+    This method is a record-quality/workflow assistant. It never certifies that a
+    root cause is correct, an action is effective, or a 8D program is compliant.
+    """
+    if not isinstance(records, Sequence) or isinstance(records, (str, bytes)):
+        raise ValueError("CAPA/8D records must be a JSON list of objects.")
+    if not 1 <= len(records) <= 5000:
+        raise ValueError("Provide between 1 and 5,000 CAPA/8D records.")
+    if any(not isinstance(row, Mapping) for row in records):
+        raise ValueError("Every CAPA/8D record must be an object.")
+
+    if as_of_date is None or not str(as_of_date).strip():
+        as_of = pd.Timestamp.now(tz="UTC").date()
+    else:
+        parsed_as_of = pd.to_datetime(as_of_date, errors="coerce")
+        if pd.isna(parsed_as_of):
+            raise ValueError("As-of date must be a valid date.")
+        as_of = parsed_as_of.date()
+
+    required_fields = {
+        "D1 team": "team",
+        "D2 problem statement": "problem_statement",
+        "D3 containment action": "containment_action",
+        "D4 root cause": "root_cause",
+        "D5 corrective action": "corrective_action",
+        "D6 implementation evidence": "implementation_evidence",
+        "D7 recurrence prevention": "preventive_action",
+        "D8 closure review": "closure_review",
+    }
+    status_values = {"OPEN", "IN_PROGRESS", "PENDING_EFFECTIVENESS", "CLOSED"}
+    ids: set[str] = set()
+    output_rows: list[dict[str, Any]] = []
+    missing_total = overdue_total = 0
+    for index, raw in enumerate(records, start=1):
+        capa_id = str(raw.get("capa_id", "")).strip()
+        title = str(raw.get("title", "")).strip()
+        if not capa_id or len(capa_id) > 100:
+            raise ValueError(f"Record {index} needs a CAPA ID no longer than 100 characters.")
+        if capa_id.casefold() in ids:
+            raise ValueError(f"CAPA IDs must be unique; duplicate ID: {capa_id}.")
+        ids.add(capa_id.casefold())
+        if not title:
+            raise ValueError(f"Record {capa_id} needs a non-empty title.")
+        status = str(raw.get("status", "OPEN")).strip().upper()
+        if status not in status_values:
+            raise ValueError(f"Record {capa_id} status must be one of {', '.join(sorted(status_values))}.")
+
+        opened_raw = str(raw.get("opened_date", "")).strip()
+        due_raw = str(raw.get("due_date", "")).strip()
+        opened_date = pd.to_datetime(opened_raw, errors="coerce").date() if opened_raw else None
+        due_date = pd.to_datetime(due_raw, errors="coerce").date() if due_raw else None
+        if opened_raw and opened_date is None:
+            raise ValueError(f"Record {capa_id} has an invalid opened_date.")
+        if due_raw and due_date is None:
+            raise ValueError(f"Record {capa_id} has an invalid due_date.")
+        if opened_date and due_date and due_date < opened_date:
+            raise ValueError(f"Record {capa_id} due date cannot precede its opened date.")
+
+        missing = [
+            label for label, field in required_fields.items()
+            if not str(raw.get(field, "") or "").strip()
+        ]
+        if not str(raw.get("owner", "") or "").strip():
+            missing.append("Accountable owner")
+        if not str(raw.get("evidence_reference", "") or "").strip():
+            missing.append("Evidence reference")
+        if not opened_date:
+            missing.append("Opened date")
+        if not due_date:
+            missing.append("Due date")
+        if status == "CLOSED":
+            if not str(raw.get("effectiveness_evidence", "") or "").strip():
+                missing.append("Effectiveness evidence")
+            if not str(raw.get("reviewer", "") or "").strip():
+                missing.append("Closure reviewer")
+            if not str(raw.get("approval_reference", "") or "").strip():
+                missing.append("Closure approval reference")
+        missing = list(dict.fromkeys(missing))
+        is_overdue = bool(due_date and due_date < as_of and status != "CLOSED")
+        if is_overdue:
+            overdue_total += 1
+        if missing:
+            missing_total += 1
+        completeness_pct = 100.0 * (len(required_fields) + 4 - len(missing)) / (len(required_fields) + 4)
+        if status == "CLOSED" and not missing:
+            workflow_state = "CLOSED_RECORD_COMPLETE"
+        elif status == "CLOSED" and missing:
+            workflow_state = "CLOSURE_EVIDENCE_INCOMPLETE"
+        elif is_overdue:
+            workflow_state = "OVERDUE"
+        elif missing:
+            workflow_state = "REQUIRES_EVIDENCE"
+        elif status == "PENDING_EFFECTIVENESS":
+            workflow_state = "PENDING_EFFECTIVENESS"
+        else:
+            workflow_state = status
+        output_rows.append({
+            "CAPA ID": capa_id,
+            "Title": title,
+            "Status": status,
+            "Workflow state": workflow_state,
+            "Owner": str(raw.get("owner", "") or "").strip(),
+            "Opened date": opened_date.isoformat() if opened_date else "",
+            "Due date": due_date.isoformat() if due_date else "",
+            "Overdue": is_overdue,
+            "Missing items": "; ".join(missing),
+            "Missing item count": len(missing),
+            "Completeness (%)": completeness_pct,
+            "Reviewer": str(raw.get("reviewer", "") or "").strip(),
+            "Evidence reference": str(raw.get("evidence_reference", "") or "").strip(),
+        })
+    frame = pd.DataFrame(output_rows)
+    status_counts = frame["Workflow state"].value_counts().rename_axis("Workflow state").reset_index(name="Records")
+    return {
+        "status": "CAPA_REGISTER_REVIEWED",
+        "record_count": int(len(frame)),
+        "overdue_count": overdue_total,
+        "records_with_missing_evidence": missing_total,
+        "complete_closure_count": int((frame["Workflow state"] == "CLOSED_RECORD_COMPLETE").sum()),
+        "workflow_summary": status_counts,
+        "records": frame,
+        "as_of_date": as_of.isoformat(),
+        "required_eight_discipline_fields": list(required_fields.keys()),
+        "method": "Structured 8D/CAPA field-completeness, due-date and closure-evidence screening",
+        "warning": "This register checks record completeness and status only. It does not verify the truth of root-cause claims, action effectiveness, regulatory compliance or engineering safety.",
+        "data_provenance": "USER_ENTERED_UNVERIFIED",
+    }
