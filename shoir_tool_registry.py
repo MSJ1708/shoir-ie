@@ -145,7 +145,7 @@ def _load_targets() -> tuple[dict[str, Any], ...]:
         external_dependency = "No external configuration established by this source audit."
         if tool_id in {"T048", "T074", "T096", "T098"}:
             external_dependency = "Approved data source or provider configuration must be explicitly set up and tested; live operation is not assumed."
-        if tool_id in {"T016", "T017", "T018", "T019", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T034", "T038", "T040", "T041", "T042", "T043", "T045", "T047", "T050", "T054", "T055", "T056", "T059", "T063", "T066", "T070", "T075", "T076", "T077", "T078", "T079", "T081", "T082", "T083", "T084", "T085"}:
+        if tool_id in {"T016", "T017", "T018", "T019", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T034", "T038", "T040", "T041", "T042", "T043", "T045", "T047", "T050", "T054", "T055", "T056", "T059", "T063", "T066", "T070", "T075", "T076", "T077", "T078", "T079", "T081", "T082", "T083", "T084", "T085", "T033", "T036", "T037"}:
             persistence_scope = (
                 "Focused result and input snapshot are saved through workspace_persistence.py for authenticated users; "
                 "managed storage is used only when configured, otherwise the local SQLite fallback may be ephemeral. "
@@ -172,7 +172,7 @@ def _load_targets() -> tuple[dict[str, Any], ...]:
             "entitlement_enforcement_points": (
                 "Direct Workbench specialist methods require _require_focused_tool_actor() plus require_tool_access(tier, tool_id) before calculation; "
                 "the capability directory also checks target access. Mapped legacy module routes still enforce their native policy."
-                if tool_id in {"T016", "T017", "T018", "T019", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T034", "T038", "T040", "T041", "T042", "T043", "T045", "T047", "T050", "T054", "T055", "T056", "T059", "T063", "T066", "T070", "T075", "T076", "T077", "T078", "T079", "T081", "T082", "T083", "T084", "T085"}
+                if tool_id in {"T016", "T017", "T018", "T019", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T034", "T038", "T040", "T041", "T042", "T043", "T045", "T047", "T050", "T054", "T055", "T056", "T059", "T063", "T066", "T070", "T075", "T076", "T077", "T078", "T079", "T081", "T082", "T083", "T084", "T085", "T033", "T036", "T037"}
                 else
                 "Target catalog gate: tier_allows_tool(tool_id, tier). Target execution is not yet wired to this ID; "
                 "the mapped legacy route must also enforce its native server-side policy."
@@ -210,6 +210,9 @@ def _load_targets() -> tuple[dict[str, Any], ...]:
                 "T063": "tests/test_shoir_target_engines.py::test_linear_task_resource_assignment_finds_minimum_cost_and_reports_shortage; tests/test_shoir_100_tool_workbench.py::test_workbench_runs_weibull_spares_safety_slotting_assignment_and_energy_methods",
                 "T077": "tests/test_shoir_target_engines.py::test_energy_scenario_comparison_ranks_intensity_without_claiming_live_control; tests/test_shoir_100_tool_workbench.py::test_workbench_runs_weibull_spares_safety_slotting_assignment_and_energy_methods",
                 "T085": "tests/test_shoir_target_engines.py::test_power_planner_matches_known_balanced_t_test_reference; tests/test_shoir_target_engines.py::test_power_planner_handles_search_limit_and_invalid_inputs",
+                "T033": "tests/test_shoir_target_engines.py::test_crossed_gage_rr_matches_hand_checked_balanced_variance_fixture; tests/test_shoir_target_engines.py::test_crossed_gage_rr_rejects_duplicate_unbalanced_and_invalid_measurements; tests/test_shoir_100_tool_workbench.py::test_workbench_runs_measurement_system_regression_and_research_hypothesis_tools",
+                "T036": "tests/test_shoir_target_engines.py::test_ols_regression_anova_matches_known_slope_and_reports_residuals; tests/test_shoir_target_engines.py::test_ols_regression_anova_rejects_rank_deficiency_missing_values_and_small_samples; tests/test_shoir_100_tool_workbench.py::test_workbench_runs_measurement_system_regression_and_research_hypothesis_tools",
+                "T037": "tests/test_shoir_target_engines.py::test_supported_hypothesis_tests_match_reference_statistics_and_decision_rule; tests/test_shoir_target_engines.py::test_hypothesis_test_rejects_unsupported_designs_and_mismatched_pairs; tests/test_shoir_100_tool_workbench.py::test_workbench_runs_measurement_system_regression_and_research_hypothesis_tools",
                 "T017": "tests/test_shoir_target_engines.py::test_data_join_reports_cardinality_unmatched_rows_and_duplicate_policy",
                 "T018": "tests/test_shoir_target_engines.py::test_time_series_processor_normalizes_timezone_and_reports_gap_and_resample",
                 "T019": "tests/test_shoir_target_engines.py::test_synthetic_industrial_data_is_reproducible_and_explicitly_labelled",
