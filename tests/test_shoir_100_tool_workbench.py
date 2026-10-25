@@ -640,7 +640,10 @@ def test_workbench_builds_downloadable_reproducibility_pack():
     assert not at.exception, "\n".join(str(error.value) for error in at.exception)
     source = at.selectbox(key="tool087_source_id")
     assert "T021 · Time Study and Standard Time" in source.options
-    source.select("T021 · Time Study and Standard Time")
+    # Select the underlying stable target ID. The widget's format_func renders
+    # the human-readable label; feeding that label back into the widget causes
+    # AppTest to apply the formatter twice and creates an invalid value.
+    source.set_value("T021")
     at.checkbox(key="tool087_include_inputs").set_value(True)
     at.checkbox(key="tool087_include_tables").set_value(True)
     assert at.checkbox(key="tool087_include_inputs").value is True
