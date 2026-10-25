@@ -5557,3 +5557,94 @@ def optimize_facility_location_flow(
             "Binary facility opening choices and continuous shipment quantities are optimized for the supplied one-period problem only.",
         ],
     }
+
+
+def get_student_practice_problem(topic_id: str) -> dict[str, Any]:
+    """Return a deterministic practice prompt without revealing the answer key."""
+    problems = {
+        "takt_time": {
+            "label": "Takt time",
+            "question": "A line has 420 production minutes available in a shift and must produce 210 units. What is takt time?",
+            "unit": "minutes per unit",
+            "formula": "Takt time = available production time ÷ customer demand",
+            "explanation": "420 available minutes ÷ 210 required units = 2 minutes per unit. Takt is the pace required to meet demand, not the measured cycle time.",
+            "answer": 2.0, "tolerance": 0.01,
+        },
+        "oee_percent": {
+            "label": "Overall equipment effectiveness (OEE)",
+            "question": "Availability is 90%, performance is 80%, and quality is 95%. What is OEE as a percentage?",
+            "unit": "percent",
+            "formula": "OEE = availability × performance × quality",
+            "explanation": "Convert to fractions and multiply: 0.90 × 0.80 × 0.95 = 0.684, or 68.4%. Use consistent definitions so losses are not double counted.",
+            "answer": 68.4, "tolerance": 0.1,
+        },
+        "eoq_units": {
+            "label": "Economic order quantity (EOQ)",
+            "question": "Annual demand is 10,000 units, order cost is SAR 50 per order, and annual holding cost is SAR 2 per unit. Calculate EOQ.",
+            "unit": "units per order",
+            "formula": "EOQ = √(2 × annual demand × order cost ÷ annual holding cost per unit)",
+            "explanation": "EOQ = √(2 × 10,000 × 50 ÷ 2) = √500,000 ≈ 707.11 units per order. This classical formula assumes stable demand and constant order/holding costs.",
+            "answer": math.sqrt(500000.0), "tolerance": 1.0,
+        },
+        "process_capability_cp": {
+            "label": "Process capability Cp",
+            "question": "The lower specification limit is 10 mm, the upper specification limit is 16 mm, and within-subgroup sigma is 1 mm. What is Cp?",
+            "unit": "dimensionless index",
+            "formula": "Cp = (USL − LSL) ÷ (6 × within-subgroup sigma)",
+            "explanation": "Cp = (16 − 10) ÷ (6 × 1) = 1.00. Cp compares specification width with process spread; it does not account for process centering.",
+            "answer": 1.0, "tolerance": 0.01,
+        },
+        "npv_sar": {
+            "label": "Net present value (NPV)",
+            "question": "An investment costs SAR 1,000 now and returns SAR 600 at the end of each of the next two years. At a 10% annual discount rate, what is NPV?",
+            "unit": "SAR",
+            "formula": "NPV = −initial investment + Σ(cash flow at t ÷ (1 + discount rate)^t)",
+            "explanation": "NPV = −1,000 + 600/1.10 + 600/1.10² ≈ SAR 41.32. This uses end-of-year cash flows and excludes tax, inflation and financing effects.",
+            "answer": -1000.0 + 600.0/1.10 + 600.0/(1.10**2), "tolerance": 0.5,
+        },
+    }
+    key = str(topic_id or "").strip().lower()
+    if key not in problems:
+        raise ValueError("Choose a supported practice topic.")
+    p = problems[key]
+    return {
+        "topic_id": key,
+        "topic": p["label"],
+        "question": p["question"],
+        "unit": p["unit"],
+        "formula": p["formula"],
+        "method": "Deterministic worked example",
+        "data_provenance": "SYNTHETIC_EXERCISE",
+    }
+
+
+def evaluate_student_practice_answer(topic_id: str, submitted_answer: Any) -> dict[str, Any]:
+    """Grade a numeric answer against a worked-example key and explain the method."""
+    prompt = get_student_practice_problem(topic_id)
+    answer = _finite_number(submitted_answer, "Your answer")
+    problems = {
+        "takt_time": (2.0, 0.01, "420 available production minutes ÷ 210 required units = 2 minutes/unit."),
+        "oee_percent": (68.4, 0.1, "0.90 availability × 0.80 performance × 0.95 quality = 0.684 = 68.4%."),
+        "eoq_units": (math.sqrt(500000.0), 1.0, "√(2 × 10,000 × 50 ÷ 2) = √500,000 ≈ 707.11 units/order."),
+        "process_capability_cp": (1.0, 0.01, "(16 − 10) ÷ (6 × 1) = 1.00."),
+        "npv_sar": (-1000.0 + 600.0/1.10 + 600.0/(1.10**2), 0.5, "−1,000 + 600/1.10 + 600/1.10² ≈ SAR 41.32."),
+    }
+    expected, tolerance, working = problems[prompt["topic_id"]]
+    error = abs(answer - expected)
+    correct = error <= tolerance
+    return {
+        "status": "PRACTICE_ANSWER_CHECKED",
+        "topic": prompt["topic"],
+        "is_correct": correct,
+        "submitted_answer": answer,
+        "expected_answer": float(expected),
+        "absolute_error": float(error),
+        "tolerance": float(tolerance),
+        "unit": prompt["unit"],
+        "formula": prompt["formula"],
+        "worked_solution": working,
+        "explanation": get_student_practice_problem(prompt["topic_id"]).get("explanation", ""),
+        "message": "Correct — well done." if correct else "Not quite. Compare your result with the worked solution and try again.",
+        "data_provenance": "SYNTHETIC_EXERCISE",
+        "limitations": ["These are fixed practice examples, not a diagnosis of any real plant or process."],
+    }
