@@ -83,6 +83,12 @@ Golden/boundary tests and Workbench AppTests cover deterministic simulation resu
 Independent tests use a hand-calculated four-route example (expected total cost 21 units), an infeasible route-capacity case, and invalid/duplicate-route inputs. The method is marked `IMPLEMENTED_NEEDS_VALIDATION` pending current CI and authenticated staging acceptance.
 
 
+### CAPA and 8D register review (T039)
+
+T039 is wired into the existing Workbench and has a deterministic record-review engine in `shoir_target_engines.py`. It validates CAPA IDs and status values, checks the D1–D8 completeness fields, flags overdue actions, and requires relevant implementation/closure evidence for records marked closed. It distinguishes a missing-field/due-date review from proof that a root cause is correct, a corrective action is effective, or an 8D system complies with a standard.
+
+The UI's editable JSON list and as-of date feed the method through the normal authenticated focused-tool execution gate and shared result/input snapshot helper. Unit fixtures and a Streamlit AppTest cover incomplete/overdue records, closed-record evidence and visible synthetic provenance. T039 is now classified `IMPLEMENTED_NEEDS_VALIDATION`, rather than `FOUNDATION_ONLY`, because a real execution path and method exist. Durable save/reload/re-login, attachment handling, explicit approval/status-transition audit history and authenticated workspace-isolation tests remain unresolved. It must not be described as a complete electronic CAPA lifecycle until these are implemented and verified.
+
 ### Student Learning and Practice Mode
 
 T089 now has a Starter-accessible practice path inside the existing Workbench. The fixed exercise set covers takt time, OEE, EOQ, Cp and NPV; each numerical answer is checked with a declared tolerance, then the learner sees the reference answer, formula and worked solution. Question prompts do not reveal the answer key before the learner submits. Examples are synthetic educational exercises, not plant observations. Golden-answer, wrong-answer and invalid-input tests plus a Workbench AppTest were added. The tool remains `IMPLEMENTED_NEEDS_VALIDATION` until current CI, authenticated UI and persistence checks pass.
@@ -144,8 +150,8 @@ The registry and matrix contain 100 target IDs, T001–T100. Current classificat
 | Status | Count |
 |---|---:|
 | `VERIFIED_WORKING` | 0 |
-| `IMPLEMENTED_NEEDS_VALIDATION` | 88 |
-| `FOUNDATION_ONLY` | 10 |
+| `IMPLEMENTED_NEEDS_VALIDATION` | 89 |
+| `FOUNDATION_ONLY` | 9 |
 | `EXTERNAL_CONFIGURATION_REQUIRED` | 2 |
 | `MISSING` | 0 |
 | `BLOCKED` | 0 |
