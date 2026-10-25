@@ -4565,3 +4565,759 @@ def optimize_supply_chain_network(
         "method": "Single-period capacitated transportation LP; route availability is a scenario input and unmet demand receives an explicit penalty.",
         "warning": "This is a single-period transport optimization, not a multi-echelon or time-phased network design model. Verify route capacity, transport unit costs, sourcing restrictions, delivery times, emissions and supplier risks before commitment.",
     }
+
+
+def simulate_discrete_event_process(
+    process_steps: Sequence[Mapping[str, Any]],
+    *,
+    job_count: int,
+    mean_interarrival_time: float,
+    arrival_distribution: str = "deterministic",
+    warmup_jobs: int = 0,
+    replications: int = 1,
+    random_seed: int = 42,
+    time_unit: str = "minutes",
+) -> dict[str, Any]:
+    """Run an event-driven FCFS production route with finite servers and replications.
+
+    Supported interarrival/service distributions are deterministic or exponential.
+    Each job follows the declared station order; each station uses FCFS queues and
+    a fixed number of identical parallel servers. This intentionally does not claim
+    to model failures, setups, alternate routing, priorities or shared labor pools.
+    """
+    import heapq
+    import random
+    from collections import deque
+
+    if isinstance(process_steps, (str, bytes)) or not isinstance(process_steps, Sequence) or not process_steps:
+        raise ValueError("Provide at least one process-station record.")
+    if isinstance(job_count, bool) or not isinstance(job_count, int) or not 2 <= job_count <= 10000:
+        raise ValueError("Job count must be a whole number from 2 through 10,000.")
+    if isinstance(warmup_jobs, bool) or not isinstance(warmup_jobs, int) or not 0 <= warmup_jobs < job_count:
+        raise ValueError("Warm-up jobs must be a whole number from zero up to job_count minus one.")
+    if isinstance(replications, bool) or not isinstance(replications, int) or not 1 <= replications <= 100:
+        raise ValueError("Replications must be a whole number from 1 through 100.")
+    if isinstance(random_seed, bool) or not isinstance(random_seed, int):
+        raise ValueError("Random seed must be a whole number.")
+    unit = str(time_unit or "").strip()
+    if not unit:
+        raise ValueError("A time unit is required.")
+    interarrival_mean = _finite_number(mean_interarrival_time, "Mean interarrival time")
+    if interarrival_mean <= 0:
+        raise ValueError("Mean interarrival time must be greater than zero.")
+    arrival_dist = str(arrival_distribution or "").strip().lower()
+    if arrival_dist not in {"deterministic", "exponential"}:
+        raise ValueError("Arrival distribution must be deterministic or exponential.")
+
+    stations: list[dict[str, Any]] = []
+    station_names: set[str] = set()
+    for index, raw in enumerate(process_steps, start=1):
+        if not isinstance(raw, Mapping):
+            raise ValueError(f"Process station row {index} must be an object.")
+        name = str(raw.get("station", raw.get("name", ""))).strip()
+        if not name:
+            raise ValueError(f"Process station row {index} needs a station name.")
+        if name.casefold() in station_names:
+            raise ValueError(f"Station names must be unique; duplicate: {name}.")
+        station_names.add(name.casefold())
+        servers = raw.get("servers", 1)
+        if isinstance(servers, bool) or not isinstance(servers, int) or not 1 <= servers <= 100:
+            raise ValueError(f"Server count for station '{name}' must be a whole number from 1 through 100.")
+        mean_service = _finite_number(raw.get("mean_service_time"), f"Mean service time for {name}")
+        if mean_service <= 0:
+            raise ValueError(f"Mean service time for station '{name}' must be greater than zero.")
+        distribution = str(raw.get("service_distribution", "deterministic")).strip().lower()
+        if distribution not in {"deterministic", "exponential"}:
+            raise ValueError(f"Service distribution for '{name}' must be deterministic or exponential.")
+        stations.append({
+            "name": name,
+            "servers": servers,
+            "mean_service_time": mean_service,
+            "service_distribution": distribution,
+        })
+
+    retained_count = job_count - warmup_jobs
+    replication_rows: list[dict[str, Any]] = []
+    station_rows: list[dict[str, Any]] = []
+
+    for replication_index in range(replications):
+        seed = random_seed + replication_index
+        rng = random.Random(seed)
+        arrival_times = [0.0]
+        for _ in range(1, job_count):
+            if arrival_dist == "deterministic":
+                interval = interarrival_mean
+            else:
+                interval = rng.expovariate(1.0 / interarrival_mean)
+            arrival_times.append(arrival_times[-1] + interval)
+
+        records = [{
+            "job_id": job_id,
+            "arrival_time": arrival_times[job_id],
+            "station_waits": [0.0] * len(stations),
+            "station_service": [0.0] * len(stations),
+            "completion_time": None,
+        } for job_id in range(job_count)]
+        runtime = [{
+            "queue": deque(),
+            "busy_servers": 0,
+            "busy_time": 0.0,
+            "waits_by_job": {},
+        } for _ in stations]
+        events: list[tuple[float, int, int, str, tuple[Any, ...]]] = []
+        sequence = 0
+
+        def schedule(event_time: float, priority: int, event_name: str, payload: tuple[Any, ...]) -> None:
+            nonlocal sequence
+            heapq.heappush(events, (event_time, priority, sequence, event_name, payload))
+            sequence += 1
+
+        def start_queued_jobs(station_index: int, event_time: float) -> None:
+            station = stations[station_index]
+            state = runtime[station_index]
+            while state["busy_servers"] < station["servers"] and state["queue"]:
+                job_id, queue_arrival = state["queue"].popleft()
+                waiting = max(0.0, event_time - queue_arrival)
+                service_mean = station["mean_service_time"]
+                if station["service_distribution"] == "deterministic":
+                    service_time = service_mean
+                else:
+                    service_time = rng.expovariate(1.0 / service_mean)
+                records[job_id]["station_waits"][station_index] = waiting
+                records[job_id]["station_service"][station_index] = service_time
+                state["waits_by_job"][job_id] = waiting
+                state["busy_servers"] += 1
+                schedule(
+                    event_time + service_time,
+                    0,
+                    "service_complete",
+                    (job_id, station_index, service_time),
+                )
+
+        # Arrivals are discrete events; service completions have priority at tied times.
+        for job_id, event_time in enumerate(arrival_times):
+            schedule(event_time, 1, "station_arrival", (job_id, 0, event_time))
+
+        while events:
+            event_time, _priority, _sequence, event_name, payload = heapq.heappop(events)
+            if event_name == "station_arrival":
+                job_id, station_index, _arrival_time = payload
+                runtime[station_index]["queue"].append((job_id, event_time))
+                start_queued_jobs(station_index, event_time)
+                continue
+
+            job_id, station_index, service_time = payload
+            state = runtime[station_index]
+            state["busy_servers"] -= 1
+            state["busy_time"] += service_time
+            next_station = station_index + 1
+            if next_station < len(stations):
+                schedule(event_time, 1, "station_arrival", (job_id, next_station, event_time))
+            else:
+                records[job_id]["completion_time"] = event_time
+            start_queued_jobs(station_index, event_time)
+
+        retained = records[warmup_jobs:]
+        if any(record["completion_time"] is None for record in retained):
+            raise RuntimeError("Simulation ended with an incomplete retained job.")
+        makespan = max(float(record["completion_time"]) for record in records)
+        observation_start = float(retained[0]["arrival_time"])
+        observation_end = max(float(record["completion_time"]) for record in retained)
+        observation_duration = observation_end - observation_start
+        if observation_duration <= 0 or not math.isfinite(observation_duration):
+            raise RuntimeError("Simulation produced a non-positive observation duration.")
+
+        flow_times = [float(r["completion_time"]) - float(r["arrival_time"]) for r in retained]
+        total_waits = [sum(float(v) for v in r["station_waits"]) for r in retained]
+        total_service = [sum(float(v) for v in r["station_service"]) for r in retained]
+        replication_rows.append({
+            "Replication": replication_index + 1,
+            "Seed": seed,
+            "Retained jobs": retained_count,
+            f"Observation duration ({unit})": observation_duration,
+            f"Throughput (jobs/{unit})": retained_count / observation_duration,
+            f"Average flow time ({unit})": float(np.mean(flow_times)),
+            f"Average total queue wait ({unit})": float(np.mean(total_waits)),
+            f"Average total service time ({unit})": float(np.mean(total_service)),
+            "Jobs with queue wait (%)": float(np.mean([value > 1e-12 for value in total_waits]) * 100.0),
+            f"Simulation makespan ({unit})": makespan,
+        })
+
+        denominator = makespan
+        for station_index, station in enumerate(stations):
+            waits = [float(r["station_waits"][station_index]) for r in retained]
+            services = [float(r["station_service"][station_index]) for r in retained]
+            station_rows.append({
+                "Replication": replication_index + 1,
+                "Station": station["name"],
+                "Servers": station["servers"],
+                f"Mean service input ({unit})": station["mean_service_time"],
+                f"Average retained-job queue wait ({unit})": float(np.mean(waits)),
+                f"Average retained-job service time ({unit})": float(np.mean(services)),
+                "Utilization across all simulated jobs (%)": (
+                    float(runtime[station_index]["busy_time"]) / (denominator * station["servers"]) * 100.0
+                    if denominator > 0 else 0.0
+                ),
+                f"Total station busy time ({unit})": float(runtime[station_index]["busy_time"]),
+            })
+
+    replication_frame = pd.DataFrame(replication_rows)
+    station_frame = pd.DataFrame(station_rows)
+    metric_columns = [
+        f"Throughput (jobs/{unit})",
+        f"Average flow time ({unit})",
+        f"Average total queue wait ({unit})",
+        f"Average total service time ({unit})",
+        "Jobs with queue wait (%)",
+    ]
+    metric_summary = []
+    for column in metric_columns:
+        values = replication_frame[column].astype(float).to_numpy()
+        metric_summary.append({
+            "Metric": column,
+            "Mean across replications": float(np.mean(values)),
+            "P05 across replications": float(np.percentile(values, 5)),
+            "P95 across replications": float(np.percentile(values, 95)),
+        })
+
+    station_summary_rows = []
+    for station_name, group in station_frame.groupby("Station", sort=False):
+        util = group["Utilization across all simulated jobs (%)"].astype(float).to_numpy()
+        wait_col = f"Average retained-job queue wait ({unit})"
+        station_summary_rows.append({
+            "Station": station_name,
+            "Servers": int(group["Servers"].iloc[0]),
+            f"Average queue wait ({unit})": float(group[wait_col].mean()),
+            "Mean utilization across replications (%)": float(np.mean(util)),
+            "P05 utilization (%)": float(np.percentile(util, 5)),
+            "P95 utilization (%)": float(np.percentile(util, 95)),
+        })
+
+    return {
+        "status": "DISCRETE_EVENT_SIMULATION_COMPLETED",
+        "method": "Event-driven FCFS serial process route with finite parallel servers; deterministic or exponential interarrivals/service times; independent seeded replications.",
+        "job_count": job_count,
+        "warmup_jobs_excluded_from_performance_metrics": warmup_jobs,
+        "replications": replications,
+        "base_random_seed": random_seed,
+        "arrival_distribution": arrival_dist,
+        "station_count": len(stations),
+        "time_unit": unit,
+        "metric_summary": pd.DataFrame(metric_summary),
+        "replication_results": replication_frame,
+        "station_summary": pd.DataFrame(station_summary_rows),
+        "station_replication_details": station_frame,
+        "limitations": [
+            "Every job follows the stations in the supplied order and queues FCFS; alternate routing, priorities, setups, breakdowns, rework and shared labor resources are not modeled.",
+            "Warm-up is excluded by dropping the first N completed job IDs from performance metrics; it is not a time-based warm-up deletion.",
+            "Utilization includes all simulated jobs, including warm-up jobs. Service-time distributions are limited to deterministic and exponential.",
+            "Simulation outputs are model-derived; calibrate process assumptions against measured data and validate before operational decisions.",
+        ],
+        "data_provenance": "USER_ENTERED_UNVERIFIED",
+    }
+
+
+def run_solver_diagnostics(
+    variable_spec: Mapping[str, Mapping[str, Any]],
+    objective_coefficients: Mapping[str, Any],
+    constraints: Sequence[Mapping[str, Any]],
+    *,
+    direction: str = "minimize",
+    time_limit_seconds: float = 10.0,
+    feasibility_tolerance: float = 1e-7,
+) -> dict[str, Any]:
+    """Build and solve a bounded/continuous-or-integer linear model and audit its solution.
+
+    Supported variable categories are Continuous, Integer and Binary. This is a
+    compact LP/MILP diagnostics runner: it reports the actual solver termination
+    state and independently recomputes variable-bound and constraint violations.
+    It does not infer an IIS or claim an optimal result from a merely feasible
+    time-limited incumbent.
+    """
+    if not isinstance(variable_spec, Mapping) or not variable_spec:
+        raise ValueError("Provide a non-empty JSON object of variable specifications.")
+    if not isinstance(objective_coefficients, Mapping) or not objective_coefficients:
+        raise ValueError("Provide a non-empty objective coefficient object.")
+    if isinstance(constraints, (str, bytes)) or not isinstance(constraints, Sequence):
+        raise ValueError("Constraints must be a JSON list of constraint records.")
+    direction_value = str(direction or "").strip().lower()
+    if direction_value not in {"minimize", "min", "maximize", "max"}:
+        raise ValueError("Objective direction must be minimize or maximize.")
+    time_limit = _finite_number(time_limit_seconds, "Solver time limit")
+    if not 0.1 <= time_limit <= 300:
+        raise ValueError("Solver time limit must be between 0.1 and 300 seconds.")
+    tolerance = _finite_number(feasibility_tolerance, "Feasibility tolerance")
+    if not 1e-10 <= tolerance <= 1e-2:
+        raise ValueError("Feasibility tolerance must be between 1e-10 and 0.01.")
+
+    normalized_specs: dict[str, dict[str, Any]] = {}
+    for raw_name, raw_spec in variable_spec.items():
+        name = str(raw_name).strip()
+        if not name or name in normalized_specs:
+            raise ValueError("Variable names must be non-empty and unique.")
+        if not isinstance(raw_spec, Mapping):
+            raise ValueError(f"Variable specification for '{name}' must be an object.")
+        category = str(raw_spec.get("category", "Continuous")).strip().lower()
+        categories = {"continuous": pulp.LpContinuous, "integer": pulp.LpInteger, "binary": pulp.LpBinary}
+        if category not in categories:
+            raise ValueError(f"Variable '{name}' category must be Continuous, Integer or Binary.")
+        low_raw, high_raw = raw_spec.get("low", 0), raw_spec.get("up")
+        low = None if low_raw is None or str(low_raw).strip() == "" else _finite_number(low_raw, f"Lower bound for {name}")
+        high = None if high_raw is None or str(high_raw).strip() == "" else _finite_number(high_raw, f"Upper bound for {name}")
+        if low is not None and high is not None and low > high:
+            raise ValueError(f"Lower bound exceeds upper bound for variable '{name}'.")
+        if category == "binary":
+            if (low is not None and low > 0) or (high is not None and high < 1):
+                raise ValueError(f"Binary variable '{name}' bounds must allow values 0 and/or 1.")
+            low, high = 0.0, 1.0
+        normalized_specs[name] = {"low": low, "up": high, "category": category, "pulp_category": categories[category]}
+
+    objective: dict[str, float] = {}
+    for raw_name, raw_coeff in objective_coefficients.items():
+        name = str(raw_name).strip()
+        if name not in normalized_specs:
+            raise ValueError(f"Objective references unknown variable '{name}'.")
+        objective[name] = _finite_number(raw_coeff, f"Objective coefficient for {name}")
+    if not objective:
+        raise ValueError("At least one objective coefficient is required.")
+
+    normalized_constraints: list[dict[str, Any]] = []
+    used_names: set[str] = set()
+    for index, raw in enumerate(constraints, start=1):
+        if not isinstance(raw, Mapping):
+            raise ValueError(f"Constraint row {index} must be an object.")
+        name = str(raw.get("name", f"constraint_{index}")).strip() or f"constraint_{index}"
+        if name.casefold() in used_names:
+            raise ValueError(f"Constraint names must be unique; duplicate: {name}.")
+        used_names.add(name.casefold())
+        coefficients_raw = raw.get("coefficients")
+        if not isinstance(coefficients_raw, Mapping) or not coefficients_raw:
+            raise ValueError(f"Constraint '{name}' needs a non-empty coefficients object.")
+        coefficients: dict[str, float] = {}
+        for raw_var, raw_coeff in coefficients_raw.items():
+            var_name = str(raw_var).strip()
+            if var_name not in normalized_specs:
+                raise ValueError(f"Constraint '{name}' references unknown variable '{var_name}'.")
+            coefficients[var_name] = _finite_number(raw_coeff, f"Coefficient of {var_name} in constraint {name}")
+        sense_raw = str(raw.get("sense", "<=")).strip()
+        senses = {"<=": pulp.LpConstraintLE, "≤": pulp.LpConstraintLE, ">=": pulp.LpConstraintGE, "≥": pulp.LpConstraintGE, "=": pulp.LpConstraintEQ, "==": pulp.LpConstraintEQ}
+        if sense_raw not in senses:
+            raise ValueError(f"Constraint '{name}' sense must be <=, >= or ==.")
+        rhs = _finite_number(raw.get("rhs"), f"Right-hand side for constraint {name}")
+        normalized_constraints.append({"name": name, "coefficients": coefficients, "sense": senses[sense_raw], "sense_label": sense_raw, "rhs": rhs})
+
+    problem = pulp.LpProblem(
+        "ShoirIE_Solver_Diagnostics",
+        pulp.LpMinimize if direction_value in {"minimize", "min"} else pulp.LpMaximize,
+    )
+    variables = {
+        name: pulp.LpVariable(name, lowBound=spec["low"], upBound=spec["up"], cat=spec["pulp_category"])
+        for name, spec in normalized_specs.items()
+    }
+    problem += pulp.lpSum(coefficient * variables[name] for name, coefficient in objective.items()), "objective"
+    for item in normalized_constraints:
+        expression = pulp.lpSum(coefficient * variables[name] for name, coefficient in item["coefficients"].items())
+        if item["sense"] == pulp.LpConstraintLE:
+            problem += expression <= item["rhs"], item["name"]
+        elif item["sense"] == pulp.LpConstraintGE:
+            problem += expression >= item["rhs"], item["name"]
+        else:
+            problem += expression == item["rhs"], item["name"]
+
+    try:
+        solver_status_code = problem.solve(pulp.PULP_CBC_CMD(msg=False, timeLimit=time_limit))
+    except Exception as exc:
+        return {
+            "status": "SOLVER_ERROR",
+            "solver_status": "SOLVER_ERROR",
+            "solver_message": f"{type(exc).__name__}: {str(exc)[:400]}",
+            "objective_value": None,
+            "variable_values": pd.DataFrame(columns=["Variable", "Value", "Category", "Lower bound", "Upper bound", "Bound status"]),
+            "constraint_diagnostics": pd.DataFrame(columns=["Constraint", "Relation", "Right-hand side", "LHS value", "Violation", "Status"]),
+            "warnings": ["The model was validated, but the configured CBC solver did not return a result; do not use a prior result as if this run succeeded."],
+            "data_provenance": "USER_ENTERED_UNVERIFIED",
+        }
+
+    solver_status = pulp.LpStatus.get(solver_status_code, f"UNKNOWN_STATUS_{solver_status_code}")
+    solution_status_code = getattr(problem, "sol_status", None)
+    solution_status = pulp.LpSolution.get(solution_status_code, "UNKNOWN_SOLUTION_STATUS")
+    variable_rows: list[dict[str, Any]] = []
+    violations: list[str] = []
+    all_values_assigned = True
+    all_bounds_ok = True
+
+    for name, variable in variables.items():
+        raw_value = variable.varValue
+        value = None if raw_value is None else float(raw_value)
+        spec = normalized_specs[name]
+        bound_violation = 0.0
+        if value is None or not math.isfinite(value):
+            all_values_assigned = False
+            all_bounds_ok = False
+            bound_status = "NO_FINITE_VALUE"
+            violations.append(f"{name}: no finite solution value")
+        else:
+            if spec["low"] is not None:
+                bound_violation = max(bound_violation, float(spec["low"]) - value)
+            if spec["up"] is not None:
+                bound_violation = max(bound_violation, value - float(spec["up"]))
+            if spec["category"] in {"integer", "binary"}:
+                bound_violation = max(bound_violation, abs(value - round(value)))
+            bound_violation = max(0.0, bound_violation)
+            if bound_violation > tolerance:
+                all_bounds_ok = False
+                bound_status = "VIOLATED"
+                violations.append(f"{name}: bound/integrality violation {bound_violation:g}")
+            else:
+                bound_status = "SATISFIED"
+        variable_rows.append({
+            "Variable": name,
+            "Value": value,
+            "Category": spec["category"],
+            "Lower bound": spec["low"],
+            "Upper bound": spec["up"],
+            "Bound violation": bound_violation,
+            "Bound status": bound_status,
+        })
+
+    constraint_rows: list[dict[str, Any]] = []
+    all_constraints_ok = True
+    for item in normalized_constraints:
+        # Recompute the left-hand side independently from the original model
+        # coefficients rather than trusting the solver's residual bookkeeping.
+        lhs_value = None
+        if all_values_assigned:
+            lhs_value = sum(float(item["coefficients"][name]) * float(variables[name].varValue) for name in item["coefficients"])
+            if item["sense"] == pulp.LpConstraintLE:
+                violation = max(0.0, lhs_value - item["rhs"])
+            elif item["sense"] == pulp.LpConstraintGE:
+                violation = max(0.0, item["rhs"] - lhs_value)
+            else:
+                violation = abs(lhs_value - item["rhs"])
+            status = "SATISFIED" if violation <= tolerance else "VIOLATED"
+        else:
+            violation = None
+            status = "NO_FINITE_CANDIDATE"
+        if violation is None or violation > tolerance:
+            all_constraints_ok = False
+            if violation is not None:
+                violations.append(f"{item['name']}: constraint violation {violation:g}")
+        constraint_rows.append({
+            "Constraint": item["name"],
+            "Relation": item["sense_label"],
+            "Right-hand side": item["rhs"],
+            "LHS value": lhs_value,
+            "Violation": violation,
+            "Status": status,
+        })
+
+    complete_feasible_candidate = all_values_assigned and all_bounds_ok and all_constraints_ok
+    objective_value = None
+    if complete_feasible_candidate:
+        obj = pulp.value(problem.objective)
+        if obj is not None and math.isfinite(float(obj)):
+            objective_value = float(obj)
+
+    if solver_status == "Infeasible":
+        interpretation_status = "INFEASIBLE"
+        warnings = ["The solver reported infeasibility; no feasible decision should be inferred from any leftover variable values."]
+        objective_value = None
+    elif solver_status == "Unbounded":
+        interpretation_status = "UNBOUNDED"
+        warnings = ["The solver reported an unbounded objective; review missing bounds, sign conventions and formulation before using the model."]
+        objective_value = None
+    elif solver_status == "Optimal" and complete_feasible_candidate and objective_value is not None:
+        interpretation_status = "OPTIMAL_FEASIBLE"
+        warnings = []
+    elif complete_feasible_candidate and solver_status not in {"Infeasible", "Unbounded", "Undefined"}:
+        interpretation_status = "FEASIBLE_NOT_PROVEN_OPTIMAL"
+        warnings = ["A feasible candidate exists, but optimality has not been proven by the solver status."]
+    else:
+        interpretation_status = "NO_VERIFIED_FEASIBLE_SOLUTION"
+        warnings = ["No independently verified feasible candidate was found; inspect solver status and listed violations."]
+    if violations:
+        warnings.append("One or more variable or constraint residual checks failed; see the diagnostic tables.")
+
+    return {
+        "status": interpretation_status,
+        "solver_status": solver_status,
+        "solution_status": solution_status,
+        "objective_direction": "minimize" if direction_value in {"minimize", "min"} else "maximize",
+        "objective_value": objective_value,
+        "variable_count": len(variables),
+        "constraint_count": len(normalized_constraints),
+        "feasibility_tolerance": tolerance,
+        "time_limit_seconds": time_limit,
+        "variable_values": pd.DataFrame(variable_rows),
+        "constraint_diagnostics": pd.DataFrame(constraint_rows),
+        "independent_feasibility_check": bool(complete_feasible_candidate),
+        "violations": violations,
+        "warnings": warnings,
+        "limitations": [
+            "Only a linear objective and linear constraints are supported; variable categories are Continuous, Integer and Binary.",
+            "An infeasibility explanation/IIS is not generated. The returned residual checks validate a candidate but do not prove model correctness or completeness.",
+            "A time-limited feasible incumbent is explicitly not labeled optimal unless the solver reports Optimal.",
+        ],
+        "data_provenance": "USER_ENTERED_UNVERIFIED",
+    }
+
+
+def build_reproducibility_pack(
+    tool_id: str,
+    canonical_name: str,
+    result: Mapping[str, Any],
+    *,
+    inputs: Mapping[str, Any] | None = None,
+    metadata: Mapping[str, Any] | None = None,
+    include_input_snapshot: bool = False,
+    include_result_tables: bool = False,
+    max_payload_bytes: int = 20_000_000,
+) -> dict[str, Any]:
+    """Create a provenance ZIP with hashes, version metadata and optional sanitized inputs/tables.
+
+    Secrets and common credential/PII-bearing fields are redacted. Raw input values
+    and detailed result tables are opt-in. The pack records a SHA-256 fingerprint
+    even when the raw input snapshot is intentionally not included. This is an
+    evidence/reproducibility artifact, not a formal proof or certification.
+    """
+    import hashlib
+    import importlib.metadata
+    import io
+    import json
+    import platform
+    import re
+    import sys
+    import zipfile
+    from datetime import datetime, timezone
+
+    target_id = str(tool_id or "").strip().upper()
+    if not re.fullmatch(r"T\d{3}", target_id) or not 1 <= int(target_id[1:]) <= 100:
+        raise ValueError("Tool ID must use a canonical T001–T100 identifier.")
+    name = str(canonical_name or "").strip()
+    if not name:
+        raise ValueError("A canonical tool name is required.")
+    if not isinstance(result, Mapping):
+        raise ValueError("A completed result object is required to build a reproducibility pack.")
+    if inputs is not None and not isinstance(inputs, Mapping):
+        raise ValueError("Inputs must be a JSON-compatible object.")
+    if metadata is not None and not isinstance(metadata, Mapping):
+        raise ValueError("Metadata must be a JSON-compatible object.")
+    if isinstance(max_payload_bytes, bool) or not isinstance(max_payload_bytes, int) or not 1024 <= max_payload_bytes <= 100_000_000:
+        raise ValueError("Maximum payload bytes must be an integer between 1,024 and 100,000,000.")
+
+    sensitive_key = re.compile(
+        r"(?:password|passphrase|secret|token|authorization|cookie|api[_ -]?key|service[_ -]?role|"
+        r"private[_ -]?key|connection[_ -]?string|database[_ -]?url|email|phone|mobile|national[_ -]?id|"
+        r"passport|ssn|access[_ -]?key|refresh[_ -]?token|employee[_ -]?name|person[_ -]?name|"
+        r"customer[_ -]?contact|contact[_ -]?name|operator[_ -]?name)",
+        re.IGNORECASE,
+    )
+    sensitive_column = re.compile(
+        r"(?:password|passphrase|secret|token|authorization|cookie|api[_ -]?key|service[_ -]?role|"
+        r"private[_ -]?key|connection[_ -]?string|database[_ -]?url|email|e_mail|phone|mobile|national[_ -]?id|"
+        r"passport|ssn|access[_ -]?key|refresh[_ -]?token|employee[_ -]?name|person[_ -]?name|"
+        r"customer[_ -]?contact|contact[_ -]?name|operator[_ -]?name)",
+        re.IGNORECASE,
+    )
+    secret_text = re.compile(
+        r"(?i)\b(password|passphrase|secret|token|api[_ -]?key|service[_ -]?role[_ -]?key|access[_ -]?key)\b(\s*[:=]\s*)([^\s,;]+)|\bBearer\s+[A-Za-z0-9._~+/-]+=*"
+    )
+
+    def _replace_secret_text(match: Any) -> str:
+        if match.group(1) is not None:
+            return f"{match.group(1)}{match.group(2) or ''}[REDACTED]"
+        return "Bearer [REDACTED]"
+
+    def _safe_string(raw: Any) -> str:
+        value = str(raw)
+        value = secret_text.sub(_replace_secret_text, value)
+        # Remove userinfo from a URL while retaining scheme and host for diagnostics.
+        value = re.sub(r"(?i)(https?|postgres(?:ql)?|mysql)://[^/@\s:]+(?::[^/@\s]*)?@", r"\1://[REDACTED]@", value)
+        return value[:5000]
+
+    def _normalise(value: Any, *, prefix: str, files: dict[str, bytes], include_tables: bool, depth: int = 0) -> Any:
+        if depth > 12:
+            raise ValueError("The result is nested too deeply to package safely.")
+        if value is None or isinstance(value, (bool, int, str)):
+            return _safe_string(value) if isinstance(value, str) else value
+        if isinstance(value, float):
+            return value if math.isfinite(value) else None
+        if isinstance(value, Mapping):
+            clean: dict[str, Any] = {}
+            for raw_key, raw_value in value.items():
+                key = _safe_string(raw_key)
+                if sensitive_key.search(key):
+                    clean[key] = "[REDACTED]"
+                else:
+                    clean[key] = _normalise(
+                        raw_value, prefix=f"{prefix}_{re.sub(r'[^A-Za-z0-9_-]+', '_', key)[:40]}",
+                        files=files, include_tables=include_tables, depth=depth + 1,
+                    )
+            return clean
+        if isinstance(value, (list, tuple, set)):
+            return [
+                _normalise(item, prefix=f"{prefix}_{index + 1}", files=files, include_tables=include_tables, depth=depth + 1)
+                for index, item in enumerate(list(value))
+            ]
+        if isinstance(value, pd.DataFrame):
+            columns = [str(col) for col in value.columns]
+            row_count = int(len(value))
+            if include_tables:
+                safe_frame = value.copy()
+                redacted_columns: list[str] = []
+                for col in columns:
+                    if sensitive_column.search(col):
+                        safe_frame[col] = "[REDACTED]"
+                        redacted_columns.append(col)
+                table_name = "tables/" + (re.sub(r"[^A-Za-z0-9_-]+", "_", prefix).strip("_") or "result")[:100] + ".csv"
+                payload = safe_frame.to_csv(index=False).encode("utf-8")
+                if len(payload) > max_payload_bytes:
+                    raise ValueError(f"Table {prefix} exceeds the configured {max_payload_bytes:,}-byte payload limit.")
+                if table_name in files:
+                    suffix = hashlib.sha256(payload).hexdigest()[:8]
+                    table_name = table_name.removesuffix(".csv") + "_" + suffix + ".csv"
+                files[table_name] = payload
+                return {
+                    "artifact_type": "csv_table",
+                    "path": table_name,
+                    "row_count": row_count,
+                    "columns": columns,
+                    "redacted_columns": redacted_columns,
+                    "sha256": hashlib.sha256(payload).hexdigest(),
+                }
+            return {
+                "artifact_type": "omitted_table_metadata",
+                "row_count": row_count,
+                "columns": columns,
+                "sha256": hashlib.sha256(value.to_csv(index=False).encode("utf-8")).hexdigest(),
+                "note": "Table values are not embedded; enable detailed result tables to include sanitized CSVs.",
+            }
+        if isinstance(value, pd.Series):
+            return _normalise(value.to_dict(), prefix=prefix, files=files, include_tables=include_tables, depth=depth + 1)
+        if isinstance(value, np.ndarray):
+            return _normalise(value.tolist(), prefix=prefix, files=files, include_tables=include_tables, depth=depth + 1)
+        if isinstance(value, np.generic):
+            return _normalise(value.item(), prefix=prefix, files=files, include_tables=include_tables, depth=depth + 1)
+        if hasattr(value, "isoformat") and callable(value.isoformat):
+            try:
+                return value.isoformat()
+            except Exception:
+                pass
+        if isinstance(value, bytes):
+            return {"artifact_type": "binary_omitted", "byte_count": len(value), "sha256": hashlib.sha256(value).hexdigest()}
+        return _safe_string(value)
+
+    files: dict[str, bytes] = {}
+    result_content = _normalise(
+        result, prefix=target_id.lower(), files=files, include_tables=include_result_tables
+    )
+    result_payload = json.dumps(result_content, ensure_ascii=False, sort_keys=True, indent=2, allow_nan=False).encode("utf-8")
+    if len(result_payload) > max_payload_bytes:
+        raise ValueError(f"Result summary exceeds the configured {max_payload_bytes:,}-byte payload limit.")
+    files["result_summary.json"] = result_payload
+
+    input_object = dict(inputs or {})
+    safe_inputs = _normalise(
+        input_object, prefix="inputs", files=files, include_tables=False
+    )
+    input_payload = json.dumps(safe_inputs, ensure_ascii=False, sort_keys=True, indent=2, allow_nan=False).encode("utf-8")
+    input_fingerprint = hashlib.sha256(input_payload).hexdigest()
+    if include_input_snapshot:
+        if len(input_payload) > max_payload_bytes:
+            raise ValueError(f"Input snapshot exceeds the configured {max_payload_bytes:,}-byte payload limit.")
+        files["input_snapshot_redacted.json"] = input_payload
+
+    metadata_safe = _normalise(
+        dict(metadata or {}), prefix="metadata", files=files, include_tables=False
+    )
+    metadata_payload = json.dumps(metadata_safe, ensure_ascii=False, sort_keys=True, indent=2, allow_nan=False).encode("utf-8")
+    if len(metadata_payload) > 250_000:
+        raise ValueError("User metadata cannot exceed 250,000 bytes.")
+    files["run_metadata.json"] = metadata_payload
+
+    dependency_versions: dict[str, str] = {}
+    for distribution in ("numpy", "pandas", "scipy", "PuLP", "streamlit"):
+        try:
+            dependency_versions[distribution] = importlib.metadata.version(distribution)
+        except importlib.metadata.PackageNotFoundError:
+            dependency_versions[distribution] = "NOT_INSTALLED"
+
+    generated_at = datetime.now(timezone.utc).isoformat()
+    files["README.txt"] = (
+        f"Shoir-IE Reproducibility Pack — {target_id} {name}\n\n"
+        f"Generated UTC: {generated_at}\n"
+        f"Configuration SHA-256 (redacted configuration): {input_fingerprint}\n"
+        f"Input snapshot included: {bool(include_input_snapshot)}\n"
+        f"Detailed result tables included: {bool(include_result_tables)}\n\n"
+        "Verify payload hashes against SHA256SUMS.txt. Review manifest redaction policy and limitations.\n"
+        "This bundle is not proof of engineering correctness or a substitute for method review.\n"
+    ).encode("utf-8")
+    files_manifest = [
+        {"path": path, "byte_count": len(payload), "sha256": hashlib.sha256(payload).hexdigest()}
+        for path, payload in sorted(files.items())
+    ]
+    manifest = {
+        "format": "shoir-ie-reproducibility-pack",
+        "format_version": 1,
+        "tool_id": target_id,
+        "canonical_name": name,
+        "generated_at_utc": generated_at,
+        "python_version": sys.version.split()[0],
+        "python_implementation": platform.python_implementation(),
+        "dependency_versions": dependency_versions,
+        "configuration_sha256": input_fingerprint,
+        "configuration_snapshot_included": bool(include_input_snapshot),
+        "detailed_result_tables_included": bool(include_result_tables),
+        "metadata": metadata_safe,
+        "payload_files": files_manifest,
+        "redaction_policy": {
+            "sensitive_mapping_keys": "Values are replaced with [REDACTED] when their key names match common secret/credential/contact patterns.",
+            "sensitive_table_columns": "Common secret/credential/contact columns are replaced with [REDACTED] when detailed tables are included.",
+            "input_snapshot": "Opt-in; redacted JSON only. Hashes alone do not prove the correctness or completeness of source inputs.",
+        },
+        "limitations": [
+            "This bundle provides reproducibility metadata and fingerprints, not a mathematical proof, audit certification or guarantee that the execution environment is identical.",
+            "Table cells whose column names do not indicate sensitive content may still contain confidential data; review contents before sharing.",
+            "The manifest hashes payload files but deliberately does not attempt to hash itself or the checksum file.",
+        ],
+    }
+    manifest_payload = json.dumps(manifest, ensure_ascii=False, sort_keys=True, indent=2, allow_nan=False).encode("utf-8")
+    checksum_payload = "\n".join(
+        f"{item['sha256']}  {item['path']}" for item in files_manifest
+    ).encode("utf-8") + b"\n"
+
+    archive_buffer = io.BytesIO()
+    with zipfile.ZipFile(archive_buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for member_path, payload in sorted(files.items()):
+            archive.writestr(member_path, payload)
+        archive.writestr("manifest.json", manifest_payload)
+        archive.writestr("SHA256SUMS.txt", checksum_payload)
+    bundle = archive_buffer.getvalue()
+    if len(bundle) > max_payload_bytes:
+        raise ValueError(f"Reproducibility ZIP exceeds the configured {max_payload_bytes:,}-byte payload limit.")
+
+    inventory = pd.DataFrame([
+        {"Path": path, "Bytes": len(payload), "SHA-256": hashlib.sha256(payload).hexdigest()}
+        for path, payload in sorted(files.items())
+    ] + [
+        {"Path": "manifest.json", "Bytes": len(manifest_payload), "SHA-256": hashlib.sha256(manifest_payload).hexdigest()},
+        {"Path": "SHA256SUMS.txt", "Bytes": len(checksum_payload), "SHA-256": hashlib.sha256(checksum_payload).hexdigest()},
+    ])
+    return {
+        "status": "REPRODUCIBILITY_PACK_CREATED",
+        "tool_id": target_id,
+        "canonical_name": name,
+        "filename": f"shoir_ie_{target_id.lower()}_reproducibility_pack.zip",
+        "bundle_bytes": bundle,
+        "bundle_sha256": hashlib.sha256(bundle).hexdigest(),
+        "bundle_byte_count": len(bundle),
+        "input_fingerprint_sha256": input_fingerprint,
+        "manifest": manifest,
+        "artifact_inventory": inventory,
+        "included_payload_paths": sorted(files),
+        "data_provenance": "PACKAGED_FROM_SAVED_SESSION_RESULT",
+        "warnings": [
+            "Review bundle contents before sharing; non-sensitive-looking data columns may contain confidential information.",
+            "Input values are excluded by default; only their redacted fingerprint is included unless the input snapshot option is enabled.",
+        ],
+    }
