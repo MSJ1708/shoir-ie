@@ -370,6 +370,33 @@ def _module_target_section(module: str, module_metadata: Mapping[str, Any] | Non
     return "WORKBENCH"
 
 
+def _ensure_requested_module_choice(
+    choices: Sequence[str],
+    requested_module: str,
+    allowed_modules: Sequence[str],
+) -> list[str]:
+    """Keep an authorized explicit deep-link selectable despite section-filter drift."""
+    result = [str(choice) for choice in choices]
+    requested = str(requested_module or "").strip()
+    allowed = {str(item).strip() for item in allowed_modules}
+    if requested and requested in allowed and requested not in result:
+        result.insert(0, requested)
+    return result
+
+
+def _resolve_requested_module_selection(
+    selected_label: str | None,
+    requested_module: str,
+    allowed_modules: Sequence[str],
+) -> str | None:
+    """Treat an authorized global-search request as authoritative over stale widget state."""
+    requested = str(requested_module or "").strip()
+    allowed = {str(item).strip() for item in allowed_modules}
+    if requested and requested in allowed:
+        return requested
+    return str(selected_label) if selected_label is not None else None
+
+
 def render_global_search(
     allowed_modules: Sequence[str],
     module_metadata: Mapping[str, Any] | None = None,
