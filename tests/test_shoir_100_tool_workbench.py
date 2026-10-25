@@ -659,3 +659,29 @@ def test_workbench_builds_downloadable_reproducibility_pack():
         assert "input_snapshot_redacted.json" in archive.namelist()
     assert result["bundle_sha256"]
     assert any(button.key == "tool087_download" for button in at.button)
+
+
+def test_workbench_runs_facility_location_flow():
+    """Exercise T069's form, execution-time tier gate and structured result output."""
+    from streamlit.testing.v1 import AppTest
+
+    page = ROOT / "pages" / "Industrial_Engineering_Workbench.py"
+    at = AppTest.from_file(page, default_timeout=90)
+    at.session_state["current_user"] = "facility-location-checker"
+    at.session_state["authenticated"] = True
+    at.session_state["user_tier"] = "Enterprise"
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+
+    at.selectbox(key="shoir_100_tool_inspector").select("T069 · Network Flow and Location Optimization")
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    at.button(key="tool069_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    result = at.session_state.get("shoir_tool_result_T069")
+    assert result is not None
+    assert result["status"] == "OPTIMAL_FEASIBLE"
+    assert result["objective_value"] == pytest.approx(21.0)
+    assert result["independent_feasibility_check"] is True
+    assert result["data_provenance"] == "SYNTHETIC_EXAMPLE"
