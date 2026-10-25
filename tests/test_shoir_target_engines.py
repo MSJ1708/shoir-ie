@@ -1465,3 +1465,90 @@ def test_monte_carlo_rejects_invalid_distribution_and_resource_bounds():
         simulate_monte_carlo_net_value([
             {"name": "Known", "role": "benefit", "distribution": "constant", "value": 5}
         ], iterations=10)
+
+
+def test_crossed_gage_rr_matches_balanced_fixture_and_reports_tolerance():
+    from shoir_target_engines import analyze_crossed_gage_rr
+
+    records = []
+    values = {
+        ("P1", "A"): [9.8, 9.9],
+        ("P1", "B"): [10.0, 10.1],
+        ("P2", "A"): [11.8, 11.9],
+        ("P2", "B"): [12.0, 12.1],
+    }
+    for (part, operator), measurements in values.items():
+        for trial, measurement in enumerate(measurements, start=1):
+            records.append({"part": part, "operator": operator, "trial": trial, "measurement": measurement})
+    result = analyze_crossed_gage_rr(records, tolerance=6.0)
+    assert result["status"] == "CROSSED_GAGE_RR_SCREENED"
+    assert result["part_count"] == 2
+    assert result["operator_count"] == 2
+    assert result["repeat_count"] == 2
+    assert result["repeatability_sd"] == pytest.approx(math.sqrt(0.005))
+    assert result["reproducibility_sd"] == pytest.approx(math.sqrt(0.02))
+    assert result["gage_rr_percent_variance"] == pytest.approx(0.025 / 2.025 * 100)
+    assert result["percent_tolerance"] == pytest.approx(math.sqrt(0.025) * 100)
+    assert result["number_of_distinct_categories"] == 12
+    assert "not automatically a compliant/certified MSA" in result["warning"]
+
+
+def test_crossed_gage_rr_rejects_unbalanced_or_duplicate_observations():
+    from shoir_target_engines import analyze_crossed_gage_rr
+
+    records = [
+        {"part": "P1", "operator": "A", "trial": 1, "measurement": 1.0},
+        {"part": "P1", "operator": "A", "trial": 2, "measurement": 1.1},
+        {"part": "P1", "operator": "B", "trial": 1, "measurement": 1.2},
+        {"part": "P1", "operator": "B", "trial": 2, "measurement": 1.3},
+        {"part": "P2", "operator": "A", "trial": 1, "measurement": 2.0},
+        {"part": "P2", "operator": "A", "trial": 2, "measurement": 2.1},
+        {"part": "P2", "operator": "B", "trial": 1, "measurement": 2.2},
+    ]
+    with pytest.raises(ValueError, match="balanced"):
+        analyze_crossed_gage_rr(records)
+    with pytest.raises(ValueError, match="Duplicate"):
+        analyze_crossed_gage_rr(records + [records[0]])
+
+
+def test_full_factorial_doe_matches_hand_calculated_effects_and_inference():
+    from shoir_target_engines import analyze_full_factorial_2level
+
+    observations = [
+        {"A": -1, "B": -1, "response": 6.4},
+        {"A": -1, "B": -1, "response": 6.6},
+        {"A": -1, "B": 1, "response": 9.4},
+        {"A": -1, "B": 1, "response": 9.6},
+        {"A": 1, "B": -1, "response": 7.4},
+        {"A": 1, "B": -1, "response": 7.6},
+        {"A": 1, "B": 1, "response": 16.4},
+        {"A": 1, "B": 1, "response": 16.6},
+    ]
+    result = analyze_full_factorial_2level(observations, response_field="response", factor_fields=["A", "B"])
+    assert result["status"] == "FACTORIAL_ANALYZED"
+    assert result["run_count"] == 8
+    assert result["residual_degrees_of_freedom"] == 4
+    effects = result["effects"].set_index("Term")
+    assert effects.loc["A", "Estimated effect (high − low)"] == pytest.approx(4.0)
+    assert effects.loc["B", "Estimated effect (high − low)"] == pytest.approx(6.0)
+    assert effects.loc["A × B", "Estimated effect (high − low)"] == pytest.approx(3.0)
+    assert effects["p-value"].notna().all()
+    assert "run order randomization" in result["assumptions"]
+
+
+def test_full_factorial_doe_rejects_missing_combinations_and_non_coded_levels():
+    from shoir_target_engines import analyze_full_factorial_2level
+
+    with pytest.raises(ValueError, match="combinations are missing"):
+        analyze_full_factorial_2level([
+            {"A": -1, "B": -1, "response": 1},
+            {"A": -1, "B": 1, "response": 2},
+            {"A": 1, "B": -1, "response": 3},
+        ], response_field="response", factor_fields=["A", "B"])
+    with pytest.raises(ValueError, match="coded levels"):
+        analyze_full_factorial_2level([
+            {"A": -1, "B": -1, "response": 1},
+            {"A": -1, "B": 1, "response": 2},
+            {"A": 1, "B": -1, "response": 3},
+            {"A": 2, "B": 1, "response": 4},
+        ], response_field="response", factor_fields=["A", "B"])
