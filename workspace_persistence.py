@@ -145,7 +145,9 @@ def _pack(value: Any) -> Any:
     if isinstance(value, pd.DataFrame):
         return {
             "__type__": "dataframe",
-            "value": value.to_json(orient="split", date_format="iso"),
+            "value": value.to_json(orient="split", date_format="iso", double_precision=15),
+            # Preserve column dtypes because JSON can infer integral-valued floats as integers.
+            "dtypes": [str(dtype) for dtype in value.dtypes],
         }
     if isinstance(value, pd.Series):
         return {
@@ -177,7 +179,23 @@ def _unpack(value: Any) -> Any:
     kind = value["__type__"]
     payload = value.get("value")
     if kind == "dataframe":
-        return pd.read_json(StringIO(payload), orient="split")
+        frame = pd.read_json(StringIO(payload), orient="split")
+        saved_dtypes = value.get("dtypes")
+        if isinstance(saved_dtypes, list) and len(saved_dtypes) == len(frame.columns):
+            for column, dtype in zip(frame.columns, saved_dtypes):
+                try:
+                    frame[column] = frame[column].astype(dtype)
+                except (TypeError, ValueError, OverflowError) as exc:
+                    # Keep workspace loading recoverable for types not supported by
+                    # a future/pandas-specific dtype. Make the loss visible in logs.
+                    import warnings
+                    warnings.warn(
+                        f"Could not restore saved dtype {dtype!r} for workspace column {str(column)!r}; "
+                        "the parsed dtype was retained.",
+                        RuntimeWarning,
+                        stacklevel=2,
+                    )
+        return frame
     if kind == "series":
         return pd.read_json(StringIO(payload), typ="series")
     if kind == "datetime":

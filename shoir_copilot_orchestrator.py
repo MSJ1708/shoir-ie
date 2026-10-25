@@ -436,10 +436,17 @@ def stage_copilot_decision(
     if not actor:
         raise ValueError("An authenticated actor is required.")
     try:
-        from shoir_enterprise_layer import enforce_action_gate, record_canonical_event, upsert_canonical_entity, upsert_canonical_relationship
-        enforce_action_gate(actor, "write", workspace, require_approval=True)
-    except ImportError:
-        pass
+        from shoir_enterprise_layer import (
+            enforce_action_gate, record_canonical_event,
+            upsert_canonical_entity, upsert_canonical_relationship,
+        )
+    except ImportError as exc:
+        raise RuntimeError(
+            "Decision staging requires the enterprise authorization and audit service; "
+            "the action was not staged because the required gate is unavailable."
+        ) from exc
+    # Propagate authorization errors. No decision write may occur without this gate.
+    enforce_action_gate(actor, "write", workspace, require_approval=True)
 
     from industrial_experience import create_decision, save_decision_spec, register_lineage
 
@@ -516,8 +523,14 @@ def stage_copilot_decision(
             metadata={"run_id": run_id},
             workspace=workspace,
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        # A Decision Card may already exist at this point, so do not imply that
+        # the multi-record audit/relationship workflow completed successfully.
+        # Include the identifier so the caller can inspect before retrying.
+        raise RuntimeError(
+            f"Decision {did} was created, but canonical audit/linkage completion failed. "
+            "Inspect this decision before retrying to avoid duplicate records."
+        ) from exc
     return did
 
 
