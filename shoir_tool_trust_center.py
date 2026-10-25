@@ -62,13 +62,13 @@ def redact_diagnostic_text(value: Any, *, max_chars: int = 12000) -> dict[str, A
     # A support summary should not reproduce a complete stack trace or source lines.
     lines = [line.strip() for line in cleaned.splitlines() if line.strip()]
     if any(line.startswith("Traceback (most recent call last)") for line in lines):
-        useful = [
+        # Source lines between stack frames can themselves contain secrets or
+        # proprietary expressions. Keep only the final exception headline.
+        exception_lines = [
             line for line in lines
-            if not line.startswith("Traceback (most recent call last)")
-            and not _TRACEBACK_FRAME.search(line)
-            and not line.startswith(("^", "~~~"))
+            if re.match(r"^[A-Za-z_][A-Za-z0-9_.]*(?:Error|Exception|Failure):", line)
         ]
-        cleaned = useful[-2:] and " | ".join(useful[-2:]) or "A traceback was supplied; frames were omitted."
+        cleaned = exception_lines[-1] if exception_lines else "A traceback was supplied; stack frames and source lines were omitted."
     else:
         cleaned = " ".join(lines)
 
