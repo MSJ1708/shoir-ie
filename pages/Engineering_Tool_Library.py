@@ -304,7 +304,9 @@ if rows:
             st.warning("This target cannot be marked executable in the new library until its acceptance tests and authenticated end-to-end evidence pass. A separately entitled existing route may still be opened below.")
         # Offer a route hand-off only to a named legacy module already available
         # under the user's real tier. Do not use the target label to widen access.
-        if item["implementation_status"] == "IMPLEMENTED_NEEDS_VALIDATION":
+        if item["implementation_status"] in {
+            "IMPLEMENTED_NEEDS_VALIDATION", "FOUNDATION_ONLY", "EXTERNAL_CONFIGURATION_REQUIRED"
+        }:
             try:
                 from industrial_platform_excellence import module_availability
                 available = module_availability(tier)
