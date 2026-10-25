@@ -370,6 +370,12 @@ def _module_target_section(module: str, module_metadata: Mapping[str, Any] | Non
     return "WORKBENCH"
 
 
+def _global_module_button_key(module_name: str) -> str:
+    """Return a stable, module-specific key for a global-search result button."""
+    digest = hashlib.sha256(str(module_name).strip().encode("utf-8")).hexdigest()[:16]
+    return f"shoir_global_module_{digest}"
+
+
 def _ensure_requested_module_choice(
     choices: Sequence[str],
     requested_module: str,
