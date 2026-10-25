@@ -41,8 +41,10 @@ def test_simulation_is_reproducible_and_station_capacity_is_respected():
 ])
 def test_simulation_rejects_invalid_model_parameters(kwargs,match):
     stations=pd.DataFrame([{"sequence":1,"station_id":"S1","servers":1,"mean_service_minutes":1,"service_time_cv":0}])
+    args = {"entity_count":100,"mean_interarrival_minutes":5,"warmup_entities":10,"replications":2}
+    args.update(kwargs)
     with pytest.raises(ValueError,match=match):
-        simulate_serial_flow_line(stations,entity_count=100,mean_interarrival_minutes=5,warmup_entities=10,replications=2,**kwargs)
+        simulate_serial_flow_line(stations, **args)
 
 
 def test_simulation_rejects_duplicate_station_sequence_and_bad_service_distribution():
