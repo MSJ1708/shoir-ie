@@ -5321,3 +5321,239 @@ def build_reproducibility_pack(
             "Input values are excluded by default; only their redacted fingerprint is included unless the input snapshot option is enabled.",
         ],
     }
+
+
+def optimize_facility_location_flow(
+    facilities: Sequence[Mapping[str, Any]],
+    customers: Sequence[Mapping[str, Any]],
+    routes: Sequence[Mapping[str, Any]],
+    *,
+    time_limit_seconds: float = 10.0,
+) -> dict[str, Any]:
+    """Minimize facility opening plus route shipment costs for one planning period.
+
+    This is a capacitated, single-period facility-location MILP. Each customer
+    demand must be met exactly; facility and route capacities are hard bounds.
+    A returned optimal solution is independently rechecked against these bounds.
+    It does not model uncertainty, multiple periods, production processes or
+    alternate routing through intermediate transshipment nodes.
+    """
+    import pulp
+
+    def _records(value: Any, name: str, *, maximum: int) -> list[Mapping[str, Any]]:
+        if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
+            raise ValueError(f"{name} must be a list of records.")
+        if not 1 <= len(value) <= maximum:
+            raise ValueError(f"{name} must contain between 1 and {maximum} records.")
+        if any(not isinstance(item, Mapping) for item in value):
+            raise ValueError(f"Every {name} item must be an object.")
+        return list(value)
+
+    facilities_raw = _records(facilities, "Facilities", maximum=50)
+    customers_raw = _records(customers, "Customers", maximum=500)
+    routes_raw = _records(routes, "Routes", maximum=5000)
+    limit = _finite_number(time_limit_seconds, "Solver time limit")
+    if not 0.1 <= limit <= 300:
+        raise ValueError("Solver time limit must be between 0.1 and 300 seconds.")
+
+    def _identifier(raw: Mapping[str, Any], field: str, label: str) -> str:
+        value = str(raw.get(field, "")).strip()
+        if not value or len(value) > 100:
+            raise ValueError(f"{label} must be a non-empty identifier no longer than 100 characters.")
+        return value
+
+    normalized_facilities: list[dict[str, Any]] = []
+    facility_ids: set[str] = set()
+    for row in facilities_raw:
+        fid = _identifier(row, "id", "Facility ID")
+        if fid.casefold() in facility_ids:
+            raise ValueError(f"Facility IDs must be unique; duplicate: {fid}.")
+        facility_ids.add(fid.casefold())
+        capacity = _finite_number(row.get("capacity"), f"Facility {fid} capacity")
+        fixed_cost = _finite_number(row.get("fixed_opening_cost"), f"Facility {fid} opening cost")
+        if capacity <= 0:
+            raise ValueError(f"Facility {fid} capacity must be greater than zero.")
+        if fixed_cost < 0:
+            raise ValueError(f"Facility {fid} opening cost cannot be negative.")
+        normalized_facilities.append({"id": fid, "capacity": capacity, "fixed_opening_cost": fixed_cost})
+
+    normalized_customers: list[dict[str, Any]] = []
+    customer_ids: set[str] = set()
+    for row in customers_raw:
+        cid = _identifier(row, "id", "Customer ID")
+        if cid.casefold() in customer_ids:
+            raise ValueError(f"Customer IDs must be unique; duplicate: {cid}.")
+        customer_ids.add(cid.casefold())
+        demand = _finite_number(row.get("demand"), f"Customer {cid} demand")
+        if demand <= 0:
+            raise ValueError(f"Customer {cid} demand must be greater than zero.")
+        normalized_customers.append({"id": cid, "demand": demand})
+
+    facility_lookup = {x["id"].casefold(): x["id"] for x in normalized_facilities}
+    customer_lookup = {x["id"].casefold(): x["id"] for x in normalized_customers}
+    total_demand = sum(x["demand"] for x in normalized_customers)
+    normalized_routes: list[dict[str, Any]] = []
+    route_keys: set[tuple[str, str]] = set()
+    for index, row in enumerate(routes_raw, start=1):
+        fid_raw = _identifier(row, "facility", f"Route {index} facility")
+        cid_raw = _identifier(row, "customer", f"Route {index} customer")
+        fid = facility_lookup.get(fid_raw.casefold())
+        cid = customer_lookup.get(cid_raw.casefold())
+        if fid is None or cid is None:
+            raise ValueError(f"Route {index} references an unknown facility or customer.")
+        key = (fid.casefold(), cid.casefold())
+        if key in route_keys:
+            raise ValueError(f"Only one route per facility/customer pair is supported; duplicate route {fid} → {cid}.")
+        route_keys.add(key)
+        unit_cost = _finite_number(row.get("unit_cost"), f"Route {index} unit cost")
+        route_capacity = _finite_number(row.get("capacity", total_demand), f"Route {index} capacity")
+        if unit_cost < 0 or route_capacity < 0:
+            raise ValueError("Route unit cost and capacity must be non-negative.")
+        available = row.get("available", True)
+        if not isinstance(available, bool):
+            raise ValueError(f"Route {index} available must be true or false.")
+        if not available:
+            route_capacity = 0.0
+        normalized_routes.append({
+            "facility": fid,
+            "customer": cid,
+            "unit_cost": unit_cost,
+            "capacity": route_capacity,
+            "available": available,
+            "index": index,
+        })
+
+    model = pulp.LpProblem("ShoirIE_Facility_Location_Flow", pulp.LpMinimize)
+    open_vars = {
+        i: pulp.LpVariable(f"facility_open_{i}", cat=pulp.LpBinary)
+        for i in range(len(normalized_facilities))
+    }
+    flow_vars = {
+        r["index"] - 1: pulp.LpVariable(
+            f"route_flow_{r['index'] - 1}", lowBound=0, upBound=r["capacity"], cat=pulp.LpContinuous
+        )
+        for r in normalized_routes
+    }
+    facility_index = {x["id"]: i for i, x in enumerate(normalized_facilities)}
+    model += (
+        pulp.lpSum(f["fixed_opening_cost"] * open_vars[i] for i, f in enumerate(normalized_facilities))
+        + pulp.lpSum(r["unit_cost"] * flow_vars[i] for i, r in enumerate(normalized_routes))
+    )
+    for i, facility in enumerate(normalized_facilities):
+        outbound = pulp.lpSum(
+            flow_vars[j] for j, route in enumerate(normalized_routes) if route["facility"] == facility["id"]
+        )
+        model += outbound <= facility["capacity"] * open_vars[i], f"facility_capacity_{i}"
+    for i, customer in enumerate(normalized_customers):
+        inbound = pulp.lpSum(
+            flow_vars[j] for j, route in enumerate(normalized_routes) if route["customer"] == customer["id"]
+        )
+        model += inbound == customer["demand"], f"customer_demand_{i}"
+
+    try:
+        model.solve(pulp.PULP_CBC_CMD(msg=False, timeLimit=limit))
+    except pulp.PulpSolverError:
+        return {
+            "status": "SOLVER_UNAVAILABLE",
+            "solver_status": "CBC solver unavailable",
+            "objective_value": None,
+            "flow_table": pd.DataFrame(),
+            "facility_table": pd.DataFrame(),
+            "customer_balance": pd.DataFrame(),
+            "violations": ["Install or configure an available PuLP-compatible MILP solver, then rerun."],
+            "assumptions": "Single-period deterministic facility location and route allocation.",
+            "warning": "No solution was claimed because the solver could not execute.",
+        }
+
+    solver_status = str(pulp.LpStatus.get(model.status, model.status))
+    if model.status != pulp.LpStatusOptimal:
+        status = "INFEASIBLE" if model.status == pulp.LpStatusInfeasible else "SOLVER_LIMIT_OR_ERROR"
+        warning = (
+            "No allocation satisfies every demand and facility/route capacity constraint."
+            if status == "INFEASIBLE"
+            else "The solver did not prove an optimal allocation within the available limits. Do not use this result as a plan."
+        )
+        return {
+            "status": status,
+            "solver_status": solver_status,
+            "objective_value": None,
+            "flow_table": pd.DataFrame(),
+            "facility_table": pd.DataFrame(),
+            "customer_balance": pd.DataFrame(),
+            "violations": [warning],
+            "assumptions": "Single-period deterministic facility location and route allocation.",
+            "warning": warning,
+        }
+
+    tol = 1e-6
+    flow_rows: list[dict[str, Any]] = []
+    for j, route in enumerate(normalized_routes):
+        value = float(pulp.value(flow_vars[j]) or 0.0)
+        if abs(value) < tol:
+            value = 0.0
+        flow_rows.append({
+            "Facility": route["facility"], "Customer": route["customer"],
+            "Shipment units": value, "Unit cost": route["unit_cost"],
+            "Variable cost": value * route["unit_cost"], "Route capacity": route["capacity"],
+            "Route available": route["available"],
+        })
+    flow_df = pd.DataFrame(flow_rows)
+    facility_rows: list[dict[str, Any]] = []
+    violations: list[str] = []
+    fixed_cost_total = 0.0
+    for i, facility in enumerate(normalized_facilities):
+        opened = float(pulp.value(open_vars[i]) or 0.0) >= 0.5
+        shipped = float(flow_df.loc[flow_df["Facility"] == facility["id"], "Shipment units"].sum())
+        if shipped > facility["capacity"] + tol:
+            violations.append(f"Facility {facility['id']} exceeds capacity.")
+        if not opened and shipped > tol:
+            violations.append(f"Closed facility {facility['id']} ships a positive quantity.")
+        fixed_cost_total += facility["fixed_opening_cost"] if opened else 0.0
+        facility_rows.append({
+            "Facility": facility["id"], "Open": opened,
+            "Fixed opening cost": facility["fixed_opening_cost"] if opened else 0.0,
+            "Capacity": facility["capacity"], "Assigned units": shipped,
+            "Utilization (%)": 100.0 * shipped / facility["capacity"],
+        })
+    customer_rows: list[dict[str, Any]] = []
+    for customer in normalized_customers:
+        delivered = float(flow_df.loc[flow_df["Customer"] == customer["id"], "Shipment units"].sum())
+        gap = delivered - customer["demand"]
+        if abs(gap) > tol:
+            violations.append(f"Customer {customer['id']} demand does not reconcile.")
+        customer_rows.append({
+            "Customer": customer["id"], "Demand": customer["demand"],
+            "Delivered": delivered, "Balance error": gap,
+            "Status": "SATISFIED" if abs(gap) <= tol else "VIOLATION",
+        })
+    if not flow_df.empty and ((flow_df["Shipment units"] > flow_df["Route capacity"] + tol).any() or (flow_df["Shipment units"] < -tol).any()):
+        violations.append("A route violates its capacity or non-negativity bound.")
+    variable_cost_total = float(flow_df["Variable cost"].sum())
+    objective_value = fixed_cost_total + variable_cost_total
+    solver_objective = float(pulp.value(model.objective))
+    if abs(objective_value - solver_objective) > max(tol, abs(solver_objective) * tol):
+        violations.append("Independent objective recomputation does not match the solver objective.")
+    independent_ok = not violations
+    return {
+        "status": "OPTIMAL_FEASIBLE" if independent_ok else "OPTIMAL_SOLUTION_FAILED_AUDIT",
+        "solver_status": solver_status,
+        "objective_value": objective_value if independent_ok else None,
+        "solver_objective_value": solver_objective,
+        "fixed_opening_cost": fixed_cost_total,
+        "variable_shipment_cost": variable_cost_total,
+        "facility_count": len(normalized_facilities),
+        "customer_count": len(normalized_customers),
+        "route_count": len(normalized_routes),
+        "open_facility_count": sum(1 for row in facility_rows if row["Open"]),
+        "independent_feasibility_check": independent_ok,
+        "violations": violations,
+        "flow_table": flow_df,
+        "facility_table": pd.DataFrame(facility_rows),
+        "customer_balance": pd.DataFrame(customer_rows),
+        "assumptions": "Single-period deterministic demand; candidate facilities have fixed opening costs and capacity; each enabled route has a unit cost and capacity; every customer demand must be met exactly.",
+        "warning": "This is a modelled plan from user-declared data, not a live logistics optimization or guaranteed real-world cost.",
+        "limitations": [
+            "No multi-period inventory, intermediate transshipment, variable production cost, uncertainty, carbon objective or demand forecast.",
+            "Binary facility opening choices and continuous shipment quantities are optimized for the supplied one-period problem only.",
+        ],
+    }
