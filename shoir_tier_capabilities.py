@@ -345,7 +345,7 @@ def available_modules(tier: str, modules: Iterable[str]) -> list[str]:
 def _looks_like_action_request(prompt: str) -> bool:
     p = re.sub(r"\s+", " ", str(prompt or "").strip().lower())
     return bool(re.search(
-        r"\b(run|execute|perform|calculate|analy[sz]e|build|create|generate|export|clean|format|"
+        r"\b(run|execute|perform|calculate|estimate|analy[sz]e|build|create|generate|export|clean|format|"
         r"compare|optimi[sz]e|fit|test|review|simulate|forecast|open|use|apply|do)\b",
         p,
     ))
