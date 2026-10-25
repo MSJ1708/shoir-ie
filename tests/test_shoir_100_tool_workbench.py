@@ -360,6 +360,19 @@ def test_workbench_runs_maintenance_hazard_mrp_and_portfolio_methods():
         result = at.session_state.get(f"shoir_tool_result_{tool_id}")
         assert result is not None, f"{tool_id} returned no result; visible errors: " + " | ".join(str(item.value) for item in at.error)
         assert result[result_key] == pytest.approx(expected)
+        if tool_id == "T044":
+            assert any(
+                "not a complete or certified rcm analysis" in str(item.value).lower()
+                for item in at.warning
+            )
+            assert any(
+                "Human review status" in getattr(frame.value, "columns", [])
+                for frame in at.dataframe
+            )
+            assert not any(
+                getattr(widget, "key", "").startswith("target_t044_review_register_")
+                for widget in at.selectbox
+            )
         assert result.get("_workspace_persistence") in {
             "SAVED_LOCAL_FALLBACK", "SAVED_MANAGED_WORKSPACE", "SESSION_ONLY",
             "SAVE_FAILED", "SAVE_PENDING", "SAVE_STATUS_NOT_CONFIRMED",

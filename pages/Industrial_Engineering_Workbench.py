@@ -1886,11 +1886,33 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                         result = st.session_state.get("shoir_tool_result_" + selected_tool["tool_id"])
                         if result:
                             _show_focused_tool_persistence(selected_tool["tool_id"], result, current_tool_inputs)
-                            render_engineering_result(
-                                result,
-                                title=selected_tool["canonical_name"],
-                                key_prefix="target_" + selected_tool["tool_id"].lower(),
-                            )
+                            if selected_tool["tool_id"] == "T044":
+                                # RCM decisions are a review register, not a chart-first
+                                # numeric result. Keep human review and the register prominent.
+                                st.metric("Failure modes for review", int(result.get("failure_mode_count", 0)))
+                                c1, c2 = st.columns(2)
+                                c1.metric("Open review items", int(result.get("open_review_count", 0)))
+                                c2.metric("Flagged decisions", int(result.get("rule_flag_count", 0)))
+                                st.warning(
+                                    result.get(
+                                        "warning",
+                                        "RCM output requires qualified human review before use.",
+                                    )
+                                )
+                                st.caption(result.get("method", "Structured RCM worksheet"))
+                                register = result.get("review_register")
+                                if isinstance(register, pd.DataFrame):
+                                    st.markdown("**RCM review register**")
+                                    st.dataframe(register, use_container_width=True, hide_index=True)
+                                else:
+                                    st.error("The RCM review register was not returned; rerun the tool with valid inputs.")
+                                st.caption(result.get("assumptions", "User-provided decision inputs require validation."))
+                            else:
+                                render_engineering_result(
+                                    result,
+                                    title=selected_tool["canonical_name"],
+                                    key_prefix="target_" + selected_tool["tool_id"].lower(),
+                                )
                     elif selected_tool["tool_id"] == "T016":
                         result = st.session_state.get("shoir_tool_result_T016")
                         if result:
