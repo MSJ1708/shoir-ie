@@ -3535,3 +3535,413 @@ def score_supplier_performance(
         ).reset_index(drop=True),
         "warning": "Weights and 0–100 scores are user-defined. Incomplete suppliers are not ranked. Verify evidence recency, score rubric and conflict-of-interest controls before procurement decisions.",
     }
+
+
+def analyze_measurement_system_gage_rr(
+    measurements: Sequence[Mapping[str, Any]],
+    *,
+    tolerance: float | None = None,
+    unit: str = "units",
+) -> dict[str, Any]:
+    """Estimate crossed gage R&R variance components with a balanced two-way ANOVA.
+
+    The input must contain exactly one reading per part/operator/trial cell and
+    the same trial identifiers for every cell. Variance components are truncated
+    at zero when sample mean squares imply a negative random-effect estimate.
+    This is a screening implementation, not a substitute for a qualified MSA
+    review of the chosen study design and assumptions.
+    """
+    if not isinstance(measurements, Sequence) or isinstance(measurements, (str, bytes)):
+        raise ValueError("Measurements must be a list of part/operator/trial reading records.")
+    if not str(unit or "").strip():
+        raise ValueError("A measurement unit is required.")
+    if tolerance is not None:
+        tolerance_value = _finite_number(tolerance, "Tolerance")
+        if tolerance_value <= 0:
+            raise ValueError("Tolerance must be greater than zero.")
+    else:
+        tolerance_value = None
+    if len(measurements) < 8:
+        raise ValueError("Provide a balanced crossed study with at least two parts, two operators and two trials.")
+
+    records: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for index, item in enumerate(measurements, start=1):
+        if not isinstance(item, Mapping):
+            raise ValueError(f"Measurement row {index} must be an object.")
+        part = str(item.get("part", "")).strip()
+        operator = str(item.get("operator", "")).strip()
+        trial = str(item.get("trial", "")).strip()
+        if not part or not operator or not trial:
+            raise ValueError(f"Measurement row {index} needs non-empty part, operator and trial identifiers.")
+        key = (part, operator, trial)
+        if key in seen:
+            raise ValueError(f"Duplicate measurement cell for part={part}, operator={operator}, trial={trial}.")
+        seen.add(key)
+        records.append({
+            "part": part,
+            "operator": operator,
+            "trial": trial,
+            "measurement": _finite_number(item.get("value"), f"Measurement value on row {index}"),
+        })
+
+    frame = pd.DataFrame(records)
+    parts = sorted(frame["part"].unique().tolist())
+    operators = sorted(frame["operator"].unique().tolist())
+    trials = sorted(frame["trial"].unique().tolist())
+    a, b, n = len(parts), len(operators), len(trials)
+    if a < 2 or b < 2 or n < 2:
+        raise ValueError("A crossed gage R&R study requires at least two parts, two operators and two trials.")
+    if len(frame) != a * b * n:
+        raise ValueError("The crossed study is unbalanced or has missing part/operator/trial cells; no values were imputed.")
+    for part in parts:
+        for operator in operators:
+            cell_trials = set(frame.loc[
+                (frame["part"] == part) & (frame["operator"] == operator), "trial"
+            ])
+            if cell_trials != set(trials):
+                raise ValueError("Every part/operator pair must contain the same trial identifiers.")
+
+    overall = float(frame["measurement"].mean())
+    part_means = frame.groupby("part", sort=False)["measurement"].mean().to_dict()
+    operator_means = frame.groupby("operator", sort=False)["measurement"].mean().to_dict()
+    cell_means = frame.groupby(["part", "operator"], sort=False)["measurement"].mean().to_dict()
+
+    ss_part = b * n * sum((float(part_means[p]) - overall) ** 2 for p in parts)
+    ss_operator = a * n * sum((float(operator_means[o]) - overall) ** 2 for o in operators)
+    ss_interaction = n * sum(
+        (
+            float(cell_means[(p, o)])
+            - float(part_means[p])
+            - float(operator_means[o])
+            + overall
+        ) ** 2
+        for p in parts for o in operators
+    )
+    ss_repeatability = 0.0
+    for row in records:
+        cell_mean = float(cell_means[(row["part"], row["operator"])])
+        ss_repeatability += (float(row["measurement"]) - cell_mean) ** 2
+
+    df_part = a - 1
+    df_operator = b - 1
+    df_interaction = (a - 1) * (b - 1)
+    df_repeatability = a * b * (n - 1)
+    ms_part = ss_part / df_part
+    ms_operator = ss_operator / df_operator
+    ms_interaction = ss_interaction / df_interaction
+    ms_repeatability = ss_repeatability / df_repeatability
+
+    repeatability_var = max(0.0, ms_repeatability)
+    interaction_var = max(0.0, (ms_interaction - ms_repeatability) / n)
+    operator_var = max(0.0, (ms_operator - ms_interaction) / (a * n))
+    part_var = max(0.0, (ms_part - ms_interaction) / (b * n))
+    grr_var = repeatability_var + interaction_var + operator_var
+    total_var = grr_var + part_var
+    grr_sd = math.sqrt(grr_var)
+    part_sd = math.sqrt(part_var)
+    total_sd = math.sqrt(total_var)
+
+    def pct(value: float, denominator: float) -> float | None:
+        return 100.0 * value / denominator if denominator > 0 else None
+
+    components = [
+        ("Repeatability (equipment)", repeatability_var),
+        ("Part-by-operator interaction", interaction_var),
+        ("Reproducibility (operator)", operator_var),
+        ("Part-to-part", part_var),
+    ]
+    variation_rows = []
+    for name, variance in components:
+        sd = math.sqrt(variance)
+        variation_rows.append({
+            "Component": name,
+            "Variance component": variance,
+            "Standard deviation": sd,
+            "% total variance": pct(variance, total_var),
+            "% study variation": pct(sd, total_sd),
+        })
+    variation_rows.append({
+        "Component": "Total gage R&R",
+        "Variance component": grr_var,
+        "Standard deviation": grr_sd,
+        "% total variance": pct(grr_var, total_var),
+        "% study variation": pct(grr_sd, total_sd),
+    })
+    percent_tolerance = 100.0 * (6.0 * grr_sd) / tolerance_value if tolerance_value is not None else None
+    ndc = int(math.floor(1.41 * part_sd / grr_sd)) if grr_sd > 0 else None
+    warnings = [
+        "Crossed random-effects ANOVA screening estimate; confirm study design, residual assumptions and site-approved MSA criteria with a qualified reviewer.",
+        "Negative method-of-moments variance components are truncated to zero; inspect the study data before relying on the decomposition.",
+    ]
+    return {
+        "status": "PROVISIONAL_CROSSED_GAGE_RR_CALCULATED",
+        "method": "Balanced crossed two-way random-effects ANOVA; variance component method-of-moments.",
+        "unit": str(unit).strip(),
+        "part_count": a,
+        "operator_count": b,
+        "trials_per_cell": n,
+        "measurement_count": len(frame),
+        "grand_mean": overall,
+        "repeatability_standard_deviation": math.sqrt(repeatability_var),
+        "reproducibility_standard_deviation": math.sqrt(interaction_var + operator_var),
+        "gage_rr_standard_deviation": grr_sd,
+        "part_to_part_standard_deviation": part_sd,
+        "total_standard_deviation": total_sd,
+        "gage_rr_percent_total_variance": pct(grr_var, total_var),
+        "gage_rr_percent_study_variation": pct(grr_sd, total_sd),
+        "gage_rr_percent_tolerance": percent_tolerance,
+        "number_of_distinct_categories": ndc,
+        "tolerance": tolerance_value,
+        "variance_components": pd.DataFrame(variation_rows),
+        "anova_table": pd.DataFrame([
+            {"Source": "Part", "df": df_part, "Sum of squares": ss_part, "Mean square": ms_part},
+            {"Source": "Operator", "df": df_operator, "Sum of squares": ss_operator, "Mean square": ms_operator},
+            {"Source": "Part × operator", "df": df_interaction, "Sum of squares": ss_interaction, "Mean square": ms_interaction},
+            {"Source": "Repeatability / error", "df": df_repeatability, "Sum of squares": ss_repeatability, "Mean square": ms_repeatability},
+        ]),
+        "warnings": warnings,
+        "data_provenance": "USER_ENTERED_UNVERIFIED",
+    }
+
+
+def fit_regression_anova(
+    records: Sequence[Mapping[str, Any]],
+    response: str,
+    predictors: Sequence[str],
+) -> dict[str, Any]:
+    """Fit full-rank ordinary least squares and emit coefficient, ANOVA and residual tables."""
+    if not isinstance(records, Sequence) or isinstance(records, (str, bytes)) or not records:
+        raise ValueError("Provide a non-empty list of observation records.")
+    response_name = str(response or "").strip()
+    predictor_names = [str(name or "").strip() for name in predictors]
+    if not response_name:
+        raise ValueError("Select a response column.")
+    if not predictor_names or any(not name for name in predictor_names):
+        raise ValueError("Provide at least one non-empty predictor column.")
+    if len(set(predictor_names)) != len(predictor_names):
+        raise ValueError("Predictor names must be unique.")
+    if response_name in predictor_names:
+        raise ValueError("The response column cannot also be a predictor.")
+    if any(not isinstance(row, Mapping) for row in records):
+        raise ValueError("Every observation row must be a JSON object.")
+    columns = {response_name, *predictor_names}
+    missing = sorted(name for name in columns if any(name not in row for row in records))
+    if missing:
+        raise ValueError(f"Missing model columns: {missing}. No rows were silently discarded.")
+
+    y = np.asarray([_finite_number(row[response_name], f"Response {response_name}") for row in records], dtype=float)
+    x_values = np.asarray([
+        [_finite_number(row[name], f"Predictor {name} on row {index}") for name in predictor_names]
+        for index, row in enumerate(records, start=1)
+    ], dtype=float)
+    n, p = len(y), len(predictor_names)
+    residual_df = n - p - 1
+    if residual_df <= 0:
+        raise ValueError(f"Need more observations than predictors plus intercept; received n={n}, predictors={p}.")
+    design = np.column_stack([np.ones(n), x_values])
+    rank = int(np.linalg.matrix_rank(design))
+    if rank != p + 1:
+        raise ValueError("The design matrix is rank-deficient (a predictor is constant or predictors are collinear).")
+    if float(np.var(y)) <= np.finfo(float).eps:
+        raise ValueError("The response has zero variance; R-squared and the regression ANOVA are not informative.")
+
+    beta, _, _, _ = np.linalg.lstsq(design, y, rcond=None)
+    fitted = design @ beta
+    residuals = y - fitted
+    mean_y = float(y.mean())
+    sse = float(np.dot(residuals, residuals))
+    sst = float(np.dot(y - mean_y, y - mean_y))
+    ssr = max(0.0, sst - sse)
+    r_squared = 1.0 - sse / sst
+    adjusted_r_squared = 1.0 - (1.0 - r_squared) * (n - 1) / residual_df
+    mse = sse / residual_df
+    residual_standard_error = math.sqrt(max(0.0, mse))
+    rmse = math.sqrt(sse / n)
+
+    if sse <= np.finfo(float).eps and ssr > 0:
+        f_statistic, model_p_value = float("inf"), 0.0
+    elif mse > 0 and p > 0:
+        f_statistic = (ssr / p) / mse
+        from scipy.stats import f as _f_dist
+        model_p_value = float(_f_dist.sf(f_statistic, p, residual_df))
+    else:
+        f_statistic, model_p_value = float("nan"), float("nan")
+
+    if mse > np.finfo(float).eps:
+        covariance = mse * np.linalg.inv(design.T @ design)
+        standard_errors = np.sqrt(np.maximum(0.0, np.diag(covariance)))
+        t_statistics = beta / standard_errors
+        from scipy.stats import t as _t_dist
+        coefficient_p_values = 2.0 * _t_dist.sf(np.abs(t_statistics), residual_df)
+    else:
+        standard_errors = np.full(p + 1, np.nan)
+        t_statistics = np.full(p + 1, np.nan)
+        coefficient_p_values = np.full(p + 1, np.nan)
+
+    coefficients = pd.DataFrame({
+        "Term": ["Intercept", *predictor_names],
+        "Estimate": beta,
+        "Standard error": standard_errors,
+        "t statistic": t_statistics,
+        "p-value": coefficient_p_values,
+    })
+    residual_table = pd.DataFrame({
+        "Observation": np.arange(1, n + 1),
+        "Observed": y,
+        "Fitted": fitted,
+        "Residual": residuals,
+    })
+    anova = pd.DataFrame([
+        {"Source": "Regression", "df": p, "Sum of squares": ssr, "Mean square": ssr / p,
+         "F statistic": f_statistic, "p-value": model_p_value},
+        {"Source": "Residual", "df": residual_df, "Sum of squares": sse, "Mean square": mse,
+         "F statistic": np.nan, "p-value": np.nan},
+        {"Source": "Total", "df": n - 1, "Sum of squares": sst, "Mean square": np.nan,
+         "F statistic": np.nan, "p-value": np.nan},
+    ])
+    warnings = [
+        "Ordinary least squares assumes appropriate model form and independent, homoscedastic residuals; inspect residuals and study design.",
+        "Observational regression does not establish causation.",
+    ]
+    if mse <= np.finfo(float).eps:
+        warnings.append("Residual variance is effectively zero; coefficient uncertainty tests are undefined and shown as NaN.")
+    return {
+        "status": "OLS_REGRESSION_ANOVA_CALCULATED",
+        "method": "Ordinary least squares with intercept; classical model F-test and coefficient t-tests when residual variance is estimable.",
+        "response": response_name,
+        "predictors": predictor_names,
+        "sample_count": n,
+        "model_degrees_freedom": p,
+        "residual_degrees_freedom": residual_df,
+        "r_squared": float(r_squared),
+        "adjusted_r_squared": float(adjusted_r_squared),
+        "rmse": float(rmse),
+        "residual_standard_error": float(residual_standard_error),
+        "f_statistic": float(f_statistic),
+        "model_p_value": float(model_p_value),
+        "coefficients": coefficients,
+        "anova_table": anova,
+        "residuals": residual_table,
+        "warnings": warnings,
+        "data_provenance": "USER_ENTERED_UNVERIFIED",
+    }
+
+
+def run_hypothesis_test(
+    test_type: str,
+    sample_a: Sequence[float],
+    sample_b: Sequence[float] | None = None,
+    *,
+    null_mean: float = 0.0,
+    alpha: float = 0.05,
+) -> dict[str, Any]:
+    """Run only one-sample, independent Welch, or paired two-sided t-tests."""
+    from scipy.stats import t as _t_dist
+
+    test = str(test_type or "").strip().lower()
+    aliases = {
+        "one_sample_t": "one_sample_t",
+        "welch_t": "welch_t",
+        "paired_t": "paired_t",
+    }
+    if test not in aliases:
+        raise ValueError("Supported test types are one_sample_t, welch_t and paired_t.")
+    alpha_value = _finite_number(alpha, "Alpha")
+    if not 0 < alpha_value < 1:
+        raise ValueError("Alpha must be strictly between zero and one.")
+    values_a = [_finite_number(value, "Sample A value") for value in sample_a]
+    if len(values_a) < 2:
+        raise ValueError("Sample A must contain at least two finite observations.")
+    values_b = None
+    if test != "one_sample_t":
+        if sample_b is None:
+            raise ValueError("Sample B is required for the selected two-sample test.")
+        values_b = [_finite_number(value, "Sample B value") for value in sample_b]
+        if len(values_b) < 2:
+            raise ValueError("Sample B must contain at least two finite observations.")
+
+    a = np.asarray(values_a, dtype=float)
+    mean_a = float(a.mean())
+    warnings = [
+        "This implementation supports two-sided t-tests only. Confirm sampling design, independence/pairing and distribution assumptions before interpreting results.",
+        "P-values do not measure practical importance or prove causation.",
+    ]
+
+    if test == "one_sample_t":
+        null_value = _finite_number(null_mean, "Null mean")
+        difference = mean_a - null_value
+        sd_a = float(np.std(a, ddof=1))
+        se = sd_a / math.sqrt(len(a))
+        df = len(a) - 1
+        test_name = "One-sample t-test"
+        mean_b = None
+        n_b = None
+        hypothesis = f"Two-sided H0: population mean = {null_value:g}; H1: population mean differs from {null_value:g}."
+        effect_size = difference / sd_a if sd_a > 0 else None
+    elif test == "welch_t":
+        b = np.asarray(values_b, dtype=float)
+        mean_b = float(b.mean())
+        var_a = float(np.var(a, ddof=1))
+        var_b = float(np.var(b, ddof=1))
+        difference = mean_a - mean_b
+        v_a = var_a / len(a)
+        v_b = var_b / len(b)
+        se = math.sqrt(v_a + v_b)
+        denominator = (v_a ** 2 / (len(a) - 1)) + (v_b ** 2 / (len(b) - 1))
+        df = ((v_a + v_b) ** 2 / denominator) if denominator > 0 else float(len(a) + len(b) - 2)
+        test_name = "Independent two-sample Welch t-test"
+        n_b = len(b)
+        pooled_sd = math.sqrt(
+            ((len(a) - 1) * var_a + (len(b) - 1) * var_b) / (len(a) + len(b) - 2)
+        )
+        effect_size = difference / pooled_sd if pooled_sd > 0 else None
+        hypothesis = "Two-sided H0: group means are equal; H1: group means differ."
+    else:
+        b = np.asarray(values_b, dtype=float)
+        if len(a) != len(b):
+            raise ValueError("Paired t-test requires sample A and B to have the same number of aligned observations.")
+        differences = a - b
+        difference = float(differences.mean())
+        sd_difference = float(np.std(differences, ddof=1))
+        se = sd_difference / math.sqrt(len(differences))
+        df = len(differences) - 1
+        test_name = "Paired two-sample t-test"
+        mean_b = float(b.mean())
+        n_b = len(b)
+        effect_size = difference / sd_difference if sd_difference > 0 else None
+        hypothesis = "Two-sided H0: mean paired difference is zero; H1: mean paired difference differs from zero."
+
+    if se > 0:
+        statistic = difference / se
+        p_value = float(2.0 * _t_dist.sf(abs(statistic), df))
+        critical = float(_t_dist.ppf(1.0 - alpha_value / 2.0, df))
+        ci_low, ci_high = difference - critical * se, difference + critical * se
+    else:
+        statistic = 0.0 if difference == 0 else math.copysign(float("inf"), difference)
+        p_value = 1.0 if difference == 0 else 0.0
+        ci_low = ci_high = difference
+
+    return {
+        "status": "HYPOTHESIS_TEST_CALCULATED",
+        "method": test_name,
+        "hypothesis": hypothesis,
+        "alpha": alpha_value,
+        "sample_size_a": len(a),
+        "sample_size_b": n_b,
+        "mean_a": mean_a,
+        "mean_b": mean_b,
+        "mean_difference": difference,
+        "test_statistic": statistic,
+        "degrees_freedom": float(df),
+        "p_value": p_value,
+        "confidence_level_pct": 100.0 * (1.0 - alpha_value),
+        "confidence_interval_low": float(ci_low),
+        "confidence_interval_high": float(ci_high),
+        "effect_size_cohens_d": float(effect_size) if effect_size is not None else None,
+        "reject_null_hypothesis": bool(p_value < alpha_value),
+        "decision_rule": "Reject H0 when p-value < alpha; otherwise fail to reject H0.",
+        "warnings": warnings,
+        "data_provenance": "USER_ENTERED_UNVERIFIED",
+    }
+
