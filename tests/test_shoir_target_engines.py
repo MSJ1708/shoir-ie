@@ -2085,3 +2085,52 @@ def test_equipment_anomaly_monitor_distinguishes_stale_data_and_rejects_bad_inpu
         monitor_equipment_anomalies([{"timestamp": "bad", "value": 1}] * 5)
     with pytest.raises(ValueError, match="threshold"):
         monitor_equipment_anomalies(observations, modified_z_threshold=0.5)
+
+
+def test_capa_8d_register_flags_incomplete_and_overdue_records():
+    from shoir_target_engines import assess_capa_8d_records
+
+    records = [{
+        "capa_id": "CAPA-001", "title": "Repeated seal failure", "status": "IN_PROGRESS",
+        "team": "Maintenance and quality", "problem_statement": "Seal failures recur",
+        "containment_action": "Inspect affected assets", "root_cause": "Not confirmed",
+        "corrective_action": "Replace supplier lot", "implementation_evidence": "WO-100",
+        "preventive_action": "Add incoming inspection", "closure_review": "Open review",
+        "owner": "Quality lead", "evidence_reference": "INV-55",
+        "opened_date": "2026-10-01", "due_date": "2026-10-10",
+    }]
+    result = assess_capa_8d_records(records, as_of_date="2026-10-25")
+    assert result["status"] == "CAPA_REGISTER_REVIEWED"
+    assert result["record_count"] == 1
+    assert result["overdue_count"] == 1
+    row = result["records"].iloc[0]
+    assert row["Workflow state"] == "OVERDUE"
+    assert row["Missing item count"] == 0
+
+
+def test_capa_8d_register_requires_evidence_for_closed_records_and_validates_dates():
+    from shoir_target_engines import assess_capa_8d_records
+
+    closed = {
+        "capa_id": "CAPA-CLOSED", "title": "Completed record", "status": "CLOSED",
+        "team": "Team A", "problem_statement": "Problem", "containment_action": "Contained",
+        "root_cause": "Cause", "corrective_action": "Corrected",
+        "implementation_evidence": "WO-1", "preventive_action": "Prevent recurrence",
+        "closure_review": "Reviewed", "owner": "Owner", "evidence_reference": "EV-1",
+        "opened_date": "2026-10-01", "due_date": "2026-10-20",
+    }
+    result = assess_capa_8d_records([closed], as_of_date="2026-10-25")
+    assert result["complete_closure_count"] == 0
+    assert result["records"].iloc[0]["Workflow state"] == "CLOSURE_EVIDENCE_INCOMPLETE"
+    assert "Effectiveness evidence" in result["records"].iloc[0]["Missing items"]
+    complete = dict(closed, effectiveness_evidence="Checked on 2026-10-22", reviewer="Reviewer A", approval_reference="APP-1")
+    good = assess_capa_8d_records([complete], as_of_date="2026-10-25")
+    assert good["complete_closure_count"] == 1
+    assert good["overdue_count"] == 0
+
+    with pytest.raises(ValueError, match="unique"):
+        assess_capa_8d_records([closed, closed])
+    with pytest.raises(ValueError, match="cannot precede"):
+        assess_capa_8d_records([dict(closed, opened_date="2026-10-25", due_date="2026-10-24")])
+    with pytest.raises(ValueError, match="between 1 and 5,000"):
+        assess_capa_8d_records([])
