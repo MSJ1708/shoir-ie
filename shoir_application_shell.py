@@ -7,6 +7,7 @@ It deliberately reuses existing specialist modules instead of replacing them.
 
 from __future__ import annotations
 
+import hashlib
 import html
 import json
 import math
@@ -369,12 +370,45 @@ def _module_target_section(module: str, module_metadata: Mapping[str, Any] | Non
         return "OPERATIONS"
     return "WORKBENCH"
 
+def _global_module_button_key(module_name: str) -> str:
+    """Return a stable, module-specific key for a global-search result button."""
+    digest = hashlib.sha256(str(module_name).strip().encode("utf-8")).hexdigest()[:16]
+    return f"shoir_global_module_{digest}"
+
+
+def _ensure_requested_module_choice(
+    choices: Sequence[str],
+    requested_module: str,
+    allowed_modules: Sequence[str],
+) -> list[str]:
+    """Keep an authorized explicit deep-link selectable despite section-filter drift."""
+    result = [str(choice) for choice in choices]
+    requested = str(requested_module or "").strip()
+    if requested and requested in {str(item).strip() for item in allowed_modules} and requested not in result:
+        result.insert(0, requested)
+    return result
+
+def _resolve_requested_module_selection(
+    selected_label: str | None,
+    requested_module: str,
+    allowed_modules: Sequence[str],
+) -> str | None:
+    """Treat an authorized global-search request as authoritative over stale widget state."""
+    requested = str(requested_module or "").strip()
+    allowed = {str(item).strip() for item in allowed_modules}
+    if requested and requested in allowed:
+        return requested
+    return str(selected_label) if selected_label is not None else None
+
 
 def render_global_search(
     allowed_modules: Sequence[str],
     module_metadata: Mapping[str, Any] | None = None,
 ) -> None:
     """Search modules and durable engineering objects from the same shell."""
+    # Apply pending widget resets before constructing their Streamlit widgets.
+    if st.session_state.pop("_shoir_clear_global_search_before_render", False):
+        st.session_state["shoir_shell_global_search"] = ""
     query = st.text_input(
         "⌘ Search Shoir-IE",
         placeholder="Search modules, datasets, runs, decisions…",
@@ -415,12 +449,16 @@ def render_global_search(
     with st.expander("⌘ Search results", expanded=True):
         if module_hits:
             st.markdown("**Modules**")
-            for idx, name in enumerate(module_hits[:12]):
-                if st.button(f"Open · {name}", key=f"shoir_global_module_{idx}", use_container_width=True):
+            for name in module_hits[:12]:
+                if st.button(f"Open · {name}", key=_global_module_button_key(name), use_container_width=True):
                     st.session_state["_shoir_requested_module"] = str(name)
+                    # Keep both the transient route request and the durable shell
+                    # selection aligned so a stale widget cannot restore an old module.
+                    st.session_state["selected_module"] = str(name)
                     st.session_state["shoir_shell_section"] = _module_target_section(str(name), module_metadata)
-                    st.session_state.pop("shoir_shell_section_radio", None)
-                    st.session_state["shoir_shell_global_search"] = ""
+                    # Clear keyed widget state on the following run, before it is
+                    # instantiated; changing it after rendering causes Streamlit errors.
+                    st.session_state["_shoir_clear_global_search_before_render"] = True
                     st.rerun()
         if not dataset_hits.empty:
             st.markdown("**Datasets**")
@@ -560,9 +598,27 @@ def render_shell_css() -> None:
 
 
 def render_application_header(username: str, tier: str, module: str) -> None:
-    df, source_key = _first_dataframe()
-    ready = data_readiness(df)
-    provenance = infer_provenance()
+    # This identity label must render before optional readiness/provenance work.
+    # The release browser uses it to confirm the actual active route, and a
+    # diagnostic calculation must never prevent that label or module UI from rendering.
+    module_safe = html.escape(str(module))
+    st.markdown(
+        f'<div class="shoir-shell-muted" data-testid="shoir-active-module">Active module: {module_safe}</div>',
+        unsafe_allow_html=True,
+    )
+
+    try:
+        df, source_key = _first_dataframe()
+        ready = data_readiness(df)
+        provenance = infer_provenance()
+    except Exception:
+        # Keep navigation/modules usable when the optional workspace summary
+        # encounters a legacy or partially restored dataset in session state.
+        source_key = ""
+        ready = {"score": 0.0}
+        provenance = "DEMO"
+        st.caption("Workspace readiness details are temporarily unavailable; the active module remains available.")
+
     project = (
         st.session_state.get("shoir_project_name")
         or st.session_state.get("active_workspace_name")
@@ -585,11 +641,6 @@ def render_application_header(username: str, tier: str, module: str) -> None:
     username_safe = html.escape(str(username))
     run_safe = html.escape(str(run_id))
     tier_safe = html.escape(str(tier))
-    module_safe = html.escape(str(module))
-    st.markdown(
-        f'<div class="shoir-shell-muted" data-testid="shoir-active-module">Active module: {module_safe}</div>',
-        unsafe_allow_html=True,
-    )
     st.markdown(
         f"""
 <div class="shoir-shell-top">
@@ -946,6 +997,9 @@ def render_application_shell(
             if name:
                 module_metadata[name] = item
     nav_labels = [key for key in NAV_GROUPS.keys() if is_admin or key != "ADMIN"]
+    # A deep link must take control of the navigation widget before st.radio mounts.
+    if st.session_state.get("_shoir_requested_module"):
+        st.session_state.pop("shoir_shell_section_radio", None)
     current_section = str(st.session_state.get("shoir_shell_section", "HOME"))
     if not is_admin and current_section == "ADMIN":
         current_section = "HOME"
@@ -958,10 +1012,8 @@ def render_application_shell(
 
     previous_section = st.session_state.get("_shoir_shell_previous_section")
     section_changed = previous_section != current_section
-    explicit_module_request = bool(
-        st.session_state.get("_shoir_requested_module")
-        and str(current_module or "") == str(st.session_state.get("_shoir_requested_module"))
-    )
+    requested_module = str(st.session_state.get("_shoir_requested_module") or "").strip()
+    explicit_module_request = bool(requested_module and requested_module in allowed_modules)
 
     with st.sidebar:
         st.markdown("## SHOIR-IE")
@@ -1011,6 +1063,8 @@ def render_application_shell(
             )
 
         choices = _module_choices(allowed_modules, section, search, module_metadata)
+        if explicit_module_request:
+            choices = _ensure_requested_module_choice(choices, requested_module, allowed_modules)
         default_module = _preferred_module(choices, current_module, recent_choice)
 
         default_index = choices.index(default_module) if default_module in choices else 0
@@ -1018,6 +1072,10 @@ def render_application_shell(
         selector_key = f"shoir_shell_module_selector_{section}"
         if st.session_state.get(selector_key) not in choices:
             st.session_state.pop(selector_key, None)
+        # Selectboxes retain state across reruns; override that state before the
+        # widget is created so an explicit navigation request cannot be ignored.
+        if explicit_module_request and requested_module in choices:
+            st.session_state[selector_key] = requested_module
         if choices:
             selected_label = st.selectbox(
                 "Select module",
@@ -1026,6 +1084,9 @@ def render_application_shell(
                 format_func=lambda x: labels.get(str(x), str(x)),
                 key=selector_key,
                 label_visibility="collapsed",
+            )
+            selected_label = _resolve_requested_module_selection(
+                selected_label, requested_module, allowed_modules
             )
             remember_module(selected_label)
         else:
@@ -1112,10 +1173,17 @@ def render_application_shell(
     if st.session_state.pop("shoir_shell_logout_requested", False):
         surface = "logout"
 
-    if surface in {"navigation_empty", "search_empty"}:
+    if surface in {"navigation_empty", "search_empty"} and not explicit_module_request:
         selected_module = ""
     else:
-        selected_module = str(selected_label or current_module or (list(allowed_modules)[0] if allowed_modules else "MILP Solvers"))
+        selected_module = str(
+            _resolve_requested_module_selection(
+                selected_label or current_module or (list(allowed_modules)[0] if allowed_modules else "MILP Solvers"),
+                requested_module,
+                allowed_modules,
+            )
+            or ""
+        )
 
     render_application_header(username, tier, selected_module)
     render_global_search(allowed_modules, module_metadata)
@@ -1682,8 +1750,7 @@ def render_shell_surface(surface: str, username: str, tier: str, module: str, al
                 save_user_workspace(user, st.session_state)
             except Exception:
                 pass
-        for key in list(st.session_state.keys()):
-            del st.session_state[key]
+        st.session_state["_shoir_clear_session_before_render"] = True
         st.rerun()
 
 
