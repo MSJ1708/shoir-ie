@@ -120,7 +120,8 @@ def test_tab_bar_layout_validator_allows_desktop_whitespace_when_not_clipped():
             "clientHeight": 44, "scrollHeight": 44,
             "labelLeft": left + 8, "labelRight": right - 8,
             "labelClientWidth": right - left - 16, "labelScrollWidth": right - left - 16,
-            "whiteSpace": "nowrap",
+            "labelClientHeight": 28, "labelScrollHeight": 28,
+            "whiteSpace": "nowrap", "labelWhiteSpace": "nowrap",
         }
         for name, left, right in [
             ("Sign In", 0, 150),
