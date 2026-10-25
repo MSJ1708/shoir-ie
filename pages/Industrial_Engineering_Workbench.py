@@ -55,7 +55,7 @@ _TOOL037_EXAMPLE_SAMPLE_A = "2, 4, 6, 8"
 _TOOL049_EXAMPLE_WORK_ORDERS = '[{"work_order_id":"WO-1","task":"Critical bearing","asset":"Pump A","criticality_score":5,"days_until_due":-2,"estimated_hours":4,"required_skill":"Mechanical"},{"work_order_id":"WO-2","task":"Calibration","asset":"Gauge B","criticality_score":4,"days_until_due":0,"estimated_hours":3,"required_skill":"Mechanical"},{"work_order_id":"WO-3","task":"Paint repair","asset":"Frame C","criticality_score":2,"days_until_due":5,"estimated_hours":2,"required_skill":"Electrical"}]'
 _TOOL058_EXAMPLE_SUPPLIERS = '[{"supplier":"Acme","scores":{"Delivery":90,"Quality":80},"data_as_of":"2026-Q3","evidence_reference":"sample-audit-1"},{"supplier":"Beta","scores":{"Delivery":75},"data_as_of":"2026-Q3","risk_mitigation":"Provide missing quality evidence"},{"supplier":"Gamma","scores":{"Delivery":70,"Quality":100},"data_as_of":"2026-Q3","evidence_reference":"sample-audit-3"}]'
 _TOOL015_EXAMPLE_COLUMNS = "Timestamp, Qty, Defects, mystery_label"
-_TOOL052_EXAMPLE_PERIODS = '[{"period":"Jan","demand":30,"planned_production":35,"production_capacity":30,"scheduled_receipts":0,"target_safety_stock":15},{"period":"Feb","demand":60,"planned_production":40,"production_capacity":50,"scheduled_receipts":0,"target_safety_stock":20}]'
+_TOOL052_EXAMPLE_PERIODS = '[{"period":"Jan","demand":30,"planned_production":35,"production_capacity":30,"scheduled_receipts":0,"target_safety_stock":15},{"period":"Feb","demand":60,"planned_production":50,"production_capacity":50,"scheduled_receipts":0,"target_safety_stock":20}]'
 
 st.markdown("""
 <style>
