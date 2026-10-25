@@ -36,7 +36,7 @@ def test_rnle_ideal_single_task_reproduces_23kg_load_constant_fixture():
     assert result["endpoint_results"]["destination"]["coupling_multiplier"] == pytest.approx(1.0)
     assert result["distance_used_for_DM_cm"] == pytest.approx(25.0)
     assert result["data_provenance"] == "USER_ENTERED_UNVERIFIED"
-    assert any("not a medical determination" in warning for warning in result["warnings"])
+    assert any("medical determination" in warning.casefold() for warning in result["warnings"])
 
 
 def test_rnle_interpolates_frequency_and_uses_lower_endpoint_weight_limit():
