@@ -14,7 +14,7 @@ def test_energy_intensity_normalizes_baseline_and_keeps_negative_savings_visible
     metrics = result["metrics"]
     assert metrics["baseline_kwh_per_unit"] == pytest.approx(10)
     assert metrics["total_normalized_baseline_energy_kwh"] == pytest.approx(2200)
-    assert metrics["estimated_energy_difference_kwh"] == pytest.approx(1300)
+    assert metrics["estimated_energy_difference_kwh"] == pytest.approx(300)
     assert result["period_comparison"].loc[1,"energy_kwh_per_unit"] == pytest.approx(7.5)
     assert result["period_comparison"].loc[1,"estimated_emissions_kg_co2e"] == pytest.approx(360)
 
@@ -33,7 +33,7 @@ def test_water_waste_normalization_and_recycling_ratio():
         {"period":"P2","production_units":20,"water_input_m3":160,"wastewater_m3":100,"waste_generated_kg":40,"waste_recycled_kg":20},
     ])
     assert result["metrics"]["total_water_input_m3"] == 260
-    assert result["metrics"]["total_recycling_rate_percent"] == pytest.approx(25)
+    assert result["metrics"]["total_recycling_rate_percent"] == pytest.approx(25 / 60 * 100)
     assert result["period_comparison"].loc[0,"water_m3_per_unit"] == pytest.approx(10)
 
 

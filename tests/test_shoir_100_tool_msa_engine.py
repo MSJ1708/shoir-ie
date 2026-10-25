@@ -49,7 +49,7 @@ def test_crossed_gage_rr_rejects_unbalanced_incomplete_and_bad_tolerance():
     frame=sample()
     with pytest.raises(ValueError,match="same number of replicates"):
         analyze_crossed_gage_rr(frame.drop(index=0),part_col="part_id",appraiser_col="appraiser",measurement_col="measurement")
-    with pytest.raises(ValueError,match="at least two"):
+    with pytest.raises(ValueError,match="(?i)at least two"):
         analyze_crossed_gage_rr(frame[frame["part_id"]=="P1"],part_col="part_id",appraiser_col="appraiser",measurement_col="measurement")
     with pytest.raises(ValueError,match="positive"):
         analyze_crossed_gage_rr(frame,part_col="part_id",appraiser_col="appraiser",measurement_col="measurement",tolerance_width=0)

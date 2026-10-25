@@ -253,3 +253,47 @@ The latest revision's automated workflows must be read by exact run/commit befor
 - The report generator does not invent citations, fetch/authenticate sources, embed raw data, or claim peer review. “Reviewed” labels are explicitly user-entered status metadata. It generates Markdown (not a signed PDF or a publication certification).
 - Added `shoir_100_tool_research_report.py`, report structure/provenance/boundary tests, Tool Library integration and a Research Pack-specific AppTest with Enterprise Plus denial. T090 is now `IMPLEMENTED_NEEDS_VALIDATION`.
 - Current counts after this tranche: **84 `IMPLEMENTED_NEEDS_VALIDATION`, 10 `FOUNDATION_ONLY`, 6 `EXTERNAL_CONFIGURATION_REQUIRED`; zero verified**. There are **61 target-specific forms and 62 bounded method/action paths**.
+
+
+---
+
+## Repair follow-up — 2026-10-25
+
+This section supersedes earlier status/count statements above for the repaired branch revision specified here. Older entries are retained as a historical log of previous implementation tranches.
+
+**Repair revision validated:** f881fd57c94efb9e199f326c463a5930232f793c  
+**Repair PR:** https://github.com/MSJ1708/shoir-ie/pull/185  
+**GitHub validation workflow:** https://github.com/MSJ1708/shoir-ie/actions/runs/40189162975
+
+The exact repair revision completed the repository validation workflow successfully. Successful steps included dependency installation, Python compile checks, the regression suite, required-module parsing, top-level application import smoke, Chromium installation, local Streamlit startup, local browser smoke at desktop/mobile widths, and smoke-artifact upload. The test step returned success. The GitHub connector did not provide a readable completed-job log to recover the precise current-head pass count; do not copy an earlier revision's count into this entry.
+
+The hosted live-deployment-smoke job was **SKIPPED** because the feature/repair branch does not satisfy the workflow's configured branch condition. This run does not prove the deployed production app is at this SHA, does not validate authenticated hosted workflows, and is not an authenticated acceptance pass for all 100 targets.
+
+### Current registry snapshot on repair revision
+
+The repair revision contains exactly 100 unique tool IDs in the canonical registry and 100 rows in the implementation matrix. Current registry status counts are:
+
+- 82 IMPLEMENTED_NEEDS_VALIDATION
+- 13 FOUNDATION_ONLY
+- 5 EXTERNAL_CONFIGURATION_REQUIRED
+- 0 VERIFIED_WORKING
+- 0 MISSING
+- 0 BLOCKED
+
+Do not treat registry-row count as feature completion. None is marked VERIFIED_WORKING because the required authenticated end-to-end evidence has not been established for every target.
+
+### Changes included in the repair follow-up
+
+- Integrated Tool Library runners for T033 (balanced crossed Gauge R&R), T048 (offline robust-MAD anomaly screening), T071 (serial-flow discrete-event simulation), T087 (metadata-only reproducibility ZIP) and T090 (research methods Markdown report).
+- Routed T085 through the supported noncentral-t planning engine for one-sample, paired and equal-sized two-independent-group t-test designs; corrected the corresponding UI acceptance test.
+- Added an honest per-target dispatch fallback: a catalogued target without a dedicated runner surfaces its recorded gap/route candidate and states that no calculation ran, instead of showing blank content or inventing success.
+- Avoided mixed-type Arrow metric conversion warnings in the shared result table by rendering scalar values consistently.
+- Added DataFrame dtype metadata to new workspace snapshots and restore it on reload, while retaining compatibility with older snapshots without dtype metadata.
+- Corrected regression fixtures for sustainability arithmetic, simulation keyword setup, Gauge R&R input-error assertion, CAPA/8D required fields, report wording/defaults and implementation-matrix drift.
+- Synchronized the CSV matrix's 100 rows to shared canonical registry fields and source-file lists.
+
+### Remaining go/no-go gates
+
+The PR remains a draft and the release decision remains **NO-GO** for merging to main or claiming full workforce/production readiness until the parallel feature branch is reconciled and the following checks are evidenced on one agreed candidate commit: authenticated browser/route/action denial and allow matrix across all targets, hosted workspace save/relogin and cross-workspace isolation, workbook-to-decision and facilities end-to-end workflows, actual XLSX/PDF/PPTX/ZIP round-trip checks, Arabic/RTL authenticated views, and configured integration/production-parity checks. Never represent external integrations as connected unless their authorized data path has been tested.
+
+No production deployment, production database mutation or protected-administrator QA was performed by this repair tranche.

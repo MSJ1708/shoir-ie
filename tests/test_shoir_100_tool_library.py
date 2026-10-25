@@ -51,6 +51,39 @@ def _run(at, tool_id):
     return result["result"]
 
 
+
+def test_guided_study_wizard_runs_a_caveated_plan_with_missing_inputs():
+    at = _authed_library(tier="Starter")
+    _open(at, "T002", "Guided Study Wizard")
+    assert any("Guided Study Wizard" in item.value for item in at.subheader)
+    assert any(
+        "dedicated runnable method is not wired" in str(item.value).lower()
+        for item in at.warning
+    )
+
+    button = next(button for button in at.button if getattr(button, "key", None) == "T002_run_button")
+    button.click()
+    at.run(timeout=60)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    saved = at.session_state.get("shoir_T002_result")
+    assert saved is not None
+    assert saved["result"]["status"] == "PLAN_GENERATED"
+    assert saved["result"]["metrics"]["missing_input_count"] > 0
+    assert any(
+        "inputs or validation steps still required before analysis" in str(item.value).lower()
+        for item in at.warning
+    )
+
+def test_foundation_target_offers_only_tier_eligible_existing_route_handoff():
+    at = _authed_library(tier="Enterprise")
+    _open(at, "T002", "Guided Study Wizard")
+    assert any(
+        "Open existing module: AI Copilot" in button.label
+        for button in at.button
+    ), "Eligible existing route hand-off should be available to an entitled account."
+    assert "shoir_T002_result" not in at.session_state
+
+
 def test_tool_library_public_preview_is_read_only_without_authentication():
     from streamlit.testing.v1 import AppTest
 
@@ -125,8 +158,10 @@ def test_extended_specialist_forms_render_and_run_with_golden_defaults():
 
     _open(at, "T085", "Statistical Power and Sample-Size Planner")
     power_result = _run(at, "T085")
-    assert power_result["required_n_per_group"] == 64
-    assert power_result["total_sample_size"] == 128
+    assert power_result["metrics"]["minimum_sample_size_per_unit"] == 34
+    assert power_result["metrics"]["minimum_total_sample_size"] == 34
+    assert power_result["metrics"]["achieved_power_at_required_sample_size"] >= 0.80
+    assert power_result["parameters"]["design"] == "one_sample"
 
 
 def test_cutting_stock_solver_is_exposed_in_the_existing_facilities_tool():
@@ -638,3 +673,68 @@ def test_research_methods_report_builds_downloadable_markdown_and_gates_tier():
     assert "shoir_T090_result" not in denied.session_state
     with pytest.raises(KeyError):
         denied.button(key="T090_run_button")
+
+
+def test_guided_study_wizard_generates_missing_input_plan_without_fake_analysis():
+    at = _authed_library(tier="Starter")
+    _open(at, "T002", "Guided Study Wizard")
+    at.text_input(key="t002_objective").set_value("Identify the production bottleneck")
+    at.button(key="T002_run_button").click()
+    at.run(timeout=60)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    saved = at.session_state.get("shoir_T002_result")
+    assert saved is not None
+    plan = saved["result"]
+    assert plan["status"] == "PLAN_GENERATED"
+    assert plan["metrics"]["missing_input_count"] > 0
+    assert plan["metrics"]["ready_to_analyze"] is False
+    assert any("No plant result" in warning for warning in plan["warnings"])
+
+
+def test_formula_inspector_reads_existing_structured_session_result():
+    at = _authed_library(tier="Starter")
+    at.session_state["shoir_T023_result"] = {
+        "signature": "synthetic-fixture-signature",
+        "source": "SYNTHETIC TEST FIXTURE",
+        "executed_at": "2026-10-25T00:00:00+00:00",
+        "persistence_status": "SESSION_ONLY_SAVE_FAILED",
+        "result": {
+            "status": "CALCULATED",
+            "method": "Takt time",
+            "formula": "net_available_minutes / demand_units",
+            "assumptions": ["The production period is the same in numerator and denominator."],
+            "warnings": ["Synthetic fixture only."],
+            "metrics": {"takt_minutes_per_unit": 1.2},
+        },
+    }
+    _open(at, "T008", "Formula and Assumption Inspector")
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    assert any("net_available_minutes / demand_units" in item.value for item in at.markdown)
+    assert any("Takt time" in item.value for item in at.markdown)
+
+
+def test_contextual_help_search_returns_curated_capacity_article_and_route_action():
+    at = _authed_library(tier="Starter")
+    _open(at, "T010", "Interactive Learning and Help Center")
+    at.text_input(key="t010_help_query").set_value("capacity")
+    at.button(key="T010_run_button").click()
+    at.run(timeout=60)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    saved = at.session_state.get("shoir_T010_result")
+    assert saved is not None
+    articles = saved["result"]["articles"]
+    assert any("T023" in article["related_tools"] or "T025" in article["related_tools"] for article in articles)
+    assert any("Open T023" in button.label for button in at.button)
+
+
+def test_student_practice_mode_checks_answer_and_explains_rounding():
+    at = _authed_library(tier="Starter")
+    _open(at, "T089", "Student Learning and Practice Mode")
+    at.number_input(key="t089_answer").set_value(1.2)
+    at.button(key="T089_run_button").click()
+    at.run(timeout=60)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    saved = at.session_state.get("shoir_T089_result")
+    assert saved is not None
+    assert saved["result"]["is_correct"] is True
+    assert "480 min / 400 units = 1.2 min/unit" in saved["result"]["worked_formula"]

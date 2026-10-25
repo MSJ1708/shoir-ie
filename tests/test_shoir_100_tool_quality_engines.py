@@ -35,7 +35,7 @@ def test_fmea_rejects_duplicate_modes_bad_scores_and_invalid_dates():
 
 def test_capa_record_open_state_never_claims_independent_verification():
     result = build_capa_8d_record(
-        record_id="CAPA-001", problem_statement="Repeat defects", owner="Quality lead",
+        record_id="CAPA-001", problem_statement="Repeat defects", owner="Quality lead", team="Quality team",
         opened_date="2026-10-24", due_date="2026-11-20", status="Verification",
         containment="Quarantined the affected lot",
         root_cause="Seal setup drift",
