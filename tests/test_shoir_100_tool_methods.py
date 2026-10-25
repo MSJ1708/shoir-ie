@@ -402,7 +402,7 @@ def test_capa_completeness_separates_complete_records_from_incomplete_actions():
 def test_pm_planner_calculates_next_due_dates_and_overdue_status():
     result = preventive_maintenance_plan([
         {"asset_id": "M1", "task": "Lubricate", "interval_days": 30, "last_done_date": "2026-09-01", "duration_hours": 1.5, "required_skill": "Mechanical"},
-        {"asset_id": "M2", "task": "Inspect", "interval_days": 7, "last_done_date": "2026-10-23", "duration_hours": 0.5, "required_skill": "Electrical"},
+        {"asset_id": "M2", "task": "Inspect", "interval_days": 7, "last_done_date": "2026-10-17", "duration_hours": 0.5, "required_skill": "Electrical"},
     ], "2026-10-24")
     table = result["tasks"].set_index("task")
     assert table.loc["Lubricate", "next_due_date"] == "2026-10-01"
