@@ -54,6 +54,8 @@ _TOOL036_EXAMPLE_RECORDS = '[{"x":1,"y":2.1},{"x":2,"y":4.0},{"x":3,"y":6.2},{"x
 _TOOL037_EXAMPLE_SAMPLE_A = "2, 4, 6, 8"
 _TOOL049_EXAMPLE_WORK_ORDERS = '[{"work_order_id":"WO-1","task":"Critical bearing","asset":"Pump A","criticality_score":5,"days_until_due":-2,"estimated_hours":4,"required_skill":"Mechanical"},{"work_order_id":"WO-2","task":"Calibration","asset":"Gauge B","criticality_score":4,"days_until_due":0,"estimated_hours":3,"required_skill":"Mechanical"},{"work_order_id":"WO-3","task":"Paint repair","asset":"Frame C","criticality_score":2,"days_until_due":5,"estimated_hours":2,"required_skill":"Electrical"}]'
 _TOOL058_EXAMPLE_SUPPLIERS = '[{"supplier":"Acme","scores":{"Delivery":90,"Quality":80},"data_as_of":"2026-Q3","evidence_reference":"sample-audit-1"},{"supplier":"Beta","scores":{"Delivery":75},"data_as_of":"2026-Q3","risk_mitigation":"Provide missing quality evidence"},{"supplier":"Gamma","scores":{"Delivery":70,"Quality":100},"data_as_of":"2026-Q3","evidence_reference":"sample-audit-3"}]'
+_TOOL015_EXAMPLE_COLUMNS = "Timestamp, Qty, Defects, mystery_label"
+_TOOL052_EXAMPLE_PERIODS = '[{"period":"Jan","demand":30,"planned_production":35,"production_capacity":30,"scheduled_receipts":0,"target_safety_stock":15},{"period":"Feb","demand":60,"planned_production":40,"production_capacity":50,"scheduled_receipts":0,"target_safety_stock":20}]'
 
 st.markdown("""
 <style>
@@ -394,7 +396,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                 "Copilot action, API and export path must enforce their own server-side entitlement checks."
             )
 
-            if selected_tool["tool_id"] in {"T016", "T017", "T018", "T019", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T033", "T034", "T036", "T037", "T038", "T040", "T041", "T042", "T043", "T045", "T047", "T049", "T050", "T054", "T055", "T056", "T058", "T059", "T063", "T066", "T070", "T075", "T076", "T077", "T078", "T079", "T081", "T082", "T083", "T084", "T085"}:
+            if selected_tool["tool_id"] in {"T015", "T016", "T017", "T018", "T019", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T033", "T034", "T036", "T037", "T038", "T040", "T041", "T042", "T043", "T045", "T047", "T049", "T050", "T052", "T054", "T055", "T056", "T058", "T059", "T063", "T066", "T070", "T075", "T076", "T077", "T078", "T079", "T081", "T082", "T083", "T084", "T085"}:
                 st.markdown("---")
                 st.markdown("**Run focused specialist method**")
                 st.caption(
@@ -889,6 +891,17 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                             supplier_records_json = st.text_area("Supplier records (JSON list)", value=_TOOL058_EXAMPLE_SUPPLIERS, key="tool058_suppliers")
                             supplier_weights_json = st.text_area("Criterion weights (JSON object; values are relative weights)", value='{"Delivery":0.4,"Quality":0.6}', key="tool058_weights")
                             run_method = st.form_submit_button("Score supplier performance", type="primary", use_container_width=True, key="tool058_run")
+                        elif selected_tool["tool_id"] == "T015":
+                            st.caption("Suggest source-to-canonical industrial fields; fuzzy matches require confirmation. Original source headers are retained in the mapping table. This does not alter the imported dataset.")
+                            field_source_columns = st.text_input("Source column names (comma-separated)", _TOOL015_EXAMPLE_COLUMNS, key="tool015_columns")
+                            field_manual_mapping_json = st.text_area("Optional confirmed mapping (JSON object: source header → canonical field ID)", "{}", key="tool015_manual")
+                            field_minimum_confidence = st.slider("Minimum confidence for a suggested mapping", min_value=0.0, max_value=1.0, value=0.65, step=0.05, key="tool015_threshold")
+                            run_method = st.form_submit_button("Suggest industrial field mappings", type="primary", use_container_width=True, key="tool015_run")
+                        elif selected_tool["tool_id"] == "T052":
+                            st.caption("Deterministic time-phased S&OP balance. Capacity limits are applied; unmet demand becomes backlog. This is an aggregate plan, not a finite-capacity optimizer.")
+                            sop_periods_json = st.text_area("Periods (JSON list)", value=_TOOL052_EXAMPLE_PERIODS, key="tool052_periods")
+                            sop_starting_inventory = st.number_input("Starting inventory (units)", min_value=0.0, value=20.0, step=5.0, key="tool052_inventory")
+                            run_method = st.form_submit_button("Reconcile S&OP plan", type="primary", use_container_width=True, key="tool052_run")
 
                     if selected_tool["tool_id"] == "T021":
                         current_tool_inputs = {
@@ -1026,6 +1039,10 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                         current_tool_inputs = {"work_orders_json": maintenance_orders_json, "available_hours": maintenance_available_hours, "available_skills": maintenance_skills_text, "due_soon_days": int(maintenance_due_soon_days)}
                     elif selected_tool["tool_id"] == "T058":
                         current_tool_inputs = {"suppliers_json": supplier_records_json, "weights_json": supplier_weights_json}
+                    elif selected_tool["tool_id"] == "T015":
+                        current_tool_inputs = {"source_columns": field_source_columns, "manual_mapping_json": field_manual_mapping_json, "minimum_confidence": field_minimum_confidence}
+                    elif selected_tool["tool_id"] == "T052":
+                        current_tool_inputs = {"periods_json": sop_periods_json, "starting_inventory": sop_starting_inventory}
                     else:
                         current_tool_inputs = {
                             "cohen_d": effect_size, "alpha": alpha,
@@ -1065,6 +1082,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 optimize_task_resource_assignment, compare_energy_performance_scenarios,
                                 analyze_measurement_system_gage_rr, fit_regression_anova, run_hypothesis_test,
                                 prioritize_maintenance_backlog, score_supplier_performance,
+                                map_industrial_fields, reconcile_sop_plan,
                             )
                             if selected_tool["tool_id"] == "T021":
                                 try:
@@ -1435,13 +1453,41 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                     if supplier_records_json.strip() == _TOOL058_EXAMPLE_SUPPLIERS
                                     else "USER_ENTERED_UNVERIFIED"
                                 )
+                            elif selected_tool["tool_id"] == "T015":
+                                source_columns = [column.strip() for column in field_source_columns.split(",")]
+                                parsed_manual_mapping = json.loads(field_manual_mapping_json)
+                                if not isinstance(parsed_manual_mapping, dict):
+                                    raise ValueError("Manual field mapping must be a JSON object from source header to canonical field ID.")
+                                result = map_industrial_fields(
+                                    source_columns,
+                                    manual_mapping=parsed_manual_mapping,
+                                    minimum_confidence=field_minimum_confidence,
+                                )
+                                result["data_provenance"] = (
+                                    "SYNTHETIC_EXAMPLE"
+                                    if field_source_columns.strip() == _TOOL015_EXAMPLE_COLUMNS and not parsed_manual_mapping
+                                    else "USER_ENTERED_UNVERIFIED"
+                                )
+                            elif selected_tool["tool_id"] == "T052":
+                                parsed_sop_periods = json.loads(sop_periods_json)
+                                if not isinstance(parsed_sop_periods, list):
+                                    raise ValueError("S&OP periods must be a JSON list of period records.")
+                                result = reconcile_sop_plan(
+                                    parsed_sop_periods,
+                                    starting_inventory=sop_starting_inventory,
+                                )
+                                result["data_provenance"] = (
+                                    "SYNTHETIC_EXAMPLE"
+                                    if sop_periods_json.strip() == _TOOL052_EXAMPLE_PERIODS
+                                    else "USER_ENTERED_UNVERIFIED"
+                                )
                             _persist_focused_tool_result(
                                 selected_tool["tool_id"], result, current_tool_inputs
                             )
                         except Exception as exc:
                             st.error(f"Tool run could not be completed safely: {exc}")
 
-                    if selected_tool["tool_id"] in {"T017", "T018", "T019", "T024", "T025", "T027", "T033", "T034", "T036", "T037", "T038", "T041", "T043", "T045", "T047", "T049", "T050", "T054", "T058", "T059", "T063", "T070", "T076", "T077", "T079", "T082", "T083", "T084"}:
+                    if selected_tool["tool_id"] in {"T015", "T017", "T018", "T019", "T024", "T025", "T027", "T033", "T034", "T036", "T037", "T038", "T041", "T043", "T045", "T047", "T049", "T050", "T052", "T054", "T058", "T059", "T063", "T070", "T076", "T077", "T079", "T082", "T083", "T084"}:
                         result = st.session_state.get("shoir_tool_result_" + selected_tool["tool_id"])
                         if result:
                             _show_focused_tool_persistence(selected_tool["tool_id"], result, current_tool_inputs)
