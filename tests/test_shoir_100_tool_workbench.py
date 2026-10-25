@@ -639,7 +639,7 @@ def test_workbench_builds_downloadable_reproducibility_pack():
     at.run(timeout=90)
     assert not at.exception, "\n".join(str(error.value) for error in at.exception)
     source = at.selectbox(key="tool087_source_id")
-    assert "T021" in source.options
+    assert any(str(option).startswith("T021 · Time Study and Standard Time") for option in source.options)
     source.select("T021")
     at.checkbox(key="tool087_include_inputs").set_value(True)
     at.checkbox(key="tool087_include_tables").set_value(True)
@@ -673,7 +673,7 @@ def test_workbench_runs_facility_location_flow():
     at.run(timeout=90)
     assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
 
-    at.selectbox(key="shoir_100_tool_inspector").select("T069")
+    at.selectbox(key="shoir_100_tool_inspector").select("T069 · Network Flow and Location Optimization")
     at.run(timeout=90)
     assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
     at.button(key="tool069_run").click()
@@ -698,7 +698,7 @@ def test_workbench_student_practice_mode_checks_answers_and_shows_solution():
     at.run(timeout=90)
     assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
 
-    at.selectbox(key="shoir_100_tool_inspector").select("T089")
+    at.selectbox(key="shoir_100_tool_inspector").select("T089 · Student Learning and Practice Mode")
     at.run(timeout=90)
     assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
     at.number_input(key="tool089_answer").set_value(2.0)
@@ -723,7 +723,7 @@ def test_workbench_guided_study_wizard_returns_gated_step_plan():
     at.run(timeout=90)
     assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
 
-    at.selectbox(key="shoir_100_tool_inspector").select("T002")
+    at.selectbox(key="shoir_100_tool_inspector").select("T002 · Guided Study Wizard")
     at.run(timeout=90)
     assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
     at.text_input(key="tool002_available_fields").set_value(
@@ -751,7 +751,7 @@ def test_workbench_runs_equipment_anomaly_monitor_and_labels_example_data():
     at.run(timeout=90)
     assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
 
-    at.selectbox(key="shoir_100_tool_inspector").select("T048")
+    at.selectbox(key="shoir_100_tool_inspector").select("T048 · Equipment Anomaly Monitor")
     at.run(timeout=90)
     assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
     at.button(key="tool048_run").click()
@@ -775,7 +775,7 @@ def test_workbench_capa_8d_register_reports_completeness_and_overdue_state():
     at.run(timeout=90)
     assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
 
-    at.selectbox(key="shoir_100_tool_inspector").select("T039")
+    at.selectbox(key="shoir_100_tool_inspector").select("T039 · CAPA and 8D Manager")
     at.run(timeout=90)
     assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
     at.button(key="tool039_run").click()
@@ -805,8 +805,6 @@ def test_workbench_runs_rnle_ergonomics_screen():
 
     # Scope confirmation is explicit: the method must not run on an unchecked default.
     at.checkbox(key="tool046_confirm_scope").check()
-    at.run(timeout=90)
-    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
     at.button(key="tool046_run").click()
     at.run(timeout=90)
     assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
