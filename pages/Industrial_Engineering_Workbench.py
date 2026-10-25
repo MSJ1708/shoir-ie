@@ -2176,7 +2176,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                         except Exception as exc:
                             st.error(f"Tool run could not be completed safely: {exc}")
 
-                    if selected_tool["tool_id"] in {"T007", "T009", "T010", "T017", "T018", "T019", "T024", "T025", "T027", "T034", "T038", "T041", "T043", "T045", "T046", "T047", "T048", "T050", "T054", "T059", "T062", "T063", "T069", "T070", "T071", "T076", "T077", "T079", "T082", "T083", "T084", "T100"}:
+                    if selected_tool["tool_id"] in {"T007", "T009", "T010", "T017", "T018", "T019", "T024", "T025", "T027", "T034", "T038", "T041", "T043", "T045", "T046", "T047", "T048", "T050", "T054", "T059", "T060", "T062", "T063", "T069", "T070", "T071", "T076", "T077", "T079", "T082", "T083", "T084", "T100"}:
                         result = st.session_state.get("shoir_tool_result_" + selected_tool["tool_id"])
                         if result:
                             _show_focused_tool_persistence(selected_tool["tool_id"], result, current_tool_inputs)
@@ -2185,6 +2185,47 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 title=selected_tool["canonical_name"],
                                 key_prefix="target_" + selected_tool["tool_id"].lower(),
                             )
+                            if selected_tool["tool_id"] == "T060":
+                                baseline_cost = result.get("baseline_transport_cost")
+                                scenario_cost = result.get("scenario_transport_cost")
+                                baseline_unmet = result.get("baseline_total_unmet_demand")
+                                scenario_unmet = result.get("scenario_total_unmet_demand")
+                                if result.get("status") == "SCENARIO_COMPARISON" and None not in (baseline_cost, scenario_cost):
+                                    k1, k2, k3, k4 = st.columns(4)
+                                    k1.metric("Baseline transport cost", f"{float(baseline_cost):,.2f}")
+                                    k2.metric("Scenario transport cost", f"{float(scenario_cost):,.2f}")
+                                    k3.metric("Transport cost change", f"{float(result['transport_cost_delta_scenario_minus_baseline']):+,.2f}")
+                                    k4.metric("Unmet demand change", f"{float(result['unmet_demand_delta_scenario_minus_baseline']):+,.2f}")
+                                    fig = go.Figure()
+                                    fig.add_trace(go.Bar(name="Transport cost", x=["Baseline", str(result.get("scenario_name") or "Scenario")], y=[float(baseline_cost), float(scenario_cost)]))
+                                    fig.update_layout(
+                                        title="Baseline versus disruption scenario",
+                                        xaxis_title="Model scenario",
+                                        yaxis_title="Transport cost (input cost units)",
+                                        margin=dict(t=55, b=30, l=35, r=20),
+                                    )
+                                    st.plotly_chart(fig, use_container_width=True, key="target_t060_cost_comparison")
+                                    baseline_tab, scenario_tab, service_tab = st.tabs(["Baseline shipment plan", "Scenario shipment plan", "Site service comparison"])
+                                    with baseline_tab:
+                                        st.dataframe(result.get("baseline_shipment_plan"), use_container_width=True, hide_index=True)
+                                    with scenario_tab:
+                                        st.dataframe(result.get("scenario_shipment_plan"), use_container_width=True, hide_index=True)
+                                    with service_tab:
+                                        baseline_service = result.get("baseline_site_service")
+                                        scenario_service = result.get("scenario_site_service")
+                                        if isinstance(baseline_service, pd.DataFrame) and isinstance(scenario_service, pd.DataFrame):
+                                            merged_service = baseline_service.merge(
+                                                scenario_service, on="Site", suffixes=(" (baseline)", " (scenario)")
+                                            )
+                                            st.dataframe(merged_service, use_container_width=True, hide_index=True)
+                                    st.warning(result.get("warning", "Validate the network and all model assumptions before using the scenario."))
+                                else:
+                                    st.error(
+                                        "At least one scenario did not return an optimal result. "
+                                        f"Baseline status: {result.get('solver_status_baseline')}; "
+                                        f"scenario status: {result.get('solver_status_scenario')}. "
+                                        + str(result.get("warning", "No optimal comparison is available."))
+                                    )
                             if selected_tool["tool_id"] == "T100":
                                 st.download_button(
                                     "Download redacted support bundle (JSON)",
