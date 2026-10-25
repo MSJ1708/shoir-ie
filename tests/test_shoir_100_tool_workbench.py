@@ -560,3 +560,52 @@ def test_workbench_runs_solver_diagnostics():
     assert result["constraint_diagnostics"]["Status"].eq("SATISFIED").all()
     assert result["data_provenance"] == "SYNTHETIC_EXAMPLE"
 
+
+
+def test_workbench_builds_downloadable_reproducibility_pack():
+    """Exercise source-result selection, Research Pack gate, ZIP creation and download wiring."""
+    import io
+    import zipfile
+    from streamlit.testing.v1 import AppTest
+
+    page = ROOT / "pages" / "Industrial_Engineering_Workbench.py"
+    at = AppTest.from_file(page, default_timeout=90)
+    at.session_state["current_user"] = "reproducibility-pack-checker"
+    at.session_state["authenticated"] = True
+    at.session_state["user_tier"] = "Research Pack"
+    at.run(timeout=90)
+    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+
+    at.selectbox(key="shoir_100_tool_inspector").select("T021 · Time Study and Standard Time")
+    at.run(timeout=90)
+    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+    at.button(key="tool021_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+    assert at.session_state.get("shoir_tool_result_T021") is not None
+
+    at.selectbox(key="shoir_100_tool_inspector").select("T087 · Reproducibility Pack Generator")
+    at.run(timeout=90)
+    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+    source = at.selectbox(key="tool087_source_id")
+    assert "T021" in source.options
+    source.select("T021")
+    at.checkbox(key="tool087_include_inputs").set_value(True)
+    at.checkbox(key="tool087_include_tables").set_value(True)
+    at.run(timeout=90)
+    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+    at.button(key="tool087_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+    result = at.session_state.get("shoir_tool_result_T087")
+    payload = at.session_state.get("shoir_tool_bundle_bytes_T087")
+    assert result is not None
+    assert result["status"] == "REPRODUCIBILITY_PACK_CREATED"
+    assert isinstance(payload, bytes) and payload.startswith(b"PK")
+    with zipfile.ZipFile(io.BytesIO(payload), "r") as archive:
+        assert "manifest.json" in archive.namelist()
+        assert "SHA256SUMS.txt" in archive.namelist()
+        assert "input_snapshot_redacted.json" in archive.namelist()
+    assert result["bundle_sha256"]
+    assert any(button.key == "tool087_download" for button in at.button)
+
