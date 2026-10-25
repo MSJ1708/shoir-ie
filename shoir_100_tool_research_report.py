@@ -30,7 +30,7 @@ def _list(values: Sequence[Any] | None, label: str, *, maximum_items: int=100) -
 def build_research_methods_report(
     *,
     title: str,
-    authors_or_team: str,
+    authors_or_team: str = "",
     purpose: str,
     method_name: str,
     method_version: str,
