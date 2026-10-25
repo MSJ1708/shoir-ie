@@ -673,7 +673,7 @@ def test_workbench_runs_facility_location_flow():
     at.run(timeout=90)
     assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
 
-    at.selectbox(key="shoir_100_tool_inspector").select("T069 · Network Flow and Location Optimization")
+    at.selectbox(key="shoir_100_tool_inspector").select("T069")
     at.run(timeout=90)
     assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
     at.button(key="tool069_run").click()
@@ -685,3 +685,28 @@ def test_workbench_runs_facility_location_flow():
     assert result["objective_value"] == pytest.approx(21.0)
     assert result["independent_feasibility_check"] is True
     assert result["data_provenance"] == "SYNTHETIC_EXAMPLE"
+
+
+def test_workbench_student_practice_mode_checks_answers_and_shows_solution():
+    from streamlit.testing.v1 import AppTest
+
+    page = ROOT / "pages" / "Industrial_Engineering_Workbench.py"
+    at = AppTest.from_file(page, default_timeout=90)
+    at.session_state["current_user"] = "student-practice-checker"
+    at.session_state["authenticated"] = True
+    at.session_state["user_tier"] = "Starter"
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+
+    at.selectbox(key="shoir_100_tool_inspector").select("T089")
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    at.number_input(key="tool089_answer").set_value(2.0)
+    at.button(key="tool089_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    result = at.session_state.get("shoir_tool_result_T089")
+    assert result is not None
+    assert result["is_correct"] is True
+    assert result["expected_answer"] == pytest.approx(2.0)
+    assert result["data_provenance"] == "SYNTHETIC_EXERCISE"
