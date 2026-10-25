@@ -659,7 +659,7 @@ def test_workbench_builds_downloadable_reproducibility_pack():
         assert "SHA256SUMS.txt" in archive.namelist()
         assert "input_snapshot_redacted.json" in archive.namelist()
     assert result["bundle_sha256"]
-    assert any(button.key == "tool087_download" for button in at.button)
+    assert any(button.key == "tool087_download" for button in at.get("download_button"))
 
 
 def test_workbench_runs_facility_location_flow():
