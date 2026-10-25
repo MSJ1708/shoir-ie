@@ -1,4 +1,4 @@
-"""Golden, boundary, and entitlement tests for T013/T017/T018/T019/T034/T070/T082/T084."""
+"""Golden, boundary, and entitlement tests for deterministic Shoir-IE target methods."""
 from __future__ import annotations
 
 import math
@@ -564,3 +564,48 @@ def test_single_station_des_rejects_invalid_distributions_and_flags_overload():
         replications=3, seed=4,
     )
     assert any("offered load" in warning for warning in result["warnings"])
+
+
+def test_planning_and_simulation_tool_panels_execute_inside_existing_workbench():
+    """Exercise the new tools through the existing Workbench UI, not only direct functions."""
+    from pathlib import Path
+    from streamlit.testing.v1 import AppTest
+
+    root = Path(__file__).resolve().parents[1]
+    page = root / "pages" / "Industrial_Engineering_Workbench.py"
+    at = AppTest.from_file(page, default_timeout=90)
+    at.session_state["current_user"] = "tool-wave-checker"
+    at.session_state["authenticated"] = True
+    at.session_state["user_tier"] = "Enterprise Plus Tier"
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+
+    # The new methods are inserted into existing module routes.
+    at.selectbox(key="workbench_module_selector").select("Planning · Advanced Planning & Scheduling")
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+
+    for button_key, result_key, expected_status in [
+        ("t049_run", "T049_last_result", "PRIORITIZED_HEURISTIC"),
+        ("t052_run", "T052_last_result", "RECONCILED"),
+        ("t058_run", "T058_last_result", "SCORED_WITH_EVIDENCE_GAPS"),
+    ]:
+        at.button(key=button_key).click()
+        at.run(timeout=90)
+        assert not at.exception, f"{button_key}: " + "\\n".join(str(error.value) for error in at.exception)
+        assert at.session_state.get(result_key) is not None, (
+            f"{button_key} did not create a result; visible errors: "
+            + " | ".join(str(item.value) for item in at.error)
+        )
+        assert at.session_state[result_key]["status"] == expected_status
+
+    at.selectbox(key="workbench_module_selector").select("Simulation · Industrial Simulation Lab")
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    at.button(key="t071_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    result = at.session_state.get("T071_last_result")
+    assert result is not None, "T071 did not create a result; visible errors: " + " | ".join(str(item.value) for item in at.error)
+    assert result["status"] == "SIMULATED"
+    assert result["configuration"]["provenance"] == "SYNTHETIC_SIMULATION"
