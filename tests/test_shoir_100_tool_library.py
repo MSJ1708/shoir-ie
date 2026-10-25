@@ -51,6 +51,17 @@ def _run(at, tool_id):
     return result["result"]
 
 
+
+def test_foundation_only_target_shows_gap_instead_of_blank_or_fake_run():
+    at = _authed_library(tier="Starter")
+    _open(at, "T002", "Guided Study Wizard")
+    assert any(
+        "dedicated runnable method is not wired" in str(item.value).lower()
+        for item in at.warning
+    )
+    assert "shoir_T002_result" not in at.session_state
+    assert not any(getattr(button, "key", None) == "T002_run_button" for button in at.button)
+
 def test_tool_library_public_preview_is_read_only_without_authentication():
     from streamlit.testing.v1 import AppTest
 
