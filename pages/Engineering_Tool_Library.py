@@ -135,7 +135,13 @@ def _run_engine_tool(tool_id, signature, button_label, calculation):
             if key not in excluded and not isinstance(value, (dict, list, tuple, pd.DataFrame, pd.Series)) and value is not None
         }
     if metrics:
-        metric_rows = [{"Metric": key, "Value": value} for key, value in metrics.items()]
+        # Scalar metrics have mixed types by design (numeric, text, boolean, null).
+        # Render them consistently as text so Arrow does not try to coerce every
+        # value into the first observed numeric/string type.
+        metric_rows = [
+            {"Metric": key, "Value": "—" if value is None else str(value)}
+            for key, value in metrics.items()
+        ]
         st.dataframe(pd.DataFrame(metric_rows), use_container_width=True, hide_index=True)
     for table_name, table in result.items():
         if isinstance(table, pd.DataFrame):
