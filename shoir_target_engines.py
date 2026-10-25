@@ -4158,7 +4158,9 @@ def analyze_full_factorial_2level(
     expected = set(product((-1, 1), repeat=len(factors)))
     missing = sorted(expected - set(combo_counts))
     if missing:
-        raise ValueError(f"Full factorial is incomplete; {len(missing)} factor combination(s) are missing.")
+        if len(missing) == 1:
+            raise ValueError("Full factorial is incomplete; 1 factor combination is missing.")
+        raise ValueError(f"Full factorial is incomplete; {len(missing)} factor combinations are missing.")
     terms: list[tuple[str, np.ndarray]] = [("Intercept", np.ones(len(observations), dtype=float))]
     for factor in factors:
         terms.append((factor, x_factors[factor]))
@@ -4402,7 +4404,7 @@ def simulate_mm1_discrete_event(
             "95% CI lower": mean - margin,
             "95% CI upper": mean + margin,
         })
-    warning = "One-server FCFS M/M/1 simulation only; arrivals/services are exponential, independent and identically distributed. No process routing, multiple servers, resource failures, shift calendars or plant data calibration are included."
+    warning = "Single-server FCFS M/M/1 simulation only; arrivals/services are exponential, independent and identically distributed. No process routing, multiple servers, resource failures, shift calendars or plant data calibration are included."
     stable = arrival_rate < service_rate
     if not stable:
         warning += " Arrival rate is at least the service rate; a stationary queue is not stable and wait/WIP should be interpreted as a finite-horizon overload scenario."
@@ -5403,7 +5405,7 @@ def optimize_facility_location_flow(
             raise ValueError(f"Route {index} references an unknown facility or customer.")
         key = (fid.casefold(), cid.casefold())
         if key in route_keys:
-            raise ValueError(f"Only one route per facility/customer pair is supported; duplicate route {fid} → {cid}.")
+            raise ValueError(f"Routes must use unique facility/customer pairs; duplicate route {fid} → {cid}.")
         route_keys.add(key)
         unit_cost = _finite_number(row.get("unit_cost"), f"Route {index} unit cost")
         route_capacity = _finite_number(row.get("capacity", total_demand), f"Route {index} capacity")

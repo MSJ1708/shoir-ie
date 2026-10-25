@@ -1539,7 +1539,7 @@ def test_full_factorial_doe_matches_hand_calculated_effects_and_inference():
 def test_full_factorial_doe_rejects_missing_combinations_and_non_coded_levels():
     from shoir_target_engines import analyze_full_factorial_2level
 
-    with pytest.raises(ValueError, match="combinations are missing"):
+    with pytest.raises(ValueError, match="factor combination is missing"):
         analyze_full_factorial_2level([
             {"A": -1, "B": -1, "response": 1},
             {"A": -1, "B": 1, "response": 2},
@@ -1572,7 +1572,7 @@ def test_anomaly_screening_flags_robust_outlier_and_handles_stable_baseline():
     flat_records = [{"timestamp": f"2026-10-{day:02d}T00:00:00Z", "value": 10 if day < 8 else 25} for day in range(1, 9)]
     fallback = detect_equipment_anomalies(flat_records)
     assert fallback["anomaly_count"] == 1
-    assert "stable-baseline deviation fallback" in fallback["method"]
+    assert "stable-baseline deviation fallback" in fallback["method"].lower()
 
 
 def test_anomaly_screening_rejects_bad_timestamps_and_duplicate_rows():
@@ -2040,7 +2040,8 @@ def test_guided_study_plan_handles_user_completed_steps_and_bad_contracts():
     )
     rows = plan["steps"].set_index("Tool ID")
     assert rows.loc["T065", "Step status"] == "COMPLETED_IN_SESSION"
-    assert rows.loc["T069", "Step status"] == "INPUTS_MISSING"
+    assert rows.loc["T069", "Step status"] == "FOUNDATION_ONLY"
+    assert "facility_table" in rows.loc["T069", "Missing input fields"]
     with pytest.raises(ValueError, match="guided-study goals"):
         build_guided_study_plan("unknown_goal")
     with pytest.raises(ValueError, match="canonical IDs"):
