@@ -32,6 +32,8 @@ from shoir_100_tool_ui import (
     render_advanced_assurance_tools,
     render_weibull_tool,
     render_mtbf_mttr_tool,
+    render_planning_resilience_tools,
+    render_single_station_des_tool,
 )
 from shoir_ie_basic_calculators import (
     calculate_standard_time, calculate_work_sampling, calculate_takt_capacity,
@@ -745,6 +747,8 @@ elif selected == "Advanced Planning & Scheduling":
 
     render_queueing_tool(st, RAW_TIER, USER)
 
+    render_planning_resilience_tools(st, RAW_TIER, USER)
+
 elif selected == "Quality Engineering & Reliability":
     st.subheader("📈 Quality Engineering & Reliability")
     tab1,tab2,tab3,tab4 = st.tabs(["SPC","Capability / MSA","DOE / ANOVA","Reliability"])
@@ -808,6 +812,8 @@ elif selected == "Industrial Simulation Lab":
                 render_engineering_result(warmup_diagnostic(nums,int(window)),"Warm-up diagnostics","warmup_result")
             except Exception as exc:
                 st.error(f"Warm-up diagnostic failed safely: {exc}")
+
+    render_single_station_des_tool(st, RAW_TIER, USER)
 
 elif selected == "3D Factory Designer":
     st.subheader("🧱 3D Factory Engineering")
