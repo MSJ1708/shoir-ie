@@ -1273,7 +1273,7 @@ def test_sop_plan_applies_capacity_limits_and_carries_backlog_forward():
     result = reconcile_sop_plan(
         [
             {"period": "Jan", "demand": 30, "planned_production": 35, "production_capacity": 30, "scheduled_receipts": 0, "target_safety_stock": 15},
-            {"period": "Feb", "demand": 60, "planned_production": 40, "production_capacity": 50, "scheduled_receipts": 0, "target_safety_stock": 20},
+            {"period": "Feb", "demand": 60, "planned_production": 40, "production_capacity": 50, "scheduled_receipts": 10, "target_safety_stock": 20},
         ],
         starting_inventory=20,
     )
