@@ -1,4 +1,4 @@
-"""Canonical 100-tool target registry for Shoir-IE.
+T069|Network Flow and Location Optimization|Optimization & Facilities|Enterprise|Workbench - Capacitated Facility Location & Flow Optimization|IMPLEMENTED_NEEDS_VALIDATION|shoir_target_engines.py;pages/Industrial_Engineering_Workbench.py;tests/test_shoir_target_engines.py;tests/test_shoir_100_tool_workbench.py|Minimize fixed facility opening and variable route costs subject to capacity and exact demand with independent flow verification.|Facilities JSON; customer demands JSON; route unit costs/capacities; optional route availability; single period; bounded sizes and solver time limit.|Opened facilities, shipment flows, exact customer balance, cost breakdown, solver status, capacity/constraint audit and limitations.|Single-period deterministic capacitated facility-location model; no multi-echelon stochastic planning.
 
 This registry is a target/gap-analysis catalogue. It is deliberately separate
 from legacy module menus until a capability's existing route, execution gate,
