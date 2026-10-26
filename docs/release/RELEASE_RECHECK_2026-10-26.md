@@ -276,3 +276,18 @@ The staging and production records were verified read-only to each contain exact
 These drafts are intentionally separate: #203 covers workbook output safety; #204 covers protected administrative state integrity and Edge Function test coverage. Neither has been merged or deployed. No production or staging environment state has been altered in this execution.
 
 **Disposition remains HOLD.** Current engineering evidence improves but does not eliminate the staging/production migration and function-version mismatch, hosted Streamlit revision uncertainty, unverified branch-protection enforcement, broader feature acceptance gaps, backup/restore evidence, provider connection requirements, or qualified Saudi legal/commercial approval.
+
+
+## 13. Follow-up CI state at 26 October 2026, 19:32 UTC
+
+The exact source identities below supersede earlier "current head" references for each active draft. These records are a time-stamped follow-up; an in-progress workflow is not a pass.
+
+| Workstream | Exact head | Latest evidence at this timestamp | Disposition |
+|---|---|---|---|
+| XLSX formula/URL auto-conversion protection — [PR #203](https://github.com/MSJ1708/shoir-ie/pull/203) | `d52cc87808d75e870f40d2f7a078380939f2277d` | Earlier full regression passed on ancestor `8663d612f820ac1ae6d6af8c1776e7a619c1a029`: 828 passed, 2 skipped, 71 warnings, 5 subtests. The latest commit adds only the missing `Any` typing import. Exact-head runs [40387008559](https://github.com/MSJ1708/shoir-ie/actions/runs/40387008559) and [40387000285](https://github.com/MSJ1708/shoir-ie/actions/runs/40387000285) were still running. | Prior revision tested; latest revision `IN_PROGRESS`; draft, not merged or deployed. Hosted deployment smoke skipped. |
+| Protected-administrator non-mutation and Edge Function testing — [PR #204](https://github.com/MSJ1708/shoir-ie/pull/204) | `4c3105b29afaa36a021420d376f5b39e5721a4c3` | Latest runs [40387179214](https://github.com/MSJ1708/shoir-ie/actions/runs/40387179214) and [40387166902](https://github.com/MSJ1708/shoir-ie/actions/runs/40387166902) were in progress. The pipeline now explicitly runs regression tests, `deno check supabase/functions/shoir-persistence/index.ts`, and `deno test supabase/functions/shoir-persistence/security_test.ts`. | `IN_PROGRESS`; draft, not merged or deployed. Hosted deployment smoke skipped. |
+| Release evidence — [PR #199](https://github.com/MSJ1708/shoir-ie/pull/199) | Latest report commit `aa5ea7dbe6c85a5a111d342bfa23728bd6df63f6` before this appended section | This follow-up is recorded separately from application code. | Documentation only; does not alter the GO/HOLD decision. |
+
+The green test run on PR #203's ancestor is not silently promoted to the later head. If either latest head has a failing check, retain that failure, fix the cause, and rerun the exact current SHA. Any required step that is skipped remains unpassed.
+
+**Release decision remains HOLD.** There is no authorized release candidate that has simultaneously passed current exact-head CI, strict authenticated staging verification, live runtime/deployed revision identification, production-schema compatibility, independent security review, recovery rehearsal, and required legal/commercial approval. No staging or production state was changed.
