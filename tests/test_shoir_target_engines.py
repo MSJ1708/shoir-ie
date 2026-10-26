@@ -2190,3 +2190,78 @@ def test_recovery_snapshot_history_rejects_invalid_actions_data_and_revisions():
         manage_recovery_snapshot_history(state, action="restore", target_revision=2)
     with pytest.raises(ValueError, match="must be checkpoint, undo, redo or restore"):
         manage_recovery_snapshot_history(state, action="future")
+
+
+def test_dataset_version_lineage_creates_versions_and_marks_supplied_stale_runs():
+    from shoir_target_engines import manage_dataset_version_lineage
+
+    first = manage_dataset_version_lineage(
+        None,
+        dataset_payload={"records": [{"id": "A1", "value": 10}]},
+        source_metadata={"dataset_id": "fixture-dataset", "schema_fingerprint": ["id", "value"]},
+        transformations=[{"transformation": "clean headers", "method_version": "1"}],
+    )
+    assert first["status"] == "VERSION_CREATED_INITIAL"
+    assert first["version_number"] == 1
+    assert first["version_count"] == 1
+
+    changed = manage_dataset_version_lineage(
+        first["lineage_state"],
+        dataset_payload={"records": [{"id": "A1", "value": 12}]},
+        source_metadata={"dataset_id": "fixture-dataset", "schema_fingerprint": ["id", "value"]},
+        transformations=[{"transformation": "clean headers", "method_version": "1"}],
+        downstream_runs=[
+            {"run_id": "RUN-CURRENT-AT-V1", "version_signature": first["version_signature"]},
+            {"run_id": "RUN-OLD", "version_signature": "000000000000"},
+            {"run_id": "RUN-UNKNOWN"},
+        ],
+    )
+    assert changed["status"] == "VERSION_CREATED"
+    assert changed["version_number"] == 2
+    assert changed["version_count"] == 2
+    assert changed["stale_run_count"] == 2
+    assert changed["unverifiable_run_count"] == 1
+    assert [run["status"] for run in changed["downstream_runs"]] == [
+        "STALE_REQUIRES_RERUN", "STALE_REQUIRES_RERUN", "UNVERIFIABLE_NO_SOURCE_SIGNATURE"
+    ]
+
+
+def test_dataset_version_lineage_is_canonical_and_recipe_changes_make_new_version():
+    from shoir_target_engines import manage_dataset_version_lineage
+
+    first = manage_dataset_version_lineage(
+        None,
+        dataset_payload={"a": 1, "b": [2, 3]},
+        source_metadata={"dataset_id": "DS-1", "schema_fingerprint": {"a": "int"}},
+        transformations=[],
+    )
+    same = manage_dataset_version_lineage(
+        first["lineage_state"],
+        dataset_payload={"b": [2, 3], "a": 1},
+        source_metadata={"schema_fingerprint": {"a": "int"}, "dataset_id": "DS-1"},
+        transformations=[],
+    )
+    assert same["status"] == "VERSION_UNCHANGED"
+    assert same["version_count"] == 1
+    recipe_change = manage_dataset_version_lineage(
+        same["lineage_state"],
+        dataset_payload={"a": 1, "b": [2, 3]},
+        source_metadata={"dataset_id": "DS-1", "schema_fingerprint": {"a": "int"}},
+        transformations=[{"transformation": "rename field", "method_version": "2"}],
+    )
+    assert recipe_change["status"] == "VERSION_CREATED"
+    assert recipe_change["version_number"] == 2
+    assert recipe_change["version_signature"] != first["version_signature"]
+
+
+def test_dataset_version_lineage_rejects_invalid_payloads_and_run_links():
+    from shoir_target_engines import manage_dataset_version_lineage
+
+    with pytest.raises(ValueError, match="must be a JSON object or array"):
+        manage_dataset_version_lineage(None, dataset_payload="not a structured snapshot")
+    with pytest.raises(ValueError, match="Transformations must be a JSON list"):
+        manage_dataset_version_lineage(None, dataset_payload={"x": 1}, transformations={"bad": "shape"})
+    with pytest.raises(ValueError, match="needs a non-empty run_id"):
+        manage_dataset_version_lineage(None, dataset_payload={"x": 1}, downstream_runs=[{"version_signature": "v1"}])
+    with pytest.raises(ValueError, match="finite, valid JSON-compatible"):
+        manage_dataset_version_lineage(None, dataset_payload={"x": float("nan")})
