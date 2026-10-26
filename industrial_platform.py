@@ -765,25 +765,53 @@ def export_pdf(title: str, tables: Sequence[Tuple[str,pd.DataFrame]], figures: S
 
 
 def export_pptx(title: str, tables: Sequence[Tuple[str,pd.DataFrame]], figures: Sequence[Tuple[str,Any]]=()) -> bytes:
-    """Build a PowerPoint report with every table row on a continued slide."""
+    """Build a widescreen PowerPoint report with complete, continued tables."""
     from pptx import Presentation
     from pptx.util import Inches
 
     prs = Presentation()
+    # Report content below uses 16:9 coordinates; set the page size explicitly
+    # instead of inheriting python-pptx's 4:3 default template dimensions.
+    prs.slide_width = Inches(13.333333)
+    prs.slide_height = Inches(7.5)
+
+    def set_report_title(slide, text: str):
+        title_shape = slide.shapes.title
+        title_shape.text = str(text or "Shoir-IE Report")[:180]
+        title_shape.left = Inches(.25)
+        title_shape.top = Inches(.15)
+        title_shape.width = Inches(12.8)
+        title_shape.height = Inches(1.0)
+        return title_shape
+
     cover = prs.slides.add_slide(prs.slide_layouts[0])
-    cover.shapes.title.text = str(title or "Shoir-IE Report")
-    cover.placeholders[1].text = "Shoir-IE Industrial Decision Platform"
+    cover_title = cover.shapes.title
+    cover_title.text = str(title or "Shoir-IE Report")
+    cover_title.left = Inches(.5)
+    cover_title.width = Inches(12.333333)
+    subtitle = cover.placeholders[1]
+    subtitle.text = "Shoir-IE Industrial Decision Platform"
+    subtitle.left = Inches(.5)
+    subtitle.width = Inches(12.333333)
+
     for label, fig in figures:
         safe_label = str(label or "Chart")[:180]
         try:
             png = fig.to_image(format="png", width=1600, height=900, scale=2)
             slide = prs.slides.add_slide(prs.slide_layouts[5])
-            slide.shapes.title.text = safe_label
-            slide.shapes.add_picture(io.BytesIO(png), Inches(.4), Inches(1.1), width=Inches(12.5))
+            set_report_title(slide, safe_label)
+            # Keep a 16:9 chart proportion and leave an explicit title gap.
+            chart_width = 10.2
+            chart_height = chart_width * 9 / 16
+            chart_left = (13.333333 - chart_width) / 2
+            slide.shapes.add_picture(
+                io.BytesIO(png), Inches(chart_left), Inches(1.3),
+                width=Inches(chart_width), height=Inches(chart_height),
+            )
         except Exception:
             # A missing chart image should not silently vanish from a delivered deck.
             slide = prs.slides.add_slide(prs.slide_layouts[5])
-            slide.shapes.title.text = safe_label
+            set_report_title(slide, safe_label)
             box = slide.shapes.add_textbox(Inches(.6), Inches(1.6), Inches(12.0), Inches(2.0))
             box.text_frame.text = (
                 "The chart image could not be rendered in this export environment. "
@@ -805,11 +833,11 @@ def export_pptx(title: str, tables: Sequence[Tuple[str,pd.DataFrame]], figures: 
         for chunk_index, chunk in enumerate(chunks):
             slide = prs.slides.add_slide(prs.slide_layouts[5])
             slide_title = base_label if chunk_index == 0 else f"{base_label} (continued {chunk_index + 1})"
-            slide.shapes.title.text = slide_title[:180]
+            set_report_title(slide, slide_title)
             rows = len(chunk) + 1
             cols = max(1, len(chunk.columns))
             table = slide.shapes.add_table(
-                rows, cols, Inches(.25), Inches(1.1), Inches(12.8), Inches(5.6)
+                rows, cols, Inches(.25), Inches(1.4), Inches(12.8), Inches(5.5)
             ).table
             for j, col in enumerate(chunk.columns):
                 table.cell(0, j).text = str(col)
