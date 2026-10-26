@@ -17,7 +17,7 @@ This is a time-stamped verification snapshot, not a deployment authorization. It
 | PR #197 — release evidence snapshot | Merged to main; current main includes its merge result. |
 | ERP foundation PR #198 | Draft: [read-only SAP/Oracle ERP adapter foundation](https://github.com/MSJ1708/shoir-ie/pull/198), current head `38093374614a60c1c26721a1f1b4b2cafb1041ba` at the latest API recheck. Keep isolated from release changes. |
 
-Before opening this audit-report PR, GitHub search returned 16 open PRs: #198, #192, #191, #189, #188, #184, #182, #181, #180, #179, #178, #175, #174, #173, #172 and #170. PR #199 itself adds a seventeenth open PR. All 17 were open as of the latest inventory: #199, #198, #192, #191, #189, #188, #184, #182, #181, #180, #179, #178, #175, #174, #173, #172 and #170. Most are drafts; several report `mergeable=false` and point at older base SHAs. Do not bulk merge. Recheck each PR's current head, checks, dependency order, review and disposition before action.
+A fresh open-PR query found 19 currently open PRs: #201, #200, #199, #198, #192, #191, #189, #188, #184, #182, #181, #180, #179, #178, #175, #174, #173, #172 and #170. Many are drafts; some have stale bases, dirty mergeability or overlapping tool-registry changes. PR #201 validates policy-version consistency but is a draft based on the staging candidate; PR #200 is a draft strict-gate fix and its latest updated head is awaiting current CI; PR #199 is this recheck report; PR #198 remains foundation-only ERP work. Do not bulk merge. Re-fetch each PR's current head, checks, dependency order, reviews and conflicts before action.
 
 ### Branch governance: FAIL / BLOCKED
 
