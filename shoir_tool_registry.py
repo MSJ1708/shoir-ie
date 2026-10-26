@@ -178,6 +178,17 @@ def _load_targets() -> tuple[dict[str, Any], ...]:
                 "the mapped legacy route must also enforce its native server-side policy."
             ),
             "unit_test": {
+                "T006": "tests/test_shoir_remaining_tool_engines.py::test_recovery_snapshot_undo_redo_and_integrity; tests/test_shoir_remaining_tool_engines.py::test_recovery_refuses_undo_before_first_revision",
+                "T020": "tests/test_shoir_remaining_tool_engines.py::test_dataset_lineage_hashes_schema_and_marks_stale_runs",
+                "T039": "tests/test_shoir_remaining_tool_engines.py::test_capa_transition_audit_and_evidence_requirements; tests/test_shoir_100_tool_workbench.py::test_workbench_capa_8d_register_reports_completeness_and_overdue_state",
+                "T060": "tests/test_shoir_remaining_tool_engines.py::test_supply_chain_network_optimizes_and_reports_shortages; tests/test_shoir_remaining_tool_engines.py::test_supply_chain_rejects_unknown_route_nodes",
+                "T074": "tests/test_shoir_remaining_tool_engines.py::test_digital_twin_calibration_returns_fit_and_residuals; tests/test_shoir_remaining_tool_engines.py::test_digital_twin_calibration_rejects_constant_input",
+                "T080": "tests/test_shoir_remaining_tool_engines.py::test_disruption_scenario_math_and_baseline_comparison",
+                "T094": "tests/test_shoir_remaining_tool_engines.py::test_kpi_alert_evaluation_handles_threshold_freshness_and_dedupe",
+                "T096": "tests/test_shoir_remaining_tool_engines.py::test_integration_status_checks_env_presence_without_returning_secret; tests/test_shoir_remaining_tool_engines.py::test_integration_status_refuses_invalid_env_names",
+                "T097": "tests/test_shoir_remaining_tool_engines.py::test_plugin_manifest_validated_but_never_enabled",
+                "T098": "tests/test_shoir_remaining_tool_engines.py::test_identity_config_reports_readiness_without_claiming_sso_active; tests/test_shoir_remaining_tool_engines.py::test_identity_config_fails_closed_when_provider_is_missing",
+                "T099": "tests/test_shoir_remaining_tool_engines.py::test_governance_snapshot_checksum_verify_and_tamper_detection; tests/test_shoir_remaining_tool_engines.py::test_governance_retention_and_delete_plans_do_not_delete_data",
                 "T021": "tests/test_shoir_target_engines.py::test_time_study_uses_explicit_rating_and_allowance_convention; tests/test_shoir_target_engines.py::test_time_study_rejects_empty_nonpositive_and_invalid_assumptions; tests/test_shoir_target_engines.py::test_time_study_result_and_input_snapshot_roundtrip_per_user; tests/test_shoir_100_tool_workbench.py::test_workbench_denies_focused_tool_execution_to_unauthenticated_guest",
                 "T022": "tests/test_shoir_target_engines.py::test_work_sampling_wilson_intervals_match_hand_checked_counts; tests/test_shoir_target_engines.py::test_work_sampling_rejects_invalid_counts_and_assumptions",
                 "T028": "tests/test_shoir_target_engines.py::test_pareto_root_cause_matches_hand_checked_cumulative_counts_and_records_five_whys; tests/test_shoir_target_engines.py::test_pareto_root_cause_rejects_invalid_counts_incomplete_whys_and_bad_dates",
