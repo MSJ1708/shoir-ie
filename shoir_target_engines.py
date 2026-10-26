@@ -6384,6 +6384,45 @@ def manage_dataset_version_lineage(
         or source_sig
     ).strip()
     metadata["dataset_id"] = dataset_identity
+    if not metadata.get("schema_fingerprint") and not metadata.get("schemas") and isinstance(packed_payload, (dict, list)):
+        schema_source: Any = packed_payload
+        if isinstance(schema_source, dict):
+            if isinstance(schema_source.get("records"), list):
+                schema_source = schema_source["records"]
+            elif isinstance(schema_source.get("rows"), list):
+                schema_source = schema_source["rows"]
+        if isinstance(schema_source, list):
+            sample_rows = [item for item in schema_source[:500] if isinstance(item, dict)]
+            schema_keys = sorted({str(key) for item in sample_rows for key in item})
+            inferred_schema = {
+                key: sorted({
+                    (
+                        "boolean" if isinstance(item.get(key), bool) else
+                        "integer" if isinstance(item.get(key), int) else
+                        "number" if isinstance(item.get(key), float) else
+                        "array" if isinstance(item.get(key), list) else
+                        "object" if isinstance(item.get(key), dict) else
+                        "string"
+                    )
+                    for item in sample_rows
+                    if key in item and item.get(key) is not None
+                })
+                for key in schema_keys
+            }
+            metadata["schema_fingerprint"] = inferred_schema or {"array_item_type": "unknown_or_empty"}
+        elif isinstance(schema_source, dict):
+            metadata["schema_fingerprint"] = {
+                str(key): (
+                    "null" if value is None else
+                    "boolean" if isinstance(value, bool) else
+                    "integer" if isinstance(value, int) else
+                    "number" if isinstance(value, float) else
+                    "array" if isinstance(value, list) else
+                    "object" if isinstance(value, dict) else "string"
+                )
+                for key, value in schema_source.items()
+                if key not in {"dataset_id", "dataset", "name"}
+            }
     if transformations is None:
         transformation_list: list[Any] = []
     else:
