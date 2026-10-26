@@ -810,6 +810,40 @@ def get_tool_example_json(tool_id: str) -> str:
             "history": [],
             "downstream_runs": [],
         },
+        "T039": {
+            "as_of_date": "2026-10-26",
+            "records": [
+                {
+                    "capa_id": "SYN-CAPA-001",
+                    "title": "Synthetic repeated seal defect",
+                    "status": "OPEN",
+                    "team": "Synthetic review team",
+                    "problem_statement": "Illustrative repeated seal defect; not a plant record",
+                    "containment_action": "Quarantine synthetic example lot",
+                    "root_cause": "Pending investigation",
+                    "corrective_action": "Validate replacement seal",
+                    "implementation_evidence": "SYNTHETIC-WO-001",
+                    "preventive_action": "Add receiving inspection",
+                    "closure_review": "Effectiveness not yet confirmed",
+                    "effectiveness_evidence": "",
+                    "owner": "Example owner",
+                    "reviewer": "",
+                    "approval_reference": "",
+                    "evidence_reference": "SYNTHETIC-REF-001",
+                    "opened_date": "2026-10-01",
+                    "due_date": "2026-11-01"
+                }
+            ],
+            "transitions": [
+                {
+                    "capa_id": "SYN-CAPA-001",
+                    "to_status": "IN_PROGRESS",
+                    "reviewer": "Example reviewer",
+                    "reason": "Move illustrative record to investigation",
+                    "transitioned_at": "2026-10-26T12:00:00Z"
+                }
+            ]
+        },
         "T060": {
             "suppliers": [{"id": "S1", "supply": 70}, {"id": "S2", "supply": 50}],
             "customers": [{"id": "C1", "demand": 60}, {"id": "C2", "demand": 40}],
