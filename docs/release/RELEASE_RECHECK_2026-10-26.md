@@ -216,3 +216,34 @@ This addendum records checks performed after the snapshot above. It supersedes e
 ### Updated disposition
 
 **HOLD — safe work continues; production and paid general availability are not approved.** Current hard blockers remain: exact hosted runtime identity, enforced branch governance, independent review/integration of drafts, production/staging schema and function compatibility, data-preservation plan for referral identifiers, comprehensive calculation and workbook/export acceptance, live provider integrations where advertised, backup/restore evidence, and qualified legal/commercial approval.
+
+
+## 11. XLSX export hardening follow-up
+
+A wider source search found direct report-generation paths in addition to the shared `build_excel_report` helper. The new draft [PR #203](https://github.com/MSJ1708/shoir-ie/pull/203), base `staging-e2e-20261019`, now covers these source routes:
+
+- `shoir_upgrade.py`: disables XlsxWriter automatic formula and URL conversion in the shared report builder.
+- `shoir_excel_studio.py`: disables XlsxWriter automatic formula/URL conversion in both the cleaned workbook and governance report paths.
+- `shoir_industrial_workbook.py`: disables automatic formula/URL conversion in both presentation export and internal persistence workbook serialization. Formula metadata remains separate from calculated workbook values.
+- `shoir_facility_layout.py` and `shoir_enterprise_integration.py`: apply `literalize_untrusted_formula_cells` to generated OpenPyXL data/audit exports where spreadsheet formulas are not an intended feature.
+- `tests/test_xlsx_export_formula_injection.py`: reopens generated workbooks and checks formula-like strings, URL-like values, data, headers and audit values.
+
+### Exact-head regression outcome and correction
+
+- Candidate `0241454c28697f986dae45a466a2ce086b146466` failed [pull-request validation run 40385420275](https://github.com/MSJ1708/shoir-ie/actions/runs/40385420275): `827 passed, 2 skipped, 1 failed, 71 warnings, 5 subtests passed`. The single failure was a test-fixture row offset (`A3` was the intended header, not the first data row). The failure was not suppressed.
+- The assertion was corrected in commit `8663d612f820ac1ae6d6af8c1776e7a619c1a029` to check the actual data row and an adjacent URL-like value.
+- Exact-head push validation [40386115815](https://github.com/MSJ1708/shoir-ie/actions/runs/40386115815) was in progress, and PR validation [40386126755](https://github.com/MSJ1708/shoir-ie/actions/runs/40386126755) was queued at this report update. **Do not mark the expanded patch tested until exact-head checks finish successfully.** The local hosted-app smoke lane is skipped by workflow conditions and is not live deployment evidence.
+- PR #203 remains a draft and has no independent review in this audit. It has not been merged, and the change has not been deployed to staging or production.
+
+### Effective referral-table privileges
+
+A read-only privilege check on staging returned:
+- `anon`: no SELECT or INSERT on `public.shoir_referrals`.
+- `authenticated`: no SELECT or INSERT on `public.shoir_referrals`.
+- `service_role`: SELECT and INSERT privileges present.
+
+Production's catalog query confirmed that `public.shoir_referrals` and `public.shoir_legal_acceptances` are absent. This confirms the staging-only service-role boundary observed in the migration and reinforces the production schema mismatch. Do not add public or general authenticated-user policies merely to silence the staging RLS advisor; validate actual Edge Function server-side authorization before considering the feature complete.
+
+The Supabase performance advisor reports unused-index informational findings in both projects (19 on staging, 16 on production in this snapshot). These are advisory-only; do not drop indexes without workload evidence and an independent review.
+
+**Disposition remains HOLD.** No staging or production migration, Edge Function deploy, user/account/subscription mutation, secret change, or app deployment has been performed.
