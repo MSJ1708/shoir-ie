@@ -227,3 +227,11 @@ Read-only project and metadata checks reconfirmed the following:
 7. Complete qualified legal/commercial/operations review and obtain an explicit dated GO decision from the accountable release owner before any production change or BETA removal.
 
 No production database, Edge Function, customer/account/subscription data, secret, or BETA state was modified in this recheck.
+
+### Supabase security-advisor recheck — 26 October 2026, 15:46 UTC
+
+A fresh Supabase security-advisor query on staging reported one INFO finding, `rls_enabled_no_policy`, for `public.shoir_referrals`: RLS is enabled but there are no SQL policies. Production's security-advisor query returned no lints at this observation. This is not, by itself, proof that the referral table is publicly readable: a direct read-only metadata query found no `pg_policies` rows and the actual table grants were limited to `service_role` and `postgres` (no grants to `PUBLIC`, `anon`, or `authenticated`). The migration explicitly revokes all privileges from public/anon/authenticated and grants CRUD to service_role.
+
+**Disposition: REVIEW REQUIRED, not cleared by the grant snapshot alone.** Independently inspect every deployed Edge Function path that reads/writes referral rows and confirm authentication, actor binding, tenant/workspace scope, role/entitlement checks, input validation, and output redaction before relying on service-role access. Verify default privileges, views, RPCs and any other path to this table; add least-privilege SQL policies only if a direct client access path is intentionally required. Do not add broad policies to silence the advisor and do not change staging or production DDL as part of this review.
+
+Performance advisors returned 19 INFO unused-index findings in staging and 17 in production. They are informational observations only; do not drop indexes without query-plan/workload evidence and a reviewed change.
