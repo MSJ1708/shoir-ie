@@ -768,6 +768,7 @@ def export_pptx(title: str, tables: Sequence[Tuple[str,pd.DataFrame]], figures: 
     """Build a widescreen PowerPoint report with complete, continued tables."""
     from pptx import Presentation
     from pptx.util import Inches
+    from pptx.enum.text import MSO_ANCHOR
 
     prs = Presentation()
     # Report content below uses 16:9 coordinates; set the page size explicitly
@@ -788,11 +789,17 @@ def export_pptx(title: str, tables: Sequence[Tuple[str,pd.DataFrame]], figures: 
     cover_title = cover.shapes.title
     cover_title.text = str(title or "Shoir-IE Report")
     cover_title.left = Inches(.5)
+    cover_title.top = Inches(2.15)
     cover_title.width = Inches(12.333333)
+    cover_title.height = Inches(1.15)
+    cover_title.text_frame.vertical_anchor = MSO_ANCHOR.MIDDLE
     subtitle = cover.placeholders[1]
     subtitle.text = "Shoir-IE Industrial Decision Platform"
     subtitle.left = Inches(.5)
+    subtitle.top = Inches(3.55)
     subtitle.width = Inches(12.333333)
+    subtitle.height = Inches(.8)
+    subtitle.text_frame.vertical_anchor = MSO_ANCHOR.MIDDLE
 
     for label, fig in figures:
         safe_label = str(label or "Chart")[:180]
