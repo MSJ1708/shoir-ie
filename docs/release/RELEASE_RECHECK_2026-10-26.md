@@ -186,3 +186,33 @@ Use [MASTER_GO_NO_GO_CHECKLIST_2026-10-26.md](MASTER_GO_NO_GO_CHECKLIST_2026-10-
 
 **Decision: HOLD — safe work continues; production release remains blocked. Keep BETA visible.** This update was documentation/source review only. No production database, Edge Function, account, subscription, hosted secret, deployment or BETA state was changed. Production deployment and post-deployment verification are NOT RUN and not authorized.
 
+
+
+## 10. Incremental live recheck — 26 Oct 2026, 19:09 UTC
+
+This addendum records checks performed after the snapshot above. It supersedes earlier status text only where explicitly stated; the historical runs and previous findings remain historical evidence.
+
+### Exact current source and CI
+
+- `main` remains `2ef44057f84162389d39998e922b505dcfe4d3e9`. Exact-SHA push workflows are green: [validation 40333856836](https://github.com/MSJ1708/shoir-ie/actions/runs/40333856836), [engine regression 40333856673](https://github.com/MSJ1708/shoir-ie/actions/runs/40333856673), and [security/quality 40333856656](https://github.com/MSJ1708/shoir-ie/actions/runs/40333856656). This is not production deployment evidence.
+- `staging-e2e-20261019` remains `9e3899d6f5147584cf27585d946fa7b5d18d92d5`. The authenticated gate [40369188234](https://github.com/MSJ1708/shoir-ie/actions/runs/40369188234) completed successfully on that exact SHA. Recorded cases: backend 24/24 PASS; module-route/default-state rendering 96/96 PASS; browser shell, Excel module and logout 7/7 PASS. It does not certify the full calculation engine, comprehensive data import/export, provider connectivity, or the exact hosted Streamlit revision.
+- The branch comparison still reports the branches as diverged: staging is 98 commits ahead and 412 behind main from the API comparison. Do not merge either branch wholesale.
+- Detailed GitHub branch-protection reads now return HTTP 403 to the connected integration. Branch metadata still reports `protected=true`, but that alone does not prove required-check enforcement. Treat the previously recorded missing/disabled required-check enforcement as unresolved until an authorized admin independently verifies the saved settings and direct-push denial.
+
+### Schema, Edge Function and protected-account recheck
+
+- Read-only aggregate checks found exactly one account matching the protected master-admin invariant in staging and one in production. No account identity was returned or used for testing. Aggregate account counts were staging 9 and production 5; no account records were changed.
+- Staging reports migrations `20261021130000_shoir_beta_legal_referrals`, `20261022110000_enforce_beta_legal_acceptance`, and `20261023130000_refresh_refund_policy_acceptance_version` that are absent from production's migration history. The production schema lacks `public.shoir_referrals` and its related legal-acceptance fields.
+- `shoir-persistence` remains staging version 9, SHA-256 `0551d88aceeca45ede2b890e874a75f542df670d2f2332a0878f23b5cc0b187e`; production is version 8, SHA-256 `410e22f7af0be8f3ec74bae5a15aec70f8b6a807a540e98a2c5143f4e6b8790d`. The deployed sources are not equivalent. Do not deploy version 9 or apply production migrations until the compatibility and recovery gate is satisfied.
+- Staging's security advisor reports one informational `rls_enabled_no_policy` finding for `public.shoir_referrals`. The repository migration explicitly revokes table access from `PUBLIC`, `anon`, and `authenticated`, and grants table access to `service_role` only. Do not create a broad user-facing RLS policy just to silence this advisor; independently verify effective grants before any release.
+- The historical referral migration rewrites `affiliate_code` for existing NULL/blank values and values matching `AFF-%-15`, changes `updated_at`, and repairs duplicate codes. Since staging has already applied it but production has not, migration promotion is blocked pending an explicit data-preservation decision and rehearsal. No migration was run in either environment during this recheck.
+
+### Export acceptance and current code work
+
+- PR [#202](https://github.com/MSJ1708/shoir-ie/pull/202), head `6d81ea3e2482e7ef29a66404dc2f34f3c6c58e35), has a successful exact-head validation run [40382266287](https://github.com/MSJ1708/shoir-ie/actions/runs/40382266287). I downloaded and independently parsed its synthetic artifact [12678948973](https://github.com/MSJ1708/shoir-ie/actions/runs/40382266287/artifacts/12678948973): the PDF contains all 67 metric labels across 4 pages; the PPTX contains all 67 labels and values in the original order across 5 table slides (6 total slides), uses a 16:9 canvas, and has no out-of-bounds shapes. Artifact hashes from its manifest: PDF `33fd6f0919b433a196cc2ebf2fe29a6b498efcf320605c9152263fbeaf691836`; PPTX `5b1bdf06436d447181ebcc642612066b94d11963c74abae24d0b05f62430c654`. The separate hosted deployment smoke was skipped; live staging acceptance and XLSX acceptance remain open.
+- New draft PR [#203](https://github.com/MSJ1708/shoir-ie/pull/203), based directly on staging, disables XlsxWriter formula/URL auto-conversion in `build_excel_report` and adds a parser-level regression test for formula-like titles, headers, values, audit fields and URL-like text. Candidate SHA: `8fc8a676fc127af5ff43d417d8d2a09c03998289`. Exact-head validation [40383978529](https://github.com/MSJ1708/shoir-ie/actions/runs/40383978529) and push validation [40383935924](https://github.com/MSJ1708/shoir-ie/actions/runs/40383935924) were still in progress at this snapshot. **Do not mark this patch tested until both relevant current-head results are refreshed and the test is confirmed passing.**
+- This session did not perform a production or staging deploy, database migration, Edge Function deployment, account/subscription change, or secret change. The Streamlit-hosted application settings and running revision could not be read through the connected tools; the live app URL was not independently verifiable here.
+
+### Updated disposition
+
+**HOLD — safe work continues; production and paid general availability are not approved.** Current hard blockers remain: exact hosted runtime identity, enforced branch governance, independent review/integration of drafts, production/staging schema and function compatibility, data-preservation plan for referral identifiers, comprehensive calculation and workbook/export acceptance, live provider integrations where advertised, backup/restore evidence, and qualified legal/commercial approval.
