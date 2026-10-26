@@ -87,7 +87,6 @@ _DURABLE_STORE_REQUIRED_EXPORTS = (
     "edge_admin_list_requests",
     "edge_admin_approve",
     "edge_admin_decline",
-    "edge_referral_summary",
     "edge_renew_request",
     "upsert_remote_account",
     "insert_remote_request",
@@ -131,6 +130,26 @@ for _durable_store_export in _DURABLE_STORE_REQUIRED_EXPORTS:
     globals()[_durable_store_export] = getattr(
         _durable_account_store, _durable_store_export
     )
+
+# Referral summaries are an optional extension, not a prerequisite for sign-in.
+# Streamlit can briefly retain an older imported persistence module during a
+# hot reload. Reuse its Edge caller when possible; otherwise fail only the
+# referral panel, never the core login/account initialization.
+if callable(getattr(_durable_account_store, "edge_referral_summary", None)):
+    edge_referral_summary = _durable_account_store.edge_referral_summary
+else:
+    _durable_edge_call = getattr(_durable_account_store, "_edge_call", None)
+    if callable(_durable_edge_call):
+        def edge_referral_summary(username: str, token: str) -> dict:
+            return _durable_edge_call(
+                "referral_summary_session",
+                {"username": username, "token": token},
+            )
+    else:
+        def edge_referral_summary(username: str, token: str) -> dict:
+            raise RuntimeError(
+                "Referral summary is unavailable in this persistence module version."
+            )
 
 # Compatibility guard: a hosted deployment can briefly have a newer app.py than
 # its supporting module during a rolling rebuild. Keep a receipt-preview import
