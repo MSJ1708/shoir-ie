@@ -68,3 +68,23 @@ Migration 20261021130000_shoir_beta_legal_referrals.sql changes existing affilia
 A current SQL catalog query confirmed the legal-acceptance trigger exists on staging and not in production. The deployed staging trigger function compares refund_policy_version against 2026-10-23-v2. Reconcile this contract with the current Edge Function before any migration/function rollout.
 
 Platform watch: Supabase says new explicit-grant behavior for Data API table exposure applies to all existing projects on 30 October 2026; audit any required direct Data API access without granting client roles broad access (source: https://github.com/orgs/supabase/discussions/45329). Older CBC-mode TLS 1.2 cipher suites are scheduled for removal from project HTTP APIs on 10 November 2026 at the earliest; confirm supported modern TLS clients and monitor the notice (source: https://supabase.com/changelog/cbc-tls-ciphers-deprecated).
+
+## New read-only data-impact finding — 26 October 2026
+
+A parameter-free, aggregate-only SELECT was run against `public.shoir_accounts`, the legal-acceptance columns on `public.shoir_subscription_requests`, and the approval-guard trigger in both environments. No account identifiers or codes were selected.
+
+| Aggregate | Staging | Production |
+|---|---:|---:|
+| Accounts total | 8 | 5 |
+| Rows matching the migration's affiliate-code rewrite predicate (NULL/blank or legacy `AFF-...-15`) | 0 | 5 |
+| Nonblank affiliate codes | 8 | 0 |
+| Excess rows over distinct nonblank codes | 0 | 0 |
+| Case-insensitive duplicate-code groups | 0 | 0 |
+| Six legal acceptance columns present | 6 | 0 |
+| Approval-guard trigger present | 1 | 0 |
+
+**Production-impact consequence:** the current `20261021130000_shoir_beta_legal_referrals.sql` would rewrite the affiliate-code field and set `updated_at = NOW()` for all five existing production accounts under its current predicate. That is a real existing-row data mutation—not purely additive schema work. Do not execute that migration verbatim based on the earlier general plan alone. The migration owner and business owner must choose and review one of: (a) preserve existing account rows/codes with a safer, separately reviewed migration and generate codes on new-account creation or a controlled opt-in/backfill; or (b) explicitly approve the all-account rewrite, including referral-link implications and the `updated_at` mutation. The chosen approach must be tested in an isolated restore/staging clone, reviewed independently, and covered by rollback/forward-recovery. The aggregate query intentionally did not determine which accounts are affected individually; do not inspect or change the master administrator for this task.
+
+The staging values are consistent with its completed referral migration having already populated eight distinct nonblank codes and no remaining rows matching its rewrite predicate. This does not prove the referral experience itself works. The six legal acceptance columns and approval guard are present in staging and absent in production, matching the schema parity result.
+
+These checks resolve the *affected-row count* question, but not the migration-ledger version/name discrepancy; actual schema/function dependencies, backup restore, legal acceptance semantics, and deployment authorization remain required before any production write.
