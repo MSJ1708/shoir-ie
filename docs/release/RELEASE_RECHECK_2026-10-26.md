@@ -291,3 +291,31 @@ The exact source identities below supersede earlier "current head" references fo
 The green test run on PR #203's ancestor is not silently promoted to the later head. If either latest head has a failing check, retain that failure, fix the cause, and rerun the exact current SHA. Any required step that is skipped remains unpassed.
 
 **Release decision remains HOLD.** There is no authorized release candidate that has simultaneously passed current exact-head CI, strict authenticated staging verification, live runtime/deployed revision identification, production-schema compatibility, independent security review, recovery rehearsal, and required legal/commercial approval. No staging or production state was changed.
+
+
+## 14. Deployed Edge Function action inventory — direct source comparison
+
+A fresh read of each active deployed `shoir-persistence` function extracted its `index.ts` and action dispatch list, without invoking any action:
+
+| Item | Staging | Production |
+|---|---|---|
+| Active deployed version | 9 | 8 |
+| Deployed bundle SHA-256 | `0551d88aceeca45ede2b890e874a75f542df670d2f2332a0878f23b5cc0b187e` | `410e22f7af0be8f3ec74bae5a15aec70f8b6a807a540e98a2c5143f4e6b8790d` |
+| Action branches | 13 | 10 |
+| Registration action | present | absent |
+| Referral summary action | present | absent |
+| Current legal-policy version constants/enforcement | present | absent |
+| Bounded JSON-object parser | present | absent |
+| Login-time protected-admin tier repair | present | present |
+
+Staging-only action handlers identified: `referral_summary_session`, `account_exists`, and `register_request`. There were no production-only action names in the enumerated dispatch list.
+
+This is further evidence that version 9 cannot be deployed as a standalone production fix: it assumes schema and legal/referral contract that do not currently exist in production. Production is also missing the bounds-enforcement helper that exists in the staging source. The admin self-repair fix in PR #204 must not be promoted by itself to production as a direct source swap; it is part of a controlled, compatible function release that must include independent review and acceptance tests for auth, workspace scope, entitlement, registrations and referrals against the actual target schema.
+
+### Latest test execution state at this snapshot
+
+- PR #203 head remains `d52cc87808d75e870f40d2f7a078380939f2277d`. Both latest exact-head runs show the Python regression step succeeded. The full jobs were still in local Chromium installation/browser-smoke stages at last read: [PR check 40387008559](https://github.com/MSJ1708/shoir-ie/actions/runs/40387008559), [push check 40387000285](https://github.com/MSJ1708/shoir-ie/actions/runs/40387000285). Final job conclusions were not available yet; hosted deployment smoke was skipped.
+- PR #204 head remains `224816cf63a88ab4759b722826fc4bebd6ad5152`, correcting the stale source-contract test. Latest push run [40387652648](https://github.com/MSJ1708/shoir-ie/actions/runs/40387652648) was still in its regression-test stage, and latest PR run [40387830793](https://github.com/MSJ1708/shoir-ie/actions/runs/40387830793) was in its regression-test stage. It is not yet valid to claim Deno type-check/security tests passed on this head; they follow the Python suite.
+- The earlier PR #204 run [40387179214](https://github.com/MSJ1708/shoir-ie/actions/runs/40387179214) failed because `tests/test_durable_accounts.py` asserted that the old tier-repair expression must exist. The current head deliberately updates that test to assert a read-only invariant and absence of an account-tier update. Preserve the failed run as history; do not conceal it.
+
+**No deployed state was changed in either Supabase project.** Production remains on version 8 and staging remains on version 9 while this report is updated. Continue to HOLD until compatible schema/function promotion is reviewed and rehearsed.
