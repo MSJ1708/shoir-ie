@@ -716,23 +716,43 @@ def save_experiment(name: str, module: str, scenarios: list, results: dict, user
     return eid
 
 def export_pdf(title: str, tables: Sequence[Tuple[str,pd.DataFrame]], figures: Sequence[Tuple[str,Any]]=()) -> bytes:
+    """Build a paginated PDF without silently truncating source tables."""
     from reportlab.lib.pagesizes import A4, landscape
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, LongTable, TableStyle, Image
     from reportlab.lib import colors
     from reportlab.lib.styles import getSampleStyleSheet
     from reportlab.lib.units import inch
-    out=io.BytesIO(); doc=SimpleDocTemplate(out,pagesize=landscape(A4)); styles=getSampleStyleSheet()
-    story=[Paragraph(html.escape(str(title or ""), quote=False),styles["Title"]),Spacer(1,8)]
-    for label,df in tables:
-        safe=df.head(30).fillna("").astype(str)
-        story.append(Paragraph(html.escape(str(label), quote=False),styles["Heading2"]))
+
+    out = io.BytesIO()
+    doc = SimpleDocTemplate(out, pagesize=landscape(A4))
+    styles = getSampleStyleSheet()
+    story = [Paragraph(html.escape(str(title or ""), quote=False), styles["Title"]), Spacer(1, 8)]
+    for label, df in tables:
+        safe = df.fillna("").astype(str)
+        story.append(Paragraph(html.escape(str(label), quote=False), styles["Heading2"]))
         if len(safe.columns):
-            t=Table([list(safe.columns)]+safe.values.tolist(),repeatRows=1); t.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor("#1E3A8A")),("TEXTCOLOR",(0,0),(-1,0),colors.white),("GRID",(0,0),(-1,-1),.25,colors.grey),("FONTSIZE",(0,0),(-1,-1),7)])); story += [t,Spacer(1,8)]
-    for label,fig in figures:
-        safe_label=html.escape(str(label), quote=False)
+            # LongTable repeats the column header on every page and splits rows
+            # across pages instead of dropping rows beyond a fixed preview cap.
+            table = LongTable(
+                [list(safe.columns)] + safe.values.tolist(),
+                repeatRows=1,
+                splitByRow=1,
+            )
+            table.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1E3A8A")),
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                ("GRID", (0, 0), (-1, -1), .25, colors.grey),
+                ("FONTSIZE", (0, 0), (-1, -1), 7),
+            ]))
+            story += [table, Spacer(1, 8)]
+    for label, fig in figures:
+        safe_label = html.escape(str(label), quote=False)
         try:
-            png=fig.to_image(format="png",width=1200,height=650,scale=2)
-            story += [Paragraph(safe_label,styles["Heading2"]),Image(io.BytesIO(png),width=10.5*inch,height=5.7*inch)]
+            png = fig.to_image(format="png", width=1200, height=650, scale=2)
+            story += [
+                Paragraph(safe_label, styles["Heading2"]),
+                Image(io.BytesIO(png), width=10.5 * inch, height=5.7 * inch),
+            ]
         except Exception:
             # Keep the report complete and explain the missing static chart,
             # rather than failing the entire PDF export.
@@ -740,33 +760,65 @@ def export_pdf(title: str, tables: Sequence[Tuple[str,pd.DataFrame]], figures: S
                 f"{safe_label} (static chart rendering was unavailable; include the underlying table where supplied)",
                 styles["Normal"],
             )]
-    doc.build(story); return out.getvalue()
+    doc.build(story)
+    return out.getvalue()
+
 
 def export_pptx(title: str, tables: Sequence[Tuple[str,pd.DataFrame]], figures: Sequence[Tuple[str,Any]]=()) -> bytes:
+    """Build a PowerPoint report with every table row on a continued slide."""
     from pptx import Presentation
     from pptx.util import Inches
-    prs=Presentation(); cover=prs.slides.add_slide(prs.slide_layouts[0]); cover.shapes.title.text=str(title or "Shoir-IE Report"); cover.placeholders[1].text="Shoir-IE Industrial Decision Platform"
-    for label,fig in figures:
-        safe_label=str(label or "Chart")[:180]
+
+    prs = Presentation()
+    cover = prs.slides.add_slide(prs.slide_layouts[0])
+    cover.shapes.title.text = str(title or "Shoir-IE Report")
+    cover.placeholders[1].text = "Shoir-IE Industrial Decision Platform"
+    for label, fig in figures:
+        safe_label = str(label or "Chart")[:180]
         try:
-            png=fig.to_image(format="png",width=1600,height=900,scale=2)
-            s=prs.slides.add_slide(prs.slide_layouts[5]); s.shapes.title.text=safe_label
-            s.shapes.add_picture(io.BytesIO(png),Inches(.4),Inches(1.1),width=Inches(12.5))
+            png = fig.to_image(format="png", width=1600, height=900, scale=2)
+            slide = prs.slides.add_slide(prs.slide_layouts[5])
+            slide.shapes.title.text = safe_label
+            slide.shapes.add_picture(io.BytesIO(png), Inches(.4), Inches(1.1), width=Inches(12.5))
         except Exception:
             # A missing chart image should not silently vanish from a delivered deck.
-            s=prs.slides.add_slide(prs.slide_layouts[5]); s.shapes.title.text=safe_label
-            box=s.shapes.add_textbox(Inches(.6),Inches(1.6),Inches(12.0),Inches(2.0))
-            box.text_frame.text=(
+            slide = prs.slides.add_slide(prs.slide_layouts[5])
+            slide.shapes.title.text = safe_label
+            box = slide.shapes.add_textbox(Inches(.6), Inches(1.6), Inches(12.0), Inches(2.0))
+            box.text_frame.text = (
                 "The chart image could not be rendered in this export environment. "
                 "Retry with chart-rendering support enabled, and include the related data table for a traceable result."
             )
-    for label,df in tables:
-        d=df.head(15).fillna("").astype(str); s=prs.slides.add_slide(prs.slide_layouts[5]); s.shapes.title.text=str(label)
-        rows=max(1,len(d)+1); cols=max(1,len(d.columns)); table=s.shapes.add_table(rows,cols,Inches(.25),Inches(1.1),Inches(12.8),Inches(5.6)).table
-        for j,col in enumerate(d.columns): table.cell(0,j).text=str(col)
-        for i,row in enumerate(d.itertuples(index=False),1):
-            for j,val in enumerate(row): table.cell(i,j).text=str(val)
-    b=io.BytesIO(); prs.save(b); return b.getvalue()
+
+    max_data_rows_per_slide = 15
+    for label, df in tables:
+        safe = df.fillna("").astype(str)
+        base_label = str(label or "Data")
+        if len(safe):
+            chunks = [
+                safe.iloc[offset:offset + max_data_rows_per_slide]
+                for offset in range(0, len(safe), max_data_rows_per_slide)
+            ]
+        else:
+            # Preserve the header-only table as a usable empty-state export.
+            chunks = [safe]
+        for chunk_index, chunk in enumerate(chunks):
+            slide = prs.slides.add_slide(prs.slide_layouts[5])
+            slide_title = base_label if chunk_index == 0 else f"{base_label} (continued {chunk_index + 1})"
+            slide.shapes.title.text = slide_title[:180]
+            rows = len(chunk) + 1
+            cols = max(1, len(chunk.columns))
+            table = slide.shapes.add_table(
+                rows, cols, Inches(.25), Inches(1.1), Inches(12.8), Inches(5.6)
+            ).table
+            for j, col in enumerate(chunk.columns):
+                table.cell(0, j).text = str(col)
+            for i, row in enumerate(chunk.itertuples(index=False), 1):
+                for j, val in enumerate(row):
+                    table.cell(i, j).text = str(val)
+    payload = io.BytesIO()
+    prs.save(payload)
+    return payload.getvalue()
 
 def _normalize_render_export_args(figures, tier, username):
     """Accept the legacy (module, tables, tier, username) calling convention safely.
