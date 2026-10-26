@@ -2,6 +2,8 @@
 
 **Decision: NO-GO. Keep BETA visible. Production is read-only for this review.**
 
+The current external blocker register, with owner roles, dependencies, exact actions and closure evidence, is in [`EXTERNAL_ACTION_REGISTER_2026-10-26.md`](EXTERNAL_ACTION_REGISTER_2026-10-26.md). The PR disposition matrix is in [`PULL_REQUEST_DISPOSITION_MATRIX_2026-10-26.csv`](PULL_REQUEST_DISPOSITION_MATRIX_2026-10-26.csv).
+
 This is a time-stamped verification snapshot, not a deployment authorization. It records current GitHub and Supabase metadata and aggregate-only read queries. It does not disclose account identifiers or credential values. The checks below do not establish the exact Streamlit deployed SHA; that remains unverified.
 
 ## 1. Exact source and PR baseline
