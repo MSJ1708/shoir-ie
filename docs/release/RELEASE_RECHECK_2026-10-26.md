@@ -49,7 +49,7 @@ Projects were confirmed by the Supabase project listing:
 | Project ref | `hfhrosthswcybccepmak` | `gcsamrdaeraxieaagsta` |
 | Project status | ACTIVE_HEALTHY | ACTIVE_HEALTHY |
 | Postgres build | `17.11.0.003` | `17.6.1.166` |
-| Accounts (aggregate count) | 8 | 5 |
+| Accounts (aggregate count, latest read-only check) | 9 | 5 |
 | Enterprise Admin role count | 1 | 1 |
 | Exact admin invariant matches (role, tier `Enterprise Plus Tier ($399)`, active state, expiry `2099-01-01T00:00:00Z`) | 1 | 1 |
 | Referral rewrite predicate matches (`affiliate_code` null/blank or `AFF-%-15`) | 0 | 5 |
