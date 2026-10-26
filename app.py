@@ -2157,6 +2157,54 @@ if not st.session_state.get("current_user"):
         )
 
         st.markdown("### Find the capability for the problem you have")
+
+        # Optional target-registry view keeps the existing public showcase compact.
+        # Readiness and route metadata are shown only when the visitor opts in.
+        _target_catalog_rows = []
+        _target_catalog_error = ""
+        try:
+            from shoir_tool_registry import TOOL_TARGETS as _target_tool_targets
+
+            for _target in _target_tool_targets:
+                _tool_id = str(_target.get("tool_id", "")).strip()
+                _canonical_name = str(_target.get("canonical_name", "")).strip()
+                if not _tool_id or not _canonical_name:
+                    continue
+                _target_catalog_rows.append({
+                    "name": f"{_tool_id} · {_canonical_name}",
+                    "category": str(_target.get("workbench") or "Engineering Tools"),
+                    "tier": str(_target.get("target_minimum_tier") or "Starter"),
+                    "when": str(_target.get("calculation_or_action") or ""),
+                    "example": (
+                        f"Required inputs: {_target.get('input_contract', '')}\n\n"
+                        f"Expected output: {_target.get('output_contract', '')}"
+                    ),
+                    "tool_id": _tool_id,
+                    "readiness_status": str(_target.get("implementation_status") or "BLOCKED"),
+                    "mapped_route": str(_target.get("existing_module_or_route") or ""),
+                    "required_inputs": str(_target.get("input_contract") or ""),
+                    "expected_outputs": str(_target.get("output_contract") or ""),
+                    "remaining_gap": str(_target.get("remaining_gap") or ""),
+                    "external_dependency": str(_target.get("external_dependency") or ""),
+                })
+        except Exception as _registry_exc:
+            _target_catalog_error = type(_registry_exc).__name__
+
+        _include_target_tools = st.checkbox(
+            "Include the 100 target engineering tools (shows readiness and mapped routes)",
+            value=False,
+            key="explore_include_target_tools_v1",
+            help="Optional expanded view. Foundation-only methods and unconfigured integrations are labelled, not presented as verified tools.",
+        )
+        _explore_catalog = list(MODULE_CATALOG)
+        if _include_target_tools:
+            _explore_catalog.extend(_target_catalog_rows)
+            if _target_catalog_error:
+                st.warning(
+                    "The 100-tool directory could not be loaded "
+                    f"({html.escape(_target_catalog_error)}). The existing module catalog is still available."
+                )
+
         _tier_options = list(MODULE_EXPLORER_TIERS)
         _browse_tier = st.selectbox(
             "Plan / access level",
@@ -2168,7 +2216,7 @@ if not st.session_state.get("current_user"):
             placeholder="Try: ShadowShift, Venture Studio, AKDT, logistics resilience, inventory, quality, warehouse, simulation…",
             key="explore_module_search_v2"
         )
-        _category_options = ["All categories"] + sorted({str(m.get("category","Other")) for m in MODULE_CATALOG})
+        _category_options = ["All categories"] + sorted({str(m.get("category","Other")) for m in _explore_catalog})
         _browse_category = st.selectbox(
             "Area",
             _category_options,
@@ -2177,7 +2225,7 @@ if not st.session_state.get("current_user"):
 
         _query = _search.strip().lower()
         _filtered_modules = []
-        for _m in MODULE_CATALOG:
+        for _m in _explore_catalog:
             if _browse_tier != "All capabilities" and _m.get("tier") != _browse_tier:
                 continue
             if _browse_category != "All categories" and _m.get("category") != _browse_category:
@@ -2187,6 +2235,12 @@ if not st.session_state.get("current_user"):
                 str(_m.get("category","")),
                 str(_m.get("when","")),
                 str(_m.get("example","")),
+                str(_m.get("tool_id","")),
+                str(_m.get("readiness_status","")),
+                str(_m.get("mapped_route","")),
+                str(_m.get("required_inputs","")),
+                str(_m.get("expected_outputs","")),
+                str(_m.get("remaining_gap","")),
             ]).lower()
             if _query and _query not in _haystack:
                 continue
@@ -2229,6 +2283,33 @@ if not st.session_state.get("current_user"):
                             f'{html.escape(str(_m.get("example","")))}</div>',
                             unsafe_allow_html=True
                         )
+                        _target_tool_id = str(_m.get("tool_id", "")).strip()
+                        if _target_tool_id:
+                            _target_status = str(_m.get("readiness_status") or "BLOCKED")
+                            st.markdown(
+                                f"**Target tool ID and readiness**\n\n**{html.escape(_target_tool_id)}** · **{html.escape(_target_status)}**"
+                            )
+                            st.markdown(f"**Mapped existing route**\n\n{html.escape(str(_m.get('mapped_route', '')))}")
+                            st.markdown(f"**Required inputs**\n\n{html.escape(str(_m.get('required_inputs', '')))}")
+                            st.markdown(f"**Expected outputs**\n\n{html.escape(str(_m.get('expected_outputs', '')))}")
+                            st.markdown(f"**Remaining gap**\n\n{html.escape(str(_m.get('remaining_gap', '')))}")
+                            _dependency = str(_m.get("external_dependency", "")).strip()
+                            if _dependency:
+                                st.markdown(f"**External configuration**\n\n{html.escape(_dependency)}")
+                            if st.button(
+                                "Open this target in Workbench",
+                                key=f"explore_open_target_{_target_tool_id}",
+                                use_container_width=True,
+                            ):
+                                st.session_state["shoir_100_tool_query"] = ""
+                                st.session_state["shoir_100_tool_workbench"] = "All workbenches"
+                                st.session_state["shoir_100_tool_status"] = "All statuses"
+                                st.session_state.pop("shoir_pending_tool_module", None)
+                                st.session_state["shoir_expand_target_directory"] = True
+                                st.session_state["shoir_100_tool_inspector"] = (
+                                    f"{_target_tool_id} · {str(_m.get('name', '')).split(' · ', 1)[-1]}"
+                                )
+                                st.switch_page("pages/Industrial_Engineering_Workbench.py")
 
         if not _filtered_modules:
             st.info("No capability matches those filters. Try a broader search or select All capabilities.")
