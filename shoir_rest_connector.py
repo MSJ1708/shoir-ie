@@ -400,6 +400,7 @@ def verify_readonly_rest_connector(
     """
     now = _timestamp()
     name = str(profile.get("name") or "REST connector").strip()[:150]
+    network_attempted = False
     try:
         protocol = str(profile.get("protocol") or "").strip().upper()
         if protocol != "REST":
@@ -429,6 +430,11 @@ def verify_readonly_rest_connector(
                 "NOT_CONFIGURED",
                 "Set the approved endpoint and Bearer-token secret in the server-side secret store. Never enter a token in the Workbench JSON editor.",
             )
+        if len(token) > 4096 or any(ord(character) < 32 or ord(character) == 127 for character in token):
+            raise ConnectorFailure(
+                "CONFIGURATION_INVALID",
+                "The configured Bearer token exceeds the safe size limit or contains prohibited control characters; rotate it in the approved secret store.",
+            )
         health_path = _validated_path(read_config(prefix + "_HEALTH_PATH"), "health path")
         read_path = _validated_path(read_config(prefix + "_READ_PATH"), "read path")
         allowed_hosts = _parse_allowlisted_hosts(read_config("SHOIR_CONNECTOR_ALLOWED_HOSTS"))
@@ -445,6 +451,7 @@ def verify_readonly_rest_connector(
                 "CONFIGURATION_INVALID", "SHOIR_CONNECTOR_TIMEOUT_SECONDS must be between 0.5 and 10."
             )
         parsed, host, port, base_path = _safe_endpoint(endpoint, allowed_hosts)
+        network_attempted = True  # DNS resolution is part of the explicit operator-triggered attempt.
         pinned_ip = _resolve_pinned_ip(host, port, private_networks, resolver=resolver)
 
         health_status, _health_type, _health_body = _get_response(
@@ -537,7 +544,7 @@ def verify_readonly_rest_connector(
             "tool_id": "T096",
             "profile_name": name,
             "status": exc.status,
-            "attempted": exc.status not in {"NOT_CONFIGURED", "CONFIGURATION_INVALID", "DISABLED_OR_REVOKED"},
+            "attempted": network_attempted,
             "verified_at": now,
             "connection_verified": False,
             "data_retrieval_verified": False,
@@ -551,7 +558,7 @@ def verify_readonly_rest_connector(
             "tool_id": "T096",
             "profile_name": name,
             "status": "CONNECTION_FAILED",
-            "attempted": True,
+            "attempted": network_attempted,
             "verified_at": now,
             "connection_verified": False,
             "data_retrieval_verified": False,
