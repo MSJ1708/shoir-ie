@@ -316,7 +316,7 @@ def test_governance_retention_and_delete_plans_do_not_delete_data():
 
 
 def test_all_target_examples_are_valid_json():
-    for tool_id in ("T006", "T020", "T060", "T074", "T080", "T094", "T096", "T097", "T098", "T099"):
+    for tool_id in ("T006", "T020", "T039", "T060", "T074", "T080", "T094", "T096", "T097", "T098", "T099"):
         value = json.loads(get_tool_example_json(tool_id))
         assert isinstance(value, dict)
         out = run_additional_tool(tool_id, value)
