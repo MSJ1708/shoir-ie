@@ -1060,7 +1060,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                             )
                             t020_transformations_json = st.text_area(
                                 "Transformation recipe (JSON list of objects)",
-                                value='[{"transformation":"clean headers","method_version":"1"}]',
+                                value="[]",
                                 key="tool020_transformations_json",
                             )
                             t020_downstream_runs_json = st.text_area(
