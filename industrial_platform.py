@@ -861,6 +861,11 @@ def export_pptx(title: str, tables: Sequence[Tuple[str,pd.DataFrame]], figures: 
             data_row_height = Inches(.46)
             for row_index in range(1, rows):
                 table.rows[row_index].height = data_row_height
+            for j, col in enumerate(chunk.columns):
+                table.cell(0, j).text = str(col)
+            for i, row in enumerate(chunk.itertuples(index=False), 1):
+                for j, val in enumerate(row):
+                    table.cell(i, j).text = str(val)
             for row_index in range(rows):
                 for cell in table.rows[row_index].cells:
                     cell.margin_top = Inches(.025)
@@ -869,15 +874,10 @@ def export_pptx(title: str, tables: Sequence[Tuple[str,pd.DataFrame]], figures: 
                     cell.margin_right = Inches(.06)
                     cell.vertical_anchor = MSO_ANCHOR.MIDDLE
                     for paragraph in cell.text_frame.paragraphs:
-                        paragraph.font.size = Inches(.14)
-            for j, col in enumerate(chunk.columns):
-                table.cell(0, j).text = str(col)
-            for i, row in enumerate(chunk.itertuples(index=False), 1):
-                for j, val in enumerate(row):
-                    table.cell(i, j).text = str(val)
-            # Check actual row extents against the reserved table region.
+                        for run in paragraph.runs:
+                            run.font.size = Inches(.14)
+            # Check effective row extents, not just the containing shape.
             assert sum(r.height for r in table.rows) <= table_height
-            table.height = table_height
     payload = io.BytesIO()
     prs.save(payload)
     return payload.getvalue()
