@@ -353,3 +353,28 @@ def test_connector_token_control_characters_are_rejected_without_exposure(monkey
     assert out["status"] == "CONFIGURATION_INVALID"
     assert out["attempted"] is False
     assert "Injected" not in json.dumps(out)
+
+def test_sample_preview_redacts_common_personal_and_location_fields():
+    preview = connector._redacted_preview({
+        "full_name": "SYNTHETIC PERSON",
+        "employee_id": "SYNTH-EMP-001",
+        "customer_name": "SYNTHETIC CUSTOMER",
+        "home_address": "123 Example Road",
+        "birth_date": "1990-01-01",
+        "contact_phone": "+1-555-0100",
+        "location": "SYNTHETIC LOCATION",
+        "station": "S1",
+        "count": 7,
+    })
+    for key in (
+        "full_name",
+        "employee_id",
+        "customer_name",
+        "home_address",
+        "birth_date",
+        "contact_phone",
+        "location",
+    ):
+        assert preview[key] == "[REDACTED]"
+    assert preview["station"] == "S1"
+    assert preview["count"] == 7
