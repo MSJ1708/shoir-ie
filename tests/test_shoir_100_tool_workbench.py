@@ -879,3 +879,14 @@ def test_workbench_t006_recovery_snapshot_history_is_undoable_redoable_and_gated
     assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
     result = at.session_state["shoir_tool_result_T006"]
     assert result["status"] == "REVISION_RESTORED" and result["current_snapshot"]["inspection_state"] == "PENDING"
+
+    # A malformed attempted checkpoint must not discard the last valid output or history.
+    at.selectbox(key="tool006_action").select("Create checkpoint")
+    at.run(timeout=90)
+    at.text_area(key="tool006_snapshot_json").set_value("{invalid json")
+    at.button(key="tool006_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    preserved = at.session_state["shoir_tool_result_T006"]
+    assert preserved["status"] == "REVISION_RESTORED"
+    assert preserved["current_snapshot"]["inspection_state"] == "PENDING"
