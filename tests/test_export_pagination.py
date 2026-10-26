@@ -142,6 +142,17 @@ def test_powerpoint_titles_tables_and_charts_fit_widescreen_slide_bounds():
     height = presentation.slide_height
     assert abs((width / height) - (16 / 9)) < 0.002
 
+    # The cover title/subtitle placeholders in python-pptx's default template
+    # may have zero-height extents after switching to widescreen. Pin both.
+    cover = presentation.slides[0]
+    cover_title = cover.shapes.title
+    cover_subtitle = cover.placeholders[1]
+    assert cover_title.height >= Inches(1.0)
+    assert cover_subtitle.height >= Inches(.6)
+    assert cover_title.top + cover_title.height <= cover_subtitle.top
+    assert cover_title.left + cover_title.width <= width
+    assert cover_subtitle.left + cover_subtitle.width <= width
+
     for slide in presentation.slides:
         title = slide.shapes.title
         if title is not None:
