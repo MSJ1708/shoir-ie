@@ -56,3 +56,18 @@
 ## Handover summary
 
 The key immediate unblocker is a real, current-candidate authenticated staging run after the hosted app and Actions fixtures are confirmed. That passing run alone would not authorize production: branch protection/review, schema/function compatibility, a reviewed launch module subset, T096/T098 external evidence, legal/commercial approval, and operational recovery proof remain release gates.
+
+---
+
+## Current-state addendum — after staging merge, 26 October 2026
+
+This addendum supersedes the baseline branch/PR status above where it differs.
+
+- PR #196 has merged to staging only at commit `32ac85493bfadfbae172f546741aae74cd647069`; current staging branch is now `bf1f9c7750b48e74d140a929eb94d521974ec0a9` after a documentation-only opt-in trigger record.
+- Authenticated gate run 40324443387 is in progress on the exact current staging SHA: https://github.com/MSJ1708/shoir-ie/actions/runs/40324443387. The latest observation was dependency installation; no acceptance result is yet available. Treat all authentication, module, persistence, logout and workspace-isolation gates as pending until their current-run results and redacted artifact are inspected.
+- Current staging validation run 40324443559 is in progress: https://github.com/MSJ1708/shoir-ie/actions/runs/40324443559. Its hosted anonymous smoke is skipped under the declared workflow conditions and does not verify the Streamlit staging URL/SHA.
+- Current main remains `267be8889c310d90141c047d8aadd42c942423fb`. The branch endpoint reports `protected=false`; the visible rulesets list is empty. The connected integration cannot change protection settings, inspect Actions secret values, or call workflow_dispatch. An authorized repository administrator/Actions operator is required for these actions and saved-setting evidence.
+- PR #195 is ready for review but has no independent approval; its source/mock tests passed while live hosted smoke is skipped for this PR context. PR #197 is still draft and must finish CI on its refreshed exact head before review. No PR was merged to main.
+- Open PR count is 17 after #196 closed by merge. The canonical 100-tool matrix remains at 0 VERIFIED_WORKING, 98 IMPLEMENTED_NEEDS_VALIDATION and 2 EXTERNAL_CONFIGURATION_REQUIRED (T096/T098).
+
+**Current release decision: NO-GO. Keep BETA visible.** Production remains unchanged. The authenticated gate, exact-head CI, branch protection, independent review, Streamlit host-to-SHA verification, provider/endpoint tests, production migration/function parity plan, Saudi legal/privacy/tax/commercial approvals and operational restore/rollback evidence are still required. Do not claim that this trigger or the #196 merge is a release pass.
