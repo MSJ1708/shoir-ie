@@ -17,6 +17,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
+from shoir_upgrade import literalize_untrusted_formula_cells
 
 
 DB_PATH = "enterprise_full_workspace.db"
@@ -599,5 +600,6 @@ def render_enterprise_integration(tier: str, username: str) -> None:
             assets.to_excel(writer,index=False,sheet_name="Shared_Assets")
             activity.to_excel(writer,index=False,sheet_name="Collaboration")
             pd.DataFrame(audit_rows).to_excel(writer,index=False,sheet_name="Audit")
+            literalize_untrusted_formula_cells(writer.book)
         st.download_button("📥 Download Enterprise Workspace Pack",data=out.getvalue(),file_name="shoir_ie_enterprise_workspace.xlsx",mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",type="primary",use_container_width=True,key="ei_export_pack")
         st.download_button("📄 Download collaboration CSV",data=activity.to_csv(index=False).encode("utf-8"),file_name="enterprise_collaboration.csv",mime="text/csv",use_container_width=True,key="ei_export_collab")
