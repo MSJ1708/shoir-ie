@@ -67,11 +67,35 @@ Every PR below is currently open and marked draft in live GitHub metadata. The m
 | [#189](https://github.com/MSJ1708/shoir-ie/pull/189) | staging-e2e-20261019 (base 19678321…) ← agent/shoir-100-release-gates-verify-20261025 (49f46bcf…) | DIRTY; validation, engine, platform, security, transaction and Edge PASS on that head; hosted smoke SKIPPED | Large staging/release stack, not a safe mainline merge | Keep staging-specific. The staging branch has since advanced; run authenticated gate on the exact final staging candidate and verify parity. Never merge this large stack blindly to main. |
 | [#191](https://github.com/MSJ1708/shoir-ie/pull/191) | feat/shoir-100-tools-integration-20261025 (base 800b86b7…) ← feat/shoir-100-t006-recovery-20261026 (latest aa286834…) | Mergeable=true/state=unstable; prior head c1e6f657… had two AppTest failures. Checks on 28449466… were IN PROGRESS at capture | T006 snapshot recovery, T020 dataset lineage and T039 status reconciliation | Fix first. Tests now mock persistence for normal tool-flow checks without using a live backend and assert failed-save rollback. Require green checks on 28449466… before port/review. |
 
+## 2A. Direct base/head comparisons (not just PR title or total historical commits)
+
+GitHub compare results were obtained for the live head refs. Ahead/behind figures are relative to the named base, and file-level evidence below reflects the current comparison, not lifetime PR statistics.
+
+| PR | Compare result | Residual file-level evidence / implication |
+|---|---|---|
+| #170 vs main | diverged; 47 ahead / 334 behind | 17 files differ, including app.py, durable_account_store.py, the persistence Edge Function, PostgreSQL SQL, two legal migrations, beta-referral tests and legal/privacy docs. High schema + Edge compatibility risk. |
+| #172 vs main | diverged; 6 ahead / 174 behind | Only 3 residual files differ: one Workbench line, three tier-capability lines, and three target-engine-test lines. Review/fix these residual changes rather than treating the historical 166-commit chain as a requirement to merge. |
+| #173 vs main | diverged; 49 ahead / 334 behind | Adds a competing shoir_100_tool_registry.py and shoir_100_tool_workbench.py, plus its matrix/report and tier changes. It is an alternative foundation, not a safe wholesale merge. |
+| #174 vs main | diverged; 44 ahead / 334 behind | Adds shoir_100_tool_hub.py (782 lines), alternative matrix/report, tier-capability and facility-layout changes and dedicated tests. Review uniquely useful workflows; avoid adding a second competing hub. |
+| #175 vs main | diverged; 20 ahead / 334 behind | Adds separate shoir_100_tool_registry.py (477 lines), shoir_100_tool_engines.py (289 lines), matrix/report and tests. Competes with the current registry. |
+| #178 vs main | diverged; 268 ahead / 330 behind | Wide multi-engine stack and new pages/Engineering_Tool_Library.py (2,369 lines); changes Workbench, Copilot, Excel Studio, facility layout, persistence, tier rules and many engine/test modules. High regression/layout/access risk; port per-target, not wholesale. |
+| #179 vs main | diverged; 33 ahead / 330 behind | Adds alternate registry, unit converter (190 lines), basic calculator (264 lines), facility-flow logic and deny-path tests. Compare each method against mainline equivalents. |
+| #180 vs main | diverged; 36 ahead / 220 behind | Changes Workbench (+352 lines), shoir_target_engines.py (+1,287), registry and tests. Candidate for unique engine/test ports after method-by-method comparison. |
+| #181 vs main | diverged; 82 ahead / 330 behind | Adds shoir_100_tool_methods.py (1,622 lines), shoir_100_tool_ui.py (625 lines), alternate registry/calculator/converter files and tests. Overlaps #179 and other foundations; split unique methods from alternative UI/registry. |
+| #182 vs main | diverged; 69 ahead / 174 behind | Changes target engines (+1,168 lines), Workbench (+338), matrix/report, registry and workspace persistence. Stacked on #172 and has a failing test; port unique changes after fixing it from a main-based branch. |
+| #184 vs main | diverged; 35 ahead / 101 behind | Changes three workflows, app.py (+47 lines), smoke script (+82), Workbench, target engines (+149) and tests. Protect CI semantics; review smoke assertions/workflow changes carefully. |
+| #188 vs main | diverged; 39 ahead / 85 behind | Adds shoir_ergonomics.py (299 lines) and tests; modifies Workbench (+270), registry, tiers and matrix. T046 is distinct but requires domain/reference validation. |
+| #189 vs staging | diverged; 317 ahead / 89 behind | Large staging stack. The diff removes 14 lines from authenticated-release-gate.yml, deletes staging credential-recovery/password-reset helpers and related tests, and changes account-provisioning/authenticated gate scripts. Do not merge without security review of every removal and exact staging acceptance. |
+| #191 vs main | diverged; 47 ahead / 5 behind | Changes Workbench (+335 lines), target engines (+361), Workbench tests (+157), registry and implementation reports. It includes unique T006/T020/T039 work but must be reviewed as a multi-file feature, not merely a test-only change. |
+
+These comparisons explain why historical commit counts and mergeable state alone do not define integration work. The right unit is the current base/head diff plus tests and dependencies. They also show #189 removes staging recovery code; a passing local test suite is not sufficient to accept those deletions.
+
 ### PR inventory count
 
-- Open drafts: 14
-- Open non-drafts: 0
-- No PR closure, merge or retarget was performed by this audit.
+- Release-feature drafts captured in this inventory: 14
+- Open non-drafts in that feature inventory: 0
+- The separate documentation-only audit PR #192 was created after the feature inventory snapshot; it is deliberately excluded from the 14-row functional CSV because it contains no runtime change. It remains a draft and must receive the normal review process.
+- No feature PR was closed, merged or retargeted by this audit.
 
 ## 3. Canonical integration and dependency graph
 
