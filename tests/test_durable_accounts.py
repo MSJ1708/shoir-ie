@@ -44,8 +44,19 @@ def test_master_admin_enterprise_plus_entitlement_contract():
     assert '("sho", admin_pass_hash, "Enterprise Admin", "Enterprise Plus Tier ($399)",' in app_source
     assert '(admin_pass_hash, "Enterprise Admin", "Enterprise Plus Tier ($399)", "mohsuhailji@gmail.com")' in app_source
     assert '("Enterprise Admin", "Enterprise Plus Tier ($399)", "mohsuhailji@gmail.com")' in app_source
-    assert _source_contract_contains(edge_source, 'const isMasterAdmin = row.username_lc==="sho"&&row.role==="Enterprise Admin";')
-    assert _source_contract_contains(edge_source, 'const effectiveTier=isMasterAdmin?adminTier:row.tier;')
+    assert _source_contract_contains(
+        edge_source,
+        'const isProtectedMasterAdmin=row.username_lc==="sho";',
+    )
+    assert _source_contract_contains(
+        edge_source,
+        'hasCanonicalMasterAdminInvariant(row as Record<string,unknown>)',
+    )
+    assert _source_contract_contains(
+        edge_source,
+        'The protected administrator configuration requires manual review.',
+    )
+    assert "update({tier:adminTier,updated_at:newDate().toISOString()})" not in re.sub(r"\s+", "", edge_source)
     assert _source_contract_contains(edge_source, 'if(requiredScope==="workspace"&&!(row.username_lc==="sho"&&row.role==="Enterprise Admin")')
     assert _source_contract_contains(edge_source, 'if(row.username_lc!=="sho"||row.role!=="Enterprise Admin")')
 
