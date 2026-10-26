@@ -24,7 +24,7 @@ Current critical blockers:
 1. Main is unprotected: GitHub reports protection disabled, required status contexts empty, and no rulesets.
 2. On exact main SHA 72e498d892b9eb088d34be940fc1f6d97b482c1a, the unit/platform test job, engine regression, transaction contract, Edge Function verification, and security-quality checks pass, but the hosted public app smoke **fails**. The hosted app displays a startup compatibility error saying durable_account_store is missing edge_referral_summary. That function exists in the checked-in source at main (durable_account_store.py around line 628). This indicates a deployed-source/entry-point mismatch, not proof the source function is absent.
 3. Staging validation passes on SHA 8b36e3737705867019b9cf29e603cfc37e7911e6, but authenticated release gate and hosted smoke are skipped, not passed.
-4. PR #191 previously failed the T006 and T020 AppTests (2 failed, 928 passed, 2 skipped). A test-isolation fix is committed at 28449466e8b6ae8c6e4ae445b4c47bba2b8aa402; CI was in progress at the time of capture.
+4. PR #191 previously failed the T006 and T020 AppTests (2 failed, 928 passed, 2 skipped). A test-isolation fix is committed at aa28683435b39fa45574da88e510728ae7a59b98; CI was in progress at the time of capture.
 
 ## 1. Verified baseline
 
@@ -65,7 +65,7 @@ Every PR below is currently open and marked draft in live GitHub metadata. The m
 | [#184](https://github.com/MSJ1708/shoir-ie/pull/184) | feat/shoir-100-tools-integration-20261025 (base a312da52…) ← feat/shoir-t044-rcm-current-base-20261025 (7af10bd0…) | DIRTY; test, engine and security PASS; hosted smoke SKIPPED | T044 limited RCM review register plus responsive smoke fixes | Reconcile stack and port the T044 workflow and responsive fixes; verify human review status, entitlement, persistence and browser behavior. |
 | [#188](https://github.com/MSJ1708/shoir-ie/pull/188) | feat/shoir-100-tools-integration-20261025 (base c84565ba…) ← agent/shoir-100-rnle-ergonomics-20261025 (e8db67bd…) | DIRTY; test PASS; hosted smoke SKIPPED; no further checks returned for the current head | T046 single-task RNLE screening; requires scope boundaries and qualified review | Port only after formula/reference/boundary/domain review; retain the human-review warning, then run tier and browser checks. |
 | [#189](https://github.com/MSJ1708/shoir-ie/pull/189) | staging-e2e-20261019 (base 19678321…) ← agent/shoir-100-release-gates-verify-20261025 (49f46bcf…) | DIRTY; validation, engine, platform, security, transaction and Edge PASS on that head; hosted smoke SKIPPED | Large staging/release stack, not a safe mainline merge | Keep staging-specific. The staging branch has since advanced; run authenticated gate on the exact final staging candidate and verify parity. Never merge this large stack blindly to main. |
-| [#191](https://github.com/MSJ1708/shoir-ie/pull/191) | feat/shoir-100-tools-integration-20261025 (base 800b86b7…) ← feat/shoir-100-t006-recovery-20261026 (latest 28449466…) | Mergeable=true/state=unstable; prior head c1e6f657… had two AppTest failures. Checks on 28449466… were IN PROGRESS at capture | T006 snapshot recovery, T020 dataset lineage and T039 status reconciliation | Fix first. Tests now mock persistence for normal tool-flow checks without using a live backend and assert failed-save rollback. Require green checks on 28449466… before port/review. |
+| [#191](https://github.com/MSJ1708/shoir-ie/pull/191) | feat/shoir-100-tools-integration-20261025 (base 800b86b7…) ← feat/shoir-100-t006-recovery-20261026 (latest aa286834…) | Mergeable=true/state=unstable; prior head c1e6f657… had two AppTest failures. Checks on 28449466… were IN PROGRESS at capture | T006 snapshot recovery, T020 dataset lineage and T039 status reconciliation | Fix first. Tests now mock persistence for normal tool-flow checks without using a live backend and assert failed-save rollback. Require green checks on 28449466… before port/review. |
 
 ### PR inventory count
 
@@ -110,12 +110,12 @@ Recommended order:
 - Read-only live repository, PR, check-run, branch-protection/ruleset and workflow inspection.
 - Confirmed the 100-row current matrix and counted status categories as above.
 - Matched production smoke error text against current main source. No production deployment or schema fix was attempted.
-- Committed a focused test-only update on PR #191 at 28449466e8b6ae8c6e4ae445b4c47bba2b8aa402. Normal T006/T020 method-flow assertions mock the workspace save operation so synthetic AppTest state cannot depend on a remote session token; explicit assertions cover failed-save rollback. Checks were in progress when recorded; not yet PASS.
+- Committed a focused test-only update on PR #191 at aa28683435b39fa45574da88e510728ae7a59b98. Normal T006/T020 method-flow assertions mock the workspace save operation so synthetic AppTest state cannot depend on a remote session token; explicit assertions cover failed-save rollback. Checks were in progress when recorded; not yet PASS.
 - Created this documentation-only branch from the exact main baseline. No branch protection change, production mutation, database/Edge deployment, payment operation, account action, PR merge or PR closure occurred.
 
 ## 6. Exact next steps
 
-1. Inspect all checks on #191 commit 28449466e8b6ae8c6e4ae445b4c47bba2b8aa402; fix underlying failures if any.
+1. Inspect all checks on #191 commit aa28683435b39fa45574da88e510728ae7a59b98; fix underlying failures if any.
 2. Build the commit/file-level unique-change map; port fixes into one current-main-based integration path and retest affected files.
 3. Verify the live production Streamlit configuration and mismatch without touching production; prepare an approved compatibility deployment plan only after source, schema and Edge versions are agreed.
 4. Configure branch protection, then run authenticated staging gate, direct-action/tier denials, cross-workspace isolation, save/reload/re-login and real artifact round trips on the exact candidate SHA.
