@@ -29,8 +29,8 @@ The candidate registry and matrix are maintained together. At the latest invento
 
 | Status | Count |
 |---|---:|
-| `IMPLEMENTED_NEEDS_VALIDATION` | 91 |
-| `FOUNDATION_ONLY` | 7 |
+| `IMPLEMENTED_NEEDS_VALIDATION` | 92 |
+| `FOUNDATION_ONLY` | 6 |
 | `EXTERNAL_CONFIGURATION_REQUIRED` | 2 |
 | `MISSING` | 0 |
 | `VERIFIED_WORKING` | 0 |
@@ -42,6 +42,7 @@ These values show catalog coverage and implementation maturity; they are not tes
 
 - **T006** added a bounded JSON snapshot-history engine, existing-Workbench controls, an execution-time tier gate, input/error-bound tests, and a Workbench AppTest. It only handles snapshots explicitly entered into this tool; it is not a universal undo manager and cannot reverse external side effects.
 - **T039** was reclassified based on code inspection: an executable CAPA/8D completeness/due-date method, gated form, result table and unit/AppTest coverage already exist. The registry/matrix entry now records the actual route and tests, while leaving the dedicated auditable lifecycle ledger, immutable/versioned status events, access-controlled attachments and two-user isolation as open gaps.
+- **T020** now has a deterministic dataset-version/lineage workflow in the existing Workbench. It can use the current Excel Studio source signature or hash a manual JSON snapshot, incorporate source metadata and transformations into a version fingerprint, and classify caller-supplied downstream run links as current, stale or unverifiable. Automatic invalidation across all downstream consumers, verified hosted durability and cross-workspace isolation remain open.
 - Report/matrix/registry counts were reconciled to avoid calling cataloged foundation-only targets “verified.”
 
 ## 4. Automated verification evidence
@@ -110,4 +111,4 @@ Historical CI evidence documented in `docs/SHOIR_100_TOOL_IMPLEMENTATION_AUDIT.m
 
 ## 8. Final release decision
 
-**NO-GO.** The T006/T039 changes are scoped, version-controlled and awaiting exact-head CI/acceptance. The 100-target catalog is accounted for but has zero fully verified targets. The hosted smoke is skipped, branch protection was disabled at baseline, and enterprise persistence/isolation plus the full 100-tool acceptance matrix remain incomplete. Do not present the product as production-ready or the 100 tools as fully operational until there is current evidence for every mandatory gate.
+**NO-GO.** The T006/T039 changes are scoped, version-controlled and awaiting exact-head CI/acceptance. The 100-target catalog is accounted for but has zero fully verified targets. Current inventory: 92 implemented-needs-validation, 6 foundation-only and 2 external-configuration-required. The hosted smoke is skipped, branch protection was disabled at baseline, and enterprise persistence/isolation plus the full 100-tool acceptance matrix remain incomplete. Do not present the product as production-ready or the 100 tools as fully operational until there is current evidence for every mandatory gate.
