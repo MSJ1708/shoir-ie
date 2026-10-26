@@ -64,8 +64,9 @@ def test_pdf_export_paginates_and_preserves_rows_past_previous_30_row_limit():
     assert len(reader.pages) >= 2
 
     extracted = "\n".join(page.extract_text() or "" for page in reader.pages)
-    for metric in rows["Metric"]:
+    for metric, value in zip(rows["Metric"], rows["Value"], strict=True):
         assert metric in extracted
+        assert str(value) in extracted
     assert "Value" in extracted
     assert "All metrics" in extracted
     _save_synthetic_evidence("complete_export_verification.pdf", payload, {
@@ -92,6 +93,7 @@ def test_powerpoint_export_splits_all_rows_over_continued_table_slides():
     assert len(table_slides) == (len(rows) + 14) // 15
 
     exported_metrics = []
+    exported_values = []
     for index, slide in enumerate(table_slides):
         table_shapes = [shape for shape in slide.shapes if getattr(shape, "has_table", False)]
         assert len(table_shapes) == 1
@@ -99,12 +101,14 @@ def test_powerpoint_export_splits_all_rows_over_continued_table_slides():
         assert table.cell(0, 0).text == "Metric"
         assert table.cell(0, 1).text == "Value"
         exported_metrics.extend(table.cell(row, 0).text for row in range(1, len(table.rows)))
+        exported_values.extend(table.cell(row, 1).text for row in range(1, len(table.rows)))
         if index == 0:
             assert slide.shapes.title.text == "All metrics"
         else:
             assert f"continued {index + 1}" in slide.shapes.title.text
 
     assert exported_metrics == list(rows["Metric"])
+    assert exported_values == [str(value) for value in rows["Value"]]
     _save_synthetic_evidence("complete_export_verification.pptx", payload, {
         "format": "PPTX",
         "row_count": len(rows),
