@@ -371,3 +371,35 @@ The current exact-head PR run [40387830793](https://github.com/MSJ1708/shoir-ie/
 Both are proposed source changes only, not a coherent promoted production candidate. The existing successful push result for PR #204 does not override its missing independent review, and neither draft changes the live backend by itself.
 
 **Overall status remains HOLD.** No production or staging deployment or database mutation occurred. The remaining blockers include current PR #203 full CI completion; PR #204 PR-check completion and independent review; staged-to-production migration/function compatibility and data-preserving rehearsal; admin-enforced branch protections; live hosted revision identification; comprehensive feature acceptance; proof of tested backup restoration/alerting; and qualified Saudi legal/commercial approval.
+
+
+## 17. Canonical 100-tool target registry audit
+
+Source inspected: `shoir_tool_registry.py`, source blob `177fa274d37032a9f25d1913dd92e692b8f1dc38` on staging `9e3899d6f5147584cf27585d946fa7b5d18d92d5`.
+
+The registry text was parsed directly and contains 100 unique IDs from `T001` through `T100`, with no duplicate or missing ID. The catalog covers 10 categories (10 entries per category) and the six current package tiers:
+
+| Source-declared status | Count | Meaning |
+|---|---:|---|
+| `IMPLEMENTED_NEEDS_VALIDATION` | 87 | Existing implementation paths are referenced, but the acceptance notes do not claim behavior verified end-to-end. |
+| `FOUNDATION_ONLY` | 11 | The capability has a foundation, not demonstrated full acceptance. |
+| `EXTERNAL_CONFIGURATION_REQUIRED` | 2 | Live capability requires provider or endpoint setup and verification. |
+| `VERIFIED_WORKING` | 0 | No target tool is currently promoted to this registry status. |
+| `MISSING` / `BLOCKED` | 0 | These statuses exist in the taxonomy but are not used by the current registry rows; that does not imply all functionality is complete. |
+
+Tier distribution in the target registry: Starter 26; Mid-Tier Pro 25; Professional 24; Enterprise 15; Enterprise Plus 4; Research Pack 6.
+
+Important qualification from the registry's own source contract: this is a **target/gap-analysis catalog**, deliberately separate from legacy module menus until route, execution, entitlement and acceptance-test evidence is reconciled. The 100-row count is therefore not proof of 100 live modules.
+
+High-priority examples from the source-declared gaps:
+- `T006 Undo, Redo, and Recovery`: foundation only; no complete cross-module undo/redo contract.
+- `T020 Dataset Versioning and Lineage`: foundation only; immutable history and downstream invalidation remain unverified.
+- `T039 CAPA and 8D Manager`: foundation only; all eight disciplines, approvals and auditable transitions require validation.
+- `T044` Reliability-Centered Maintenance and `T046` Ergonomics Assessment: foundation only; method/scoring validation and specialist review required.
+- `T060 Supply Chain Network Planner`, `T074 Digital Twin Calibration Studio`, and `T080 Industrial Disruption Simulator`: foundation only; formulated/calibrated models and independent reference checks not demonstrated.
+- `T094 KPI Dashboard and Alert Center`: foundation only; source aggregation, persisted thresholds, access scopes and duplicate-alert behavior unverified.
+- `T096 Integration Management Center`: external configuration required; live connection cannot be claimed until authorized staging endpoint/credential verification passes.
+- `T098 Enterprise Identity and Audit Center`: external configuration required; SSO/MFA and audit coverage must be proven against the real identity provider.
+- `T099 Data Governance and Recovery Center`: foundation only; isolated restore/delete, tenant-scoping and recovery evidence missing.
+
+This source audit is a catalogue check, not an end-to-end functional test. It supports the release rule that feature statuses must not be upgraded merely because their routes or source files exist. The module inventory and acceptance work remain a release blocker, especially for paid general availability.
