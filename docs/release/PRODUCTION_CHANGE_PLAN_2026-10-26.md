@@ -60,3 +60,11 @@ This is not authorization to execute these steps. The final migration/function o
 Include approver role/identity, UTC timestamp, target ref, exact SHA, migration paths/checksums, function hash, backup/restore evidence, change window, on-call/recovery owner, abort conditions, forward-recovery/rollback strategy, monitoring and post-deploy tests.
 
 **Current status: BLOCKED. Production remains unchanged.**
+
+## Additional preflight discovered in source review
+
+Migration 20261021130000_shoir_beta_legal_referrals.sql changes existing affiliate_code values for NULL/blank and legacy AFF-...-15 rows and for case-insensitive duplicates, updates updated_at, and adds a unique index. Do not classify this as only additive. Compute redacted aggregate affected-row counts and review consequences for existing referral links before production authorization. The terms acceptance field defaults to false, which must not be changed to imply that any user accepted a new version.
+
+A current SQL catalog query confirmed the legal-acceptance trigger exists on staging and not in production. The deployed staging trigger function compares refund_policy_version against 2026-10-23-v2. Reconcile this contract with the current Edge Function before any migration/function rollout.
+
+Platform watch: Supabase says new explicit-grant behavior for Data API table exposure applies to all existing projects on 30 October 2026; audit any required direct Data API access without granting client roles broad access (source: https://github.com/orgs/supabase/discussions/45329). Older CBC-mode TLS 1.2 cipher suites are scheduled for removal from project HTTP APIs on 10 November 2026 at the earliest; confirm supported modern TLS clients and monitor the notice (source: https://supabase.com/changelog/cbc-tls-ciphers-deprecated).
