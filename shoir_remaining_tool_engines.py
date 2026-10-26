@@ -64,6 +64,20 @@ def _records(value: Any, field: str, *, minimum: int = 1, maximum: int = 5000) -
     return _json_clone(value)
 
 
+def _configuration_value(name: str) -> str:
+    """Read a named secret/config value without ever returning it to the UI."""
+    value = os.environ.get(name, "")
+    if value and value.strip():
+        return value.strip()
+    try:
+        import streamlit as st
+        value = st.secrets.get(name, "")
+        return str(value or "").strip()
+    except Exception:
+        # Secrets may be absent in local tests or a non-Streamlit invocation.
+        return ""
+
+
 def _utc_timestamp(value: Any, field: str, *, allow_missing: bool = False) -> datetime | None:
     if value is None or not str(value).strip():
         if allow_missing:
@@ -102,6 +116,8 @@ def recovery_action(payload: Mapping[str, Any]) -> dict[str, Any]:
     elif action in {"undo", "redo", "recover"}:
         raise ValueError(f"{action} requires at least one valid snapshot.")
     if action == "snapshot":
+        if "state" not in payload:
+            raise ValueError("state is required when action is snapshot.")
         state = payload.get("state")
         cloned = _json_clone(state)
         # Discard redo history after a new edit, following standard editor semantics.
@@ -523,8 +539,8 @@ def integration_configuration_status(payload: Mapping[str, Any]) -> dict[str, An
             raise ValueError(f"{name}.endpoint_env must use a SHOIR_CONNECTOR_*_ENDPOINT/URL/DSN variable name.")
         if not re.fullmatch(r"SHOIR_CONNECTOR_[A-Z0-9_]+_(TOKEN|CREDENTIAL|PASSWORD|DSN)", credential_env):
             raise ValueError(f"{name}.credential_env must use a SHOIR_CONNECTOR_*_TOKEN/CREDENTIAL/PASSWORD/DSN variable name.")
-        endpoint_value = os.environ.get(endpoint_env, "").strip()
-        credential_value = os.environ.get(credential_env, "").strip()
+        endpoint_value = _configuration_value(endpoint_env)
+        credential_value = _configuration_value(credential_env)
         endpoint_valid = False
         if endpoint_value:
             parsed = urlparse(endpoint_value)
@@ -585,7 +601,7 @@ def validate_api_plugin_manifests(payload: Mapping[str, Any]) -> dict[str, Any]:
         if tier not in {"Starter", "Mid-Tier Pro", "Professional", "Enterprise", "Enterprise Plus", "Research Pack"}:
             errors.append("minimum_tier must be one of the six canonical packages.")
         scopes = manifest.get("scopes", [])
-        if not isinstance(scopes, list) or not scopes or any(s not in scopes_allowed for s in scopes):
+        if not isinstance(scopes, list) or not scopes or any(not isinstance(s, str) or s not in scopes_allowed for s in scopes):
             errors.append("scopes must be a non-empty list drawn from read/write/execute/export/admin.")
         request_schema = manifest.get("request_schema")
         response_schema = manifest.get("response_schema")
@@ -632,16 +648,17 @@ def identity_audit_configuration_status(payload: Mapping[str, Any] | None = None
         "mfa_enforced": "SHOIR_MFA_ENFORCED",
         "audit_log_enabled": "SHOIR_AUDIT_LOG_ENABLED",
     }
-    present = {key: bool(os.environ.get(name, "").strip()) for key, name in env_map.items()}
-    issuer = os.environ.get(env_map["issuer_url"], "").strip()
-    redirect = os.environ.get(env_map["redirect_uri"], "").strip()
-    scopes = set(os.environ.get(env_map["scopes"], "").lower().split())
+    configured_values = {key: _configuration_value(name) for key, name in env_map.items()}
+    present = {key: bool(value) for key, value in configured_values.items()}
+    issuer = configured_values["issuer_url"]
+    redirect = configured_values["redirect_uri"]
+    scopes = set(configured_values["scopes"].lower().split())
     issuer_parsed = urlparse(issuer) if issuer else None
     redirect_parsed = urlparse(redirect) if redirect else None
     issuer_valid = bool(issuer_parsed and issuer_parsed.scheme == "https" and issuer_parsed.netloc)
     redirect_valid = bool(redirect_parsed and redirect_parsed.scheme == "https" and redirect_parsed.netloc)
-    mfa_enforced = os.environ.get(env_map["mfa_enforced"], "").strip().lower() in {"true", "1", "yes", "enforced"}
-    audit_enabled = os.environ.get(env_map["audit_log_enabled"], "").strip().lower() in {"true", "1", "yes", "enabled"}
+    mfa_enforced = configured_values["mfa_enforced"].lower() in {"true", "1", "yes", "enforced"}
+    audit_enabled = configured_values["audit_log_enabled"].lower() in {"true", "1", "yes", "enabled"}
     missing = [env_map[key] for key, value in present.items() if not value]
     problems = []
     if present["issuer_url"] and not issuer_valid:
