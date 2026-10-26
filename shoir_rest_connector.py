@@ -324,7 +324,6 @@ def _get_response(
             "GET",
             target_path,
             headers={
-                "Host": (f"[{host}]" if ":" in host else host) + (f":{port}" if port != 443 else ""),
                 "Accept": "application/json",
                 "Authorization": "Bearer " + token,
                 "Connection": "close",
