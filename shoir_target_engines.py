@@ -6311,3 +6311,176 @@ def manage_recovery_snapshot_history(
             "Authenticated managed-workspace persistence, re-login recovery and cross-workspace isolation require staging verification.",
         ],
     }
+
+
+def manage_dataset_version_lineage(
+    history_state: Mapping[str, Any] | None,
+    *,
+    dataset_payload: Any = None,
+    source_signature: str | None = None,
+    source_metadata: Mapping[str, Any] | None = None,
+    transformations: Sequence[Mapping[str, Any]] | None = None,
+    downstream_runs: Sequence[Mapping[str, Any]] | None = None,
+    max_versions: int = 100,
+    max_metadata_bytes: int = 65536,
+) -> dict[str, Any]:
+    """Record bounded dataset source/recipe versions and classify supplied downstream runs.
+
+    A supplied source_signature is treated as an upstream identifier, not independently
+    certified data content. When omitted, a signature is computed from JSON snapshot data.
+    """
+    import hashlib
+    import json
+    from datetime import datetime, timezone
+
+    if isinstance(max_versions, bool) or not isinstance(max_versions, int) or not 2 <= max_versions <= 1000:
+        raise ValueError("max_versions must be an integer from 2 to 1000.")
+    if isinstance(max_metadata_bytes, bool) or not isinstance(max_metadata_bytes, int) or not 1024 <= max_metadata_bytes <= 2_000_000:
+        raise ValueError("max_metadata_bytes must be an integer from 1,024 to 2,000,000.")
+
+    def canonical_json(value: Any, field: str) -> tuple[str, Any]:
+        try:
+            encoded = json.dumps(value, ensure_ascii=False, sort_keys=True, allow_nan=False, separators=(",", ":"), default=None)
+            packed = json.loads(encoded)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError(f"{field} must be finite, valid JSON-compatible data.") from exc
+        if len(encoded.encode("utf-8")) > max_metadata_bytes:
+            raise ValueError(f"{field} exceeds the {max_metadata_bytes}-byte metadata limit.")
+        return encoded, packed
+
+    if source_signature is None or not str(source_signature).strip():
+        encoded_payload, packed_payload = canonical_json(dataset_payload, "Dataset snapshot")
+        if not isinstance(packed_payload, (dict, list)):
+            raise ValueError("Dataset snapshot must be a JSON object or array when no source signature is provided.")
+        source_sig = hashlib.sha256(encoded_payload.encode("utf-8")).hexdigest()
+        payload_provenance = "JSON_SNAPSHOT_HASHED_BY_TOOL"
+    else:
+        source_sig = str(source_signature).strip().lower()
+        if len(source_sig) > 256 or any(ord(ch) < 32 for ch in source_sig):
+            raise ValueError("Source signature must be a printable identifier no longer than 256 characters.")
+        payload_provenance = "UPSTREAM_SIGNATURE_NOT_INDEPENDENTLY_REHASHED"
+        packed_payload = None
+
+    metadata = dict(source_metadata or {})
+    if not isinstance(metadata, dict):
+        raise ValueError("Source metadata must be a JSON object.")
+    metadata_json, metadata = canonical_json(metadata, "Source metadata")
+    if transformations is None:
+        transformation_list: list[Any] = []
+    else:
+        if not isinstance(transformations, Sequence) or isinstance(transformations, (str, bytes)):
+            raise ValueError("Transformations must be a JSON list of objects.")
+        if any(not isinstance(item, Mapping) for item in transformations):
+            raise ValueError("Each transformation entry must be an object.")
+        _, transformation_list = canonical_json(list(transformations), "Transformations")
+    if downstream_runs is None:
+        run_list: list[Any] = []
+    else:
+        if not isinstance(downstream_runs, Sequence) or isinstance(downstream_runs, (str, bytes)):
+            raise ValueError("Downstream runs must be a JSON list of objects.")
+        if any(not isinstance(item, Mapping) for item in downstream_runs):
+            raise ValueError("Each downstream run must be an object.")
+        _, run_list = canonical_json(list(downstream_runs), "Downstream runs")
+
+    schema_bytes = metadata.get("schema_fingerprint", metadata.get("schemas", {}))
+    schema_json, _ = canonical_json(schema_bytes, "Schema fingerprint")
+    recipe_json, _ = canonical_json(transformation_list, "Transformations")
+    version_material = json.dumps(
+        {
+            "source_signature": source_sig,
+            "source_metadata": metadata,
+            "transformations": transformation_list,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        allow_nan=False,
+        separators=(",", ":"),
+    )
+    version_signature = hashlib.sha256(version_material.encode("utf-8")).hexdigest()
+
+    if history_state is None:
+        versions: list[dict[str, Any]] = []
+    else:
+        if not isinstance(history_state, Mapping):
+            raise ValueError("Lineage history state must be an object.")
+        raw_versions = history_state.get("versions", [])
+        if not isinstance(raw_versions, list):
+            raise ValueError("Lineage history versions must be a list.")
+        _, copied_versions = canonical_json(raw_versions, "Lineage versions")
+        if any(not isinstance(v, dict) for v in copied_versions):
+            raise ValueError("Each prior lineage version must be an object.")
+        versions = copied_versions
+        if len(versions) > max_versions:
+            raise ValueError(f"Lineage history exceeds the {max_versions}-version limit.")
+
+    current = versions[-1] if versions else None
+    if current and current.get("version_signature") == version_signature:
+        version = current
+        status = "VERSION_UNCHANGED"
+    else:
+        version_no = int(current.get("version_number", len(versions))) + 1 if current else 1
+        version = {
+            "version_number": version_no,
+            "dataset_id": "DS-" + hashlib.sha256((str(metadata.get("dataset_id", "")) + source_sig).encode("utf-8")).hexdigest()[:16].upper(),
+            "version_signature": version_signature,
+            "source_signature": source_sig,
+            "source_metadata": metadata,
+            "schema_fingerprint": hashlib.sha256(schema_json.encode("utf-8")).hexdigest(),
+            "transformation_signature": hashlib.sha256(recipe_json.encode("utf-8")).hexdigest(),
+            "transformations": transformation_list,
+            "payload_provenance": payload_provenance,
+            "recorded_utc": datetime.now(timezone.utc).isoformat(),
+        }
+        versions.append(version)
+        versions = versions[-max_versions:]
+        status = "VERSION_CREATED" if len(versions) > 1 else "VERSION_CREATED_INITIAL"
+
+    current_signature = str(version["version_signature"])
+    classified_runs = []
+    for item in run_list:
+        run_id = str(item.get("run_id", item.get("id", ""))).strip()
+        if not run_id:
+            raise ValueError("Each downstream run needs a non-empty run_id or id.")
+        linked_signature = str(item.get("version_signature", item.get("dataset_signature", item.get("source_signature", "")))).strip()
+        if not linked_signature:
+            run_status = "UNVERIFIABLE_NO_SOURCE_SIGNATURE"
+        elif linked_signature == current_signature:
+            run_status = "CURRENT"
+        else:
+            run_status = "STALE_REQUIRES_RERUN"
+        classified_runs.append({
+            "run_id": run_id,
+            "source_signature": linked_signature or None,
+            "status": run_status,
+            "method": "Exact comparison against this tool's version_signature; caller-provided run links are not independently verified.",
+        })
+
+    state = {
+        "versions": versions,
+        "current_version_number": version.get("version_number"),
+        "current_version_signature": current_signature,
+        "max_versions": max_versions,
+    }
+    return {
+        "status": status,
+        "dataset_id": version["dataset_id"],
+        "version_number": version["version_number"],
+        "version_signature": current_signature,
+        "source_signature": source_sig,
+        "schema_fingerprint": version["schema_fingerprint"],
+        "transformation_signature": version["transformation_signature"],
+        "transformations": transformation_list,
+        "source_metadata": metadata,
+        "payload_provenance": payload_provenance,
+        "version_count": len(versions),
+        "version_history": versions,
+        "downstream_runs": classified_runs,
+        "stale_run_count": sum(1 for item in classified_runs if item["status"] == "STALE_REQUIRES_RERUN"),
+        "unverifiable_run_count": sum(1 for item in classified_runs if item["status"] == "UNVERIFIABLE_NO_SOURCE_SIGNATURE"),
+        "lineage_state": state,
+        "limitations": [
+            "Upstream source signatures and downstream run references are supplied by the caller; their authenticity is not independently established here.",
+            "A downstream run is marked stale only when it supplies a non-matching signature; missing signatures remain unverifiable.",
+            "Durable hosted persistence, linkage to every core dataset consumer and cross-workspace isolation require staging verification.",
+        ],
+    }
