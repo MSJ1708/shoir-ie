@@ -208,3 +208,45 @@ This section supersedes earlier statements in this report that PR #196 remains o
 ## Updated release decision
 
 **NO-GO. Keep BETA visible.** Re-evaluate only after the in-progress exact-SHA checks finish and the authenticated gate produces an inspected, non-skipped pass. The Streamlit Cloud app-to-branch/SHA mapping, saved branch-protection settings, production parity/change approval, external T096/T098 integrations, legal/commercial review, and operational recovery tests remain open.
+
+
+---
+
+## 13. Final current staging-gate evidence — 26 October 2026, 13:11 UTC
+
+This section supersedes the earlier in-progress/failed-gate snapshots above for the new candidate. It records a staging result only and does not alter the release decision.
+
+### Exact candidate and workflow outcomes
+
+- Staging branch: `staging-e2e-20261019`
+- Exact staging candidate SHA: `9e3899d6f5147584cf27585d946fa7b5d18d92d5`
+- Authenticated release-gate run: **PASS** — https://github.com/MSJ1708/shoir-ie/actions/runs/40326994939
+- Redacted evidence artifact: https://github.com/MSJ1708/shoir-ie/actions/runs/40326994939/artifacts/12653225915
+- Standard validation run on the same SHA: **PASS** — https://github.com/MSJ1708/shoir-ie/actions/runs/40326994926
+
+### Inspected artifact counts
+
+- Candidate-build preflight: PASS. Staging banner present, shell version marker `SHOIR-IE SHELL VERSION: 3.2` visible, and no credentials submitted during this preflight.
+- Authenticated Edge API lifecycle/workspace-isolation suite: **22 PASS, 0 FAIL, 2 SKIP** out of 24 cases. The 2 skips are the optional live login-throttle probe (`SHOIR_E2E_VERIFY_LOGIN_THROTTLE=true` is not configured) and inactive-account denial (no dedicated inactive `shoir-e2e-*` account is configured). They are explicitly not passed.
+- Authenticated module rendering: **96/96 PASS**, 0 failures, no missing module routes. Scope is route/default-state rendering; it is not proof of engineering formula correctness, real dataset I/O, export fidelity, or every module's operational acceptance.
+- Authenticated browser shell/Excel/logout suite: **7/7 PASS**, including staging marker, candidate marker, authenticated shell, explicit `Excel Data Cleaning & Import` route, logout returning to the unauthenticated sign-in surface, and no uncaught browser JavaScript errors.
+- Standard local runtime/browser validation: PASS for compilation, regression tests, required-module parsing, top-level app import, Chromium smoke at desktop/mobile dimensions.
+
+### Changes validated in this candidate
+
+- Staging-only public sign-in shell now displays shell version 3.2 next to the staging safety banner. The candidate preflight confirms it before any credentials are submitted.
+- The authenticated registration security probe now sends Refund Policy v2 (`2026-10-23-v2`), matching the current staging Edge Function, allowing the unknown-referral probe to reach and validate referral rejection rather than being rejected earlier for stale consent.
+- These were staging-branch changes only. Main remains `267be8889c310d90141c047d8aadd42c942423fb`; no production app/database/function, account, payment, subscription, master-admin record or BETA setting was changed.
+
+### Remaining release blockers despite staging PASS
+
+1. Configure and rerun the intentionally skipped inactive-account denial and login-throttle probes using only dedicated staging fixtures and authorized GitHub Actions variables/secrets.
+2. Main is still reported `protected=false` and no visible repository ruleset exists. An authorized repository administrator must enable/verify required checks, independent review, conversation resolution, stale-review dismissal and prohibited direct/force pushes. No protection change was made through the available integration.
+3. PR #195 (T096) has passing automated test/engine/security checks on `05cac4c8cc40f4da0d884b5b26a0a008e387a4de`, but no independent approval and no approved live REST endpoint/token test. T096 remains `EXTERNAL_CONFIGURATION_REQUIRED`; privacy-preview redaction tests are mocked/local and do not qualify as live connector acceptance.
+4. T098 still needs a selected provider/test tenant and real OIDC callback, session/role mapping, MFA, and durable audit evidence.
+5. The 100-tool matrix remains 0 `VERIFIED_WORKING`, 98 `IMPLEMENTED_NEEDS_VALIDATION`, and 2 `EXTERNAL_CONFIGURATION_REQUIRED`. Route rendering does not close method, numeric-reference, persistence, tier-denial, import/export and recovery acceptance.
+6. Production migration/function parity remains incomplete: production Edge Function v8 differs from staging v9 and production lacks legal/referral schema/guard. The checked migration ledger still has a version/name discrepancy. A read-only aggregate query shows the current referral migration predicate would rewrite `affiliate_code` and `updated_at` for all 5 existing production accounts. Redesign that migration or explicitly approve its data impact after isolated rehearsal and independent review. No production change was made.
+7. Confirm backup/PITR and restore rehearsal, rollback/forward recovery, monitoring, alerting, support/incident response ownership, Saudi legal/privacy counsel and tax/payment/commercial signoffs. Repository legal documents are preparation/checklists, not professional approval.
+8. No independent review is recorded for PR #197; its earlier exact-head automated checks passed before this updated evidence append, and the new head must complete its own CI before review/merge.
+
+**Release decision remains NO-GO. Keep BETA visible.** The current staging authenticated suite is a real, positive milestone, not production authorization or paid launch approval.
