@@ -189,3 +189,22 @@ The connected GitHub tool cannot invoke workflow_dispatch or inspect Actions sec
 All eight linked artifacts are documentation changes on this PR branch. Those new commits invalidate earlier CI as exact-head evidence; rerun the required checks on the final PR #197 SHA before requesting approval or merging.
 
 **Decision remains NO-GO.** Keep BETA visible; production schema, Edge Function, application, accounts, tiers, subscriptions, payments, branch protections and BETA state were not changed.
+
+---
+
+## 12. Current-state reconciliation — after PR #196 staging merge, 26 October 2026
+
+This section supersedes earlier statements in this report that PR #196 remains open/draft or that the staging branch head is still 8b36e3737705867019b9cf29e603cfc37e7911e6.
+
+- **PR #196 merged staging-only** at 2026-10-26T12:37:51Z. Merge commit: `32ac85493bfadfbae172f546741aae74cd647069`. PR: https://github.com/MSJ1708/shoir-ie/pull/196. This is not a production merge or release.
+- The subsequent opt-in workflow-trigger record was committed only to the staging branch as `bf1f9c7750b48e74d140a929eb94d521974ec0a9`. It changes documentation only and uses the workflow's documented `[run-authenticated-gate]` marker. Current staging branch tip at this check: `bf1f9c7750b48e74d140a929eb94d521974ec0a9`.
+- Authenticated gate run **40324443387** is in progress on that exact SHA: https://github.com/MSJ1708/shoir-ie/actions/runs/40324443387. At last observation it was installing test dependencies. No preflight, backend isolation, module matrix, or browser result is yet available; therefore **no authenticated staging pass is claimed**.
+- Ordinary push validation run **40324443559** is in progress on the same SHA. Its hosted `live-deployment-smoke` job is skipped by the workflow's documented branch/event condition and is not proof of the deployed Streamlit revision.
+- PR #195 remains open/ready-for-review on `26d5e4f2a6569223976eff4fe43db83b0967d2e2`. Automated source/mock checks passed: test, engine regression and security/quality; the hosted live-smoke job is skipped on this non-audit PR. No independent review/approval is recorded and there is still no authorized real T096 endpoint/token test. Do not merge on CI alone.
+- PR #197 remains draft/open on `86c995ff0f3b7ccea39139fe026645ca99f6b8fe`. Engine regression and security/quality succeeded; three PR workflows were still in progress when checked. The current head therefore is not yet fully validated, and no independent review is recorded.
+- Open PR count is now 17 after #196 closed by merge. The repository branch API still reports `main.protected=false`; the visible repository rulesets endpoint is empty. The connected integration does not expose branch-protection mutation, workflow-dispatch, or secrets read access.
+- The main head remains `267be8889c310d90141c047d8aadd42c942423fb`. No production app/schema/function, production user, payment, subscription, BETA flag, or master-administrator record was changed by this update.
+
+## Updated release decision
+
+**NO-GO. Keep BETA visible.** Re-evaluate only after the in-progress exact-SHA checks finish and the authenticated gate produces an inspected, non-skipped pass. The Streamlit Cloud app-to-branch/SHA mapping, saved branch-protection settings, production parity/change approval, external T096/T098 integrations, legal/commercial review, and operational recovery tests remain open.
