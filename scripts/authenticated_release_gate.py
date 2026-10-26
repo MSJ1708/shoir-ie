@@ -144,7 +144,7 @@ def main() -> int:
         "terms_accepted": True,
         "terms_version": "2026-10-21-beta-v1",
         "privacy_policy_version": "2026-10-21-v1",
-        "refund_policy_version": "2026-10-21-v1",
+        "refund_policy_version": "2026-10-23-v2",
         "cookie_policy_version": "2026-10-21-v1",
     }
 
