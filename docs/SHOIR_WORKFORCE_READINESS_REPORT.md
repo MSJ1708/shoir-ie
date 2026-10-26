@@ -17,8 +17,8 @@ The canonical `shoir_tool_registry.py` and `docs/SHOIR_100_TOOL_IMPLEMENTATION_M
 
 | Registry status | Count | Meaning |
 |---|---:|---|
-| `IMPLEMENTED_NEEDS_VALIDATION` | 91 | A mapped/executable implementation or meaningful foundation exists; complete acceptance is not proven |
-| `FOUNDATION_ONLY` | 7 | Foundational work remains before the target should be represented as operational |
+| `IMPLEMENTED_NEEDS_VALIDATION` | 92 | A mapped/executable implementation or meaningful foundation exists; complete acceptance is not proven |
+| `FOUNDATION_ONLY` | 6 | Foundational work remains before the target should be represented as operational |
 | `EXTERNAL_CONFIGURATION_REQUIRED` | 2 | Live configuration/provider setup and testing is required |
 | `VERIFIED_WORKING` | 0 | No target has completed all applicable hosted acceptance requirements |
 | **Total** | **100** | Stable IDs T001–T100 accounted for |
@@ -38,6 +38,12 @@ A bounded JSON snapshot-history method and Workbench flow were added for explici
 The existing method, gated Workbench form, result table, calculation fixtures and Workbench AppTest were audited and its catalog mapping corrected. It evaluates record completeness, dates, overdue states, evidence references and closed-record evidence.
 
 **Scope limitation:** it is not yet a complete CAPA lifecycle ledger. Durable record CRUD, immutable/versioned status events, auditable approval events, access-controlled attachment storage and two-user isolation remain open.
+
+### T020 — Dataset Versioning and Lineage
+
+The existing Workbench now provides two data-source paths: use the current Excel Studio import's source signature, or hash an explicitly entered JSON snapshot. It fingerprints source metadata and a transformation recipe, records bounded versions in user/workspace/project-keyed session state, and compares supplied downstream run signatures with the latest version. Runs without a source signature are reported as unverifiable rather than assumed current.
+
+**Scope limitation:** the tool does not automatically register every downstream consumer or invalidate every result across Shoir-IE. An upstream Excel Studio signature is trusted, not independently rehashed by this method; durable hosted history and cross-workspace isolation remain unverified.
 
 ## Mandatory workforce-readiness gates
 
