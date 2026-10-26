@@ -52,7 +52,7 @@ Projects were confirmed by the Supabase project listing:
 | Accounts (aggregate count, latest read-only check) | 9 | 5 |
 | Enterprise Admin role count | 1 | 1 |
 | Exact admin invariant matches (role, tier `Enterprise Plus Tier ($399)`, active state, expiry `2099-01-01T00:00:00Z`) | 1 | 1 |
-| Referral rewrite predicate matches (`affiliate_code` null/blank or `AFF-%-15`) | 0 | 5 |
+| Referral rewrite predicate matches (`affiliate_code` null/blank or `AFF-%-15`) | 1 | 5 |
 | `shoir_referrals` table present | Yes | No |
 | Legal acceptance columns in `shoir_subscription_requests` | 6 | 0 |
 | Legal acceptance approval trigger present | Yes | No |
