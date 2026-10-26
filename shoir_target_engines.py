@@ -6361,9 +6361,12 @@ def manage_dataset_version_lineage(
         payload_provenance = "UPSTREAM_SIGNATURE_NOT_INDEPENDENTLY_REHASHED"
         packed_payload = None
 
-    metadata = dict(source_metadata or {})
-    if not isinstance(metadata, dict):
+    if source_metadata is None:
+        metadata: dict[str, Any] = {}
+    elif not isinstance(source_metadata, Mapping):
         raise ValueError("Source metadata must be a JSON object.")
+    else:
+        metadata = dict(source_metadata)
     metadata_json, metadata = canonical_json(metadata, "Source metadata")
     if transformations is None:
         transformation_list: list[Any] = []
@@ -6441,18 +6444,32 @@ def manage_dataset_version_lineage(
         run_id = str(item.get("run_id", item.get("id", ""))).strip()
         if not run_id:
             raise ValueError("Each downstream run needs a non-empty run_id or id.")
-        linked_signature = str(item.get("version_signature", item.get("dataset_signature", item.get("source_signature", "")))).strip()
+        version_link = str(item.get("version_signature", "")).strip()
+        dataset_link = str(item.get("dataset_signature", "")).strip()
+        source_link = str(item.get("source_signature", "")).strip()
+        linked_signature = version_link or dataset_link or source_link
         if not linked_signature:
             run_status = "UNVERIFIABLE_NO_SOURCE_SIGNATURE"
-        elif linked_signature == current_signature:
+        elif version_link and version_link == current_signature:
             run_status = "CURRENT"
+        elif version_link:
+            run_status = "STALE_REQUIRES_RERUN"
+        elif (dataset_link or source_link) and linked_signature == source_sig:
+            # A matching raw-source fingerprint is insufficient to prove that the
+            # downstream run used the current transformation recipe and schema.
+            run_status = "SOURCE_MATCH_VERSION_UNVERIFIED"
         else:
             run_status = "STALE_REQUIRES_RERUN"
         classified_runs.append({
             "run_id": run_id,
             "source_signature": linked_signature or None,
+            "signature_kind": (
+                "version_signature" if version_link else
+                "dataset_signature" if dataset_link else
+                "source_signature" if source_link else "missing"
+            ),
             "status": run_status,
-            "method": "Exact comparison against this tool's version_signature; caller-provided run links are not independently verified.",
+            "method": "Only an exact version_signature match is marked CURRENT; raw source matches do not certify the transformation recipe.",
         })
 
     state = {
@@ -6476,7 +6493,7 @@ def manage_dataset_version_lineage(
         "version_history": versions,
         "downstream_runs": classified_runs,
         "stale_run_count": sum(1 for item in classified_runs if item["status"] == "STALE_REQUIRES_RERUN"),
-        "unverifiable_run_count": sum(1 for item in classified_runs if item["status"] == "UNVERIFIABLE_NO_SOURCE_SIGNATURE"),
+        "unverifiable_run_count": sum(1 for item in classified_runs if item["status"] in {"UNVERIFIABLE_NO_SOURCE_SIGNATURE", "SOURCE_MATCH_VERSION_UNVERIFIED"}),
         "lineage_state": state,
         "limitations": [
             "Upstream source signatures and downstream run references are supplied by the caller; their authenticity is not independently established here.",
