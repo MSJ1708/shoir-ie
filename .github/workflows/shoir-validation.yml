@@ -26,7 +26,29 @@ jobs:
           SHOIR_EXPORT_EVIDENCE_DIR: artifacts/report-export-validation
           SHOIR_EXPORT_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: python -m pytest -q tests
-      - name: Upload sanitized report-export validation artifacts
+      - name: Install PDF rendering tools for visual export acceptance
+        if: always()
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libreoffice-impress poppler-utils
+      - name: Render the exact-head synthetic PDF and every PowerPoint slide
+        if: always()
+        run: |
+          set -euo pipefail
+          evidence=artifacts/report-export-validation
+          if [ -f "$evidence/complete_export_verification.pptx" ]; then
+            mkdir -p "$evidence/pptx-rendered"
+            libreoffice --headless --convert-to pdf --outdir "$evidence/pptx-rendered" "$evidence/complete_export_verification.pptx"
+            pdf="$evidence/pptx-rendered/complete_export_verification.pdf"
+            test -s "$pdf"
+            pdfinfo "$pdf"
+            pdftoppm -png -r 110 "$pdf" "$evidence/pptx-rendered/slide"
+            test "$(find "$evidence/pptx-rendered" -maxdepth 1 -name 'slide-*.png' | wc -l)" -ge 1
+          fi
+          if [ -f "$evidence/complete_export_verification.pdf" ]; then
+            pdfinfo "$evidence/complete_export_verification.pdf"
+          fi
+      - name: Upload sanitized report-export validation artifacts and rendered pages
         if: always()
         uses: actions/upload-artifact@v4
         with:
