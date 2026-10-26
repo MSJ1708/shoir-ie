@@ -115,3 +115,13 @@ This gate does not approve or decline renewal requests, change any subscription,
 ## Module-rendering matrix
 
 The module-rendering matrix validates authenticated route selection and safe default/empty-state rendering for every source inventory entry. It is not calculation correctness proof, valid-input result proof, import/export round-trip proof, direct service authorization proof, tenant-isolation proof, or production readiness evidence; those remain separate acceptance cases. The account usernames must be unique `shoir-e2e-*` identities and must never be the master administrator or a customer. Module-matrix workspaces are disposable and must contain no industrial/customer data.
+
+## Post-logout token-reuse proof
+
+A `session_revocation` case is a three-step authenticated acceptance test, not merely a successful logout response:
+
+1. Send a `renew_request` with the same dedicated test username and token but **without** a payment reference or proof. A still-valid session must reach the endpoint's explicit HTTP 400 “A transaction/payment reference is required for renewal review.” validation. This is a no-write probe because the Edge Function checks the session and validates the required reference before storing a request or payment proof. The endpoint accepts both workspace- and renewal-scoped sessions, so it also works for the disposable expired-subscription fixture.
+2. Call `logout` and require HTTP 200, `ok: true`, and `revoked: true`.
+3. Repeat the exact no-write renewal probe with the **same token** and require HTTP 401 with `Unauthorized session.`.
+
+The test fails closed if the token is missing, invalid before logout, logout does not confirm deletion, token reuse returns any other outcome, or the transport fails. Response bodies, passwords, and bearer tokens must not be written to the release evidence. Run this only with the explicitly provisioned `shoir-e2e-*` staging accounts. Do not use the protected master administrator, production accounts, payment references, or real receipts for this probe.
