@@ -2219,6 +2219,7 @@ def test_dataset_version_lineage_creates_versions_and_marks_supplied_stale_runs(
     assert changed["status"] == "VERSION_CREATED"
     assert changed["version_number"] == 2
     assert changed["version_count"] == 2
+    assert changed["dataset_id"] == first["dataset_id"]
     assert changed["stale_run_count"] == 2
     assert changed["unverifiable_run_count"] == 1
     assert [run["status"] for run in changed["downstream_runs"]] == [
@@ -2254,6 +2255,24 @@ def test_dataset_version_lineage_is_canonical_and_recipe_changes_make_new_versio
     assert recipe_change["version_signature"] != first["version_signature"]
 
 
+
+
+
+def test_dataset_version_lineage_inferrs_stable_identity_and_schema_from_snapshot():
+    from shoir_target_engines import manage_dataset_version_lineage
+
+    first = manage_dataset_version_lineage(
+        None,
+        dataset_payload={"dataset": "orders", "rows": [{"id": "A1", "qty": 10}]},
+    )
+    changed = manage_dataset_version_lineage(
+        first["lineage_state"],
+        dataset_payload={"dataset": "orders", "rows": [{"id": "A1", "qty": 12}]},
+    )
+    assert first["source_metadata"]["dataset_id"] == "orders"
+    assert first["source_metadata"]["schema_fingerprint"] == {"id": ["string"], "qty": ["integer"]}
+    assert changed["dataset_id"] == first["dataset_id"]
+    assert changed["version_signature"] != first["version_signature"]
 
 
 def test_dataset_version_lineage_does_not_treat_raw_source_match_as_fully_current():
