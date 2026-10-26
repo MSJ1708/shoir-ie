@@ -174,7 +174,9 @@ Residual security limitations are material:
 ## Verification / release gates
 
 ### Canonical 100-target accounting
-The matrix and runtime registry were reconciled: both contain exactly 100 unique IDs (T001–T100) with matching canonical name, minimum tier and implementation status. The classification remains 0 VERIFIED_WORKING, 87 IMPLEMENTED_NEEDS_VALIDATION, 11 FOUNDATION_ONLY, 2 EXTERNAL_CONFIGURATION_REQUIRED, 0 MISSING, and 0 BLOCKED. This means all targets are accounted for, not that all are operational.
+The matrix and runtime registry were reconciled: both contain exactly 100 unique IDs (T001–T100) with matching canonical name, minimum tier and implementation status. The current classification is 0 VERIFIED_WORKING, 90 IMPLEMENTED_NEEDS_VALIDATION, 8 FOUNDATION_ONLY, 2 EXTERNAL_CONFIGURATION_REQUIRED, 0 MISSING, and 0 BLOCKED. This means all targets are accounted for, not that all are operational. The CSV matrix and canonical registry must remain the source of the current count; subsequent target changes must update all three.
+
+T006 (Undo, Redo, and Recovery) now has a bounded JSON snapshot-history engine and a gated Workbench form for checkpoint, undo, redo and revision restore. It is intentionally not a universal cross-module undo manager and cannot roll back external side effects. New independent method tests and a Workbench AppTest are included but remain pending exact-head CI and hosted persistence/cross-workspace acceptance.
 
 The newly added test tests/test_shoir_100_tool_tier_truth_table.py is intended to make this cross-check and the six-package authorization truth table part of automated regression coverage. It exercises the canonical authorization helper, not every legacy route or external API callsite; route/API/Copilot/export-level enforcement still requires dedicated authenticated acceptance.
 
