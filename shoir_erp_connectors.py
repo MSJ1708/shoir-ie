@@ -28,7 +28,10 @@ SENSITIVE_FIELD_PATTERN = re.compile(
     r"(?:email|e-mail|phone|mobile|birth|dateofbirth|\bdob\b|national.?id|"
     r"passport|street|postal.?address|home.?address|full.?name|first.?name|"
     r"last.?name|personal.?name|employee.?name|person.?name|username|"
-    r"employee.?id|person.?id|user.?id|nationality|passport.?number)",
+    r"employee.?id|person.?id|user.?id|nationality|passport.?number|"
+    r"access.?token|refresh.?token|token|password|passwd|secret|"
+    r"authorization|auth.?header|api.?key|private.?key|client.?secret|"
+    r"credential|bearer|cookie|set.?cookie)",
     re.IGNORECASE,
 )
 
