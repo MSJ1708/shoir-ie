@@ -252,3 +252,73 @@ def test_non_rest_protocol_cannot_use_generic_adapter(monkeypatch):
     monkeypatch.setattr(connector, "_config_value", lambda key: cfg.get(key, ""))
     out = connector.verify_readonly_rest_connector({**_profile(), "protocol": "SAP"})
     assert out["status"] == "CONFIGURATION_INVALID"
+
+def test_live_t096_operation_requires_authenticated_admin_and_entitlement(monkeypatch):
+    import streamlit as st
+
+    state = {
+        "authenticated": False,
+        "current_user": "",
+        "user_role": "Engineer",
+        "user_tier": "Enterprise",
+    }
+    monkeypatch.setattr(st, "session_state", state, raising=True)
+    with pytest.raises(PermissionError):
+        engines._require_connector_operator()
+
+    state.update({
+        "authenticated": True,
+        "current_user": "disposable-admin",
+        "user_role": "Engineer",
+        "user_tier": "Enterprise",
+    })
+    with pytest.raises(PermissionError):
+        engines._require_connector_operator()
+
+    state.update({"user_role": "Enterprise Admin", "user_tier": "Starter"})
+    with pytest.raises(PermissionError):
+        engines._require_connector_operator()
+
+    state.update({"user_tier": "Enterprise"})
+    engines._require_connector_operator()
+
+
+def test_explicit_live_action_checks_authorization_before_adapter(monkeypatch):
+    monkeypatch.setattr(engines, "_require_connector_operator", lambda: (_ for _ in ()).throw(PermissionError("denied")))
+    monkeypatch.setattr(
+        engines, "verify_readonly_rest_connector",
+        lambda *a, **k: pytest.fail("adapter must not run after authorization denial"),
+    )
+    with pytest.raises(PermissionError, match="denied"):
+        engines.integration_configuration_status({
+            "action": "verify_rest_read",
+            "profile": _profile(),
+        })
+
+
+def test_explicit_live_action_routes_approved_profile_to_adapter(monkeypatch):
+    observed = {}
+    monkeypatch.setattr(engines, "_require_connector_operator", lambda: None)
+
+    def fake_adapter(profile, include_sample_data=False):
+        observed["profile"] = profile
+        observed["include_sample_data"] = include_sample_data
+        return {"tool_id": "T096", "status": "DATA_RETRIEVAL_VERIFIED"}
+
+    monkeypatch.setattr(engines, "verify_readonly_rest_connector", fake_adapter)
+    out = engines.integration_configuration_status({
+        "action": "verify_rest_read",
+        "profile": _profile(),
+        "include_sample_data": True,
+    })
+    assert out["status"] == "DATA_RETRIEVAL_VERIFIED"
+    assert observed["profile"] == _profile()
+    assert observed["include_sample_data"] is True
+
+
+def test_live_rest_adapter_rejects_non_token_credentials(monkeypatch):
+    cfg = _valid_config()
+    monkeypatch.setattr(connector, "_config_value", lambda key: cfg.get(key, ""))
+    profile = {**_profile(), "credential_env": "SHOIR_CONNECTOR_PLANT_CREDENTIAL"}
+    out = connector.verify_readonly_rest_connector(profile)
+    assert out["status"] == "CONFIGURATION_INVALID"
