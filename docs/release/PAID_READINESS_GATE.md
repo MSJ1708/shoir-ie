@@ -10,11 +10,11 @@ This document records evidence and required actions. It does not certify Saudi l
 
 | Requirement | Status | Evidence / action to close |
 |---|---|---|
-| Main CI at exact current main SHA | PARTIAL | At SHA 72e498d892b9eb088d34be940fc1f6d97b482c1a, test, engine regression, transaction contract, Edge Function verification and security-quality passed. Hosted public smoke failed. See [validation run 40273481812](https://github.com/MSJ1708/shoir-ie/actions/runs/40273481812). |
+| Main CI at exact current main SHA | PARTIAL | At the initial audit SHA 72e498d892b9eb088d34be940fc1f6d97b482c1a (now superseded by the 26 Oct recheck), test, engine regression, transaction contract, Edge Function verification and security-quality passed. Hosted public smoke failed. See [validation run 40273481812](https://github.com/MSJ1708/shoir-ie/actions/runs/40273481812). |
 | Production deployment/source parity | FAIL / BLOCKED | Public app reports missing durable_account_store.edge_referral_summary; current source contains this function. Verify Streamlit branch/commit/entry point and deployed source, then prepare a version-compatible bundle and rollback plan. No production action was performed. |
 | Staging branch validation | PARTIAL | Branch staging-e2e-20261019 at 8b36e3737705867019b9cf29e603cfc37e7911e6 passed validation [run 40273588613](https://github.com/MSJ1708/shoir-ie/actions/runs/40273588613). Authenticated release gate [run 40273588637](https://github.com/MSJ1708/shoir-ie/actions/runs/40273588637) and hosted smoke were skipped. |
 | Branch protection | FAIL | GitHub says main is unprotected; rulesets empty; required contexts empty. Repository admin must enable required reviews, status checks and conversation resolution. Reread the resulting settings afterward. |
-| Registry and matrix | PASS for structural row count only | The current matrix has 100 tool rows: 89 IMPLEMENTED_NEEDS_VALIDATION, 9 FOUNDATION_ONLY, 2 EXTERNAL_CONFIGURATION_REQUIRED, 0 VERIFIED_WORKING. These are not all production-ready. |
+| Registry and matrix | PASS for structural row count only | The current matrix has 100 tool rows: 98 IMPLEMENTED_NEEDS_VALIDATION, 0 FOUNDATION_ONLY, 2 EXTERNAL_CONFIGURATION_REQUIRED, 0 VERIFIED_WORKING. These are not all production-ready. |
 | Authenticated tier/route/direct-action checks | NOT RUN for final candidate | Run the dedicated authenticated release gate with only disposable shoir-e2e-* accounts. Cover all six packages, unknown tier/tool, expired/revoked session, Copilot, exports, direct route/action and mutations. Do not use the master administrator account. |
 | Tenant/RLS/RPC checks | NOT ESTABLISHED for final candidate | Use two distinct test users/workspaces; prove server/database denial for cross-tenant read, list, update, insert, delete, export and direct-object reference. Capture redacted artifacts. |
 | Save/reload/re-login | NOT ESTABLISHED for final candidate | Confirm writes and confirmed status on the actual staging service; verify reload after new login; test write failure, stale policy and revoked session. |
@@ -188,3 +188,19 @@ A fresh read of the current CI records confirms the public main smoke still fail
 
 No production migration, Edge Function deployment, Streamlit deployment, account operation, or billing operation was performed. Decision remains **NO-GO**.
 
+
+
+## Current baseline recheck — 26 October 2026
+
+This recheck supersedes older SHA/count claims elsewhere in the historical capture.
+
+- Current `main`: `267be8889c310d90141c047d8aadd42c942423fb`.
+- Exact-main automated checks: validation [40291784799](https://github.com/MSJ1708/shoir-ie/actions/runs/40291784799), engine regression [40291784823](https://github.com/MSJ1708/shoir-ie/actions/runs/40291784823), and security/quality [40291784836](https://github.com/MSJ1708/shoir-ie/actions/runs/40291784836) passed.
+- The merged PR #193 commit had a failed hosted desktop/mobile smoke in [40290645125](https://github.com/MSJ1708/shoir-ie/actions/runs/40290645125). The current main automated validation run is not proof that the deployed hosted app is aligned.
+- Staging validation passed at `8b36e3737705867019b9cf29e603cfc37e7911e6`, but authenticated release gate [40273588637](https://github.com/MSJ1708/shoir-ie/actions/runs/40273588637) was skipped.
+- Current matrix: 100 rows = 98 `IMPLEMENTED_NEEDS_VALIDATION`, 2 `EXTERNAL_CONFIGURATION_REQUIRED`, and 0 `VERIFIED_WORKING`.
+- T096 draft implementation is in [PR #195](https://github.com/MSJ1708/shoir-ie/pull/195); no real staging endpoint/result has been verified. T098 has no verified enterprise OIDC flow, provider-backed MFA evidence or durable audit persistence evidence.
+- Branch protection could not be read by the active integration (403). An authorized repository administrator must inspect the actual saved rules.
+- The root [Commercial Launch Checklist](../COMMERCIAL_LAUNCH_CHECKLIST.md) is the gate-by-gate source of truth.
+
+Decision remains **NO-GO**. Do not remove the public BETA label or activate paid general availability.
