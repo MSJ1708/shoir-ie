@@ -6195,3 +6195,364 @@ def build_rcm_decision_register(
         "assumptions": "Failure descriptions, consequence categories, selected strategies and evidence references are user supplied. The tool does not validate the source evidence, determine task applicability, estimate failure probabilities or approve maintenance policy.",
         "warning": "This is not a complete or certified RCM analysis and is not a substitute for the organization's approved RCM method or qualified engineering/safety review. Every row remains PENDING until the accountable review occurs outside this calculator.",
     }
+
+
+def manage_recovery_snapshot_history(
+    history_state: Mapping[str, Any] | None,
+    *,
+    action: str,
+    new_snapshot: Any = None,
+    target_revision: int | None = None,
+    max_history: int = 25,
+    max_snapshot_bytes: int = 32768,
+) -> dict[str, Any]:
+    """Checkpoint, undo, redo or restore bounded JSON snapshots for this tool only."""
+    import json
+
+    if isinstance(max_history, bool) or not isinstance(max_history, int) or not 2 <= max_history <= 100:
+        raise ValueError("max_history must be an integer from 2 to 100.")
+    if isinstance(max_snapshot_bytes, bool) or not isinstance(max_snapshot_bytes, int) or not 256 <= max_snapshot_bytes <= 1_000_000:
+        raise ValueError("max_snapshot_bytes must be an integer from 256 to 1,000,000.")
+
+    action_value = str(action or "").strip().lower()
+    aliases = {"checkpoint": "checkpoint", "create_checkpoint": "checkpoint", "undo": "undo",
+               "redo": "redo", "restore": "restore", "restore_revision": "restore"}
+    if action_value not in aliases:
+        raise ValueError("Recovery action must be checkpoint, undo, redo or restore.")
+    action_value = aliases[action_value]
+
+    def copy_snapshot(value: Any, field: str) -> Any:
+        try:
+            encoded = json.dumps(value, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError(f"{field} must be valid JSON-compatible data without NaN or Infinity.") from exc
+        if len(encoded.encode("utf-8")) > max_snapshot_bytes:
+            raise ValueError(f"{field} exceeds the {max_snapshot_bytes}-byte snapshot limit.")
+        cloned = json.loads(encoded)
+        if not isinstance(cloned, (dict, list)):
+            raise ValueError(f"{field} must be a JSON object or array.")
+        return cloned
+
+    if history_state is None:
+        past: list[Any] = []
+        future: list[Any] = []
+        current: Any = None
+        has_current = False
+    else:
+        if not isinstance(history_state, Mapping):
+            raise ValueError("Recovery history state must be an object.")
+        past_raw = history_state.get("past", [])
+        future_raw = history_state.get("future", [])
+        has_current = history_state.get("has_current", "current" in history_state)
+        if not isinstance(past_raw, list) or not isinstance(future_raw, list) or not isinstance(has_current, bool):
+            raise ValueError("Recovery history requires past/future lists and a Boolean has_current flag.")
+        past = [copy_snapshot(item, "Prior snapshot") for item in past_raw]
+        future = [copy_snapshot(item, "Redo snapshot") for item in future_raw]
+        current = copy_snapshot(history_state.get("current"), "Current snapshot") if has_current else None
+        if len(past) + len(future) + int(has_current) > max_history:
+            raise ValueError(f"Recovery history exceeds the {max_history}-revision limit.")
+        if not has_current and (past or future):
+            raise ValueError("Recovery history cannot contain past/future snapshots without a current snapshot.")
+
+    if action_value == "checkpoint":
+        checkpoint = copy_snapshot(new_snapshot, "New snapshot")
+        if not has_current:
+            current, has_current, past, future = checkpoint, True, [], []
+            status = "SNAPSHOT_CREATED"
+        elif current == checkpoint:
+            status = "SNAPSHOT_UNCHANGED"
+        else:
+            past = (past + [current])[-(max_history - 1):]
+            current, future = checkpoint, []
+            status = "SNAPSHOT_CHECKPOINTED"
+    elif action_value == "undo":
+        if not has_current or not past:
+            raise ValueError("No earlier snapshot is available to undo.")
+        future.append(current)
+        current = past.pop()
+        status = "SNAPSHOT_UNDONE"
+    elif action_value == "redo":
+        if not has_current or not future:
+            raise ValueError("No undone snapshot is available to redo.")
+        past.append(current)
+        current = future.pop()
+        status = "SNAPSHOT_REDONE"
+    else:
+        if not has_current:
+            raise ValueError("No snapshot is available to restore.")
+        if isinstance(target_revision, bool) or not isinstance(target_revision, int):
+            raise ValueError("Target revision must be an integer using 1-based numbering.")
+        timeline_values = [*past, current, *reversed(future)]
+        if target_revision < 1 or target_revision > len(timeline_values):
+            raise ValueError(f"Target revision must be between 1 and {len(timeline_values)}.")
+        past = timeline_values[:target_revision - 1]
+        current = timeline_values[target_revision - 1]
+        future = list(reversed(timeline_values[target_revision:]))
+        status = "REVISION_RESTORED"
+
+    timeline_values = [*past, current, *reversed(future)] if has_current else []
+    timeline = [{"revision": i + 1, "is_current": i == len(past), "snapshot": item}
+                for i, item in enumerate(timeline_values)]
+    updated_history = {"past": past, "current": current, "future": future,
+                       "has_current": has_current, "max_history": max_history}
+    return {
+        "status": status,
+        "action": action_value,
+        "current_revision": len(past) + 1 if has_current else None,
+        "revision_count": len(timeline_values),
+        "can_undo": bool(has_current and past),
+        "can_redo": bool(has_current and future),
+        "current_snapshot": current if has_current else None,
+        "timeline": timeline,
+        "history_state": updated_history,
+        "limitations": [
+            "History covers only JSON snapshots explicitly entered into this recovery tool.",
+            "It does not intercept arbitrary edits in other Shoir-IE modules or roll back external-system side effects.",
+            "Authenticated managed-workspace persistence, re-login recovery and cross-workspace isolation require staging verification.",
+        ],
+    }
+
+
+def manage_dataset_version_lineage(
+    history_state: Mapping[str, Any] | None,
+    *,
+    dataset_payload: Any = None,
+    source_signature: str | None = None,
+    source_metadata: Mapping[str, Any] | None = None,
+    transformations: Sequence[Mapping[str, Any]] | None = None,
+    downstream_runs: Sequence[Mapping[str, Any]] | None = None,
+    max_versions: int = 100,
+    max_metadata_bytes: int = 65536,
+) -> dict[str, Any]:
+    """Record bounded dataset source/recipe versions and classify supplied downstream runs.
+
+    A supplied source_signature is treated as an upstream identifier, not independently
+    certified data content. When omitted, a signature is computed from JSON snapshot data.
+    """
+    import hashlib
+    import json
+    from datetime import datetime, timezone
+
+    if isinstance(max_versions, bool) or not isinstance(max_versions, int) or not 2 <= max_versions <= 1000:
+        raise ValueError("max_versions must be an integer from 2 to 1000.")
+    if isinstance(max_metadata_bytes, bool) or not isinstance(max_metadata_bytes, int) or not 1024 <= max_metadata_bytes <= 2_000_000:
+        raise ValueError("max_metadata_bytes must be an integer from 1,024 to 2,000,000.")
+
+    def canonical_json(value: Any, field: str) -> tuple[str, Any]:
+        try:
+            encoded = json.dumps(value, ensure_ascii=False, sort_keys=True, allow_nan=False, separators=(",", ":"), default=None)
+            packed = json.loads(encoded)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError(f"{field} must be finite, valid JSON-compatible data.") from exc
+        if len(encoded.encode("utf-8")) > max_metadata_bytes:
+            raise ValueError(f"{field} exceeds the {max_metadata_bytes}-byte metadata limit.")
+        return encoded, packed
+
+    if source_signature is None or not str(source_signature).strip():
+        encoded_payload, packed_payload = canonical_json(dataset_payload, "Dataset snapshot")
+        if not isinstance(packed_payload, (dict, list)):
+            raise ValueError("Dataset snapshot must be a JSON object or array when no source signature is provided.")
+        source_sig = hashlib.sha256(encoded_payload.encode("utf-8")).hexdigest()
+        payload_provenance = "JSON_SNAPSHOT_HASHED_BY_TOOL"
+    else:
+        source_sig = str(source_signature).strip().lower()
+        if len(source_sig) > 256 or any(ord(ch) < 32 for ch in source_sig):
+            raise ValueError("Source signature must be a printable identifier no longer than 256 characters.")
+        payload_provenance = "UPSTREAM_SIGNATURE_NOT_INDEPENDENTLY_REHASHED"
+        packed_payload = None
+
+    if source_metadata is None:
+        metadata: dict[str, Any] = {}
+    elif not isinstance(source_metadata, Mapping):
+        raise ValueError("Source metadata must be a JSON object.")
+    else:
+        metadata = dict(source_metadata)
+    _, metadata = canonical_json(metadata, "Source metadata")
+    # Dataset identity must remain stable when the content/version signature changes.
+    dataset_identity = str(
+        metadata.get("dataset_id")
+        or metadata.get("dataset_name")
+        or metadata.get("filename")
+        or metadata.get("source_name")
+        or (
+            packed_payload.get("dataset_id")
+            or packed_payload.get("dataset")
+            or packed_payload.get("name")
+            if isinstance(packed_payload, dict)
+            else ""
+        )
+        or source_sig
+    ).strip()
+    metadata["dataset_id"] = dataset_identity
+    if not metadata.get("schema_fingerprint") and not metadata.get("schemas") and isinstance(packed_payload, (dict, list)):
+        schema_source: Any = packed_payload
+        if isinstance(schema_source, dict):
+            if isinstance(schema_source.get("records"), list):
+                schema_source = schema_source["records"]
+            elif isinstance(schema_source.get("rows"), list):
+                schema_source = schema_source["rows"]
+        if isinstance(schema_source, list):
+            sample_rows = [item for item in schema_source[:500] if isinstance(item, dict)]
+            schema_keys = sorted({str(key) for item in sample_rows for key in item})
+            inferred_schema = {
+                key: sorted({
+                    (
+                        "boolean" if isinstance(item.get(key), bool) else
+                        "integer" if isinstance(item.get(key), int) else
+                        "number" if isinstance(item.get(key), float) else
+                        "array" if isinstance(item.get(key), list) else
+                        "object" if isinstance(item.get(key), dict) else
+                        "string"
+                    )
+                    for item in sample_rows
+                    if key in item and item.get(key) is not None
+                })
+                for key in schema_keys
+            }
+            metadata["schema_fingerprint"] = inferred_schema or {"array_item_type": "unknown_or_empty"}
+        elif isinstance(schema_source, dict):
+            metadata["schema_fingerprint"] = {
+                str(key): (
+                    "null" if value is None else
+                    "boolean" if isinstance(value, bool) else
+                    "integer" if isinstance(value, int) else
+                    "number" if isinstance(value, float) else
+                    "array" if isinstance(value, list) else
+                    "object" if isinstance(value, dict) else "string"
+                )
+                for key, value in schema_source.items()
+                if key not in {"dataset_id", "dataset", "name"}
+            }
+    if transformations is None:
+        transformation_list: list[Any] = []
+    else:
+        if not isinstance(transformations, Sequence) or isinstance(transformations, (str, bytes)):
+            raise ValueError("Transformations must be a JSON list of objects.")
+        if any(not isinstance(item, Mapping) for item in transformations):
+            raise ValueError("Each transformation entry must be an object.")
+        _, transformation_list = canonical_json(list(transformations), "Transformations")
+    if downstream_runs is None:
+        run_list: list[Any] = []
+    else:
+        if not isinstance(downstream_runs, Sequence) or isinstance(downstream_runs, (str, bytes)):
+            raise ValueError("Downstream runs must be a JSON list of objects.")
+        if any(not isinstance(item, Mapping) for item in downstream_runs):
+            raise ValueError("Each downstream run must be an object.")
+        _, run_list = canonical_json(list(downstream_runs), "Downstream runs")
+
+    schema_bytes = metadata.get("schema_fingerprint") or metadata.get("schemas") or metadata.get("table_catalog") or {}
+    schema_json, _ = canonical_json(schema_bytes, "Schema fingerprint")
+    recipe_json, _ = canonical_json(transformation_list, "Transformations")
+    version_material = json.dumps(
+        {
+            "source_signature": source_sig,
+            "source_metadata": metadata,
+            "transformations": transformation_list,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        allow_nan=False,
+        separators=(",", ":"),
+    )
+    version_signature = hashlib.sha256(version_material.encode("utf-8")).hexdigest()
+
+    if history_state is None:
+        versions: list[dict[str, Any]] = []
+    else:
+        if not isinstance(history_state, Mapping):
+            raise ValueError("Lineage history state must be an object.")
+        raw_versions = history_state.get("versions", [])
+        if not isinstance(raw_versions, list):
+            raise ValueError("Lineage history versions must be a list.")
+        _, copied_versions = canonical_json(raw_versions, "Lineage versions")
+        if any(not isinstance(v, dict) for v in copied_versions):
+            raise ValueError("Each prior lineage version must be an object.")
+        versions = copied_versions
+        if len(versions) > max_versions:
+            raise ValueError(f"Lineage history exceeds the {max_versions}-version limit.")
+
+    current = versions[-1] if versions else None
+    if current and current.get("version_signature") == version_signature:
+        version = current
+        status = "VERSION_UNCHANGED"
+    else:
+        version_no = int(current.get("version_number", len(versions))) + 1 if current else 1
+        version = {
+            "version_number": version_no,
+            "dataset_id": "DS-" + hashlib.sha256(str(metadata.get("dataset_id", source_sig)).encode("utf-8")).hexdigest()[:16].upper(),
+            "version_signature": version_signature,
+            "source_signature": source_sig,
+            "source_metadata": metadata,
+            "schema_fingerprint": hashlib.sha256(schema_json.encode("utf-8")).hexdigest(),
+            "transformation_signature": hashlib.sha256(recipe_json.encode("utf-8")).hexdigest(),
+            "transformations": transformation_list,
+            "payload_provenance": payload_provenance,
+            "recorded_utc": datetime.now(timezone.utc).isoformat(),
+        }
+        versions.append(version)
+        versions = versions[-max_versions:]
+        status = "VERSION_CREATED" if len(versions) > 1 else "VERSION_CREATED_INITIAL"
+
+    current_signature = str(version["version_signature"])
+    classified_runs = []
+    for item in run_list:
+        run_id = str(item.get("run_id", item.get("id", ""))).strip()
+        if not run_id:
+            raise ValueError("Each downstream run needs a non-empty run_id or id.")
+        version_link = str(item.get("version_signature", "")).strip()
+        dataset_link = str(item.get("dataset_signature", "")).strip()
+        source_link = str(item.get("source_signature", "")).strip()
+        linked_signature = version_link or dataset_link or source_link
+        if not linked_signature:
+            run_status = "UNVERIFIABLE_NO_SOURCE_SIGNATURE"
+        elif version_link and version_link == current_signature:
+            run_status = "CURRENT"
+        elif version_link:
+            run_status = "STALE_REQUIRES_RERUN"
+        elif (dataset_link or source_link) and linked_signature == source_sig:
+            # A matching raw-source fingerprint is insufficient to prove that the
+            # downstream run used the current transformation recipe and schema.
+            run_status = "SOURCE_MATCH_VERSION_UNVERIFIED"
+        else:
+            run_status = "STALE_REQUIRES_RERUN"
+        classified_runs.append({
+            "run_id": run_id,
+            "source_signature": linked_signature or None,
+            "signature_kind": (
+                "version_signature" if version_link else
+                "dataset_signature" if dataset_link else
+                "source_signature" if source_link else "missing"
+            ),
+            "status": run_status,
+            "method": "Only an exact version_signature match is marked CURRENT; raw source matches do not certify the transformation recipe.",
+        })
+
+    state = {
+        "versions": versions,
+        "current_version_number": version.get("version_number"),
+        "current_version_signature": current_signature,
+        "max_versions": max_versions,
+    }
+    return {
+        "status": status,
+        "dataset_id": version["dataset_id"],
+        "version_number": version["version_number"],
+        "version_signature": current_signature,
+        "source_signature": source_sig,
+        "schema_fingerprint": version["schema_fingerprint"],
+        "transformation_signature": version["transformation_signature"],
+        "transformations": transformation_list,
+        "source_metadata": metadata,
+        "payload_provenance": payload_provenance,
+        "version_count": len(versions),
+        "version_history": versions,
+        "downstream_runs": classified_runs,
+        "stale_run_count": sum(1 for item in classified_runs if item["status"] == "STALE_REQUIRES_RERUN"),
+        "unverifiable_run_count": sum(1 for item in classified_runs if item["status"] in {"UNVERIFIABLE_NO_SOURCE_SIGNATURE", "SOURCE_MATCH_VERSION_UNVERIFIED"}),
+        "lineage_state": state,
+        "limitations": [
+            "Upstream source signatures and downstream run references are supplied by the caller; their authenticity is not independently established here.",
+            "A downstream run is marked stale only when it supplies a non-matching signature; missing signatures remain unverifiable.",
+            "Durable hosted persistence, linkage to every core dataset consumer and cross-workspace isolation require staging verification.",
+        ],
+    }

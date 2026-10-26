@@ -414,7 +414,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                 "Copilot action, API and export path must enforce their own server-side entitlement checks."
             )
 
-            if selected_tool["tool_id"] in {"T002", "T007", "T009", "T010", "T015", "T016", "T017", "T018", "T019", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T033", "T034", "T035", "T036", "T037", "T038", "T039", "T040", "T041", "T042", "T043", "T044", "T045", "T046", "T047", "T048", "T049", "T050", "T051", "T052", "T054", "T055", "T056", "T058", "T059", "T062", "T063", "T066", "T069", "T070", "T071", "T072", "T075", "T076", "T077", "T078", "T079", "T081", "T082", "T083", "T084", "T085", "T087", "T089", "T100"}:
+            if selected_tool["tool_id"] in {"T002", "T006", "T007", "T020", "T009", "T010", "T015", "T016", "T017", "T018", "T019", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T033", "T034", "T035", "T036", "T037", "T038", "T039", "T040", "T041", "T042", "T043", "T044", "T045", "T046", "T047", "T048", "T049", "T050", "T051", "T052", "T054", "T055", "T056", "T058", "T059", "T062", "T063", "T066", "T069", "T070", "T071", "T072", "T075", "T076", "T077", "T078", "T079", "T081", "T082", "T083", "T084", "T085", "T087", "T089", "T100"}:
                 st.markdown("---")
                 st.markdown("**Run focused specialist method**")
                 st.caption(
@@ -428,7 +428,43 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                     )
                 else:
                     with st.form("shoir_target_method_form_" + selected_tool["tool_id"]):
-                        if selected_tool["tool_id"] == "T007":
+                        if selected_tool["tool_id"] == "T006":
+                            st.caption(
+                                "Create bounded JSON checkpoints for a record you explicitly provide here. "
+                                "Undo/redo applies only to this snapshot history, not arbitrary edits in other modules. "
+                                "Do not paste passwords, tokens or unnecessary personal/customer data."
+                            )
+                            recovery_action_label = st.selectbox(
+                                "Recovery action",
+                                ["Create checkpoint", "Undo", "Redo", "Restore selected revision"],
+                                key="tool006_action",
+                            )
+                            recovery_action = {
+                                "Create checkpoint": "checkpoint",
+                                "Undo": "undo",
+                                "Redo": "redo",
+                                "Restore selected revision": "restore",
+                            }[recovery_action_label]
+                            recovery_snapshot_json = st.text_area(
+                                "Snapshot JSON (used only when creating a checkpoint)",
+                                value='{"asset_id":"P-101","inspection_state":"PENDING"}',
+                                key="tool006_snapshot_json",
+                            )
+                            recovery_target_revision = st.number_input(
+                                "Revision to restore (1-based)",
+                                min_value=1,
+                                max_value=25,
+                                value=1,
+                                step=1,
+                                key="tool006_target_revision",
+                            )
+                            run_method = st.form_submit_button(
+                                "Apply recovery action",
+                                type="primary",
+                                use_container_width=True,
+                                key="tool006_run",
+                            )
+                        elif selected_tool["tool_id"] == "T007":
                             st.caption("Paste only the relevant error message. This inspector redacts common credentials and contact details, does not read server logs, and offers rule-based next checks.")
                             diagnostic_inspector_text = st.text_area(
                                 "Error or warning text",
@@ -991,6 +1027,53 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                             synthetic_downtime = st.number_input("Mean downtime per record (minutes)", min_value=0.0, value=5.0, step=1.0, key="tool019_downtime")
                             synthetic_energy = st.number_input("Energy per good-scale output unit (kWh)", min_value=0.0, value=0.5, step=0.1, key="tool019_energy")
                             run_method = st.form_submit_button("Generate synthetic dataset", type="primary", use_container_width=True, key="tool019_run")
+                        elif selected_tool["tool_id"] == "T020":
+                            st.caption(
+                                "Record a deterministic source/recipe version and flag supplied downstream-run links "
+                                "whose signatures do not match. This does not infer unrecorded dependencies."
+                            )
+                            studio_result = st.session_state.get("excel_studio_result")
+                            if isinstance(studio_result, dict) and studio_result.get("signature"):
+                                st.caption(
+                                    f"Excel Studio dataset available: {studio_result.get('filename', 'unnamed workbook')} "
+                                    f"· source signature {str(studio_result.get('signature'))[:16]}…"
+                                )
+                            else:
+                                st.info(
+                                    "No current Excel Studio import was detected. Choose Manual JSON snapshot, "
+                                    "or import a workbook in Excel Intelligence first."
+                                )
+                            t020_source_mode = st.selectbox(
+                                "Dataset source",
+                                ["Current Excel Studio dataset", "Manual JSON snapshot"],
+                                key="tool020_source_mode",
+                            )
+                            t020_snapshot_json = st.text_area(
+                                "JSON dataset snapshot (used only in manual mode)",
+                                value='{"dataset":"example","records":[{"id":"A1","value":10}]}',
+                                key="tool020_snapshot_json",
+                            )
+                            t020_source_metadata_json = st.text_area(
+                                "Additional source metadata (JSON object)",
+                                value="{}",
+                                key="tool020_source_metadata_json",
+                            )
+                            t020_transformations_json = st.text_area(
+                                "Transformation recipe (JSON list of objects)",
+                                value="[]",
+                                key="tool020_transformations_json",
+                            )
+                            t020_downstream_runs_json = st.text_area(
+                                "Downstream run references (JSON list; include each run's version_signature)",
+                                value="[]",
+                                key="tool020_downstream_runs_json",
+                            )
+                            run_method = st.form_submit_button(
+                                "Record dataset version and check run freshness",
+                                type="primary",
+                                use_container_width=True,
+                                key="tool020_run",
+                            )
                         elif selected_tool["tool_id"] == "T034":
                             st.caption("Single-sample binomial plan. Confirm any contractual sampling standard and finite-lot conditions before use.")
                             sampling_aql = st.number_input("AQL defect fraction (%)", min_value=0.0, max_value=99.0, value=1.0, step=0.5, key="tool034_aql")
@@ -1235,7 +1318,14 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                             )
                             run_method = st.form_submit_button("Calculate sample size", type="primary", use_container_width=True, key="tool085_run")
 
-                    if selected_tool["tool_id"] == "T007":
+                    if selected_tool["tool_id"] == "T006":
+                        current_tool_inputs = {
+                            "action": recovery_action,
+                            "snapshot_input_bytes": len(recovery_snapshot_json.encode("utf-8")),
+                            "target_revision": int(recovery_target_revision) if recovery_action == "restore" else None,
+                            "snapshot_contents_excluded_from_input_metadata": True,
+                        }
+                    elif selected_tool["tool_id"] == "T007":
                         safe_diagnostic = classify_diagnostic(diagnostic_inspector_text)
                         current_tool_inputs = {
                             "reported_subsystem": diagnostic_category,
@@ -1354,6 +1444,14 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                         current_tool_inputs = {"records_json": time_series_json, "timestamp_column": ts_column, "timezone_name": ts_timezone, "expected_interval": ts_expected_interval, "resample_frequency": ts_resample_frequency, "aggregation": ts_aggregation}
                     elif selected_tool["tool_id"] == "T019":
                         current_tool_inputs = {"row_count": int(synthetic_rows), "seed": int(synthetic_seed), "start_timestamp": synthetic_start, "interval_minutes": int(synthetic_interval), "defect_rate_pct": synthetic_defect_rate, "mean_downtime_minutes": synthetic_downtime, "energy_kwh_per_unit": synthetic_energy}
+                    elif selected_tool["tool_id"] == "T020":
+                        current_tool_inputs = {
+                            "source_mode": t020_source_mode,
+                            "manual_snapshot_json": t020_snapshot_json if t020_source_mode == "Manual JSON snapshot" else None,
+                            "source_metadata_json": t020_source_metadata_json,
+                            "transformations_json": t020_transformations_json,
+                            "downstream_runs_json": t020_downstream_runs_json,
+                        }
                     elif selected_tool["tool_id"] == "T034":
                         current_tool_inputs = {"aql_pct": sampling_aql, "ltpd_pct": sampling_ltpd, "producer_risk_pct": sampling_alpha, "consumer_risk_pct": sampling_beta, "max_sample_size": int(sampling_max_n)}
                     elif selected_tool["tool_id"] == "T041":
@@ -1447,6 +1545,34 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                         }
 
                     if run_method:
+                        previous_t006_state = {}
+                        previous_t006_history = {}
+                        if selected_tool["tool_id"] == "T006":
+                            for key in (
+                                "shoir_tool_result_T006",
+                                "shoir_tool_inputs_T006",
+                                "shoir_tool_save_status_T006",
+                            ):
+                                previous_t006_state[key] = (key in st.session_state, st.session_state.get(key))
+                            previous_t006_history = {
+                                key: st.session_state[key]
+                                for key in st.session_state
+                                if str(key).startswith("shoir_recovery_history_T006_")
+                            }
+                        previous_t020_state = {}
+                        previous_t020_lineage = {}
+                        if selected_tool["tool_id"] == "T020":
+                            for key in (
+                                "shoir_tool_result_T020",
+                                "shoir_tool_inputs_T020",
+                                "shoir_tool_save_status_T020",
+                            ):
+                                previous_t020_state[key] = (key in st.session_state, st.session_state.get(key))
+                            previous_t020_lineage = {
+                                key: st.session_state[key]
+                                for key in st.session_state
+                                if str(key).startswith("shoir_dataset_lineage_T020_")
+                            }
                         # Remove only the in-session output before a new run. The last
                         # successful saved workspace snapshot remains intact if this run fails.
                         st.session_state.pop("shoir_tool_result_" + selected_tool["tool_id"], None)
@@ -1489,10 +1615,128 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 get_student_practice_problem,
                                 evaluate_student_practice_answer,
                                 build_guided_study_plan,
+                                manage_recovery_snapshot_history,
+                                manage_dataset_version_lineage,
                                 monitor_equipment_anomalies,
                                 assess_capa_8d_records,
                             )
-                            if selected_tool["tool_id"] == "T007":
+                            if selected_tool["tool_id"] == "T006":
+                                recovery_snapshot = None
+                                if recovery_action == "checkpoint":
+                                    try:
+                                        recovery_snapshot = json.loads(recovery_snapshot_json)
+                                    except json.JSONDecodeError as exc:
+                                        raise ValueError("Snapshot must be valid JSON.") from exc
+                                import hashlib
+                                recovery_scope_values = (
+                                    st.session_state.get("current_user"),
+                                    st.session_state.get("shoir_workspace_name"),
+                                    st.session_state.get("workspace"),
+                                    st.session_state.get("active_workspace_name"),
+                                    st.session_state.get("active_workspace_id"),
+                                    st.session_state.get("workspace_id"),
+                                    st.session_state.get("active_project_id"),
+                                    st.session_state.get("project_id"),
+                                )
+                                recovery_scope_token = hashlib.sha256(
+                                    "\\x1f".join(str(value or "") for value in recovery_scope_values).encode("utf-8")
+                                ).hexdigest()[:16]
+                                recovery_history_key = "shoir_recovery_history_T006_" + recovery_scope_token
+                                result = manage_recovery_snapshot_history(
+                                    st.session_state.get(recovery_history_key),
+                                    action=recovery_action,
+                                    new_snapshot=recovery_snapshot,
+                                    target_revision=int(recovery_target_revision) if recovery_action == "restore" else None,
+                                )
+                                st.session_state[recovery_history_key] = result.pop("history_state")
+                                result["data_provenance"] = (
+                                    "USER_ENTERED_UNVERIFIED" if recovery_snapshot is not None
+                                    else "TOOL_SCOPED_SNAPSHOT_HISTORY_UNVERIFIED"
+                                )
+                                result["scope"] = (
+                                    "JSON snapshots explicitly entered into this recovery tool only; "
+                                    "not a cross-module undo manager or external-system rollback."
+                                )
+                            elif selected_tool["tool_id"] == "T020":
+                                try:
+                                    source_metadata_extra = json.loads(t020_source_metadata_json)
+                                    transformations = json.loads(t020_transformations_json)
+                                    downstream_runs = json.loads(t020_downstream_runs_json)
+                                except json.JSONDecodeError as exc:
+                                    raise ValueError("Source metadata, transformation recipe and downstream runs must be valid JSON.") from exc
+                                if not isinstance(source_metadata_extra, dict):
+                                    raise ValueError("Additional source metadata must be a JSON object.")
+                                if not isinstance(transformations, list) or not isinstance(downstream_runs, list):
+                                    raise ValueError("Transformation recipe and downstream runs must be JSON lists.")
+                                lineage_source_signature = None
+                                dataset_payload = None
+                                if t020_source_mode == "Current Excel Studio dataset":
+                                    studio_result = st.session_state.get("excel_studio_result")
+                                    if not isinstance(studio_result, dict) or not str(studio_result.get("signature") or "").strip():
+                                        raise ValueError(
+                                            "No current Excel Studio dataset with a source signature is available. "
+                                            "Import a workbook first, or choose Manual JSON snapshot."
+                                        )
+                                    diagnostics = studio_result.get("import_diagnostics", {})
+                                    profiles = studio_result.get("profiles", {})
+                                    lineage_source_signature = str(studio_result["signature"])
+                                    source_metadata = {
+                                        **source_metadata_extra,
+                                        "filename": str(studio_result.get("filename") or ""),
+                                        "source_type": (
+                                            diagnostics.get("Source type", "Unknown")
+                                            if isinstance(diagnostics, dict)
+                                            else "Unknown"
+                                        ),
+                                        "dataset_version": studio_result.get("dataset_version", 1),
+                                        "table_catalog": studio_result.get("table_catalog", []),
+                                        "schema_fingerprint": {
+                                            str(sheet): profile.get("Schema fingerprint", "")
+                                            for sheet, profile in profiles.items()
+                                            if isinstance(profile, dict)
+                                        } if isinstance(profiles, dict) else {},
+                                    }
+                                    lineage_provenance = "CURRENT_EXCEL_STUDIO_IMPORT_SOURCE_SIGNATURE"
+                                else:
+                                    try:
+                                        dataset_payload = json.loads(t020_snapshot_json)
+                                    except json.JSONDecodeError as exc:
+                                        raise ValueError("Manual dataset snapshot must be valid JSON.") from exc
+                                    if not isinstance(dataset_payload, (dict, list)):
+                                        raise ValueError("Manual dataset snapshot must be a JSON object or array.")
+                                    source_metadata = source_metadata_extra
+                                    lineage_provenance = "MANUAL_JSON_SNAPSHOT"
+                                import hashlib
+                                lineage_scope_values = (
+                                    st.session_state.get("current_user"),
+                                    st.session_state.get("shoir_workspace_name"),
+                                    st.session_state.get("workspace"),
+                                    st.session_state.get("active_workspace_name"),
+                                    st.session_state.get("active_workspace_id"),
+                                    st.session_state.get("workspace_id"),
+                                    st.session_state.get("active_project_id"),
+                                    st.session_state.get("project_id"),
+                                )
+                                lineage_scope_token = hashlib.sha256(
+                                    "\\x1f".join(str(value or "") for value in lineage_scope_values).encode("utf-8")
+                                ).hexdigest()[:16]
+                                lineage_history_key = "shoir_dataset_lineage_T020_" + lineage_scope_token
+                                result = manage_dataset_version_lineage(
+                                    st.session_state.get(lineage_history_key),
+                                    dataset_payload=dataset_payload,
+                                    source_signature=lineage_source_signature,
+                                    source_metadata=source_metadata,
+                                    transformations=transformations,
+                                    downstream_runs=downstream_runs,
+                                )
+                                st.session_state[lineage_history_key] = result.pop("lineage_state")
+                                result["data_provenance"] = lineage_provenance
+                                result["scope"] = (
+                                    "Versions are keyed to the current user/workspace/project context in session state. "
+                                    "The tool reports stale supplied run references only; it does not automatically intercept "
+                                    "every dataset consumer or prove managed-backend isolation."
+                                )
+                            elif selected_tool["tool_id"] == "T007":
                                 result = classify_diagnostic(diagnostic_inspector_text)
                                 result["reported_subsystem"] = diagnostic_category
                                 result["data_provenance"] = "USER_PROVIDED_DIAGNOSTIC_REDACTED"
@@ -2083,13 +2327,62 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 st.session_state["shoir_tool_bundle_bytes_T087"] = pack_result.pop("bundle_bytes")
                                 result = pack_result
 
-                            _persist_focused_tool_result(
+                            persistence_outcome = _persist_focused_tool_result(
                                 selected_tool["tool_id"], result, current_tool_inputs
                             )
+                            if persistence_outcome == "SAVE_FAILED" and selected_tool["tool_id"] in {"T006", "T020"}:
+                                if selected_tool["tool_id"] == "T006":
+                                    for key, (existed, previous_value) in previous_t006_state.items():
+                                        if existed:
+                                            st.session_state[key] = previous_value
+                                        else:
+                                            st.session_state.pop(key, None)
+                                    for key in list(st.session_state):
+                                        if str(key).startswith("shoir_recovery_history_T006_") and key not in previous_t006_history:
+                                            st.session_state.pop(key, None)
+                                    for key, previous_value in previous_t006_history.items():
+                                        st.session_state[key] = previous_value
+                                else:
+                                    for key, (existed, previous_value) in previous_t020_state.items():
+                                        if existed:
+                                            st.session_state[key] = previous_value
+                                        else:
+                                            st.session_state.pop(key, None)
+                                    for key in list(st.session_state):
+                                        if str(key).startswith("shoir_dataset_lineage_T020_") and key not in previous_t020_lineage:
+                                            st.session_state.pop(key, None)
+                                    for key, previous_value in previous_t020_lineage.items():
+                                        st.session_state[key] = previous_value
+                                st.error(
+                                    "Workspace save failed. The last successful result and recovery/lineage history "
+                                    "were restored in the current session; do not assume the new state was saved."
+                                )
                         except Exception as exc:
+                            if selected_tool["tool_id"] == "T006":
+                                for key, (existed, previous_value) in previous_t006_state.items():
+                                    if existed:
+                                        st.session_state[key] = previous_value
+                                    else:
+                                        st.session_state.pop(key, None)
+                                for key in list(st.session_state):
+                                    if str(key).startswith("shoir_recovery_history_T006_") and key not in previous_t006_history:
+                                        st.session_state.pop(key, None)
+                                for key, previous_value in previous_t006_history.items():
+                                    st.session_state[key] = previous_value
+                            elif selected_tool["tool_id"] == "T020":
+                                for key, (existed, previous_value) in previous_t020_state.items():
+                                    if existed:
+                                        st.session_state[key] = previous_value
+                                    else:
+                                        st.session_state.pop(key, None)
+                                for key in list(st.session_state):
+                                    if str(key).startswith("shoir_dataset_lineage_T020_") and key not in previous_t020_lineage:
+                                        st.session_state.pop(key, None)
+                                for key, previous_value in previous_t020_lineage.items():
+                                    st.session_state[key] = previous_value
                             st.error(f"Tool run could not be completed safely: {exc}")
 
-                    if selected_tool["tool_id"] in {"T007", "T009", "T010", "T017", "T018", "T019", "T024", "T025", "T027", "T034", "T038", "T041", "T043", "T044", "T045", "T046", "T047", "T048", "T050", "T054", "T059", "T062", "T063", "T069", "T070", "T071", "T076", "T077", "T079", "T082", "T083", "T084", "T100"}:
+                    if selected_tool["tool_id"] in {"T006", "T007", "T020", "T009", "T010", "T017", "T018", "T019", "T024", "T025", "T027", "T034", "T038", "T041", "T043", "T044", "T045", "T046", "T047", "T048", "T050", "T054", "T059", "T062", "T063", "T069", "T070", "T071", "T076", "T077", "T079", "T082", "T083", "T084", "T100"}:
                         result = st.session_state.get("shoir_tool_result_" + selected_tool["tool_id"])
                         if result:
                             _show_focused_tool_persistence(selected_tool["tool_id"], result, current_tool_inputs)
@@ -2163,6 +2456,42 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                             chart = result["chart_data"]
                             st.plotly_chart(px.line(chart, x="Observation", y=[f"Measurement ({result['unit']})", f"I center ({result['unit']})", f"I UCL ({result['unit']})", f"I LCL ({result['unit']})"], markers=True, title="Individuals control chart"), use_container_width=True)
                             st.plotly_chart(px.line(chart, x="Observation", y=["Moving range", "MR center", "MR UCL", "MR LCL"], markers=True, title="Moving-range control chart"), use_container_width=True)
+                    elif selected_tool["tool_id"] == "T020":
+                        result = st.session_state.get("shoir_tool_result_T020")
+                        if result:
+                            _show_focused_tool_persistence("T020", result, current_tool_inputs)
+                            c1, c2, c3 = st.columns(3)
+                            c1.metric("Dataset version", result["version_number"])
+                            c2.metric("Versions retained", result["version_count"])
+                            c3.metric("Supplied runs flagged stale", result["stale_run_count"])
+                            st.caption(
+                                f"Dataset {result['dataset_id']} · signature {result['version_signature'][:16]}… "
+                                f"· provenance: {result.get('data_provenance', 'UNVERIFIED')}"
+                            )
+                            st.dataframe(
+                                [
+                                    {
+                                        "Version": item["version_number"],
+                                        "Source signature": str(item.get("source_signature", ""))[:16] + "…",
+                                        "Schema fingerprint": str(item.get("schema_fingerprint", ""))[:16] + "…",
+                                        "Recipe fingerprint": str(item.get("transformation_signature", ""))[:16] + "…",
+                                        "Recorded UTC": item.get("recorded_utc", ""),
+                                    }
+                                    for item in result["version_history"]
+                                ],
+                                use_container_width=True,
+                                hide_index=True,
+                            )
+                            if result["downstream_runs"]:
+                                st.dataframe(result["downstream_runs"], use_container_width=True, hide_index=True)
+                            else:
+                                st.info("No downstream runs were supplied. Unregistered run dependencies cannot be detected.")
+                            if result["stale_run_count"]:
+                                st.warning("One or more supplied runs have a different source/version signature and require review or rerun.")
+                            if result["unverifiable_run_count"]:
+                                st.warning("Some supplied runs have no source signature and remain unverifiable; they are not assumed current.")
+                            for limitation in result["limitations"]:
+                                st.caption("Limitation: " + limitation)
                     elif selected_tool["tool_id"] == "T039":
                         result = st.session_state.get("shoir_tool_result_T039")
                         if result:

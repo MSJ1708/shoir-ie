@@ -27,14 +27,14 @@ This is a focused first implementation phase, **not completion of the full 100-t
 
 | Status | Count |
 |---|---:|
-| `IMPLEMENTED_NEEDS_VALIDATION` | 49 |
-| `FOUNDATION_ONLY` | 49 |
+| `IMPLEMENTED_NEEDS_VALIDATION` | 92 |
+| `FOUNDATION_ONLY` | 6 |
 | `EXTERNAL_CONFIGURATION_REQUIRED` | 2 |
 | `MISSING` | 0 |
 | `VERIFIED_WORKING` | 0 |
 | **Total** | **100** |
 
-These counts are conservative source-audit classifications. They are not a tool success rate, do not mean that every target method has been implemented, and do not mean that all 49 mapped capabilities meet their complete acceptance criteria. All 100 authenticated end-to-end browser statuses remain unverified in the matrix. The 19 focused methods listed above remain `IMPLEMENTED_NEEDS_VALIDATION`, not `VERIFIED_WORKING`, because hosted authenticated end-to-end acceptance has not been established. Local persistence/service tests do not prove managed-backend save/reload/re-login or workspace isolation across real authenticated sessions.
+These counts are conservative source-audit classifications as recorded by the canonical registry and matrix on this feature branch. They are not a tool success rate and do not mean the complete acceptance criteria have passed. All 100 authenticated end-to-end browser statuses remain unverified. T006 is a bounded JSON snapshot history tool, not universal cross-module undo. T039 validates CAPA/8D record completeness and due dates but does not yet provide a fully audited lifecycle ledger or attachment store. T020 now records bounded dataset versions from a current Excel Studio signature or manual JSON snapshot and fingerprints source metadata plus transformation recipes; downstream stale detection only applies to supplied run references and is not yet an automatic dependency graph. Local persistence/service tests do not prove managed-backend save/reload/re-login or workspace isolation across real authenticated sessions.
 
 ## Entitlement and routing boundaries
 
@@ -72,4 +72,4 @@ No authenticated per-tier module walkthrough was run. The matrix accurately mark
 
 ## Release recommendation
 
-**NO-GO for merging this as completion of the requested 100-tool implementation or for declaring Shoir-IE fully verified/workforce-ready.** Revision `a76237f204ba2c6136c16d732c6e8fbc55367899` passed the full 660-test suite, platform, engine-regression, security/quality, compile/import, and local desktop/mobile smoke gates. The hosted public-site smoke failed at desktop and mobile because the endpoint served a sleeping-app page instead of Shoir-IE. The branch provides an auditable 100-target matrix, 19 focused Workbench methods, a corrected Research Pack/Enterprise Plus boundary, authenticated execution gating and improved workspace serialization/persistence coverage. It does not deliver 100 fully implemented/verified tools or authenticated per-tier end-to-end acceptance. The remaining work above is required before the full master prompt can be marked done.
+**NO-GO for merging this as completion of the requested 100-tool implementation or for declaring Shoir-IE fully verified/workforce-ready.** The T006/T039 implementation on branch `feat/shoir-100-t006-recovery-20261026` is under draft PR review; the precise commit and CI outcomes must be read from [PR #191](https://github.com/MSJ1708/shoir-ie/pull/191). The hosted public-site smoke failed at desktop and mobile because the endpoint served a sleeping-app page instead of Shoir-IE. The branch provides an auditable 100-target matrix, focused calculation-backed Workbench methods including T006 and T039, a corrected Research Pack/Enterprise Plus boundary, authenticated execution gating and improved workspace serialization/persistence coverage. It does not deliver 100 fully implemented/verified tools or authenticated per-tier end-to-end acceptance. The remaining work above is required before the full master prompt can be marked done.
