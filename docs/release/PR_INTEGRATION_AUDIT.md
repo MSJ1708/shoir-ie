@@ -188,3 +188,19 @@ Recommended order:
 
 **Impact on decision:** deployment parity remains **FAIL / BLOCKED**; authenticated staging feature acceptance remains **NOT RUN**; overall production and paid-pilot decision remains **NO-GO**. No production database, Edge Function, application deployment, billing, or account was mutated by this inspection.
 
+## 8. Fresh direct-content reconciliation of PR #170 — 26 October 2026
+
+The current PR #170 branch `legal-beta-referral-readiness-2026-10-21` is **47 commits ahead / 334 behind** current `main`, based on common ancestor `3a73ada0be2ea5e85903b9c8937f8a9387ee061d`. The ordinary compare is therefore not an inventory of unique current changes: paths touched on both sides since the old common ancestor can appear in the compare even when their present file contents match.
+
+A direct file-content comparison found the following files identical between current main and PR #170: `docs/COOKIE_POLICY.md`, `docs/PRIVACY_POLICY.md`, `docs/TERMS_AND_CONDITIONS.md`, `docs/THIRD_PARTY_LICENSE_REVIEW.md`, `durable_account_store.py`, `migrations/shoir_postgresql.sql`, `supabase/migrations/20261021130000_shoir_beta_legal_referrals.sql`, `supabase/migrations/20261022110000_enforce_beta_legal_acceptance.sql`, and `tests/test_beta_legal_referrals.py`. The repository's current main already contains the core code and focused test for versioned consent and attribution; these do not need to be wholesale reintroduced from an old stack.
+
+Current main is newer in several material places:
+
+- Main `docs/REFUND_POLICY.md` is version `2026-10-23-v2`; PR #170 still has `2026-10-21-v1`.
+- Main `app.py` and `supabase/functions/shoir-persistence/index.ts` have the refund-policy v2 constants and additional current code. The PR #170 versions still reflect v1, and its Edge source does not include the subsequent v2 change.
+- Main contains `supabase/migrations/20261023130000_refresh_refund_policy_acceptance_version.sql`, which is absent from PR #170's migration list, and main's migration-history/source-inventory tests assert the v2 policy. The stale branch's corresponding fixture/assertions still use v1.
+- Main's `docs/LEGAL_RISK_REGISTER.md` and `README.md` differ from the PR branch and must be preserved/reconciled rather than reverted to the older branch version.
+- `docs/COMMERCIAL_LAUNCH_CHECKLIST.md` is present on #170 but absent from current main. A review-only copy is already preserved in this audit PR as `docs/release/legal-drafts/SAUDI_COMMERCIAL_REVIEW_CHECKLIST.md`; it remains an unapproved draft.
+
+**Disposition refinement for #170:** do not merge or cherry-pick the old branch wholesale. Keep it open/draft until a reviewer explicitly approves a small, current-main-based change. The checklist's unique content is preserved in the audit PR; any remaining README/app/Edge differences must be reviewed against current main and the v2 consent contract. Production still lacks the later applied migrations in its live history and the deployed production Edge hash differs from staging, so repository presence alone does not resolve deployment parity. No PR was merged or closed by this reconciliation.
+
