@@ -28,3 +28,7 @@ def test_essential_account_exports_remain_required():
         "account_is_expired",
     ):
         assert f'"{name}"' in required
+
+
+def test_staging_notice_uses_the_required_exact_text():
+    assert 'STAGING TEST ENVIRONMENT · use disposable test accounts and synthetic data only.' in APP
