@@ -1,6 +1,7 @@
 import {
   MAX_REQUEST_BODY_BYTES,
   MAX_WORKSPACE_STATE_BYTES,
+  hasCanonicalMasterAdminInvariant,
   normalizeWorkspaceStateJson,
   publicErrorFor,
   PublicRequestError,
@@ -156,4 +157,37 @@ Deno.test("public error mapping does not expose internal infrastructure details"
     invalidProof.status === 400,
     "Invalid proof should be a client error.",
   );
+});
+
+
+Deno.test("protected administrator invariant is read-only and fails closed on drift", () => {
+  const canonical = Object.freeze({
+    username_lc: "sho",
+    role: "Enterprise Admin",
+    tier: "Enterprise Plus Tier ($399)",
+    active: true,
+    subscription_expires_at: "2099-01-01T00:00:00+00:00",
+  });
+  assert(
+    hasCanonicalMasterAdminInvariant(canonical),
+    "Canonical protected administrator state should be accepted.",
+  );
+  assert(
+    canonical.tier === "Enterprise Plus Tier ($399)",
+    "The invariant check must not mutate the account.",
+  );
+
+  const invalidRows = [
+    { ...canonical, role: "User" },
+    { ...canonical, tier: "Professional Tier ($129)" },
+    { ...canonical, active: false },
+    { ...canonical, subscription_expires_at: "2030-01-01T00:00:00Z" },
+    { ...canonical, username_lc: "another-user" },
+  ];
+  for (const row of invalidRows) {
+    assert(
+      !hasCanonicalMasterAdminInvariant(row),
+      "Invariant drift must be detected and rejected.",
+    );
+  }
 });
