@@ -171,3 +171,59 @@ This addendum updates the earlier snapshot without overwriting its historical ob
 - PR #198 remains a draft ERP mapping/adaptation foundation at head `38093374614a60c1c26721a1f1b4b2cafb1041ba`. Standard Python, security/quality, engine-regression, validation and platform suites passed for that head; `live-deployment-smoke` was skipped. This does not prove SAP/Oracle provider authentication, HTTP transport, durable synchronization, import persistence or live non-production tenant acceptance. All six product profiles remain `SPECIFICATION_ONLY_UNCONFIGURED`.
 - PR #199 (this report) is currently at head `a84d62246a41a0d8e0e0079a4f9a1161d58f5088`; validation run [40341080730](https://github.com/MSJ1708/shoir-ie/actions/runs/40341080730) succeeded, while `live-deployment-smoke` was skipped. This is a documentation snapshot, not live deployment proof.
 - **Decision remains NO-GO.** No production database, Edge Function, subscription, or account was changed; BETA remains visible. The migration data-impact, branch-protection, live deployment/runtime SHA, provider-backed T096/T098 and legal/operational approvals remain open.
+
+---
+
+## Latest exact-head addendum — 26 October 2026, approximately 15:35 UTC
+
+This addendum supersedes the earlier PR-count and implementation-matrix snapshots above. The CSV disposition matrix was refreshed in commit `711036d6a9565f45839518fbc50d479ae3090e8e`; its PR #199 head field records the branch state immediately before this documentation-only update. Because this audit branch itself advances when these artifacts are committed, re-fetch the final branch head and checks before merging this report.
+
+### Current candidate and mandatory release gate
+
+- `main`: `2ef44057f84162389d39998e922b505dcfe4d3e9`.
+- `staging-e2e-20261019`: `9e3899d6f5147584cf27585d946fa7b5d18d92d5`.
+- Staging authenticated release run [40326994939](https://github.com/MSJ1708/shoir-ie/actions/runs/40326994939) completed with a successful job conclusion on the candidate SHA. Case-level evidence remains 22 PASS / 0 FAIL / 2 SKIP; 96/96 module routes and 7/7 browser-shell/Excel/logout checks passed. The two skips are mandatory for a complete acceptance: `login_throttle_blocks_excess_attempts` and `inactive_account_denied`. A successful workflow with these skips is not a full PASS.
+- The currently checked-in staging workflow at the candidate still uses the old aggregate rule that classifies every result other than an explicit FAIL as an overall PASS. The fix is isolated in draft [PR #200](https://github.com/MSJ1708/shoir-ie/pull/200), head `66b1def87c3bfe99373ebf1733df7249d8c628a0`, targeting the staging branch. Its strict status classifier correctly returns BLOCKED for skipped/missing/unknown cases, and allows module/browser suites to run for diagnostics when the backend check fails. The exact-head standard test job succeeded; hosted `live-deployment-smoke` was skipped. PR #200 has no review submission and remains draft; do not merge until independent review and applicable checks complete.
+- PR #200 does **not** provision the inactive account or enable the throttle probe. An authorized staging operator must configure `SHOIR_E2E_INACTIVE_USERNAME` and `SHOIR_E2E_INACTIVE_PASSWORD` as dedicated synthetic account secrets and set repository variable `SHOIR_E2E_VERIFY_LOGIN_THROTTLE=true`. The inactive account must actually be inactive in staging. Then dispatch `.github/workflows/authenticated-release-gate.yml` manually on the reviewed staging branch and confirm that both cases ran and passed rather than skipped.
+- The connected GitHub tool access does not expose a workflow-dispatch action. No new authenticated gate was dispatched by this recheck. The two Streamlit candidate URLs and the production URL could not be inspected by the available web/runtime network access. The authoritative staging URL, configured branch, entry point, runtime SHA, startup log and exact staging banner therefore remain BLOCKED / NOT RUN, not evidence that the app is down.
+
+### Current pull-request governance and disposition
+
+The live PR API returned **18 open PRs**, and each is marked draft with zero submitted review records. Exact current heads, base refs/SHAs, mergeability, and exact-head check summaries are in `PULL_REQUEST_DISPOSITION_MATRIX_2026-10-26.csv`. The API currently reports only PRs #198, #199, #192 and #200 as mergeable; #199 checks were still in progress at this snapshot. PR #182 has a failing test check, and PR #172 has failing test and security-quality checks. The remaining dirty PRs are stacked on old parent branches or have old base SHAs; their green unit/security checks do not supersede conflicts or skipped hosted deployment smoke. Do not bulk-merge or close these branches: first designate canonical owners for shared 100-tool registry/entitlement/workbench changes, reconcile dependencies, then rebase each selected PR deliberately.
+
+Branch governance remains **FAIL / BLOCKED**:
+- GitHub branch metadata reports `protected=false` for both `main` and `staging-e2e-20261019`.
+- The accessible rulesets endpoint returns an empty list. The protection-detail endpoint returned HTTP 403 (Resource not accessible by integration).
+- The connected integration cannot set and independently verify enforced branch protections. A repository administrator must configure and verify required PR review, current required checks, stale-approval dismissal, review-thread resolution, direct/force-push and deletion restrictions, and documented bypass rules. Until then, required governance is not satisfied.
+
+### Current schema, function, and tool-matrix parity
+
+Read-only project and metadata checks reconfirmed the following:
+- Staging project `hfhrosthswcybccepmak` has 17 migration records; production project `gcsamrdaeraxieaagsta` has 14. Production is missing staging entries `20261021130000_shoir_beta_legal_referrals`, `20261022110000_enforce_beta_legal_acceptance`, and ledger version `20261025164602` named `20261023130000_refresh_refund_policy_acceptance_version`. Investigate the refund-policy version/name discrepancy using actual migration SQL, schema and ledger records; do not rewrite migration history blindly.
+- Staging has `public.shoir_referrals`; production does not. `shoir_subscription_requests` has 19 columns in staging versus 13 in production; six legal-acceptance columns are absent in production. Aggregate table counts were 8 versus 5 accounts, 7 versus 4 subscription requests, 42 versus 40 sessions, 7 versus 4 pending credentials, and 40 versus 1 login-throttle records. No account identifiers or credential values were selected.
+- `shoir-persistence` is version 9 in staging with source hash `0551d88aceeca45ede2b890e874a75f542df670d2f2332a0878f23b5cc0b187e`; production is version 8 with source hash `410e22f7af0be8f3ec74bae5a15aec70f8b6a807a540e98a2c5143f4e6b8790d`. Staging source includes legal/referral behavior absent from production source. No production migration, function deployment or other write was performed.
+- The source implementation inventories diverge: current `main` matrix has 100 rows (98 IMPLEMENTED_NEEDS_VALIDATION, 2 EXTERNAL_CONFIGURATION_REQUIRED); staging has 100 rows (87 IMPLEMENTED_NEEDS_VALIDATION, 11 FOUNDATION_ONLY, 2 EXTERNAL_CONFIGURATION_REQUIRED). Both have zero VERIFIED_WORKING entries. This discrepancy requires reconciliation; the counts are classifications, not pass rates.
+- Existing production data-impact analysis says the proposed referral migration predicate matches all five production account rows and would rewrite `affiliate_code` and `updated_at`. It must not be described as purely additive. Prepare a reviewed preservation-first migration/backfill plan and obtain business-owner approval before any production consideration.
+- Neither current backup/PITR availability nor a successful isolated restoration rehearsal was verified here. Production remains read-only.
+
+### ERP, identity, module, and commercial readiness
+
+- T096 is PARTIAL: the merged component is a generic HTTPS GET/JSON REST adapter, not a native SAP/Oracle connector, and no approved non-production endpoint/credential has completed live acceptance.
+- T098 is BLOCKED for provider-backed OIDC, provider-enforced MFA and durable audit acceptance. No configured non-production identity provider and passing end-to-end evidence were found.
+- Draft PR #198 remains a **specification/mapping foundation only**. It has deterministic tests and a product selector but no provider-specific live HTTP/auth/token lifecycle, customer tenant, durable incremental synchronization, persistent imported-data workflow or live SAP/Oracle provider acceptance. Do not label either provider connected. Keep it isolated from the release candidate.
+- No launch-critical module may be marked VERIFIED_WORKING from route rendering alone. Facility Layout, bottleneck/capacity recovery, Excel round-trip, workbook persistence, cross-workspace role boundaries, and parsed PDF/PPTX/XLSX export behavior still require independent reference fixtures and hosted authenticated evidence.
+- Qualified Saudi legal/privacy review, payment lifecycle acceptance (if payments are offered), referral terms/abuse controls, support/contact ownership, incident exercise, backup/recovery sign-off and launch-owner approval remain outstanding.
+
+### Updated decision and next actions
+
+**Decision remains NO-GO. Keep BETA visible. No production writes or BETA change occurred.**
+
+1. Repository administrator: enable and independently verify branch protections for `main` and the staging branch; record direct-push denial and required checks.
+2. Independent reviewer: review PR #200 at its current head, require applicable CI, and approve it only if the strict skip behavior and regression tests are sound. Merge through protected governance, not by bypass.
+3. Staging account/configuration owner and GitHub Actions operator: provision an actually inactive disposable `shoir-e2e-*` identity; configure the throttle variable; dispatch the gate; inspect case-level redacted evidence; require zero mandatory skips and an exact reviewed candidate SHA.
+4. Streamlit owner: independently report the authoritative staging URL, repository/branch/entry point, running revision, required banner, startup logs and staging-only Supabase target. Do not paste secret values.
+5. Database owner + independent reviewer + referral business owner: reconcile actual schema/ledger/functions/RLS/grants, choose a preservation-safe migration plan, and supply backup/PITR plus restore evidence before seeking any production authorization.
+6. Keep PR #198 separate; finish provider-specific connectors only with official product/API contracts, approved non-production SAP/Oracle access and live resource-level acceptance. Continue the 100-tool acceptance work in focused branches.
+7. Complete qualified legal/commercial/operations review and obtain an explicit dated GO decision from the accountable release owner before any production change or BETA removal.
+
+No production database, Edge Function, customer/account/subscription data, secret, or BETA state was modified in this recheck.
