@@ -28,8 +28,12 @@ _DEFAULT_TIMEOUT_SECONDS = 5.0
 _MAX_DNS_ADDRESSES = 16
 _SENSITIVE_KEY = re.compile(
     r"(secret|token|password|authorization|credential|api[_-]?key|"
-    r"access[_-]?key|email|phone|mobile|ssn|national[_-]?id|"
-    r"personal[_-]?data|refresh)",
+    r"access[_-]?key|email|e-mail|phone|mobile|ssn|national[_-]?id|"
+    r"personal[_-]?data|refresh|full[_-]?name|first[_-]?name|last[_-]?name|"
+    r"given[_-]?name|family[_-]?name|surname|(?:^|[_-])name(?:$|[_-])|"
+    r"employee|worker|operator|customer|person|username|user[_-]?id|account|"
+    r"identifier|contact|address|street|postal|zip|birth|dob|location|"
+    r"latitude|longitude|ip[_-]?address|passport|license|badge|tax[_-]?id)",
     re.IGNORECASE,
 )
 _BLOCKED_IPS = {
@@ -535,7 +539,7 @@ def verify_readonly_rest_connector(
             "record_count": record_count,
             "sample_keys": keys,
             "sample_preview": _redacted_preview(sample) if include_sample_data else None,
-            "warning": "This verifies only the configured HTTPS health/read paths and the returned sample response. It does not prove vendor-wide integration, write access, data quality, or ongoing availability.",
+            "warning": "This verifies only the configured HTTPS health/read paths and returned sample response; it does not prove vendor-wide integration, write access, data quality, or ongoing availability. Sample preview is opt-in and key-based, not a guarantee that free-text or unknown fields contain no personal/confidential data; preview only approved synthetic or cleared data.",
         }
         return result
     except ConnectorFailure as exc:
