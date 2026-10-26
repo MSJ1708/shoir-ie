@@ -41,12 +41,9 @@ def test_recovery_snapshot_undo_redo_and_integrity():
 
 
 def test_recovery_refuses_undo_before_first_revision():
+    first = recovery_action({"action": "snapshot", "history": [], "state": {"x": 1}})
     with pytest.raises(ValueError, match="earliest revision"):
-        recovery_action({
-            "action": "undo",
-            "history": [{"snapshot_id": "rev-1", "revision": 0, "state": {"x": 1}}],
-            "current_index": 0,
-        })
+        recovery_action({"action": "undo", "history": first["history"], "current_index": 0})
 
 
 def test_dataset_lineage_hashes_schema_and_marks_stale_runs():
@@ -71,6 +68,13 @@ def test_dataset_lineage_hashes_schema_and_marks_stale_runs():
     })
     assert changed["stale_run_count"] == 1
     assert changed["stale_downstream_runs"][0]["run_id"] == "run-old"
+    unchanged = dataset_version_lineage({
+        "dataset_name": "sample", "source": "synthetic_fixture",
+        "records": [{"qty": 2}, {"qty": 3}], "transformations": ["initial"],
+        "history": first["history"],
+        "downstream_runs": [{"run_id": "run-same-data", "dataset_sha256": first["version"]["content_sha256"], "dataset_version_id": first["version"]["version_id"]}],
+    })
+    assert unchanged["stale_run_count"] == 0
 
 
 def _complete_capa(status="OPEN"):
@@ -145,6 +149,15 @@ def test_supply_chain_rejects_unknown_route_nodes():
             "customers": [{"id": "C1", "demand": 10}],
             "routes": [{"supplier": "MISSING", "customer": "C1", "capacity": 10, "unit_cost": 1}],
         })
+    with pytest.raises(ValueError, match="Duplicate route"):
+        supply_chain_network_plan({
+            "suppliers": [{"id": "S1", "supply": 10}],
+            "customers": [{"id": "C1", "demand": 10}],
+            "routes": [
+                {"supplier": "S1", "customer": "C1", "capacity": 10, "unit_cost": 1},
+                {"supplier": "S1", "customer": "C1", "capacity": 10, "unit_cost": 1},
+            ],
+        })
 
 
 def test_digital_twin_calibration_returns_fit_and_residuals():
@@ -165,6 +178,8 @@ def test_digital_twin_calibration_returns_fit_and_residuals():
 def test_digital_twin_calibration_rejects_constant_input():
     with pytest.raises(ValueError, match="must vary"):
         calibrate_digital_twin({"simulated_values": [1, 1, 1], "measured_values": [1, 2, 3]})
+    with pytest.raises(ValueError, match="strictly below"):
+        calibrate_digital_twin({"simulated_values": [1, 2, 3], "measured_values": [2, 4, 6], "scale_bounds": [1, 1], "offset_bounds": [-1, 1]})
 
 
 def test_disruption_scenario_math_and_baseline_comparison():
@@ -313,6 +328,11 @@ def test_governance_retention_and_delete_plans_do_not_delete_data():
     })
     assert deletion["delete_executed"] is False
     assert "backups" in deletion["systems_to_review"]
+    with pytest.raises(ValueError, match="whole number"):
+        governance_recovery_action({
+            "action": "retention_review",
+            "policies": [{"category": "audit", "retention_days": 3.5, "legal_hold": False}],
+        })
 
 
 def test_all_target_examples_are_valid_json():
