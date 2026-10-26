@@ -2,7 +2,7 @@
 
 **Release decision: HOLD — not cleared for paid commercial production.**
 
-This checklist turns the open risks into items that can be closed with named owners and evidence. The staging app and authenticated release gate are technically verified, but that does not clear the production deployment or establish compliance under Saudi law.
+This checklist turns the open risks into items that can be closed with named owners and evidence. A prior staging candidate passed authenticated verification, but that evidence does not establish that the current candidate has passed. As of October 26, 2026, authenticated release gate [run #88](https://github.com/MSJ1708/shoir-ie/actions/runs/40369188234) remains in progress on candidate 9e3899d6f5147584cf27585d946fa7b5d18d92d5. That does not clear the production deployment or establish compliance under Saudi law.
 
 ## Gate 1 — Identify the operator and publish accurate commercial details
 
@@ -65,7 +65,8 @@ Owner: platform maintainer and operator.
 
 - [x] Staging database contains the legal-version fields, server-only referral table and approval trigger.
 - [x] Staging `shoir-persistence` Edge Function version 8 is deployed and enforces current acceptance/referral rules.
-- [x] Authenticated staging gate passed for candidate shell, API lifecycle/workspace isolation, 96-module rendering, browser shell, Excel module and logout (run https://github.com/MSJ1708/shoir-ie/actions/runs/39861471413).
+- [x] Historical evidence only: an earlier candidate passed the authenticated shell, API lifecycle/workspace isolation, 96-module rendering, browser shell, Excel and logout gate (run https://github.com/MSJ1708/shoir-ie/actions/runs/39861471413). This does not verify the October 26 candidate.
+- [ ] Current candidate verification: run #88 (https://github.com/MSJ1708/shoir-ie/actions/runs/40369188234) is in progress at commit 9e3899d6f5147584cf27585d946fa7b5d18d92d5. At the latest inspection, API lifecycle/workspace isolation passed, 96-module rendering was in progress, and browser shell/Excel/logout plus evidence upload were pending. Re-check the final run conclusion and exact candidate SHA before release sign-off.
 - [x] The production atomic registration/approval RPC migration is applied and verified; synthetic test registration/duplicate/approve/decline succeeded, with synthetic rows removed.
 - [ ] Plan the production rollout as a coordinated maintenance-window change: app + database schema/trigger + Edge Function versions. Do not roll out only one component, because the old client and new server require different consent payloads.
 - [ ] Before deployment, snapshot/back up and verify recovery, capture exact commit/migration/function hashes, rehearse rollback, and define how any in-flight pending registration is handled.
