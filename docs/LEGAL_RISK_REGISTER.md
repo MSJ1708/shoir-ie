@@ -4,12 +4,20 @@
 **Review type:** Targeted repository/source review of public legal notices, registration, referral claims and selected persistence code.  
 **Overall status:** **NOT LEGALLY CLEARED FOR COMMERCIAL PRODUCTION.** This document is not legal advice, a compliance certificate, a full security assessment or a formula-by-formula engineering audit. A Saudi-qualified lawyer and appropriately skilled technical reviewers should confirm unresolved items.
 
+## Current release-candidate recheck — October 26, 2026
+
+- Reviewed candidate branch: staging-e2e-20261019, commit 9e3899d6f5147584cf27585d946fa7b5d18d92d5.
+- Authenticated release gate [run #88](https://github.com/MSJ1708/shoir-ie/actions/runs/40369188234) was **in progress** at this snapshot. The authenticated Edge API lifecycle/workspace-isolation stage had passed; the 96-module rendering stage was in progress; browser shell/Excel/logout and evidence upload were pending.
+- The older fully-green staging statement later in this register refers to run [39861471413](https://github.com/MSJ1708/shoir-ie/actions/runs/39861471413) on an earlier candidate. It is historical evidence only, not proof that run #88 or this candidate has passed.
+- Current policy identifiers are Terms 2026-10-21-beta-v1, Privacy 2026-10-21-v1, Refund 2026-10-23-v2, and Cookie 2026-10-21-v1. The prior Refund v1 value in this register was stale and is corrected here. The policy-consistency regression test compares public notices, embedded application copies, server enforcement, the latest approval-guard migration and the authenticated staging probe.
+
+
 ## Beta terms and user notices
 
 Current branch drafts are versioned in:
 - [Terms and Conditions](TERMS_AND_CONDITIONS.md) — version 2026-10-21-beta-v1
 - [Privacy Policy](PRIVACY_POLICY.md) — version 2026-10-21-v1
-- [Refund Policy](REFUND_POLICY.md) — version 2026-10-21-v1
+- [Refund Policy](REFUND_POLICY.md) — version 2026-10-23-v2
 - [Cookie Policy](COOKIE_POLICY.md) — version 2026-10-21-v1
 
 The public app displays a beta warning; the terms explain that calculations, AI responses, simulations, reports, integrations and stored work may be incomplete or wrong; the output disclaimers require independent verification; and the limitation-of-liability wording expressly preserves legal rights that cannot be excluded. The current referral copy no longer promises a 15% discount or displays invented referral counts. Rewards are inactive unless separate program rules are published.
