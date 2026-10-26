@@ -403,3 +403,49 @@ High-priority examples from the source-declared gaps:
 - `T099 Data Governance and Recovery Center`: foundation only; isolated restore/delete, tenant-scoping and recovery evidence missing.
 
 This source audit is a catalogue check, not an end-to-end functional test. It supports the release rule that feature statuses must not be upgraded merely because their routes or source files exist. The module inventory and acceptance work remain a release blocker, especially for paid general availability.
+
+## 10. Fresh connector recheck addendum — 26 October 2026
+
+**This section is a newer read-only observation and supersedes earlier status descriptions above where the timestamps or current PR heads differ.** It does not authorize a deployment.
+
+### Current repository and in-flight PR evidence
+
+- `main` still points to `2ef44057f84162389d39998e922b505dcfe4d3e9`; `staging-e2e-20261019` still points to `9e3899d6f5147584cf27585d946fa7b5d18d92d5`.
+- PR #200 remains draft on `fix/auth-gate-strict-skip-status-20261026`. Its branch was updated to `ec3d7c411b5b9ce57eec5e960b79f670ee89cfe7` to require `SHOIR_E2E_INACTIVE_USERNAME` and `SHOIR_E2E_INACTIVE_PASSWORD` in staging preflight and restrict that username to the `shoir-e2e-*` disposable-account prefix. Regression coverage was added in `tests/test_authenticated_release_gate_contract.py`. Exact-head validation runs [40389120798](https://github.com/MSJ1708/shoir-ie/actions/runs/40389120798) and [40389126898](https://github.com/MSJ1708/shoir-ie/actions/runs/40389126898) were queued at the time of this addendum; do not call this change tested until those runs complete successfully.
+- PR #203 formula-injection protection remains draft at `17bf858a5df56c023387117d491575ae7f0c75b3`; exact-head validation runs [40388790597](https://github.com/MSJ1708/shoir-ie/actions/runs/40388790597) and [40388799176](https://github.com/MSJ1708/shoir-ie/actions/runs/40388799176) were in progress.
+- PR #204 reserved-administrator non-mutation remains draft at `224816cf63a88ab4759b722826fc4bebd6ad5152`. Its exact-head push validation [40387652648](https://github.com/MSJ1708/shoir-ie/actions/runs/40387652648) passed, including 824 Python tests (2 skipped, 71 warnings, 5 subtests) and 7 Deno security tests; PR validation [40387830793](https://github.com/MSJ1708/shoir-ie/actions/runs/40387830793) was still in progress. No independent security review or live staging deployment of that code is evidenced.
+- PR #202 export pagination is draft at `14fdc05d864afead06bc390c9a15144a15d85f48`; its exact-head validation [40383338813](https://github.com/MSJ1708/shoir-ie/actions/runs/40383338813) and PR run [40383346417](https://github.com/MSJ1708/shoir-ie/actions/runs/40383346417) completed successfully. The tests do not replace representative rendered-artifact review, workbook validation, or hosted deployment acceptance.
+- PR #201 policy-version/commercial-readiness changes are draft at `f5bd0c7a7fe95aa393da56986ced451b75b83e6f`; exact-head validation [40372201071](https://github.com/MSJ1708/shoir-ie/actions/runs/40372201071) and engine regression [40372193733](https://github.com/MSJ1708/shoir-ie/actions/runs/40372193733) completed successfully, but legal/commercial gates remain open.
+
+### Current direct Supabase observations
+
+| Read-only check | Staging | Production |
+|---|---|---|
+| Project state / region | `ACTIVE_HEALTHY`, `eu-central-1` | `ACTIVE_HEALTHY`, `eu-central-1` |
+| PostgreSQL build | `17.11.0.003` | `17.6.1.166` |
+| Applied migration entries | 17 | 14 |
+| `shoir-persistence` | version 9; source SHA-256 `0551d88aceeca45ede2b890e874a75f542df670d2f2332a0878f23b5cc0b187e` | version 8; source SHA-256 `410e22f7af0be8f3ec74bae5a15aec70f8b6a807a540e98a2c5143f4e6b8790d` |
+| Referral table | Present; RLS enabled | Absent |
+| Referral table policies / grants | 0 policies; no grants to `anon` or `authenticated`; table privileges observed only for `postgres` and `service_role` | Table absent |
+| Reserved master-admin invariant | Exactly 1 matching row; all required fields matched | Exactly 1 matching row; all required fields matched |
+
+The production migration ledger ends at `20261019140600_atomic_subscription_request_decisions`. Staging additionally records `20261021130000_shoir_beta_legal_referrals`, `20261022110000_enforce_beta_legal_acceptance`, and `20261025164602` (named `20261023130000_refresh_refund_policy_acceptance_version`). The production subscription-request table does not have the six legal-acceptance columns seen in staging, and production has no `shoir_referrals` table. The staging function's source currently contains a login-time tier correction update; the production function source contains the same update pattern. PR #204 changes source code to fail closed rather than rewriting the reserved administrator, but neither deployed function is that corrected implementation. Current admin rows happen to satisfy the invariant; this read-only result is not evidence the deployed mutation risk is resolved.
+
+### Referral migration data-preservation recheck
+
+The current staging source for `supabase/migrations/20261021130000_shoir_beta_legal_referrals.sql` updates `public.shoir_accounts.affiliate_code` and sets `updated_at = NOW()` where `affiliate_code IS NULL`, blank after trim, or matches `AFF-%-15`; it also rewrites duplicate codes. The matching aggregate was re-run without selecting account identifiers:
+
+| Aggregate | Staging | Production |
+|---|---:|---:|
+| Total account rows | 9 | 5 |
+| Rows matching the first-update predicate | 1 | 5 |
+| Null affiliate codes | 1 | 5 |
+| Populated affiliate codes | 8 | 0 |
+
+Applying this migration verbatim to production would modify all five existing account rows and their `updated_at` values while assigning referral codes. Keep production unchanged; redesign and rehearse a forward migration that preserves existing timestamps and identities, or obtain explicit reviewed data/business-owner authorization for each intended change. The staging advisor's `rls_enabled_no_policy` item for `shoir_referrals` is `INFO`; the separate live read confirmed RLS is enabled and `anon`/`authenticated` have no grants. Do not add a permissive policy just to silence the advisor. Keep referral operations server-only.
+
+### Current release disposition
+
+- **Staging candidate:** existing gate #88 remains a successful historical result on `9e3899d6f5147584cf27585d946fa7b5d18d92d5`. It does not test the newer code in the open draft PRs and does not prove the hosted app's deployed SHA.
+- **Production:** no migration, Edge Function deployment, secret/configuration change, subscription/referral mutation, or administrator mutation was performed during this recheck.
+- **Decision:** `HOLD — IMPLEMENTATION PROGRESSED, EXTERNAL GATES REMAIN`. Keep `BETA` visible; do not enable paid general availability or referral rewards. Mandatory remaining gates include reviewed/integrated code, new exact-candidate authenticated staging tests, coordinated app/schema/Edge Function compatibility, tested recovery, hosted deployment identity, independent security/engineering review, and Saudi-qualified legal/commercial approval.
