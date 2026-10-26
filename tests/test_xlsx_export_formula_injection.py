@@ -81,9 +81,13 @@ def test_industrial_workbook_export_keeps_formula_like_values_as_text():
 
     workbook = load_workbook(BytesIO(payload), data_only=False)
     sheet = workbook["Inputs"]
-    assert sheet["A3"].value == formula
-    assert sheet["A3"].data_type != "f"
-    assert sheet["A3"].hyperlink is None
+    # This exporter starts the table at row 3: row 3 is the header, row 4 is data.
+    assert sheet["A4"].value == formula
+    assert sheet["A4"].data_type != "f"
+    assert sheet["A4"].hyperlink is None
+    assert sheet["A5"].value == "https://attacker.invalid/workbook"
+    assert sheet["A5"].data_type != "f"
+    assert sheet["A5"].hyperlink is None
     # The calculation formula inventory is metadata, not a user-executable cell.
     formula_sheets = [ws for ws in workbook.worksheets if "FORMULA" in ws.title.upper()]
     for ws in formula_sheets:
