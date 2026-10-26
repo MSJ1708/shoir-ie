@@ -144,6 +144,8 @@ def test_staging_app_must_declare_staging_and_refuses_production_backend_fallbac
     assert "production fallback is disabled" in durable
     assert "Direct PostgreSQL URLs are forbidden in Shoir-IE staging mode" in durable
     assert "STAGING TEST ENVIRONMENT" in app
+    assert 'st.caption(f"SHOIR-IE SHELL VERSION: {SHELL_VERSION}")' in app
+    assert "SHELL_VERSION = \"3.2\"" in (ROOT / "shoir_application_shell.py").read_text(encoding="utf-8")
     assert "if not is_staging" in browser
     assert "STAGING TEST ENVIRONMENT" in module_matrix
     assert "edge_url = " in docs
@@ -197,3 +199,9 @@ def test_staging_credential_recovery_reads_clipboard_without_echo_and_clears_it(
     assert "Read-Host" not in wrapper
     assert "STAGING server secret/service-role key" in wrapper
     assert "STAGING publishable/anon key" in wrapper
+
+
+def test_authenticated_registration_probes_use_current_refund_policy_version():
+    script = (ROOT / "scripts/authenticated_release_gate.py").read_text(encoding="utf-8")
+    assert '"refund_policy_version": "2026-10-23-v2"' in script
+    assert '"referral code"' in script
