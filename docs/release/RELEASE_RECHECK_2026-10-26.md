@@ -319,3 +319,24 @@ This is further evidence that version 9 cannot be deployed as a standalone produ
 - The earlier PR #204 run [40387179214](https://github.com/MSJ1708/shoir-ie/actions/runs/40387179214) failed because `tests/test_durable_accounts.py` asserted that the old tier-repair expression must exist. The current head deliberately updates that test to assert a read-only invariant and absence of an account-tier update. Preserve the failed run as history; do not conceal it.
 
 **No deployed state was changed in either Supabase project.** Production remains on version 8 and staging remains on version 9 while this report is updated. Continue to HOLD until compatible schema/function promotion is reviewed and rehearsed.
+
+
+## 15. Completed push validation for protected-admin hardening — 26 October 2026, 19:37 UTC
+
+The corrected PR #204 head is `224816cf63a88ab4759b722826fc4bebd6ad5152`. Its exact-head push workflow [40387652648](https://github.com/MSJ1708/shoir-ie/actions/runs/40387652648) has now **completed successfully**.
+
+From the job log:
+- Python regression suite: **824 passed, 2 skipped, 71 warnings, 5 subtests passed**.
+- Edge Function security tests: **7 passed, 0 failed**.
+- `deno check supabase/functions/shoir-persistence/index.ts`: success.
+- Python compile, required application module parse, application top-level import smoke, local Streamlit startup, Chromium install, and local desktop/mobile browser smoke: success.
+- Browser smoke reported no fatal error marker, no uncaught JavaScript errors, and no sampled console errors.
+- The separate `live-deployment-smoke` job was skipped under branch conditions. The exact-head pull-request validation [40387830793](https://github.com/MSJ1708/shoir-ie/actions/runs/40387830793) was still in progress at last read; the PR remains a draft and unreviewed.
+
+The earlier failed run is retained as history: [40387179214](https://github.com/MSJ1708/shoir-ie/actions/runs/40387179214) failed because the prior source-contract assertion required the removed automatic admin-tier update. The current source-contract test was corrected; the exact-head push test and Deno suite now pass. Do not suppress or delete historical failure evidence.
+
+### Current status for the XLSX fix
+
+PR #203 remains at `d52cc87808d75e870f40d2f7a078380939f2277d`. Its exact-head Python regression step is reported successful, but both the exact PR and push workflows were still in `Install Chromium for local runtime smoke` at last read: [40387008559](https://github.com/MSJ1708/shoir-ie/actions/runs/40387008559) and [40387000285](https://github.com/MSJ1708/shoir-ie/actions/runs/40387000285). Their full job conclusions remain unresolved; do not mark this PR fully verified until the jobs finish successfully or record a failure.
+
+Neither PR has been merged or deployed. No staging or production runtime, database schema, deployed Edge Function, user/account/subscription/referral record, or secret was changed in this session.
