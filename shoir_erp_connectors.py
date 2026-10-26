@@ -384,7 +384,7 @@ class ERPReadOnlyAdapter:
         authorize: Callable[[str, str, str, str], bool] | None,
         page_size: int = 250,
     ) -> dict[str, Any]:
-        if not isinstance(authorize, Callable):
+        if authorize is None or not callable(authorize):
             raise ERPConnectorError("AUTHORIZATION_REQUIRED", "A server-side authorization check is required before an ERP read.")
         if not _safe_text(actor_id, "actor reference"):
             raise ERPConnectorError("AUTHORIZATION_REQUIRED", "An authenticated actor reference is required.")
