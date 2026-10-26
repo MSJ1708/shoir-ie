@@ -2215,6 +2215,9 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                             st.caption(f"Review as of {result['as_of_date']} · provenance: {result.get('data_provenance', 'USER_ENTERED_UNVERIFIED')}")
                             st.dataframe(result["records"], use_container_width=True, hide_index=True)
                             st.dataframe(result["workflow_summary"], use_container_width=True, hide_index=True)
+                            if result.get("transition_audit"):
+                                st.markdown("**CAPA / 8D transition audit**")
+                                st.dataframe(pd.json_normalize(result["transition_audit"]), use_container_width=True, hide_index=True)
                             st.warning(result["warning"])
                     elif selected_tool["tool_id"] == "T040":
                         result = st.session_state.get("shoir_tool_result_T040")
