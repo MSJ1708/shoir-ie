@@ -2254,6 +2254,34 @@ def test_dataset_version_lineage_is_canonical_and_recipe_changes_make_new_versio
     assert recipe_change["version_signature"] != first["version_signature"]
 
 
+
+
+def test_dataset_version_lineage_does_not_treat_raw_source_match_as_fully_current():
+    from shoir_target_engines import manage_dataset_version_lineage
+
+    initial = manage_dataset_version_lineage(
+        None,
+        dataset_payload={"rows": [{"id": "A1"}]},
+        source_metadata={"schema_fingerprint": ["id"]},
+        transformations=[{"transformation": "normalize", "method_version": "1"}],
+    )
+    checked = manage_dataset_version_lineage(
+        initial["lineage_state"],
+        dataset_payload={"rows": [{"id": "A1"}]},
+        source_metadata={"schema_fingerprint": ["id"]},
+        transformations=[{"transformation": "normalize", "method_version": "1"}],
+        downstream_runs=[
+            {"run_id": "RUN-RAW-SOURCE", "source_signature": initial["source_signature"]},
+            {"run_id": "RUN-VERSION", "version_signature": initial["version_signature"]},
+        ],
+    )
+    assert checked["stale_run_count"] == 0
+    assert checked["unverifiable_run_count"] == 1
+    assert [run["status"] for run in checked["downstream_runs"]] == [
+        "SOURCE_MATCH_VERSION_UNVERIFIED", "CURRENT"
+    ]
+
+
 def test_dataset_version_lineage_rejects_invalid_payloads_and_run_links():
     from shoir_target_engines import manage_dataset_version_lineage
 
