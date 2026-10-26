@@ -45,3 +45,20 @@ Snapshot: GitHub open PR API for MSJ1708/shoir-ie, refreshed after PR #195 was m
 ## Source-control control
 
 Main reports protected=false and the visible rulesets API returns an empty array. Detailed protection endpoint returns 403. Have an authorized repository admin configure and independently verify rules before merging. Do not disable required security checks or use self-approval.
+
+---
+
+## Current-state reconciliation after PR #196 merge — 26 October 2026
+
+The table above is the historical snapshot captured earlier on 26 October. The following newer facts supersede it:
+
+- PR #196 is **merged to staging** at 2026-10-26T12:37:51Z, merge commit `32ac85493bfadfbae172f546741aae74cd647069`: https://github.com/MSJ1708/shoir-ie/pull/196. It is no longer an open PR. Do not infer authenticated release acceptance from the merge.
+- The staging branch's opt-in authenticated gate trigger record is commit `bf1f9c7750b48e74d140a929eb94d521974ec0a9`. The change is documentation-only; the commit message carries the workflow's supported `[run-authenticated-gate]` marker.
+- Authenticated release gate run `40324443387` is running on exactly `bf1f9c7750b48e74d140a929eb94d521974ec0a9`: https://github.com/MSJ1708/shoir-ie/actions/runs/40324443387. At the latest check, dependency installation was in progress. No pass/fail result is available; this remains pending.
+- Staging validation run `40324443559` is also running on that SHA: https://github.com/MSJ1708/shoir-ie/actions/runs/40324443559. The hosted anonymous `live-deployment-smoke` job is skipped by the workflow's declared event/ref condition.
+- PR #195 remains open and ready for review at `26d5e4f2a6569223976eff4fe43db83b0967d2e2`. Automated test, engine regression, and security/quality jobs passed; the `live-deployment-smoke` job is skipped for this PR context. No independent reviewer approval is recorded. Keep T096 external-configuration-required until authorized live positive/negative endpoint tests pass; T098 remains blocked pending provider-backed OIDC/MFA/audit.
+- PR #197 remains open and draft at `86c995ff0f3b7ccea39139fe026645ca99f6b8fe`. Engine regression and security/quality succeeded; three PR CI workflows were still in progress at latest observation. No independent review is recorded. This PR is an evidence package, not a release approval.
+- Open PR count is now 17 following the #196 merge. `main` remains unprotected according to the accessible branch endpoint and the visible rulesets collection is empty. The integration cannot change branch protection, read Actions secrets, or dispatch workflow via the API available in this session.
+- No PR was merged to main by this execution. Main remains `267be8889c310d90141c047d8aadd42c942423fb`. Production remains unchanged.
+
+**Disposition remains NO-GO.** Do not bypass review or merge #195/#197 to compensate for unavailable protection controls. An authorized repository administrator must configure and verify branch protection and independent approvals.
