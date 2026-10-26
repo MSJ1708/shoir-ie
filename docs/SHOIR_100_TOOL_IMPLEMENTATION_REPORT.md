@@ -217,8 +217,8 @@ This candidate now includes a focused implementation for the nine formerly found
 - **T094 — KPI Dashboard and Alert Center:** KPI threshold/freshness evaluation and duplicate-open-alert fingerprinting. Durable alert storage, authorized source aggregation and notification delivery remain open.
 - **T097 — API, SDK, and Plugin Toolkit:** validates inert manifests, versions, tiers, scopes, schemas and safe relative entrypoints. Arbitrary code never executes and a manifest cannot self-enable.
 - **T099 — Data Governance and Recovery Center:** creates/verifies hashed recovery packages and produces retention/deletion plans without performing destructive deletion.
-- **T096 — Integration Management Center:** inspects endpoint/credential key presence and syntax without returning secret values or making outbound connections. It does not claim a live connection.
-- **T098 — Enterprise Identity and Audit Center:** checks OIDC issuer/client/redirect/scopes and explicit MFA/audit flags without returning secrets. It does not claim that SSO or MFA is active.
+- **T096 — Integration Management Center:** retains no-network configuration inspection and now supports an explicit admin-only, allowlisted HTTPS REST health/read test. It pins a validated DNS address for TLS-verified GET requests, blocks redirects, bounds time/response size, redacts sample preview fields and classifies connection/auth/authorization/rate-limit/data-read failures. Only mocked tests exist; no live provider is verified.
+- **T098 — Enterprise Identity and Audit Center:** separates missing from invalid OIDC issuer/redirect/scope/MFA/audit settings, returns explicit non-verified flags for the login flow, provider authentication, provider-evidenced MFA, audit sink and durable persistence, and gives a precise external-action list. It remains configuration-only; no enterprise OIDC login/callback/session flow or verified durable security-audit writer is implemented.
 
 The Workbench exposes each focused method through its existing tool directory and a per-target JSON input form, uses the existing authenticated actor/entitlement checks, and sends output through the existing result/persistence renderer. Examples are labelled synthetic. No new top-level page was added.
 
@@ -226,7 +226,7 @@ The Workbench exposes each focused method through its existing tool directory an
 
 The two registry/matrix sources now record **0 FOUNDATION_ONLY**, **98 IMPLEMENTED_NEEDS_VALIDATION**, **2 EXTERNAL_CONFIGURATION_REQUIRED**, and **0 VERIFIED_WORKING**. This means eight new deterministic engines plus the T039 lifecycle completion have moved out of foundation-only; it does not mean 98 tools are production verified.
 
-The external status remains correct for T096/T098. Neither an approved connector endpoint/credential nor an identity provider/client/callback has been supplied or verified in this task. The new configuration handlers support environment variables or top-level Streamlit secrets and report readiness with values redacted. Real connection tests, OIDC login/MFA, role mapping, session lifecycle and audit verification require provider-side configuration and authorized staging acceptance. See [Remaining Tools Configuration Setup](release/REMAINING_TOOLS_CONFIG_SETUP.md).
+The external status remains correct for T096/T098. The generic REST adapter is code-complete only for mocked paths: no approved live endpoint/token, native vendor adapter, or real data read has been verified. T098 remains a configuration-readiness checker: no enterprise OIDC login flow, provider-evidenced MFA enforcement, or verified durable security-audit sink is established. Those controls require the chosen provider/service configuration and authorized staging acceptance. See [Remaining Tools Configuration Setup](release/REMAINING_TOOLS_CONFIG_SETUP.md).
 
 ### Tests added
 
@@ -234,7 +234,8 @@ The external status remains correct for T096/T098. Neither an approved connector
 
 ### Remaining external gates (not bypassed)
 
-- **T096:** approved real endpoint and least-privilege credential in deployment secret configuration; authenticated staging test and scope/health/freshness evidence.
+- **T096:** configure `*_ENABLED`, an HTTPS endpoint, Bearer token, exact host allowlist, health/read paths and required read scope in staging; run the explicit health/read verification and capture sanitized evidence. Vendor-specific SAP/Oracle/MES support remains separate work.
+- **T098:** choose and register the actual OIDC provider, implement its supported login/callback/session flow, prove MFA from provider-supported evidence, and persist/verify security audit events in a protected durable sink.
 - **T098:** selected OIDC provider, client registration, callback/logout URIs, secret configuration, role/group mapping, enforced MFA and audit collection; authenticated success/denial/challenge/logout/expiry/revocation tests.
 - **All newly implemented tools:** exact-SHA CI, an independent reference reviewer, authenticated tier-denial tests, save/reload/re-login checks, two-user workspace isolation and documented evidence before changing any row to `VERIFIED_WORKING`.
 

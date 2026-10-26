@@ -432,7 +432,11 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                 else:
                     with st.form("shoir_target_method_form_" + selected_tool["tool_id"]):
                         if selected_tool["tool_id"] in _ADDITIONAL_TOOL_IDS:
-                            st.caption("Structured, deterministic tool input. Examples are explicitly synthetic. Review every field and keep credentials out of this editor; external configuration checks inspect only secret presence and never return secret values.")
+                            st.caption("Structured tool input. Examples are synthetic. Never enter credentials, tokens, or customer secrets in this editor; use the approved deployment secret store.")
+                            if selected_tool["tool_id"] == "T096":
+                                st.info("Configuration inspection makes no network calls. Only the explicit action verify_rest_read makes outbound HTTPS GET requests, after an authenticated entitled administrator submits the form. The generic adapter supports HTTPS plus a server-side Bearer token, exact host allowlisting, configured health/read paths, TLS verification, no redirects, and bounded JSON responses. It does not write to the external system.")
+                            elif selected_tool["tool_id"] == "T098":
+                                st.warning("Current T098 behavior is configuration-readiness inspection only. It does not implement an OIDC login flow, prove provider-enforced MFA, or verify durable security-audit persistence. Do not treat configured flags as active controls.")
                             _saved_tool_inputs = st.session_state.get("shoir_tool_inputs_" + selected_tool["tool_id"], {})
                             _saved_payload_json = _saved_tool_inputs.get("payload_json") if isinstance(_saved_tool_inputs, dict) else None
                             additional_tool_payload = st.text_area(

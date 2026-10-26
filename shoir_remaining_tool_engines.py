@@ -20,6 +20,8 @@ import numpy as np
 import pandas as pd
 from scipy.optimize import linprog
 
+from shoir_rest_connector import verify_readonly_rest_connector
+
 
 def _json_clone(value: Any) -> Any:
     try:
@@ -537,8 +539,54 @@ def evaluate_kpi_alerts(payload: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _require_connector_operator() -> None:
+    """Require an authenticated, entitled admin before a live connector operation."""
+    try:
+        import streamlit as st
+        state = st.session_state
+        authenticated = bool(state.get("authenticated"))
+        actor = str(state.get("current_user") or "").strip()
+        role = str(state.get("user_role") or state.get("current_role") or "").strip().casefold()
+        role = role.replace("_", " ").replace("-", " ")
+        tier = state.get("user_tier")
+    except Exception as exc:
+        raise PermissionError("Sign in with an authorized Enterprise administrator account before testing a connector.") from exc
+    if not authenticated or not actor or actor.casefold() in {"guest", "unknown", "anonymous"}:
+        raise PermissionError("Sign in with an authorized Enterprise administrator account before testing a connector.")
+    if role not in {"owner", "admin", "enterprise admin"}:
+        raise PermissionError("Only an authorized workspace owner or administrator may run a live connector test.")
+    try:
+        from shoir_tool_registry import tier_allows_tool
+        if not tier_allows_tool(tier, "T096"):
+            raise PermissionError("The current subscription tier does not permit Integration Management Center operations.")
+    except PermissionError:
+        raise
+    except Exception as exc:
+        raise PermissionError("Connector access could not be verified; the operation was denied.") from exc
+
+
 def integration_configuration_status(payload: Mapping[str, Any]) -> dict[str, Any]:
-    """Inspect environment-variable presence without exposing secrets or making network calls."""
+    """Inspect configuration or explicitly test a server-configured read-only REST connector.
+
+    Configuration inspection is the default and never performs network access.
+    A live request requires action='verify_rest_read', a server-configured
+    allowlisted profile, and an authenticated entitled administrator.
+    """
+    action = str(payload.get("action") or "inspect").strip().lower()
+    if action == "verify_rest_read":
+        profile = payload.get("profile")
+        if not isinstance(profile, dict):
+            raise ValueError("profile must be a JSON object for the approved REST connector.")
+        _require_connector_operator()
+        include_sample_data = payload.get("include_sample_data", False)
+        if not isinstance(include_sample_data, bool):
+            raise ValueError("include_sample_data must be a JSON boolean.")
+        return verify_readonly_rest_connector(
+            profile,
+            include_sample_data=include_sample_data,
+        )
+    if action not in {"inspect", "check_configuration"}:
+        raise ValueError("action must be inspect or verify_rest_read.")
     profiles = _records(payload.get("profiles"), "profiles", maximum=500)
     output = []
     for profile in profiles:
@@ -685,9 +733,14 @@ def identity_audit_configuration_status(payload: Mapping[str, Any] | None = None
     if present["audit_log_enabled"] and not audit_enabled:
         problems.append("Audit logging is not explicitly enabled.")
     complete = not missing and not problems and issuer_valid and redirect_valid and "openid" in scopes and mfa_enforced and audit_enabled
+    status = (
+        "NOT_CONFIGURED" if missing
+        else "CONFIGURATION_INVALID" if problems or not complete
+        else "READY_FOR_AUTHORIZED_IDP_TEST"
+    )
     return {
         "tool_id": "T098",
-        "status": "READY_FOR_AUTHORIZED_IDP_TEST" if complete else "NOT_CONFIGURED",
+        "status": status,
         "provider": "OIDC-compatible identity provider (not detected/activated by this check)",
         "environment_variables": pd.DataFrame([
             {"setting": key, "environment_variable": env_name, "configured": present[key], "value_exposed": False}
@@ -702,7 +755,22 @@ def identity_audit_configuration_status(payload: Mapping[str, Any] | None = None
         "audit_logging_flag": audit_enabled,
         "sso_active": False,
         "mfa_active": False,
-        "warning": "This is a readiness check only. SSO/MFA are not reported active until an approved provider is configured and staging login, callback, group/role mapping, MFA challenge, logout, session expiry/revocation and audit coverage are tested.",
+        "oidc_login_flow_implemented": False,
+        "provider_authentication_tested": False,
+        "provider_mfa_evidence_verified": False,
+        "audit_sink_configured": False,
+        "audit_persistence_verified": False,
+        "verified_at": None,
+        "required_external_actions": [
+            "Select an approved identity provider and configure its application/client and exact callback/logout URIs.",
+            "Implement and review the provider-supported login/callback/session integration in the existing authentication architecture.",
+            "Validate issuer, audience, signature, state, nonce, expiry, redirect and logout/revocation behavior using a maintained protocol implementation.",
+            "Map a validated provider identity to the existing application account, role, tier and workspace without privilege elevation.",
+            "Prove MFA from the provider's documented policy/result; environment flags alone are not evidence.",
+            "Configure a protected durable audit destination and verify representative events were written and can be read under authorized access.",
+            "Run authenticated staging allow/deny, cross-workspace, expired/revoked session and audit-failure tests."
+        ],
+        "warning": "This is a readiness check only. Configuration is not authentication, provider policy is not verified MFA evidence, and an audit toggle is not proof of a durable audit write. SSO/MFA and audit persistence remain unverified until the external protocol flow and durable event path are implemented and tested on authorized staging.",
     }
 
 

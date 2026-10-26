@@ -283,6 +283,13 @@ def test_identity_config_reports_readiness_without_claiming_sso_active(monkeypat
     assert out["status"] == "READY_FOR_AUTHORIZED_IDP_TEST"
     assert out["sso_active"] is False
     assert out["mfa_active"] is False
+    assert out["oidc_login_flow_implemented"] is False
+    assert out["provider_authentication_tested"] is False
+    assert out["provider_mfa_evidence_verified"] is False
+    assert out["audit_sink_configured"] is False
+    assert out["audit_persistence_verified"] is False
+    assert out["verified_at"] is None
+    assert len(out["required_external_actions"]) >= 6
     assert "do-not-return" not in json.dumps({key: value for key, value in out.items() if key != "environment_variables"})
 
 
@@ -341,3 +348,25 @@ def test_all_target_examples_are_valid_json():
         assert isinstance(value, dict)
         out = run_additional_tool(tool_id, value)
         assert out["tool_id"] == tool_id
+
+def test_identity_config_separates_invalid_settings_from_missing_provider(monkeypatch):
+    values = {
+        "SHOIR_OIDC_ISSUER_URL": "http://idp.example.test",
+        "SHOIR_OIDC_CLIENT_ID": "shoir-staging",
+        "SHOIR_OIDC_CLIENT_SECRET": "do-not-return",
+        "SHOIR_OIDC_REDIRECT_URI": "https://staging.example.test/auth/callback",
+        "SHOIR_OIDC_SCOPES": "profile email",
+        "SHOIR_MFA_ENFORCED": "false",
+        "SHOIR_AUDIT_LOG_ENABLED": "false",
+    }
+    for key, value in values.items():
+        monkeypatch.setenv(key, value)
+    out = identity_audit_configuration_status()
+    assert out["status"] == "CONFIGURATION_INVALID"
+    assert out["sso_active"] is False
+    assert out["mfa_active"] is False
+    assert out["provider_mfa_evidence_verified"] is False
+    assert not out["oidc_issuer_syntax_valid"]
+    assert not out["openid_scope_present"]
+    assert len(out["configuration_problems"]) >= 3
+    assert "do-not-return" not in json.dumps({key: value for key, value in out.items() if key != "environment_variables"})
