@@ -37,6 +37,165 @@ APP_READY_MARKERS = (
     "Get Subscription Ticket & Register",
     "Industrial Control Center",
 )
+SLEEP_PAGE_MARKERS = (
+    "this app has gone to sleep due to inactivity",
+    "would you like to wake it back up",
+)
+WAKE_BUTTON = re.compile(r"yes, get this app back up", re.I)
+
+
+def _visible_text_across_frames(page) -> str:
+    """Collect visible body text from the host and all same-origin accessible frames."""
+    chunks = []
+    for frame in list(page.frames):
+        try:
+            chunks.append(frame.locator("body").inner_text(timeout=1_000))
+        except Exception:
+            continue
+    return "\n".join(chunks)
+
+
+def _tab_bar_layout(app_frame) -> dict:
+    """Capture tab-list and tab-label geometry so clipped mobile labels fail smoke."""
+    tab_list = app_frame.locator('[role="tablist"], div[data-testid="stTabs"] [data-baseweb="tab-list"]').first
+    if tab_list.count() == 0:
+        raise AssertionError("Streamlit public tab list was not found.")
+    # Wait for Streamlit to complete any tab-triggered rerender before measuring geometry.
+    tab_list.wait_for(state="visible", timeout=8_000)
+    return tab_list.evaluate(
+        """element => {
+            const listRect = element.getBoundingClientRect();
+            const tabs = Array.from(new Set(element.querySelectorAll('[role="tab"], [data-baseweb="tab"]'))).map(button => {
+                const rect = button.getBoundingClientRect();
+                const label = button.querySelector('[data-testid="stMarkdownContainer"]') || button;
+                const labelRect = label.getBoundingClientRect();
+                return {
+                    label: (button.innerText || button.textContent || '').trim(),
+                    left: rect.left,
+                    right: rect.right,
+                    top: rect.top,
+                    bottom: rect.bottom,
+                    clientWidth: button.clientWidth,
+                    scrollWidth: button.scrollWidth,
+                    clientHeight: button.clientHeight,
+                    scrollHeight: button.scrollHeight,
+                    labelLeft: labelRect.left,
+                    labelRight: labelRect.right,
+                    labelClientWidth: label.clientWidth,
+                    labelScrollWidth: label.scrollWidth,
+                    labelClientHeight: label.clientHeight,
+                    labelScrollHeight: label.scrollHeight,
+                    whiteSpace: getComputedStyle(button).whiteSpace,
+                    labelWhiteSpace: getComputedStyle(label).whiteSpace
+                };
+            });
+            return {
+                viewportWidth: window.innerWidth,
+                listLeft: listRect.left,
+                listRight: listRect.right,
+                listWidth: listRect.width,
+                clientWidth: element.clientWidth,
+                scrollWidth: element.scrollWidth,
+                scrollLeft: element.scrollLeft,
+                tabCount: tabs.length,
+                tabs
+            };
+        }"""
+    )
+
+
+def _validate_tab_bar_layout(layout: dict, viewport_width: int) -> None:
+    """Fail on a horizontally scrollable tab strip or clipped/overflowing labels."""
+    if layout.get("tabCount", 0) < 3:
+        raise AssertionError(f"Expected all three public tabs to render: {layout}")
+    if layout["scrollWidth"] > layout["clientWidth"] + 2:
+        raise AssertionError(f"Public tab list requires horizontal scrolling: {layout}")
+    for tab in layout["tabs"]:
+        if tab["left"] < layout["listLeft"] - 2 or tab["right"] > layout["listRight"] + 2:
+            raise AssertionError(f"Public tab falls outside its tab-list bounds: {tab}")
+        if tab["scrollWidth"] > tab["clientWidth"] + 2:
+            raise AssertionError(f"Public tab label is horizontally clipped: {tab}")
+        if tab["scrollHeight"] > tab["clientHeight"] + 2:
+            raise AssertionError(f"Public tab label is vertically clipped: {tab}")
+        if tab["labelClientWidth"] <= 0 or tab["labelClientHeight"] <= 0:
+            raise AssertionError(f"Public tab label has no visible layout box: {tab}")
+        if tab["labelScrollWidth"] > tab["labelClientWidth"] + 2:
+            raise AssertionError(f"Inner public tab label is horizontally clipped: {tab}")
+        if tab["labelScrollHeight"] > tab["labelClientHeight"] + 2:
+            raise AssertionError(f"Inner public tab label is vertically clipped: {tab}")
+        if tab["labelLeft"] < tab["left"] - 2 or tab["labelRight"] > tab["right"] + 2:
+            raise AssertionError(f"Public tab label extends beyond its button: {tab}")
+        if tab["labelRight"] > layout["listRight"] + 2:
+            raise AssertionError(f"Public tab label extends beyond the visible tab-list: {tab}")
+    if viewport_width <= 600 and any(
+        tab["whiteSpace"] == "nowrap" or tab["labelWhiteSpace"] == "nowrap"
+        for tab in layout["tabs"]
+    ):
+        raise AssertionError(f"Mobile tab labels are configured not to wrap: {layout}")
+
+
+def _wake_if_sleeping(page, *, timeout_seconds: int = 150) -> dict:
+    """Detect and wake an idle Streamlit app without masking a failed startup."""
+    # The public sleeping interstitial can load shortly after DOMContentLoaded;
+    # poll for it instead of checking only once before the host frame hydrates.
+    detection_deadline = time.monotonic() + 20
+    body = ""
+    folded = ""
+    while time.monotonic() < detection_deadline:
+        body = _visible_text_across_frames(page)
+        folded = body.casefold()
+        if any(marker in folded for marker in SLEEP_PAGE_MARKERS):
+            break
+        if any(marker.casefold() in folded for marker in APP_READY_MARKERS):
+            return {"sleep_screen_seen": False, "wake_clicked": False, "wake_result": "APP_ALREADY_READY"}
+        page.wait_for_timeout(500)
+    else:
+        return {
+            "sleep_screen_seen": False,
+            "wake_clicked": False,
+            "wake_result": "SLEEP_SCREEN_NOT_SEEN_DURING_DETECTION",
+        }
+
+    clicked = False
+    click_errors = []
+    for locator in (
+        page.get_by_role("button", name=WAKE_BUTTON),
+        page.get_by_text(WAKE_BUTTON),
+    ):
+        try:
+            locator.first.click(timeout=5_000)
+            clicked = True
+            break
+        except Exception as exc:
+            click_errors.append(type(exc).__name__)
+    if not clicked:
+        raise RuntimeError(
+            "Streamlit displayed its sleep screen, but the wake control could not be clicked. "
+            f"Attempts: {', '.join(click_errors)}"
+        )
+
+    deadline = time.monotonic() + max(10, int(timeout_seconds))
+    while time.monotonic() < deadline:
+        page.wait_for_timeout(1_000)
+        body = _visible_text_across_frames(page)
+        folded = body.casefold()
+        if any(marker.casefold() in folded for marker in APP_READY_MARKERS):
+            return {
+                "sleep_screen_seen": True,
+                "wake_clicked": True,
+                "wake_result": "APP_READY_AFTER_WAKE",
+            }
+        if not any(marker in folded for marker in SLEEP_PAGE_MARKERS) and body.strip():
+            # Let the regular readiness loop decide whether this is the app or
+            # a transient shell; only record that the sleep interstitial cleared.
+            return {
+                "sleep_screen_seen": True,
+                "wake_clicked": True,
+                "wake_result": "SLEEP_SCREEN_CLEARED",
+            }
+    raise RuntimeError(
+        f"Streamlit app did not wake into an accessible page within {timeout_seconds} seconds."
+    )
 FATAL_TEXT_MARKERS = (
     "application runtime could not be loaded",
     "this app has encountered an error.",
@@ -107,6 +266,10 @@ def main() -> int:
                             URL, wait_until="domcontentloaded", timeout=90_000
                         )
                         item["http_status"] = response.status if response else None
+                        # Community Cloud sleeps after inactivity. Wake it through its
+                        # public UI and then test the real app frame; do not classify a
+                        # wake-screen HTTP 200 as a successful application render.
+                        item["wake_check"] = _wake_if_sleeping(page)
                         # Streamlit can briefly render only its static header before the
                         # application body hydrates. Do not treat generic product/sidebar
                         # text as readiness: wait for a real sign-in/welcome surface, and
@@ -293,6 +456,11 @@ def main() -> int:
                                         raise AssertionError(
                                             f"App frame horizontal overflow at {label}: {frame_dimensions}"
                                         )
+                                    # Measure the tab list and each label, not just page-wide overflow:
+                                    # clipped tabs can be invisible while the document itself fits.
+                                    tab_layout = _tab_bar_layout(app_frame)
+                                    check["tab_bar_layout"] = tab_layout
+                                    _validate_tab_bar_layout(tab_layout, viewport["width"])
                                     screenshot_path = OUTPUT / f"{label}-{check_name}.png"
                                     page.screenshot(path=str(screenshot_path), full_page=True, timeout=30_000)
                                     check["screenshot"] = str(screenshot_path)
