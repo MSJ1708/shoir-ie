@@ -174,11 +174,13 @@ Residual security limitations are material:
 ## Verification / release gates
 
 ### Canonical 100-target accounting
-The matrix and runtime registry were reconciled: both contain exactly 100 unique IDs (T001–T100) with matching canonical name, minimum tier and implementation status. The current classification is 0 VERIFIED_WORKING, 91 IMPLEMENTED_NEEDS_VALIDATION, 7 FOUNDATION_ONLY, 2 EXTERNAL_CONFIGURATION_REQUIRED, 0 MISSING, and 0 BLOCKED. This means all targets are accounted for, not that all are operational. The CSV matrix and canonical registry must remain the source of the current count; subsequent target changes must update all three.
+The matrix and runtime registry were reconciled: both contain exactly 100 unique IDs (T001–T100) with matching canonical name, minimum tier and implementation status. The current classification is 0 VERIFIED_WORKING, 92 IMPLEMENTED_NEEDS_VALIDATION, 6 FOUNDATION_ONLY, 2 EXTERNAL_CONFIGURATION_REQUIRED, 0 MISSING, and 0 BLOCKED. This means all targets are accounted for, not that all are operational. The CSV matrix and canonical registry must remain the source of the current count; subsequent target changes must update all three.
 
 T006 (Undo, Redo, and Recovery) now has a bounded JSON snapshot-history engine and a gated Workbench form for checkpoint, undo, redo and revision restore. It is intentionally not a universal cross-module undo manager and cannot roll back external side effects. New independent method tests and a Workbench AppTest are included but remain pending exact-head CI and hosted persistence/cross-workspace acceptance.
 
 T039 (CAPA and 8D Manager) is correctly classified as implemented-needs-validation because the current checkout contains an executable record-completeness/due-date engine, a gated Workbench form, a result table, calculation fixtures and a Workbench AppTest. It is not yet a complete auditable CAPA lifecycle system: durable record CRUD, immutable status-event history, access-controlled attachment storage and two-user isolation remain open.
+
+T020 (Dataset Versioning and Lineage) now has a deterministic version fingerprint based on the current Excel Studio source signature or a bounded JSON snapshot, source metadata and transformation recipe. Its Workbench flow records scoped versions and classifies explicitly supplied downstream run references. It still does not automatically invalidate every dependent result, independently verify arbitrary run links or prove managed backend durability and cross-workspace isolation.
 
 The newly added test tests/test_shoir_100_tool_tier_truth_table.py is intended to make this cross-check and the six-package authorization truth table part of automated regression coverage. It exercises the canonical authorization helper, not every legacy route or external API callsite; route/API/Copilot/export-level enforcement still requires dedicated authenticated acceptance.
 
