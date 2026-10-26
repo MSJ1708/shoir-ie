@@ -1553,6 +1553,20 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 "shoir_tool_save_status_T006",
                             ):
                                 previous_t006_state[key] = (key in st.session_state, st.session_state.get(key))
+                        previous_t020_state = {}
+                        previous_t020_lineage = {}
+                        if selected_tool["tool_id"] == "T020":
+                            for key in (
+                                "shoir_tool_result_T020",
+                                "shoir_tool_inputs_T020",
+                                "shoir_tool_save_status_T020",
+                            ):
+                                previous_t020_state[key] = (key in st.session_state, st.session_state.get(key))
+                            previous_t020_lineage = {
+                                key: st.session_state[key]
+                                for key in st.session_state
+                                if str(key).startswith("shoir_dataset_lineage_T020_")
+                            }
                         # Remove only the in-session output before a new run. The last
                         # successful saved workspace snapshot remains intact if this run fails.
                         st.session_state.pop("shoir_tool_result_" + selected_tool["tool_id"], None)
@@ -2317,6 +2331,17 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                         st.session_state[key] = previous_value
                                     else:
                                         st.session_state.pop(key, None)
+                            elif selected_tool["tool_id"] == "T020":
+                                for key, (existed, previous_value) in previous_t020_state.items():
+                                    if existed:
+                                        st.session_state[key] = previous_value
+                                    else:
+                                        st.session_state.pop(key, None)
+                                for key in list(st.session_state):
+                                    if str(key).startswith("shoir_dataset_lineage_T020_") and key not in previous_t020_lineage:
+                                        st.session_state.pop(key, None)
+                                for key, previous_value in previous_t020_lineage.items():
+                                    st.session_state[key] = previous_value
                             st.error(f"Tool run could not be completed safely: {exc}")
 
                     if selected_tool["tool_id"] in {"T006", "T007", "T020", "T009", "T010", "T017", "T018", "T019", "T024", "T025", "T027", "T034", "T038", "T041", "T043", "T044", "T045", "T046", "T047", "T048", "T050", "T054", "T059", "T062", "T063", "T069", "T070", "T071", "T076", "T077", "T079", "T082", "T083", "T084", "T100"}:
