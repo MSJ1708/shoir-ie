@@ -278,6 +278,11 @@ def _validate_binding(binding: ERPResourceBinding) -> None:
     _validate_relative_path(binding.source_path, "source path")
     _validate_json_path(binding.records_path, "records path", allow_root=True)
     _validate_json_path(binding.id_path, "source ID path")
+    if SENSITIVE_FIELD_PATTERN.search(binding.id_path):
+        raise ERPConnectorError(
+            "PERSONAL_DATA_FIELD_BLOCKED",
+            "A personal identifier cannot be used as the default source key; choose a non-personal business key or obtain a separate privacy-approved design.",
+        )
     if not binding.field_map or len(binding.field_map) > 100:
         raise ERPConnectorError("MAPPING_INVALID", "An explicit field map with 1 to 100 fields is required.")
     for canonical_field, source_path in binding.field_map.items():
@@ -341,7 +346,10 @@ def _canonical_record(
             currency = raw_currency.strip()
     source_timestamp = None
     if binding.source_timestamp_path:
-        source_timestamp = _utc_iso(_extract_path(source_record, binding.source_timestamp_path))
+        raw_timestamp = _extract_path(source_record, binding.source_timestamp_path)
+        source_timestamp = _utc_iso(raw_timestamp)
+        if raw_timestamp is not None and source_timestamp is None:
+            return None
     raw_key = f"{connection.connection_id}|{binding.resource_key}|{source_id}"
     source_hash = hashlib.sha256(raw_key.encode("utf-8")).hexdigest()
     return {
@@ -390,7 +398,14 @@ class ERPReadOnlyAdapter:
             raise ERPConnectorError("AUTHORIZATION_REQUIRED", "An authenticated actor reference is required.")
         if active_workspace_id != connection.workspace_id:
             raise ERPConnectorError("WORKSPACE_DENIED", "The connection belongs to a different workspace.")
-        if authorize(actor_id, connection.workspace_id, connection.connection_id, binding.resource_key) is not True:
+        try:
+            authorized = authorize(actor_id, connection.workspace_id, connection.connection_id, binding.resource_key)
+        except Exception as exc:
+            raise ERPConnectorError(
+                "AUTHORIZATION_CHECK_FAILED",
+                "Authorization could not be verified; no ERP request was sent. Check the approved access-control service.",
+            ) from exc
+        if authorized is not True:
             raise ERPConnectorError("ACCESS_DENIED", "The current actor is not authorized for this connection and resource.")
         if connection.product_id != self.product_id:
             raise ERPConnectorError("PRODUCT_MISMATCH", "The selected adapter does not match the connection product.")
@@ -424,6 +439,11 @@ class ERPReadOnlyAdapter:
                 # Never include the raw transport exception; it may contain URLs,
                 # headers, tokens or customer response fragments.
                 raise ERPConnectorError("TRANSPORT_FAILURE", "The provider read failed; inspect approved redacted server-side diagnostics.") from exc
+            if not isinstance(page, TransportPage):
+                raise ERPConnectorError(
+                    "INVALID_TRANSPORT_RESPONSE",
+                    "The connector transport returned an invalid page contract; no result was accepted.",
+                )
             pages_read += 1
             collection = _extract_path(page.payload, binding.records_path)
             if not isinstance(collection, list):
