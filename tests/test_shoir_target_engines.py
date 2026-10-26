@@ -2134,3 +2134,59 @@ def test_capa_8d_register_requires_evidence_for_closed_records_and_validates_dat
         assess_capa_8d_records([dict(closed, opened_date="2026-10-25", due_date="2026-10-24")])
     with pytest.raises(ValueError, match="between 1 and 5,000"):
         assess_capa_8d_records([])
+
+def test_recovery_snapshot_history_checkpoints_undoes_redoes_and_restores_revision():
+    from shoir_target_engines import manage_recovery_snapshot_history
+
+    first = manage_recovery_snapshot_history(None, action="checkpoint", new_snapshot={"asset_id": "P-101", "count": 1})
+    assert first["status"] == "SNAPSHOT_CREATED"
+    assert first["current_revision"] == 1
+    assert first["can_undo"] is False
+    second = manage_recovery_snapshot_history(first["history_state"], action="checkpoint", new_snapshot={"asset_id": "P-101", "count": 2})
+    assert second["status"] == "SNAPSHOT_CHECKPOINTED"
+    assert second["current_revision"] == 2
+    undone = manage_recovery_snapshot_history(second["history_state"], action="undo")
+    assert undone["status"] == "SNAPSHOT_UNDONE"
+    assert undone["current_snapshot"]["count"] == 1
+    assert undone["can_redo"] is True
+    redone = manage_recovery_snapshot_history(undone["history_state"], action="redo")
+    assert redone["status"] == "SNAPSHOT_REDONE"
+    assert redone["current_snapshot"]["count"] == 2
+    restored = manage_recovery_snapshot_history(redone["history_state"], action="restore", target_revision=1)
+    assert restored["status"] == "REVISION_RESTORED"
+    assert restored["current_snapshot"]["count"] == 1
+    assert restored["can_redo"] is True
+    assert [row["revision"] for row in restored["timeline"]] == [1, 2]
+
+
+def test_recovery_snapshot_history_clears_redo_on_new_checkpoint_and_bounds_history():
+    from shoir_target_engines import manage_recovery_snapshot_history
+
+    state = None
+    for value in range(1, 8):
+        state = manage_recovery_snapshot_history(state, action="checkpoint", new_snapshot={"value": value}, max_history=4)["history_state"]
+    bounded = manage_recovery_snapshot_history(state, action="undo", max_history=4)
+    assert bounded["revision_count"] <= 4
+    assert bounded["current_snapshot"]["value"] == 6
+    branched = manage_recovery_snapshot_history(bounded["history_state"], action="checkpoint", new_snapshot={"value": 99}, max_history=4)
+    assert branched["can_redo"] is False
+    assert branched["current_snapshot"]["value"] == 99
+    assert branched["revision_count"] <= 4
+
+
+def test_recovery_snapshot_history_rejects_invalid_actions_data_and_revisions():
+    from shoir_target_engines import manage_recovery_snapshot_history
+
+    with pytest.raises(ValueError, match="valid JSON-compatible"):
+        manage_recovery_snapshot_history(None, action="checkpoint", new_snapshot={"bad": float("nan")})
+    with pytest.raises(ValueError, match="byte snapshot limit"):
+        manage_recovery_snapshot_history(None, action="checkpoint", new_snapshot={"large": "x" * 33000})
+    with pytest.raises(ValueError, match="No earlier snapshot"):
+        manage_recovery_snapshot_history(None, action="undo")
+    with pytest.raises(ValueError, match="No undone snapshot"):
+        manage_recovery_snapshot_history(None, action="redo")
+    state = manage_recovery_snapshot_history(None, action="checkpoint", new_snapshot={"value": 1})["history_state"]
+    with pytest.raises(ValueError, match="between 1 and 1"):
+        manage_recovery_snapshot_history(state, action="restore", target_revision=2)
+    with pytest.raises(ValueError, match="must be checkpoint, undo, redo or restore"):
+        manage_recovery_snapshot_history(state, action="future")
