@@ -56,7 +56,7 @@ def test_excel_studio_export_keeps_formula_like_input_as_text():
         {"Cleaned Data": source},
         {"Raw Data": source},
         {"Cleaned Data": [{"Action": formula, "Details": "synthetic"}]},
-        {},
+        {"Cleaned Data": {"Rows": 2, "Columns": 1, "Quality score": 100}},
     )
 
     workbook = load_workbook(BytesIO(payload), data_only=False)
