@@ -171,3 +171,18 @@ The current production public smoke failure is a blocker to diagnose. Do not wor
 | Billing/tax/invoice/refund/support | NOT READY |
 
 **Final decision: NO-GO.** Reassess only after the exact limited pilot scope passes calculation/reference, authorization, persistence, export and authenticated staging acceptance and its applicable legal, privacy, provider, payment, support and recovery gates have closed.
+
+## Live deployment evidence added 26 October 2026
+
+A read-only Supabase management/API inspection verified that the production database project is `gcsamrdaeraxieaagsta` and staging is `hfhrosthswcybccepmak`; both report region `eu-central-1`. This is only the database region, not a full vendor/data-transfer assessment.
+
+Production reports 14 migrations and ends at `20261019140600_atomic_subscription_request_decisions`. Staging reports 17 migrations and additionally includes legal/referral and consent-policy records (`20261021130000_shoir_beta_legal_referrals`, `20261022110000_enforce_beta_legal_acceptance`, and applied version `20261025164602` named `20261023130000_refresh_refund_policy_acceptance_version`). Schema/policy parity remains **FAIL / BLOCKED** until the version/name discrepancy is reconciled and a reviewed rollout is approved.
+
+Both `shoir-persistence` Edge Functions report ACTIVE version 8 and `verify_jwt=false`, but deployed source SHA-256 differs: production `410e22f7af0be8f3ec74bae5a15aec70f8b6a807a540e98a2c5143f4e6b8790d`; staging `b25d2c22d33baa4daef2b63d27375dcdfac57bb58cfc5e577882882436a0d0d0`. The production deployed `index.ts` returned by the management API lacks referral-handling code present in staging and current repository source. The app's exact Streamlit deployment branch/entry point and config cannot be verified from the available connection. **Do not hot-deploy**; reconcile app/schema/Edge as one bundle with backup, restore proof, authorized change window, postflight and rollback.
+
+Read-only grant/policy queries found staging `public.shoir_referrals` has RLS enabled, no row policy and no direct table grants to `anon` or `authenticated`; grants are shown for `postgres` and `service_role`. This may be correct for a server-only table, but only if every caller uses reviewed, authenticated server logic. `shoir_accounts` and `shoir_workspace_states` have deny-all RLS policies for `anon`/`authenticated` and no direct grants to those roles. These metadata checks do not prove complete endpoint, object-ownership, entitlement, session-expiry, or tenant-isolation security.
+
+A fresh read of the current CI records confirms the public main smoke still fails on the recorded main SHA, staging's unauthenticated smoke is skipped, and the staging authenticated release-gate job is skipped. Skipped checks remain **NOT RUN**. The live parity evidence and required actions are detailed in [PR Integration Audit](PR_INTEGRATION_AUDIT.md).
+
+No production migration, Edge Function deployment, Streamlit deployment, account operation, or billing operation was performed. Decision remains **NO-GO**.
+
