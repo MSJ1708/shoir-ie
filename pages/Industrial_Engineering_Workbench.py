@@ -1055,7 +1055,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                             )
                             t020_source_metadata_json = st.text_area(
                                 "Additional source metadata (JSON object)",
-                                value='{"dataset_id":"lineage-example","schema_fingerprint":{"records":["id","value"]}}',
+                                value="{}",
                                 key="tool020_source_metadata_json",
                             )
                             t020_transformations_json = st.text_area(
