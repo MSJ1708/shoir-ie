@@ -1,6 +1,6 @@
 # Pull request and dependency reconciliation — 26 October 2026
 
-Snapshot: GitHub open PR API for MSJ1708/shoir-ie. The 18 open PRs below were all returned as drafts. No PR should be merged merely to reduce backlog. Obtain independent review and verify exact-head checks first.
+Snapshot: GitHub open PR API for MSJ1708/shoir-ie, refreshed after PR #195 was marked ready for review. There are 18 open PRs in total; #195 is ready for review but has no recorded approval, and the other 17 are drafts. No PR should be merged merely to reduce backlog. Obtain independent review and verify exact-head checks first.
 
 | PR | Head / purpose | Classification | Rationale / next action |
 |---|---|---|---|
@@ -40,7 +40,7 @@ Snapshot: GitHub open PR API for MSJ1708/shoir-ie. The 18 open PRs below were al
 - #196 head 7c0219385fe33bcb68b963b23dfac9a9c0fb886c: validation run 40303682913 reported test success and live-deployment-smoke skipped; push validation run 40303680055 succeeded.
 - #195 head 26d5e4f2a6569223976eff4fe43db83b0967d2e2: prior exact-head evidence lists validation 40298783424, tests 40298783902, platform tests 40298783416, engine regression 40298783672 and security/quality 40298783645 as successful. Recheck before merge.
 - #197 head 87bf544db432e0b4ec966ebec6d0b162b1501b38 had successful validation 40304635611, platform 40304635662, engine 40304635679, tests 40304635703 and security-quality 40304635715; those checks must be rerun after this documentation change.
-- No review submissions were returned for #196 or #197. This work is not an independent review.
+- No review submissions were returned for #195, #196 or #197. PR #195 was moved from draft to ready-for-review status, but this is not an independent review and no approval was recorded.
 
 ## Source-control control
 
