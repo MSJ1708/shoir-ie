@@ -275,3 +275,59 @@ def test_missing_or_invalid_currency_does_not_create_a_canonical_record():
     assert result["record_count"] == 0
     assert result["rejected_record_count"] == 1
     assert result["status"] == "PARTIAL_READ"
+
+
+
+def test_personal_identifier_cannot_be_used_as_source_key():
+    with pytest.raises(erp.ERPConnectorError) as error:
+        erp._validate_binding(binding(id_path="EmployeeID"))
+    assert error.value.code == "PERSONAL_DATA_FIELD_BLOCKED"
+
+
+def test_naive_source_timestamp_rejects_record_instead_of_claiming_valid_lineage():
+    transport = FakeTransport([erp.TransportPage({"value": [
+        {
+            "ProductionOrder": "1001",
+            "ProductionPlant": "PL01",
+            "LastChangeDateTime": "2026-10-26T10:00:00",
+        }
+    ]})])
+    result = erp.adapter_for("SAP_S4HANA_CLOUD_PUBLIC").read_resource(
+        connection(), binding(), transport, actor_id="admin-a",
+        active_workspace_id="workspace-a", allowed_hosts={("sap.example.test", 443)}, authorize=auth_ok,
+    )
+    assert result["record_count"] == 0
+    assert result["rejected_record_count"] == 1
+    assert result["status"] == "PARTIAL_READ"
+
+
+def test_authorization_service_failure_is_sanitized_before_provider_transport():
+    transport = FakeTransport([erp.TransportPage({"value": []})])
+
+    def auth_failure(*args):
+        raise RuntimeError("Bearer secret-token at https://private.example.test?token=classified")
+
+    with pytest.raises(erp.ERPConnectorError) as error:
+        erp.adapter_for("SAP_S4HANA_CLOUD_PUBLIC").read_resource(
+            connection(), binding(), transport, actor_id="admin-a",
+            active_workspace_id="workspace-a", allowed_hosts={("sap.example.test", 443)},
+            authorize=auth_failure,
+        )
+    assert error.value.code == "AUTHORIZATION_CHECK_FAILED"
+    assert "secret-token" not in str(error.value)
+    assert "private.example.test" not in str(error.value)
+    assert transport.calls == []
+
+
+def test_invalid_transport_page_contract_is_sanitized():
+    class InvalidTransport:
+        def get_json(self, *args, **kwargs):
+            return {"payload": {"value": []}}
+
+    with pytest.raises(erp.ERPConnectorError) as error:
+        erp.adapter_for("SAP_S4HANA_CLOUD_PUBLIC").read_resource(
+            connection(), binding(), InvalidTransport(), actor_id="admin-a",
+            active_workspace_id="workspace-a", allowed_hosts={("sap.example.test", 443)},
+            authorize=auth_ok,
+        )
+    assert error.value.code == "INVALID_TRANSPORT_RESPONSE"
