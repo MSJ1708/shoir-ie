@@ -27,7 +27,7 @@ from shoir_tool_trust_center import (classify_diagnostic, summarize_capability_r
 from shoir_ergonomics import calculate_rnle_lifting_index
 from shoir_remaining_tool_engines import get_tool_example_json, run_additional_tool
 
-_ADDITIONAL_TOOL_IDS = {"T006", "T020", "T039", "T060", "T074", "T080", "T094", "T096", "T097", "T098", "T099"}
+_ADDITIONAL_TOOL_IDS = {"T006", "T020", "T060", "T074", "T080", "T094", "T096", "T097", "T098", "T099"}
 from industrial_platform_excellence import (
     CANONICAL_TIERS, MODULE_MATRIX, canonical_tier, tier_allows, tier_matrix,
     module_matrix, module_availability, deep_data_quality, validate_schema,
@@ -557,6 +557,11 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 "Review date (YYYY-MM-DD; blank uses current date)",
                                 value="",
                                 key="tool039_as_of_date",
+                            )
+                            capa_transitions_json = st.text_area(
+                                "Optional status transitions (JSON list; each transition requires capa_id, to_status, reviewer and reason)",
+                                value="[]",
+                                key="tool039_transitions",
                             )
                             run_method = st.form_submit_button("Review CAPA / 8D register", type="primary", use_container_width=True, key="tool039_run")
                         elif selected_tool["tool_id"] == "T040":
@@ -1416,7 +1421,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                     elif selected_tool["tool_id"] == "T031":
                         current_tool_inputs = {"measurements_text": spc_measurements_text, "unit": spc_unit}
                     elif selected_tool["tool_id"] == "T039":
-                        current_tool_inputs = {"records_json": capa_records_json, "as_of_date": capa_as_of_date}
+                        current_tool_inputs = {"records_json": capa_records_json, "transitions_json": capa_transitions_json, "as_of_date": capa_as_of_date}
 
                     elif selected_tool["tool_id"] == "T040":
                         current_tool_inputs = {"period": quality_period, "currency": quality_currency, "total_units": quality_total_units, "defective_units": quality_defects, "scrap_units": quality_scrap_units, "rework_units": quality_rework_units, "scrap_cost_per_unit": quality_scrap_cost, "rework_cost_per_unit": quality_rework_cost, "inspection_cost": quality_inspection_cost}
@@ -1752,14 +1757,18 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                             elif selected_tool["tool_id"] == "T039":
                                 try:
                                     parsed_capa_records = json.loads(capa_records_json)
+                                    parsed_capa_transitions = json.loads(capa_transitions_json or "[]")
                                 except json.JSONDecodeError as exc:
-                                    raise ValueError("CAPA/8D records must be valid JSON.") from exc
+                                    raise ValueError("CAPA/8D records and transitions must be valid JSON.") from exc
                                 if not isinstance(parsed_capa_records, list):
                                     raise ValueError("CAPA/8D records must be a JSON list of objects.")
-                                result = assess_capa_8d_records(
-                                    parsed_capa_records,
-                                    as_of_date=capa_as_of_date.strip() or None,
-                                )
+                                if not isinstance(parsed_capa_transitions, list):
+                                    raise ValueError("CAPA/8D transitions must be a JSON list.")
+                                result = run_additional_tool("T039", {
+                                    "records": parsed_capa_records,
+                                    "transitions": parsed_capa_transitions,
+                                    "as_of_date": capa_as_of_date.strip() or None,
+                                })
                                 result["data_provenance"] = (
                                     "SYNTHETIC_EXAMPLE"
                                     if capa_records_json.strip() == _TOOL039_EXAMPLE_RECORDS
