@@ -115,7 +115,7 @@ def _parse_allowlisted_hosts(raw: str) -> set[tuple[str, int]]:
         try:
             parsed = urlsplit("//" + value)
             host = (parsed.hostname or "").rstrip(".").lower()
-            port = parsed.port or 443
+            port = parsed.port if parsed.port is not None else 443
         except ValueError as exc:
             raise ConnectorFailure(
                 "CONFIGURATION_INVALID", "The connector host allowlist contains an invalid host or port."
@@ -324,7 +324,7 @@ def _get_response(
             "GET",
             target_path,
             headers={
-                "Host": f"{host}:{port}" if port != 443 else host,
+                "Host": (f"[{host}]" if ":" in host else host) + (f":{port}" if port != 443 else ""),
                 "Accept": "application/json",
                 "Authorization": "Bearer " + token,
                 "Connection": "close",
@@ -424,13 +424,13 @@ def verify_readonly_rest_connector(
             }
         endpoint = read_config(prefix + "_ENDPOINT")
         token = read_config(credential_env)
-        health_path = _validated_path(read_config(prefix + "_HEALTH_PATH"), "health path")
-        read_path = _validated_path(read_config(prefix + "_READ_PATH"), "read path")
         if not endpoint or not token:
             raise ConnectorFailure(
                 "NOT_CONFIGURED",
                 "Set the approved endpoint and Bearer-token secret in the server-side secret store. Never enter a token in the Workbench JSON editor.",
             )
+        health_path = _validated_path(read_config(prefix + "_HEALTH_PATH"), "health path")
+        read_path = _validated_path(read_config(prefix + "_READ_PATH"), "read path")
         allowed_hosts = _parse_allowlisted_hosts(read_config("SHOIR_CONNECTOR_ALLOWED_HOSTS"))
         private_networks = _parse_approved_private_cidrs(read_config("SHOIR_CONNECTOR_APPROVED_PRIVATE_CIDRS"))
         timeout_raw = read_config("SHOIR_CONNECTOR_TIMEOUT_SECONDS")
