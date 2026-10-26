@@ -33,3 +33,7 @@ The checked-in E2E guard validates HTTPS and the exact approved staging Edge Fun
 8. Have a repository admin configure and verify main protection and required checks.
 
 **Release decision:** auth/tenancy remains BLOCKED until current-candidate E2E evidence exists. The aggregate admin invariant is true for this snapshot only and must be checked again after any authorized production release changes.
+
+## Additional SQL function privilege check
+
+A read-only pg_proc/ACL query on both environments found the inspected shoir_* functions have EXECUTE grants for postgres and service_role only. has_function_privilege was false for anon and authenticated for shoir_check_login_throttle, shoir_cleanup_sessions, shoir_create_registration_request and shoir_finalize_subscription_request. The staging-only legal acceptance trigger function was also executable by service_role but not anon/authenticated. shoir_cleanup_sessions is SECURITY DEFINER, so preserve the reviewed EXECUTE restriction and do not expose it through a public RPC. This is a snapshot, not a substitute for post-migration checks.
