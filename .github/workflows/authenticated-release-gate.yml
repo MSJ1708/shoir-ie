@@ -91,11 +91,11 @@ jobs:
       # for every account or for every module.
       - name: Verify authenticated 96-module rendering matrix
         id: module_matrix
-        if: ${{ always() && steps.staging_preflight.conclusion == 'success' && steps.candidate_build.conclusion == 'success' && steps.backend_check.conclusion == 'success' }}
+        if: ${{ always() && steps.staging_preflight.conclusion == 'success' && steps.candidate_build.conclusion == 'success' }}
         run: python scripts/authenticated_module_matrix.py
       - name: Verify authenticated browser shell, Excel module and logout
         id: browser_check
-        if: ${{ always() && steps.staging_preflight.conclusion == 'success' && steps.candidate_build.conclusion == 'success' && steps.backend_check.conclusion == 'success' }}
+        if: ${{ always() && steps.staging_preflight.conclusion == 'success' && steps.candidate_build.conclusion == 'success' }}
         run: python scripts/authenticated_browser_matrix.py
       - name: Upload redacted verification evidence
         if: always()
