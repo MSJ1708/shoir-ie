@@ -68,3 +68,15 @@ Aggregate-only read-only checks showed exactly one Enterprise Admin record and o
 - [ ] Verify production after authorized deployment with post-deploy smoke and aggregate invariant check.
 
 **Status:** production parity FAIL. No production change was made.
+
+## Additional read-only trigger and platform-compatibility checks — 26 October 2026
+
+A direct current trigger inventory confirmed the trigger shoir_require_legal_acceptance_before_approval exists on staging for BEFORE UPDATE on shoir_subscription_requests and is absent in production. The current staged function checks Refund Policy version 2026-10-23-v2 and rejects approval of a new request without the required document versions and accepted_at. The related trigger function is SECURITY INVOKER. The core shoir_* SQL functions inspected have EXECUTE ACLs for postgres and service_role only; has_function_privilege returned false for both anon and authenticated, including shoir_cleanup_sessions, which is SECURITY DEFINER. This is a read-only ACL observation; keep the server-only execution contract reviewed.
+
+Important data-impact detail: migration 20261021130000_shoir_beta_legal_referrals.sql is not purely additive. Besides adding acceptance columns and a referrals table, it changes affiliate_code for existing accounts whose code is null/blank or matches the legacy AFF-...-15 pattern, repairs case-insensitive duplicates, updates updated_at and adds a unique index. Before any production rollout, perform aggregate-only dry-run counts for affected rows, review referral-link/user impact and preservation expectations, and approve the compatibility/communication plan. terms_accepted defaults to false; do not treat this as accepted consent.
+
+## Upcoming Supabase API compatibility checks
+
+Official Supabase notice: on 30 October 2026, the new behavior is scheduled to apply to existing projects so public-schema tables require explicit grants to be exposed through the Data API. Review all direct PostgREST/GraphQL/supabase-js Data API consumers before that date. The inspected shoir_* tables have no explicit grants to anon/authenticated/PUBLIC and appear intentionally server-only; do not add grants broadly just to preserve accidental exposure. Source: https://github.com/orgs/supabase/discussions/45329
+
+Supabase also announced removal of four older CBC-mode TLS 1.2 ciphers from project HTTP APIs starting 10 November 2026 at the earliest, affecting Auth, Data API, Storage, Realtime and Edge Functions. Confirm supported clients/TLS libraries and run connectivity checks before the change. Source: https://supabase.com/changelog/cbc-tls-ciphers-deprecated
