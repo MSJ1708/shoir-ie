@@ -433,9 +433,11 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                     with st.form("shoir_target_method_form_" + selected_tool["tool_id"]):
                         if selected_tool["tool_id"] in _ADDITIONAL_TOOL_IDS:
                             st.caption("Structured, deterministic tool input. Examples are explicitly synthetic. Review every field and keep credentials out of this editor; external configuration checks inspect only secret presence and never return secret values.")
+                            _saved_tool_inputs = st.session_state.get("shoir_tool_inputs_" + selected_tool["tool_id"], {})
+                            _saved_payload_json = _saved_tool_inputs.get("payload_json") if isinstance(_saved_tool_inputs, dict) else None
                             additional_tool_payload = st.text_area(
                                 "Tool inputs (JSON object)",
-                                value=get_tool_example_json(selected_tool["tool_id"]),
+                                value=_saved_payload_json if isinstance(_saved_payload_json, str) and _saved_payload_json.strip() else get_tool_example_json(selected_tool["tool_id"]),
                                 height=260,
                                 key="additional_tool_payload_" + selected_tool["tool_id"],
                             )
