@@ -146,6 +146,12 @@ This section records the latest checks performed for this draft; it does not aut
 ## 9. Follow-up after ERP secret-field hardening — 26 October 2026
 
 - The mapper's sensitive-field filter now rejects source or canonical mappings containing access/refresh tokens, passwords, secrets, authorization headers, API/private keys, client secrets, credentials, bearer values and cookies. Seven parameterized regression cases were added for these patterns.
-- CI on exact ERP head `38093374614a60c1c26721a1f1b4b2cafb1041ba` is not complete. Live check-run status at report preparation: live-deployment-smoke: completed/skipped; test: completed/success; test: in_progress; test: in_progress; engine-regression: completed/success; security-quality: completed/success; live-deployment-smoke: completed/skipped; test: in_progress; engine-regression: completed/success. Live-deployment-smoke is skipped. Treat the seven new tests as NOT VERIFIED until tests and required CI finish on this exact commit.
-- No independent review is available for PR #198 or #199. Keep both drafts and do not merge until current required checks, independent review and release-owner acceptance exist.
+- CI on exact ERP head `38093374614a60c1c26721a1f1b4b2cafb1041ba` has progressed as follows:
+  - [Python test suite — run 40339560945](https://github.com/MSJ1708/shoir-ie/actions/runs/40339560945): **PASS**. The workflow step `python -m pytest -q tests` succeeded, so the seven new regression cases are included in the passing suite.
+  - [Security and quality — run 40339560898](https://github.com/MSJ1708/shoir-ie/actions/runs/40339560898): **PASS**.
+  - [Engine regression — run 40339560969](https://github.com/MSJ1708/shoir-ie/actions/runs/40339560969): **PASS**.
+  - [Validation — run 40339560897](https://github.com/MSJ1708/shoir-ie/actions/runs/40339560897): **IN PROGRESS**; local runtime/browser smoke steps are still running.
+  - [Platform tests — run 40339560946](https://github.com/MSJ1708/shoir-ie/actions/runs/40339560946): **IN PROGRESS**; regression tests have not completed.
+  - `live-deployment-smoke` is **SKIPPED**, so these results are not live SAP/Oracle acceptance and do not prove deployment.
+- No independent review is available for PR #198 or #199. Keep both drafts and do not merge until every applicable required check has completed, an independent review is recorded, and release-owner approval is obtained.
 - The six ERP products remain `SPECIFICATION_ONLY_UNCONFIGURED`. No provider authentication, real HTTP transport, durable sync/checkpointing, import persistence or live sandbox tenant has been implemented and accepted.
