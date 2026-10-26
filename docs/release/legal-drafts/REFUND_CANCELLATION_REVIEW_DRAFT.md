@@ -4,8 +4,8 @@
 
 # Shoir-IE Refund Policy
 
-**Last updated:** October 21, 2026  
-**Version:** 2026-10-21-v1
+**Last updated:** October 23, 2026  
+**Version:** 2026-10-23-v2
 
 Payments are reviewed manually; STC Pay QR is a separate payment step, not an integrated card checkout. Refund requests are assessed under applicable law and mandatory consumer rights. Nothing in this policy waives rights that cannot lawfully be waived.
 
