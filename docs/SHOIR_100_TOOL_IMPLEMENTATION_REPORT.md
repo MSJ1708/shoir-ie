@@ -144,8 +144,8 @@ The registry and matrix contain 100 target IDs, T001–T100. Current classificat
 | Status | Count |
 |---|---:|
 | `VERIFIED_WORKING` | 0 |
-| `IMPLEMENTED_NEEDS_VALIDATION` | 87 |
-| `FOUNDATION_ONLY` | 11 |
+| `IMPLEMENTED_NEEDS_VALIDATION` | 92 |
+| `FOUNDATION_ONLY` | 6 |
 | `EXTERNAL_CONFIGURATION_REQUIRED` | 2 |
 | `MISSING` | 0 |
 | `BLOCKED` | 0 |
