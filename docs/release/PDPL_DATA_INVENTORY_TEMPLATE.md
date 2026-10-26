@@ -3,6 +3,24 @@
 **Status:** TEMPLATE / FACTUAL CONFIGURATION NOT VERIFIED / REQUIRES QUALIFIED REVIEW.  
 Do not mark a provider, region, legal basis, retention period or transfer as compliant before verifying actual contracts and runtime configuration.
 
+
+
+## Runtime facts confirmed in a read-only inspection — 26 October 2026
+
+These are limited configuration observations, not a completed data-protection impact or transfer assessment.
+
+| Component | Observed fact | What remains unverified |
+|---|---|---|
+| Production database | Supabase project `gcsamrdaeraxieaagsta`, project name `shoir-ie-production`, region `eu-central-1`, PostgreSQL `17.6.1.166`; 14 applied migrations, latest `20261019140600_atomic_subscription_request_decisions`. | Other service regions, all data recipients/processors, contractual terms, legal basis, retention/deletion, and international-transfer safeguards. |
+| Staging database | Supabase project `hfhrosthswcybccepmak`, project name `shoir-ie-staging-2026-10-19`, region `eu-central-1`, PostgreSQL `17.11.0.003`; 17 applied migration records including the later consent/referral and refund-policy acceptance records. | The applied version/name mapping for the refund-v2 migration needs reconciliation with source history. Staging is not proof of production parity. |
+| `shoir-persistence` Edge Function | Both projects report ACTIVE version 8; deployed source hashes differ. Production hash `410e22f7af0be8f3ec74bae5a15aec70f8b6a807a540e98a2c5143f4e6b8790d`; staging hash `b25d2c22d33baa4daef2b63d27375dcdfac57bb58cfc5e577882882436a0d0d0`. | The deployed functions do not have source parity; confirm each endpoint's auth/session controls and deployment plan. |
+| Streamlit hosting | Actual deployed branch, commit, entry point and configuration presence were not accessible from the current connection. | Resolve the hosting-panel mapping independently for both staging URLs and production. |
+| AI/Copilot, email, analytics, support tooling, object/file storage and backups | Providers and regions not established by this inspection. | Confirm each enabled provider, location, recipient/subprocessor, support access, retention and deletion/backup behavior from current account settings/contracts. |
+
+Read-only grant/policy checks found staging `public.shoir_referrals` has RLS enabled, no row policy, and no direct table grant to `anon` or `authenticated`; the grants observed were for `postgres` and `service_role`. This can be consistent with a server-only table only if every access path remains authenticated and reviewed. It is not evidence that every Edge action is correctly authorized. No table rows or secret values were read.
+
+**Do not mark the data inventory complete from these facts.** Supabase region does not establish that all personal data stays in that region or that any cross-border transfer is compliant. The operator and qualified privacy counsel must still verify lawful basis/purpose, minimization, data-subject rights, transfer safeguards, retention/deletion, vendor agreements, incident handling and customer notices.
+
 ## Data-flow inventory
 
 Complete one row per actual data flow. Known categories below are prompts for verification, not claims that every system is enabled.
