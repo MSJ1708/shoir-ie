@@ -27,14 +27,14 @@ This is a focused first implementation phase, **not completion of the full 100-t
 
 | Status | Count |
 |---|---:|
-| `IMPLEMENTED_NEEDS_VALIDATION` | 91 |
-| `FOUNDATION_ONLY` | 7 |
+| `IMPLEMENTED_NEEDS_VALIDATION` | 92 |
+| `FOUNDATION_ONLY` | 6 |
 | `EXTERNAL_CONFIGURATION_REQUIRED` | 2 |
 | `MISSING` | 0 |
 | `VERIFIED_WORKING` | 0 |
 | **Total** | **100** |
 
-These counts are conservative source-audit classifications as recorded by the canonical registry and matrix on this feature branch. They are not a tool success rate and do not mean the complete acceptance criteria have passed. All 100 authenticated end-to-end browser statuses remain unverified. T006 is a bounded JSON snapshot history tool, not universal cross-module undo. T039 validates CAPA/8D record completeness and due dates but does not yet provide a fully audited lifecycle ledger or attachment store. Local persistence/service tests do not prove managed-backend save/reload/re-login or workspace isolation across real authenticated sessions.
+These counts are conservative source-audit classifications as recorded by the canonical registry and matrix on this feature branch. They are not a tool success rate and do not mean the complete acceptance criteria have passed. All 100 authenticated end-to-end browser statuses remain unverified. T006 is a bounded JSON snapshot history tool, not universal cross-module undo. T039 validates CAPA/8D record completeness and due dates but does not yet provide a fully audited lifecycle ledger or attachment store. T020 now records bounded dataset versions from a current Excel Studio signature or manual JSON snapshot and fingerprints source metadata plus transformation recipes; downstream stale detection only applies to supplied run references and is not yet an automatic dependency graph. Local persistence/service tests do not prove managed-backend save/reload/re-login or workspace isolation across real authenticated sessions.
 
 ## Entitlement and routing boundaries
 
