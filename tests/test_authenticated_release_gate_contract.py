@@ -72,7 +72,8 @@ def test_authenticated_sidebar_starts_expanded_and_browser_gate_expands_it_befor
     assert "WAIT_SECONDS = 90" in candidate
     assert "python scripts/staging_candidate_build_preflight.py" in workflow
     assert "steps.candidate_build.conclusion == 'success'" in workflow
-    assert "steps.backend_check.conclusion == 'success'" in workflow
+    assert "steps.backend_check.conclusion == 'success'" not in workflow
+    assert "always()" in workflow
 
 
 def test_active_module_identity_renders_before_optional_header_diagnostics_and_has_visible_text_fallback():
