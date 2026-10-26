@@ -291,6 +291,19 @@ def _excel_safe_df(value: Any) -> pd.DataFrame:
             out[col] = out[col].map(lambda v: v if v is None or isinstance(v, (str, int, float, bool, pd.Timestamp)) else str(v))
     return out
 
+def literalize_untrusted_formula_cells(workbook: Any) -> None:
+    """Store formula-looking strings as text in openpyxl reports with no intentional formulas.
+
+    Only call this for generated report workbooks whose sheets are data/audit exports,
+    not for user-authored workbooks where real formulas must be preserved.
+    """
+    for worksheet in getattr(workbook, "worksheets", []):
+        for row in worksheet.iter_rows():
+            for cell in row:
+                if cell.data_type == "f" and isinstance(cell.value, str):
+                    cell.data_type = "s"
+
+
 def _excel_column_width(series: pd.Series, header: Any) -> int:
     """Calculate a bounded width without vectorized len() failures on mixed objects."""
     width = len(str(header)) + 2
