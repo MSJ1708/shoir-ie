@@ -201,3 +201,42 @@ Before this may be considered for merge or deployment, the exact final head must
 ## Release position
 
 **DRAFT / NO-GO.** This integration tranche preserves the current UX and adds executable calculation-backed tools, but it does not complete all 100 targets or certify workforce/production readiness. Do not merge or make commercial readiness claims until the remaining foundation-only capabilities and the mandatory release checks are completed.
+
+## Implementation update — remaining foundation/configuration tranche (26 October 2026)
+
+This candidate now includes a focused implementation for the nine formerly foundation-only target rows and configuration-readiness handlers for both externally configured rows. The 100-tool registry remains the canonical catalogue; the existing grouped Workbench layout is preserved.
+
+### New and completed code paths in this candidate
+
+- **T006 — Undo, Redo, and Recovery:** SHA-256 integrity checked JSON snapshots, undo/redo and explicit recovery to a known revision. The tool returns updated history for the existing workspace persistence path. Cross-session durability and authenticated recovery remain acceptance tests.
+- **T020 — Dataset Versioning and Lineage:** content-addressed version IDs and hashes, source/transform metadata, schema/row summary, appended lineage history and downstream run stale flags. Runtime gating on persisted hashes still needs integration acceptance.
+- **T039 — CAPA and 8D Manager:** preserves existing D1–D8 completeness and due-date review; adds explicit allowed transition checks and reviewer/reason/approval transition audit. Closure is rejected without effectiveness evidence and an approval reference.
+- **T060 — Supply Chain Network Planner:** deterministic minimum-cost supplier-to-customer allocation with capacity constraints and explicit shortage variables; reports fill rate, cost and per-customer shortage.
+- **T074 — Digital Twin Calibration Studio:** bounded least-squares affine correction with residuals, RMSE, MAE and R². This is not physical-model parameter calibration and carries an explicit holdout/data-alignment warning.
+- **T080 — Industrial Disruption Simulator:** repeatable capacity/demand/cost/lead-time shock comparison with throughput, shortage, service level and recovery assumptions. It remains a scenario model, not a live/calibrated twin.
+- **T094 — KPI Dashboard and Alert Center:** KPI threshold/freshness evaluation and duplicate-open-alert fingerprinting. Durable alert storage, authorized source aggregation and notification delivery remain open.
+- **T097 — API, SDK, and Plugin Toolkit:** validates inert manifests, versions, tiers, scopes, schemas and safe relative entrypoints. Arbitrary code never executes and a manifest cannot self-enable.
+- **T099 — Data Governance and Recovery Center:** creates/verifies hashed recovery packages and produces retention/deletion plans without performing destructive deletion.
+- **T096 — Integration Management Center:** inspects endpoint/credential key presence and syntax without returning secret values or making outbound connections. It does not claim a live connection.
+- **T098 — Enterprise Identity and Audit Center:** checks OIDC issuer/client/redirect/scopes and explicit MFA/audit flags without returning secrets. It does not claim that SSO or MFA is active.
+
+The Workbench exposes each focused method through its existing tool directory and a per-target JSON input form, uses the existing authenticated actor/entitlement checks, and sends output through the existing result/persistence renderer. Examples are labelled synthetic. No new top-level page was added.
+
+### Matrix disposition after this change
+
+The two registry/matrix sources now record **0 FOUNDATION_ONLY**, **98 IMPLEMENTED_NEEDS_VALIDATION**, **2 EXTERNAL_CONFIGURATION_REQUIRED**, and **0 VERIFIED_WORKING**. This means eight new deterministic engines plus the T039 lifecycle completion have moved out of foundation-only; it does not mean 98 tools are production verified.
+
+The external status remains correct for T096/T098. Neither an approved connector endpoint/credential nor an identity provider/client/callback has been supplied or verified in this task. The new configuration handlers support environment variables or top-level Streamlit secrets and report readiness with values redacted. Real connection tests, OIDC login/MFA, role mapping, session lifecycle and audit verification require provider-side configuration and authorized staging acceptance. See [Remaining Tools Configuration Setup](release/REMAINING_TOOLS_CONFIG_SETUP.md).
+
+### Tests added
+
+`tests/test_shoir_remaining_tool_engines.py` adds deterministic and negative-path fixtures for revision integrity and undo/redo, dataset hashes/stale runs, CAPA lifecycle denial, min-cost flow/shortages, least-squares calibration, disruption scenario arithmetic, KPI freshness/deduplication, redacted connector readiness, inert plugin validation, OIDC configuration readiness, governance snapshot tamper detection and non-destructive retention/deletion plans. It also executes all provided example payloads. These fixtures still need to run green on the exact final candidate SHA, followed by authenticated hosted browser and persistence acceptance.
+
+### Remaining external gates (not bypassed)
+
+- **T096:** approved real endpoint and least-privilege credential in deployment secret configuration; authenticated staging test and scope/health/freshness evidence.
+- **T098:** selected OIDC provider, client registration, callback/logout URIs, secret configuration, role/group mapping, enforced MFA and audit collection; authenticated success/denial/challenge/logout/expiry/revocation tests.
+- **All newly implemented tools:** exact-SHA CI, an independent reference reviewer, authenticated tier-denial tests, save/reload/re-login checks, two-user workspace isolation and documented evidence before changing any row to `VERIFIED_WORKING`.
+
+No production app, database, Edge Function, connector, identity provider, account, payment or data record was changed. The release decision remains **NO-GO** pending exact-SHA CI, authenticated acceptance, provider setup and the existing release/legal/security gates.
+

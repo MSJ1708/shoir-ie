@@ -25,6 +25,9 @@ from industrial_platform import render_module, PLATFORM_CATALOG, init_platform_d
 from shoir_tool_registry import TOOL_TARGETS, TOOL_STATUS_VALUES, tier_allows_tool, tool_status_counts, require_tool_access
 from shoir_tool_trust_center import (classify_diagnostic, summarize_capability_registry, search_tool_help, build_redacted_support_bundle, redact_diagnostic_text)
 from shoir_ergonomics import calculate_rnle_lifting_index
+from shoir_remaining_tool_engines import get_tool_example_json, run_additional_tool
+
+_ADDITIONAL_TOOL_IDS = {"T006", "T020", "T060", "T074", "T080", "T094", "T096", "T097", "T098", "T099"}
 from industrial_platform_excellence import (
     CANONICAL_TIERS, MODULE_MATRIX, canonical_tier, tier_allows, tier_matrix,
     module_matrix, module_availability, deep_data_quality, validate_schema,
@@ -414,7 +417,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                 "Copilot action, API and export path must enforce their own server-side entitlement checks."
             )
 
-            if selected_tool["tool_id"] in {"T002", "T007", "T009", "T010", "T015", "T016", "T017", "T018", "T019", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T033", "T034", "T035", "T036", "T037", "T038", "T039", "T040", "T041", "T042", "T043", "T044", "T045", "T046", "T047", "T048", "T049", "T050", "T051", "T052", "T054", "T055", "T056", "T058", "T059", "T062", "T063", "T066", "T069", "T070", "T071", "T072", "T075", "T076", "T077", "T078", "T079", "T081", "T082", "T083", "T084", "T085", "T087", "T089", "T100"}:
+            if selected_tool["tool_id"] in {"T002", "T006", "T007", "T009", "T010", "T015", "T016", "T017", "T018", "T019", "T020", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T033", "T034", "T035", "T036", "T037", "T038", "T039", "T040", "T041", "T042", "T043", "T044", "T045", "T046", "T047", "T048", "T049", "T050", "T051", "T052", "T054", "T055", "T056", "T058", "T059", "T060", "T062", "T063", "T066", "T069", "T070", "T071", "T072", "T074", "T075", "T076", "T077", "T078", "T079", "T080", "T081", "T082", "T083", "T084", "T085", "T087", "T089", "T094", "T096", "T097", "T098", "T099", "T100"}:
                 st.markdown("---")
                 st.markdown("**Run focused specialist method**")
                 st.caption(
@@ -428,7 +431,18 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                     )
                 else:
                     with st.form("shoir_target_method_form_" + selected_tool["tool_id"]):
-                        if selected_tool["tool_id"] == "T007":
+                        if selected_tool["tool_id"] in _ADDITIONAL_TOOL_IDS:
+                            st.caption("Structured, deterministic tool input. Examples are explicitly synthetic. Review every field and keep credentials out of this editor; external configuration checks inspect only secret presence and never return secret values.")
+                            _saved_tool_inputs = st.session_state.get("shoir_tool_inputs_" + selected_tool["tool_id"], {})
+                            _saved_payload_json = _saved_tool_inputs.get("payload_json") if isinstance(_saved_tool_inputs, dict) else None
+                            additional_tool_payload = st.text_area(
+                                "Tool inputs (JSON object)",
+                                value=_saved_payload_json if isinstance(_saved_payload_json, str) and _saved_payload_json.strip() else get_tool_example_json(selected_tool["tool_id"]),
+                                height=260,
+                                key="additional_tool_payload_" + selected_tool["tool_id"],
+                            )
+                            run_method = st.form_submit_button("Run " + selected_tool["canonical_name"], type="primary", use_container_width=True, key="additional_tool_run_" + selected_tool["tool_id"])
+                        elif selected_tool["tool_id"] == "T007":
                             st.caption("Paste only the relevant error message. This inspector redacts common credentials and contact details, does not read server logs, and offers rule-based next checks.")
                             diagnostic_inspector_text = st.text_area(
                                 "Error or warning text",
@@ -545,6 +559,11 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 "Review date (YYYY-MM-DD; blank uses current date)",
                                 value="",
                                 key="tool039_as_of_date",
+                            )
+                            capa_transitions_json = st.text_area(
+                                "Optional status transitions (JSON list; each transition requires capa_id, to_status, reviewer and reason)",
+                                value="[]",
+                                key="tool039_transitions",
                             )
                             run_method = st.form_submit_button("Review CAPA / 8D register", type="primary", use_container_width=True, key="tool039_run")
                         elif selected_tool["tool_id"] == "T040":
@@ -1235,7 +1254,9 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                             )
                             run_method = st.form_submit_button("Calculate sample size", type="primary", use_container_width=True, key="tool085_run")
 
-                    if selected_tool["tool_id"] == "T007":
+                    if selected_tool["tool_id"] in _ADDITIONAL_TOOL_IDS:
+                        current_tool_inputs = {"payload_json": additional_tool_payload}
+                    elif selected_tool["tool_id"] == "T007":
                         safe_diagnostic = classify_diagnostic(diagnostic_inspector_text)
                         current_tool_inputs = {
                             "reported_subsystem": diagnostic_category,
@@ -1402,7 +1423,7 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                     elif selected_tool["tool_id"] == "T031":
                         current_tool_inputs = {"measurements_text": spc_measurements_text, "unit": spc_unit}
                     elif selected_tool["tool_id"] == "T039":
-                        current_tool_inputs = {"records_json": capa_records_json, "as_of_date": capa_as_of_date}
+                        current_tool_inputs = {"records_json": capa_records_json, "transitions_json": capa_transitions_json, "as_of_date": capa_as_of_date}
 
                     elif selected_tool["tool_id"] == "T040":
                         current_tool_inputs = {"period": quality_period, "currency": quality_currency, "total_units": quality_total_units, "defective_units": quality_defects, "scrap_units": quality_scrap_units, "rework_units": quality_rework_units, "scrap_cost_per_unit": quality_scrap_cost, "rework_cost_per_unit": quality_rework_cost, "inspection_cost": quality_inspection_cost}
@@ -1492,7 +1513,15 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                 monitor_equipment_anomalies,
                                 assess_capa_8d_records,
                             )
-                            if selected_tool["tool_id"] == "T007":
+                            if selected_tool["tool_id"] in _ADDITIONAL_TOOL_IDS:
+                                try:
+                                    additional_payload = json.loads(current_tool_inputs.get("payload_json", "{}"))
+                                except json.JSONDecodeError as exc:
+                                    raise ValueError("Tool inputs must be valid JSON.") from exc
+                                if not isinstance(additional_payload, dict):
+                                    raise ValueError("Tool inputs must be a JSON object.")
+                                result = run_additional_tool(selected_tool["tool_id"], additional_payload)
+                            elif selected_tool["tool_id"] == "T007":
                                 result = classify_diagnostic(diagnostic_inspector_text)
                                 result["reported_subsystem"] = diagnostic_category
                                 result["data_provenance"] = "USER_PROVIDED_DIAGNOSTIC_REDACTED"
@@ -1730,14 +1759,18 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                             elif selected_tool["tool_id"] == "T039":
                                 try:
                                     parsed_capa_records = json.loads(capa_records_json)
+                                    parsed_capa_transitions = json.loads(capa_transitions_json or "[]")
                                 except json.JSONDecodeError as exc:
-                                    raise ValueError("CAPA/8D records must be valid JSON.") from exc
+                                    raise ValueError("CAPA/8D records and transitions must be valid JSON.") from exc
                                 if not isinstance(parsed_capa_records, list):
                                     raise ValueError("CAPA/8D records must be a JSON list of objects.")
-                                result = assess_capa_8d_records(
-                                    parsed_capa_records,
-                                    as_of_date=capa_as_of_date.strip() or None,
-                                )
+                                if not isinstance(parsed_capa_transitions, list):
+                                    raise ValueError("CAPA/8D transitions must be a JSON list.")
+                                result = run_additional_tool("T039", {
+                                    "records": parsed_capa_records,
+                                    "transitions": parsed_capa_transitions,
+                                    "as_of_date": capa_as_of_date.strip() or None,
+                                })
                                 result["data_provenance"] = (
                                     "SYNTHETIC_EXAMPLE"
                                     if capa_records_json.strip() == _TOOL039_EXAMPLE_RECORDS
@@ -2138,6 +2171,15 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                                     use_container_width=True,
                                 )
                                 st.info("Prepared locally only. Review the contents before sharing; no ticket was opened and no data was sent.")
+                    elif selected_tool["tool_id"] in _ADDITIONAL_TOOL_IDS:
+                        result = st.session_state.get("shoir_tool_result_" + selected_tool["tool_id"])
+                        if result:
+                            _show_focused_tool_persistence(selected_tool["tool_id"], result, current_tool_inputs)
+                            render_engineering_result(result, title=selected_tool["canonical_name"], key_prefix="additional_" + selected_tool["tool_id"].lower())
+                            if selected_tool["tool_id"] == "T096":
+                                st.warning("Configuration presence is not a live connection. Test only against an approved staging endpoint after reviewing access scopes, network allow-lists, and secret handling.")
+                            elif selected_tool["tool_id"] == "T098":
+                                st.warning("SSO/MFA are not active from this status check. A real OIDC provider and callback setup plus authenticated browser tests are still required.")
                     elif selected_tool["tool_id"] == "T016":
                         result = st.session_state.get("shoir_tool_result_T016")
                         if result:
@@ -2175,6 +2217,9 @@ with st.expander("🧭 100-tool directory & readiness", expanded=_expand_target_
                             st.caption(f"Review as of {result['as_of_date']} · provenance: {result.get('data_provenance', 'USER_ENTERED_UNVERIFIED')}")
                             st.dataframe(result["records"], use_container_width=True, hide_index=True)
                             st.dataframe(result["workflow_summary"], use_container_width=True, hide_index=True)
+                            if result.get("transition_audit"):
+                                st.markdown("**CAPA / 8D transition audit**")
+                                st.dataframe(pd.json_normalize(result["transition_audit"]), use_container_width=True, hide_index=True)
                             st.warning(result["warning"])
                     elif selected_tool["tool_id"] == "T040":
                         result = st.session_state.get("shoir_tool_result_T040")
