@@ -7,6 +7,9 @@ from pathlib import Path
 
 import pandas as pd
 from pptx import Presentation
+from pptx.enum.shapes import MSO_SHAPE_TYPE
+from pptx.util import Inches
+from PIL import Image
 from pypdf import PdfReader
 
 from industrial_platform import export_pdf, export_pptx
@@ -117,3 +120,45 @@ def test_powerpoint_export_splits_all_rows_over_continued_table_slides():
         "expected_last_row": rows["Metric"].iloc[-1],
         "all_rows_verified": True,
     })
+
+class _SyntheticFigure:
+    def to_image(self, **kwargs) -> bytes:
+        """Return a small 16:9 chart image without external chart services."""
+        buffer = BytesIO()
+        Image.new("RGB", (160, 90), "white").save(buffer, format="PNG")
+        return buffer.getvalue()
+
+
+def test_powerpoint_titles_tables_and_charts_fit_widescreen_slide_bounds():
+    rows = pd.DataFrame({"Metric": ["A", "B"], "Value": [1.0, 2.0]})
+    payload = export_pptx(
+        "Widescreen layout verification",
+        [("Metrics", rows)],
+        [("Synthetic chart", _SyntheticFigure())],
+    )
+    presentation = Presentation(BytesIO(payload))
+
+    width = presentation.slide_width
+    height = presentation.slide_height
+    assert abs((width / height) - (16 / 9)) < 0.002
+
+    for slide in presentation.slides:
+        title = slide.shapes.title
+        if title is not None:
+            assert title.left >= 0
+            assert title.left + title.width <= width
+            assert title.top >= 0
+            assert title.top + title.height <= height
+
+        content_shapes = [
+            shape for shape in slide.shapes
+            if getattr(shape, "has_table", False) or shape.shape_type == MSO_SHAPE_TYPE.PICTURE
+        ]
+        for shape in content_shapes:
+            assert shape.left >= 0
+            assert shape.top >= 0
+            assert shape.left + shape.width <= width
+            assert shape.top + shape.height <= height
+            if title is not None:
+                assert shape.top >= title.top + title.height
+
