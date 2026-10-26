@@ -331,3 +331,30 @@ def test_invalid_transport_page_contract_is_sanitized():
             authorize=auth_ok,
         )
     assert error.value.code == "INVALID_TRANSPORT_RESPONSE"
+
+@pytest.mark.parametrize(
+    ("canonical_field", "source_path"),
+    [
+        ("plant_code", "AccessToken"),
+        ("plant_code", "refresh_token"),
+        ("plant_code", "Authorization"),
+        ("plant_code", "PasswordHash"),
+        ("plant_code", "apiKey"),
+        ("api_key", "ProductionPlant"),
+        ("client_secret", "ProductionPlant"),
+    ],
+)
+def test_secret_like_fields_are_rejected_even_when_explicitly_mapped(
+    canonical_field, source_path
+):
+    candidate = binding(
+        field_map={canonical_field: source_path},
+        required_fields=(canonical_field,),
+        units={},
+        currency_path="",
+        source_timestamp_path="",
+    )
+    with pytest.raises(erp.ERPConnectorError) as error:
+        erp._validate_binding(candidate)
+    assert error.value.code == "PERSONAL_DATA_FIELD_BLOCKED"
+
