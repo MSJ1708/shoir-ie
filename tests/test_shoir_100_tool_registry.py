@@ -117,8 +117,13 @@ def test_unknown_or_display_name_ids_fail_closed_and_cannot_authorize_by_alias()
 def test_status_summary_counts_all_targets_and_never_infers_verified_from_presence():
     counts = tool_status_counts()
     assert sum(counts.values()) == 100
-    # No authenticated browser matrix or engine fixture suite has yet run for all
-    # targets on this branch, so source mapping alone must not create "verified".
+    # All formerly FOUNDATION_ONLY rows must now have a mapped, guarded handler.
+    # External service configuration remains a distinct status, not a fake PASS.
+    assert counts["FOUNDATION_ONLY"] == 0
+    assert counts["IMPLEMENTED_NEEDS_VALIDATION"] == 98
+    assert counts["EXTERNAL_CONFIGURATION_REQUIRED"] == 2
+    # No authenticated browser matrix or independent reference validation has yet
+    # run for every target on this branch, so source mapping cannot create "verified".
     assert counts["VERIFIED_WORKING"] == 0
 
 
