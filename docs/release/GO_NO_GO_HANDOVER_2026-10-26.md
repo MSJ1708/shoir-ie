@@ -71,3 +71,17 @@ This addendum supersedes the baseline branch/PR status above where it differs.
 - Open PR count is 17 after #196 closed by merge. The canonical 100-tool matrix remains at 0 VERIFIED_WORKING, 98 IMPLEMENTED_NEEDS_VALIDATION and 2 EXTERNAL_CONFIGURATION_REQUIRED (T096/T098).
 
 **Current release decision: NO-GO. Keep BETA visible.** Production remains unchanged. The authenticated gate, exact-head CI, branch protection, independent review, Streamlit host-to-SHA verification, provider/endpoint tests, production migration/function parity plan, Saudi legal/privacy/tax/commercial approvals and operational restore/rollback evidence are still required. Do not claim that this trigger or the #196 merge is a release pass.
+
+
+---
+
+## Latest verified staging result — 26 October 2026
+
+- Exact candidate SHA: `9e3899d6f5147584cf27585d946fa7b5d18d92d5` on `staging-e2e-20261019`.
+- Authenticated release gate **PASS**: https://github.com/MSJ1708/shoir-ie/actions/runs/40326994939. Redacted artifact: https://github.com/MSJ1708/shoir-ie/actions/runs/40326994939/artifacts/12653225915.
+- Same-SHA validation **PASS**: https://github.com/MSJ1708/shoir-ie/actions/runs/40326994926.
+- Artifact: candidate build PASS, staging banner and shell version 3.2 confirmed before credentials; backend 22 PASS / 0 FAIL / 2 SKIP; module matrix 96/96 PASS; browser shell/Excel/logout 7/7 PASS. The two backend skips are the optional active login-throttle test (Actions variable not configured) and inactive-account denial (no dedicated inactive test identity). Treat them as open, not passed.
+- The 100-tool matrix is still 0 VERIFIED_WORKING; 98 need further validation and T096/T098 require external configuration. Production schema/Edge Function parity remains incomplete, and the referral migration would rewrite all five existing production accounts' `affiliate_code` and `updated_at` under its current predicate.
+- Main remains `267be8889c310d90141c047d8aadd42c942423fb` and unprotected per accessible branch API. PR #195 and #197 lack independent review. No production change was performed.
+
+**NO-GO. Keep BETA visible.** Close the optional staging probes and all external admin/provider/legal/operations blockers, then conduct a new reviewed release decision. Staging pass is not production authorization.
