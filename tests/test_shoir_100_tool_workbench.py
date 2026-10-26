@@ -890,3 +890,44 @@ def test_workbench_t006_recovery_snapshot_history_is_undoable_redoable_and_gated
     preserved = at.session_state["shoir_tool_result_T006"]
     assert preserved["status"] == "REVISION_RESTORED"
     assert preserved["current_snapshot"]["inspection_state"] == "PENDING"
+
+
+def test_workbench_t020_tracks_dataset_versions_and_stale_runs():
+    import json
+    from streamlit.testing.v1 import AppTest
+
+    page = ROOT / "pages" / "Industrial_Engineering_Workbench.py"
+    at = AppTest.from_file(page, default_timeout=90)
+    at.session_state["current_user"] = "lineage-workbench-checker"
+    at.session_state["authenticated"] = True
+    at.session_state["user_tier"] = "Professional"
+    at.run(timeout=90)
+    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+
+    at.selectbox(key="shoir_100_tool_inspector").select("T020 · Dataset Versioning and Lineage")
+    at.run(timeout=90)
+    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+    at.selectbox(key="tool020_source_mode").select("Manual JSON snapshot")
+    at.text_area(key="tool020_snapshot_json").set_value('{"dataset":"orders","rows":[{"id":"A1","qty":10}]}')
+    at.button(key="tool020_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+    first = at.session_state.get("shoir_tool_result_T020")
+    assert first is not None
+    assert first["status"] == "VERSION_CREATED_INITIAL"
+    assert first["version_number"] == 1
+
+    at.text_area(key="tool020_snapshot_json").set_value('{"dataset":"orders","rows":[{"id":"A1","qty":12}]}')
+    at.text_area(key="tool020_downstream_runs_json").set_value(json.dumps([
+        {"run_id": "RUN-OLD", "version_signature": first["version_signature"]},
+        {"run_id": "RUN-NO-LINK"},
+    ]))
+    at.button(key="tool020_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+    changed = at.session_state.get("shoir_tool_result_T020")
+    assert changed["status"] == "VERSION_CREATED"
+    assert changed["version_number"] == 2
+    assert changed["stale_run_count"] == 1
+    assert changed["unverifiable_run_count"] == 1
+    assert any(key.startswith("shoir_dataset_lineage_T020_") for key in at.session_state)
