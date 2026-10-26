@@ -67,14 +67,17 @@ Owner: software maintainer/founder; IP counsel if needed.
 
 Owner: platform maintainer and operator.
 
-- [x] Staging database contains the legal-version fields, server-only referral table and approval trigger.
-- [x] Staging `shoir-persistence` Edge Function version 8 is deployed and enforces current acceptance/referral rules.
-- [x] Authenticated staging gate passed for candidate shell, API lifecycle/workspace isolation, 96-module rendering, browser shell, Excel module and logout (run https://github.com/MSJ1708/shoir-ie/actions/runs/39861471413).
-- [x] The production atomic registration/approval RPC migration is applied and verified; synthetic test registration/duplicate/approve/decline succeeded, with synthetic rows removed.
-- [ ] Plan the production rollout as a coordinated maintenance-window change: app + database schema/trigger + Edge Function versions. Do not roll out only one component, because the old client and new server require different consent payloads.
-- [ ] Before deployment, snapshot/back up and verify recovery, capture exact commit/migration/function hashes, rehearse rollback, and define how any in-flight pending registration is handled.
-- [ ] After rollout, verify registration with consent, consent rejection for stale clients, manual approval/decline, renewal, referral attribution, private receipt permissions, tenant isolation and refund/complaint route. Keep production data out of test probes.
-- [ ] Do not enable paid commercial access until Gates 1–4 are closed and the production gate is green.
+**Current status at 26 October 2026: OPEN — the current release candidate has not passed authenticated hosted acceptance or production parity.** The checkmarked items below are historical evidence from an earlier setup/test revision, not a PASS for the current `main` or release candidate.
+
+- [x] **Historical staging schema evidence:** an earlier setup recorded the legal-version fields, server-only referral table and approval trigger. A fresh read-only comparison now confirms these legal/referral migrations are applied to staging, but not to production.
+- [x] **Historical staging function evidence:** an earlier run recorded `shoir-persistence` version 8. Both current production and staging report version 8, but their deployed source SHA-256 hashes differ, so version-number equality is not source parity.
+- [x] **Historical authenticated gate:** run [39861471413](https://github.com/MSJ1708/shoir-ie/actions/runs/39861471413) passed an earlier staging candidate. It does **not** verify the current candidate SHA. Current staging validation [40273588613](https://github.com/MSJ1708/shoir-ie/actions/runs/40273588613) passed its test job but skipped hosted smoke; current authenticated release-gate run [40273588637](https://github.com/MSJ1708/shoir-ie/actions/runs/40273588637) was **SKIPPED / NOT RUN**.
+- [x] **Historical production transaction evidence:** earlier project records report the atomic registration/approval flow was tested with synthetic data. The current production migration inventory confirms `20261019140600_atomic_subscription_request_decisions` is applied, but the later legal/referral and refund-v2 migrations are absent from production's applied migration history. The historical test is not a substitute for current deployment parity or a new approved migration.
+- [ ] **BLOCKED — release owner:** verify the actual Streamlit branch, commit, entry point, and configuration presence. The current hosted main smoke [40273481812](https://github.com/MSJ1708/shoir-ie/actions/runs/40273481812) fails at desktop/mobile hosted entry-screen rendering.
+- [ ] Plan production rollout as a coordinated maintenance-window change: reviewed app SHA + missing database migrations + compatible Edge Function source. Do not roll out one component alone.
+- [ ] Before any production deployment, snapshot/back up and prove recovery, record exact commit/migration/function hashes, rehearse rollback, and define handling for in-flight pending registrations.
+- [ ] After authorized deployment, verify consent capture and stale-policy rejection, manual approval/decline, renewal, referral attribution, private receipt permissions, tenant isolation, and refund/complaint route using disposable accounts and synthetic fixtures only.
+- [ ] Do not enable paid commercial access until technical, calculation-validation, operator/legal, privacy, tax/payment, support and recovery gates are independently closed.
 
 ## Sign-off record
 
