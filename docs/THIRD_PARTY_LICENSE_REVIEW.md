@@ -31,6 +31,7 @@ The current declaration includes:
 - paho-mqtt>=2,<3
 - duckdb>=1.0,<2
 - xlrd>=2.0.1,<3
+- pypdf==6.21.2 (used by artifact-level PDF export tests; BSD-3-Clause)
 
 This is a source-level list of direct requirements, not a complete licence audit. Transitive dependencies, optional extras, solver binaries, JavaScript/TypeScript imports, fonts, images and other assets need to be inventoried separately. Their exact resolved versions can differ between environments.
 
