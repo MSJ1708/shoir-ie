@@ -247,3 +247,32 @@ Production's catalog query confirmed that `public.shoir_referrals` and `public.s
 The Supabase performance advisor reports unused-index informational findings in both projects (19 on staging, 16 on production in this snapshot). These are advisory-only; do not drop indexes without workload evidence and an independent review.
 
 **Disposition remains HOLD.** No staging or production migration, Edge Function deploy, user/account/subscription mutation, secret change, or app deployment has been performed.
+
+
+## 12. Current candidate outcomes and protected-admin remediation
+
+### XLSX export hardening — latest exact PR head
+
+- Expanded PR #203's latest head is `8663d612f820ac1ae6d6af8c1776e7a619c1a029`.
+- Exact-head pull-request validation [40386126755](https://github.com/MSJ1708/shoir-ie/actions/runs/40386126755) completed **success** with `828 passed, 2 skipped, 71 warnings, 5 subtests passed`.
+- The previous failure was corrected transparently and remains visible in history: [40385420275](https://github.com/MSJ1708/shoir-ie/actions/runs/40385420275) failed only because a test expected the data cell at A3 when A3 was the writer's header row; the corrected test checks A4 and A5.
+- Push validation [40386115815](https://github.com/MSJ1708/shoir-ie/actions/runs/40386115815) was in progress at the last status read. The exact PR-run green result is real, but the PR remains draft; independent review and broader release checks are still required. Hosted deployment smoke was skipped.
+
+### Protected-administrator login behavior — new draft PR #204
+
+Code review of the currently deployed `shoir-persistence` sources found that both staging v9 and production v8 include a login-time code path that updates the protected administrator's tier and `updated_at` when the tier is not the expected value. That silently changes the record if configuration drift occurs, contrary to the no-automatic-mutation invariant.
+
+Draft [PR #204](https://github.com/MSJ1708/shoir-ie/pull/204), on branch `fix/protect-master-admin-config-20261026`, based on staging SHA `9e3899d6f5147584cf27585d946fa7b5d18d92d5`, changes source code only:
+
+- It removes the login-time account update.
+- It checks the reserved administrator's role, tier, active flag, and UTC expiry through a pure read-only helper.
+- It refuses to issue the normal administrator session if that protected configuration is inconsistent, returning a generic manual-review response instead of repairing the account.
+- It adds synthetic Deno tests for canonical and drifted invariant values and adds a Deno test step to `.github/workflows/shoir-validation.yml`.
+
+The staging and production records were verified read-only to each contain exactly one account matching the expected invariant. The test does not sign in as or mutate the real protected account. Exact-head CI had not completed when this report was updated: the PR run [40386711214](https://github.com/MSJ1708/shoir-ie/actions/runs/40386711214) was queued and push run [40386644642](https://github.com/MSJ1708/shoir-ie/actions/runs/40386644642) was in progress. **PR #204 is not yet tested/verified and remains draft.** No deployed function, database, account, session, secret, or subscription was changed.
+
+### Release impact
+
+These drafts are intentionally separate: #203 covers workbook output safety; #204 covers protected administrative state integrity and Edge Function test coverage. Neither has been merged or deployed. No production or staging environment state has been altered in this execution.
+
+**Disposition remains HOLD.** Current engineering evidence improves but does not eliminate the staging/production migration and function-version mismatch, hosted Streamlit revision uncertainty, unverified branch-protection enforcement, broader feature acceptance gaps, backup/restore evidence, provider connection requirements, or qualified Saudi legal/commercial approval.
