@@ -27,7 +27,7 @@ from shoir_tool_trust_center import (classify_diagnostic, summarize_capability_r
 from shoir_ergonomics import calculate_rnle_lifting_index
 from shoir_remaining_tool_engines import get_tool_example_json, run_additional_tool
 
-_ADDITIONAL_TOOL_IDS = {"T006", "T020", "T060", "T074", "T080", "T094", "T096", "T097", "T098", "T099"}
+_ADDITIONAL_TOOL_IDS = {"T006", "T020", "T039", "T060", "T074", "T080", "T094", "T096", "T097", "T098", "T099"}
 from industrial_platform_excellence import (
     CANONICAL_TIERS, MODULE_MATRIX, canonical_tier, tier_allows, tier_matrix,
     module_matrix, module_availability, deep_data_quality, validate_schema,
