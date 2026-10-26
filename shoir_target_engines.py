@@ -6195,3 +6195,119 @@ def build_rcm_decision_register(
         "assumptions": "Failure descriptions, consequence categories, selected strategies and evidence references are user supplied. The tool does not validate the source evidence, determine task applicability, estimate failure probabilities or approve maintenance policy.",
         "warning": "This is not a complete or certified RCM analysis and is not a substitute for the organization's approved RCM method or qualified engineering/safety review. Every row remains PENDING until the accountable review occurs outside this calculator.",
     }
+
+
+def manage_recovery_snapshot_history(
+    history_state: Mapping[str, Any] | None,
+    *,
+    action: str,
+    new_snapshot: Any = None,
+    target_revision: int | None = None,
+    max_history: int = 25,
+    max_snapshot_bytes: int = 32768,
+) -> dict[str, Any]:
+    """Checkpoint, undo, redo or restore bounded JSON snapshots for this tool only."""
+    import json
+
+    if isinstance(max_history, bool) or not isinstance(max_history, int) or not 2 <= max_history <= 100:
+        raise ValueError("max_history must be an integer from 2 to 100.")
+    if isinstance(max_snapshot_bytes, bool) or not isinstance(max_snapshot_bytes, int) or not 256 <= max_snapshot_bytes <= 1_000_000:
+        raise ValueError("max_snapshot_bytes must be an integer from 256 to 1,000,000.")
+
+    action_value = str(action or "").strip().lower()
+    aliases = {"checkpoint": "checkpoint", "create_checkpoint": "checkpoint", "undo": "undo",
+               "redo": "redo", "restore": "restore", "restore_revision": "restore"}
+    if action_value not in aliases:
+        raise ValueError("Recovery action must be checkpoint, undo, redo or restore.")
+    action_value = aliases[action_value]
+
+    def copy_snapshot(value: Any, field: str) -> Any:
+        try:
+            encoded = json.dumps(value, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError(f"{field} must be valid JSON-compatible data without NaN or Infinity.") from exc
+        if len(encoded.encode("utf-8")) > max_snapshot_bytes:
+            raise ValueError(f"{field} exceeds the {max_snapshot_bytes}-byte snapshot limit.")
+        cloned = json.loads(encoded)
+        if not isinstance(cloned, (dict, list)):
+            raise ValueError(f"{field} must be a JSON object or array.")
+        return cloned
+
+    if history_state is None:
+        past: list[Any] = []
+        future: list[Any] = []
+        current: Any = None
+        has_current = False
+    else:
+        if not isinstance(history_state, Mapping):
+            raise ValueError("Recovery history state must be an object.")
+        past_raw = history_state.get("past", [])
+        future_raw = history_state.get("future", [])
+        has_current = history_state.get("has_current", "current" in history_state)
+        if not isinstance(past_raw, list) or not isinstance(future_raw, list) or not isinstance(has_current, bool):
+            raise ValueError("Recovery history requires past/future lists and a Boolean has_current flag.")
+        past = [copy_snapshot(item, "Prior snapshot") for item in past_raw]
+        future = [copy_snapshot(item, "Redo snapshot") for item in future_raw]
+        current = copy_snapshot(history_state.get("current"), "Current snapshot") if has_current else None
+        if len(past) + len(future) + int(has_current) > max_history:
+            raise ValueError(f"Recovery history exceeds the {max_history}-revision limit.")
+        if not has_current and (past or future):
+            raise ValueError("Recovery history cannot contain past/future snapshots without a current snapshot.")
+
+    if action_value == "checkpoint":
+        checkpoint = copy_snapshot(new_snapshot, "New snapshot")
+        if not has_current:
+            current, has_current, past, future = checkpoint, True, [], []
+            status = "SNAPSHOT_CREATED"
+        elif current == checkpoint:
+            status = "SNAPSHOT_UNCHANGED"
+        else:
+            past = (past + [current])[-(max_history - 1):]
+            current, future = checkpoint, []
+            status = "SNAPSHOT_CHECKPOINTED"
+    elif action_value == "undo":
+        if not has_current or not past:
+            raise ValueError("No earlier snapshot is available to undo.")
+        future.append(current)
+        current = past.pop()
+        status = "SNAPSHOT_UNDONE"
+    elif action_value == "redo":
+        if not has_current or not future:
+            raise ValueError("No undone snapshot is available to redo.")
+        past.append(current)
+        current = future.pop()
+        status = "SNAPSHOT_REDONE"
+    else:
+        if not has_current:
+            raise ValueError("No snapshot is available to restore.")
+        if isinstance(target_revision, bool) or not isinstance(target_revision, int):
+            raise ValueError("Target revision must be an integer using 1-based numbering.")
+        timeline_values = [*past, current, *reversed(future)]
+        if target_revision < 1 or target_revision > len(timeline_values):
+            raise ValueError(f"Target revision must be between 1 and {len(timeline_values)}.")
+        past = timeline_values[:target_revision - 1]
+        current = timeline_values[target_revision - 1]
+        future = list(reversed(timeline_values[target_revision:]))
+        status = "REVISION_RESTORED"
+
+    timeline_values = [*past, current, *reversed(future)] if has_current else []
+    timeline = [{"revision": i + 1, "is_current": i == len(past), "snapshot": item}
+                for i, item in enumerate(timeline_values)]
+    updated_history = {"past": past, "current": current, "future": future,
+                       "has_current": has_current, "max_history": max_history}
+    return {
+        "status": status,
+        "action": action_value,
+        "current_revision": len(past) + 1 if has_current else None,
+        "revision_count": len(timeline_values),
+        "can_undo": bool(has_current and past),
+        "can_redo": bool(has_current and future),
+        "current_snapshot": current if has_current else None,
+        "timeline": timeline,
+        "history_state": updated_history,
+        "limitations": [
+            "History covers only JSON snapshots explicitly entered into this recovery tool.",
+            "It does not intercept arbitrary edits in other Shoir-IE modules or roll back external-system side effects.",
+            "Authenticated managed-workspace persistence, re-login recovery and cross-workspace isolation require staging verification.",
+        ],
+    }
