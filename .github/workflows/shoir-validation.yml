@@ -24,6 +24,7 @@ jobs:
       - name: Run regression tests
         env:
           SHOIR_EXPORT_EVIDENCE_DIR: artifacts/report-export-validation
+          SHOIR_EXPORT_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: python -m pytest -q tests
       - name: Upload sanitized report-export validation artifacts
         if: always()
