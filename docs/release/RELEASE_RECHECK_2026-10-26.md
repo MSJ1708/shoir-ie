@@ -340,3 +340,34 @@ The earlier failed run is retained as history: [40387179214](https://github.com/
 PR #203 remains at `d52cc87808d75e870f40d2f7a078380939f2277d`. Its exact-head Python regression step is reported successful, but both the exact PR and push workflows were still in `Install Chromium for local runtime smoke` at last read: [40387008559](https://github.com/MSJ1708/shoir-ie/actions/runs/40387008559) and [40387000285](https://github.com/MSJ1708/shoir-ie/actions/runs/40387000285). Their full job conclusions remain unresolved; do not mark this PR fully verified until the jobs finish successfully or record a failure.
 
 Neither PR has been merged or deployed. No staging or production runtime, database schema, deployed Edge Function, user/account/subscription/referral record, or secret was changed in this session.
+
+
+## 16. Final current-head status for both implementation drafts
+
+### PR #203 — XLSX injection protection
+
+Latest head: `17bf858a5df56c023387117d491575ae7f0c75b3`, base staging `9e3899d6f5147584cf27585d946fa7b5d18d92d5`.
+
+The change now covers the discovered generated-XLSX writer sites in the shared report builder, Excel Studio, Industrial Workbook, Facility Layout and Enterprise Integration. `shoir_capacity_recovery.py` already used `strings_to_formulas=False` and `strings_to_urls=False` and was left unchanged. Enterprise Integration's export was extracted to a pure byte-producing helper and has a dedicated OpenPyXL regression test for formula-like and URL-like text in connector and audit sheets.
+
+Exact-head validation is underway:
+- PR run [40388799176](https://github.com/MSJ1708/shoir-ie/actions/runs/40388799176).
+- Push run [40388790597](https://github.com/MSJ1708/shoir-ie/actions/runs/40388790597).
+
+Prior head `d52cc87808d75e870f40d2f7a078380939f2277d` had its Python regression test step pass, but complete CI did not return a final conclusion and remained in the Chromium/local-runtime-smoke setup. Do not transfer that partial result to the new current head or treat PR #203 as verified yet.
+
+### PR #204 — protected administrator configuration
+
+Latest head: `224816cf63a88ab4759b722826fc4bebd6ad5152`, base staging `9e3899d6f5147584cf27585d946fa7b5d18d92d5`.
+
+Exact-head push validation [40387652648](https://github.com/MSJ1708/shoir-ie/actions/runs/40387652648) completed success:
+- 824 Python tests passed, 2 skipped, 71 warnings, 5 subtests passed.
+- Deno security tests: 7 passed, 0 failed.
+- Deno type-check, module parsing, import smoke, local Streamlit startup and local desktop/mobile browser smoke passed.
+- The hosted `live-deployment-smoke` lane was skipped.
+
+The current exact-head PR run [40387830793](https://github.com/MSJ1708/shoir-ie/actions/runs/40387830793) was still in progress at the latest status check. No independent review has been submitted. PR #204 remains a draft and is not deployed.
+
+Both are proposed source changes only, not a coherent promoted production candidate. The existing successful push result for PR #204 does not override its missing independent review, and neither draft changes the live backend by itself.
+
+**Overall status remains HOLD.** No production or staging deployment or database mutation occurred. The remaining blockers include current PR #203 full CI completion; PR #204 PR-check completion and independent review; staged-to-production migration/function compatibility and data-preserving rehearsal; admin-enforced branch protections; live hosted revision identification; comprehensive feature acceptance; proof of tested backup restoration/alerting; and qualified Saudi legal/commercial approval.
