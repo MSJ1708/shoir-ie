@@ -62,3 +62,21 @@ The table above is the historical snapshot captured earlier on 26 October. The f
 - No PR was merged to main by this execution. Main remains `267be8889c310d90141c047d8aadd42c942423fb`. Production remains unchanged.
 
 **Disposition remains NO-GO.** Do not bypass review or merge #195/#197 to compensate for unavailable protection controls. An authorized repository administrator must configure and verify branch protection and independent approvals.
+
+
+---
+
+## Latest CI and authenticated staging gate — 26 October 2026
+
+The staging fix candidate is now validated on exact SHA `9e3899d6f5147584cf27585d946fa7b5d18d92d5`, branch `staging-e2e-20261019`:
+
+- Authenticated release gate **PASS**: https://github.com/MSJ1708/shoir-ie/actions/runs/40326994939.
+- Redacted evidence artifact: https://github.com/MSJ1708/shoir-ie/actions/runs/40326994939/artifacts/12653225915.
+- Standard validation **PASS**: https://github.com/MSJ1708/shoir-ie/actions/runs/40326994926.
+- Candidate preflight: PASS (staging marker and shell 3.2 marker); backend suite 22 PASS / 0 FAIL / 2 SKIP; module matrix 96/96 PASS; browser shell/Excel/logout 7/7 PASS.
+- The two skipped backend cases are intentional optional checks requiring environment provisioning: `SHOIR_E2E_VERIFY_LOGIN_THROTTLE=true` for the live throttle probe and dedicated inactive `shoir-e2e-*` credentials for inactive-account denial. Do not mark those cases passed.
+- PR #195 remains open/read-for-review at `05cac4c8cc40f4da0d884b5b26a0a008e387a4de`; automated tests, engine regression and security/quality checks passed, but there is no independent approval and its live-deployment-smoke job is skipped for the normal PR event. It still requires a live authorized T096 endpoint test. PR #197's previous exact-head checks passed, but this evidence update creates a new head requiring its own CI; no independent review is recorded.
+- Main `267be8889c310d90141c047d8aadd42c942423fb` remains reported unprotected. Open PR count is 17; no PR was merged to main.
+- Production remains unchanged; current referral migration aggregate impact is 5/5 existing production accounts affected by its legacy-code predicate. The migration must be redesigned or explicitly approved after impact review and isolated rehearsal.
+
+**NO-GO remains in force. Keep BETA visible.**
