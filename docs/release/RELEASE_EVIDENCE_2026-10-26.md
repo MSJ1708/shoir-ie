@@ -154,3 +154,38 @@ Before paid launch, named Saudi legal/privacy counsel and the business owner mus
 ## Final decision
 
 **NO-GO. Keep BETA visible.** Production was not changed. Staging Edge Function deployment is verified at version 9, but the app fix is still in draft PR #196, the authenticated staging gate has not passed on the current candidate, and production migration/function parity plus provider-backed, legal, commercial and operations gates remain open.
+
+
+---
+
+## 11. Current-state reconciliation addendum — 26 October 2026, 12:16 UTC
+
+This addendum supersedes status statements above that were explicitly phrased as “still running” or were based on earlier snapshots. The source documentation PR has been extended with the following dated artifacts:
+
+- [Baseline audit](BASELINE_AUDIT_2026-10-26.md)
+- [Pull request and dependency reconciliation](PR_RECONCILIATION_2026-10-26.md)
+- [Staging and production schema/function parity](STAGING_PARITY_2026-10-26.md)
+- [T096/T098 acceptance boundaries](T096_T098_ACCEPTANCE_2026-10-26.md)
+- [Security and authorization acceptance](SECURITY_AUTH_ACCEPTANCE_2026-10-26.md)
+- [Saudi legal, privacy and commercial checklist](LEGAL_COMMERCIAL_CHECKLIST_2026-10-26.md)
+- [Production change plan](PRODUCTION_CHANGE_PLAN_2026-10-26.md)
+- [Final gate matrix and handover](GO_NO_GO_HANDOVER_2026-10-26.md)
+
+### Updated evidence facts
+
+- PR #196 head is 7c0219385fe33bcb68b963b23dfac9a9c0fb886c. Validation test job passed in run 40303682913; the hosted deployment smoke job was SKIPPED. PR #196 is still a draft with no review submissions found. This is not a pass for hosted deployment or authenticated acceptance.
+- Current staging SHA 8b36e3737705867019b9cf29e603cfc37e7911e6 has validation run 40273588613 success, while authenticated gate run 40273588637 was SKIPPED.
+- Last actual manual authenticated gate found was run 39613907604 on older SHA 3c91c83db17724f415e7fb92d83ed338d9eb5a9a and FAILED. Its backend lifecycle/isolation and all 96 module routes passed, but two per-module logout-settlement cases failed (Enterprise Plus and Research Pack). The separate browser shell/Excel/logout step passed. Its redacted artifact belongs to a failed, stale run and does not establish current release readiness.
+- Main reports protected=false; the accessible repository rulesets endpoint returned an empty array, while the detailed protection endpoint returned 403. Full branch protection is therefore not configured/verified through available evidence; administrator action is required.
+- Aggregate-only read-only invariant checks found exactly one intended admin and one exact role/tier/active/expiry match in each environment. The admin identity was not queried and was not used for testing.
+- Staging function inventory remains version 9 with bundle hash 0551d88aceeca45ede2b890e874a75f542df670d2f2332a0878f23b5cc0b187e; production remains version 8 with hash 410e22f7af0be8f3ec74bae5a15aec70f8b6a807a540e98a2c5143f4e6b8790d. No production mutation occurred.
+- The canonical 100-tool matrix remains 100 unique IDs/names, 98 IMPLEMENTED_NEEDS_VALIDATION, 2 EXTERNAL_CONFIGURATION_REQUIRED, and zero VERIFIED_WORKING. It was not upgraded without evidence.
+- The staging security advisor reports RLS enabled/no policies for public.shoir_referrals; the inspected grants inventory returned no explicit anon/authenticated/PUBLIC grants for the inspected shoir_* tables. This was documented for review; no policy change was made.
+
+### Evidence and workflow limitations
+
+The connected GitHub tool cannot invoke workflow_dispatch or inspect Actions secret values. An authorized Actions operator must check the required staging-only secrets/variables and disposable shoir-e2e-* accounts, then manually dispatch .github/workflows/authenticated-release-gate.yml on staging-e2e-20261019. Require a real non-skipped success on the exact reviewed/deployed candidate and inspect the redacted artifact. The Streamlit Cloud URL/repository/branch/entrypoint/running SHA mapping could not be verified from the connected tools.
+
+All eight linked artifacts are documentation changes on this PR branch. Those new commits invalidate earlier CI as exact-head evidence; rerun the required checks on the final PR #197 SHA before requesting approval or merging.
+
+**Decision remains NO-GO.** Keep BETA visible; production schema, Edge Function, application, accounts, tiers, subscriptions, payments, branch protections and BETA state were not changed.
