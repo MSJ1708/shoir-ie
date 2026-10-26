@@ -147,3 +147,44 @@ Recommended order:
 5. Close operator identity, Saudi legal, privacy/PDPL, IP/SBOM, payment, tax, support and recovery gates; independently validate the limited paid-pilot tool subset.
 
 **Final decision: NO-GO.** Zero tools are marked VERIFIED_WORKING in the current matrix, production smoke fails, authenticated staging acceptance is skipped, main is unprotected, and legal/commercial gates remain open. A limited paid-pilot decision can be considered only after a precisely listed tool subset passes independent acceptance and its applicable legal, privacy, security and support gates are complete.
+
+## 7. Fresh production/staging Supabase parity evidence — read-only snapshot, 26 October 2026
+
+**Inspection method:** Supabase project metadata, migration list, deployed Edge Function metadata/source, security advisors, and read-only SELECTs against `information_schema.role_table_grants` and `pg_policies`. No table rows were read; no schema, migration, function, account, payment, or project settings were changed.
+
+### Project and database state
+
+| Signal | Production | Staging | Release implication |
+|---|---|---|---|
+| Supabase project | `gcsamrdaeraxieaagsta` (`shoir-ie-production`) | `hfhrosthswcybccepmak` (`shoir-ie-staging-2026-10-19`) | Refs verified from the connected Supabase project list. |
+| Reported region | `eu-central-1` | `eu-central-1` | Runtime database region is confirmed; this does not itself establish legal transfer compliance or identify every app/AI/email/analytics processor or its region. |
+| Database engine/version | PostgreSQL 17; `17.6.1.166` | PostgreSQL 17; `17.11.0.003` | The database engine versions differ. |
+| Applied migrations | 14; latest `20261019140600_atomic_subscription_request_decisions` | 17; includes that same migration plus three later legal/consent-policy migration records | Schema/policy parity is **FAIL / BLOCKED**. Staging records `20261021130000_shoir_beta_legal_referrals`, `20261022110000_enforce_beta_legal_acceptance`, and version `20261025164602` named `20261023130000_refresh_refund_policy_acceptance_version`; production does not report these migrations. Reconcile the third record's applied version/name with the checked-in migration inventory before any release. |
+| `shoir-persistence` Edge Function | ACTIVE, version 8, `verify_jwt=false`, deployed-source SHA-256 `410e22f7af0be8f3ec74bae5a15aec70f8b6a807a540e98a2c5143f4e6b8790d` | ACTIVE, version 8, `verify_jwt=false`, deployed-source SHA-256 `b25d2c22d33baa4daef2b63d27375dcdfac57bb58cfc5e577882882436a0d0d0` | Same version number does **not** mean same source. The deployed hashes differ; source parity is **FAIL / BLOCKED**. |
+| Referral flow in deployed function source | Referral-handler code is absent from the deployed production `index.ts` returned by the management API | Referral-handler code is present in the deployed staging `index.ts` | Production's deployed Edge source is behind/ different from staging and current repository source. The production app's hosted smoke also fails with a missing `durable_account_store.edge_referral_summary` attribute, while the inspected current main source contains that method. Together these are direct parity indicators, not a reason to hot-deploy without a compatibility plan. |
+
+### Access-control metadata observed
+
+- `public.shoir_referrals` exists in staging and was not returned in the production public-table inventory. On staging it has RLS enabled, no row policies, and the read-only grant query returned no direct table grants to `anon` or `authenticated`; grants were shown for `postgres` and `service_role`. The Supabase security advisor emits one INFO lint, `rls_enabled_no_policy`, for this table. This is consistent with a server-only table **only if** all access stays on authenticated, reviewed service paths; it is not a substitute for direct-call, RPC, and tenant-isolation testing.
+- The inspected `shoir_accounts` and `shoir_workspace_states` tables have RLS enabled. The returned `anon`/`authenticated` policies are deny-all (`USING false`, `WITH CHECK false`), and the query found no direct table grants to those roles. These are positive metadata observations, not proof that all Edge Function actions, service-role paths, object references, session expiry, or exported data are isolated.
+- Both Edge Functions are configured with platform `verify_jwt=false`; the source inspected contains custom session validation such as `getSession` and admin-session checks. Because platform JWT verification is disabled, every public action must be proven to apply the correct custom session, role, entitlement, and ownership checks. Do not infer either safety or exploitability from this flag alone.
+- The production security advisor returned no security lints at this inspection; staging returned the one informational RLS/no-policy finding above. A clean advisor list does not establish application-level tenant isolation.
+
+### Release actions now required
+
+1. **BLOCKED — platform owner:** verify the actual Streamlit Cloud branch, commit, entry point, and secret/configuration *presence* for each production/staging URL. The connected GitHub/Supabase tools cannot read Streamlit Cloud deployment settings.
+2. **BLOCKED — platform owner:** reconcile the deployed production application source with the reviewed repository commit and the deployed Edge source. Treat app + database migrations + Edge Function as one compatibility bundle; do not redeploy only one component.
+3. **BLOCKED — release/security reviewer:** prove custom session expiry/revocation, role/entitlement gates, direct Edge action denial, two-user workspace isolation, and private referral/payment-proof access on the deployed staging services.
+4. **BLOCKED — owner approval:** before any production mutation, record a database backup and restore proof, exact candidate SHA/migration/Edge hashes, a backwards-compatible rollout order, postflight checks, and rollback plan, then obtain explicit authorization. No production migration or function/app deployment was performed in this inspection.
+5. **BLOCKED — owner + qualified Saudi privacy/legal review:** incorporate the confirmed `eu-central-1` database region into the factual data-flow map, then verify Streamlit and all enabled processors/regions/contracts, transfer paths, retention, deletion, legal bases, and customer disclosures. A region observation is not a legal-compliance conclusion.
+6. **Upcoming compatibility check:** current Supabase official changelog describes a public-schema Data/GraphQL API exposure-default change being enforced for all projects on **30 October 2026**. Before adding/exposing tables, confirm the actual Data API settings, explicit grants, and RLS policy model against current Supabase guidance; do not broaden grants merely to make a client request work. Source: https://supabase.com/changelog?types=breaking-change
+
+### Current hosted-check evidence rechecked
+
+- Main exact-SHA validation run [40273481812](https://github.com/MSJ1708/shoir-ie/actions/runs/40273481812): unit/platform test job **PASS**; `live-deployment-smoke` **FAIL** at “Test hosted entry-screen rendering at desktop and mobile widths.”
+- Staging exact-branch validation run [40273588613](https://github.com/MSJ1708/shoir-ie/actions/runs/40273588613): test job **PASS**; `live-deployment-smoke` **SKIPPED**.
+- Staging authenticated release gate [40273588637](https://github.com/MSJ1708/shoir-ie/actions/runs/40273588637): job **SKIPPED**, therefore **NOT RUN**, not PASS.
+- PR #192's documentation checks passed on the preceding audit head `30371aff367f16460100ca88cdaa18418d08d103`; this document update creates a new commit, so that earlier check result is not evidence for the new head. Verify all required workflows on the new exact head before treating the updated audit PR as validated.
+
+**Impact on decision:** deployment parity remains **FAIL / BLOCKED**; authenticated staging feature acceptance remains **NOT RUN**; overall production and paid-pilot decision remains **NO-GO**. No production database, Edge Function, application deployment, billing, or account was mutated by this inspection.
+
