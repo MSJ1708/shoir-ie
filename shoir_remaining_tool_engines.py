@@ -20,6 +20,8 @@ import numpy as np
 import pandas as pd
 from scipy.optimize import linprog
 
+from shoir_rest_connector import verify_readonly_rest_connector
+
 
 def _json_clone(value: Any) -> Any:
     try:
@@ -537,8 +539,51 @@ def evaluate_kpi_alerts(payload: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _require_connector_operator() -> None:
+    """Require an authenticated, entitled admin before a live connector operation."""
+    try:
+        import streamlit as st
+        state = st.session_state
+        authenticated = bool(state.get("authenticated"))
+        actor = str(state.get("current_user") or "").strip()
+        role = str(state.get("user_role") or state.get("current_role") or "").strip().casefold()
+        role = role.replace("_", " ").replace("-", " ")
+        tier = state.get("user_tier")
+    except Exception as exc:
+        raise PermissionError("Sign in with an authorized Enterprise administrator account before testing a connector.") from exc
+    if not authenticated or not actor or actor.casefold() in {"guest", "unknown", "anonymous"}:
+        raise PermissionError("Sign in with an authorized Enterprise administrator account before testing a connector.")
+    if role not in {"owner", "admin", "enterprise admin"}:
+        raise PermissionError("Only an authorized workspace owner or administrator may run a live connector test.")
+    try:
+        from shoir_tool_registry import tier_allows_tool
+        if not tier_allows_tool(tier, "T096"):
+            raise PermissionError("The current subscription tier does not permit Integration Management Center operations.")
+    except PermissionError:
+        raise
+    except Exception as exc:
+        raise PermissionError("Connector access could not be verified; the operation was denied.") from exc
+
+
 def integration_configuration_status(payload: Mapping[str, Any]) -> dict[str, Any]:
-    """Inspect environment-variable presence without exposing secrets or making network calls."""
+    """Inspect configuration or explicitly test a server-configured read-only REST connector.
+
+    Configuration inspection is the default and never performs network access.
+    A live request requires action='verify_rest_read', a server-configured
+    allowlisted profile, and an authenticated entitled administrator.
+    """
+    action = str(payload.get("action") or "inspect").strip().lower()
+    if action == "verify_rest_read":
+        profile = payload.get("profile")
+        if not isinstance(profile, dict):
+            raise ValueError("profile must be a JSON object for the approved REST connector.")
+        _require_connector_operator()
+        return verify_readonly_rest_connector(
+            profile,
+            include_sample_data=bool(payload.get("include_sample_data", False)),
+        )
+    if action not in {"inspect", "check_configuration"}:
+        raise ValueError("action must be inspect or verify_rest_read.")
     profiles = _records(payload.get("profiles"), "profiles", maximum=500)
     output = []
     for profile in profiles:
