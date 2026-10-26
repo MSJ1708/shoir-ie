@@ -21,9 +21,9 @@ Before opening this audit-report PR, GitHub search returned 16 open PRs: #198, #
 
 ### Branch governance: FAIL / BLOCKED
 
-- Live GitHub branch reads show `main.protected=false` and `staging-e2e-20261019.protected=false`.
-- The accessible repository rulesets endpoint returned an empty list.
-- The branch protection detail endpoint returned 403 for the connected integration. An authorized repository administrator must configure and independently verify enforced rules: pull requests, at least one eligible independent approval, required current checks, stale approval dismissal, review-conversation resolution and restrictions on direct/force push and branch deletion. Record and justify any bypass.
+- Fresh branch reads report `main.protected=true` and `staging-e2e-20261019.protected=true`. The earlier `protected=false` statement in a previous snapshot is stale and corrected by this recheck.
+- The current branch summary reports no configured required status-check contexts for `main` (`enforcement_level=everyone`, `contexts=[]`, `checks=[]`); staging reports `enforcement_level=off` with empty contexts/checks. The repository rulesets endpoint returned an empty list.
+- Therefore, branch protection exists but required-check enforcement is not established; staging explicitly reports required-check enforcement off. Review-count, stale-approval dismissal, direct/force-push restriction and deletion protection are not fully verifiable through the available branch summary. An authorized repository administrator must configure and independently verify PR-only changes, eligible independent review, current required checks, stale-approval dismissal, resolved review conversations, direct/force-push restrictions and branch deletion protection; document any exception.
 - No protection setting was changed by this review.
 
 ### Main/staging divergence: FAIL / BLOCKED
