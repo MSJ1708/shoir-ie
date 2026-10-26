@@ -42,7 +42,7 @@ def _save_synthetic_evidence(filename: str, payload: bytes, metadata: dict) -> N
     manifest.update({
         "evidence_type": "synthetic_report_export_validation",
         "synthetic_data_only": True,
-        "source_commit": os.environ.get("GITHUB_SHA", "local-unidentified"),
+        "source_commit": os.environ.get("SHOIR_EXPORT_HEAD_SHA") or os.environ.get("GITHUB_SHA", "local-unidentified"),
     })
     manifest[filename] = {
         **metadata,
