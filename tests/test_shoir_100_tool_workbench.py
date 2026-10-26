@@ -931,3 +931,15 @@ def test_workbench_t020_tracks_dataset_versions_and_stale_runs():
     assert changed["stale_run_count"] == 1
     assert changed["unverifiable_run_count"] == 1
     assert any(key.startswith("shoir_dataset_lineage_T020_") for key in at.session_state)
+
+    # Invalid input must not destroy the last successful version/result.
+    at.text_area(key="tool020_snapshot_json").set_value("{invalid json")
+    at.button(key="tool020_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "\n".join(str(error.value) for error in at.exception)
+    preserved = at.session_state["shoir_tool_result_T020"]
+    assert preserved["status"] == "VERSION_CREATED"
+    assert preserved["version_number"] == 2
+    history_keys = [key for key in at.session_state if key.startswith("shoir_dataset_lineage_T020_")]
+    assert len(history_keys) == 1
+    assert len(at.session_state[history_keys[0]]["versions"]) == 2
