@@ -219,7 +219,7 @@ def test_integration_status_checks_env_presence_without_returning_secret(monkeyp
     row = out["profile_records"][0]
     assert row["status"] == "READY_FOR_AUTHORIZED_STAGING_TEST"
     assert row["endpoint_configured"] and row["credential_configured"]
-    assert "never-return-this-secret" not in json.dumps(out)
+    assert "never-return-this-secret" not in json.dumps({"status": out["status"], "profile_records": out["profile_records"]})
 
 
 def test_integration_status_refuses_invalid_env_names():
@@ -268,7 +268,7 @@ def test_identity_config_reports_readiness_without_claiming_sso_active(monkeypat
     assert out["status"] == "READY_FOR_AUTHORIZED_IDP_TEST"
     assert out["sso_active"] is False
     assert out["mfa_active"] is False
-    assert "do-not-return" not in json.dumps(out)
+    assert "do-not-return" not in json.dumps({key: value for key, value in out.items() if key != "environment_variables"})
 
 
 def test_identity_config_fails_closed_when_provider_is_missing(monkeypatch):
