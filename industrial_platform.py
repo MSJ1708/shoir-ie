@@ -733,8 +733,13 @@ def export_pdf(title: str, tables: Sequence[Tuple[str,pd.DataFrame]], figures: S
         if len(safe.columns):
             # LongTable repeats the column header on every page and splits rows
             # across pages instead of dropping rows beyond a fixed preview cap.
+            # Explicitly occupy the usable landscape width. ReportLab's
+            # inferred widths can otherwise leave a two-column report as a
+            # narrow strip centered on the page.
+            column_count = len(safe.columns)
             table = LongTable(
                 [list(safe.columns)] + safe.values.tolist(),
+                colWidths=[doc.width / column_count] * column_count,
                 repeatRows=1,
                 splitByRow=1,
             )
@@ -825,7 +830,10 @@ def export_pptx(title: str, tables: Sequence[Tuple[str,pd.DataFrame]], figures: 
                 "Retry with chart-rendering support enabled, and include the related data table for a traceable result."
             )
 
-    max_data_rows_per_slide = 15
+    # Ten data rows plus the header leave enough vertical room for
+    # readable text in LibreOffice/PowerPoint renderers. Do not rely on
+    # shape-level bounds alone: explicitly size each cell row and text.
+    max_data_rows_per_slide = 10
     for label, df in tables:
         safe = df.fillna("").astype(str)
         base_label = str(label or "Data")
@@ -846,11 +854,30 @@ def export_pptx(title: str, tables: Sequence[Tuple[str,pd.DataFrame]], figures: 
             table = slide.shapes.add_table(
                 rows, cols, Inches(.25), Inches(1.4), Inches(12.8), Inches(5.5)
             ).table
+            # Fixed row heights and explicit text styling avoid the last
+            # row being clipped by renderer-specific auto-fit behavior.
+            table_height = Inches(5.2)
+            table.rows[0].height = Inches(.42)
+            data_row_height = Inches(.46)
+            for row_index in range(1, rows):
+                table.rows[row_index].height = data_row_height
+            for row_index in range(rows):
+                for cell in table.rows[row_index].cells:
+                    cell.margin_top = Inches(.025)
+                    cell.margin_bottom = Inches(.025)
+                    cell.margin_left = Inches(.06)
+                    cell.margin_right = Inches(.06)
+                    cell.vertical_anchor = MSO_ANCHOR.MIDDLE
+                    for paragraph in cell.text_frame.paragraphs:
+                        paragraph.font.size = Inches(.14)
             for j, col in enumerate(chunk.columns):
                 table.cell(0, j).text = str(col)
             for i, row in enumerate(chunk.itertuples(index=False), 1):
                 for j, val in enumerate(row):
                     table.cell(i, j).text = str(val)
+            # Check actual row extents against the reserved table region.
+            assert sum(r.height for r in table.rows) <= table_height
+            table.height = table_height
     payload = io.BytesIO()
     prs.save(payload)
     return payload.getvalue()
