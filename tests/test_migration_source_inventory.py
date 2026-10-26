@@ -22,6 +22,7 @@ EXPECTED_VERSIONS = [
     "20261021130000",
     "20261022110000",
     "20261023130000",
+    "20261026110000",
 ]
 
 
@@ -68,3 +69,13 @@ def test_refund_policy_v2_guard_migration_requires_current_refund_version():
     source = (MIGRATIONS / "20261023130000_refresh_refund_policy_acceptance_version.sql").read_text(encoding="utf-8")
     assert "refund_policy_version IS DISTINCT FROM '2026-10-23-v2'" in source
     assert "BEFORE UPDATE OF status" in source
+
+
+def test_additive_referral_migration_does_not_rewrite_existing_account_identifiers():
+    source = (
+        MIGRATIONS / "20261026110000_safe_beta_legal_referrals.sql"
+    ).read_text(encoding="utf-8").casefold()
+    assert "create table if not exists public.shoir_referrals" in source
+    assert "affiliate_code" not in source
+    assert "update public.shoir_accounts" not in source
+    assert "revoke all on table public.shoir_referrals from public, anon, authenticated" in source
