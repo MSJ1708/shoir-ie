@@ -149,3 +149,15 @@ This section records the current source facts; exact live state was refreshed du
 - The product adapter remains a deterministic read-only mapper with an injected transport protocol only. It does not perform provider authentication, token refresh, actual network I/O, durable synchronization, checkpoints, persistence or live provider reads. Its six product profiles remain `SPECIFICATION_ONLY_UNCONFIGURED`.
 - No SAP/Oracle tenant owner has supplied an approved non-production tenant, the required product/version/API/resource definition or scoped test credentials. No live provider acceptance can therefore be claimed.
 - No independent PR review is available for #198 or #199. Keep both drafts and do not merge until current required checks, review and release-owner acceptance exist.
+
+
+## 8. Supporting evidence artifacts in this PR
+
+- [Pull request disposition matrix](PULL_REQUEST_DISPOSITION_MATRIX_2026-10-26.csv) — current open/merged PR heads, bases, visible CI and recommended disposition.
+- [100-tool row-level reconciliation](TOOL_MATRIX_RECONCILIATION_2026-10-26.csv) — compares 100 rows and all mapped contract/evidence columns from main blob `d3e7069adb73567cf5e40899eab07394c6381b16` against staging blob `e5cd1f85c0dc2fa2dc17061441dc19ca95a69d45`; **13 rows differ**. Eleven differ in implementation status and other details; T096/T098 remain external-configuration-required on both snapshots but have differing source/contract/evidence fields.
+- [Authenticated staging test matrix](AUTHENTICATED_STAGING_TEST_MATRIX_2026-10-26.csv) — separates artifact-reported pass groups from individual tests not verified in this recheck, mandatory skips and deployment-blocked checks.
+- [T096/T098 acceptance report](T096_T098_ACCEPTANCE_REPORT_2026-10-26.md) — exact boundary between generic REST validation, ERP foundation, provider-backed identity/audit and live acceptance.
+- [Production change-plan preparation](PRODUCTION_CHANGE_PLAN_PREPARATION_ONLY.md) — a controlled draft with preconditions, provisional dependencies, postconditions and abort/recovery constraints; **not authorized to run**.
+- Separate ERP implementation PR: [#198](https://github.com/MSJ1708/shoir-ie/pull/198).
+
+All paths and files are held in this report PR's branch until independent review. CI runs associated with documentation commits do not replace source review, hosted verification, database review or legal approval.
