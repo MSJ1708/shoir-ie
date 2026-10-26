@@ -123,7 +123,7 @@ def test_status_summary_counts_all_targets_and_never_infers_verified_from_presen
 
 
 def test_focused_workbench_tools_document_direct_gates_tests_and_transient_persistence():
-    focused = {"T015", "T016", "T017", "T018", "T019", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T033", "T034", "T035", "T036", "T037", "T038", "T040", "T041", "T042", "T043", "T045", "T047", "T048", "T049", "T050", "T051", "T052", "T054", "T055", "T056", "T058", "T059", "T063", "T066", "T070", "T072", "T075", "T076", "T077", "T078", "T079", "T081", "T082", "T083", "T084", "T085"}
+    focused = {"T006", "T015", "T016", "T017", "T018", "T019", "T020", "T021", "T022", "T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T033", "T034", "T035", "T036", "T037", "T038", "T039", "T040", "T041", "T042", "T043", "T045", "T047", "T048", "T049", "T050", "T051", "T052", "T054", "T055", "T056", "T058", "T059", "T060", "T063", "T066", "T070", "T072", "T074", "T075", "T076", "T077", "T078", "T079", "T080", "T081", "T082", "T083", "T084", "T085", "T094", "T097", "T099"}
     for tool_id in focused:
         tool = get_tool(tool_id)
         assert tool is not None
@@ -131,7 +131,7 @@ def test_focused_workbench_tools_document_direct_gates_tests_and_transient_persi
         assert "not yet wired" not in tool["entitlement_enforcement_points"]
         assert "workspace_persistence.py" in tool["persistence_scope"]
         assert "local SQLite fallback may be ephemeral" in tool["persistence_scope"]
-        assert "tests/test_shoir_target_engines.py::" in tool["unit_test"]
+        assert ("tests/test_shoir_target_engines.py::" in tool["unit_test"] or "tests/test_shoir_remaining_tool_engines.py::" in tool["unit_test"])
         assert tool["implementation_status"] == "IMPLEMENTED_NEEDS_VALIDATION"
 
 
@@ -164,3 +164,17 @@ def test_rnle_ergonomics_target_has_real_gated_runner_and_explicit_validation_st
     assert not tier_allows_tool("Mid-Tier Pro", "T046")
     assert tier_allows_tool("Professional", "T046")
     assert "UNVERIFIED" in tool["browser_test"]
+
+def test_external_configuration_targets_are_entitlement_gated_and_never_claim_active():
+    connector = get_tool("T096")
+    identity = get_tool("T098")
+    assert connector is not None and connector["implementation_status"] == "EXTERNAL_CONFIGURATION_REQUIRED"
+    assert identity is not None and identity["implementation_status"] == "EXTERNAL_CONFIGURATION_REQUIRED"
+    for tool in (connector, identity):
+        assert "require_tool_access" in tool["entitlement_enforcement_points"]
+        assert "workspace_persistence.py" in tool["persistence_scope"]
+        assert "local SQLite fallback may be ephemeral" in tool["persistence_scope"]
+    assert tier_allows_tool("Enterprise", "T096")
+    assert tier_allows_tool("Enterprise Plus", "T098")
+    assert not tier_allows_tool("Enterprise", "T098")
+
