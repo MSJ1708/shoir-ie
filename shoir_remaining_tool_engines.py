@@ -102,12 +102,17 @@ def recovery_action(payload: Mapping[str, Any]) -> dict[str, Any]:
     if not isinstance(state_history, list):
         raise ValueError("history must be a JSON list.")
     history = _json_clone(state_history)
-    if any(not isinstance(item, dict) or "state" not in item for item in history):
-        raise ValueError("Every history entry must be an object containing state.")
+    if any(not isinstance(item, dict) or not {"state", "snapshot_id", "state_hash"}.issubset(item) for item in history):
+        raise ValueError("Every history entry must include state, snapshot_id and state_hash.")
     if len(history) > 1000:
         raise ValueError("history may contain at most 1,000 snapshots.")
+    seen_snapshot_ids: set[str] = set()
     for item in history:
-        if item.get("state_hash") and item["state_hash"] != _canonical_hash(item["state"]):
+        snapshot_id = _nonempty_text(item.get("snapshot_id"), "history.snapshot_id", 120)
+        if snapshot_id in seen_snapshot_ids:
+            raise ValueError("Revision history contains duplicate snapshot IDs; refusing ambiguous recovery.")
+        seen_snapshot_ids.add(snapshot_id)
+        if item["state_hash"] != _canonical_hash(item["state"]):
             raise ValueError("Revision history integrity check failed; refusing to recover altered state.")
     index = int(payload.get("current_index", len(history) - 1))
     if history:
@@ -122,10 +127,11 @@ def recovery_action(payload: Mapping[str, Any]) -> dict[str, Any]:
         cloned = _json_clone(state)
         # Discard redo history after a new edit, following standard editor semantics.
         history = history[: index + 1] if history else []
-        snapshot_id = "rev-" + _canonical_hash(cloned)[:16]
+        next_revision = (int(history[index].get("revision", index)) + 1) if history else 0
+        snapshot_id = f"rev-{next_revision}-{_canonical_hash(cloned)[:16]}"
         history.append({
             "snapshot_id": snapshot_id,
-            "revision": (history[-1].get("revision", len(history) - 1) + 1) if history else 0,
+            "revision": next_revision,
             "created_at": str(payload.get("created_at") or datetime.now(timezone.utc).isoformat()),
             "state_hash": _canonical_hash(cloned),
             "state": cloned,
@@ -194,7 +200,7 @@ def dataset_version_lineage(payload: Mapping[str, Any]) -> dict[str, Any]:
         "parent_version_id": supplied_parent or None,
         "transformations": transformations,
         "schema": sorted(dataset[0].keys()) if isinstance(dataset, list) and dataset and isinstance(dataset[0], dict) else (sorted(dataset.keys()) if isinstance(dataset, dict) else []),
-        "record_count": len(dataset) if isinstance(dataset, (dict, list)) else None,
+        "record_count": len(dataset) if isinstance(dataset, list) else None,
         "provenance": str(payload.get("provenance") or "USER_ENTERED_UNVERIFIED"),
     }
     downstream = payload.get("downstream_runs", [])
@@ -204,7 +210,8 @@ def dataset_version_lineage(payload: Mapping[str, Any]) -> dict[str, Any]:
     for run in downstream:
         run_hash = str(run.get("dataset_sha256") or run.get("dataset_hash") or "")
         run_version = str(run.get("dataset_version_id") or "")
-        if (run_hash and run_hash != digest) or (run_version and run_version != version_id):
+        stale_run = (run_hash != digest) if run_hash else (bool(run_version) and run_version != version_id)
+        if stale_run:
             stale.append({
                 "run_id": str(run.get("run_id") or "UNNAMED_RUN"),
                 "reason": "The run references a different dataset hash or version.",
@@ -254,6 +261,7 @@ def capa_lifecycle_review(payload: Mapping[str, Any]) -> dict[str, Any]:
         approval = str(transition.get("approval_reference") or "").strip()
         if after == "CLOSED" and (not approval or not str(by_id[capa_id.casefold()].get("effectiveness_evidence") or "").strip()):
             raise ValueError(f"CAPA {capa_id} cannot be closed without an approval_reference and effectiveness_evidence.")
+        transition_time = _utc_timestamp(transition.get("transitioned_at"), "transition.transitioned_at", allow_missing=True) or datetime.now(timezone.utc)
         audit.append({
             "capa_id": capa_id,
             "from_status": before,
@@ -261,7 +269,7 @@ def capa_lifecycle_review(payload: Mapping[str, Any]) -> dict[str, Any]:
             "reviewer": reviewer,
             "reason": reason,
             "approval_reference": approval or None,
-            "transitioned_at": str(transition.get("transitioned_at") or datetime.now(timezone.utc).isoformat()),
+            "transitioned_at": transition_time.isoformat(),
             "source": "USER_ENTERED_UNVERIFIED",
         })
         by_id[capa_id.casefold()]["status"] = after
@@ -301,6 +309,8 @@ def supply_chain_network_plan(payload: Mapping[str, Any]) -> dict[str, Any]:
             raise ValueError(f"Route {src} -> {dst} refers to an unknown supplier/customer.")
         cap = _number(route.get("capacity"), f"route {src}->{dst} capacity", minimum=0)
         cost = _number(route.get("unit_cost"), f"route {src}->{dst} unit_cost", minimum=0)
+        if any(item["supplier"] == src and item["customer"] == dst for item in parsed_routes):
+            raise ValueError(f"Duplicate route {src} -> {dst} is not allowed; merge its capacity/cost definition explicitly.")
         max_cost = max(max_cost, cost)
         parsed_routes.append({"supplier": src, "customer": dst, "capacity": cap, "unit_cost": cost})
     if not parsed_routes:
@@ -382,11 +392,14 @@ def calibrate_digital_twin(payload: Mapping[str, Any]) -> dict[str, Any]:
     hi_scale = float(scale_bounds[1])
     lo_offset = float(offset_bounds[0])
     hi_offset = float(offset_bounds[1])
-    if math.isnan(lo_scale) or math.isnan(hi_scale) or math.isnan(lo_offset) or math.isnan(hi_offset) or lo_scale > hi_scale or lo_offset > hi_offset:
-        raise ValueError("Calibration bounds must be ordered and cannot be NaN.")
+    if math.isnan(lo_scale) or math.isnan(hi_scale) or math.isnan(lo_offset) or math.isnan(hi_offset) or lo_scale >= hi_scale or lo_offset >= hi_offset:
+        raise ValueError("Calibration bounds must be ordered with lower values strictly below upper values, and cannot be NaN.")
     from scipy.optimize import lsq_linear
     design = np.column_stack([x, np.ones_like(x)])
-    fitted = lsq_linear(design, y, bounds=([lo_scale, lo_offset], [hi_scale, hi_offset]))
+    try:
+        fitted = lsq_linear(design, y, bounds=([lo_scale, lo_offset], [hi_scale, hi_offset]))
+    except (ValueError, RuntimeError) as exc:
+        raise ValueError("Calibration optimizer rejected the bounds or input; no calibrated parameters were returned.") from exc
     if not fitted.success:
         raise ValueError("Calibration optimizer did not converge; no calibrated parameters were returned.")
     scale, offset = map(float, fitted.x)
@@ -733,7 +746,10 @@ def governance_recovery_action(payload: Mapping[str, Any]) -> dict[str, Any]:
         out = []
         for row in policies:
             category = _nonempty_text(row.get("category"), "policy.category", 150)
-            retention = int(_number(row.get("retention_days"), f"{category}.retention_days", minimum=1, maximum=36500))
+            retention_value = _number(row.get("retention_days"), f"{category}.retention_days", minimum=1, maximum=36500)
+            if not retention_value.is_integer():
+                raise ValueError(f"{category}.retention_days must be a whole number of days.")
+            retention = int(retention_value)
             hold = bool(row.get("legal_hold", False))
             out.append({
                 "category": category,
