@@ -826,3 +826,56 @@ def test_workbench_runs_rnle_ergonomics_screen():
         "SAVED_LOCAL_FALLBACK", "SAVED_MANAGED_WORKSPACE", "SESSION_ONLY",
         "SAVE_FAILED", "SAVE_PENDING", "SAVE_STATUS_NOT_CONFIRMED",
     }
+
+
+def test_workbench_t006_recovery_snapshot_history_is_undoable_redoable_and_gated():
+    from streamlit.testing.v1 import AppTest
+
+    page = ROOT / "pages" / "Industrial_Engineering_Workbench.py"
+    at = AppTest.from_file(page, default_timeout=90)
+    at.session_state["current_user"] = "recovery-history-checker"
+    at.session_state["authenticated"] = True
+    at.session_state["user_tier"] = "Starter"
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+
+    at.selectbox(key="shoir_100_tool_inspector").select("T006 · Undo, Redo, and Recovery")
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+
+    at.button(key="tool006_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    result = at.session_state.get("shoir_tool_result_T006")
+    assert result is not None and result["status"] == "SNAPSHOT_CREATED"
+    assert result["current_snapshot"]["inspection_state"] == "PENDING"
+
+    at.text_area(key="tool006_snapshot_json").set_value('{"asset_id":"P-101","inspection_state":"COMPLETE"}')
+    at.button(key="tool006_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    assert at.session_state["shoir_tool_result_T006"]["status"] == "SNAPSHOT_CHECKPOINTED"
+
+    at.selectbox(key="tool006_action").select("Undo")
+    at.run(timeout=90)
+    at.button(key="tool006_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    result = at.session_state["shoir_tool_result_T006"]
+    assert result["status"] == "SNAPSHOT_UNDONE" and result["current_snapshot"]["inspection_state"] == "PENDING"
+
+    at.selectbox(key="tool006_action").select("Redo")
+    at.run(timeout=90)
+    at.button(key="tool006_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    assert at.session_state["shoir_tool_result_T006"]["current_snapshot"]["inspection_state"] == "COMPLETE"
+
+    at.selectbox(key="tool006_action").select("Restore selected revision")
+    at.run(timeout=90)
+    at.number_input(key="tool006_target_revision").set_value(1)
+    at.button(key="tool006_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    result = at.session_state["shoir_tool_result_T006"]
+    assert result["status"] == "REVISION_RESTORED" and result["current_snapshot"]["inspection_state"] == "PENDING"
