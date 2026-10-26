@@ -828,8 +828,13 @@ def test_workbench_runs_rnle_ergonomics_screen():
     }
 
 
-def test_workbench_t006_recovery_snapshot_history_is_undoable_redoable_and_gated():
+def test_workbench_t006_recovery_snapshot_history_is_undoable_redoable_and_gated(monkeypatch):
     from streamlit.testing.v1 import AppTest
+    import workspace_persistence
+
+    # Isolate this Workbench test from live Edge configuration. AppTest has no
+    # remote session token; simulate a confirmed save for the normal action flow.
+    monkeypatch.setattr(workspace_persistence, "save_user_workspace", lambda *args, **kwargs: True)
 
     page = ROOT / "pages" / "Industrial_Engineering_Workbench.py"
     at = AppTest.from_file(page, default_timeout=90)
@@ -891,10 +896,30 @@ def test_workbench_t006_recovery_snapshot_history_is_undoable_redoable_and_gated
     assert preserved["status"] == "REVISION_RESTORED"
     assert preserved["current_snapshot"]["inspection_state"] == "PENDING"
 
+    # A valid action whose durable write fails must keep the last confirmed
+    # result and its snapshot history, and must not claim that it was saved.
+    history_key = next(key for key in at.session_state if key.startswith("shoir_recovery_history_T006_"))
+    history_before_failed_save = at.session_state[history_key]
+    monkeypatch.setattr(workspace_persistence, "save_user_workspace", lambda *args, **kwargs: False)
+    at.text_area(key="tool006_snapshot_json").set_value('{"asset_id":"P-101","inspection_state":"NEW_UNSAVED"}')
+    at.button(key="tool006_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    assert any("Workspace save failed" in str(item.value) for item in at.error)
+    preserved_after_failed_save = at.session_state["shoir_tool_result_T006"]
+    assert preserved_after_failed_save["status"] == "REVISION_RESTORED"
+    assert preserved_after_failed_save["current_snapshot"]["inspection_state"] == "PENDING"
+    assert at.session_state[history_key] == history_before_failed_save
 
-def test_workbench_t020_tracks_dataset_versions_and_stale_runs():
+
+def test_workbench_t020_tracks_dataset_versions_and_stale_runs(monkeypatch):
     import json
     from streamlit.testing.v1 import AppTest
+    import workspace_persistence
+
+    # Avoid sending synthetic AppTest state to any configured remote backend.
+    # This test covers the method flow and explicitly tests failed-save rollback.
+    monkeypatch.setattr(workspace_persistence, "save_user_workspace", lambda *args, **kwargs: True)
 
     page = ROOT / "pages" / "Industrial_Engineering_Workbench.py"
     at = AppTest.from_file(page, default_timeout=90)
@@ -943,3 +968,19 @@ def test_workbench_t020_tracks_dataset_versions_and_stale_runs():
     history_keys = [key for key in at.session_state if key.startswith("shoir_dataset_lineage_T020_")]
     assert len(history_keys) == 1
     assert len(at.session_state[history_keys[0]]["versions"]) == 2
+
+    # Failed persistence must preserve the confirmed v2 lineage and not retain
+    # a phantom v3 version in the session.
+    lineage_before_failed_save = at.session_state[history_keys[0]]
+    monkeypatch.setattr(workspace_persistence, "save_user_workspace", lambda *args, **kwargs: False)
+    at.text_area(key="tool020_snapshot_json").set_value('{"dataset":"orders","rows":[{"id":"A1","qty":14}]}')
+    at.button(key="tool020_run").click()
+    at.run(timeout=90)
+    assert not at.exception, "\\n".join(str(error.value) for error in at.exception)
+    assert any("Workspace save failed" in str(item.value) for item in at.error)
+    preserved_after_failed_save = at.session_state["shoir_tool_result_T020"]
+    assert preserved_after_failed_save["status"] == "VERSION_CREATED"
+    assert preserved_after_failed_save["version_number"] == 2
+    history_keys_after_failed_save = [key for key in at.session_state if key.startswith("shoir_dataset_lineage_T020_")]
+    assert history_keys_after_failed_save == history_keys
+    assert at.session_state[history_keys_after_failed_save[0]] == lineage_before_failed_save
