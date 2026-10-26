@@ -22,7 +22,6 @@ def _large_report_table(row_count: int = 67) -> pd.DataFrame:
     })
 
 
-
 def _save_synthetic_evidence(filename: str, payload: bytes, metadata: dict) -> None:
     """Optionally retain parser-verified synthetic artifacts as a CI evidence bundle."""
     target = os.environ.get("SHOIR_EXPORT_EVIDENCE_DIR", "").strip()
@@ -57,6 +56,7 @@ def _save_synthetic_evidence(filename: str, payload: bytes, metadata: dict) -> N
     temporary.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
     temporary.replace(manifest_path)
 
+
 def test_pdf_export_paginates_and_preserves_rows_past_previous_30_row_limit():
     rows = _large_report_table()
     payload = export_pdf("Complete export verification", [("All metrics", rows)])
@@ -67,10 +67,14 @@ def test_pdf_export_paginates_and_preserves_rows_past_previous_30_row_limit():
     assert len(reader.pages) >= 2
 
     extracted = "\n".join(page.extract_text() or "" for page in reader.pages)
-    # Confirm the table uses the available landscape width rather than a
-    # narrow, centered strip. Inspect extracted text coordinates on page 1.
+    # pypdf's text matrix can be local to a transformed text object. Add the
+    # current transformation matrix's x offset to measure absolute page spread.
     positions = []
-    reader.pages[0].extract_text(visitor_text=lambda text, cm, tm, font, size: positions.append(tm[4]) if text.strip() else None)
+    reader.pages[0].extract_text(
+        visitor_text=lambda text, cm, tm, font, size: (
+            positions.append(cm[4] + tm[4]) if text.strip() else None
+        )
+    )
     page_width = float(reader.pages[0].mediabox.width)
     assert positions and (max(positions) - min(positions)) >= page_width * 0.45
     for metric, value in zip(rows["Metric"], rows["Value"], strict=True):
@@ -130,6 +134,7 @@ def test_powerpoint_export_splits_all_rows_over_continued_table_slides():
         "all_rows_verified": True,
     })
 
+
 class _SyntheticFigure:
     def to_image(self, **kwargs) -> bytes:
         """Return a small 16:9 chart image without external chart services."""
@@ -151,8 +156,6 @@ def test_powerpoint_titles_tables_and_charts_fit_widescreen_slide_bounds():
     height = presentation.slide_height
     assert abs((width / height) - (16 / 9)) < 0.002
 
-    # The cover title/subtitle placeholders in python-pptx's default template
-    # may have zero-height extents after switching to widescreen. Pin both.
     cover = presentation.slides[0]
     cover_title = cover.shapes.title
     cover_subtitle = cover.placeholders[1]
@@ -181,4 +184,3 @@ def test_powerpoint_titles_tables_and_charts_fit_widescreen_slide_bounds():
             assert shape.top + shape.height <= height
             if title is not None:
                 assert shape.top >= title.top + title.height
-
