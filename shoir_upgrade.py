@@ -7,7 +7,7 @@ the Streamlit Copilot.
 from __future__ import annotations
 import csv, io, re, zipfile, html
 from datetime import datetime, timezone
-from typing import Iterable, Optional, Tuple, Sequence
+from typing import Any, Iterable, Optional, Tuple, Sequence
 import pandas as pd
 import numpy as np
 
