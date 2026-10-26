@@ -36,18 +36,54 @@ def record(case: str, account_class: str, passed: bool | None, detail: str) -> N
     print(f"[{status}] {case} ({account_class}): {detail}")
 
 
-def summarize_results(results: list[dict[str, Any]]) -> tuple[str, int]:
+# A passing aggregate must include every required logical case and account class.
+# The workspace-load and workspace-round-trip cases are explicitly recorded below.
+REQUIRED_CASES = frozenset({
+    ("active_login", "active"),
+    ("invalid_password", "active"),
+    ("second_login", "second"),
+    ("starter_tier", "starter"),
+    ("admin_action_denied", "active"),
+    ("cross_owner_load_denied", "active"),
+    ("cross_owner_save_denied", "active"),
+    ("workspace_load", "active"),
+    ("workspace_round_trip", "active"),
+    ("workspace_save", "active"),
+    ("workspace_relogin_restore", "active"),
+    ("workspace_restore", "active"),
+    ("expired_login_renewal_only", "expired"),
+    ("expired_workspace_load_denied", "expired"),
+    ("expired_workspace_save_denied", "expired"),
+    ("renewal_requires_reference", "expired"),
+    ("login_throttle_blocks_excess_attempts", "synthetic"),
+    ("inactive_account_denied", "inactive"),
+    ("session_revocation", "active"),
+    ("session_revocation", "active-fresh"),
+    ("session_revocation", "second"),
+    ("session_revocation", "starter"),
+    ("session_revocation", "expired"),
+})
+
+
+def summarize_results(
+    results: list[dict[str, Any]],
+    required_cases: set[tuple[str, str]] | frozenset[tuple[str, str]] | None = None,
+) -> tuple[str, int]:
     """Return an honest aggregate status and process code for the release gate.
 
-    Explicit failures are FAIL. Any skipped/unknown case (including missing
-    results) is BLOCKED, never a successful release gate.
+    Explicit failures are FAIL. Skipped/unknown statuses or absent mandatory
+    case/account-class records are BLOCKED, never a successful release gate.
     """
     statuses = [str(item.get("status") or "SKIP").upper() for item in results]
-    if not statuses:
-        return "BLOCKED", 2
+    required = REQUIRED_CASES if required_cases is None else frozenset(required_cases)
+    observed = {
+        (str(item.get("case") or ""), str(item.get("account_class") or ""))
+        for item in results
+    }
+    missing_cases = sorted(required - observed)
     if "FAIL" in statuses:
         return "FAIL", 1
-    if any(status != "PASS" for status in statuses):
+    if not statuses or any(status != "PASS" for status in statuses) or missing_cases:
         return "BLOCKED", 2
     return "PASS", 0
 
@@ -311,9 +347,12 @@ def main() -> int:
             original_workspace = data.get("state_json") if workspace_was_loaded else None
             if not workspace_was_loaded:
                 record("workspace_load", "active", False, "Could not load the active test workspace.")
-            elif original_workspace is not None and (not isinstance(original_workspace, str) or len(original_workspace) > 1_000_000):
-                record("workspace_round_trip", "active", False, "Workspace is not a small string suitable for a safe test-account probe.")
             else:
+                record("workspace_load", "active", True, "Active test workspace loaded under its authenticated owner.")
+
+            if workspace_was_loaded and original_workspace is not None and (not isinstance(original_workspace, str) or len(original_workspace) > 1_000_000):
+                record("workspace_round_trip", "active", False, "Workspace is not a small string suitable for a safe test-account probe.")
+            elif workspace_was_loaded:
                 try:
                     prior_state = json.loads(original_workspace) if original_workspace else {}
                     if not isinstance(prior_state, dict):
@@ -321,6 +360,7 @@ def main() -> int:
                 except Exception:
                     record("workspace_round_trip", "active", False, "Workspace is not a JSON object; refusing to overwrite it.")
                 else:
+                    record("workspace_round_trip", "active", True, "Workspace payload is a JSON object and is safe for a temporary round-trip probe.")
                     prior_state.pop(sentinel_key, None)
                     restore_expected = original_workspace if original_workspace else "{}"
                     probe_state = dict(prior_state)
@@ -464,7 +504,7 @@ def main() -> int:
                 except Exception:
                     record("session_revocation", label, False, "Could not confirm cleanup of a dedicated test session.")
 
-    overall, exit_code = summarize_results(RESULTS)
+    overall, exit_code = summarize_results(RESULTS, REQUIRED_CASES)
     REPORT_PATH.write_text(json.dumps({
         "run_at_utc": datetime.now(timezone.utc).isoformat(),
         "target": edge_url,
