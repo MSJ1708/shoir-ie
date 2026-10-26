@@ -2,7 +2,7 @@
 
 **Audit captured:** 26 October 2026, using live GitHub metadata  
 **Repository:** [MSJ1708/shoir-ie](https://github.com/MSJ1708/shoir-ie)  
-**Baseline:** main at SHA 72e498d892b9eb088d34be940fc1f6d97b482c1a  
+**Initial baseline:** main at SHA 72e498d892b9eb088d34be940fc1f6d97b482c1a; superseded by the current recheck below.  
 **Decision:** **NO-GO** for production release and paid launch on current evidence.
 
 This report is an evidence snapshot and recommended disposition, not a claim that PRs were merged or blocked checks passed. Mainline already includes PR #183. All 14 open PRs below are still drafts.
@@ -13,8 +13,8 @@ The main 100-target matrix has exactly 100 rows, with the following current stat
 
 | Matrix status | Count |
 |---|---:|
-| IMPLEMENTED_NEEDS_VALIDATION | 89 |
-| FOUNDATION_ONLY | 9 |
+| IMPLEMENTED_NEEDS_VALIDATION | 98 |
+| FOUNDATION_ONLY | 0 |
 | EXTERNAL_CONFIGURATION_REQUIRED | 2 |
 | VERIFIED_WORKING | 0 |
 
@@ -204,3 +204,22 @@ Current main is newer in several material places:
 
 **Disposition refinement for #170:** do not merge or cherry-pick the old branch wholesale. Keep it open/draft until a reviewer explicitly approves a small, current-main-based change. The checklist's unique content is preserved in the audit PR; any remaining README/app/Edge differences must be reviewed against current main and the v2 consent contract. Production still lacks the later applied migrations in its live history and the deployed production Edge hash differs from staging, so repository presence alone does not resolve deployment parity. No PR was merged or closed by this reconciliation.
 
+
+
+## Current recheck — 26 October 2026
+
+The following current snapshot supersedes the older baseline/counts in this historical audit. Current `main` is `267be8889c310d90141c047d8aadd42c942423fb`; its 100-row tool matrix contains 98 `IMPLEMENTED_NEEDS_VALIDATION`, 2 `EXTERNAL_CONFIGURATION_REQUIRED`, and 0 `VERIFIED_WORKING`.
+
+### Exact-main checks
+
+- Validation [40291784799](https://github.com/MSJ1708/shoir-ie/actions/runs/40291784799): PASS.
+- Engine regression [40291784823](https://github.com/MSJ1708/shoir-ie/actions/runs/40291784823): PASS.
+- Security/quality [40291784836](https://github.com/MSJ1708/shoir-ie/actions/runs/40291784836): PASS.
+- Hosted smoke failed on the merged PR #193 commit in [run 40290645125](https://github.com/MSJ1708/shoir-ie/actions/runs/40290645125); a fresh hosted check of the currently deployed source remains required.
+- Staging validation [40273588613](https://github.com/MSJ1708/shoir-ie/actions/runs/40273588613) passed at `8b36e3737705867019b9cf29e603cfc37e7911e6`; authenticated gate [40273588637](https://github.com/MSJ1708/shoir-ie/actions/runs/40273588637) was skipped / NOT RUN.
+- The current GitHub integration could not read main branch protection (403); the repository administrator must verify the saved rule configuration.
+- PR #193 is merged. PR #195, [secure read-only REST verification for T096](https://github.com/MSJ1708/shoir-ie/pull/195), is still a draft on `feat/t096-rest-readonly-adapter-20261026`. At head `678d1db7df73c3db71a6c355bbf58741a8a36a70`, engine regression had passed; validation, platform, tests and security/quality were still in progress at the last check. This is not merge or release approval.
+- The current open-PR search returned 16 PRs: #192, #195, #191, #182, #172, #184, #173, #181, #174, #188, #178, #189, #179, #180, #175 and #170. Each requires a current per-PR diff, base/head, conflict and exact-head-check review; this inventory is not a merge recommendation.
+- Root [Commercial Launch Checklist](../COMMERCIAL_LAUNCH_CHECKLIST.md) contains current gate statuses and explicit external actions.
+
+No production deployment, database migration or branch-protection change was performed by this audit. Overall decision remains **NO-GO**.
